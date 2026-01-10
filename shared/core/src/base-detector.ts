@@ -2,15 +2,15 @@
 // Provides common functionality for all blockchain detectors
 
 import { ethers } from 'ethers';
-import WebSocket from 'ws';
-import { RedisClient, getRedisClient, createLogger, getPerformanceLogger, PerformanceLogger } from './index';
-import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG } from '../../config/src';
+import { RedisClient, getRedisClient, createLogger, getPerformanceLogger, PerformanceLogger, EventBatcher, BatchedEvent, createEventBatcher, WebSocketManager, WebSocketMessage } from './index';
+import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG } from '../../config/src';
 import {
   Dex,
   Token,
   PriceUpdate,
   ArbitrageOpportunity,
   SwapEvent,
+  MessageEvent,
   Pair
 } from '../../types/src';
 
@@ -26,10 +26,11 @@ export interface DetectorConfig {
 
 export abstract class BaseDetector {
   protected provider: ethers.JsonRpcProvider;
-  protected wsProvider: WebSocket | null = null;
+  protected wsManager: WebSocketManager | null = null;
   protected redis: RedisClient | null = null;
   protected logger: any;
   protected perfLogger: PerformanceLogger;
+  protected eventBatcher: any;
 
   protected dexes: Dex[];
   protected tokens: Token[];
@@ -61,11 +62,37 @@ export abstract class BaseDetector {
       config.rpcUrl || chainConfig.rpcUrl
     );
 
+    // Initialize event batcher for optimized processing
+    this.eventBatcher = createEventBatcher(
+      {
+        maxBatchSize: config.batchSize || 20,
+        maxWaitTime: config.batchTimeout || 30,
+        enableDeduplication: true,
+        enablePrioritization: true
+      },
+      (batch: BatchedEvent) => this.processBatchedEvents(batch)
+    );
+
+    // Initialize WebSocket manager
+    const wsUrl = config.wsUrl || chainConfig.wsUrl;
+    this.wsManager = new WebSocketManager({
+      url: wsUrl,
+      reconnectInterval: 5000,
+      maxReconnectAttempts: 10,
+      heartbeatInterval: 30000,
+      connectionTimeout: 10000
+    });
+
+    // Set up WebSocket message handler
+    this.wsManager.onMessage((message: WebSocketMessage) => {
+      this.handleWebSocketMessage(message);
+    });
+
     this.logger.info(`Initialized ${this.chain} detector`, {
       dexes: this.dexes.length,
       tokens: this.tokens.length,
       rpcUrl: config.rpcUrl || chainConfig.rpcUrl,
-      wsUrl: config.wsUrl || chainConfig.wsUrl
+      wsUrl
     });
   }
 
@@ -82,9 +109,13 @@ export abstract class BaseDetector {
   // Abstract methods that must be implemented by subclasses
   abstract start(): Promise<void>;
   abstract stop(): Promise<void>;
-  abstract connectWebSocket(): Promise<void>;
-  abstract subscribeToEvents(): Promise<void>;
   abstract getHealth(): Promise<any>;
+  protected abstract processSyncEvent(log: any, pair: Pair): Promise<void>;
+  protected abstract processSwapEvent(log: any, pair: Pair): Promise<void>;
+  protected abstract checkIntraDexArbitrage(pair: Pair): Promise<void>;
+  protected abstract checkWhaleActivity(swapEvent: SwapEvent): Promise<void>;
+  protected abstract estimateUsdValue(pair: Pair, amount0In: string, amount1In: string, amount0Out: string, amount1Out: string): Promise<number>;
+  protected abstract calculatePriceImpact(swapEvent: SwapEvent): Promise<number>;
 
   // Common functionality
   protected async initializePairs(): Promise<void> {
@@ -247,6 +278,193 @@ export abstract class BaseDetector {
     }
 
     return true;
+  }
+
+  // Common WebSocket connection method
+  protected async connectWebSocket(): Promise<void> {
+    if (!this.wsManager) {
+      throw new Error('WebSocket manager not initialized');
+    }
+
+    try {
+      await this.wsManager.connect();
+    } catch (error) {
+      this.logger.error(`Failed to connect to ${this.chain} WebSocket`, { error });
+      throw error;
+    }
+  }
+
+  // Common event subscription method
+  protected async subscribeToEvents(): Promise<void> {
+    if (!this.wsManager) {
+      throw new Error('WebSocket manager not initialized');
+    }
+
+    // Subscribe to Sync events (reserve changes)
+    if (EVENT_CONFIG.syncEvents.enabled) {
+      this.wsManager.subscribe({
+        method: 'eth_subscribe',
+        params: [
+          'logs',
+          {
+            topics: [
+              '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1', // Sync event signature
+            ],
+            address: Array.from(this.monitoredPairs)
+          }
+        ]
+      });
+      this.logger.info(`Subscribed to Sync events for ${this.monitoredPairs.size} pairs`);
+    }
+
+    // Subscribe to Swap events (trading activity)
+    if (EVENT_CONFIG.swapEvents.enabled) {
+      this.wsManager.subscribe({
+        method: 'eth_subscribe',
+        params: [
+          'logs',
+          {
+            topics: [
+              '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822e', // Swap event signature
+            ],
+            address: Array.from(this.monitoredPairs)
+          }
+        ]
+      });
+      this.logger.info(`Subscribed to Swap events for ${this.monitoredPairs.size} pairs`);
+    }
+  }
+
+  // Common WebSocket message handler
+  protected handleWebSocketMessage(message: WebSocketMessage): void {
+    try {
+      if (message.method === 'eth_subscription') {
+        const { result } = message;
+        // Add event to batcher for optimized processing
+        this.eventBatcher.addEvent(result);
+      }
+    } catch (error) {
+      this.logger.error('Failed to process WebSocket message', { error });
+    }
+  }
+
+  // Common log event processor
+  protected async processLogEvent(log: any): Promise<void> {
+    const startTime = performance.now();
+
+    try {
+      // Find the pair this log belongs to
+      const pair = Array.from(this.pairs.values()).find(p => p.address.toLowerCase() === log.address.toLowerCase());
+      if (!pair) {
+        return; // Not a monitored pair
+      }
+
+      // Decode the event based on topics
+      if (log.topics[0] === '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1') {
+        // Sync event (reserve update)
+        await this.processSyncEvent(log, pair);
+      } else if (log.topics[0] === '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822e') {
+        // Swap event (trade)
+        await this.processSwapEvent(log, pair);
+      }
+
+      const latency = performance.now() - startTime;
+      this.perfLogger.logEventLatency('log_processing', latency, {
+        pair: `${pair.token0.symbol}-${pair.token1.symbol}`,
+        dex: pair.dex.name,
+        eventType: log.topics[0]
+      });
+
+    } catch (error) {
+      this.logger.error('Failed to process log event', { error, log });
+    }
+  }
+
+  // Common batched event processor
+  protected async processBatchedEvents(batch: BatchedEvent): Promise<void> {
+    const startTime = performance.now();
+
+    try {
+      // Process all events in the batch
+      const processPromises = batch.events.map(event => this.processLogEvent(event));
+      await Promise.all(processPromises);
+
+      const latency = performance.now() - startTime;
+      this.perfLogger.logEventLatency('batch_processing', latency, {
+        pairKey: batch.pairKey,
+        batchSize: batch.batchSize,
+        eventsPerMs: batch.batchSize / (latency / 1000)
+      });
+
+    } catch (error) {
+      this.logger.error('Failed to process batched events', {
+        error,
+        pairKey: batch.pairKey,
+        batchSize: batch.batchSize
+      });
+    }
+  }
+
+
+  // Common price calculation
+  protected calculatePrice(pair: Pair): number {
+    try {
+      const reserve0 = parseFloat(pair.reserve0 || '0');
+      const reserve1 = parseFloat(pair.reserve1 || '0');
+
+      if (reserve0 === 0 || reserve1 === 0) return 0;
+
+      // Price of token1 in terms of token0
+      return reserve0 / reserve1;
+    } catch (error) {
+      this.logger.error('Failed to calculate price', { error, pair });
+      return 0;
+    }
+  }
+
+  // Common publishing methods
+  protected async publishPriceUpdate(update: PriceUpdate): Promise<void> {
+    const message: MessageEvent = {
+      type: 'price-update',
+      data: update,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    await this.redis!.publish('price-updates', message);
+  }
+
+  protected async publishSwapEvent(swapEvent: SwapEvent): Promise<void> {
+    const message: MessageEvent = {
+      type: 'swap-event',
+      data: swapEvent,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    await this.redis!.publish('swap-events', message);
+  }
+
+  protected async publishArbitrageOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
+    const message: MessageEvent = {
+      type: 'arbitrage-opportunity',
+      data: opportunity,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    await this.redis!.publish('arbitrage-opportunities', message);
+  }
+
+  protected async publishWhaleTransaction(whaleTransaction: any): Promise<void> {
+    const message: MessageEvent = {
+      type: 'whale-transaction',
+      data: whaleTransaction,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    await this.redis!.publish('whale-transactions', message);
   }
 
   protected getStats(): any {
