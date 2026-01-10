@@ -1,4 +1,5 @@
 // Rate Limiter Tests
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { RateLimiter } from './rate-limiter';
 
 // Mock Redis client

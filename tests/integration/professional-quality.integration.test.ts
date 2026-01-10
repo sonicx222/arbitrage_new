@@ -1,6 +1,7 @@
 // Professional Quality Integration Tests
 // End-to-end testing of the AD-PQS metric during live system operations
 
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { TestEnvironment, createMockPriceUpdate, createMockArbitrageOpportunity } from '../../shared/test-utils/src';
 import { ProfessionalQualityMonitor, getProfessionalQualityMonitor } from '../../shared/core/src/professional-quality-monitor';
 import { BSCDetectorService } from '../../services/bsc-detector/src/detector';

@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { RedisClient, getRedisClient, resetRedisInstance } from '../redis';
 
 // Mock ioredis

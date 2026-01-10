@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventProcessingWorkerPool, Task, TaskResult } from '../worker-pool';
 import { Worker } from 'worker_threads';
 import * as path from 'path';

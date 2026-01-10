@@ -180,6 +180,10 @@ export {
   getAdvancedArbitrageOrchestrator
 } from './advanced-arbitrage-orchestrator';
 
+// Base detector for chain-specific implementations
+export { BaseDetector } from './base-detector';
+export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
+
 // Re-export types for convenience
 export type {
   Chain,
