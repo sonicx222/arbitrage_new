@@ -27,7 +27,7 @@ export interface HealthThreshold {
 
 export interface AlertRule {
   name: string;
-  condition: (metrics: HealthMetric[], context: any) => boolean;
+  condition: (metrics: HealthMetric[], context: any) => boolean | Promise<boolean>;
   severity: 'info' | 'warning' | 'error' | 'critical';
   message: string;
   cooldown: number; // Minimum time between alerts (ms)
@@ -245,7 +245,8 @@ export class EnhancedHealthMonitor {
     await this.checkAlertRules(health);
 
     // Store health snapshot
-    await this.redis.set('health:snapshot', health, 300); // 5 minutes TTL
+    const redis = await this.redis;
+    await redis.set('health:snapshot', health, 300); // 5 minutes TTL
 
     // Log health status
     logger.debug('Health check completed', {
@@ -256,11 +257,13 @@ export class EnhancedHealthMonitor {
   }
 
   private async checkServiceHealth(): Promise<Record<string, ServiceHealth>> {
+    const redis = await this.redis;
     // Get service health from Redis
-    const allHealth = await this.redis.getAllServiceHealth();
+    const allHealth = await redis.getAllServiceHealth();
     const services: Record<string, ServiceHealth> = {};
 
-    for (const [serviceName, health] of Object.entries(allHealth)) {
+    for (const [serviceName, healthData] of Object.entries(allHealth)) {
+      const health = healthData as any;
       services[serviceName] = {
         name: serviceName,
         status: this.determineServiceStatus(health),
@@ -284,7 +287,8 @@ export class EnhancedHealthMonitor {
 
     // Check Redis
     try {
-      infrastructure.redis = (await this.redis.ping()) === 'PONG';
+      const redis = await this.redis;
+      infrastructure.redis = await redis.ping();
     } catch (error) {
       infrastructure.redis = false;
     }
@@ -397,13 +401,18 @@ export class EnhancedHealthMonitor {
       await this.executeAlertAction(action, rule, health);
     }
 
+    const redis = await this.redis;
     // Publish alert to Redis for other services
-    await this.redis.publish('health-alerts', {
-      rule: rule.name,
-      severity: rule.severity,
-      message: rule.message,
-      health,
-      timestamp: Date.now()
+    await redis.publish('health-alerts', {
+      type: 'health_alert',
+      data: {
+        rule: rule.name,
+        severity: rule.severity,
+        message: rule.message,
+        health
+      },
+      timestamp: Date.now(),
+      source: 'enhanced-health-monitor'
     });
   }
 
@@ -443,15 +452,16 @@ export class EnhancedHealthMonitor {
     }
   }
 
-  private flushMetrics(): void {
+  private async flushMetrics(): Promise<void> {
     if (this.metricsBuffer.length === 0) return;
 
     // In a real implementation, this would batch send metrics to monitoring system
     const metricsToFlush = [...this.metricsBuffer];
     this.metricsBuffer.length = 0;
 
+    const redis = await this.redis;
     // Store in Redis for short-term analysis
-    this.redis.set('metrics:recent', metricsToFlush.slice(-50), 3600); // 1 hour TTL
+    await redis.set('metrics:recent', metricsToFlush.slice(-50), 3600); // 1 hour TTL
 
     logger.debug('Flushed health metrics', { count: metricsToFlush.length });
   }

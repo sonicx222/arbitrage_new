@@ -221,10 +221,11 @@ export class RedisClient {
     }
   }
 
-  async del(key: string): Promise<number> {
+  async del(...keys: string[]): Promise<number> {
     try {
-      return await this.client.del(key);
-    } catch (error) {
+      if (keys.length === 0) return 0;
+      return await this.client.del(...keys);
+    } catch (error: any) {
       this.logger.error('Error deleting cache', { error });
       return 0;
     }
@@ -406,6 +407,15 @@ export class RedisClient {
     } catch (error) {
       this.logger.error('Error lrange', { error });
       return [];
+    }
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<'OK'> {
+    try {
+      return await this.client.ltrim(key, start, stop);
+    } catch (error) {
+      this.logger.error('Error ltrim', { error });
+      return 'OK';
     }
   }
 

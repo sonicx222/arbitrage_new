@@ -235,7 +235,7 @@ export class RiskManagementEngine {
   }
 
   // Check if adding position would breach risk limits
-  private canAddPosition(newPosition: Omit<Position, 'unrealizedPnL' | 'riskMetrics'>): boolean {
+  public async canAddPosition(newPosition: Omit<Position, 'unrealizedPnL' | 'riskMetrics'>): Promise<boolean> {
     // Check position size limit
     const positionSizePercent = newPosition.size / this.portfolioMetrics.totalValue;
     if (positionSizePercent > this.riskLimits.maxPositionSize) {
@@ -267,7 +267,7 @@ export class RiskManagementEngine {
   }
 
   // Calculate comprehensive risk metrics for a position
-  private async calculatePositionRisk(position: Position): Promise<PositionRisk> {
+  public async calculatePositionRisk(position: Omit<Position, 'unrealizedPnL' | 'riskMetrics'>): Promise<PositionRisk> {
     const risk: PositionRisk = {
       volatility: 0,
       liquidityRisk: 0,
@@ -313,8 +313,9 @@ export class RiskManagementEngine {
 
   // Calculate volatility risk for a pair
   private async calculateVolatilityRisk(pair: string): Promise<number> {
+    const redis = await this.redis;
     // Get recent price data from cache
-    const priceData = await this.redis.get(`price_history:${pair}`);
+    const priceData = await redis.get<number[]>(`price_history:${pair}`);
     if (!priceData) return 0.5; // Default medium risk
 
     const prices = Array.isArray(priceData) ? priceData : [];
@@ -336,8 +337,9 @@ export class RiskManagementEngine {
 
   // Calculate liquidity risk
   private async calculateLiquidityRisk(pair: string, positionSize: number): Promise<number> {
+    const redis = await this.redis;
     // Get liquidity data
-    const liquidityData = await this.redis.get(`liquidity:${pair}`);
+    const liquidityData = await redis.get(`liquidity:${pair}`);
     if (!liquidityData || typeof liquidityData !== 'object') return 1.0; // High risk if no data
 
     const { poolSize, dailyVolume } = liquidityData as any;
@@ -366,8 +368,9 @@ export class RiskManagementEngine {
     // Extract chain from pair (assuming format like "ETH/USDT:bsc")
     const chain = pair.split(':').pop() || 'ethereum';
 
+    const redis = await this.redis;
     // Get gas price data
-    const gasData = await this.redis.get(`gas:${chain}`);
+    const gasData = await redis.get(`gas:${chain}`);
     if (!gasData || typeof gasData !== 'object') return 0.5;
 
     const { gasPrice, gasLimit } = gasData as any;
@@ -382,8 +385,9 @@ export class RiskManagementEngine {
 
   // Calculate impermanent loss risk for LP positions
   private async calculateImpermanentLossRisk(pair: string): Promise<number> {
+    const redis = await this.redis;
     // Get price correlation data
-    const correlationData = await this.redis.get(`correlation:${pair}`);
+    const correlationData = await redis.get(`correlation:${pair}`);
     if (!correlationData || typeof correlationData !== 'number') return 0.3; // Medium risk default
 
     const correlation = correlationData as number;
@@ -393,7 +397,7 @@ export class RiskManagementEngine {
   }
 
   // Calculate counterparty risk
-  private calculateCounterpartyRisk(position: Position): number {
+  private calculateCounterpartyRisk(position: Omit<Position, 'unrealizedPnL' | 'riskMetrics'>): number {
     // Risk based on DEX/protocol used
     const dexRisk: { [key: string]: number } = {
       'uniswap_v3': 0.1, // Very low risk
@@ -457,14 +461,16 @@ export class RiskManagementEngine {
     // Calculate risk-adjusted metrics
     this.calculateRiskAdjustedMetrics();
 
+    const redis = await this.redis;
     // Store in Redis for monitoring
-    await this.redis.set('portfolio:metrics', this.portfolioMetrics, 60); // 1 minute TTL
+    await redis.set('portfolio:metrics', this.portfolioMetrics, 60); // 1 minute TTL
   }
 
   // Calculate drawdown metrics
   private async calculateDrawdown(): Promise<void> {
+    const redis = await this.redis;
     // Get historical portfolio values (simplified)
-    const historicalValues = await this.redis.get('portfolio:history') || [];
+    const historicalValues = await redis.get<number[]>('portfolio:history') || [];
     const currentValue = this.portfolioMetrics.totalValue;
 
     if (Array.isArray(historicalValues) && historicalValues.length > 0) {
@@ -521,7 +527,8 @@ export class RiskManagementEngine {
       this.dailyPnL = this.dailyPnL.slice(-30);
     }
 
-    await this.redis.set('portfolio:daily_pnl', this.dailyPnL, 86400); // 24 hours TTL
+    const redis = await this.redis;
+    await redis.set('portfolio:daily_pnl', this.dailyPnL, 86400); // 24 hours TTL
   }
 
   // Create risk alert
@@ -551,8 +558,14 @@ export class RiskManagementEngine {
       this.alerts = this.alerts.slice(-100);
     }
 
+    const redis = await this.redis;
     // Publish alert
-    await this.redis.publish('risk:alerts', alert);
+    await redis.publish('risk:alerts', {
+      type: 'risk_alert',
+      data: alert,
+      timestamp: Date.now(),
+      source: 'risk-management'
+    });
 
     logger.warn('Risk alert created', {
       type: alert.type,

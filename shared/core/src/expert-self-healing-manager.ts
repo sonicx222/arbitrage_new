@@ -86,7 +86,6 @@ export class ExpertSelfHealingManager {
 
     logger.info('Starting Expert Self-Healing Manager');
 
-    this.redis = await getRedisClient();
     this.isRunning = true;
 
     // Start monitoring and recovery loops
@@ -150,8 +149,14 @@ export class ExpertSelfHealingManager {
     // Update service health state
     await this.updateServiceHealthState(serviceName, failure);
 
+    const redis = await this.redis;
     // Publish failure event
-    await this.redis.publish('system:failures', failure);
+    await redis.publish('system:failures', {
+      type: 'failure_reported',
+      data: failure,
+      timestamp: Date.now(),
+      source: 'expert-self-healing-manager'
+    });
 
     // Trigger immediate analysis and recovery
     await this.analyzeAndRecover(failure);
@@ -168,15 +173,15 @@ export class ExpertSelfHealingManager {
   private assessFailureSeverity(error: Error, context: any): FailureSeverity {
     // Network-related failures
     if (error.message.includes('ECONNREFUSED') ||
-        error.message.includes('ENOTFOUND') ||
-        error.message.includes('timeout')) {
+      error.message.includes('ENOTFOUND') ||
+      error.message.includes('timeout')) {
       return FailureSeverity.MEDIUM;
     }
 
     // Memory/CPU resource issues
     if (error.message.includes('out of memory') ||
-        error.message.includes('heap limit') ||
-        context.memoryUsage > 0.9) { // 90% memory usage
+      error.message.includes('heap limit') ||
+      context.memoryUsage > 0.9) { // 90% memory usage
       return FailureSeverity.HIGH;
     }
 
@@ -192,14 +197,14 @@ export class ExpertSelfHealingManager {
 
     // WebSocket disconnections (common, low severity)
     if (error.message.includes('WebSocket') &&
-        (error.message.includes('close') || error.message.includes('disconnect'))) {
+      (error.message.includes('close') || error.message.includes('disconnect'))) {
       return FailureSeverity.LOW;
     }
 
     // Data corruption or critical logic failures
     if (error.message.includes('corrupt') ||
-        error.message.includes('invalid') ||
-        context.dataIntegrityFailure) {
+      error.message.includes('invalid') ||
+      context.dataIntegrityFailure) {
       return FailureSeverity.CRITICAL;
     }
 
@@ -247,8 +252,9 @@ export class ExpertSelfHealingManager {
 
     state.recoveryCooldown = Date.now() + cooldownTime[failure.severity];
 
+    const redis = await this.redis;
     // Store in Redis for persistence
-    await this.redis.set(`health_state:${serviceName}`, state, 3600); // 1 hour TTL
+    await redis.set(`health_state:${serviceName}`, state, 3600); // 1 hour TTL
   }
 
   // Analyze failure and determine recovery strategy
@@ -420,8 +426,9 @@ export class ExpertSelfHealingManager {
       state.activeRecoveryActions = state.activeRecoveryActions.filter(a => a.id !== action.id);
     }
 
+    const redis = await this.redis;
     // Store recovery action result
-    await this.redis.set(`recovery_action:${action.id}`, action, 86400); // 24 hours
+    await redis.set(`recovery_action:${action.id}`, action, 86400); // 24 hours
   }
 
   // Perform the actual recovery action
@@ -465,10 +472,15 @@ export class ExpertSelfHealingManager {
   // Individual recovery action implementations
   private async restartService(serviceName: string): Promise<boolean> {
     try {
+      const redis = await this.redis;
       // Publish restart command to service
-      await this.redis.publish(`service:${serviceName}:control`, {
-        command: 'restart',
-        timestamp: Date.now()
+      await redis.publish(`service:${serviceName}:control`, {
+        type: 'restart_command',
+        data: {
+          command: 'restart'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
 
       // Wait for service to report healthy
@@ -482,9 +494,14 @@ export class ExpertSelfHealingManager {
 
   private async resetNetworkConnection(serviceName: string): Promise<boolean> {
     try {
-      await this.redis.publish(`service:${serviceName}:control`, {
-        command: 'reset_network',
-        timestamp: Date.now()
+      const redis = await this.redis;
+      await redis.publish(`service:${serviceName}:control`, {
+        type: 'reset_network_command',
+        data: {
+          command: 'reset_network'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -495,9 +512,14 @@ export class ExpertSelfHealingManager {
 
   private async performMemoryCompaction(serviceName: string): Promise<boolean> {
     try {
-      await this.redis.publish(`service:${serviceName}:control`, {
-        command: 'memory_compaction',
-        timestamp: Date.now()
+      const redis = await this.redis;
+      await redis.publish(`service:${serviceName}:control`, {
+        type: 'memory_compaction_command',
+        data: {
+          command: 'memory_compaction'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -508,9 +530,9 @@ export class ExpertSelfHealingManager {
 
   private async tripCircuitBreaker(serviceName: string): Promise<boolean> {
     try {
-      const circuitBreaker = this.circuitBreakers.getCircuitBreaker(serviceName);
+      const circuitBreaker = this.circuitBreakers.getBreaker(serviceName);
       if (circuitBreaker) {
-        await circuitBreaker.forceOpen();
+        circuitBreaker.forceOpen();
         logger.info('Circuit breaker tripped', { service: serviceName });
       }
       return true;
@@ -522,10 +544,15 @@ export class ExpertSelfHealingManager {
 
   private async repairDataIntegrity(serviceName: string): Promise<boolean> {
     try {
+      const redis = await this.redis;
       // Trigger data integrity check and repair
-      await this.redis.publish(`service:${serviceName}:control`, {
-        command: 'repair_data',
-        timestamp: Date.now()
+      await redis.publish(`service:${serviceName}:control`, {
+        type: 'repair_data_command',
+        data: {
+          command: 'repair_data'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -536,9 +563,14 @@ export class ExpertSelfHealingManager {
 
   private async resetConfiguration(serviceName: string): Promise<boolean> {
     try {
-      await this.redis.publish(`service:${serviceName}:control`, {
-        command: 'reset_config',
-        timestamp: Date.now()
+      const redis = await this.redis;
+      await redis.publish(`service:${serviceName}:control`, {
+        type: 'reset_config_command',
+        data: {
+          command: 'reset_config'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -549,10 +581,15 @@ export class ExpertSelfHealingManager {
 
   private async failoverToBackup(serviceName: string): Promise<boolean> {
     try {
-      await this.redis.publish(`system:failover`, {
-        service: serviceName,
-        action: 'activate_backup',
-        timestamp: Date.now()
+      const redis = await this.redis;
+      await redis.publish(`system:failover`, {
+        type: 'failover_command',
+        data: {
+          service: serviceName,
+          action: 'activate_backup'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -563,10 +600,15 @@ export class ExpertSelfHealingManager {
 
   private async scaleUpResources(serviceName: string): Promise<boolean> {
     try {
-      await this.redis.publish(`system:scaling`, {
-        service: serviceName,
-        action: 'scale_up',
-        timestamp: Date.now()
+      const redis = await this.redis;
+      await redis.publish(`system:scaling`, {
+        type: 'scaling_command',
+        data: {
+          service: serviceName,
+          action: 'scale_up'
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
       });
       return true;
     } catch (error) {
@@ -579,9 +621,10 @@ export class ExpertSelfHealingManager {
   private async waitForServiceHealth(serviceName: string, timeout: number): Promise<boolean> {
     const startTime = Date.now();
 
+    const redis = await this.redis;
     while (Date.now() - startTime < timeout) {
       try {
-        const health = await this.redis.getServiceHealth(serviceName);
+        const health = await redis.getServiceHealth(serviceName);
         if (health && health.status === 'healthy') {
           return true;
         }
@@ -634,17 +677,19 @@ export class ExpertSelfHealingManager {
 
   // Subscribe to failure events from services
   private async subscribeToFailureEvents(): Promise<void> {
-    await this.redis.subscribe('system:failures', (message) => {
+    const redis = await this.redis;
+    await redis.subscribe('system:failures', (event) => {
       // Handle incoming failure reports
-      logger.debug('Received failure event', message);
+      logger.debug('Received failure event', event);
     });
   }
 
   // Perform periodic health checks
   private async performHealthCheck(): Promise<void> {
+    const redis = await this.redis;
     for (const [serviceName, state] of this.serviceHealthStates) {
       try {
-        const health = await this.redis.getServiceHealth(serviceName);
+        const health = await redis.getServiceHealth(serviceName);
 
         if (health && health.status === 'healthy') {
           // Service is healthy, gradually improve health score
