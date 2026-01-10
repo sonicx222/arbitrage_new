@@ -1,0 +1,494 @@
+// Redis client for message queue and caching
+import { Redis } from 'ioredis';
+import { MessageEvent, ServiceHealth, PerformanceMetrics } from '../../types';
+import { createLogger } from './logger';
+
+export class RedisClient {
+  private client: Redis;
+  private pubClient: Redis;
+  private subClient: Redis;
+  private logger: any;
+
+  constructor(url: string, password?: string) {
+    this.logger = createLogger('redis-client');
+
+    const options: any = {
+      host: this.parseHost(url),
+      port: this.parsePort(url),
+      password,
+      retryDelayOnFailover: 100,
+      enableReadyCheck: false,
+      maxRetriesPerRequest: 3,
+      lazyConnect: true
+    };
+
+    this.client = new Redis(url, options);
+    this.pubClient = new Redis(url, options);
+    this.subClient = new Redis(url, options);
+
+    this.setupEventHandlers();
+  }
+
+  private parseHost(url: string): string {
+    const match = url.match(/redis:\/\/(?:[^:]+:[^@]+@)?([^:]+):/);
+    return match ? match[1] : 'localhost';
+  }
+
+  private parsePort(url: string): number {
+    const match = url.match(/:(\d+)/);
+    return match ? parseInt(match[1]) : 6379;
+  }
+
+  private setupEventHandlers(): void {
+    // Clean up existing listeners to prevent memory leaks
+    this.client.removeAllListeners('error');
+    this.client.removeAllListeners('connect');
+    this.client.removeAllListeners('ready');
+    this.client.removeAllListeners('close');
+
+    this.client.on('error', (err: any) => {
+      this.logger?.error('Redis main client error', { error: err });
+    });
+
+    this.client.on('connect', () => {
+      this.logger?.info('Redis main client connected');
+    });
+
+    this.client.on('ready', () => {
+      this.logger?.debug('Redis main client ready');
+    });
+
+    this.client.on('close', () => {
+      this.logger?.info('Redis main client closed');
+    });
+
+    // Setup pubClient event handlers
+    this.pubClient.removeAllListeners('error');
+    this.pubClient.on('error', (err: any) => {
+      this.logger?.error('Redis pub client error', { error: err });
+    });
+
+    // Setup subClient event handlers
+    this.subClient.removeAllListeners('error');
+    this.subClient.removeAllListeners('message');
+    this.subClient.on('error', (err: any) => {
+      this.logger?.error('Redis sub client error', { error: err });
+    });
+  }
+
+  // Message publishing with security validation
+  async publish(channel: string, message: MessageEvent): Promise<number> {
+    // SECURITY: Validate and sanitize inputs
+    this.validateChannelName(channel);
+    this.validateMessage(message);
+
+    try {
+      const serializedMessage = JSON.stringify({
+        ...message,
+        timestamp: Date.now()
+      });
+
+      // SECURITY: Limit message size to prevent DoS
+      if (serializedMessage.length > 1024 * 1024) { // 1MB limit
+        throw new Error('Message too large');
+      }
+
+      return await this.pubClient.publish(channel, serializedMessage);
+    } catch (error) {
+      this.logger.error('Error publishing message', { error, channel });
+      throw error;
+    }
+  }
+
+  private validateChannelName(channel: string): void {
+    // SECURITY: Only allow safe characters in channel names
+    if (!channel || typeof channel !== 'string') {
+      throw new Error('Invalid channel name: must be non-empty string');
+    }
+
+    if (channel.length > 128) {
+      throw new Error('Channel name too long');
+    }
+
+    // Allow only alphanumeric, dash, underscore, and colon
+    if (!/^[a-zA-Z0-9\-_:]+$/.test(channel)) {
+      throw new Error('Invalid channel name: contains unsafe characters');
+    }
+  }
+
+  private validateMessage(message: MessageEvent): void {
+    // SECURITY: Validate MessageEvent structure
+    if (!message || typeof message !== 'object') {
+      throw new Error('Invalid message: must be object');
+    }
+
+    if (!message.type || typeof message.type !== 'string') {
+      throw new Error('Invalid message: missing or invalid type');
+    }
+
+    if (message.timestamp && (typeof message.timestamp !== 'number' || message.timestamp < 0)) {
+      throw new Error('Invalid message: invalid timestamp');
+    }
+
+    if (message.correlationId && typeof message.correlationId !== 'string') {
+      throw new Error('Invalid message: invalid correlationId');
+    }
+
+    // SECURITY: Sanitize string fields
+    if (message.source && typeof message.source === 'string') {
+      message.source = message.source.replace(/[^a-zA-Z0-9\-_\.]/g, '');
+    }
+
+    if (message.correlationId && typeof message.correlationId === 'string') {
+      message.correlationId = message.correlationId.replace(/[^a-zA-Z0-9\-_]/g, '');
+    }
+  }
+
+  // Message subscription with cleanup tracking
+  private subscriptions = new Map<string, { callback: (message: MessageEvent) => void; listener: Function }>();
+
+  async subscribe(channel: string, callback: (message: MessageEvent) => void): Promise<void> {
+    try {
+      // Check if already subscribed to prevent duplicate listeners
+      if (this.subscriptions.has(channel)) {
+        this.logger.warn(`Already subscribed to channel ${channel}, replacing callback`);
+        await this.unsubscribe(channel);
+      }
+
+      await this.subClient.subscribe(channel);
+
+      // Create and store the listener for cleanup
+      const listener = (receivedChannel: string, message: string) => {
+        if (receivedChannel === channel) {
+          try {
+            const parsedMessage = JSON.parse(message);
+            callback(parsedMessage);
+          } catch (error) {
+            this.logger.error('Error parsing message', { error, channel });
+          }
+        }
+      };
+
+      this.subClient.on('message', listener);
+      this.subscriptions.set(channel, { callback, listener });
+
+      this.logger.debug(`Subscribed to channel: ${channel}`);
+
+    } catch (error) {
+      this.logger.error('Error subscribing to channel', { error, channel });
+      throw error;
+    }
+  }
+
+  async unsubscribe(channel: string): Promise<void> {
+    try {
+      const subscription = this.subscriptions.get(channel);
+      if (subscription) {
+        // Remove the specific listener
+        this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
+        this.subscriptions.delete(channel);
+
+        await this.subClient.unsubscribe(channel);
+        this.logger.debug(`Unsubscribed from channel: ${channel}`);
+      }
+    } catch (error) {
+      this.logger.error('Error unsubscribing from channel', { error, channel });
+    }
+  }
+
+  // Caching operations
+  async set(key: string, value: any, ttl?: number): Promise<void> {
+    try {
+      const serializedValue = JSON.stringify(value);
+      if (ttl) {
+        await this.client.setex(key, ttl, serializedValue);
+      } else {
+        await this.client.set(key, serializedValue);
+      }
+    } catch (error) {
+      this.logger.error('Error setting cache', { error });
+      throw error;
+    }
+  }
+
+  async get<T = any>(key: string): Promise<T | null> {
+    try {
+      const value = await this.client.get(key);
+      return value ? JSON.parse(value) : null;
+    } catch (error) {
+      this.logger.error('Error getting cache', { error });
+      return null;
+    }
+  }
+
+  async del(key: string): Promise<number> {
+    try {
+      return await this.client.del(key);
+    } catch (error) {
+      this.logger.error('Error deleting cache', { error });
+      return 0;
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      const result = await this.client.exists(key);
+      return result === 1;
+    } catch (error) {
+      this.logger.error('Error checking existence', { error });
+      return false;
+    }
+  }
+
+  // Hash operations for complex data
+  async hset(key: string, field: string, value: any): Promise<number> {
+    try {
+      const serializedValue = JSON.stringify(value);
+      return await this.client.hset(key, field, serializedValue);
+    } catch (error) {
+      this.logger.error('Error setting hash field', { error });
+      return 0;
+    }
+  }
+
+  async hget<T = any>(key: string, field: string): Promise<T | null> {
+    try {
+      const value = await this.client.hget(key, field);
+      return value ? JSON.parse(value) : null;
+    } catch (error) {
+      this.logger.error('Error getting hash field', { error });
+      return null;
+    }
+  }
+
+  async hgetall<T = any>(key: string): Promise<Record<string, T> | null> {
+    try {
+      const result = await this.client.hgetall(key);
+      if (!result || Object.keys(result).length === 0) return null;
+
+            const parsed: Record<string, T> = {};
+      for (const [field, value] of Object.entries(result)) {
+        parsed[field] = JSON.parse(value as string);
+      }
+      return parsed;
+    } catch (error) {
+      this.logger.error('Error getting all hash fields', { error });
+      return null;
+    }
+  }
+
+  // Service health tracking
+  async updateServiceHealth(serviceName: string, health: ServiceHealth): Promise<void> {
+    const key = `health:${serviceName}`;
+    await this.set(key, health, 300); // 5 minute TTL
+  }
+
+  async getServiceHealth(serviceName: string): Promise<ServiceHealth | null> {
+    const key = `health:${serviceName}`;
+    return await this.get<ServiceHealth>(key);
+  }
+
+  async getAllServiceHealth(): Promise<Record<string, ServiceHealth>> {
+    try {
+      const keys = await this.client.keys('health:*');
+      const health: Record<string, ServiceHealth> = {};
+
+      for (const key of keys) {
+        const serviceName = key.replace('health:', '');
+        const serviceHealth = await this.get<ServiceHealth>(key);
+        if (serviceHealth) {
+          health[serviceName] = serviceHealth;
+        }
+      }
+
+      return health;
+    } catch (error) {
+      this.logger.error('Error getting all service health', { error });
+      return {};
+    }
+  }
+
+  // Performance metrics
+  async recordMetrics(serviceName: string, metrics: PerformanceMetrics): Promise<void> {
+    // Use time-bucketed keys instead of millisecond precision to prevent memory leaks
+    const timeBucket = Math.floor(Date.now() / (5 * 60 * 1000)); // 5-minute buckets
+    const key = `metrics:${serviceName}:${timeBucket}`;
+
+    // Store metrics in a hash to aggregate within the time bucket
+    const field = Date.now().toString();
+    await this.hset(key, field, metrics);
+
+    // Set TTL on the hash key (24 hours)
+    await this.client.expire(key, 86400);
+
+    // Also maintain a rolling window of recent metrics (limit to prevent unbounded growth)
+    const rollingKey = `metrics:${serviceName}:recent`;
+    const serialized = JSON.stringify(metrics);
+
+    // Check current list length before adding
+    const currentLength = await this.client.llen(rollingKey);
+    if (currentLength >= 100) {
+      // Remove oldest entry before adding new one
+      await this.client.rpop(rollingKey);
+    }
+    await this.client.lpush(rollingKey, serialized);
+
+    // Set TTL on rolling key as well
+    await this.client.expire(rollingKey, 86400);
+  }
+
+  async getRecentMetrics(serviceName: string, count: number = 10): Promise<PerformanceMetrics[]> {
+    try {
+      const rollingKey = `metrics:${serviceName}:recent`;
+      const metrics = await this.client.lrange(rollingKey, 0, count - 1);
+
+      return metrics.map((m: string) => JSON.parse(m)).reverse(); // Most recent first
+    } catch (error) {
+      this.logger.error('Error getting recent metrics', { error });
+      return [];
+    }
+  }
+
+  // Cleanup and maintenance
+  async disconnect(): Promise<void> {
+    try {
+      this.logger.info('Disconnecting Redis clients');
+
+      // Clean up subscriptions to prevent memory leaks
+      for (const [channel, subscription] of this.subscriptions) {
+        try {
+          this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
+          await this.subClient.unsubscribe(channel);
+        } catch (error) {
+          this.logger.warn(`Error cleaning up subscription for ${channel}`, { error });
+        }
+      }
+      this.subscriptions.clear();
+
+      // Remove all remaining event listeners to prevent memory leaks
+      this.client.removeAllListeners();
+      this.pubClient.removeAllListeners();
+      this.subClient.removeAllListeners();
+
+      // Disconnect all clients with timeout to prevent hanging
+      const disconnectPromises = [
+        this.client.disconnect(),
+        this.pubClient.disconnect(),
+        this.subClient.disconnect()
+      ];
+
+      // Add timeout to prevent indefinite waiting
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Redis disconnect timeout')), 5000);
+      });
+
+      await Promise.race([Promise.all(disconnectPromises), timeoutPromise]);
+
+      this.logger.info('Redis clients disconnected successfully');
+    } catch (error) {
+      this.logger.error('Error during Redis disconnect', { error });
+      // Force disconnect even if there were errors
+      try {
+        this.client.disconnect();
+        this.pubClient.disconnect();
+        this.subClient.disconnect();
+      } catch (forceError) {
+        this.logger.error('Force disconnect also failed', { error: forceError });
+      }
+    }
+  }
+
+  // Health check
+  async ping(): Promise<boolean> {
+    try {
+      const result = await this.client.ping();
+      return result === 'PONG';
+    } catch (error) {
+      return false;
+    }
+  }
+}
+
+// Thread-safe singleton with proper async initialization
+let redisInstance: RedisClient | null = null;
+let redisInstancePromise: Promise<RedisClient> | null = null;
+let initializationError: Error | null = null;
+
+export async function getRedisClient(url?: string, password?: string): Promise<RedisClient> {
+  // If already initialized successfully, return immediately
+  if (redisInstance) {
+    return redisInstance;
+  }
+
+  // If there's a cached error, throw it
+  if (initializationError) {
+    throw initializationError;
+  }
+
+  // If initialization is already in progress, wait for it
+  if (redisInstancePromise) {
+    try {
+      redisInstance = await redisInstancePromise;
+      return redisInstance;
+    } catch (error) {
+      initializationError = error as Error;
+      throw error;
+    }
+  }
+
+  // Start new initialization
+  redisInstancePromise = (async (): Promise<RedisClient> => {
+    try {
+      const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
+      const redisPassword = password || process.env.REDIS_PASSWORD;
+
+      const instance = new RedisClient(redisUrl, redisPassword);
+
+      // Wait for initial connection to ensure the client is ready
+      await instance.ping();
+
+      redisInstance = instance;
+      return instance;
+    } catch (error) {
+      initializationError = error as Error;
+      throw error;
+    }
+  })();
+
+  try {
+    redisInstance = await redisInstancePromise;
+    return redisInstance;
+  } catch (error) {
+    throw error;
+  }
+}
+
+// Synchronous version - only use after async initialization
+export function getRedisClientSync(): RedisClient | null {
+  if (initializationError) {
+    throw initializationError;
+  }
+  return redisInstance;
+}
+
+// Health check for Redis connectivity
+export async function checkRedisHealth(url?: string, password?: string): Promise<boolean> {
+  try {
+    const client = new RedisClient(url || process.env.REDIS_URL || 'redis://localhost:6379', password || process.env.REDIS_PASSWORD);
+    const isHealthy = await client.ping();
+    await client.disconnect(); // Clean up test client
+    return isHealthy;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Reset singleton for testing purposes
+export function resetRedisInstance(): void {
+  if (redisInstance) {
+    redisInstance.disconnect().catch(() => {}); // Best effort cleanup
+  }
+  redisInstance = null;
+  redisInstancePromise = null;
+  initializationError = null;
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@arbitrage/types",
+  "version": "1.0.0",
+  "description": "TypeScript type definitions for arbitrage system",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src --ext .ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.4",
+    "typescript": "^5.6.2"
+  }
+}

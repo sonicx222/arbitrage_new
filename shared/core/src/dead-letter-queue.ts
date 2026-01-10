@@ -1,0 +1,501 @@
+// Dead Letter Queue for Failed Operations
+// Prevents data loss and enables manual recovery of failed operations
+
+import { createLogger } from './logger';
+import { getRedisClient } from './redis';
+
+const logger = createLogger('dead-letter-queue');
+
+export interface FailedOperation {
+  id: string;
+  operation: string;
+  payload: any;
+  error: {
+    message: string;
+    code?: string;
+    stack?: string;
+  };
+  timestamp: number;
+  retryCount: number;
+  maxRetries: number;
+  service: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  correlationId?: string;
+  tags?: string[];
+}
+
+export interface DLQConfig {
+  maxSize: number;              // Maximum operations to keep in queue
+  retentionPeriod: number;      // How long to keep failed operations (ms)
+  retryEnabled: boolean;        // Whether to auto-retry operations
+  retryDelay: number;          // Delay between retry attempts
+  alertThreshold: number;       // Alert when queue size exceeds this
+  batchSize: number;           // How many operations to process at once
+}
+
+export interface ProcessingResult {
+  processed: number;
+  succeeded: number;
+  failed: number;
+  retryScheduled: number;
+}
+
+export class DeadLetterQueue {
+  private redis = getRedisClient();
+  private config: DLQConfig;
+  private processingTimer?: NodeJS.Timeout;
+  private isProcessing = false;
+
+  constructor(config: Partial<DLQConfig> = {}) {
+    this.config = {
+      maxSize: config.maxSize || 10000,
+      retentionPeriod: config.retentionPeriod || 7 * 24 * 60 * 60 * 1000, // 7 days
+      retryEnabled: config.retryEnabled !== false,
+      retryDelay: config.retryDelay || 60000, // 1 minute
+      alertThreshold: config.alertThreshold || 1000,
+      batchSize: config.batchSize || 10
+    };
+  }
+
+  // Add a failed operation to the dead letter queue
+  async enqueue(operation: Omit<FailedOperation, 'id' | 'timestamp'>): Promise<string> {
+    const failedOp: FailedOperation = {
+      ...operation,
+      id: this.generateId(),
+      timestamp: Date.now()
+    };
+
+    try {
+      // Check queue size limit
+      const currentSize = await this.getQueueSize();
+      if (currentSize >= this.config.maxSize) {
+        // Remove oldest entries to make room
+        await this.evictOldEntries(this.config.maxSize * 0.1); // Remove 10%
+        logger.warn('DLQ size limit reached, evicted old entries', { evicted: Math.floor(this.config.maxSize * 0.1) });
+      }
+
+      // Store in Redis with TTL
+      const key = `dlq:${failedOp.id}`;
+      await this.redis.set(key, failedOp, Math.floor(this.config.retentionPeriod / 1000));
+
+      // Add to priority queue
+      const priorityKey = `dlq:priority:${failedOp.priority}`;
+      await this.redis.zadd(priorityKey, failedOp.timestamp, failedOp.id);
+
+      // Add to service-specific queue
+      const serviceKey = `dlq:service:${failedOp.service}`;
+      await this.redis.zadd(serviceKey, failedOp.timestamp, failedOp.id);
+
+      // Add tags for filtering
+      if (failedOp.tags) {
+        for (const tag of failedOp.tags) {
+          const tagKey = `dlq:tag:${tag}`;
+          await this.redis.zadd(tagKey, failedOp.timestamp, failedOp.id);
+        }
+      }
+
+      logger.warn('Operation added to dead letter queue', {
+        id: failedOp.id,
+        operation: failedOp.operation,
+        service: failedOp.service,
+        priority: failedOp.priority
+      });
+
+      // Check if we should alert
+      await this.checkAlertThreshold();
+
+      return failedOp.id;
+
+    } catch (error) {
+      logger.error('Failed to enqueue operation to DLQ', { error, operation: failedOp.operation });
+      throw error;
+    }
+  }
+
+  // Process operations from the dead letter queue
+  async processBatch(limit?: number): Promise<ProcessingResult> {
+    if (this.isProcessing) {
+      return { processed: 0, succeeded: 0, failed: 0, retryScheduled: 0 };
+    }
+
+    this.isProcessing = true;
+    const batchSize = limit || this.config.batchSize;
+    let processed = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let retryScheduled = 0;
+
+    try {
+      // Process operations by priority (critical first)
+      const priorities: Array<'critical' | 'high' | 'medium' | 'low'> = ['critical', 'high', 'medium', 'low'];
+
+      for (const priority of priorities) {
+        if (processed >= batchSize) break;
+
+        const priorityKey = `dlq:priority:${priority}`;
+        const operationIds = await this.redis.zrange(priorityKey, 0, batchSize - processed - 1);
+
+        for (const operationId of operationIds) {
+          if (processed >= batchSize) break;
+
+          try {
+            const result = await this.processOperation(operationId);
+            processed++;
+
+            if (result.success) {
+              succeeded++;
+              // Remove from all queues
+              await this.removeOperation(operationId);
+            } else if (result.retry) {
+              retryScheduled++;
+              // Move to retry queue
+              await this.scheduleRetry(operationId);
+            } else {
+              failed++;
+            }
+          } catch (error) {
+            logger.error('Failed to process DLQ operation', { error, operationId });
+            failed++;
+          }
+        }
+      }
+
+    } finally {
+      this.isProcessing = false;
+    }
+
+    logger.info('DLQ batch processing completed', {
+      processed,
+      succeeded,
+      failed,
+      retryScheduled
+    });
+
+    return { processed, succeeded, failed, retryScheduled };
+  }
+
+  // Get operations by various criteria
+  async getOperations(options: {
+    priority?: string;
+    service?: string;
+    tag?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<FailedOperation[]> {
+    const { priority, service, tag, limit = 100, offset = 0 } = options;
+
+    let operationIds: string[] = [];
+
+    if (priority) {
+      const key = `dlq:priority:${priority}`;
+      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+    } else if (service) {
+      const key = `dlq:service:${service}`;
+      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+    } else if (tag) {
+      const key = `dlq:tag:${tag}`;
+      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+    } else {
+      // Get all operations (by timestamp)
+      const keys = await this.redis.keys('dlq:priority:*');
+      for (const key of keys) {
+        const ids = await this.redis.zrange(key, offset, offset + limit - 1);
+        operationIds.push(...ids);
+        if (operationIds.length >= limit) break;
+      }
+      operationIds = operationIds.slice(0, limit);
+    }
+
+    const operations: FailedOperation[] = [];
+    for (const id of operationIds) {
+      const op = await this.getOperation(id);
+      if (op) operations.push(op);
+    }
+
+    return operations;
+  }
+
+  // Get statistics about the dead letter queue
+  async getStats(): Promise<{
+    totalOperations: number;
+    byPriority: Record<string, number>;
+    byService: Record<string, number>;
+    byTag: Record<string, number>;
+    oldestOperation: number;
+    newestOperation: number;
+    averageRetries: number;
+  }> {
+    const stats = {
+      totalOperations: await this.getQueueSize(),
+      byPriority: {} as Record<string, number>,
+      byService: {} as Record<string, number>,
+      byTag: {} as Record<string, number>,
+      oldestOperation: 0,
+      newestOperation: 0,
+      averageRetries: 0
+    };
+
+    // Count by priority
+    const priorities = ['critical', 'high', 'medium', 'low'];
+    for (const priority of priorities) {
+      const count = await this.redis.zcard(`dlq:priority:${priority}`);
+      stats.byPriority[priority] = count;
+    }
+
+    // Count by service
+    const serviceKeys = await this.redis.keys('dlq:service:*');
+    for (const key of serviceKeys) {
+      const service = key.replace('dlq:service:', '');
+      const count = await this.redis.zcard(key);
+      stats.byService[service] = count;
+    }
+
+    // Count by tag
+    const tagKeys = await this.redis.keys('dlq:tag:*');
+    for (const key of tagKeys) {
+      const tag = key.replace('dlq:tag:', '');
+      const count = await this.redis.zcard(key);
+      stats.byTag[tag] = count;
+    }
+
+    // Get age statistics
+    if (stats.totalOperations > 0) {
+      const criticalOps = await this.redis.zrange('dlq:priority:critical', 0, -1, 'WITHSCORES');
+      if (criticalOps.length >= 2) {
+        stats.oldestOperation = parseInt(criticalOps[1]); // First score
+        stats.newestOperation = parseInt(criticalOps[criticalOps.length - 1]); // Last score
+      }
+    }
+
+    return stats;
+  }
+
+  // Manually retry a specific operation
+  async retryOperation(operationId: string): Promise<boolean> {
+    try {
+      const operation = await this.getOperation(operationId);
+      if (!operation) {
+        logger.warn('Operation not found for retry', { operationId });
+        return false;
+      }
+
+      const result = await this.processOperation(operationId);
+
+      if (result.success) {
+        await this.removeOperation(operationId);
+        logger.info('Manual retry succeeded', { operationId });
+        return true;
+      } else {
+        operation.retryCount++;
+        await this.redis.set(`dlq:${operationId}`, operation);
+        logger.warn('Manual retry failed', { operationId, retryCount: operation.retryCount });
+        return false;
+      }
+    } catch (error) {
+      logger.error('Manual retry failed with error', { error, operationId });
+      return false;
+    }
+  }
+
+  // Clean up expired operations
+  async cleanup(): Promise<number> {
+    const cutoffTime = Date.now() - this.config.retentionPeriod;
+    let cleaned = 0;
+
+    try {
+      // Find all DLQ keys
+      const keys = await this.redis.keys('dlq:*');
+
+      for (const key of keys) {
+        if (key.startsWith('dlq:') && !key.includes(':priority:') && !key.includes(':service:') && !key.includes(':tag:')) {
+          // This is an operation key
+          const operation = await this.redis.get<FailedOperation>(key);
+          if (operation && operation.timestamp < cutoffTime) {
+            await this.removeOperation(key.replace('dlq:', ''));
+            cleaned++;
+          }
+        }
+      }
+
+      logger.info('DLQ cleanup completed', { cleaned });
+    } catch (error) {
+      logger.error('DLQ cleanup failed', { error });
+    }
+
+    return cleaned;
+  }
+
+  // Start automatic processing
+  startAutoProcessing(intervalMs: number = 30000): void {
+    this.processingTimer = setInterval(async () => {
+      try {
+        await this.processBatch();
+      } catch (error) {
+        logger.error('Auto-processing failed', { error });
+      }
+    }, intervalMs);
+
+    logger.info('DLQ auto-processing started', { intervalMs });
+  }
+
+  // Stop automatic processing
+  stopAutoProcessing(): void {
+    if (this.processingTimer) {
+      clearInterval(this.processingTimer);
+      this.processingTimer = undefined;
+      logger.info('DLQ auto-processing stopped');
+    }
+  }
+
+  private generateId(): string {
+    return `dlq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  private async getQueueSize(): Promise<number> {
+    const keys = await this.redis.keys('dlq:priority:*');
+    let total = 0;
+    for (const key of keys) {
+      total += await this.redis.zcard(key);
+    }
+    return total;
+  }
+
+  private async evictOldEntries(count: number): Promise<void> {
+    // Remove oldest operations across all priorities
+    const priorities = ['low', 'medium', 'high', 'critical'];
+
+    for (const priority of priorities) {
+      if (count <= 0) break;
+
+      const key = `dlq:priority:${priority}`;
+      const oldestIds = await this.redis.zrange(key, 0, Math.min(count - 1, 100));
+
+      for (const id of oldestIds) {
+        await this.removeOperation(id);
+        count--;
+        if (count <= 0) break;
+      }
+    }
+  }
+
+  private async getOperation(id: string): Promise<FailedOperation | null> {
+    return await this.redis.get(`dlq:${id}`);
+  }
+
+  private async processOperation(operationId: string): Promise<{ success: boolean; retry: boolean }> {
+    const operation = await this.getOperation(operationId);
+    if (!operation) {
+      return { success: false, retry: false };
+    }
+
+    // This is where you would implement the actual retry logic
+    // For now, we'll simulate based on operation type
+    try {
+      // Simulate processing based on operation type
+      await this.simulateOperationProcessing(operation);
+
+      return { success: true, retry: false };
+    } catch (error) {
+      operation.retryCount++;
+
+      const shouldRetry = operation.retryCount < operation.maxRetries && this.shouldRetry(operation, error);
+      return { success: false, retry: shouldRetry };
+    }
+  }
+
+  private async simulateOperationProcessing(operation: FailedOperation): Promise<void> {
+    // Simulate different failure rates based on operation type
+    const failureRate = {
+      'arbitrage_calculation': 0.1,
+      'price_update': 0.05,
+      'bridge_transaction': 0.2,
+      'health_check': 0.02
+    };
+
+    const rate = failureRate[operation.operation as keyof typeof failureRate] || 0.1;
+
+    if (Math.random() < rate) {
+      throw new Error(`Simulated failure for ${operation.operation}`);
+    }
+
+    // Simulate processing time
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
+  }
+
+  private shouldRetry(operation: FailedOperation, error: any): boolean {
+    // Don't retry certain types of errors
+    if (error.message?.includes('Authentication failed')) return false;
+    if (error.message?.includes('Invalid input')) return false;
+    if (operation.retryCount >= operation.maxRetries) return false;
+
+    return true;
+  }
+
+  private async scheduleRetry(operationId: string): Promise<void> {
+    // Schedule retry after delay
+    setTimeout(async () => {
+      await this.retryOperation(operationId);
+    }, this.config.retryDelay);
+  }
+
+  private async removeOperation(operationId: string): Promise<void> {
+    const keys = [
+      `dlq:${operationId}`,
+      ...(await this.findOperationInIndexes(operationId))
+    ];
+
+    for (const key of keys) {
+      await this.redis.del(key);
+    }
+  }
+
+  private async findOperationInIndexes(operationId: string): Promise<string[]> {
+    const indexKeys: string[] = [];
+    const patterns = ['dlq:priority:*', 'dlq:service:*', 'dlq:tag:*'];
+
+    for (const pattern of patterns) {
+      const keys = await this.redis.keys(pattern);
+      for (const key of keys) {
+        const exists = await this.redis.zscore(key, operationId);
+        if (exists !== null) {
+          indexKeys.push(key);
+        }
+      }
+    }
+
+    return indexKeys;
+  }
+
+  private async checkAlertThreshold(): Promise<void> {
+    const size = await this.getQueueSize();
+    if (size > this.config.alertThreshold) {
+      logger.warn('DLQ size exceeded alert threshold', {
+        size,
+        threshold: this.config.alertThreshold
+      });
+
+      // In a real system, this would trigger alerts
+      await this.redis.publish('dlq-alert', {
+        type: 'size_threshold_exceeded',
+        size,
+        threshold: this.config.alertThreshold,
+        timestamp: Date.now()
+      });
+    }
+  }
+}
+
+// Global DLQ instance
+let globalDLQ: DeadLetterQueue | null = null;
+
+export function getDeadLetterQueue(config?: Partial<DLQConfig>): DeadLetterQueue {
+  if (!globalDLQ) {
+    globalDLQ = new DeadLetterQueue(config);
+  }
+  return globalDLQ;
+}
+
+// Convenience function to add failed operations
+export async function enqueueFailedOperation(operation: Omit<FailedOperation, 'id' | 'timestamp'>): Promise<string> {
+  return await getDeadLetterQueue().enqueue(operation);
+}

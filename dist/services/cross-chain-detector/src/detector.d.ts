@@ -1,0 +1,44 @@
+export declare class CrossChainDetectorService {
+    private redis;
+    private logger;
+    private perfLogger;
+    private priceData;
+    private opportunitiesCache;
+    private isRunning;
+    private bridgePredictor;
+    constructor();
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    private subscribeToPriceUpdates;
+    private subscribeToWhaleTransactions;
+    private initializeMLPredictor;
+    private handlePriceUpdate;
+    private handleWhaleTransaction;
+    private cleanOldPriceData;
+    private startOpportunityDetection;
+    private detectCrossChainOpportunities;
+    private getAllTokenPairs;
+    private getPricesForTokenPair;
+    private findArbitrageInPair;
+    private extractTokenFromPair;
+    private estimateBridgeCost;
+    private fallbackBridgeCost;
+    private extractTokenAmount;
+    updateBridgeData(bridgeResult: {
+        sourceChain: string;
+        targetChain: string;
+        bridge: string;
+        token: string;
+        amount: number;
+        actualLatency: number;
+        actualCost: number;
+        success: boolean;
+        timestamp: number;
+    }): void;
+    private calculateConfidence;
+    private filterValidOpportunities;
+    private analyzeWhaleImpact;
+    private publishArbitrageOpportunity;
+    private startHealthMonitoring;
+}
+//# sourceMappingURL=detector.d.ts.map
