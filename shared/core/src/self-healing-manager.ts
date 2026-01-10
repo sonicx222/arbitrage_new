@@ -67,14 +67,13 @@ export class SelfHealingManager {
 
     // Create circuit breaker for health checks
     const circuitBreaker = createCircuitBreaker(
+      `${serviceDef.name}-health-check`,
       {
         failureThreshold: 3,
         recoveryTimeout: 30000,
         monitoringPeriod: 60000,
-        successThreshold: 2,
-        timeout: 5000
-      },
-      `${serviceDef.name}-health-check`
+        successThreshold: 2
+      }
     );
     this.circuitBreakers.set(serviceDef.name, circuitBreaker);
 
@@ -335,7 +334,7 @@ export class SelfHealingManager {
       // Update Redis with health status
       await this.updateHealthInRedis(serviceName, health);
 
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof CircuitBreakerError) {
         logger.warn(`Health check circuit breaker open for ${serviceName}`);
         health.status = 'unhealthy';
