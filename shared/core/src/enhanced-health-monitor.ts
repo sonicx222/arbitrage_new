@@ -1,5 +1,6 @@
 // Enhanced Health Monitoring System
 // Comprehensive monitoring with predictive analytics and automatic alerts
+// Updated 2025-01-10: Added Redis Streams health monitoring (ADR-002, S1.1.5)
 
 import { createLogger } from './logger';
 import { getRedisClient } from './redis';
@@ -7,6 +8,7 @@ import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getGracefulDegradationManager } from './graceful-degradation';
 import { checkRecoverySystemHealth } from './error-recovery';
+import { getStreamHealthMonitor, StreamHealthSummary } from './stream-health-monitor';
 
 const logger = createLogger('enhanced-health-monitor');
 
@@ -56,6 +58,7 @@ export interface InfrastructureHealth {
   redis: boolean;
   database: boolean;
   messageQueue: boolean;
+  streams: StreamHealthSummary | null; // Redis Streams health (ADR-002, S1.1.5)
   externalAPIs: Record<string, boolean>;
 }
 
@@ -282,6 +285,7 @@ export class EnhancedHealthMonitor {
       redis: false,
       database: true, // Assume healthy for now
       messageQueue: false,
+      streams: null, // Redis Streams health (ADR-002, S1.1.5)
       externalAPIs: {}
     };
 
@@ -295,6 +299,15 @@ export class EnhancedHealthMonitor {
 
     // Check message queue (same as Redis for now)
     infrastructure.messageQueue = infrastructure.redis;
+
+    // Check Redis Streams health (ADR-002, S1.1.5)
+    try {
+      const streamMonitor = getStreamHealthMonitor();
+      infrastructure.streams = await streamMonitor.getSummary();
+    } catch (error) {
+      logger.warn('Failed to get stream health', { error });
+      infrastructure.streams = null;
+    }
 
     return infrastructure;
   }

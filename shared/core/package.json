@@ -11,12 +11,15 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "dependencies": {
+    "ioredis": "^5.4.1",
     "redis": "^4.7.0",
-    "winston": "^3.14.2",
-    "ioredis": "^5.4.1"
+    "winston": "^3.14.2"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.5.4",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
     "typescript": "^5.6.2"
   }
 }

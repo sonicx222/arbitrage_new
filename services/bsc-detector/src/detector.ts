@@ -63,9 +63,18 @@ export class BSCDetectorService extends BaseDetector {
       this.eventBatcher = null as any;
     }
 
+    // Clean up Redis Streams batchers (ADR-002, S1.1.4)
+    await this.cleanupStreamBatchers();
+
     // Disconnect WebSocket manager
     if (this.wsManager) {
       this.wsManager.disconnect();
+    }
+
+    // Disconnect Redis Streams client
+    if (this.streamsClient) {
+      await this.streamsClient.disconnect();
+      this.streamsClient = null;
     }
 
     // Disconnect Redis
