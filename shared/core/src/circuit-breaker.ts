@@ -46,7 +46,7 @@ export class CircuitBreaker {
   private totalSuccesses = 0;
   private nextAttemptTime = 0;
 
-  constructor(private config: CircuitBreakerConfig) {}
+  constructor(private config: CircuitBreakerConfig) { }
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
     this.totalRequests++;
@@ -197,11 +197,8 @@ export function getCircuitBreakerRegistry(): CircuitBreakerRegistry {
 }
 
 // Convenience functions
-export function createCircuitBreaker(config: Omit<CircuitBreakerConfig, 'name'>): CircuitBreaker {
-  return getCircuitBreakerRegistry().createBreaker(
-    config.name || `circuit-${Date.now()}`,
-    config
-  );
+export function createCircuitBreaker(name: string, config: Omit<CircuitBreakerConfig, 'name'>): CircuitBreaker {
+  return getCircuitBreakerRegistry().createBreaker(name, config);
 }
 
 export async function withCircuitBreaker<T>(
@@ -218,7 +215,6 @@ export async function withCircuitBreaker<T>(
       recoveryTimeout: 60000,
       monitoringPeriod: 60000,
       successThreshold: 3,
-      name: breakerName,
       ...config
     });
   }

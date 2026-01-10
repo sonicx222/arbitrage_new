@@ -34,7 +34,7 @@ export class RetryMechanism {
       backoffMultiplier: config.backoffMultiplier || 2,
       jitter: config.jitter !== false,
       retryCondition: config.retryCondition || this.defaultRetryCondition,
-      onRetry: config.onRetry || (() => {})
+      onRetry: config.onRetry || (() => { })
     };
   }
 
@@ -43,7 +43,8 @@ export class RetryMechanism {
     let lastError: any;
     let totalDelay = 0;
 
-    for (let attempt = 1; attempt <= this.config.maxAttempts; attempt++) {
+    let attempt = 1;
+    for (attempt = 1; attempt <= this.config.maxAttempts; attempt++) {
       try {
         const result = await fn();
         return {
@@ -52,7 +53,7 @@ export class RetryMechanism {
           attempts: attempt,
           totalDelay
         };
-      } catch (error) {
+      } catch (error: any) {
         lastError = error;
 
         // Check if we should retry this error
@@ -87,7 +88,7 @@ export class RetryMechanism {
     return {
       success: false,
       error: lastError,
-      attempts: this.config.maxAttempts,
+      attempts: Math.min(this.config.maxAttempts, attempt),
       totalDelay
     };
   }
@@ -97,17 +98,18 @@ export class RetryMechanism {
     fn: () => Promise<T>,
     timeoutMs: number
   ): Promise<RetryResult<T>> {
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
+      timeoutHandle = setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
     });
 
-    const executePromise = this.execute(fn);
-
     try {
-      return await Promise.race([executePromise, timeoutPromise.then(() => {
-        throw new Error(`Operation timed out after ${timeoutMs}ms`);
-      })]);
+      const result = await Promise.race([this.execute(fn), timeoutPromise]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      return result;
     } catch (error) {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       return {
         success: false,
         error,
@@ -177,9 +179,9 @@ export class RetryPresets {
     retryCondition: (error) => {
       // Retry network-related errors
       return error.code === 'ECONNRESET' ||
-             error.code === 'ETIMEDOUT' ||
-             error.code === 'ENOTFOUND' ||
-             (error.status && error.status >= 500);
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ENOTFOUND' ||
+        (error.status && error.status >= 500);
     }
   });
 
@@ -192,9 +194,9 @@ export class RetryPresets {
     retryCondition: (error) => {
       // Retry database connection and temporary errors
       return error.code === 'ECONNREFUSED' ||
-             error.code === 'ETIMEDOUT' ||
-             error.message?.includes('connection') ||
-             error.message?.includes('timeout');
+        error.code === 'ETIMEDOUT' ||
+        error.message?.includes('connection') ||
+        error.message?.includes('timeout');
     }
   });
 
@@ -207,10 +209,10 @@ export class RetryPresets {
     retryCondition: (error) => {
       // Retry API rate limits and temporary failures
       return error.status === 429 || // Rate limited
-             error.status === 503 || // Service unavailable
-             error.status === 502 || // Bad gateway
-             error.code === 'ECONNRESET' ||
-             error.code === 'ETIMEDOUT';
+        error.status === 503 || // Service unavailable
+        error.status === 502 || // Bad gateway
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT';
     }
   });
 
@@ -223,9 +225,9 @@ export class RetryPresets {
     retryCondition: (error) => {
       // Retry RPC-specific errors
       return error.code === -32005 || // Request rate exceeded
-             error.code === -32603 || // Internal error
-             error.message?.includes('timeout') ||
-             error.message?.includes('connection');
+        error.code === -32603 || // Internal error
+        error.message?.includes('timeout') ||
+        error.message?.includes('connection');
     }
   });
 }
@@ -280,7 +282,7 @@ export async function retryAdvanced<T>(
     maxAttempts = 3,
     delayFn = (attempt) => Math.min(1000 * Math.pow(2, attempt - 1), 30000),
     shouldRetry = () => true,
-    onRetry = () => {}
+    onRetry = () => { }
   } = options;
 
   let lastError: any;

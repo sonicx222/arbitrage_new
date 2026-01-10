@@ -290,7 +290,7 @@ export class EnterpriseConfigurationManager {
       }
 
       return validation;
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Failed to import configuration', { error });
       return {
         valid: false,
@@ -388,11 +388,12 @@ export class EnterpriseConfigurationManager {
 
   private async loadConfigurationFiles(): Promise<void> {
     const fileLayer = this.layers.find(l => l.source === 'file')!;
+    const configDir = path.join(process.cwd(), 'config');
     const configFiles = [
-      '/Users/pho/DEV/Arbitrage_Bot/Optimized_Arb_Bot_V3/config/default.json',
-      '/Users/pho/DEV/Arbitrage_Bot/Optimized_Arb_Bot_V3/config/production.json',
-      `/Users/pho/DEV/Arbitrage_Bot/Optimized_Arb_Bot_V3/config/${process.env.NODE_ENV || 'development'}.json`,
-      '/Users/pho/DEV/Arbitrage_Bot/Optimized_Arb_Bot_V3/config/local.json'
+      path.join(configDir, 'default.json'),
+      path.join(configDir, 'production.json'),
+      path.join(configDir, `${process.env.NODE_ENV || 'development'}.json`),
+      path.join(configDir, 'local.json')
     ];
 
     fileLayer.data = {};
@@ -409,7 +410,7 @@ export class EnterpriseConfigurationManager {
 
           logger.debug(`Loaded config file: ${path.basename(configFile)}`);
         }
-      } catch (error) {
+      } catch (error: any) {
         logger.warn(`Failed to load config file: ${configFile}`, { error: error.message });
       }
     }
@@ -419,12 +420,13 @@ export class EnterpriseConfigurationManager {
     const redisLayer = this.layers.find(l => l.source === 'redis')!;
 
     try {
-      const redisConfig = await this.redis.get('config:runtime');
+      const redis = await this.redis;
+      const redisConfig = await redis.get('config:runtime');
       if (redisConfig) {
         redisLayer.data = JSON.parse(redisConfig);
         logger.debug('Loaded Redis configuration');
       }
-    } catch (error) {
+    } catch (error: any) {
       logger.warn('Failed to load Redis configuration', { error: error.message });
     }
   }
@@ -549,7 +551,7 @@ export class EnterpriseConfigurationManager {
     }
   }
 
-  private validateField(path: string, value: any, validation: any): Array<{path: string, message: string, value: any}> {
+  private validateField(path: string, value: any, validation: any): Array<{ path: string, message: string, value: any }> {
     const errors = [];
 
     if (validation.min !== undefined && value < validation.min) {
@@ -601,7 +603,7 @@ export class EnterpriseConfigurationManager {
   }
 
   private async setupFileWatchers(): Promise<void> {
-    const configDir = '/Users/pho/DEV/Arbitrage_Bot/Optimized_Arb_Bot_V3/config';
+    const configDir = path.join(process.cwd(), 'config');
 
     if (!fs.existsSync(configDir)) {
       fs.mkdirSync(configDir, { recursive: true });
@@ -668,8 +670,9 @@ export class EnterpriseConfigurationManager {
     const runtimeLayer = this.layers.find(l => l.source === 'runtime')!;
     this.setNestedValue(runtimeLayer.data, path, value);
 
+    const redis = await this.redis;
     // Persist to Redis
-    await this.redis.set('config:runtime', JSON.stringify(runtimeLayer.data));
+    await redis.set('config:runtime', JSON.stringify(runtimeLayer.data));
   }
 
   private setPathValue(path: string, value: any): void {
@@ -743,8 +746,10 @@ export const DEFAULT_CONFIG_SCHEMA: ConfigurationSchema = {
   'app.environment': {
     type: 'string',
     required: true,
-    enum: ['development', 'staging', 'production'],
     default: 'development',
+    validation: {
+      enum: ['development', 'staging', 'production']
+    },
     description: 'Deployment environment'
   },
   'redis.url': {

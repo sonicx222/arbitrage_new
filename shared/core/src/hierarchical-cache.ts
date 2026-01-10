@@ -3,7 +3,8 @@
 // L2: Redis for distributed caching
 // L3: Persistent storage for long-term data
 
-import { getRedisClient, createLogger } from './index';
+import { getRedisClient } from './redis';
+import { createLogger } from './logger';
 
 const logger = createLogger('hierarchical-cache');
 
@@ -32,8 +33,6 @@ export class HierarchicalCache {
   private redis: any;
 
   // L1 Cache: SharedArrayBuffer for ultra-fast access
-  private l1Buffer: SharedArrayBuffer | null = null;
-  private l1View: Uint8Array | null = null;
   private l1Metadata: Map<string, CacheEntry> = new Map();
   private l1MaxEntries: number;
   private l1EvictionQueue: string[] = []; // LRU eviction
@@ -71,7 +70,6 @@ export class HierarchicalCache {
       this.redis = getRedisClient();
     }
 
-    this.initializeL1Cache();
     logger.info('Hierarchical cache initialized', {
       l1Enabled: this.config.l1Enabled,
       l2Enabled: this.config.l2Enabled,
@@ -248,25 +246,6 @@ export class HierarchicalCache {
     };
   }
 
-  // L1 Cache Implementation (SharedArrayBuffer)
-  private initializeL1Cache(): void {
-    if (!this.config.l1Enabled) return;
-
-    try {
-      // Create SharedArrayBuffer for cross-worker access
-      this.l1Buffer = new SharedArrayBuffer(this.config.l1Size * 1024 * 1024);
-      this.l1View = new Uint8Array(this.l1Buffer);
-
-      logger.info('L1 cache initialized', {
-        size: this.config.l1Size,
-        maxEntries: this.l1MaxEntries
-      });
-    } catch (error) {
-      logger.error('Failed to initialize L1 cache', { error });
-      this.config.l1Enabled = false;
-    }
-  }
-
   private getFromL1(key: string): any {
     const entry = this.l1Metadata.get(key);
     if (!entry) return null;
@@ -296,7 +275,7 @@ export class HierarchicalCache {
 
     // Evict if necessary
     while (this.l1Metadata.size >= this.l1MaxEntries ||
-           this.getCurrentL1Size() + size > this.config.l1Size * 1024 * 1024) {
+      this.getCurrentL1Size() + size > this.config.l1Size * 1024 * 1024) {
       this.evictL1();
     }
 
@@ -357,7 +336,8 @@ export class HierarchicalCache {
   // L2 Cache Implementation (Redis)
   private async getFromL2(key: string): Promise<any> {
     try {
-      const data = await this.redis.get(`${this.l2Prefix}${key}`);
+      const redis = await this.redis;
+      const data = await redis.get(`${this.l2Prefix}${key}`);
       return data ? JSON.parse(data) : null;
     } catch (error) {
       logger.error('L2 cache get error', { error, key });
@@ -367,13 +347,14 @@ export class HierarchicalCache {
 
   private async setInL2(key: string, value: any, ttl?: number): Promise<void> {
     try {
+      const redis = await this.redis;
       const serialized = JSON.stringify(value);
       const redisKey = `${this.l2Prefix}${key}`;
 
       if (ttl) {
-        await this.redis.setex(redisKey, ttl, serialized);
+        await redis.setex(redisKey, ttl, serialized);
       } else {
-        await this.redis.setex(redisKey, this.config.l2Ttl, serialized);
+        await redis.setex(redisKey, this.config.l2Ttl, serialized);
       }
     } catch (error) {
       logger.error('L2 cache set error', { error, key });
@@ -382,7 +363,8 @@ export class HierarchicalCache {
 
   private async invalidateL2(key: string): Promise<void> {
     try {
-      await this.redis.del(`${this.l2Prefix}${key}`);
+      const redis = await this.redis;
+      await redis.del(`${this.l2Prefix}${key}`);
     } catch (error) {
       logger.error('L2 cache invalidate error', { error, key });
     }
@@ -390,10 +372,11 @@ export class HierarchicalCache {
 
   private async invalidateL2Pattern(pattern: string): Promise<void> {
     try {
+      const redis = await this.redis;
       // Use Redis SCAN for pattern deletion
-      const keys = await this.redis.keys(`${this.l2Prefix}*${pattern}*`);
+      const keys = await redis.keys(`${this.l2Prefix}*${pattern}*`);
       if (keys.length > 0) {
-        await this.redis.del(...keys);
+        await redis.del(...keys);
       }
     } catch (error) {
       logger.error('L2 cache pattern invalidate error', { error, pattern });

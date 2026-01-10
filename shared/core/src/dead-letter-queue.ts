@@ -74,23 +74,24 @@ export class DeadLetterQueue {
         logger.warn('DLQ size limit reached, evicted old entries', { evicted: Math.floor(this.config.maxSize * 0.1) });
       }
 
+      const redis = await this.redis;
       // Store in Redis with TTL
       const key = `dlq:${failedOp.id}`;
-      await this.redis.set(key, failedOp, Math.floor(this.config.retentionPeriod / 1000));
+      await redis.set(key, failedOp, Math.floor(this.config.retentionPeriod / 1000));
 
       // Add to priority queue
       const priorityKey = `dlq:priority:${failedOp.priority}`;
-      await this.redis.zadd(priorityKey, failedOp.timestamp, failedOp.id);
+      await redis.zadd(priorityKey, failedOp.timestamp, failedOp.id);
 
       // Add to service-specific queue
       const serviceKey = `dlq:service:${failedOp.service}`;
-      await this.redis.zadd(serviceKey, failedOp.timestamp, failedOp.id);
+      await redis.zadd(serviceKey, failedOp.timestamp, failedOp.id);
 
       // Add tags for filtering
       if (failedOp.tags) {
         for (const tag of failedOp.tags) {
           const tagKey = `dlq:tag:${tag}`;
-          await this.redis.zadd(tagKey, failedOp.timestamp, failedOp.id);
+          await redis.zadd(tagKey, failedOp.timestamp, failedOp.id);
         }
       }
 
@@ -129,11 +130,12 @@ export class DeadLetterQueue {
       // Process operations by priority (critical first)
       const priorities: Array<'critical' | 'high' | 'medium' | 'low'> = ['critical', 'high', 'medium', 'low'];
 
+      const redis = await this.redis;
       for (const priority of priorities) {
         if (processed >= batchSize) break;
 
         const priorityKey = `dlq:priority:${priority}`;
-        const operationIds = await this.redis.zrange(priorityKey, 0, batchSize - processed - 1);
+        const operationIds = await redis.zrange(priorityKey, 0, batchSize - processed - 1);
 
         for (const operationId of operationIds) {
           if (processed >= batchSize) break;
@@ -186,20 +188,21 @@ export class DeadLetterQueue {
 
     let operationIds: string[] = [];
 
+    const redis = await this.redis;
     if (priority) {
       const key = `dlq:priority:${priority}`;
-      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+      operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else if (service) {
       const key = `dlq:service:${service}`;
-      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+      operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else if (tag) {
       const key = `dlq:tag:${tag}`;
-      operationIds = await this.redis.zrange(key, offset, offset + limit - 1);
+      operationIds = await redis.zrange(key, offset, offset + limit - 1);
     } else {
       // Get all operations (by timestamp)
-      const keys = await this.redis.keys('dlq:priority:*');
+      const keys = await redis.keys('dlq:priority:*');
       for (const key of keys) {
-        const ids = await this.redis.zrange(key, offset, offset + limit - 1);
+        const ids = await redis.zrange(key, offset, offset + limit - 1);
         operationIds.push(...ids);
         if (operationIds.length >= limit) break;
       }
@@ -235,32 +238,33 @@ export class DeadLetterQueue {
       averageRetries: 0
     };
 
+    const redis = await this.redis;
     // Count by priority
     const priorities = ['critical', 'high', 'medium', 'low'];
     for (const priority of priorities) {
-      const count = await this.redis.zcard(`dlq:priority:${priority}`);
+      const count = await redis.zcard(`dlq:priority:${priority}`);
       stats.byPriority[priority] = count;
     }
 
     // Count by service
-    const serviceKeys = await this.redis.keys('dlq:service:*');
+    const serviceKeys = await redis.keys('dlq:service:*');
     for (const key of serviceKeys) {
       const service = key.replace('dlq:service:', '');
-      const count = await this.redis.zcard(key);
+      const count = await redis.zcard(key);
       stats.byService[service] = count;
     }
 
     // Count by tag
-    const tagKeys = await this.redis.keys('dlq:tag:*');
+    const tagKeys = await redis.keys('dlq:tag:*');
     for (const key of tagKeys) {
       const tag = key.replace('dlq:tag:', '');
-      const count = await this.redis.zcard(key);
+      const count = await redis.zcard(key);
       stats.byTag[tag] = count;
     }
 
     // Get age statistics
     if (stats.totalOperations > 0) {
-      const criticalOps = await this.redis.zrange('dlq:priority:critical', 0, -1, 'WITHSCORES');
+      const criticalOps = await redis.zrange('dlq:priority:critical', 0, -1, 'WITHSCORES');
       if (criticalOps.length >= 2) {
         stats.oldestOperation = parseInt(criticalOps[1]); // First score
         stats.newestOperation = parseInt(criticalOps[criticalOps.length - 1]); // Last score
@@ -281,13 +285,14 @@ export class DeadLetterQueue {
 
       const result = await this.processOperation(operationId);
 
+      const redis = await this.redis;
       if (result.success) {
         await this.removeOperation(operationId);
         logger.info('Manual retry succeeded', { operationId });
         return true;
       } else {
         operation.retryCount++;
-        await this.redis.set(`dlq:${operationId}`, operation);
+        await redis.set(`dlq:${operationId}`, operation);
         logger.warn('Manual retry failed', { operationId, retryCount: operation.retryCount });
         return false;
       }
@@ -303,13 +308,14 @@ export class DeadLetterQueue {
     let cleaned = 0;
 
     try {
+      const redis = await this.redis;
       // Find all DLQ keys
-      const keys = await this.redis.keys('dlq:*');
+      const keys = await redis.keys('dlq:*');
 
       for (const key of keys) {
         if (key.startsWith('dlq:') && !key.includes(':priority:') && !key.includes(':service:') && !key.includes(':tag:')) {
           // This is an operation key
-          const operation = await this.redis.get<FailedOperation>(key);
+          const operation = await redis.get<FailedOperation>(key);
           if (operation && operation.timestamp < cutoffTime) {
             await this.removeOperation(key.replace('dlq:', ''));
             cleaned++;
@@ -352,10 +358,11 @@ export class DeadLetterQueue {
   }
 
   private async getQueueSize(): Promise<number> {
-    const keys = await this.redis.keys('dlq:priority:*');
+    const redis = await this.redis;
+    const keys = await redis.keys('dlq:priority:*');
     let total = 0;
     for (const key of keys) {
-      total += await this.redis.zcard(key);
+      total += await redis.zcard(key);
     }
     return total;
   }
@@ -367,8 +374,9 @@ export class DeadLetterQueue {
     for (const priority of priorities) {
       if (count <= 0) break;
 
+      const redis = await this.redis;
       const key = `dlq:priority:${priority}`;
-      const oldestIds = await this.redis.zrange(key, 0, Math.min(count - 1, 100));
+      const oldestIds = await redis.zrange(key, 0, Math.min(count - 1, 100));
 
       for (const id of oldestIds) {
         await this.removeOperation(id);
@@ -379,7 +387,8 @@ export class DeadLetterQueue {
   }
 
   private async getOperation(id: string): Promise<FailedOperation | null> {
-    return await this.redis.get(`dlq:${id}`);
+    const redis = await this.redis;
+    return await redis.get(`dlq:${id}`);
   }
 
   private async processOperation(operationId: string): Promise<{ success: boolean; retry: boolean }> {
@@ -439,24 +448,27 @@ export class DeadLetterQueue {
   }
 
   private async removeOperation(operationId: string): Promise<void> {
-    const keys = [
-      `dlq:${operationId}`,
-      ...(await this.findOperationInIndexes(operationId))
-    ];
+    const redis = await this.redis;
+    const indexKeys = await this.findOperationInIndexes(operationId);
 
-    for (const key of keys) {
-      await this.redis.del(key);
+    // Remove from main storage
+    await redis.del(`dlq:${operationId}`);
+
+    // Remove from all indexes
+    for (const key of indexKeys) {
+      await redis.zrem(key, operationId);
     }
   }
 
   private async findOperationInIndexes(operationId: string): Promise<string[]> {
+    const redis = await this.redis;
     const indexKeys: string[] = [];
     const patterns = ['dlq:priority:*', 'dlq:service:*', 'dlq:tag:*'];
 
     for (const pattern of patterns) {
-      const keys = await this.redis.keys(pattern);
+      const keys = await redis.keys(pattern);
       for (const key of keys) {
-        const exists = await this.redis.zscore(key, operationId);
+        const exists = await redis.zscore(key, operationId);
         if (exists !== null) {
           indexKeys.push(key);
         }
@@ -475,11 +487,16 @@ export class DeadLetterQueue {
       });
 
       // In a real system, this would trigger alerts
-      await this.redis.publish('dlq-alert', {
+      const redis = await this.redis;
+      // In a real system, this would trigger alerts
+      await redis.publish('dlq-alert', {
         type: 'size_threshold_exceeded',
-        size,
-        threshold: this.config.alertThreshold,
-        timestamp: Date.now()
+        data: {
+          size,
+          threshold: this.config.alertThreshold
+        },
+        timestamp: Date.now(),
+        source: 'dead-letter-queue'
       });
     }
   }

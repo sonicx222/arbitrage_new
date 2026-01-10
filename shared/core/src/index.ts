@@ -50,15 +50,15 @@ export {
   PositionRisk,
   PortfolioMetrics,
   RiskLimits,
-  RiskAlert,
-  BenchmarkComparison,
-  AttributionAnalysis
+  RiskAlert
 } from './risk-management';
 export {
   PerformanceAnalyticsEngine,
   StrategyPerformance,
   AssetPerformance,
-  TimePerformance
+  TimePerformance,
+  BenchmarkComparison,
+  AttributionAnalysis
 } from './performance-analytics';
 export {
   CrossDexTriangularArbitrage,

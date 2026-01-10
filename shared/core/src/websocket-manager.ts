@@ -37,6 +37,7 @@ export class WebSocketManager {
 
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private connectionTimeoutTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private isConnecting = false;
   private isConnected = false;
@@ -70,7 +71,7 @@ export class WebSocketManager {
 
         this.ws = new WebSocket(this.config.url);
 
-        const connectionTimeout = setTimeout(() => {
+        this.connectionTimeoutTimer = setTimeout(() => {
           if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
             this.ws.close();
             reject(new Error('WebSocket connection timeout'));
@@ -78,7 +79,7 @@ export class WebSocketManager {
         }, this.config.connectionTimeout);
 
         this.ws.on('open', () => {
-          clearTimeout(connectionTimeout);
+          this.clearConnectionTimeout();
           this.logger.info('WebSocket connected');
           this.isConnecting = false;
           this.isConnected = true;
@@ -101,14 +102,14 @@ export class WebSocketManager {
         });
 
         this.ws.on('error', (error) => {
-          clearTimeout(connectionTimeout);
+          this.clearConnectionTimeout();
           this.logger.error('WebSocket error', { error });
           this.isConnecting = false;
           reject(error);
         });
 
         this.ws.on('close', (code: number, reason: Buffer) => {
-          clearTimeout(connectionTimeout);
+          this.clearConnectionTimeout();
           this.logger.warn('WebSocket closed', { code, reason: reason.toString() });
           this.isConnecting = false;
           this.isConnected = false;
@@ -138,6 +139,7 @@ export class WebSocketManager {
 
     // Clear timers
     this.clearReconnectionTimer();
+    this.clearConnectionTimeout();
     this.stopHeartbeat();
 
     // Close connection
@@ -297,6 +299,13 @@ export class WebSocketManager {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
+    }
+  }
+
+  private clearConnectionTimeout(): void {
+    if (this.connectionTimeoutTimer) {
+      clearTimeout(this.connectionTimeoutTimer);
+      this.connectionTimeoutTimer = null;
     }
   }
 
