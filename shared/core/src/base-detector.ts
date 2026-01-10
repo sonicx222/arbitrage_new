@@ -42,6 +42,21 @@ export interface DetectorConfig {
   healthCheckInterval?: number;
 }
 
+/**
+ * Snapshot of pair data for thread-safe arbitrage detection.
+ * Captures reserve values at a point in time to avoid race conditions
+ * when reserves are updated by concurrent processSyncEvent calls.
+ */
+export interface PairSnapshot {
+  address: string;
+  dex: string;
+  token0: string;
+  token1: string;
+  reserve0: string;
+  reserve1: string;
+  fee: number;
+}
+
 export abstract class BaseDetector {
   protected provider: ethers.JsonRpcProvider;
   protected wsManager: WebSocketManager | null = null;
@@ -64,6 +79,10 @@ export abstract class BaseDetector {
   protected pairs: Map<string, Pair> = new Map();
   protected monitoredPairs: Set<string> = new Set();
   protected isRunning = false;
+
+  // Stop/start synchronization (race condition fix)
+  // stopPromise ensures start() waits for stop() to fully complete
+  protected stopPromise: Promise<void> | null = null;
 
   // Feature flag for gradual migration (default: use streams)
   protected useStreams = true;
@@ -400,7 +419,7 @@ export abstract class BaseDetector {
           'logs',
           {
             topics: [
-              '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822e', // Swap event signature
+              '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822', // Swap V2 event signature
             ],
             address: Array.from(this.monitoredPairs)
           }
@@ -438,8 +457,8 @@ export abstract class BaseDetector {
       if (log.topics[0] === '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1') {
         // Sync event (reserve update)
         await this.processSyncEvent(log, pair);
-      } else if (log.topics[0] === '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822e') {
-        // Swap event (trade)
+      } else if (log.topics[0] === '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822') {
+        // Swap V2 event (trade)
         await this.processSwapEvent(log, pair);
       }
 
@@ -497,6 +516,71 @@ export abstract class BaseDetector {
     }
   }
 
+  /**
+   * Create a snapshot of pair data for thread-safe arbitrage detection.
+   * This captures reserve values at a point in time to avoid race conditions.
+   * @param pair The pair to snapshot
+   * @returns PairSnapshot with immutable reserve values, or null if reserves not available
+   */
+  protected createPairSnapshot(pair: Pair): PairSnapshot | null {
+    // Capture reserves atomically (both at same instant)
+    const reserve0 = (pair as any).reserve0;
+    const reserve1 = (pair as any).reserve1;
+
+    // Skip pairs without initialized reserves
+    if (!reserve0 || !reserve1) {
+      return null;
+    }
+
+    return {
+      address: pair.address,
+      dex: pair.dex,
+      token0: pair.token0,
+      token1: pair.token1,
+      reserve0: reserve0,
+      reserve1: reserve1,
+      fee: pair.fee || 30
+    };
+  }
+
+  /**
+   * Calculate price from a snapshot (thread-safe).
+   * Uses pre-captured reserve values that won't change during calculation.
+   */
+  protected calculatePriceFromSnapshot(snapshot: PairSnapshot): number {
+    try {
+      const reserve0 = parseFloat(snapshot.reserve0);
+      const reserve1 = parseFloat(snapshot.reserve1);
+
+      if (reserve0 === 0 || reserve1 === 0 || isNaN(reserve0) || isNaN(reserve1)) {
+        return 0;
+      }
+
+      return reserve0 / reserve1;
+    } catch (error) {
+      this.logger.error('Failed to calculate price from snapshot', { error });
+      return 0;
+    }
+  }
+
+  /**
+   * Create snapshots of all pairs for thread-safe iteration.
+   * Should be called at the start of arbitrage detection to capture
+   * a consistent view of all pair reserves.
+   */
+  protected createPairsSnapshot(): Map<string, PairSnapshot> {
+    const snapshots = new Map<string, PairSnapshot>();
+
+    for (const [key, pair] of this.pairs.entries()) {
+      const snapshot = this.createPairSnapshot(pair);
+      if (snapshot) {
+        snapshots.set(key, snapshot);
+      }
+    }
+
+    return snapshots;
+  }
+
   // Common publishing methods
   // Updated 2025-01-10: Migrated to Redis Streams with batching (ADR-002, S1.1.4)
 
@@ -514,10 +598,12 @@ export abstract class BaseDetector {
         this.priceUpdateBatcher.add(message);
       } catch (error) {
         this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('price-updates', message);
+        if (this.redis) {
+          await this.redis.publish('price-updates', message);
+        }
       }
-    } else {
-      await this.redis!.publish('price-updates', message);
+    } else if (this.redis) {
+      await this.redis.publish('price-updates', message);
     }
   }
 
@@ -550,10 +636,12 @@ export abstract class BaseDetector {
         this.swapEventBatcher.add(message);
       } catch (error) {
         this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('swap-events', message);
+        if (this.redis) {
+          await this.redis.publish('swap-events', message);
+        }
       }
-    } else {
-      await this.redis!.publish('swap-events', message);
+    } else if (this.redis) {
+      await this.redis.publish('swap-events', message);
     }
   }
 
@@ -574,10 +662,12 @@ export abstract class BaseDetector {
         );
       } catch (error) {
         this.logger.warn('Stream publish failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('arbitrage-opportunities', message);
+        if (this.redis) {
+          await this.redis.publish('arbitrage-opportunities', message);
+        }
       }
-    } else {
-      await this.redis!.publish('arbitrage-opportunities', message);
+    } else if (this.redis) {
+      await this.redis.publish('arbitrage-opportunities', message);
     }
   }
 
@@ -595,10 +685,12 @@ export abstract class BaseDetector {
         this.whaleAlertBatcher.add(message);
       } catch (error) {
         this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('whale-transactions', message);
+        if (this.redis) {
+          await this.redis.publish('whale-transactions', message);
+        }
       }
-    } else {
-      await this.redis!.publish('whale-transactions', message);
+    } else if (this.redis) {
+      await this.redis.publish('whale-transactions', message);
     }
   }
 
@@ -617,10 +709,12 @@ export abstract class BaseDetector {
         this.whaleAlertBatcher.add(message);
       } catch (error) {
         this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('whale-alerts', message);
+        if (this.redis) {
+          await this.redis.publish('whale-alerts', message);
+        }
       }
-    } else {
-      await this.redis!.publish('whale-alerts', message);
+    } else if (this.redis) {
+      await this.redis.publish('whale-alerts', message);
     }
   }
 
@@ -642,10 +736,12 @@ export abstract class BaseDetector {
         );
       } catch (error) {
         this.logger.warn('Stream publish failed, falling back to Pub/Sub', { error });
-        await this.redis!.publish('volume-aggregates', message);
+        if (this.redis) {
+          await this.redis.publish('volume-aggregates', message);
+        }
       }
-    } else {
-      await this.redis!.publish('volume-aggregates', message);
+    } else if (this.redis) {
+      await this.redis.publish('volume-aggregates', message);
     }
   }
 

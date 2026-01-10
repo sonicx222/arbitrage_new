@@ -15,6 +15,7 @@ export interface Dex {
   factoryAddress: string;
   routerAddress: string;
   fee: number; // in basis points (e.g., 25 = 0.25%)
+  enabled?: boolean; // Optional: defaults to true if not specified
 }
 
 export interface Token {
@@ -24,7 +25,22 @@ export interface Token {
   chainId: number;
 }
 
+// Base Pair interface for detector services (uses string references)
 export interface Pair {
+  name?: string;
+  address: string;
+  token0: string; // Token address
+  token1: string; // Token address
+  dex: string;    // DEX name
+  fee?: number;   // Fee in basis points
+  reserve0?: string;
+  reserve1?: string;
+  blockNumber?: number;
+  lastUpdate?: number;
+}
+
+// Full Pair interface with complete token/dex objects (for analysis)
+export interface PairFull {
   address: string;
   token0: Token;
   token1: Token;
@@ -51,21 +67,31 @@ export interface PriceUpdate {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type: 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+  type: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+  chain?: string;        // Single chain for same-chain arbitrage
   buyDex: string;
   sellDex: string;
-  buyChain: string;
+  buyChain?: string;     // Optional for same-chain arbitrage
   sellChain?: string;
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: string;
-  expectedProfit: number;
+  buyPair?: string;      // Pair address for buy side
+  sellPair?: string;     // Pair address for sell side
+  token0?: string;       // Token addresses (alternative to tokenIn/tokenOut)
+  token1?: string;
+  tokenIn?: string;
+  tokenOut?: string;
+  amountIn?: string;
+  buyPrice?: number;     // Price on buy DEX
+  sellPrice?: number;    // Price on sell DEX
+  expectedProfit?: number;
+  estimatedProfit?: number;
   profitPercentage: number;
-  gasEstimate: number;
+  gasEstimate: number | string; // Support both number and string (wei)
   confidence: number;
   timestamp: number;
-  blockNumber: number;
-  path?: string[]; // For triangular arbitrage
+  blockNumber?: number;
+  expiresAt?: number;    // Opportunity expiration timestamp
+  status?: 'pending' | 'executing' | 'completed' | 'failed' | 'expired';
+  path?: string[];       // For triangular arbitrage
   bridgeRequired?: boolean;
   bridgeCost?: number;
 }

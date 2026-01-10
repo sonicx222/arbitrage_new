@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { CoordinatorService } from '../coordinator';
 import { getRedisClient, resetRedisInstance } from '../../../shared/core/src';
 

@@ -358,3 +358,409 @@
 1768063539023 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
 1768063539023 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
 2026-01-10T16:45:39.026Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.736Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.747Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.748Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.749Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.751Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T18:59:39.752Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.753Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.754Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T18:59:39.755Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.756Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071579757 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071579757 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071579758 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071579759 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071579759 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071579760 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:39.761Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.762Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071579763 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071579764 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071579764 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071579765 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071579765 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071579766 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:39.768Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.769Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071579770 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071579771 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071579772 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071579772 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071579773 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071579773 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:39.774Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.775Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.776Z [stream-health-monitor] info: Default consumer group updated {"groupName":"custom-group"}
+2026-01-10T18:59:39.777Z [stream-health-monitor] info: Default consumer group updated {"groupName":"another-group"}
+2026-01-10T18:59:39.780Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.781Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:39.782Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071579783 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071579784 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071579785 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071579785 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071579786 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071579787 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:39.788Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:40.013Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071580014 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T18:59:40.021Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:40.022Z [stream-health-monitor] warn: Failed to get health for stream: stream:price-updates {"error":{}}
+1768071580023 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071580023 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071580023 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071580024 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071580025 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:40.241Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071580241 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071580242 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071580242 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071580243 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071580243 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071580243 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:40.247Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.171Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.177Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.178Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.179Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.181Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.183Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.187Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.189Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.191Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071582192 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071582193 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071582194 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071582195 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071582195 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071582196 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:42.197Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071582199 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T18:59:42.200Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071582202 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071582203 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071582204 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071582204 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071582205 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071582206 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:42.207Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071582208 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071582209 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071582209 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071582210 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071582211 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071582212 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T18:59:42.214Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.215Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":500,"lagCritical":2000,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T18:59:42.216Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T18:59:42.217Z [stream-health-monitor] info: Added stream to monitoring {"streamName":"stream:custom"}
+2026-01-10T18:59:42.218Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.573Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.596Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.601Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.602Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.603Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:00:11.604Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.606Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.607Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:00:11.609Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.612Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071611615 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071611616 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071611616 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071611619 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071611619 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071611620 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:11.623Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.624Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071611631 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071611635 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071611635 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071611636 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071611636 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071611640 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:11.641Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.642Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071611645 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071611646 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071611647 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071611647 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071611648 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071611650 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:11.652Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.655Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.656Z [stream-health-monitor] info: Default consumer group updated {"groupName":"custom-group"}
+2026-01-10T19:00:11.659Z [stream-health-monitor] info: Default consumer group updated {"groupName":"another-group"}
+2026-01-10T19:00:11.664Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.669Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.670Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071611684 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071611684 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071611686 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071611686 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071611687 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071611687 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:11.691Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.939Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071611940 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T19:00:11.950Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:11.951Z [stream-health-monitor] warn: Failed to get health for stream: stream:price-updates {"error":{}}
+1768071611952 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071611952 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071611953 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071611954 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071611954 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:12.170Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071612171 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071612171 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071612172 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071612173 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071612174 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071612174 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:12.179Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.430Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.447Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.449Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.450Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.455Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.457Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.459Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.461Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.466Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071613467 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071613468 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071613469 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071613470 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071613470 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071613471 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:13.475Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071613477 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T19:00:13.479Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071613481 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071613481 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071613484 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071613485 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071613486 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071613487 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:13.489Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071613491 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071613491 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071613492 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071613493 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071613494 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071613496 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:00:13.498Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.499Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":500,"lagCritical":2000,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:00:13.501Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:00:13.503Z [stream-health-monitor] info: Added stream to monitoring {"streamName":"stream:custom"}
+2026-01-10T19:00:13.504Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.610Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.627Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.628Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.630Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.631Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:01:31.631Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.632Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.633Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:01:31.634Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.635Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071691636 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071691637 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071691638 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071691638 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071691639 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071691640 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:31.641Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.642Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071691643 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071691643 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071691644 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071691645 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071691645 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071691646 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:31.647Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.648Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071691649 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071691650 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071691651 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071691651 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071691651 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071691652 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:31.653Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.653Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.654Z [stream-health-monitor] info: Default consumer group updated {"groupName":"custom-group"}
+2026-01-10T19:01:31.655Z [stream-health-monitor] info: Default consumer group updated {"groupName":"another-group"}
+2026-01-10T19:01:31.657Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.658Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.659Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071691659 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071691660 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071691660 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071691661 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071691661 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071691662 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:31.662Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.894Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071691895 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T19:01:31.903Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:01:31.904Z [stream-health-monitor] warn: Failed to get health for stream: stream:price-updates {"error":{}}
+1768071691905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071691905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071691905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071691906 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071691906 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:32.123Z [stream-health-monitor] info: Stream health monitoring stopped
+1768071692124 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768071692124 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768071692125 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768071692125 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768071692125 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768071692125 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:01:32.128Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.788Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.802Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.805Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.810Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.811Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:24:44.812Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.813Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.814Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:24:44.815Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.815Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073084816 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073084817 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073084818 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073084818 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073084819 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073084820 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:24:44.821Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.822Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073084823 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073084823 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073084824 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073084824 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073084824 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073084825 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:24:44.825Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.826Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073084826 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073084827 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073084827 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073084828 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073084828 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073084828 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:24:44.829Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.829Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.830Z [stream-health-monitor] info: Default consumer group updated {"groupName":"custom-group"}
+2026-01-10T19:24:44.831Z [stream-health-monitor] info: Default consumer group updated {"groupName":"another-group"}
+2026-01-10T19:24:44.835Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.835Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:24:44.836Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073084837 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073084837 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073084837 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073084838 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073084838 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073084839 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:24:44.839Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.571Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.579Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.580Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.580Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.581Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:25:09.582Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.583Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.583Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":10,"lagCritical":100,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:25:09.584Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.584Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073109585 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073109586 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073109586 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073109586 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073109587 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073109587 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:09.587Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.588Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073109589 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073109589 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073109589 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073109590 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073109590 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073109590 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:09.591Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.592Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073109592 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073109593 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073109593 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073109593 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073109594 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073109594 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:09.595Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.595Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.596Z [stream-health-monitor] info: Default consumer group updated {"groupName":"custom-group"}
+2026-01-10T19:25:09.596Z [stream-health-monitor] info: Default consumer group updated {"groupName":"another-group"}
+2026-01-10T19:25:09.600Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.601Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.602Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073109603 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073109603 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073109604 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073109605 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073109605 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073109606 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:09.607Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.823Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073109824 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T19:25:09.831Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:09.832Z [stream-health-monitor] warn: Failed to get health for stream: stream:price-updates {"error":{}}
+1768073109833 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073109833 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073109833 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073109834 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073109835 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:10.051Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073110051 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073110052 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073110052 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073110052 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073110052 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073110053 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:10.056Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.885Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.893Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.894Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.895Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.896Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.897Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.899Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.901Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.902Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073110904 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073110904 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073110905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073110905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073110905 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073110906 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:10.906Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073110907 [stream-health-monitor] warn: Stream alert triggered Redis Streams connection unavailable {"type":"stream_unavailable","severity":"critical","stream":"all"}
+2026-01-10T19:25:10.909Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073110910 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073110910 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073110910 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073110911 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073110912 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073110912 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:10.913Z [stream-health-monitor] info: Stream health monitoring stopped
+1768073110914 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:price-updates"}
+1768073110914 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:swap-events"}
+1768073110915 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:opportunities"}
+1768073110915 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:whale-alerts"}
+1768073110915 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:volume-aggregates"}
+1768073110916 [stream-health-monitor] warn: Stream alert triggered Critical lag detected: 5000 pending messages {"type":"high_lag","severity":"critical","stream":"stream:health"}
+2026-01-10T19:25:10.916Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.917Z [stream-health-monitor] info: Stream health thresholds updated {"lagWarning":500,"lagCritical":2000,"lengthWarning":10000,"lengthCritical":100000}
+2026-01-10T19:25:10.918Z [stream-health-monitor] info: Stream health monitoring stopped
+2026-01-10T19:25:10.919Z [stream-health-monitor] info: Added stream to monitoring {"streamName":"stream:custom"}
+2026-01-10T19:25:10.920Z [stream-health-monitor] info: Stream health monitoring stopped

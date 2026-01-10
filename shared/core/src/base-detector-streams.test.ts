@@ -7,55 +7,59 @@
  * @see S1.1.4: Migrate price-updates channel to Stream
  */
 
-import { RedisStreamsClient, StreamBatcher } from './redis-streams';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+
+// Define STREAMS constant for tests
+const STREAMS = {
+  PRICE_UPDATES: 'stream:price-updates',
+  SWAP_EVENTS: 'stream:swap-events',
+  OPPORTUNITIES: 'stream:opportunities',
+  WHALE_ALERTS: 'stream:whale-alerts',
+  VOLUME_AGGREGATES: 'stream:volume-aggregates',
+  HEALTH: 'stream:health'
+};
 
 // Mock Redis Streams Client
-jest.mock('./redis-streams', () => {
-  const mockBatcher = {
-    add: jest.fn(),
-    flush: jest.fn().mockResolvedValue(undefined),
-    getStats: jest.fn().mockReturnValue({
-      currentQueueSize: 0,
-      totalMessagesQueued: 0,
-      batchesSent: 0,
-      totalMessagesSent: 0,
-      compressionRatio: 1,
-      averageBatchSize: 0
-    }),
-    destroy: jest.fn()
-  };
+const mockBatcher = {
+  add: jest.fn(),
+  flush: jest.fn(() => Promise.resolve()),
+  getStats: jest.fn().mockReturnValue({
+    currentQueueSize: 0,
+    totalMessagesQueued: 0,
+    batchesSent: 0,
+    totalMessagesSent: 0,
+    compressionRatio: 1,
+    averageBatchSize: 0
+  }),
+  destroy: jest.fn()
+};
 
-  const mockStreamsClient = {
-    xadd: jest.fn().mockResolvedValue('1234-0'),
-    createBatcher: jest.fn().mockReturnValue(mockBatcher),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    ping: jest.fn().mockResolvedValue(true)
-  };
+const mockStreamsClient = {
+  xadd: jest.fn(() => Promise.resolve('1234-0')),
+  createBatcher: jest.fn().mockReturnValue(mockBatcher),
+  disconnect: jest.fn(() => Promise.resolve()),
+  ping: jest.fn(() => Promise.resolve(true))
+};
 
-  const MockRedisStreamsClient = jest.fn(() => mockStreamsClient);
-  // Add static STREAMS property
-  MockRedisStreamsClient.STREAMS = {
-    PRICE_UPDATES: 'stream:price-updates',
-    SWAP_EVENTS: 'stream:swap-events',
-    OPPORTUNITIES: 'stream:opportunities',
-    WHALE_ALERTS: 'stream:whale-alerts',
-    VOLUME_AGGREGATES: 'stream:volume-aggregates',
-    HEALTH: 'stream:health'
-  };
+const MockRedisStreamsClient = Object.assign(
+  jest.fn(() => mockStreamsClient),
+  { STREAMS }
+);
 
-  return {
-    RedisStreamsClient: MockRedisStreamsClient,
-    getRedisStreamsClient: jest.fn().mockResolvedValue(mockStreamsClient),
-    StreamBatcher: jest.fn(() => mockBatcher)
-  };
-});
+jest.mock('./redis-streams', () => ({
+  RedisStreamsClient: MockRedisStreamsClient,
+  getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
+  StreamBatcher: jest.fn(() => mockBatcher)
+}));
 
 // Mock the regular Redis client (for backward compatibility)
+const mockRedisClient = {
+  publish: jest.fn(() => Promise.resolve(1)),
+  disconnect: jest.fn(() => Promise.resolve(undefined))
+};
+
 jest.mock('./redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue({
-    publish: jest.fn().mockResolvedValue(1),
-    disconnect: jest.fn().mockResolvedValue(undefined)
-  })
+  getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient))
 }));
 
 describe('BaseDetector Streams Migration', () => {
@@ -78,7 +82,7 @@ describe('BaseDetector Streams Migration', () => {
 
       // Simulate publishing to stream
       await streamsClient.xadd(
-        RedisStreamsClient.STREAMS.PRICE_UPDATES,
+        STREAMS.PRICE_UPDATES,
         priceUpdate
       );
 
@@ -139,7 +143,7 @@ describe('BaseDetector Streams Migration', () => {
       };
 
       await streamsClient.xadd(
-        RedisStreamsClient.STREAMS.SWAP_EVENTS,
+        STREAMS.SWAP_EVENTS,
         swapEvent
       );
 
@@ -162,7 +166,7 @@ describe('BaseDetector Streams Migration', () => {
       };
 
       await streamsClient.xadd(
-        RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        STREAMS.WHALE_ALERTS,
         whaleAlert
       );
 
@@ -189,7 +193,7 @@ describe('BaseDetector Streams Migration', () => {
       };
 
       await streamsClient.xadd(
-        RedisStreamsClient.STREAMS.OPPORTUNITIES,
+        STREAMS.OPPORTUNITIES,
         opportunity
       );
 
@@ -322,11 +326,11 @@ describe('BaseDetector Streams Migration', () => {
 describe('Stream Channel Constants', () => {
   it('should use consistent stream names', () => {
     // Verify stream names match ADR-002 specification
-    expect(RedisStreamsClient.STREAMS.PRICE_UPDATES).toBe('stream:price-updates');
-    expect(RedisStreamsClient.STREAMS.SWAP_EVENTS).toBe('stream:swap-events');
-    expect(RedisStreamsClient.STREAMS.OPPORTUNITIES).toBe('stream:opportunities');
-    expect(RedisStreamsClient.STREAMS.WHALE_ALERTS).toBe('stream:whale-alerts');
-    expect(RedisStreamsClient.STREAMS.VOLUME_AGGREGATES).toBe('stream:volume-aggregates');
-    expect(RedisStreamsClient.STREAMS.HEALTH).toBe('stream:health');
+    expect(STREAMS.PRICE_UPDATES).toBe('stream:price-updates');
+    expect(STREAMS.SWAP_EVENTS).toBe('stream:swap-events');
+    expect(STREAMS.OPPORTUNITIES).toBe('stream:opportunities');
+    expect(STREAMS.WHALE_ALERTS).toBe('stream:whale-alerts');
+    expect(STREAMS.VOLUME_AGGREGATES).toBe('stream:volume-aggregates');
+    expect(STREAMS.HEALTH).toBe('stream:health');
   });
 });

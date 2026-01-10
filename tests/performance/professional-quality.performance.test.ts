@@ -1,6 +1,7 @@
 // Professional Quality Performance Tests
 // Measures AD-PQS under various load conditions to ensure new features don't degrade quality
 
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { TestEnvironment } from '../../shared/test-utils/src';
 import { ProfessionalQualityMonitor, getProfessionalQualityMonitor } from '../../shared/core/src/professional-quality-monitor';
 import { BSCDetectorService } from '../../services/bsc-detector/src/detector';

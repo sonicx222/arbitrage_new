@@ -1,6 +1,6 @@
 // Shared configuration for the arbitrage system
 // Updated: 2025-01-10 - Phase 1 expansion (7 chains, 25 DEXs, 60 tokens)
-import { Chain, Dex, Token } from '../types';
+import { Chain, Dex, Token } from '../../types';
 
 // Validate required environment variables at startup
 if (!process.env.ETHEREUM_RPC_URL) {
@@ -471,5 +471,161 @@ export const PHASE_METRICS = {
     phase1: { chains: 7, dexes: 25, tokens: 60, opportunities: 300 },
     phase2: { chains: 9, dexes: 45, tokens: 110, opportunities: 550 },
     phase3: { chains: 10, dexes: 55, tokens: 150, opportunities: 780 }
+  }
+};
+
+// =============================================================================
+// TOKEN METADATA - Chain-specific token addresses and categories
+// Used for USD value estimation and price calculations
+// =============================================================================
+export const TOKEN_METADATA: Record<string, {
+  weth: string;
+  stablecoins: { address: string; symbol: string; decimals: number }[];
+  nativeWrapper: string;
+}> = {
+  optimism: {
+    weth: '0x4200000000000000000000000000000000000006',
+    nativeWrapper: '0x4200000000000000000000000000000000000006',
+    stablecoins: [
+      { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', symbol: 'USDT', decimals: 6 },
+      { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 },
+      { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  arbitrum: {
+    weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    nativeWrapper: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    stablecoins: [
+      { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 },
+      { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
+      { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  bsc: {
+    weth: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH on BSC
+    nativeWrapper: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
+    stablecoins: [
+      { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
+      { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 },
+      { address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', symbol: 'BUSD', decimals: 18 }
+    ]
+  },
+  base: {
+    weth: '0x4200000000000000000000000000000000000006',
+    nativeWrapper: '0x4200000000000000000000000000000000000006',
+    stablecoins: [
+      { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
+      { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  polygon: {
+    weth: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+    nativeWrapper: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
+    stablecoins: [
+      { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6 },
+      { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6 },
+      { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  ethereum: {
+    weth: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    nativeWrapper: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    stablecoins: [
+      { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
+      { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 }
+    ]
+  }
+};
+
+// =============================================================================
+// EVENT SIGNATURES - Pre-computed for performance
+// =============================================================================
+export const EVENT_SIGNATURES = {
+  // Uniswap V2 / SushiSwap style
+  SYNC: '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1',
+  SWAP_V2: '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822',
+  // Alternative signatures for different DEX implementations
+  SWAP_V3: '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
+};
+
+// =============================================================================
+// DETECTOR CONFIGURATION - Chain-specific detector settings
+// Consolidates hardcoded values from individual detector implementations
+// =============================================================================
+export interface DetectorChainConfig {
+  // Batching configuration
+  batchSize: number;
+  batchTimeout: number;
+  healthCheckInterval: number;
+  // Arbitrage detection
+  confidence: number;           // Opportunity confidence score (0-1)
+  expiryMs: number;             // Opportunity expiry in milliseconds
+  gasEstimate: number;          // Estimated gas for swap execution
+  // Whale detection
+  whaleThreshold: number;       // USD value threshold for whale alerts
+  // Token metadata key for native token
+  nativeTokenKey: 'weth' | 'nativeWrapper';
+}
+
+export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
+  ethereum: {
+    batchSize: 15,              // Lower batch size for 12s blocks
+    batchTimeout: 50,
+    healthCheckInterval: 30000,
+    confidence: 0.75,           // Lower due to higher gas variability
+    expiryMs: 15000,            // 15s (longer for slow blocks)
+    gasEstimate: 250000,        // Higher gas on mainnet
+    whaleThreshold: 100000,     // $100K (higher due to gas costs)
+    nativeTokenKey: 'weth'
+  },
+  arbitrum: {
+    batchSize: 30,              // Higher batch size for ultra-fast 250ms blocks
+    batchTimeout: 20,           // Lower timeout for faster processing
+    healthCheckInterval: 15000, // More frequent health checks
+    confidence: 0.85,           // Higher due to ultra-fast processing
+    expiryMs: 5000,             // 5s (faster for quick blocks)
+    gasEstimate: 50000,         // Very low gas on Arbitrum
+    whaleThreshold: 25000,      // $25K (lower threshold for L2)
+    nativeTokenKey: 'weth'
+  },
+  optimism: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s
+    gasEstimate: 100000,
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
+  base: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s
+    gasEstimate: 100000,
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
+  polygon: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s
+    gasEstimate: 150000,
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'      // WETH on Polygon, not WMATIC for USD calc
+  },
+  bsc: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s
+    gasEstimate: 200000,
+    whaleThreshold: 50000,      // $50K (moderate threshold)
+    nativeTokenKey: 'nativeWrapper'  // WBNB for USD calc
   }
 };

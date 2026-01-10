@@ -1,15 +1,13 @@
 /**
- * Base DEX Detector Service - Coinbase Layer 2
+ * Optimism DEX Detector Service
  *
- * Monitors Base chain DEXes for arbitrage opportunities.
+ * Monitors Optimism chain DEXes for arbitrage opportunities.
  * Extends BaseDetector for shared functionality including:
  * - Redis Streams integration (ADR-002, S1.1)
  * - Smart Swap Event Filter (S1.2)
  * - L1 Price Matrix support (S1.3)
  *
- * Optimized for Base's 2-second block time (Coinbase ecosystem)
- *
- * @see IMPLEMENTATION_PLAN.md S2.5
+ * @see IMPLEMENTATION_PLAN.md S2.1.1
  * @see shared/core/src/base-detector.ts
  */
 
@@ -38,14 +36,14 @@ import type {
 // Types
 // =============================================================================
 
-interface BasePair extends Pair {
+interface OptimismPair extends Pair {
   reserve0: string;
   reserve1: string;
   blockNumber: number;
   lastUpdate: number;
 }
 
-interface BaseDetectorConfig {
+interface OptimismDetectorConfig {
   chain: string;
   enabled: boolean;
   wsUrl: string | undefined;
@@ -56,11 +54,11 @@ interface BaseDetectorConfig {
 }
 
 // =============================================================================
-// Base Detector Service (Coinbase Layer 2)
+// Optimism Detector Service
 // =============================================================================
 
-export class BaseDetectorService extends BaseDetector {
-  private readonly baseConfig: BaseDetectorConfig;
+export class OptimismDetectorService extends BaseDetector {
+  private readonly optimismConfig: OptimismDetectorConfig;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
 
   // O(1) pair lookup by address (performance optimization)
@@ -70,45 +68,45 @@ export class BaseDetectorService extends BaseDetector {
   private isStopping = false;
 
   // Cached token metadata for USD estimation
-  private readonly tokenMetadata = TOKEN_METADATA.base;
+  private readonly tokenMetadata = TOKEN_METADATA.optimism;
 
   constructor() {
-    const config: BaseDetectorConfig = {
-      chain: 'base',
+    const config: OptimismDetectorConfig = {
+      chain: 'optimism',
       enabled: true,
-      wsUrl: CHAINS.base?.wsUrl,
-      rpcUrl: CHAINS.base?.rpcUrl || 'https://mainnet.base.org',
+      wsUrl: CHAINS.optimism?.wsUrl,
+      rpcUrl: CHAINS.optimism?.rpcUrl || 'https://mainnet.optimism.io',
       batchSize: 20,
       batchTimeout: 30,
       healthCheckInterval: 30000
     };
 
     super(config);
-    this.baseConfig = config;
+    this.optimismConfig = config;
   }
 
   // ===========================================================================
   // Configuration Getters
   // ===========================================================================
 
-  getConfig(): BaseDetectorConfig {
-    return { ...this.baseConfig };
+  getConfig(): OptimismDetectorConfig {
+    return { ...this.optimismConfig };
   }
 
   getMinProfitThreshold(): number {
-    return ARBITRAGE_CONFIG.chainMinProfits.base || 0.002; // 0.2%
+    return ARBITRAGE_CONFIG.chainMinProfits.optimism || 0.002; // 0.2%
   }
 
   getSupportedDexes(): string[] {
-    return (DEXES.base || []).map(dex => dex.name);
+    return (DEXES.optimism || []).map(dex => dex.name);
   }
 
   getDexConfigs(): Dex[] {
-    return DEXES.base || [];
+    return DEXES.optimism || [];
   }
 
   getSupportedTokens(): Token[] {
-    return CORE_TOKENS.base || [];
+    return CORE_TOKENS.optimism || [];
   }
 
   getPairCount(): number {
@@ -139,7 +137,7 @@ export class BaseDetectorService extends BaseDetector {
     }
 
     try {
-      this.logger.info('Starting Base detector service (Coinbase Layer 2)');
+      this.logger.info('Starting Optimism detector service');
 
       // Initialize Redis client
       await this.initializeRedis();
@@ -154,18 +152,17 @@ export class BaseDetectorService extends BaseDetector {
       await this.subscribeToEvents();
 
       this.isRunning = true;
-      this.logger.info('Base detector service started successfully', {
+      this.logger.info('Optimism detector service started successfully', {
         pairs: this.pairs.size,
         dexes: this.dexes.length,
-        tokens: this.tokens.length,
-        coinbaseEcosystem: true
+        tokens: this.tokens.length
       });
 
       // Start health monitoring
       this.startHealthMonitoring();
 
     } catch (error) {
-      this.logger.error('Failed to start Base detector service', { error });
+      this.logger.error('Failed to start Optimism detector service', { error });
       throw error;
     }
   }
@@ -174,6 +171,7 @@ export class BaseDetectorService extends BaseDetector {
     // Guard against double stop
     if (this.isStopping || !this.isRunning) {
       this.logger.debug('Service is already stopped or stopping');
+      // Return existing promise if stopping is in progress
       if (this.stopPromise) {
         return this.stopPromise;
       }
@@ -181,13 +179,18 @@ export class BaseDetectorService extends BaseDetector {
     }
 
     this.isStopping = true;
-    this.logger.info('Stopping Base detector service');
+    this.logger.info('Stopping Optimism detector service');
     this.isRunning = false;
 
+    // Create stop promise for synchronization (race condition fix)
     this.stopPromise = this.performCleanup();
     await this.stopPromise;
   }
 
+  /**
+   * Internal cleanup method wrapped in stopPromise for synchronization.
+   * Ensures start() waits for full cleanup completion.
+   */
   private async performCleanup(): Promise<void> {
     try {
       // Stop health monitoring first to prevent racing
@@ -244,8 +247,9 @@ export class BaseDetectorService extends BaseDetector {
       this.pairsByAddress.clear();
       this.monitoredPairs.clear();
 
-      this.logger.info('Base detector service stopped');
+      this.logger.info('Optimism detector service stopped');
     } finally {
+      // Always reset state, even if cleanup fails
       this.isStopping = false;
       this.stopPromise = null;
     }
@@ -256,7 +260,7 @@ export class BaseDetectorService extends BaseDetector {
   // ===========================================================================
 
   protected async initializePairs(): Promise<void> {
-    this.logger.info('Initializing Base trading pairs (Coinbase Layer 2)');
+    this.logger.info('Initializing Optimism trading pairs');
 
     for (const dex of this.dexes) {
       for (let i = 0; i < this.tokens.length; i++) {
@@ -298,7 +302,7 @@ export class BaseDetectorService extends BaseDetector {
       }
     }
 
-    this.logger.info(`Initialized ${this.pairs.size} trading pairs on Base`);
+    this.logger.info(`Initialized ${this.pairs.size} trading pairs on Optimism`);
   }
 
   // ===========================================================================
@@ -358,20 +362,20 @@ export class BaseDetectorService extends BaseDetector {
         : log.blockNumber;
 
       // Update pair data
-      const basePair = pair as BasePair;
-      basePair.reserve0 = reserve0;
-      basePair.reserve1 = reserve1;
-      basePair.blockNumber = blockNumber;
-      basePair.lastUpdate = Date.now();
+      const optimismPair = pair as OptimismPair;
+      optimismPair.reserve0 = reserve0;
+      optimismPair.reserve1 = reserve1;
+      optimismPair.blockNumber = blockNumber;
+      optimismPair.lastUpdate = Date.now();
 
       // Calculate price
-      const price = this.calculatePrice(basePair);
+      const price = this.calculatePrice(optimismPair);
 
       // Create price update
       const priceUpdate: PriceUpdate = {
         pairKey: `${pair.dex}_${pair.token0}_${pair.token1}`,
         dex: pair.dex,
-        chain: 'base',
+        chain: 'optimism',
         token0: pair.token0,
         token1: pair.token1,
         price,
@@ -434,7 +438,7 @@ export class BaseDetectorService extends BaseDetector {
         transactionHash: log.transactionHash || '0x0',
         timestamp: Date.now(),
         dex: pair.dex,
-        chain: 'base',
+        chain: 'optimism',
         usdValue
       };
 
@@ -453,7 +457,7 @@ export class BaseDetectorService extends BaseDetector {
   // Price Calculation
   // ===========================================================================
 
-  protected calculatePrice(pair: BasePair | { reserve0: string; reserve1: string; token0: string; token1: string }): number {
+  protected calculatePrice(pair: OptimismPair | { reserve0: string; reserve1: string; token0: string; token1: string }): number {
     try {
       // Guard against undefined reserves (pair not yet initialized via Sync event)
       if (!pair.reserve0 || !pair.reserve1) return 0;
@@ -490,7 +494,7 @@ export class BaseDetectorService extends BaseDetector {
     amount0Out: string,
     amount1Out: string
   ): Promise<number> {
-    const ethPrice = 2500; // TODO: Fetch from price oracle in Phase 2
+    const ethPrice = 2000; // TODO: Fetch from price oracle in Phase 2
     const token0Lower = pair.token0.toLowerCase();
     const token1Lower = pair.token1.toLowerCase();
     const wethLower = this.tokenMetadata.weth.toLowerCase();
@@ -586,11 +590,11 @@ export class BaseDetectorService extends BaseDetector {
 
         if (priceDiff >= this.getMinProfitThreshold()) {
           // Use config-driven values for chain-specific settings
-          const chainConfig = DETECTOR_CONFIG.base;
+          const chainConfig = DETECTOR_CONFIG.optimism;
           const opportunity: ArbitrageOpportunity = {
             id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
             type: 'simple',
-            chain: 'base',
+            chain: 'optimism',
             buyDex: currentPrice < otherPrice ? currentSnapshot.dex : otherSnapshot.dex,
             sellDex: currentPrice < otherPrice ? otherSnapshot.dex : currentSnapshot.dex,
             buyPair: currentPrice < otherPrice ? currentSnapshot.address : otherSnapshot.address,
@@ -626,22 +630,21 @@ export class BaseDetectorService extends BaseDetector {
 
   protected async checkWhaleActivity(swapEvent: SwapEvent): Promise<void> {
     // Use config-driven whale threshold (chain-specific)
-    const whaleThreshold = DETECTOR_CONFIG.base.whaleThreshold;
+    const whaleThreshold = DETECTOR_CONFIG.optimism.whaleThreshold;
     if (!swapEvent.usdValue || swapEvent.usdValue < whaleThreshold) {
       return;
     }
 
-    // Fix: Compare numbers, not strings
-    const amount0InNum = parseFloat(swapEvent.amount0In);
-    const amount1InNum = parseFloat(swapEvent.amount1In);
+    const amount0In = parseFloat(swapEvent.amount0In);
+    const amount1In = parseFloat(swapEvent.amount1In);
 
     const whaleTransaction = {
       transactionHash: swapEvent.transactionHash,
       address: swapEvent.sender,
-      token: amount0InNum > amount1InNum ? 'token0' : 'token1',
-      amount: Math.max(amount0InNum, amount1InNum),
+      token: amount0In > amount1In ? 'token0' : 'token1',
+      amount: Math.max(amount0In, amount1In),
       usdValue: swapEvent.usdValue,
-      direction: amount0InNum > amount1InNum ? 'sell' : 'buy',
+      direction: amount0In > amount1In ? 'sell' : 'buy',
       dex: swapEvent.dex,
       chain: swapEvent.chain,
       timestamp: swapEvent.timestamp,
@@ -653,7 +656,7 @@ export class BaseDetectorService extends BaseDetector {
 
   protected async calculatePriceImpact(swapEvent: SwapEvent): Promise<number> {
     // Get the pair to access reserves
-    const pair = this.pairsByAddress.get(swapEvent.pairAddress.toLowerCase()) as BasePair;
+    const pair = this.pairsByAddress.get(swapEvent.pairAddress.toLowerCase()) as OptimismPair;
 
     if (!pair || !pair.reserve0 || !pair.reserve1) {
       return 0.02; // Default 2% if reserves not available
@@ -686,7 +689,7 @@ export class BaseDetectorService extends BaseDetector {
     const wsStats = this.wsManager ? this.wsManager.getConnectionStats() : null;
 
     return {
-      service: 'base-detector',
+      service: 'optimism-detector',
       status: (this.isRunning && !this.isStopping ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
       uptime: process.uptime(),
       memoryUsage: process.memoryUsage().heapUsed,
@@ -695,10 +698,9 @@ export class BaseDetectorService extends BaseDetector {
       pairs: this.pairs.size,
       websocket: wsStats,
       batcherStats,
-      chain: 'base',
+      chain: 'optimism',
       dexCount: this.dexes.length,
-      tokenCount: this.tokens.length,
-      coinbaseEcosystem: true
+      tokenCount: this.tokens.length
     };
   }
 
@@ -713,14 +715,14 @@ export class BaseDetectorService extends BaseDetector {
         const health = await this.getHealth();
 
         if (this.redis) {
-          await this.redis.updateServiceHealth('base-detector', health);
+          await this.redis.updateServiceHealth('optimism-detector', health);
         }
 
-        this.perfLogger.logHealthCheck('base-detector', health);
+        this.perfLogger.logHealthCheck('optimism-detector', health);
 
       } catch (error) {
         this.logger.error('Health monitoring failed', { error });
       }
-    }, this.baseConfig.healthCheckInterval);
+    }, this.optimismConfig.healthCheckInterval);
   }
 }

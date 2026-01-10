@@ -3462,3 +3462,1030 @@
 2026-01-10T16:45:39.300Z [swap-event-filter] info: Whale alert detected {"usdValue":639542.1644912993,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6dd0128797aeb"}
 2026-01-10T16:45:39.300Z [swap-event-filter] info: Whale alert detected {"usdValue":270204.5309630717,"chain":"ethereum","dex":"uniswap_v3","pair":"0x91ea5a2704253"}
 2026-01-10T16:45:39.301Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.796Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.836Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.838Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.840Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.841Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.842Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.843Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.844Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.845Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.846Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.847Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.848Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.849Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.850Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.851Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.853Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.854Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.855Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.856Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.857Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:39.858Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:39.859Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.024Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.025Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.028Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.030Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x65c9c1cd37cd98"}
+2026-01-10T18:59:40.047Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.050Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.051Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.052Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.053Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6f4815728224d8"}
+2026-01-10T18:59:40.058Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.059Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.060Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe8b712d219e7c8"}
+2026-01-10T18:59:40.061Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbaa2c71fe29e68"}
+2026-01-10T18:59:40.062Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.063Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.064Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7e6c0299911f68"}
+2026-01-10T18:59:40.064Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd64efa36b47f4"}
+2026-01-10T18:59:40.065Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.066Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.226Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.227Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.385Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.387Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.383Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.395Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.397Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.398Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":100000,"dedupWindowMs":10000,"aggregationWindowMs":10000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.398Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.399Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.400Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.402Z [swap-event-filter] info: SwapEventFilter config updated {"config":{"minUsdValue":500,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.403Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.404Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.405Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.406Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.408Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.409Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.410Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.411Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.413Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.414Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.415Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.416Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.417Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.419Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.419Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.540Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.541Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.570Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.571Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.572Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.572Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:40.573Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.574Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.575Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.576Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.577Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:40.578Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.579Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.579Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:40.580Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:40.581Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.581Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.582Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.706Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.735Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.737Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.738Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.738Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.707Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.708Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9944f409625408"}
+2026-01-10T18:59:40.709Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.710Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.711Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.712Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.713Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.713Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.714Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1f48b1edccd23"}
+2026-01-10T18:59:40.715Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.715Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.716Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.717Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.717Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x08607c10118ee8"}
+2026-01-10T18:59:40.719Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.719Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.720Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.721Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.732Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.733Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.734Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1049c2f593b65"}
+2026-01-10T18:59:40.735Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.737Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.854Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.856Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.902Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.903Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.904Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.905Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.958Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.063Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.064Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.065Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.071Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.072Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.073Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.075Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.077Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.078Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.079Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.080Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.082Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.083Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.084Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.085Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.086Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.087Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.088Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.089Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.089Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.090Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.091Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.092Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.093Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.094Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.095Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.096Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.097Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.097Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.960Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.961Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.962Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.962Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.963Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.963Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.964Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.964Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.965Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.966Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9d0ccb9d5ccda"}
+2026-01-10T18:59:40.966Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.967Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.968Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.969Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.969Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T18:59:40.970Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.971Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.974Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.975Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:40.993Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:40.994Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.006Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.007Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.019Z [swap-event-filter] info: Whale alert detected {"usdValue":720712.5102320019,"chain":"ethereum","dex":"uniswap_v3","pair":"0x461e02e1185a6"}
+2026-01-10T18:59:41.020Z [swap-event-filter] info: Whale alert detected {"usdValue":214822.47604228999,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1e0ad881a8767"}
+2026-01-10T18:59:41.020Z [swap-event-filter] info: Whale alert detected {"usdValue":53509.60008100248,"chain":"ethereum","dex":"uniswap_v3","pair":"0x74e57daa2ba6e"}
+2026-01-10T18:59:41.021Z [swap-event-filter] info: Whale alert detected {"usdValue":794552.6270768619,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdd8740bae0f1e"}
+2026-01-10T18:59:41.021Z [swap-event-filter] info: Whale alert detected {"usdValue":423045.8285348882,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcba7275507c42"}
+2026-01-10T18:59:41.022Z [swap-event-filter] info: Whale alert detected {"usdValue":432012.61805813323,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4dc457c748546"}
+2026-01-10T18:59:41.022Z [swap-event-filter] info: Whale alert detected {"usdValue":705167.5677791934,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7f5725068ebb2"}
+2026-01-10T18:59:41.023Z [swap-event-filter] info: Whale alert detected {"usdValue":396134.9649110202,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0ad87aabbbb95"}
+2026-01-10T18:59:41.023Z [swap-event-filter] info: Whale alert detected {"usdValue":167752.79277786985,"chain":"ethereum","dex":"uniswap_v3","pair":"0x04a716c44da8b8"}
+2026-01-10T18:59:41.024Z [swap-event-filter] info: Whale alert detected {"usdValue":316583.44261486246,"chain":"ethereum","dex":"uniswap_v3","pair":"0x933314b32a0ef8"}
+2026-01-10T18:59:41.025Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.026Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.027Z [swap-event-filter] info: Whale alert detected {"usdValue":433646.0283839165,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfe5c169d958648"}
+2026-01-10T18:59:41.027Z [swap-event-filter] info: Whale alert detected {"usdValue":136022.49460763653,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa2e8709c5f80c8"}
+2026-01-10T18:59:41.028Z [swap-event-filter] info: Whale alert detected {"usdValue":664702.9310898832,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc04c4d1dc90af"}
+2026-01-10T18:59:41.028Z [swap-event-filter] info: Whale alert detected {"usdValue":824445.2765743075,"chain":"ethereum","dex":"uniswap_v3","pair":"0x12a4adad70c528"}
+2026-01-10T18:59:41.029Z [swap-event-filter] info: Whale alert detected {"usdValue":87288.56761118528,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd0d22115c88a2"}
+2026-01-10T18:59:41.029Z [swap-event-filter] info: Whale alert detected {"usdValue":927673.099247169,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd738c059624d88"}
+2026-01-10T18:59:41.030Z [swap-event-filter] info: Whale alert detected {"usdValue":860861.612590055,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5d30217ee839"}
+2026-01-10T18:59:41.031Z [swap-event-filter] info: Whale alert detected {"usdValue":268440.7965081569,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc9002ebd0c517"}
+2026-01-10T18:59:41.031Z [swap-event-filter] info: Whale alert detected {"usdValue":840552.4943845564,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6c034b8d70d8b"}
+2026-01-10T18:59:41.032Z [swap-event-filter] info: Whale alert detected {"usdValue":61059.82017200686,"chain":"ethereum","dex":"uniswap_v3","pair":"0x05b5676373dc9"}
+2026-01-10T18:59:41.032Z [swap-event-filter] info: Whale alert detected {"usdValue":849364.2190779006,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd2dc56e2713a28"}
+2026-01-10T18:59:41.033Z [swap-event-filter] info: Whale alert detected {"usdValue":259757.89797127637,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcf5a7b3e66edd8"}
+2026-01-10T18:59:41.033Z [swap-event-filter] info: Whale alert detected {"usdValue":825102.0405034688,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6d9d9c6db926"}
+2026-01-10T18:59:41.034Z [swap-event-filter] info: Whale alert detected {"usdValue":690295.9974324767,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0f279ddd8ad8e"}
+2026-01-10T18:59:41.035Z [swap-event-filter] info: Whale alert detected {"usdValue":533037.6699623483,"chain":"ethereum","dex":"uniswap_v3","pair":"0x985d2b0474043"}
+2026-01-10T18:59:41.036Z [swap-event-filter] info: Whale alert detected {"usdValue":485570.17499842774,"chain":"ethereum","dex":"uniswap_v3","pair":"0x19f3b86764af6"}
+2026-01-10T18:59:41.036Z [swap-event-filter] info: Whale alert detected {"usdValue":360421.1889851145,"chain":"ethereum","dex":"uniswap_v3","pair":"0xed609ff1507c78"}
+2026-01-10T18:59:41.037Z [swap-event-filter] info: Whale alert detected {"usdValue":416048.8112485343,"chain":"ethereum","dex":"uniswap_v3","pair":"0xffdd08032de458"}
+2026-01-10T18:59:41.037Z [swap-event-filter] info: Whale alert detected {"usdValue":237095.23135979346,"chain":"ethereum","dex":"uniswap_v3","pair":"0x64a90c0c536ca"}
+2026-01-10T18:59:41.038Z [swap-event-filter] info: Whale alert detected {"usdValue":878111.2751478195,"chain":"ethereum","dex":"uniswap_v3","pair":"0x96a030087e1338"}
+2026-01-10T18:59:41.039Z [swap-event-filter] info: Whale alert detected {"usdValue":625749.428690717,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2a058a3545c99"}
+2026-01-10T18:59:41.039Z [swap-event-filter] info: Whale alert detected {"usdValue":109254.97762115278,"chain":"ethereum","dex":"uniswap_v3","pair":"0x95fb8c15756798"}
+2026-01-10T18:59:41.040Z [swap-event-filter] info: Whale alert detected {"usdValue":693352.9035120249,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6d36704a7247c"}
+2026-01-10T18:59:41.040Z [swap-event-filter] info: Whale alert detected {"usdValue":610568.3934951826,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4502deacceb2f8"}
+2026-01-10T18:59:41.041Z [swap-event-filter] info: Whale alert detected {"usdValue":75953.9645417656,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfad875c6f99998"}
+2026-01-10T18:59:41.042Z [swap-event-filter] info: Whale alert detected {"usdValue":872942.489971757,"chain":"ethereum","dex":"uniswap_v3","pair":"0x933df49792d1a"}
+2026-01-10T18:59:41.042Z [swap-event-filter] info: Whale alert detected {"usdValue":806690.2181472039,"chain":"ethereum","dex":"uniswap_v3","pair":"0x20b08961eca26"}
+2026-01-10T18:59:41.042Z [swap-event-filter] info: Whale alert detected {"usdValue":699095.158117085,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc15e27b72fe7c8"}
+2026-01-10T18:59:41.043Z [swap-event-filter] info: Whale alert detected {"usdValue":451717.70999097486,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdd607131f2fad"}
+2026-01-10T18:59:41.044Z [swap-event-filter] info: Whale alert detected {"usdValue":477764.3703216772,"chain":"ethereum","dex":"uniswap_v3","pair":"0x158b8f4900d23"}
+2026-01-10T18:59:41.044Z [swap-event-filter] info: Whale alert detected {"usdValue":684092.4753801165,"chain":"ethereum","dex":"uniswap_v3","pair":"0x06768994a3d7d8"}
+2026-01-10T18:59:41.045Z [swap-event-filter] info: Whale alert detected {"usdValue":98219.24165679749,"chain":"ethereum","dex":"uniswap_v3","pair":"0x14cabfae2791e"}
+2026-01-10T18:59:41.045Z [swap-event-filter] info: Whale alert detected {"usdValue":197902.11262633718,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0b3bca6b081958"}
+2026-01-10T18:59:41.045Z [swap-event-filter] info: Whale alert detected {"usdValue":896268.2501513362,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2d349daa523728"}
+2026-01-10T18:59:41.046Z [swap-event-filter] info: Whale alert detected {"usdValue":980690.019394032,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5b17ec343746d"}
+2026-01-10T18:59:41.046Z [swap-event-filter] info: Whale alert detected {"usdValue":466119.361520989,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf77376b173f6d"}
+2026-01-10T18:59:41.047Z [swap-event-filter] info: Whale alert detected {"usdValue":359877.041495276,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbc925c817cf13"}
+2026-01-10T18:59:41.049Z [swap-event-filter] info: Whale alert detected {"usdValue":966148.0295919783,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc56b215b0379c"}
+2026-01-10T18:59:41.051Z [swap-event-filter] info: Whale alert detected {"usdValue":215121.83023015165,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6c503af54e679"}
+2026-01-10T18:59:41.052Z [swap-event-filter] info: Whale alert detected {"usdValue":638656.6969462046,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc41d5e67630f88"}
+2026-01-10T18:59:41.053Z [swap-event-filter] info: Whale alert detected {"usdValue":710556.4310837195,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5a7eb5fdef7db"}
+2026-01-10T18:59:41.054Z [swap-event-filter] info: Whale alert detected {"usdValue":227678.50162650726,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4b2081a7325fd"}
+2026-01-10T18:59:41.055Z [swap-event-filter] info: Whale alert detected {"usdValue":964059.7212409197,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf2433633cecda"}
+2026-01-10T18:59:41.056Z [swap-event-filter] info: Whale alert detected {"usdValue":599217.9625636175,"chain":"ethereum","dex":"uniswap_v3","pair":"0x82210088beb8a8"}
+2026-01-10T18:59:41.057Z [swap-event-filter] info: Whale alert detected {"usdValue":520966.5372336579,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc16eb0975965"}
+2026-01-10T18:59:41.058Z [swap-event-filter] info: Whale alert detected {"usdValue":880976.162900264,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfadbb7bc5d347"}
+2026-01-10T18:59:41.058Z [swap-event-filter] info: Whale alert detected {"usdValue":336745.97019752197,"chain":"ethereum","dex":"uniswap_v3","pair":"0x15a7a8c987436"}
+2026-01-10T18:59:41.059Z [swap-event-filter] info: Whale alert detected {"usdValue":670008.2327605408,"chain":"ethereum","dex":"uniswap_v3","pair":"0xace5dc76a62058"}
+2026-01-10T18:59:41.060Z [swap-event-filter] info: Whale alert detected {"usdValue":439893.9079521291,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd66308c234b7"}
+2026-01-10T18:59:41.061Z [swap-event-filter] info: Whale alert detected {"usdValue":699757.3322131683,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7507d8e9a3c97"}
+2026-01-10T18:59:41.062Z [swap-event-filter] info: Whale alert detected {"usdValue":887346.4047958998,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcb2290fd3ae78"}
+2026-01-10T18:59:41.063Z [swap-event-filter] info: Whale alert detected {"usdValue":446686.88346443657,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd1db702b4eb398"}
+2026-01-10T18:59:41.064Z [swap-event-filter] info: Whale alert detected {"usdValue":886278.4499065912,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2cd14e7451623"}
+2026-01-10T18:59:41.065Z [swap-event-filter] info: Whale alert detected {"usdValue":724016.4183059406,"chain":"ethereum","dex":"uniswap_v3","pair":"0x897345969987e8"}
+2026-01-10T18:59:41.066Z [swap-event-filter] info: Whale alert detected {"usdValue":474083.4130244859,"chain":"ethereum","dex":"uniswap_v3","pair":"0xeeda71f7164328"}
+2026-01-10T18:59:41.066Z [swap-event-filter] info: Whale alert detected {"usdValue":481975.53739985166,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd700aa2da73228"}
+2026-01-10T18:59:41.067Z [swap-event-filter] info: Whale alert detected {"usdValue":984302.4201700968,"chain":"ethereum","dex":"uniswap_v3","pair":"0x924c9cb639f578"}
+2026-01-10T18:59:41.068Z [swap-event-filter] info: Whale alert detected {"usdValue":391213.97314192954,"chain":"ethereum","dex":"uniswap_v3","pair":"0xedadae8aaaa7a"}
+2026-01-10T18:59:41.069Z [swap-event-filter] info: Whale alert detected {"usdValue":911032.223755172,"chain":"ethereum","dex":"uniswap_v3","pair":"0x695c0a9d80b1c"}
+2026-01-10T18:59:41.070Z [swap-event-filter] info: Whale alert detected {"usdValue":602193.78856609,"chain":"ethereum","dex":"uniswap_v3","pair":"0x105f2fa1c57078"}
+2026-01-10T18:59:41.071Z [swap-event-filter] info: Whale alert detected {"usdValue":195496.10565560067,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7bb5674433c408"}
+2026-01-10T18:59:41.071Z [swap-event-filter] info: Whale alert detected {"usdValue":931344.8945397901,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbf541c1f006cd"}
+2026-01-10T18:59:41.072Z [swap-event-filter] info: Whale alert detected {"usdValue":555511.5959945961,"chain":"ethereum","dex":"uniswap_v3","pair":"0x58754522d5ea2"}
+2026-01-10T18:59:41.073Z [swap-event-filter] info: Whale alert detected {"usdValue":99867.66381914893,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe74eea9c726a08"}
+2026-01-10T18:59:41.074Z [swap-event-filter] info: Whale alert detected {"usdValue":276723.6688952619,"chain":"ethereum","dex":"uniswap_v3","pair":"0xeffc799d362798"}
+2026-01-10T18:59:41.075Z [swap-event-filter] info: Whale alert detected {"usdValue":223434.83656084456,"chain":"ethereum","dex":"uniswap_v3","pair":"0xceb09478bf5a48"}
+2026-01-10T18:59:41.076Z [swap-event-filter] info: Whale alert detected {"usdValue":483809.6326410428,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5c63c5d0aa712"}
+2026-01-10T18:59:41.077Z [swap-event-filter] info: Whale alert detected {"usdValue":398907.3341013006,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd77069aecb449"}
+2026-01-10T18:59:41.078Z [swap-event-filter] info: Whale alert detected {"usdValue":557104.2604216863,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6d883ef57c7aa8"}
+2026-01-10T18:59:41.079Z [swap-event-filter] info: Whale alert detected {"usdValue":537572.7496917921,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf8c54e8a327448"}
+2026-01-10T18:59:41.080Z [swap-event-filter] info: Whale alert detected {"usdValue":851832.1380584222,"chain":"ethereum","dex":"uniswap_v3","pair":"0x350c69ee71dc8"}
+2026-01-10T18:59:41.081Z [swap-event-filter] info: Whale alert detected {"usdValue":675408.4404925742,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2685b4a44026f8"}
+2026-01-10T18:59:41.081Z [swap-event-filter] info: Whale alert detected {"usdValue":758490.6401742309,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd56443c1eac58"}
+2026-01-10T18:59:41.082Z [swap-event-filter] info: Whale alert detected {"usdValue":113673.89077851543,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfc66f7e1f08e08"}
+2026-01-10T18:59:41.083Z [swap-event-filter] info: Whale alert detected {"usdValue":986516.5936327362,"chain":"ethereum","dex":"uniswap_v3","pair":"0xaa4f63a771a4d8"}
+2026-01-10T18:59:41.084Z [swap-event-filter] info: Whale alert detected {"usdValue":965230.9027478874,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd3165f07dfc91"}
+2026-01-10T18:59:41.085Z [swap-event-filter] info: Whale alert detected {"usdValue":675350.7557570614,"chain":"ethereum","dex":"uniswap_v3","pair":"0x376e4ed48020f8"}
+2026-01-10T18:59:41.086Z [swap-event-filter] info: Whale alert detected {"usdValue":428477.329470865,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa687e08095272"}
+2026-01-10T18:59:41.087Z [swap-event-filter] info: Whale alert detected {"usdValue":551290.6401462957,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8db64d59b47fc"}
+2026-01-10T18:59:41.088Z [swap-event-filter] info: Whale alert detected {"usdValue":870273.4488329951,"chain":"ethereum","dex":"uniswap_v3","pair":"0x79ee632db86e3"}
+2026-01-10T18:59:41.089Z [swap-event-filter] info: Whale alert detected {"usdValue":987205.7854775173,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf01651360caf78"}
+2026-01-10T18:59:41.089Z [swap-event-filter] info: Whale alert detected {"usdValue":184610.5528776106,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdbcdb599e34e"}
+2026-01-10T18:59:41.090Z [swap-event-filter] info: Whale alert detected {"usdValue":804868.3356185354,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7d8a63df4bf6d"}
+2026-01-10T18:59:41.091Z [swap-event-filter] info: Whale alert detected {"usdValue":823354.3485561477,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa5549bcae49c4"}
+2026-01-10T18:59:41.092Z [swap-event-filter] info: Whale alert detected {"usdValue":704941.2581917124,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdf04374553969"}
+2026-01-10T18:59:41.093Z [swap-event-filter] info: Whale alert detected {"usdValue":954312.5091459962,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb0f15a9b4f1d98"}
+2026-01-10T18:59:41.094Z [swap-event-filter] info: Whale alert detected {"usdValue":678625.2322994221,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5c5a743aeb6f08"}
+2026-01-10T18:59:41.095Z [swap-event-filter] info: Whale alert detected {"usdValue":753992.9920725933,"chain":"ethereum","dex":"uniswap_v3","pair":"0x768ab79e146e28"}
+2026-01-10T18:59:41.096Z [swap-event-filter] info: Whale alert detected {"usdValue":534910.7639272473,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6c774f68d113c8"}
+2026-01-10T18:59:41.097Z [swap-event-filter] info: Whale alert detected {"usdValue":963593.8534679852,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc40f60f146aaf"}
+2026-01-10T18:59:41.098Z [swap-event-filter] info: Whale alert detected {"usdValue":753045.4910332663,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2b58640202bd48"}
+2026-01-10T18:59:41.099Z [swap-event-filter] info: Whale alert detected {"usdValue":302699.6461715655,"chain":"ethereum","dex":"uniswap_v3","pair":"0x817001520ca66"}
+2026-01-10T18:59:41.112Z [swap-event-filter] info: Whale alert detected {"usdValue":215482.62431784818,"chain":"ethereum","dex":"uniswap_v3","pair":"0x652ab5b8ddba1"}
+2026-01-10T18:59:41.113Z [swap-event-filter] info: Whale alert detected {"usdValue":865351.3094251644,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd80daafd2be02"}
+2026-01-10T18:59:41.114Z [swap-event-filter] info: Whale alert detected {"usdValue":986034.3357734492,"chain":"ethereum","dex":"uniswap_v3","pair":"0x377418f336bc3"}
+2026-01-10T18:59:41.115Z [swap-event-filter] info: Whale alert detected {"usdValue":684951.3289978568,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0c66d9c5a1a76"}
+2026-01-10T18:59:41.116Z [swap-event-filter] info: Whale alert detected {"usdValue":720390.7825682086,"chain":"ethereum","dex":"uniswap_v3","pair":"0x442ad0970ba3a"}
+2026-01-10T18:59:41.116Z [swap-event-filter] info: Whale alert detected {"usdValue":162476.18586434564,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd918fbfd0603e"}
+2026-01-10T18:59:41.117Z [swap-event-filter] info: Whale alert detected {"usdValue":289783.21336048655,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb725b5090ac4b"}
+2026-01-10T18:59:41.118Z [swap-event-filter] info: Whale alert detected {"usdValue":856393.591854314,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe81f01bdf1817"}
+2026-01-10T18:59:41.119Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.219Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.220Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.221Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.222Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.336Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.337Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.339Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.340Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.341Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.341Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.342Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.343Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.344Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.345Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.346Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.347Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.348Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.348Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.349Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.350Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.350Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T18:59:41.351Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.352Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.353Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.354Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.355Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.355Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.356Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.356Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.357Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.533Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.535Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.537Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.538Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.539Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.541Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.542Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.543Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.650Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T18:59:41.651Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T18:59:41.652Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T18:59:41.654Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.102Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.161Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.163Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.164Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.167Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.175Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.177Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.178Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.179Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.200Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.202Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.203Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.205Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.206Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.207Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.208Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.210Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.211Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.213Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.217Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.218Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.222Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.387Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.388Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.391Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.392Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1cb1294e9b0cd8"}
+2026-01-10T19:00:11.395Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.396Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.399Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.401Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.402Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x73cbe6cfb948c8"}
+2026-01-10T19:00:11.406Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.410Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.411Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdfd1fad7dca188"}
+2026-01-10T19:00:11.413Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x080790af13c148"}
+2026-01-10T19:00:11.414Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.419Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.420Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x70d31943fecb98"}
+2026-01-10T19:00:11.421Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe9275d5c9282b"}
+2026-01-10T19:00:11.423Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.424Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.585Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.587Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.755Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.759Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:11.922Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:11.927Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.104Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.105Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.106Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xeaceafe6286e58"}
+2026-01-10T19:00:12.107Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.108Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.109Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.110Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.111Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.112Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.113Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa6bf285378d77"}
+2026-01-10T19:00:12.114Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.115Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.116Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.116Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.117Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc863405855efb"}
+2026-01-10T19:00:12.119Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.120Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.123Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.124Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.166Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.168Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.169Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8c7ac040bf06e8"}
+2026-01-10T19:00:12.171Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.172Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.138Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.153Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.155Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.156Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":100000,"dedupWindowMs":10000,"aggregationWindowMs":10000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.158Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.159Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.161Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.163Z [swap-event-filter] info: SwapEventFilter config updated {"config":{"minUsdValue":500,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.164Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.167Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.169Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.171Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.173Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.177Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.179Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.180Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.185Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.187Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.188Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.189Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.190Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.192Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.193Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.284Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.286Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.356Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.358Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.360Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.361Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.362Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.366Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.367Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.369Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.370Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.371Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.372Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.373Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.375Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.376Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.377Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.379Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.401Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.538Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.539Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.541Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.544Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.405Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.408Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.409Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.412Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.413Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.414Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.417Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.418Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.420Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.422Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcbc3e098faec"}
+2026-01-10T19:00:12.423Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.425Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.426Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.429Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.429Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T19:00:12.430Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.431Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.435Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.436Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.471Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.472Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.491Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.493Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.513Z [swap-event-filter] info: Whale alert detected {"usdValue":291555.44160445523,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd191a180adf6b8"}
+2026-01-10T19:00:12.514Z [swap-event-filter] info: Whale alert detected {"usdValue":555358.7462230895,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6147eb392eba7"}
+2026-01-10T19:00:12.515Z [swap-event-filter] info: Whale alert detected {"usdValue":188806.18365989494,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd3a793e9296418"}
+2026-01-10T19:00:12.517Z [swap-event-filter] info: Whale alert detected {"usdValue":757863.7609637295,"chain":"ethereum","dex":"uniswap_v3","pair":"0x17a3c951de2318"}
+2026-01-10T19:00:12.518Z [swap-event-filter] info: Whale alert detected {"usdValue":222022.05143414607,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe56f594144bcb8"}
+2026-01-10T19:00:12.519Z [swap-event-filter] info: Whale alert detected {"usdValue":858680.4793625826,"chain":"ethereum","dex":"uniswap_v3","pair":"0x420e46c57b2a8"}
+2026-01-10T19:00:12.520Z [swap-event-filter] info: Whale alert detected {"usdValue":683055.2304831868,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfec9f19a661548"}
+2026-01-10T19:00:12.523Z [swap-event-filter] info: Whale alert detected {"usdValue":979865.7947814532,"chain":"ethereum","dex":"uniswap_v3","pair":"0x82614c8fe0948"}
+2026-01-10T19:00:12.526Z [swap-event-filter] info: Whale alert detected {"usdValue":877898.8314067986,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8c6b961724258"}
+2026-01-10T19:00:12.527Z [swap-event-filter] info: Whale alert detected {"usdValue":907407.9935850707,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3a8540b639b3d"}
+2026-01-10T19:00:12.530Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.531Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.533Z [swap-event-filter] info: Whale alert detected {"usdValue":827596.2935099874,"chain":"ethereum","dex":"uniswap_v3","pair":"0x157206075444c8"}
+2026-01-10T19:00:12.536Z [swap-event-filter] info: Whale alert detected {"usdValue":891023.9776528168,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8146a19aaf52f"}
+2026-01-10T19:00:12.537Z [swap-event-filter] info: Whale alert detected {"usdValue":719129.9926066754,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc12086cb66ec48"}
+2026-01-10T19:00:12.538Z [swap-event-filter] info: Whale alert detected {"usdValue":510930.7915475001,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7cb3cdc2c968f"}
+2026-01-10T19:00:12.539Z [swap-event-filter] info: Whale alert detected {"usdValue":527098.3253528698,"chain":"ethereum","dex":"uniswap_v3","pair":"0x21ab15d4d6ac7"}
+2026-01-10T19:00:12.540Z [swap-event-filter] info: Whale alert detected {"usdValue":157740.36663223046,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf58fdc48a995c"}
+2026-01-10T19:00:12.541Z [swap-event-filter] info: Whale alert detected {"usdValue":825831.0254408942,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa3b1cb4c699d6"}
+2026-01-10T19:00:12.544Z [swap-event-filter] info: Whale alert detected {"usdValue":789269.2975820289,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf21eb55d4f393"}
+2026-01-10T19:00:12.545Z [swap-event-filter] info: Whale alert detected {"usdValue":676002.4285937237,"chain":"ethereum","dex":"uniswap_v3","pair":"0x33012b7743fcd"}
+2026-01-10T19:00:12.546Z [swap-event-filter] info: Whale alert detected {"usdValue":910909.7920217369,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8e773f5f77b3"}
+2026-01-10T19:00:12.546Z [swap-event-filter] info: Whale alert detected {"usdValue":702925.6459356234,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbd4bb5182c475"}
+2026-01-10T19:00:12.549Z [swap-event-filter] info: Whale alert detected {"usdValue":538752.512180902,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6083b3c8dc3f18"}
+2026-01-10T19:00:12.550Z [swap-event-filter] info: Whale alert detected {"usdValue":492633.091411747,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5bcb5b40201518"}
+2026-01-10T19:00:12.551Z [swap-event-filter] info: Whale alert detected {"usdValue":790314.6026096878,"chain":"ethereum","dex":"uniswap_v3","pair":"0x50edfa242b8128"}
+2026-01-10T19:00:12.554Z [swap-event-filter] info: Whale alert detected {"usdValue":304593.6113289393,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfdb17d5087ee68"}
+2026-01-10T19:00:12.555Z [swap-event-filter] info: Whale alert detected {"usdValue":491995.9617863147,"chain":"ethereum","dex":"uniswap_v3","pair":"0x58360636ab27d"}
+2026-01-10T19:00:12.556Z [swap-event-filter] info: Whale alert detected {"usdValue":239383.09973756786,"chain":"ethereum","dex":"uniswap_v3","pair":"0xed93c15323e798"}
+2026-01-10T19:00:12.557Z [swap-event-filter] info: Whale alert detected {"usdValue":492983.1423192573,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc2e6a5e92a5968"}
+2026-01-10T19:00:12.558Z [swap-event-filter] info: Whale alert detected {"usdValue":668273.294700141,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc2459ba63c8268"}
+2026-01-10T19:00:12.559Z [swap-event-filter] info: Whale alert detected {"usdValue":265709.89900768106,"chain":"ethereum","dex":"uniswap_v3","pair":"0xda9641a265c9c"}
+2026-01-10T19:00:12.560Z [swap-event-filter] info: Whale alert detected {"usdValue":742375.208055572,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9d91944c4a2a78"}
+2026-01-10T19:00:12.561Z [swap-event-filter] info: Whale alert detected {"usdValue":934584.4201529507,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc3b89d8d6e42c"}
+2026-01-10T19:00:12.562Z [swap-event-filter] info: Whale alert detected {"usdValue":635588.2780857601,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0ff30fafffe62"}
+2026-01-10T19:00:12.563Z [swap-event-filter] info: Whale alert detected {"usdValue":408099.7987296111,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1d4a508c8738e"}
+2026-01-10T19:00:12.564Z [swap-event-filter] info: Whale alert detected {"usdValue":332072.53868930746,"chain":"ethereum","dex":"uniswap_v3","pair":"0x46b9107c4d80e8"}
+2026-01-10T19:00:12.565Z [swap-event-filter] info: Whale alert detected {"usdValue":380902.4371265595,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8946fa865a0688"}
+2026-01-10T19:00:12.566Z [swap-event-filter] info: Whale alert detected {"usdValue":688901.3712955622,"chain":"ethereum","dex":"uniswap_v3","pair":"0xedfd05d2d0bf5"}
+2026-01-10T19:00:12.568Z [swap-event-filter] info: Whale alert detected {"usdValue":923309.9187778393,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe1fe886b8890e8"}
+2026-01-10T19:00:12.569Z [swap-event-filter] info: Whale alert detected {"usdValue":429674.10211267637,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc3dfcd310fe158"}
+2026-01-10T19:00:12.570Z [swap-event-filter] info: Whale alert detected {"usdValue":455232.83974733565,"chain":"ethereum","dex":"uniswap_v3","pair":"0x96b60a7c0087a8"}
+2026-01-10T19:00:12.571Z [swap-event-filter] info: Whale alert detected {"usdValue":846772.097449005,"chain":"ethereum","dex":"uniswap_v3","pair":"0x596b27e1b88878"}
+2026-01-10T19:00:12.571Z [swap-event-filter] info: Whale alert detected {"usdValue":329227.65420829697,"chain":"ethereum","dex":"uniswap_v3","pair":"0x56e26c4aff44c"}
+2026-01-10T19:00:12.575Z [swap-event-filter] info: Whale alert detected {"usdValue":632796.1734825607,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe41bd098c4fca"}
+2026-01-10T19:00:12.575Z [swap-event-filter] info: Whale alert detected {"usdValue":253090.6302662829,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc5a300010fdda8"}
+2026-01-10T19:00:12.576Z [swap-event-filter] info: Whale alert detected {"usdValue":561173.6437803227,"chain":"ethereum","dex":"uniswap_v3","pair":"0x95f7e5fb7d2228"}
+2026-01-10T19:00:12.578Z [swap-event-filter] info: Whale alert detected {"usdValue":175667.62743726186,"chain":"ethereum","dex":"uniswap_v3","pair":"0x577b1693e6dbf"}
+2026-01-10T19:00:12.579Z [swap-event-filter] info: Whale alert detected {"usdValue":704607.6152676765,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa72b8d2602d2"}
+2026-01-10T19:00:12.580Z [swap-event-filter] info: Whale alert detected {"usdValue":739341.107067136,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7571c62cb124b"}
+2026-01-10T19:00:12.581Z [swap-event-filter] info: Whale alert detected {"usdValue":921900.9814051634,"chain":"ethereum","dex":"uniswap_v3","pair":"0x95181ebbbe30b"}
+2026-01-10T19:00:12.582Z [swap-event-filter] info: Whale alert detected {"usdValue":149551.0545596509,"chain":"ethereum","dex":"uniswap_v3","pair":"0x30831a0ecfa3a8"}
+2026-01-10T19:00:12.583Z [swap-event-filter] info: Whale alert detected {"usdValue":823939.7596700889,"chain":"ethereum","dex":"uniswap_v3","pair":"0x52e4308f1619c"}
+2026-01-10T19:00:12.584Z [swap-event-filter] info: Whale alert detected {"usdValue":867595.088746462,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc8cb6caad957f8"}
+2026-01-10T19:00:12.585Z [swap-event-filter] info: Whale alert detected {"usdValue":245582.51237028805,"chain":"ethereum","dex":"uniswap_v3","pair":"0x58e81d1001a19"}
+2026-01-10T19:00:12.586Z [swap-event-filter] info: Whale alert detected {"usdValue":379429.4370573679,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9100b21ef295c8"}
+2026-01-10T19:00:12.587Z [swap-event-filter] info: Whale alert detected {"usdValue":595216.1956610644,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7bf81e3bfda78"}
+2026-01-10T19:00:12.588Z [swap-event-filter] info: Whale alert detected {"usdValue":979614.2123811558,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8839001a1dcf48"}
+2026-01-10T19:00:12.591Z [swap-event-filter] info: Whale alert detected {"usdValue":76192.88367425142,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0d8f25f4709d1"}
+2026-01-10T19:00:12.592Z [swap-event-filter] info: Whale alert detected {"usdValue":936991.1794901505,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3f9d5509b22d58"}
+2026-01-10T19:00:12.593Z [swap-event-filter] info: Whale alert detected {"usdValue":808290.7542148797,"chain":"ethereum","dex":"uniswap_v3","pair":"0x511d83f69020d"}
+2026-01-10T19:00:12.594Z [swap-event-filter] info: Whale alert detected {"usdValue":653861.4649832625,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0bba384a9f35f"}
+2026-01-10T19:00:12.596Z [swap-event-filter] info: Whale alert detected {"usdValue":990994.3694069713,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7d5dc072468608"}
+2026-01-10T19:00:12.597Z [swap-event-filter] info: Whale alert detected {"usdValue":640199.3865888353,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb576a8a3a4ce3"}
+2026-01-10T19:00:12.597Z [swap-event-filter] info: Whale alert detected {"usdValue":213013.5809381049,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd3215b3aaca258"}
+2026-01-10T19:00:12.602Z [swap-event-filter] info: Whale alert detected {"usdValue":197244.12434118235,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0a41d2fbf4da7"}
+2026-01-10T19:00:12.603Z [swap-event-filter] info: Whale alert detected {"usdValue":453925.5907621505,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa602d2531199b8"}
+2026-01-10T19:00:12.604Z [swap-event-filter] info: Whale alert detected {"usdValue":927548.6327990101,"chain":"ethereum","dex":"uniswap_v3","pair":"0x64fd7d64ad4368"}
+2026-01-10T19:00:12.605Z [swap-event-filter] info: Whale alert detected {"usdValue":318434.9550338201,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8ddfabf0906d8"}
+2026-01-10T19:00:12.606Z [swap-event-filter] info: Whale alert detected {"usdValue":598735.1609634308,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7dba3fe2e1081"}
+2026-01-10T19:00:12.607Z [swap-event-filter] info: Whale alert detected {"usdValue":120284.13141190245,"chain":"ethereum","dex":"uniswap_v3","pair":"0x61def9a6d543b8"}
+2026-01-10T19:00:12.610Z [swap-event-filter] info: Whale alert detected {"usdValue":611124.0825014228,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb3b2edee53c06"}
+2026-01-10T19:00:12.611Z [swap-event-filter] info: Whale alert detected {"usdValue":447374.18001488294,"chain":"ethereum","dex":"uniswap_v3","pair":"0x69317f8cac0048"}
+2026-01-10T19:00:12.612Z [swap-event-filter] info: Whale alert detected {"usdValue":136224.1187136243,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc4c222a589e3e"}
+2026-01-10T19:00:12.612Z [swap-event-filter] info: Whale alert detected {"usdValue":325299.43185814325,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4861b049ed1d5"}
+2026-01-10T19:00:12.613Z [swap-event-filter] info: Whale alert detected {"usdValue":63491.45621147929,"chain":"ethereum","dex":"uniswap_v3","pair":"0x481905b7004f78"}
+2026-01-10T19:00:12.618Z [swap-event-filter] info: Whale alert detected {"usdValue":326606.1121287022,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5bd50a716c49d"}
+2026-01-10T19:00:12.703Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.619Z [swap-event-filter] info: Whale alert detected {"usdValue":180345.2531276321,"chain":"ethereum","dex":"uniswap_v3","pair":"0x65d4844a72fd"}
+2026-01-10T19:00:12.620Z [swap-event-filter] info: Whale alert detected {"usdValue":233230.26297599784,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4ecaab8715837"}
+2026-01-10T19:00:12.621Z [swap-event-filter] info: Whale alert detected {"usdValue":618377.9182892984,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9e30839c1a2038"}
+2026-01-10T19:00:12.622Z [swap-event-filter] info: Whale alert detected {"usdValue":799313.0584372706,"chain":"ethereum","dex":"uniswap_v3","pair":"0x379901f2de1028"}
+2026-01-10T19:00:12.626Z [swap-event-filter] info: Whale alert detected {"usdValue":746794.1370370088,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0ea2be7b0b1f18"}
+2026-01-10T19:00:12.627Z [swap-event-filter] info: Whale alert detected {"usdValue":294203.66500488564,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcebb0c62845f2"}
+2026-01-10T19:00:12.631Z [swap-event-filter] info: Whale alert detected {"usdValue":380039.9251759202,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf52c1677038b9"}
+2026-01-10T19:00:12.632Z [swap-event-filter] info: Whale alert detected {"usdValue":702921.6386681988,"chain":"ethereum","dex":"uniswap_v3","pair":"0xada1266c7472b"}
+2026-01-10T19:00:12.634Z [swap-event-filter] info: Whale alert detected {"usdValue":68774.44925260486,"chain":"ethereum","dex":"uniswap_v3","pair":"0xace7b98f7dbf6"}
+2026-01-10T19:00:12.635Z [swap-event-filter] info: Whale alert detected {"usdValue":610171.6315316461,"chain":"ethereum","dex":"uniswap_v3","pair":"0x59229a4458b598"}
+2026-01-10T19:00:12.636Z [swap-event-filter] info: Whale alert detected {"usdValue":738263.4194207047,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7100a5d38239f"}
+2026-01-10T19:00:12.636Z [swap-event-filter] info: Whale alert detected {"usdValue":646831.0861648681,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7a02b2eed4106"}
+2026-01-10T19:00:12.638Z [swap-event-filter] info: Whale alert detected {"usdValue":362890.09860389936,"chain":"ethereum","dex":"uniswap_v3","pair":"0x913eac4ff3b098"}
+2026-01-10T19:00:12.640Z [swap-event-filter] info: Whale alert detected {"usdValue":82900.34023018877,"chain":"ethereum","dex":"uniswap_v3","pair":"0xcba37147b9cca8"}
+2026-01-10T19:00:12.641Z [swap-event-filter] info: Whale alert detected {"usdValue":182183.498242545,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3b79717f2d2e8"}
+2026-01-10T19:00:12.641Z [swap-event-filter] info: Whale alert detected {"usdValue":899957.5701335538,"chain":"ethereum","dex":"uniswap_v3","pair":"0xecc54d80ae65b"}
+2026-01-10T19:00:12.642Z [swap-event-filter] info: Whale alert detected {"usdValue":391676.39583503065,"chain":"ethereum","dex":"uniswap_v3","pair":"0x776a0e26209b48"}
+2026-01-10T19:00:12.645Z [swap-event-filter] info: Whale alert detected {"usdValue":470750.21636968886,"chain":"ethereum","dex":"uniswap_v3","pair":"0xde8cdf8356f3e"}
+2026-01-10T19:00:12.646Z [swap-event-filter] info: Whale alert detected {"usdValue":932205.2094319788,"chain":"ethereum","dex":"uniswap_v3","pair":"0x38cb5d595348"}
+2026-01-10T19:00:12.650Z [swap-event-filter] info: Whale alert detected {"usdValue":241918.16714804724,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4ccdfe1404c458"}
+2026-01-10T19:00:12.650Z [swap-event-filter] info: Whale alert detected {"usdValue":757352.408500021,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3f6e040529bd2"}
+2026-01-10T19:00:12.651Z [swap-event-filter] info: Whale alert detected {"usdValue":850154.9442985615,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa2c4a3f8f508"}
+2026-01-10T19:00:12.652Z [swap-event-filter] info: Whale alert detected {"usdValue":228335.87576180176,"chain":"ethereum","dex":"uniswap_v3","pair":"0x236f466914b078"}
+2026-01-10T19:00:12.653Z [swap-event-filter] info: Whale alert detected {"usdValue":799217.0181245871,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa495870baf412"}
+2026-01-10T19:00:12.654Z [swap-event-filter] info: Whale alert detected {"usdValue":427884.7365811788,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfb232d2a0c6d4"}
+2026-01-10T19:00:12.655Z [swap-event-filter] info: Whale alert detected {"usdValue":787261.5648348471,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4d03d1d3014d"}
+2026-01-10T19:00:12.658Z [swap-event-filter] info: Whale alert detected {"usdValue":802715.0059902851,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4d0c92be8cd73"}
+2026-01-10T19:00:12.659Z [swap-event-filter] info: Whale alert detected {"usdValue":99743.34473627068,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5bf7aa11dd407"}
+2026-01-10T19:00:12.660Z [swap-event-filter] info: Whale alert detected {"usdValue":211153.12960662428,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdd255d99baec88"}
+2026-01-10T19:00:12.663Z [swap-event-filter] info: Whale alert detected {"usdValue":963578.4661336933,"chain":"ethereum","dex":"uniswap_v3","pair":"0x50551300f79af8"}
+2026-01-10T19:00:12.664Z [swap-event-filter] info: Whale alert detected {"usdValue":209081.0486271084,"chain":"ethereum","dex":"uniswap_v3","pair":"0x798a980cc8c068"}
+2026-01-10T19:00:12.666Z [swap-event-filter] info: Whale alert detected {"usdValue":507299.71239402547,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6b25a277abdaf8"}
+2026-01-10T19:00:12.667Z [swap-event-filter] info: Whale alert detected {"usdValue":470355.16775883513,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9bf297d720e2e"}
+2026-01-10T19:00:12.668Z [swap-event-filter] info: Whale alert detected {"usdValue":425045.33560576494,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe9982132980e6"}
+2026-01-10T19:00:12.669Z [swap-event-filter] info: Whale alert detected {"usdValue":354904.5114632899,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb0bd7a2bd625"}
+2026-01-10T19:00:12.671Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.704Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.706Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.707Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.869Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.870Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.873Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.876Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.877Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.878Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.879Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.881Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.882Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.884Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.886Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.888Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.889Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.893Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:12.897Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.900Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.901Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.903Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.905Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.906Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.907Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.908Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.910Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.911Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.911Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.914Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.915Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:12.917Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:12.918Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.035Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.036Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.038Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.041Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.152Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.155Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.158Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.160Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.162Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.163Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:13.164Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.166Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.167Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.169Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.172Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.173Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.174Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.175Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.178Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.179Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.180Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T19:00:13.180Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.181Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.184Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.185Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:13.186Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:13.189Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.190Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.190Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.191Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.385Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.387Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.388Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.389Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:13.392Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.395Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.396Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.399Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.504Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:00:13.506Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:00:13.506Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:00:13.508Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.388Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.439Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.442Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.445Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.447Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.456Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.458Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.459Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.479Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.480Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.482Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.483Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.484Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.485Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.486Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.489Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.491Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.492Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.493Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.495Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.496Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.497Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.650Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.651Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.652Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.653Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x514231e4cf8f58"}
+2026-01-10T19:24:44.654Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.655Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.656Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.657Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.658Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4cfdec6d96729"}
+2026-01-10T19:24:44.660Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.662Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.663Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x13563a71e82cf8"}
+2026-01-10T19:24:44.663Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x96107bd05d0d58"}
+2026-01-10T19:24:44.664Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.665Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.667Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x712ab31c34cf4"}
+2026-01-10T19:24:44.668Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb413233c4dac38"}
+2026-01-10T19:24:44.669Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.670Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:24:44.832Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:24:44.833Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.168Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.207Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.209Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.210Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.211Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.213Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.233Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.236Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.238Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.240Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.241Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.242Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.244Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.245Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.247Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.248Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.250Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.252Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.253Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.255Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.256Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.256Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.414Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.415Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.416Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.417Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe731c75b4dcbf"}
+2026-01-10T19:25:09.417Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.418Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.418Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.419Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.420Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x15c7b4269e9708"}
+2026-01-10T19:25:09.421Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.422Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.422Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4e0c9be4450cd8"}
+2026-01-10T19:25:09.423Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa447644219c5e"}
+2026-01-10T19:25:09.423Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.424Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.424Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x486d02b858d408"}
+2026-01-10T19:25:09.425Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb06aee4f8c55e8"}
+2026-01-10T19:25:09.426Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.426Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.582Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.583Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.748Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.749Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:09.907Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:09.908Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.079Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.081Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.082Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xce6edfa1736e68"}
+2026-01-10T19:25:10.083Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.084Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.087Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.089Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.090Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.092Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.093Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9529198703b41"}
+2026-01-10T19:25:10.094Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.095Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.095Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.096Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.097Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd2a7fa9fbc1a1"}
+2026-01-10T19:25:10.099Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.100Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.101Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.102Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.118Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.119Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.120Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xaafeb1eb00159"}
+2026-01-10T19:25:10.120Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.121Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.231Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.233Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.335Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.384Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.395Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.397Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.398Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":100,"whaleThreshold":100000,"dedupWindowMs":10000,"aggregationWindowMs":10000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.400Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.401Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.402Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.404Z [swap-event-filter] info: SwapEventFilter config updated {"config":{"minUsdValue":500,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.405Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.406Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.407Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.408Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.409Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.409Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.410Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.411Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.412Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.413Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.415Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.416Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.417Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.418Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.419Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":100,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.337Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.338Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.339Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.340Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.341Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.342Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.343Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.344Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.345Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.346Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdbb870a6fd0a58"}
+2026-01-10T19:25:10.347Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.348Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.349Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.350Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.350Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T19:25:10.351Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.352Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.355Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.356Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.370Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.371Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.379Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.381Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.391Z [swap-event-filter] info: Whale alert detected {"usdValue":471867.33272115304,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1e31e413e8d8e8"}
+2026-01-10T19:25:10.392Z [swap-event-filter] info: Whale alert detected {"usdValue":662359.4748171895,"chain":"ethereum","dex":"uniswap_v3","pair":"0x08619e184a0f88"}
+2026-01-10T19:25:10.392Z [swap-event-filter] info: Whale alert detected {"usdValue":552196.2015376503,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe18e0f9ff256f8"}
+2026-01-10T19:25:10.393Z [swap-event-filter] info: Whale alert detected {"usdValue":953893.459274328,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc5a28eb527683"}
+2026-01-10T19:25:10.393Z [swap-event-filter] info: Whale alert detected {"usdValue":312845.9753979933,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0939eb5d89c7c"}
+2026-01-10T19:25:10.394Z [swap-event-filter] info: Whale alert detected {"usdValue":628854.7111213127,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe5866464125ce"}
+2026-01-10T19:25:10.395Z [swap-event-filter] info: Whale alert detected {"usdValue":416159.10562804894,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5d89ccd0e74998"}
+2026-01-10T19:25:10.396Z [swap-event-filter] info: Whale alert detected {"usdValue":975469.8826098694,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb2ad1945970a9"}
+2026-01-10T19:25:10.397Z [swap-event-filter] info: Whale alert detected {"usdValue":597596.1491839301,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0332b5bd9e289"}
+2026-01-10T19:25:10.398Z [swap-event-filter] info: Whale alert detected {"usdValue":541339.3682058181,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb7ed3d5f5e2298"}
+2026-01-10T19:25:10.400Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.401Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.402Z [swap-event-filter] info: Whale alert detected {"usdValue":664123.9826057599,"chain":"ethereum","dex":"uniswap_v3","pair":"0x57e0e82bf9a96"}
+2026-01-10T19:25:10.403Z [swap-event-filter] info: Whale alert detected {"usdValue":942072.6387609172,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2ad10a36ed8e98"}
+2026-01-10T19:25:10.404Z [swap-event-filter] info: Whale alert detected {"usdValue":987086.7972435191,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0cf2bb1c7570b"}
+2026-01-10T19:25:10.405Z [swap-event-filter] info: Whale alert detected {"usdValue":525239.2832330052,"chain":"ethereum","dex":"uniswap_v3","pair":"0xfc6ccb6d8fe658"}
+2026-01-10T19:25:10.405Z [swap-event-filter] info: Whale alert detected {"usdValue":77032.1053713001,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7e6b632c1071f8"}
+2026-01-10T19:25:10.406Z [swap-event-filter] info: Whale alert detected {"usdValue":749327.6324915006,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbce2f3eecf21c"}
+2026-01-10T19:25:10.407Z [swap-event-filter] info: Whale alert detected {"usdValue":635573.2288612766,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd958e9432606e"}
+2026-01-10T19:25:10.407Z [swap-event-filter] info: Whale alert detected {"usdValue":564769.516740757,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf4b02b359e3e1"}
+2026-01-10T19:25:10.407Z [swap-event-filter] info: Whale alert detected {"usdValue":798843.5126909853,"chain":"ethereum","dex":"uniswap_v3","pair":"0x520e924706fa9"}
+2026-01-10T19:25:10.408Z [swap-event-filter] info: Whale alert detected {"usdValue":822930.5482862928,"chain":"ethereum","dex":"uniswap_v3","pair":"0x30b66a28327798"}
+2026-01-10T19:25:10.409Z [swap-event-filter] info: Whale alert detected {"usdValue":467404.1487614351,"chain":"ethereum","dex":"uniswap_v3","pair":"0x81e5aa0886b68"}
+2026-01-10T19:25:10.409Z [swap-event-filter] info: Whale alert detected {"usdValue":860007.5716906333,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5ca9ebc62dcbd"}
+2026-01-10T19:25:10.410Z [swap-event-filter] info: Whale alert detected {"usdValue":410816.1669555824,"chain":"ethereum","dex":"uniswap_v3","pair":"0x61cc8ca9af3f9"}
+2026-01-10T19:25:10.411Z [swap-event-filter] info: Whale alert detected {"usdValue":805510.2945631521,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5782482aa264a"}
+2026-01-10T19:25:10.412Z [swap-event-filter] info: Whale alert detected {"usdValue":176821.68429921285,"chain":"ethereum","dex":"uniswap_v3","pair":"0x97315ff86f217"}
+2026-01-10T19:25:10.413Z [swap-event-filter] info: Whale alert detected {"usdValue":310998.4973628438,"chain":"ethereum","dex":"uniswap_v3","pair":"0x05ce4863a66fc"}
+2026-01-10T19:25:10.414Z [swap-event-filter] info: Whale alert detected {"usdValue":326430.74755097245,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4ad797f98e0ab8"}
+2026-01-10T19:25:10.414Z [swap-event-filter] info: Whale alert detected {"usdValue":167304.55227996354,"chain":"ethereum","dex":"uniswap_v3","pair":"0x824cc56424a498"}
+2026-01-10T19:25:10.415Z [swap-event-filter] info: Whale alert detected {"usdValue":443801.1188076981,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd627a21a719378"}
+2026-01-10T19:25:10.416Z [swap-event-filter] info: Whale alert detected {"usdValue":612346.1501527843,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5eab2aaedc3af8"}
+2026-01-10T19:25:10.416Z [swap-event-filter] info: Whale alert detected {"usdValue":358158.03750017314,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7c88d2aabf6a7"}
+2026-01-10T19:25:10.417Z [swap-event-filter] info: Whale alert detected {"usdValue":896050.213959013,"chain":"ethereum","dex":"uniswap_v3","pair":"0x85aede10d7668"}
+2026-01-10T19:25:10.417Z [swap-event-filter] info: Whale alert detected {"usdValue":994625.6595799512,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb5440a441e5e2"}
+2026-01-10T19:25:10.418Z [swap-event-filter] info: Whale alert detected {"usdValue":426973.12816062936,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6dc31c92ac0c78"}
+2026-01-10T19:25:10.418Z [swap-event-filter] info: Whale alert detected {"usdValue":322926.9702908411,"chain":"ethereum","dex":"uniswap_v3","pair":"0x407da611165dd8"}
+2026-01-10T19:25:10.419Z [swap-event-filter] info: Whale alert detected {"usdValue":366594.1640139518,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4d2b3f0ad40ba8"}
+2026-01-10T19:25:10.419Z [swap-event-filter] info: Whale alert detected {"usdValue":851515.4530115951,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe493a0adb96dd"}
+2026-01-10T19:25:10.420Z [swap-event-filter] info: Whale alert detected {"usdValue":115642.51872707039,"chain":"ethereum","dex":"uniswap_v3","pair":"0x64e2b5af128d4"}
+2026-01-10T19:25:10.420Z [swap-event-filter] info: Whale alert detected {"usdValue":310116.5596041491,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7d39da47584278"}
+2026-01-10T19:25:10.421Z [swap-event-filter] info: Whale alert detected {"usdValue":210283.1826852082,"chain":"ethereum","dex":"uniswap_v3","pair":"0x85a13ac0c5d58"}
+2026-01-10T19:25:10.421Z [swap-event-filter] info: Whale alert detected {"usdValue":993523.2462004371,"chain":"ethereum","dex":"uniswap_v3","pair":"0xbd34dd23c81db8"}
+2026-01-10T19:25:10.422Z [swap-event-filter] info: Whale alert detected {"usdValue":714383.8490207049,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd626b9bdaef098"}
+2026-01-10T19:25:10.422Z [swap-event-filter] info: Whale alert detected {"usdValue":614007.5261293005,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9ff6522cf4a9a"}
+2026-01-10T19:25:10.423Z [swap-event-filter] info: Whale alert detected {"usdValue":440652.8307179531,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb2bf2499c7a7f8"}
+2026-01-10T19:25:10.423Z [swap-event-filter] info: Whale alert detected {"usdValue":88344.76347450234,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf5b0142be4c38"}
+2026-01-10T19:25:10.424Z [swap-event-filter] info: Whale alert detected {"usdValue":464482.4567146552,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa081e387bd357"}
+2026-01-10T19:25:10.424Z [swap-event-filter] info: Whale alert detected {"usdValue":975510.6501253437,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd903b612dcb8e"}
+2026-01-10T19:25:10.425Z [swap-event-filter] info: Whale alert detected {"usdValue":857545.3367546918,"chain":"ethereum","dex":"uniswap_v3","pair":"0x034fa04028a9c8"}
+2026-01-10T19:25:10.425Z [swap-event-filter] info: Whale alert detected {"usdValue":646580.7238348766,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa0c4b5fc1b0808"}
+2026-01-10T19:25:10.426Z [swap-event-filter] info: Whale alert detected {"usdValue":414557.35257290193,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd434e59a7a76c"}
+2026-01-10T19:25:10.426Z [swap-event-filter] info: Whale alert detected {"usdValue":383538.8677764321,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4e66e4cb7ce708"}
+2026-01-10T19:25:10.427Z [swap-event-filter] info: Whale alert detected {"usdValue":817705.9166495408,"chain":"ethereum","dex":"uniswap_v3","pair":"0x27ad56787921d"}
+2026-01-10T19:25:10.427Z [swap-event-filter] info: Whale alert detected {"usdValue":499158.46155356045,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc523c02030f318"}
+2026-01-10T19:25:10.428Z [swap-event-filter] info: Whale alert detected {"usdValue":986233.9252955037,"chain":"ethereum","dex":"uniswap_v3","pair":"0x63dfb77d3e348"}
+2026-01-10T19:25:10.428Z [swap-event-filter] info: Whale alert detected {"usdValue":226256.3359407703,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9d1291ebe1833"}
+2026-01-10T19:25:10.429Z [swap-event-filter] info: Whale alert detected {"usdValue":906595.3000894812,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa4e819f53932f8"}
+2026-01-10T19:25:10.429Z [swap-event-filter] info: Whale alert detected {"usdValue":866075.227965232,"chain":"ethereum","dex":"uniswap_v3","pair":"0xec00cc421b19c"}
+2026-01-10T19:25:10.429Z [swap-event-filter] info: Whale alert detected {"usdValue":473173.6897992296,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2bcd4da727e89"}
+2026-01-10T19:25:10.430Z [swap-event-filter] info: Whale alert detected {"usdValue":85535.22721636343,"chain":"ethereum","dex":"uniswap_v3","pair":"0x857e691da13668"}
+2026-01-10T19:25:10.431Z [swap-event-filter] info: Whale alert detected {"usdValue":965950.9639917137,"chain":"ethereum","dex":"uniswap_v3","pair":"0x9ecd86d63b4e8"}
+2026-01-10T19:25:10.431Z [swap-event-filter] info: Whale alert detected {"usdValue":211153.17780065266,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4075786cb090c"}
+2026-01-10T19:25:10.432Z [swap-event-filter] info: Whale alert detected {"usdValue":100895.83275025661,"chain":"ethereum","dex":"uniswap_v3","pair":"0xa87c0b24d2c938"}
+2026-01-10T19:25:10.433Z [swap-event-filter] info: Whale alert detected {"usdValue":820730.2674773573,"chain":"ethereum","dex":"uniswap_v3","pair":"0x0e584da4bc6668"}
+2026-01-10T19:25:10.434Z [swap-event-filter] info: Whale alert detected {"usdValue":555623.8105482454,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3383d945ebd69"}
+2026-01-10T19:25:10.434Z [swap-event-filter] info: Whale alert detected {"usdValue":970094.910488481,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf546c1e2d6a9d8"}
+2026-01-10T19:25:10.435Z [swap-event-filter] info: Whale alert detected {"usdValue":918787.9930679514,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf0a37c09c20f18"}
+2026-01-10T19:25:10.435Z [swap-event-filter] info: Whale alert detected {"usdValue":233419.76564246824,"chain":"ethereum","dex":"uniswap_v3","pair":"0xda581dfce5023"}
+2026-01-10T19:25:10.436Z [swap-event-filter] info: Whale alert detected {"usdValue":466504.78773827536,"chain":"ethereum","dex":"uniswap_v3","pair":"0x93b435425af8a"}
+2026-01-10T19:25:10.436Z [swap-event-filter] info: Whale alert detected {"usdValue":353354.8293469937,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb2d977ee9efd18"}
+2026-01-10T19:25:10.437Z [swap-event-filter] info: Whale alert detected {"usdValue":766656.0684075592,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4b76a0ef9ca75"}
+2026-01-10T19:25:10.437Z [swap-event-filter] info: Whale alert detected {"usdValue":976977.832842099,"chain":"ethereum","dex":"uniswap_v3","pair":"0x99f0f75957b048"}
+2026-01-10T19:25:10.438Z [swap-event-filter] info: Whale alert detected {"usdValue":258613.96783318088,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdda72521029bd"}
+2026-01-10T19:25:10.438Z [swap-event-filter] info: Whale alert detected {"usdValue":357439.54376580875,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8a7dd6c670378"}
+2026-01-10T19:25:10.438Z [swap-event-filter] info: Whale alert detected {"usdValue":603747.3911489694,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7a5a58d37ffe28"}
+2026-01-10T19:25:10.439Z [swap-event-filter] info: Whale alert detected {"usdValue":190949.08047533093,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4bb46e2fc8c998"}
+2026-01-10T19:25:10.440Z [swap-event-filter] info: Whale alert detected {"usdValue":285193.1160554468,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdf309558f0e4a8"}
+2026-01-10T19:25:10.440Z [swap-event-filter] info: Whale alert detected {"usdValue":739007.0718006685,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5cb61af7bdf52"}
+2026-01-10T19:25:10.441Z [swap-event-filter] info: Whale alert detected {"usdValue":280548.64091638086,"chain":"ethereum","dex":"uniswap_v3","pair":"0x6f2dd2dd77c7d"}
+2026-01-10T19:25:10.441Z [swap-event-filter] info: Whale alert detected {"usdValue":967250.8314531326,"chain":"ethereum","dex":"uniswap_v3","pair":"0x428e61bdd3619"}
+2026-01-10T19:25:10.442Z [swap-event-filter] info: Whale alert detected {"usdValue":626765.8108975346,"chain":"ethereum","dex":"uniswap_v3","pair":"0x5ed71983b49cf"}
+2026-01-10T19:25:10.442Z [swap-event-filter] info: Whale alert detected {"usdValue":212105.19287433327,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc456d59c58fdd"}
+2026-01-10T19:25:10.443Z [swap-event-filter] info: Whale alert detected {"usdValue":833592.7687190904,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf421a6b4f2b778"}
+2026-01-10T19:25:10.443Z [swap-event-filter] info: Whale alert detected {"usdValue":246511.27534618802,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb7ba573e69acd8"}
+2026-01-10T19:25:10.443Z [swap-event-filter] info: Whale alert detected {"usdValue":523451.04567284987,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2d145320f27658"}
+2026-01-10T19:25:10.444Z [swap-event-filter] info: Whale alert detected {"usdValue":772612.388816169,"chain":"ethereum","dex":"uniswap_v3","pair":"0x666ea5c3ce575"}
+2026-01-10T19:25:10.444Z [swap-event-filter] info: Whale alert detected {"usdValue":940449.6791498191,"chain":"ethereum","dex":"uniswap_v3","pair":"0x86c22f026a6ce8"}
+2026-01-10T19:25:10.445Z [swap-event-filter] info: Whale alert detected {"usdValue":763464.8293752316,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8c9d18186f1118"}
+2026-01-10T19:25:10.445Z [swap-event-filter] info: Whale alert detected {"usdValue":205002.69397226494,"chain":"ethereum","dex":"uniswap_v3","pair":"0x05653414ac9188"}
+2026-01-10T19:25:10.446Z [swap-event-filter] info: Whale alert detected {"usdValue":68172.29275033777,"chain":"ethereum","dex":"uniswap_v3","pair":"0xebdc6327d6215"}
+2026-01-10T19:25:10.446Z [swap-event-filter] info: Whale alert detected {"usdValue":232772.80048335993,"chain":"ethereum","dex":"uniswap_v3","pair":"0xc06076b5910e9"}
+2026-01-10T19:25:10.446Z [swap-event-filter] info: Whale alert detected {"usdValue":941327.0114999936,"chain":"ethereum","dex":"uniswap_v3","pair":"0x7180f6a40c6018"}
+2026-01-10T19:25:10.447Z [swap-event-filter] info: Whale alert detected {"usdValue":675738.3661270298,"chain":"ethereum","dex":"uniswap_v3","pair":"0x683245ee2afc18"}
+2026-01-10T19:25:10.448Z [swap-event-filter] info: Whale alert detected {"usdValue":730364.9788129953,"chain":"ethereum","dex":"uniswap_v3","pair":"0xe913306d7cabe"}
+2026-01-10T19:25:10.449Z [swap-event-filter] info: Whale alert detected {"usdValue":506434.7489393681,"chain":"ethereum","dex":"uniswap_v3","pair":"0xf363a1621bd57"}
+2026-01-10T19:25:10.449Z [swap-event-filter] info: Whale alert detected {"usdValue":683839.1227792968,"chain":"ethereum","dex":"uniswap_v3","pair":"0x59ad114b8bd62"}
+2026-01-10T19:25:10.450Z [swap-event-filter] info: Whale alert detected {"usdValue":754099.7200101841,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb08bff960536c8"}
+2026-01-10T19:25:10.451Z [swap-event-filter] info: Whale alert detected {"usdValue":569588.28159371,"chain":"ethereum","dex":"uniswap_v3","pair":"0x810d121a26b35"}
+2026-01-10T19:25:10.452Z [swap-event-filter] info: Whale alert detected {"usdValue":777274.6141941022,"chain":"ethereum","dex":"uniswap_v3","pair":"0xdb3263b560c1a8"}
+2026-01-10T19:25:10.453Z [swap-event-filter] info: Whale alert detected {"usdValue":439768.12713455805,"chain":"ethereum","dex":"uniswap_v3","pair":"0xffa0c8fe9be078"}
+2026-01-10T19:25:10.454Z [swap-event-filter] info: Whale alert detected {"usdValue":892700.9407943233,"chain":"ethereum","dex":"uniswap_v3","pair":"0x4e4fe3a15abb"}
+2026-01-10T19:25:10.454Z [swap-event-filter] info: Whale alert detected {"usdValue":165261.73654815566,"chain":"ethereum","dex":"uniswap_v3","pair":"0x01e41eed8bdf8"}
+2026-01-10T19:25:10.455Z [swap-event-filter] info: Whale alert detected {"usdValue":410893.3511287892,"chain":"ethereum","dex":"uniswap_v3","pair":"0xaf9781c5195a58"}
+2026-01-10T19:25:10.456Z [swap-event-filter] info: Whale alert detected {"usdValue":962543.1422337436,"chain":"ethereum","dex":"uniswap_v3","pair":"0x3a8a5a66917e38"}
+2026-01-10T19:25:10.457Z [swap-event-filter] info: Whale alert detected {"usdValue":237514.58893151573,"chain":"ethereum","dex":"uniswap_v3","pair":"0xafe20727c5fbd"}
+2026-01-10T19:25:10.458Z [swap-event-filter] info: Whale alert detected {"usdValue":955656.4328173241,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2d380ef8ba4ee"}
+2026-01-10T19:25:10.458Z [swap-event-filter] info: Whale alert detected {"usdValue":687000.0881864731,"chain":"ethereum","dex":"uniswap_v3","pair":"0x063271fe36fa48"}
+2026-01-10T19:25:10.459Z [swap-event-filter] info: Whale alert detected {"usdValue":536939.1145900625,"chain":"ethereum","dex":"uniswap_v3","pair":"0x8e0d63f95578a"}
+2026-01-10T19:25:10.460Z [swap-event-filter] info: Whale alert detected {"usdValue":446460.2194522189,"chain":"ethereum","dex":"uniswap_v3","pair":"0x2c32a20c73d4b"}
+2026-01-10T19:25:10.461Z [swap-event-filter] info: Whale alert detected {"usdValue":723073.8876450859,"chain":"ethereum","dex":"uniswap_v3","pair":"0xb60c3068b73e7"}
+2026-01-10T19:25:10.462Z [swap-event-filter] info: Whale alert detected {"usdValue":785301.680689276,"chain":"ethereum","dex":"uniswap_v3","pair":"0xd526c0e5cd3d4"}
+2026-01-10T19:25:10.473Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.582Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.584Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.585Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.586Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:10.587Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.588Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.589Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.590Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.592Z [swap-event-filter] info: Whale alert detected {"usdValue":75000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:10.593Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.594Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.595Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:10.596Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:10.597Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.598Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.599Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.764Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.765Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.767Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.768Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.933Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.934Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:10.936Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:10.937Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":100,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.091Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.091Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.092Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.094Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.094Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.095Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.096Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.097Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.106Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.109Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.110Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.111Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.112Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.113Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.114Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.114Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.115Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.116Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.116Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.117Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.118Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.118Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.119Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.120Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.121Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.121Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.122Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.122Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.123Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":50,"aggregationWindowMs":5000,"maxDedupCacheSize":100,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.234Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.235Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.236Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.237Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.344Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.345Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.345Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.346Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.347Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.348Z [swap-event-filter] info: Whale alert detected {"usdValue":1000000000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.349Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.349Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.350Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.351Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.352Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.353Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.354Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.355Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.355Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.356Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.356Z [swap-event-filter] warn: processEvent called on destroyed filter
+2026-01-10T19:25:11.357Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.358Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.359Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.359Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.360Z [swap-event-filter] info: Whale alert detected {"usdValue":70000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.361Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.362Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.363Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.363Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.533Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.534Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.535Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.536Z [swap-event-filter] info: Whale alert detected {"usdValue":60000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.538Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.539Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.541Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.543Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":50,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.648Z [swap-event-filter] info: SwapEventFilter destroyed
+2026-01-10T19:25:11.650Z [swap-event-filter] info: SwapEventFilter initialized {"config":{"minUsdValue":10,"whaleThreshold":50000,"dedupWindowMs":5000,"aggregationWindowMs":5000,"maxDedupCacheSize":10000,"cleanupIntervalMs":30000}}
+2026-01-10T19:25:11.650Z [swap-event-filter] info: Whale alert detected {"usdValue":100000,"chain":"ethereum","dex":"uniswap_v3","pair":"0x1234567890123456789012345678901234567890"}
+2026-01-10T19:25:11.652Z [swap-event-filter] info: SwapEventFilter destroyed

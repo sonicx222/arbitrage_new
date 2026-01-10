@@ -1,6 +1,7 @@
 // Professional Quality Monitor Tests
 // Comprehensive testing of the AD-PQS (Arbitrage Detection Professional Quality Score)
 
+import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { ProfessionalQualityMonitor, ProfessionalQualityScore } from './professional-quality-monitor';
 import { RedisMock } from '../../test-utils/src';
 
