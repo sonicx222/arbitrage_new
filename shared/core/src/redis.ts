@@ -240,6 +240,27 @@ export class RedisClient {
     }
   }
 
+  /**
+   * Set key only if it doesn't exist (for leader election)
+   * Returns true if the key was set, false if it already exists
+   */
+  async setNx(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+    try {
+      let result: string | null;
+      if (ttlSeconds) {
+        // SET key value NX EX seconds
+        result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      } else {
+        // SET key value NX
+        result = await this.client.set(key, value, 'NX');
+      }
+      return result === 'OK';
+    } catch (error) {
+      this.logger.error('Error setting NX', { error, key });
+      return false;
+    }
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       const result = await this.client.exists(key);

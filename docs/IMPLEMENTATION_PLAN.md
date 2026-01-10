@@ -1,9 +1,9 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.0
+> **Version**: 1.1
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-10
+> **Last Updated**: 2025-01-10 (Coordinator alignment completed)
 
 ---
 
@@ -242,6 +242,60 @@
 
 ---
 
+#### S1.4: Coordinator Service Architecture Alignment
+**Status**: `[x] Completed`
+**Priority**: P0 | **Effort**: 1 day | **Confidence**: 95%
+**Completed**: 2025-01-10
+
+**Hypothesis**: Aligning coordinator with ADR-002 (Redis Streams) and ADR-007 (Leader Election) ensures architectural consistency.
+
+**Tasks**:
+```
+[x] S1.4.1 Migrate coordinator from Pub/Sub to Redis Streams
+    - Updated: services/coordinator/src/coordinator.ts
+    - Replaced: Pub/Sub subscription for execution-results
+    - Added: Consumer group subscription for streams
+    - Streams: stream:health, stream:opportunities, stream:whale-alerts
+    - COMPLETED: 2025-01-10 - Full migration to Redis Streams
+
+[x] S1.4.2 Add consumer group management to coordinator
+    - Consumer group: coordinator-group
+    - Consumer ID: coordinator-{instanceId}
+    - Proper message acknowledgment with xack()
+    - COMPLETED: 2025-01-10 - Consumer groups for all monitored streams
+
+[x] S1.4.3 Implement leader election in coordinator
+    - Lock key: coordinator:leader:lock
+    - TTL: 30 seconds with 10-second heartbeat
+    - Using Redis SET NX for distributed lock
+    - COMPLETED: 2025-01-10 - Integrated into coordinator service
+
+[x] S1.4.4 Add leader-only operation controls
+    - Service restart requires leader status
+    - Dashboard shows LEADER/STANDBY badge
+    - API endpoint: GET /api/leader for status
+    - COMPLETED: 2025-01-10 - Leader-only controls implemented
+
+[x] S1.4.5 Update coordinator integration tests
+    - Tests: services/coordinator/src/__tests__/coordinator.integration.test.ts
+    - Coverage: Leader election, Streams consumption, Consumer groups
+    - Test suites: lifecycle, leader election, redis streams, health monitoring
+    - COMPLETED: 2025-01-10 - Comprehensive test coverage added
+```
+
+**Validation**:
+- [x] Coordinator uses Redis Streams instead of Pub/Sub (ADR-002 compliant)
+- [x] Leader election prevents conflicting coordinator instances (ADR-007 compliant)
+- [x] Integration tests verify Streams and leader election behavior
+- [x] setNx method added to RedisClient for leader election support
+
+**Files Modified**:
+- services/coordinator/src/coordinator.ts - Complete rewrite for Streams + leader election
+- shared/core/src/redis.ts - Added setNx() method for distributed lock
+- services/coordinator/src/__tests__/coordinator.integration.test.ts - New tests
+
+---
+
 #### S1.3: L1 Price Matrix
 **Status**: `[x] Completed`
 **Priority**: P1 | **Effort**: 2 days | **Confidence**: 85%
@@ -434,17 +488,20 @@
 ### Sprint 4 (Days 22-28): Reliability & Optimization
 
 #### S4.1: Cross-Region Failover
-**Status**: `[ ] Not Started`
+**Status**: `[~] In Progress`
 **Priority**: P2 | **Effort**: 3 days | **Confidence**: 90%
 
 **Hypothesis**: Active-passive failover achieves 99.9% uptime.
 
 **Tasks**:
 ```
-[ ] S4.1.1 Implement leader election
-    - File: shared/core/src/leader-election.ts
-    - Use Redis SET NX with TTL
-    - Heartbeat mechanism
+[x] S4.1.1 Implement leader election
+    - File: services/coordinator/src/coordinator.ts (integrated)
+    - Use Redis SET NX with TTL (30s lock, 10s heartbeat)
+    - Heartbeat mechanism for lock renewal
+    - COMPLETED: 2025-01-10 - Coordinator leader election implemented
+    - New API endpoint: GET /api/leader returns leader status and instance ID
+    - Dashboard updated to show LEADER/STANDBY status
 
 [ ] S4.1.2 Create CrossRegionHealthManager
     - File: shared/core/src/cross-region-health.ts
@@ -576,12 +633,12 @@
 
 | Sprint | Total Tasks | Completed | In Progress | Blocked |
 |--------|-------------|-----------|-------------|---------|
-| Sprint 1 | 15 | 15 | 0 | 0 |
+| Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 4 | 0 | 0 |
 | Sprint 3 | 10 | 0 | 0 | 0 |
-| Sprint 4 | 9 | 0 | 0 | 0 |
+| Sprint 4 | 9 | 1 | 1 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **54** | **19** | **0** | **0** |
+| **Total** | **59** | **25** | **1** | **0** |
 
 ---
 

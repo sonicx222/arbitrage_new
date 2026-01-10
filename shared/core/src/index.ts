@@ -1,11 +1,52 @@
 // Core utilities exports
-export { RedisClient, getRedisClient } from './redis';
+export { RedisClient, getRedisClient, resetRedisInstance } from './redis';
 export {
   RedisStreamsClient,
   StreamBatcher,
   getRedisStreamsClient,
   resetRedisStreamsInstance
 } from './redis-streams';
+
+// Distributed Lock Manager (ADR-007)
+export {
+  DistributedLockManager,
+  getDistributedLockManager,
+  resetDistributedLockManager
+} from './distributed-lock';
+export type {
+  LockConfig,
+  AcquireOptions,
+  LockHandle,
+  LockStats
+} from './distributed-lock';
+
+// Service State Machine (lifecycle management)
+export {
+  ServiceStateManager,
+  ServiceState,
+  createServiceState,
+  isServiceState
+} from './service-state';
+export type {
+  StateTransitionResult,
+  StateChangeEvent,
+  ServiceStateConfig,
+  ServiceStateSnapshot
+} from './service-state';
+
+// Price Oracle (replaces hardcoded prices)
+export {
+  PriceOracle,
+  getPriceOracle,
+  resetPriceOracle,
+  getDefaultPrice,
+  hasDefaultPrice
+} from './price-oracle';
+export type {
+  TokenPrice,
+  PriceOracleConfig,
+  PriceBatchRequest
+} from './price-oracle';
 export type {
   StreamMessage,
   ConsumerGroupConfig,

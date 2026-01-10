@@ -1,6 +1,7 @@
 // Base Detector Class
 // Provides common functionality for all blockchain detectors
 // Updated 2025-01-10: Migrated from Pub/Sub to Redis Streams (ADR-002, S1.1.4)
+// Updated 2025-01-10: Consolidated with ServiceStateManager and template method pattern
 
 import { ethers } from 'ethers';
 import {
@@ -19,9 +20,12 @@ import {
   getRedisStreamsClient,
   SwapEventFilter,
   WhaleAlert,
-  VolumeAggregate
+  VolumeAggregate,
+  ServiceStateManager,
+  ServiceState,
+  createServiceState
 } from './index';
-import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG } from '../../config/src';
+import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA } from '../../config/src';
 import {
   Dex,
   Token,
@@ -40,6 +44,16 @@ export interface DetectorConfig {
   batchSize?: number;
   batchTimeout?: number;
   healthCheckInterval?: number;
+}
+
+/**
+ * Extended pair interface with reserve data
+ */
+export interface ExtendedPair extends Pair {
+  reserve0: string;
+  reserve1: string;
+  blockNumber: number;
+  lastUpdate: number;
 }
 
 /**
@@ -80,15 +94,28 @@ export abstract class BaseDetector {
   protected monitoredPairs: Set<string> = new Set();
   protected isRunning = false;
 
+  // O(1) pair lookup by address (performance optimization)
+  protected pairsByAddress: Map<string, Pair> = new Map();
+
   // Stop/start synchronization (race condition fix)
   // stopPromise ensures start() waits for stop() to fully complete
   protected stopPromise: Promise<void> | null = null;
+
+  // Service state management (prevents lifecycle race conditions)
+  protected stateManager: ServiceStateManager;
+  protected healthMonitoringInterval: NodeJS.Timeout | null = null;
+
+  // Race condition protection (additional guard alongside state machine)
+  protected isStopping = false;
 
   // Feature flag for gradual migration (default: use streams)
   protected useStreams = true;
 
   protected config: DetectorConfig;
   protected chain: string;
+
+  // Token metadata for USD estimation (chain-specific)
+  protected tokenMetadata: any;
 
   constructor(config: DetectorConfig) {
     this.config = config;
@@ -97,9 +124,16 @@ export abstract class BaseDetector {
     this.logger = createLogger(`${this.chain}-detector`);
     this.perfLogger = getPerformanceLogger(`${this.chain}-detector`);
 
+    // Initialize state manager for lifecycle control
+    this.stateManager = createServiceState({
+      serviceName: `${this.chain}-detector`,
+      transitionTimeoutMs: 30000
+    });
+
     // Initialize chain-specific data
     this.dexes = DEXES[this.chain as keyof typeof DEXES] || [];
     this.tokens = CORE_TOKENS[this.chain as keyof typeof CORE_TOKENS] || [];
+    this.tokenMetadata = TOKEN_METADATA[this.chain as keyof typeof TOKEN_METADATA] || {};
 
     // Initialize provider
     const chainConfig = CHAINS[this.chain as keyof typeof CHAINS];
@@ -227,18 +261,575 @@ export abstract class BaseDetector {
     }
   }
 
-  // Abstract methods that must be implemented by subclasses
-  abstract start(): Promise<void>;
-  abstract stop(): Promise<void>;
-  abstract getHealth(): Promise<any>;
-  protected abstract processSyncEvent(log: any, pair: Pair): Promise<void>;
-  protected abstract processSwapEvent(log: any, pair: Pair): Promise<void>;
-  protected abstract checkIntraDexArbitrage(pair: Pair): Promise<void>;
-  protected abstract checkWhaleActivity(swapEvent: SwapEvent): Promise<void>;
-  protected abstract estimateUsdValue(pair: Pair, amount0In: string, amount1In: string, amount0Out: string, amount1Out: string): Promise<number>;
-  protected abstract calculatePriceImpact(swapEvent: SwapEvent): Promise<number>;
+  // ===========================================================================
+  // Lifecycle Methods (Concrete with hooks for subclass customization)
+  // Uses ServiceStateManager to prevent race conditions
+  // ===========================================================================
 
-  // Common functionality
+  /**
+   * Start the detector service.
+   * Uses ServiceStateManager to prevent race conditions.
+   * Override onStart() for chain-specific initialization.
+   */
+  async start(): Promise<void> {
+    // Wait for any pending stop operation to complete
+    if (this.stopPromise) {
+      this.logger.debug('Waiting for pending stop operation to complete');
+      await this.stopPromise;
+    }
+
+    // Guard against starting while stopping
+    if (this.isStopping) {
+      this.logger.warn('Cannot start: service is currently stopping');
+      return;
+    }
+
+    // Guard against double start
+    if (this.isRunning) {
+      this.logger.warn('Service is already running');
+      return;
+    }
+
+    try {
+      this.logger.info(`Starting ${this.chain} detector service`);
+
+      // Initialize Redis client
+      await this.initializeRedis();
+
+      // Initialize pairs from DEX factories
+      await this.initializePairs();
+
+      // Connect to WebSocket for real-time events
+      await this.connectWebSocket();
+
+      // Subscribe to Sync and Swap events
+      await this.subscribeToEvents();
+
+      // Hook for chain-specific initialization
+      await this.onStart();
+
+      this.isRunning = true;
+      this.logger.info(`${this.chain} detector service started successfully`, {
+        pairs: this.pairs.size,
+        dexes: this.dexes.length,
+        tokens: this.tokens.length
+      });
+
+      // Start health monitoring
+      this.startHealthMonitoring();
+
+    } catch (error) {
+      this.logger.error(`Failed to start ${this.chain} detector service`, { error });
+      throw error;
+    }
+  }
+
+  /**
+   * Stop the detector service.
+   * Uses ServiceStateManager to prevent race conditions.
+   * Override onStop() for chain-specific cleanup.
+   */
+  async stop(): Promise<void> {
+    // Guard against double stop
+    if (this.isStopping || !this.isRunning) {
+      this.logger.debug('Service is already stopped or stopping');
+      if (this.stopPromise) {
+        return this.stopPromise;
+      }
+      return;
+    }
+
+    this.isStopping = true;
+    this.logger.info(`Stopping ${this.chain} detector service`);
+    this.isRunning = false;
+
+    this.stopPromise = this.performCleanup();
+    await this.stopPromise;
+  }
+
+  /**
+   * Internal cleanup method called by stop()
+   */
+  private async performCleanup(): Promise<void> {
+    try {
+      // Stop health monitoring first to prevent racing
+      if (this.healthMonitoringInterval) {
+        clearInterval(this.healthMonitoringInterval);
+        this.healthMonitoringInterval = null;
+      }
+
+      // Hook for chain-specific cleanup
+      await this.onStop();
+
+      // Flush any remaining batched events
+      if (this.eventBatcher) {
+        try {
+          this.eventBatcher.flushAll();
+          this.eventBatcher.destroy();
+        } catch (error) {
+          this.logger.warn('Error flushing event batcher', { error });
+        }
+        this.eventBatcher = null as any;
+      }
+
+      // Clean up Redis Streams batchers (ADR-002, S1.1.4)
+      await this.cleanupStreamBatchers();
+
+      // Disconnect WebSocket manager
+      if (this.wsManager) {
+        try {
+          this.wsManager.disconnect();
+        } catch (error) {
+          this.logger.warn('Error disconnecting WebSocket', { error });
+        }
+      }
+
+      // Disconnect Redis Streams client
+      if (this.streamsClient) {
+        try {
+          await this.streamsClient.disconnect();
+        } catch (error) {
+          this.logger.warn('Error disconnecting Redis Streams client', { error });
+        }
+        this.streamsClient = null;
+      }
+
+      // Disconnect Redis
+      if (this.redis) {
+        try {
+          await this.redis.disconnect();
+        } catch (error) {
+          this.logger.warn('Error disconnecting Redis', { error });
+        }
+        this.redis = null;
+      }
+
+      // Clear collections to prevent memory leaks
+      this.pairs.clear();
+      this.pairsByAddress.clear();
+      this.monitoredPairs.clear();
+
+      this.logger.info(`${this.chain} detector service stopped`);
+    } finally {
+      this.isStopping = false;
+      this.stopPromise = null;
+    }
+  }
+
+  /**
+   * Hook for chain-specific initialization.
+   * Override in subclass for custom setup.
+   */
+  protected async onStart(): Promise<void> {
+    // Default: no-op, override in subclass if needed
+  }
+
+  /**
+   * Hook for chain-specific cleanup.
+   * Override in subclass for custom cleanup.
+   */
+  protected async onStop(): Promise<void> {
+    // Default: no-op, override in subclass if needed
+  }
+
+  /**
+   * Get service health status.
+   * Override in subclass for chain-specific health info.
+   */
+  async getHealth(): Promise<any> {
+    const batcherStats = this.eventBatcher ? this.eventBatcher.getStats() : null;
+    const wsStats = this.wsManager ? this.wsManager.getConnectionStats() : null;
+
+    return {
+      service: `${this.chain}-detector`,
+      status: (this.isRunning && !this.isStopping ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
+      uptime: process.uptime(),
+      memoryUsage: process.memoryUsage().heapUsed,
+      cpuUsage: 0,
+      lastHeartbeat: Date.now(),
+      pairs: this.pairs.size,
+      websocket: wsStats,
+      batcherStats,
+      chain: this.chain,
+      dexCount: this.dexes.length,
+      tokenCount: this.tokens.length
+    };
+  }
+
+  /**
+   * Start health monitoring interval
+   */
+  protected startHealthMonitoring(): void {
+    const interval = this.config.healthCheckInterval || 30000;
+    this.healthMonitoringInterval = setInterval(async () => {
+      // Guard against running during shutdown (P2 fix: consistent order)
+      if (this.isStopping || !this.isRunning) {
+        return;
+      }
+
+      try {
+        const health = await this.getHealth();
+
+        if (this.redis) {
+          await this.redis.updateServiceHealth(`${this.chain}-detector`, health);
+        }
+
+        this.perfLogger.logHealthCheck(`${this.chain}-detector`, health);
+
+      } catch (error) {
+        this.logger.error('Health monitoring failed', { error });
+      }
+    }, interval);
+  }
+
+  // ===========================================================================
+  // Configuration Getters (Override in subclass for chain-specific values)
+  // ===========================================================================
+
+  /**
+   * Get minimum profit threshold for this chain.
+   * Override in subclass for chain-specific thresholds.
+   */
+  getMinProfitThreshold(): number {
+    const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
+    return chainMinProfits[this.chain] || 0.003; // Default 0.3%
+  }
+
+  /**
+   * Get chain-specific detector config.
+   * Override in subclass if needed.
+   */
+  protected getChainDetectorConfig(): any {
+    return (DETECTOR_CONFIG as Record<string, any>)[this.chain] || {
+      confidence: 0.8,
+      expiryMs: 5000,
+      gasEstimate: 200000,
+      whaleThreshold: 50000
+    };
+  }
+
+  // ===========================================================================
+  // Event Processing (Concrete implementations with sensible defaults)
+  // ===========================================================================
+
+  /**
+   * Process Sync event (reserve update).
+   * Default implementation - can be overridden for chain-specific behavior.
+   */
+  protected async processSyncEvent(log: any, pair: Pair): Promise<void> {
+    try {
+      // Decode reserve data from log data
+      const decodedData = ethers.AbiCoder.defaultAbiCoder().decode(
+        ['uint112', 'uint112'],
+        log.data
+      );
+
+      const reserve0 = decodedData[0].toString();
+      const reserve1 = decodedData[1].toString();
+      const blockNumber = typeof log.blockNumber === 'string'
+        ? parseInt(log.blockNumber, 16)
+        : log.blockNumber;
+
+      // Update pair data
+      const extendedPair = pair as ExtendedPair;
+      extendedPair.reserve0 = reserve0;
+      extendedPair.reserve1 = reserve1;
+      extendedPair.blockNumber = blockNumber;
+      extendedPair.lastUpdate = Date.now();
+
+      // Calculate price
+      const price = this.calculatePrice(extendedPair);
+
+      // Create price update
+      const priceUpdate: PriceUpdate = {
+        pairKey: `${pair.dex}_${pair.token0}_${pair.token1}`,
+        dex: pair.dex,
+        chain: this.chain,
+        token0: pair.token0,
+        token1: pair.token1,
+        price,
+        reserve0,
+        reserve1,
+        blockNumber,
+        timestamp: Date.now(),
+        latency: 0
+      };
+
+      // Publish price update (uses Redis Streams batching)
+      await this.publishPriceUpdate(priceUpdate);
+
+      // Check for intra-DEX arbitrage
+      await this.checkIntraDexArbitrage(pair);
+
+    } catch (error) {
+      this.logger.error('Failed to process sync event', { error, pair: pair.address });
+    }
+  }
+
+  /**
+   * Process Swap event (trade).
+   * Default implementation - can be overridden for chain-specific behavior.
+   */
+  protected async processSwapEvent(log: any, pair: Pair): Promise<void> {
+    try {
+      // Decode swap data
+      const decodedData = ethers.AbiCoder.defaultAbiCoder().decode(
+        ['uint256', 'uint256', 'uint256', 'uint256'],
+        log.data
+      );
+
+      const amount0In = decodedData[0].toString();
+      const amount1In = decodedData[1].toString();
+      const amount0Out = decodedData[2].toString();
+      const amount1Out = decodedData[3].toString();
+
+      // Calculate USD value
+      const usdValue = await this.estimateUsdValue(pair, amount0In, amount1In, amount0Out, amount1Out);
+
+      // Apply filtering based on configuration
+      if (usdValue < EVENT_CONFIG.swapEvents.minAmountUSD) {
+        // Apply sampling for small trades
+        if (Math.random() > EVENT_CONFIG.swapEvents.samplingRate) {
+          return; // Skip this event
+        }
+      }
+
+      const blockNumber = typeof log.blockNumber === 'string'
+        ? parseInt(log.blockNumber, 16)
+        : log.blockNumber;
+
+      const swapEvent: SwapEvent = {
+        pairAddress: pair.address,
+        sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '0x0',
+        recipient: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '0x0',
+        amount0In,
+        amount1In,
+        amount0Out,
+        amount1Out,
+        to: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '0x0',
+        blockNumber,
+        transactionHash: log.transactionHash || '0x0',
+        timestamp: Date.now(),
+        dex: pair.dex,
+        chain: this.chain,
+        usdValue
+      };
+
+      // Publish swap event (uses Smart Swap Event Filter)
+      await this.publishSwapEvent(swapEvent);
+
+      // Check for whale activity
+      await this.checkWhaleActivity(swapEvent);
+
+    } catch (error) {
+      this.logger.error('Failed to process swap event', { error, pair: pair.address });
+    }
+  }
+
+  /**
+   * Check for intra-DEX arbitrage opportunities.
+   * Default implementation using pair snapshots for thread safety.
+   */
+  protected async checkIntraDexArbitrage(pair: Pair): Promise<void> {
+    // Guard against processing during shutdown (P2 fix: consistent order)
+    if (this.isStopping || !this.isRunning) {
+      return;
+    }
+
+    const opportunities: ArbitrageOpportunity[] = [];
+
+    // Create snapshot of current pair for thread-safe comparison
+    const currentSnapshot = this.createPairSnapshot(pair);
+    if (!currentSnapshot) return;
+
+    const [token0, token1] = [currentSnapshot.token0.toLowerCase(), currentSnapshot.token1.toLowerCase()];
+    const currentPrice = this.calculatePriceFromSnapshot(currentSnapshot);
+
+    if (currentPrice === 0) return;
+
+    // Create snapshots of ALL pairs atomically
+    const pairsSnapshots = this.createPairsSnapshot();
+
+    for (const [key, otherSnapshot] of pairsSnapshots) {
+      if (otherSnapshot.address === currentSnapshot.address) continue;
+      if (otherSnapshot.dex === currentSnapshot.dex) continue;
+
+      const otherToken0 = otherSnapshot.token0.toLowerCase();
+      const otherToken1 = otherSnapshot.token1.toLowerCase();
+
+      // Check if same token pair (in either order)
+      const sameOrder = otherToken0 === token0 && otherToken1 === token1;
+      const reverseOrder = otherToken0 === token1 && otherToken1 === token0;
+
+      if (sameOrder || reverseOrder) {
+        let otherPrice = this.calculatePriceFromSnapshot(otherSnapshot);
+        if (otherPrice === 0) continue;
+
+        // Adjust price for reverse order pairs
+        if (reverseOrder && otherPrice !== 0) {
+          otherPrice = 1 / otherPrice;
+        }
+
+        // Calculate price difference percentage
+        const priceDiff = Math.abs(currentPrice - otherPrice) / Math.min(currentPrice, otherPrice);
+
+        if (priceDiff >= this.getMinProfitThreshold()) {
+          const chainConfig = this.getChainDetectorConfig();
+          const opportunity: ArbitrageOpportunity = {
+            id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
+            type: 'simple',
+            chain: this.chain,
+            buyDex: currentPrice < otherPrice ? currentSnapshot.dex : otherSnapshot.dex,
+            sellDex: currentPrice < otherPrice ? otherSnapshot.dex : currentSnapshot.dex,
+            buyPair: currentPrice < otherPrice ? currentSnapshot.address : otherSnapshot.address,
+            sellPair: currentPrice < otherPrice ? otherSnapshot.address : currentSnapshot.address,
+            token0: currentSnapshot.token0,
+            token1: currentSnapshot.token1,
+            buyPrice: Math.min(currentPrice, otherPrice),
+            sellPrice: Math.max(currentPrice, otherPrice),
+            profitPercentage: priceDiff * 100,
+            estimatedProfit: 0,
+            confidence: chainConfig.confidence,
+            timestamp: Date.now(),
+            expiresAt: Date.now() + chainConfig.expiryMs,
+            gasEstimate: chainConfig.gasEstimate,
+            status: 'pending'
+          };
+
+          opportunities.push(opportunity);
+        }
+      }
+    }
+
+    // Publish opportunities
+    for (const opportunity of opportunities) {
+      await this.publishArbitrageOpportunity(opportunity);
+      this.perfLogger.logArbitrageOpportunity(opportunity);
+    }
+  }
+
+  /**
+   * Check for whale activity.
+   * Default implementation using chain config thresholds.
+   */
+  protected async checkWhaleActivity(swapEvent: SwapEvent): Promise<void> {
+    const chainConfig = this.getChainDetectorConfig();
+    const whaleThreshold = chainConfig.whaleThreshold;
+
+    if (!swapEvent.usdValue || swapEvent.usdValue < whaleThreshold) {
+      return;
+    }
+
+    const amount0InNum = parseFloat(swapEvent.amount0In);
+    const amount1InNum = parseFloat(swapEvent.amount1In);
+
+    const whaleTransaction = {
+      transactionHash: swapEvent.transactionHash,
+      address: swapEvent.sender,
+      token: amount0InNum > amount1InNum ? 'token0' : 'token1',
+      amount: Math.max(amount0InNum, amount1InNum),
+      usdValue: swapEvent.usdValue,
+      direction: amount0InNum > amount1InNum ? 'sell' : 'buy',
+      dex: swapEvent.dex,
+      chain: swapEvent.chain,
+      timestamp: swapEvent.timestamp,
+      impact: await this.calculatePriceImpact(swapEvent)
+    };
+
+    await this.publishWhaleTransaction(whaleTransaction);
+  }
+
+  /**
+   * Estimate USD value of a swap.
+   * Default implementation - should be overridden for chain-specific tokens.
+   */
+  protected async estimateUsdValue(
+    pair: Pair,
+    amount0In: string,
+    amount1In: string,
+    amount0Out: string,
+    amount1Out: string
+  ): Promise<number> {
+    // Default prices (fallback)
+    const defaultPrices: Record<string, number> = {
+      ETH: 2500, WETH: 2500,
+      BNB: 300, WBNB: 300,
+      MATIC: 0.80, WMATIC: 0.80,
+      ARB: 1.20,
+      OP: 2.50
+    };
+
+    const token0Lower = pair.token0.toLowerCase();
+    const token1Lower = pair.token1.toLowerCase();
+
+    // Check for native wrapper token
+    const nativeWrapper = this.tokenMetadata?.nativeWrapper || this.tokenMetadata?.weth || this.tokenMetadata?.wmatic;
+    if (nativeWrapper) {
+      const nativeWrapperLower = nativeWrapper.toLowerCase();
+
+      if (token0Lower === nativeWrapperLower || token1Lower === nativeWrapperLower) {
+        const isToken0Native = token0Lower === nativeWrapperLower;
+        const amount = isToken0Native
+          ? Math.max(parseFloat(amount0In), parseFloat(amount0Out))
+          : Math.max(parseFloat(amount1In), parseFloat(amount1Out));
+
+        // Get chain-specific native token price
+        const nativeSymbol = this.chain === 'bsc' ? 'BNB' : this.chain === 'polygon' ? 'MATIC' : 'ETH';
+        const price = defaultPrices[nativeSymbol] || 2500;
+        return (amount / 1e18) * price;
+      }
+    }
+
+    // Check for stablecoins
+    const stablecoins = this.tokenMetadata?.stablecoins || [];
+    for (const stable of stablecoins) {
+      const stableLower = stable.address.toLowerCase();
+
+      if (token0Lower === stableLower) {
+        const stableAmount = Math.max(parseFloat(amount0In), parseFloat(amount0Out));
+        return stableAmount / Math.pow(10, stable.decimals || 18);
+      }
+
+      if (token1Lower === stableLower) {
+        const stableAmount = Math.max(parseFloat(amount1In), parseFloat(amount1Out));
+        return stableAmount / Math.pow(10, stable.decimals || 18);
+      }
+    }
+
+    return 0;
+  }
+
+  /**
+   * Calculate price impact of a swap.
+   * Default implementation using reserve ratios.
+   */
+  protected async calculatePriceImpact(swapEvent: SwapEvent): Promise<number> {
+    const pair = this.pairsByAddress.get(swapEvent.pairAddress.toLowerCase()) as ExtendedPair;
+
+    if (!pair || !pair.reserve0 || !pair.reserve1) {
+      return 0.02; // Default 2% if reserves not available
+    }
+
+    const reserve0 = parseFloat(pair.reserve0);
+    const reserve1 = parseFloat(pair.reserve1);
+    const tradeAmount = Math.max(
+      parseFloat(swapEvent.amount0In),
+      parseFloat(swapEvent.amount1In),
+      parseFloat(swapEvent.amount0Out),
+      parseFloat(swapEvent.amount1Out)
+    );
+
+    // Simple impact calculation: trade_size / reserve
+    const relevantReserve = parseFloat(swapEvent.amount0In) > 0 ? reserve0 : reserve1;
+    if (relevantReserve === 0) return 0.02;
+
+    return Math.min(tradeAmount / relevantReserve, 0.5); // Cap at 50%
+  }
+
+  // ===========================================================================
+  // Pair Initialization (Common functionality)
+  // ===========================================================================
+
   protected async initializePairs(): Promise<void> {
     this.logger.info(`Initializing ${this.chain} trading pairs`);
 
@@ -268,19 +859,21 @@ export abstract class BaseDetector {
                 fee: dex.fee || 0.003 // Default 0.3% fee
               };
 
-              const pairKey = `${dex.name}_${pair.name}`;
-              this.pairs.set(pairKey, pair);
-              this.monitoredPairs.add(pairKey);
+              const fullPairKey = `${dex.name}_${pair.name}`;
+              this.pairs.set(fullPairKey, pair);
+              // O(1) lookup by address (used in processLogEvent, calculatePriceImpact)
+              this.pairsByAddress.set(pairAddress.toLowerCase(), pair);
+              this.monitoredPairs.add(pairAddress.toLowerCase());
               pairsProcessed.add(pairKey);
 
               this.logger.debug(`Added pair: ${pair.name} on ${dex.name}`, {
                 address: pairAddress,
-                pairKey
+                pairKey: fullPairKey
               });
             }
           } catch (error) {
             this.logger.warn(`Failed to get pair address for ${token0.symbol}/${token1.symbol} on ${dex.name}`, {
-              error: error.message
+              error: (error as Error).message
             });
           }
         }
@@ -443,34 +1036,41 @@ export abstract class BaseDetector {
   }
 
   // Common log event processor
-  protected async processLogEvent(log: any): Promise<void> {
-    const startTime = performance.now();
+  /**
+   * Process a log event (public for testing).
+   * Uses O(1) lookup via pairsByAddress map.
+   */
+  async processLogEvent(log: any): Promise<void> {
+    // Guard against processing during shutdown (P2 fix: consistent order)
+    if (this.isStopping || !this.isRunning) {
+      return;
+    }
 
     try {
-      // Find the pair this log belongs to
-      const pair = Array.from(this.pairs.values()).find(p => p.address.toLowerCase() === log.address.toLowerCase());
-      if (!pair) {
-        return; // Not a monitored pair
+      // O(1) pair lookup by address
+      const pairAddress = log.address?.toLowerCase();
+      if (!pairAddress || !this.monitoredPairs.has(pairAddress)) {
+        return;
       }
 
-      // Decode the event based on topics
-      if (log.topics[0] === '0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1') {
-        // Sync event (reserve update)
+      const pair = this.pairsByAddress.get(pairAddress);
+      if (!pair) {
+        return;
+      }
+
+      // Route based on event topic (using cached signatures)
+      const topic = log.topics?.[0];
+      if (!topic) {
+        return;
+      }
+
+      if (topic === EVENT_SIGNATURES.SYNC) {
         await this.processSyncEvent(log, pair);
-      } else if (log.topics[0] === '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822') {
-        // Swap V2 event (trade)
+      } else if (topic === EVENT_SIGNATURES.SWAP_V2) {
         await this.processSwapEvent(log, pair);
       }
-
-      const latency = performance.now() - startTime;
-      this.perfLogger.logEventLatency('log_processing', latency, {
-        pair: `${pair.token0.symbol}-${pair.token1.symbol}`,
-        dex: pair.dex.name,
-        eventType: log.topics[0]
-      });
-
     } catch (error) {
-      this.logger.error('Failed to process log event', { error, log });
+      this.logger.error('Failed to process log event', { error, log: log?.address });
     }
   }
 
