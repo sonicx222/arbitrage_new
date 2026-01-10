@@ -5,6 +5,14 @@ export { MatrixPriceCache, getMatrixPriceCache } from './matrix-cache';
 export { PredictiveCacheWarmer, getPredictiveCacheWarmer } from './predictive-warmer';
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
+export {
+  WebSocketManager,
+  WebSocketConfig,
+  WebSocketSubscription,
+  WebSocketMessage,
+  WebSocketEventHandler,
+  ConnectionStateHandler
+} from './websocket-manager';
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './hierarchical-cache';
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './shared-memory-cache';
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager } from './cache-coherency-manager';
@@ -82,6 +90,21 @@ export {
   ValidationMiddleware,
   ValidationSchemas
 } from './validation';
+
+// Domain models and core interfaces
+export * from './domain-models';
+
+// Repository pattern
+export {
+  RedisArbitrageRepository,
+  RedisExecutionRepository,
+  createArbitrageRepository,
+  createExecutionRepository
+} from './repositories';
+
+// Refactored service layer
+export { ArbitrageService } from './arbitrage-service';
+export type { ArbitrageServiceConfig } from './arbitrage-service';
 
 export {
   ConfigurationChange,
