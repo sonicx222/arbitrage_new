@@ -84,6 +84,19 @@ export type {
   FilterStats,
   BatchResult
 } from './swap-event-filter';
+export {
+  PriceMatrix,
+  PriceIndexMapper,
+  getPriceMatrix,
+  resetPriceMatrix
+} from './price-matrix';
+export type {
+  PriceMatrixConfig,
+  PriceEntry,
+  MemoryUsage,
+  PriceMatrixStats,
+  BatchUpdate
+} from './price-matrix';
 
 // Professional-grade arbitrage and analytics exports
 export {
