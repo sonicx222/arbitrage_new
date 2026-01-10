@@ -21,6 +21,9 @@ export interface SharedCacheEntry {
   compressed: boolean;
   encrypted: boolean;
   size: number;
+  keyOffset?: number;
+  valueOffset?: number;
+  valueLen?: number;
 }
 
 // Memory layout for SharedArrayBuffer:
@@ -28,10 +31,10 @@ export interface SharedCacheEntry {
 // Metadata: [version][entryCount][maxEntries][dataStartOffset]
 export class SharedMemoryCache {
   private config: SharedCacheConfig;
-  private buffer: SharedArrayBuffer;
-  private view: Uint8Array;
-  private metadataView: Uint32Array; // First 16 bytes for metadata
-  private dataView: Uint8Array; // Rest for data
+  private buffer!: SharedArrayBuffer;
+  private view!: Uint8Array;
+  private metadataView!: Uint32Array; // First 16 bytes for metadata
+  private dataView!: Uint8Array; // Rest for data
 
   // Constants for memory layout
   private static readonly METADATA_SIZE = 16; // 4 * 4 bytes
@@ -236,9 +239,9 @@ export class SharedMemoryCache {
 
   private validateKey(key: string): boolean {
     return typeof key === 'string' &&
-           key.length > 0 &&
-           key.length <= this.config.maxKeyLength &&
-           !key.includes('\0'); // Null bytes not allowed
+      key.length > 0 &&
+      key.length <= this.config.maxKeyLength &&
+      !key.includes('\0'); // Null bytes not allowed
   }
 
   private findEntry(key: string): SharedCacheEntry | null {
@@ -430,9 +433,9 @@ export class SharedMemoryCache {
   // Low-level memory access methods
   private readUint32(offset: number): number {
     return (this.view[offset] << 24) |
-           (this.view[offset + 1] << 16) |
-           (this.view[offset + 2] << 8) |
-           this.view[offset + 3];
+      (this.view[offset + 1] << 16) |
+      (this.view[offset + 2] << 8) |
+      this.view[offset + 3];
   }
 
   private writeUint32(offset: number, value: number): void {
@@ -466,20 +469,17 @@ export class SharedMemoryCache {
   cleanup(): void {
     const now = Date.now();
     let cleaned = 0;
+    const keys = this.keys();
 
-    // Clean L3 storage
-    for (const [key, entry] of this.l3Storage.entries()) {
-      if (entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
-        this.l3Storage.delete(key);
-        cleaned++;
-      }
-    }
-
-    // Clean L1 metadata (though SharedArrayBuffer itself doesn't need cleanup)
-    for (const [key, entry] of this.l1Metadata.entries()) {
-      if (entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
-        this.invalidateL1(key);
-        cleaned++;
+    for (const key of keys) {
+      try {
+        const entry = this.findEntry(key);
+        if (entry && entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
+          this.delete(key);
+          cleaned++;
+        }
+      } catch (error) {
+        logger.error('Error during key cleanup', { key, error });
       }
     }
 
@@ -492,10 +492,8 @@ export class SharedMemoryCache {
   destroy(): void {
     logger.info('Destroying shared memory cache');
 
-    // Clear all metadata
-    this.l1Metadata.clear();
-    this.l1EvictionQueue.length = 0;
-    this.l3Storage.clear();
+    // Clear metadata
+    this.clear();
 
     // Note: SharedArrayBuffer cannot be explicitly freed in JavaScript
     // It will be garbage collected when no references remain

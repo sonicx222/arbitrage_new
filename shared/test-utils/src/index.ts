@@ -115,8 +115,8 @@ export class RedisMock {
     return 1;
   }
 
-  async ping(): Promise<string> {
-    return 'PONG';
+  async ping(): Promise<boolean> {
+    return true; // Simplified for mock
   }
 
   async disconnect(): Promise<void> {

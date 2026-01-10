@@ -1,6 +1,7 @@
-// Logging utility for the arbitrage system
 import winston from 'winston';
 import { format } from 'winston';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const { combine, timestamp, printf, colorize, errors } = format;
 
@@ -48,8 +49,6 @@ export function createLogger(serviceName: string) {
   });
 
   // Ensure log directory exists
-  const fs = require('fs');
-  const path = require('path');
   const logDir = path.join(process.cwd(), 'logs');
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
@@ -146,12 +145,12 @@ export class PerformanceLogger {
   }
 }
 
-// Global performance logger instance
-let performanceLogger: PerformanceLogger | null = null;
+// Map to store performance loggers by service name
+const performanceLoggers: Map<string, PerformanceLogger> = new Map();
 
 export function getPerformanceLogger(serviceName: string): PerformanceLogger {
-  if (!performanceLogger) {
-    performanceLogger = new PerformanceLogger(serviceName);
+  if (!performanceLoggers.has(serviceName)) {
+    performanceLoggers.set(serviceName, new PerformanceLogger(serviceName));
   }
-  return performanceLogger;
+  return performanceLoggers.get(serviceName)!;
 }

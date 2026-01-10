@@ -258,18 +258,23 @@ export class GracefulDegradationManager {
   }
 
   private async applyDegradation(serviceName: string, level: DegradationLevel): Promise<void> {
+    const redis = await this.redis;
     // Notify the service to adjust its behavior
-    await this.redis.publish(`service-degradation:${serviceName}`, {
-      serviceName,
-      degradationLevel: level.name,
-      enabledFeatures: level.enabledFeatures,
-      disabledFeatures: level.disabledFeatures,
-      performanceImpact: level.performanceImpact,
-      timestamp: Date.now()
+    await redis.publish(`service-degradation:${serviceName}`, {
+      type: 'degradation_applied',
+      data: {
+        serviceName,
+        degradationLevel: level.name,
+        enabledFeatures: level.enabledFeatures,
+        disabledFeatures: level.disabledFeatures,
+        performanceImpact: level.performanceImpact
+      },
+      timestamp: Date.now(),
+      source: 'graceful-degradation-manager'
     });
 
     // Update service configuration in Redis
-    await this.redis.set(`service-config:${serviceName}:degradation`, {
+    await redis.set(`service-config:${serviceName}:degradation`, {
       level: level.name,
       enabledFeatures: level.enabledFeatures,
       disabledFeatures: level.disabledFeatures,
@@ -304,9 +309,10 @@ export class GracefulDegradationManager {
     // This would implement service-specific capability testing
     // For now, we'll use a simple health check simulation
 
+    const redis = await this.redis;
     switch (capability.name) {
       case 'redis_connection':
-        return (await this.redis.ping()) === 'PONG';
+        return await redis.ping();
 
       case 'web3_connection':
         // Would test blockchain connectivity
@@ -326,11 +332,16 @@ export class GracefulDegradationManager {
       // Clear degradation state
       this.serviceStates.delete(serviceName);
 
+      const redis = await this.redis;
       // Notify service of recovery
-      await this.redis.publish(`service-recovery:${serviceName}`, {
-        serviceName,
-        recoveredFrom: state.currentLevel.name,
-        timestamp: Date.now()
+      await redis.publish(`service-recovery:${serviceName}`, {
+        type: 'service_recovered',
+        data: {
+          serviceName,
+          recoveredFrom: state.currentLevel.name
+        },
+        timestamp: Date.now(),
+        source: 'graceful-degradation-manager'
       });
 
       // Clear recovery timer
@@ -341,7 +352,7 @@ export class GracefulDegradationManager {
       }
 
       // Remove degradation configuration
-      await this.redis.del(`service-config:${serviceName}:degradation`);
+      await redis.del(`service-config:${serviceName}:degradation`);
 
       logger.info(`Service ${serviceName} recovered from degradation level ${state.currentLevel.name}`);
       return true;
@@ -366,12 +377,17 @@ export class GracefulDegradationManager {
   }
 
   private async notifyDegradation(serviceName: string, state: DegradationState): Promise<void> {
-    await this.redis.publish('service-degradation', {
-      serviceName,
-      degradationLevel: state.currentLevel.name,
-      triggeredBy: state.triggeredBy,
-      performanceImpact: state.metrics.performanceImpact,
-      timestamp: state.timestamp
+    const redis = await this.redis;
+    await redis.publish('service-degradation', {
+      type: 'service_degradation',
+      data: {
+        serviceName,
+        degradationLevel: state.currentLevel.name,
+        triggeredBy: state.triggeredBy,
+        performanceImpact: state.metrics.performanceImpact
+      },
+      timestamp: state.timestamp,
+      source: 'graceful-degradation-manager'
     });
   }
 }

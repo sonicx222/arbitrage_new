@@ -230,6 +230,15 @@ export class RedisClient {
     }
   }
 
+  async expire(key: string, seconds: number): Promise<number> {
+    try {
+      return await this.client.expire(key, seconds);
+    } catch (error) {
+      this.logger.error('Error setting expire', { error });
+      return 0;
+    }
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       const result = await this.client.exists(key);
@@ -266,7 +275,7 @@ export class RedisClient {
       const result = await this.client.hgetall(key);
       if (!result || Object.keys(result).length === 0) return null;
 
-            const parsed: Record<string, T> = {};
+      const parsed: Record<string, T> = {};
       for (const [field, value] of Object.entries(result)) {
         parsed[field] = JSON.parse(value as string);
       }
@@ -274,6 +283,129 @@ export class RedisClient {
     } catch (error) {
       this.logger.error('Error getting all hash fields', { error });
       return null;
+    }
+  }
+
+  // Set operations
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.sadd(key, ...members);
+    } catch (error) {
+      this.logger.error('Error sadd', { error });
+      return 0;
+    }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.srem(key, ...members);
+    } catch (error) {
+      this.logger.error('Error srem', { error });
+      return 0;
+    }
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    try {
+      return await this.client.smembers(key);
+    } catch (error) {
+      this.logger.error('Error smembers', { error });
+      return [];
+    }
+  }
+
+  // Sorted Set operations
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    try {
+      return await this.client.zadd(key, score, member);
+    } catch (error) {
+      this.logger.error('Error zadd', { error });
+      return 0;
+    }
+  }
+
+  async zrange(key: string, start: number, stop: number, withScores: string = ''): Promise<string[]> {
+    try {
+      if (withScores === 'WITHSCORES') {
+        return await this.client.zrange(key, start, stop, 'WITHSCORES');
+      }
+      return await this.client.zrange(key, start, stop);
+    } catch (error) {
+      this.logger.error('Error zrange', { error });
+      return [];
+    }
+  }
+
+  async zrem(key: string, ...members: string[]): Promise<number> {
+    try {
+      return await this.client.zrem(key, ...members);
+    } catch (error) {
+      this.logger.error('Error zrem', { error });
+      return 0;
+    }
+  }
+
+  async zcard(key: string): Promise<number> {
+    try {
+      return await this.client.zcard(key);
+    } catch (error) {
+      this.logger.error('Error zcard', { error });
+      return 0;
+    }
+  }
+
+  async zscore(key: string, member: string): Promise<string | null> {
+    try {
+      return await this.client.zscore(key, member);
+    } catch (error) {
+      this.logger.error('Error zscore', { error });
+      return null;
+    }
+  }
+
+  // Key operations
+  async keys(pattern: string): Promise<string[]> {
+    try {
+      return await this.client.keys(pattern);
+    } catch (error) {
+      this.logger.error('Error keys', { error });
+      return [];
+    }
+  }
+
+  async llen(key: string): Promise<number> {
+    try {
+      return await this.client.llen(key);
+    } catch (error) {
+      this.logger.error('Error llen', { error });
+      return 0;
+    }
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    try {
+      return await this.client.lpush(key, ...values);
+    } catch (error) {
+      this.logger.error('Error lpush', { error });
+      return 0;
+    }
+  }
+
+  async rpop(key: string): Promise<string | null> {
+    try {
+      return await this.client.rpop(key);
+    } catch (error) {
+      this.logger.error('Error rpop', { error });
+      return null;
+    }
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    try {
+      return await this.client.lrange(key, start, stop);
+    } catch (error) {
+      this.logger.error('Error lrange', { error });
+      return [];
     }
   }
 
@@ -486,7 +618,7 @@ export async function checkRedisHealth(url?: string, password?: string): Promise
 // Reset singleton for testing purposes
 export function resetRedisInstance(): void {
   if (redisInstance) {
-    redisInstance.disconnect().catch(() => {}); // Best effort cleanup
+    redisInstance.disconnect().catch(() => { }); // Best effort cleanup
   }
   redisInstance = null;
   redisInstancePromise = null;
