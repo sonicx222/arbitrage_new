@@ -1,5 +1,23 @@
 // Core utilities exports
 export { RedisClient, getRedisClient } from './redis';
+export {
+  RedisStreamsClient,
+  StreamBatcher,
+  getRedisStreamsClient,
+  resetRedisStreamsInstance
+} from './redis-streams';
+export type {
+  StreamMessage,
+  ConsumerGroupConfig,
+  XReadOptions,
+  XReadGroupOptions,
+  XTrimOptions,
+  XAddOptions,
+  StreamInfo,
+  PendingInfo,
+  BatcherConfig,
+  BatcherStats
+} from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger } from './logger';
 export { MatrixPriceCache, getMatrixPriceCache } from './matrix-cache';
 export { PredictiveCacheWarmer, getPredictiveCacheWarmer } from './predictive-warmer';
@@ -35,6 +53,23 @@ export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealin
 export { ExpertSelfHealingManager, getExpertSelfHealingManager } from './expert-self-healing-manager';
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './error-recovery';
 export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './enhanced-health-monitor';
+export {
+  StreamHealthMonitor,
+  getStreamHealthMonitor,
+  resetStreamHealthMonitor
+} from './stream-health-monitor';
+export type {
+  StreamHealthStatus,
+  StreamLagInfo,
+  ConsumerLagInfo,
+  MonitoredStreamInfo,
+  StreamHealth,
+  StreamMetrics,
+  ConsumerGroupHealth,
+  StreamHealthSummary,
+  StreamHealthThresholds,
+  StreamAlert
+} from './stream-health-monitor';
 
 // Professional-grade arbitrage and analytics exports
 export {
