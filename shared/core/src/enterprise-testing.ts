@@ -345,8 +345,8 @@ export class EnterpriseTestingFramework {
       switch (assertion.type) {
         case 'response_time':
           actualValue = assertion.metric === 'p95' ? metrics.p95ResponseTime :
-                       assertion.metric === 'p99' ? metrics.p99ResponseTime :
-                       metrics.averageResponseTime;
+            assertion.metric === 'p99' ? metrics.p99ResponseTime :
+              metrics.averageResponseTime;
           break;
         case 'error_rate':
           actualValue = metrics.errorRate;
@@ -411,10 +411,15 @@ export class EnterpriseTestingFramework {
     logger.info(`Injecting network delay chaos: ${event.intensity * 100}% increase`);
 
     // This would modify network layer or add delays to specific operations
-    await this.redis.publish('chaos-event', {
+    const redis = await this.redis;
+    await redis.publish('chaos-event', {
       type: 'network_delay',
-      intensity: event.intensity,
-      duration: event.duration
+      data: {
+        intensity: event.intensity,
+        duration: event.duration
+      },
+      timestamp: Date.now(),
+      source: 'enterprise-testing'
     });
   }
 
@@ -422,10 +427,15 @@ export class EnterpriseTestingFramework {
     // Simulate service failures
     logger.info(`Injecting service failure chaos for ${event.targetService}`);
 
-    await this.redis.publish('chaos-event', {
+    const redis = await this.redis;
+    await redis.publish('chaos-event', {
       type: 'service_failure',
-      target: event.targetService,
-      duration: event.duration
+      data: {
+        target: event.targetService,
+        duration: event.duration
+      },
+      timestamp: Date.now(),
+      source: 'enterprise-testing'
     });
   }
 
@@ -433,11 +443,16 @@ export class EnterpriseTestingFramework {
     // Simulate resource exhaustion
     logger.info(`Injecting resource exhaustion chaos: ${event.intensity * 100}% load`);
 
+    const redis = await this.redis;
     // Trigger high memory/CPU usage
-    await this.redis.publish('chaos-event', {
+    await redis.publish('chaos-event', {
       type: 'resource_exhaustion',
-      intensity: event.intensity,
-      duration: event.duration
+      data: {
+        intensity: event.intensity,
+        duration: event.duration
+      },
+      timestamp: Date.now(),
+      source: 'enterprise-testing'
     });
   }
 
@@ -445,10 +460,15 @@ export class EnterpriseTestingFramework {
     // Simulate data corruption (safely)
     logger.info('Injecting data corruption chaos (simulation only)');
 
-    await this.redis.publish('chaos-event', {
+    const redis = await this.redis;
+    await redis.publish('chaos-event', {
       type: 'data_corruption',
-      intensity: event.intensity,
-      duration: event.duration
+      data: {
+        intensity: event.intensity,
+        duration: event.duration
+      },
+      timestamp: Date.now(),
+      source: 'enterprise-testing'
     });
   }
 
@@ -456,10 +476,15 @@ export class EnterpriseTestingFramework {
     // Inject sustained high load
     logger.info(`Injecting high load chaos: ${event.intensity * 100}% intensity`);
 
-    await this.redis.publish('chaos-event', {
+    const redis = await this.redis;
+    await redis.publish('chaos-event', {
       type: 'high_load',
-      intensity: event.intensity,
-      duration: event.duration
+      data: {
+        intensity: event.intensity,
+        duration: event.duration
+      },
+      timestamp: Date.now(),
+      source: 'enterprise-testing'
     });
   }
 
@@ -518,7 +543,7 @@ export class EnterpriseTestingFramework {
     return {
       totalFailures: failedTests.length,
       commonErrors: Object.entries(errorCounts)
-        .sort(([,a], [,b]) => b - a)
+        .sort(([, a], [, b]) => b - a)
         .slice(0, 5)
         .map(([error, count]) => ({ error, count }))
     };
@@ -564,9 +589,10 @@ export class EnterpriseTestingFramework {
   }
 
   private async storeTestResult(result: TestResult): Promise<void> {
-    await this.redis.set(`test_result:${result.scenarioId}`, result, 7 * 24 * 60 * 60); // 7 days
-    await this.redis.lpush('test_history', JSON.stringify(result));
-    await this.redis.ltrim('test_history', 0, 9999); // Keep last 10k results
+    const redis = await this.redis;
+    await redis.set(`test_result:${result.scenarioId}`, result, 7 * 24 * 60 * 60); // 7 days
+    await redis.lpush('test_history', JSON.stringify(result));
+    await redis.ltrim('test_history', 0, 9999); // Keep last 10k results
   }
 
   private delay(ms: number): Promise<void> {
@@ -578,7 +604,7 @@ export class EnterpriseTestingFramework {
 class TestExecution {
   private scenario: TestScenario;
   private metrics: TestMetrics;
-  private startTime: number;
+  private startTime: number = 0;
   private errors: string[] = [];
 
   constructor(scenario: TestScenario) {
@@ -603,7 +629,7 @@ class TestExecution {
         errors: this.errors,
         timestamp: Date.now()
       };
-    } catch (error) {
+    } catch (error: any) {
       const duration = Date.now() - this.startTime;
 
       return {
@@ -673,7 +699,7 @@ class TestExecution {
       try {
         await testFunction();
         responseTimes.push(performance.now() - startTime);
-      } catch (error) {
+      } catch (error: any) {
         this.errors.push(error.message);
       }
 

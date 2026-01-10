@@ -2,7 +2,7 @@
 // Clean separation of data access logic
 
 import { RedisClient } from './redis';
-import { StructuredLogger } from './logger';
+import { Logger } from 'winston';
 import {
   ArbitrageOpportunity,
   ExecutionResult,
@@ -17,8 +17,8 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
 
   constructor(
     private readonly redis: RedisClient,
-    private readonly logger: StructuredLogger
-  ) {}
+    private readonly logger: Logger
+  ) { }
 
   async save(opportunity: ArbitrageOpportunity): Promise<void> {
     try {
@@ -28,7 +28,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
         timestamp: opportunity.timestamp.toISOString()
       });
 
-      await this.redis.setex(key, this.EXPIRY_SECONDS, data);
+      await this.redis.set(key, data, this.EXPIRY_SECONDS);
 
       // Add to active opportunities set
       await this.redis.sadd(`${this.OPPORTUNITIES_KEY}:active`, opportunity.id);
@@ -39,7 +39,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
         profit: opportunity.profitPercentage,
         chain: opportunity.chain.name
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('opportunity_save_failed', {
         opportunityId: opportunity.id,
         error: error.message
@@ -64,7 +64,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
         ...parsed,
         timestamp: new Date(parsed.timestamp)
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('opportunity_find_failed', {
         opportunityId: id,
         error: error.message
@@ -89,7 +89,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
       opportunities.sort((a, b) => b.profitPercentage - a.profitPercentage);
 
       return opportunities;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('active_opportunities_find_failed', {
         error: error.message
       });
@@ -101,7 +101,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
     try {
       const activeOpportunities = await this.findActive();
       return activeOpportunities.filter(opp => opp.chain.id === chain.id);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('chain_opportunities_find_failed', {
         chainId: chain.id,
         error: error.message
@@ -127,7 +127,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
         opportunityId: id,
         status
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('opportunity_status_update_failed', {
         opportunityId: id,
         status,
@@ -157,7 +157,7 @@ export class RedisArbitrageRepository implements IArbitrageRepository {
       });
 
       return deletedCount;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('expired_opportunities_cleanup_failed', {
         olderThan: olderThan.toISOString(),
         error: error.message
@@ -173,8 +173,8 @@ export class RedisExecutionRepository implements IExecutionRepository {
 
   constructor(
     private readonly redis: RedisClient,
-    private readonly logger: StructuredLogger
-  ) {}
+    private readonly logger: Logger
+  ) { }
 
   async save(result: ExecutionResult): Promise<void> {
     try {
@@ -186,7 +186,7 @@ export class RedisExecutionRepository implements IExecutionRepository {
 
       // Store with expiration
       const expirySeconds = this.RETENTION_DAYS * 24 * 60 * 60;
-      await this.redis.setex(key, expirySeconds, data);
+      await this.redis.set(key, data, expirySeconds);
 
       // Add to executions list for analytics
       const listKey = `${this.EXECUTIONS_KEY}:list`;
@@ -199,7 +199,7 @@ export class RedisExecutionRepository implements IExecutionRepository {
         profit: result.actualProfit,
         gasUsed: result.gasUsed
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('execution_save_failed', {
         opportunityId: result.opportunityId,
         error: error.message
@@ -224,7 +224,7 @@ export class RedisExecutionRepository implements IExecutionRepository {
         ...parsed,
         executedAt: new Date(parsed.executedAt)
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('execution_find_failed', {
         opportunityId,
         error: error.message
@@ -247,7 +247,7 @@ export class RedisExecutionRepository implements IExecutionRepository {
       }
 
       return executions;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('recent_executions_fetch_failed', {
         limit,
         error: error.message
@@ -269,7 +269,7 @@ export class RedisExecutionRepository implements IExecutionRepository {
 
       const successful = relevantExecutions.filter(exec => exec.success).length;
       return successful / relevantExecutions.length;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('success_rate_calculation_failed', {
         timeRangeMs,
         error: error.message
@@ -280,10 +280,10 @@ export class RedisExecutionRepository implements IExecutionRepository {
 }
 
 // Factory functions for repository creation
-export function createArbitrageRepository(redis: RedisClient, logger: StructuredLogger): IArbitrageRepository {
+export function createArbitrageRepository(redis: RedisClient, logger: Logger): IArbitrageRepository {
   return new RedisArbitrageRepository(redis, logger);
 }
 
-export function createExecutionRepository(redis: RedisClient, logger: StructuredLogger): IExecutionRepository {
+export function createExecutionRepository(redis: RedisClient, logger: Logger): IExecutionRepository {
   return new RedisExecutionRepository(redis, logger);
 }

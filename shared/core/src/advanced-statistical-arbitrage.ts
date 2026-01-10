@@ -65,7 +65,7 @@ export class AdvancedStatisticalArbitrage {
     const regime = this.detectMarketRegime(pair, priceHistory, volumeHistory);
 
     // Get adaptive thresholds for this regime
-    const thresholds = this.getAdaptiveThresholds(pair, regime);
+    const thresholds = await this.getAdaptiveThresholds(pair, regime);
 
     // Calculate regime-aware z-score
     const zScore = this.calculateAdaptiveZScore(currentSpread, priceHistory, thresholds);
@@ -233,12 +233,12 @@ export class AdvancedStatisticalArbitrage {
   }
 
   // Get adaptive thresholds for a pair and regime
-  private getAdaptiveThresholds(pair: string, regime: MarketRegime): AdaptiveThresholds {
+  private async getAdaptiveThresholds(pair: string, regime: MarketRegime): Promise<AdaptiveThresholds> {
     // Check cache first
     const cacheKey = `thresholds:${pair}:${regime}`;
-    const cached = this.cache.get(cacheKey);
+    const cached = await this.cache.get(cacheKey);
     if (cached) {
-      return cached as AdaptiveThresholds;
+      return cached as unknown as AdaptiveThresholds;
     }
 
     // Calculate adaptive thresholds based on regime
@@ -293,7 +293,7 @@ export class AdvancedStatisticalArbitrage {
     };
 
     // Cache for 5 minutes
-    this.cache.set(cacheKey, thresholds, 300);
+    await this.cache.set(cacheKey, thresholds, 300);
     return thresholds;
   }
 

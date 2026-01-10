@@ -2,7 +2,7 @@
 // Unifies all arbitrage strategies into a single, optimized execution engine
 
 import { createLogger } from './logger';
-import { getRedisClient } from './redis';
+import { getRedisClient, RedisClient } from './redis';
 import { AdvancedStatisticalArbitrage, StatisticalSignal } from './advanced-statistical-arbitrage';
 import { RiskManagementEngine, Position } from './risk-management';
 import { CrossDexTriangularArbitrage, TriangularOpportunity } from './cross-dex-triangular-arbitrage';
@@ -36,7 +36,7 @@ export interface ExecutionStep {
 }
 
 export class AdvancedArbitrageOrchestrator {
-  private redis = getRedisClient();
+  private redis: Promise<RedisClient> = getRedisClient();
   private statisticalArb = new AdvancedStatisticalArbitrage();
   private riskManager = new RiskManagementEngine();
   private triangularArb = new CrossDexTriangularArbitrage();
@@ -54,7 +54,7 @@ export class AdvancedArbitrageOrchestrator {
 
     logger.info('Starting Advanced Arbitrage Orchestrator');
 
-    this.redis = await getRedisClient();
+    this.redis = getRedisClient();
     await this.selfHealing; // Ensure self-healing is initialized
 
     this.isRunning = true;
@@ -135,9 +135,10 @@ export class AdvancedArbitrageOrchestrator {
         riskAssessment
       };
 
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Market analysis failed', { chain, error });
-      await this.selfHealing.reportFailure('arbitrage-orchestrator', 'market_analysis', error as Error);
+      const healing = await this.selfHealing;
+      await healing.reportFailure('arbitrage-orchestrator', 'market_analysis', error);
       throw error;
     }
   }
@@ -163,17 +164,7 @@ export class AdvancedArbitrageOrchestrator {
         size: 1,
         entryPrice: 1,
         currentPrice: 1,
-        unrealizedPnL: 0,
-        timestamp: Date.now(),
-        riskMetrics: {
-          volatility: 0.1,
-          liquidityRisk: 0.05,
-          counterpartyRisk: 0.02,
-          slippageRisk: 0.03,
-          gasRisk: 0.02,
-          impermanentLossRisk: 0,
-          totalRisk: 0.22
-        }
+        timestamp: Date.now()
       });
 
       const execution: ArbitrageExecution = {
@@ -213,7 +204,7 @@ export class AdvancedArbitrageOrchestrator {
 
       return execution;
 
-    } catch (error) {
+    } catch (error: any) {
       logger.error('Arbitrage execution failed', { executionId, error });
 
       const execution = this.activeExecutions.get(executionId);
@@ -222,7 +213,8 @@ export class AdvancedArbitrageOrchestrator {
         execution.endTime = Date.now();
       }
 
-      await this.selfHealing.reportFailure(
+      const healing = await this.selfHealing;
+      await healing.reportFailure(
         'arbitrage-orchestrator',
         'execution',
         error as Error,
@@ -238,7 +230,7 @@ export class AdvancedArbitrageOrchestrator {
 
   // Batch execute multiple opportunities
   async executeBatchArbitrage(
-    opportunities: Array<{opportunity: StatisticalSignal | TriangularOpportunity, strategy: 'statistical' | 'triangular'}>
+    opportunities: Array<{ opportunity: StatisticalSignal | TriangularOpportunity, strategy: 'statistical' | 'triangular' }>
   ): Promise<ArbitrageExecution[]> {
     const executions: ArbitrageExecution[] = [];
 
@@ -247,7 +239,7 @@ export class AdvancedArbitrageOrchestrator {
     const batches = this.chunkArray(opportunities, concurrencyLimit);
 
     for (const batch of batches) {
-      const batchPromises = batch.map(({opportunity, strategy}) =>
+      const batchPromises = batch.map(({ opportunity, strategy }) =>
         this.executeArbitrageOpportunity(opportunity, strategy)
       );
 
@@ -257,7 +249,7 @@ export class AdvancedArbitrageOrchestrator {
         if (result.status === 'fulfilled') {
           executions.push(result.value);
         } else {
-          logger.error('Batch execution failed', { error: result.reason });
+          logger.error('Batch execution failed', { error: (result as PromiseRejectedResult).reason });
         }
       }
     }
@@ -309,25 +301,27 @@ export class AdvancedArbitrageOrchestrator {
   }
 
   private async subscribeToMarketData(): Promise<void> {
+    const redis = await this.redis;
     // Subscribe to price updates from detectors
-    await this.redis.subscribe('price-updates', (message) => {
+    await redis.subscribe('price-updates', (message: any) => {
       this.handlePriceUpdate(message);
     });
 
     // Subscribe to arbitrage opportunities
-    await this.redis.subscribe('arbitrage-opportunities', (message) => {
+    await redis.subscribe('arbitrage-opportunities', (message: any) => {
       this.handleArbitrageOpportunity(message);
     });
   }
 
   private async subscribeToArbitrageSignals(): Promise<void> {
+    const redis = await this.redis;
     // Subscribe to statistical signals
-    await this.redis.subscribe('statistical-signals', (message) => {
+    await redis.subscribe('statistical-signals', (message: any) => {
       this.handleStatisticalSignal(message);
     });
 
     // Subscribe to triangular opportunities
-    await this.redis.subscribe('triangular-opportunities', (message) => {
+    await redis.subscribe('triangular-opportunities', (message: any) => {
       this.handleTriangularOpportunity(message);
     });
   }
@@ -341,8 +335,9 @@ export class AdvancedArbitrageOrchestrator {
     }>;
     pools: any[];
   }> {
+    const redis = await this.redis;
     // Get recent price data from Redis
-    const priceData = await this.redis.get(`market_data:${chain}`) || {};
+    const priceData = await redis.get<any>(`market_data:${chain}`) || {};
 
     const pairs = Object.entries(priceData).map(([key, data]: [string, any]) => ({
       key,
@@ -352,7 +347,7 @@ export class AdvancedArbitrageOrchestrator {
     }));
 
     // Get pool data
-    const pools = await this.redis.get(`pools:${chain}`) || [];
+    const pools = await redis.get<any[]>(`pools:${chain}`) || [];
 
     return { pairs, pools };
   }
@@ -386,7 +381,7 @@ export class AdvancedArbitrageOrchestrator {
     }, {} as Record<string, number>);
 
     const dominantRegime = Object.entries(regimeCounts)
-      .sort(([,a], [,b]) => b - a)[0][0];
+      .sort(([, a], [, b]) => b - a)[0][0];
 
     return dominantRegime;
   }
@@ -492,7 +487,8 @@ export class AdvancedArbitrageOrchestrator {
     try {
       // Update market data cache
       const { chain, pair, price } = message.data;
-      await this.redis.hset(`market_data:${chain}`, pair, { currentPrice: price, timestamp: Date.now() });
+      const redis = await this.redis;
+      await redis.hset(`market_data:${chain}`, pair, { currentPrice: price, timestamp: Date.now() });
     } catch (error) {
       logger.error('Failed to handle price update', { error });
     }

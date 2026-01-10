@@ -255,7 +255,7 @@ export class CrossDexTriangularArbitrage {
 
       return opportunity;
 
-    } catch (error) {
+    } catch (error: any) {
       logger.debug('Triangle simulation failed', {
         tokens,
         dexes: pools.map(p => p.dex),

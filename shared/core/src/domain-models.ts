@@ -81,11 +81,11 @@ export interface ExecutionResult {
   gasPrice: number;
   actualProfit: string;
   transactionHash?: string;
-  error?: ExecutionError;
+  error?: ExecutionFailure;
   metadata: ExecutionMetadata;
 }
 
-export interface ExecutionError {
+export interface ExecutionFailure {
   type: 'slippage' | 'gas' | 'network' | 'insufficient_funds' | 'timeout';
   message: string;
   details: any;
@@ -204,6 +204,8 @@ export interface IArbitrageDetector {
   stop(): Promise<void>;
   getActiveOpportunities(): Promise<ArbitrageOpportunity[]>;
   processEvent(event: MarketEvent): Promise<void>;
+  on(event: string, callback: (...args: any[]) => void): void;
+  off(event: string, callback: (...args: any[]) => void): void;
 }
 
 export interface IArbitrageExecutor {

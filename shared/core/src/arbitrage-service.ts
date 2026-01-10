@@ -11,9 +11,9 @@ import {
   IExecutionRepository,
   IArbitrageDetector,
   IArbitrageExecutor,
-  ArbitrageError,
-  StructuredLogger
+  ArbitrageError
 } from './domain-models';
+import { Logger } from 'winston';
 
 export interface ArbitrageServiceConfig {
   maxConcurrentExecutions: number;
@@ -30,7 +30,7 @@ export class ArbitrageService extends EventEmitter {
 
   constructor(
     private readonly config: ArbitrageServiceConfig,
-    private readonly logger: StructuredLogger,
+    private readonly logger: Logger,
     private readonly opportunityRepo: IArbitrageRepository,
     private readonly executionRepo: IExecutionRepository,
     private readonly detectors: IArbitrageDetector[],
@@ -120,7 +120,7 @@ export class ArbitrageService extends EventEmitter {
 
       // Check for new opportunities
       await this.checkAndExecuteOpportunities();
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('market_event_processing_failed', {
         eventType: event.type,
         eventId: event.id,
@@ -158,7 +158,7 @@ export class ArbitrageService extends EventEmitter {
         // Execute in background
         this.executeOpportunity(opportunity);
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('opportunity_check_failed', {
         error: error.message
       });
@@ -213,7 +213,7 @@ export class ArbitrageService extends EventEmitter {
         gasUsed: result.gasUsed
       });
 
-    } catch (error) {
+    } catch (error: any) {
       const executionError = error instanceof ArbitrageError ? error : new ArbitrageError(
         'EXECUTION_FAILED',
         `Unexpected execution error: ${error.message}`,
@@ -230,7 +230,7 @@ export class ArbitrageService extends EventEmitter {
         gasPrice: 0,
         actualProfit: '0',
         error: {
-          type: 'execution',
+          type: (executionError.code === 'EXECUTION_TIMEOUT') ? 'timeout' : 'network',
           message: executionError.message,
           details: executionError.details,
           recoverable: executionError.recoverable
@@ -246,7 +246,7 @@ export class ArbitrageService extends EventEmitter {
       try {
         await this.executionRepo.save(failureResult);
         await this.opportunityRepo.updateStatus(executionId, 'expired');
-      } catch (saveError) {
+      } catch (saveError: any) {
         this.logger.error('execution_result_save_failed', {
           opportunityId: executionId,
           saveError: saveError.message
@@ -276,7 +276,7 @@ export class ArbitrageService extends EventEmitter {
 
       // Validate with executor
       return await this.executor.validateExecution(opportunity);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn('opportunity_validation_failed', {
         opportunityId: opportunity.id,
         error: error.message
@@ -304,7 +304,7 @@ export class ArbitrageService extends EventEmitter {
         try {
           await this.opportunityRepo.updateStatus(opportunity.id, 'expired');
           this.opportunityTimers.delete(opportunity.id);
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error('opportunity_expiry_failed', {
             opportunityId: opportunity.id,
             error: error.message
@@ -323,7 +323,7 @@ export class ArbitrageService extends EventEmitter {
         pair: `${opportunity.pair.baseToken.symbol}/${opportunity.pair.quoteToken.symbol}`
       });
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('opportunity_save_failed', {
         opportunityId: opportunity.id,
         detectorIndex,
@@ -344,7 +344,7 @@ export class ArbitrageService extends EventEmitter {
             cutoffDate: cutoffDate.toISOString()
           });
         }
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error('cleanup_process_failed', {
           error: error.message
         });

@@ -130,18 +130,19 @@ export class PerformanceAnalyticsEngine {
       this.tradeHistory = this.tradeHistory.slice(-this.maxHistorySize);
     }
 
+    const redis = await this.redis;
     // Store in Redis for persistence
-    await this.redis.set(`trade:${trade.id}`, tradeRecord, 2592000); // 30 days TTL
-    await this.redis.lpush('trade_history', JSON.stringify(tradeRecord));
+    await redis.set(`trade:${trade.id}`, tradeRecord, 2592000); // 30 days TTL
+    await redis.lpush('trade_history', JSON.stringify(tradeRecord));
 
     // Keep only recent trades in Redis list
-    await this.redis.ltrim('trade_history', 0, 9999); // Keep last 10k
+    await redis.ltrim('trade_history', 0, 9999); // Keep last 10k
 
     logger.debug('Trade recorded', {
       id: trade.id,
       strategy: trade.strategy,
-      pnl: trade.netPnL.toFixed(4),
-      duration: trade.duration
+      pnl: tradeRecord.netPnL.toFixed(4),
+      duration: tradeRecord.duration
     });
   }
 
@@ -202,7 +203,8 @@ export class PerformanceAnalyticsEngine {
     const byTimeOfDay = this.calculateTimePerformance(trades);
 
     // Risk-adjusted returns (simplified calculations)
-    const alpha = totalPnL - this.calculateBenchmarkReturn(periodStart, periodEnd);
+    const benchmarkReturn = await this.getBenchmarkReturn('ETH', periodStart, periodEnd);
+    const alpha = totalPnL - benchmarkReturn;
     const beta = this.calculateBeta(returns);
     const informationRatio = volatility > 0 ? alpha / volatility : 0;
     const omegaRatio = this.calculateOmegaRatio(returns);
@@ -299,7 +301,6 @@ export class PerformanceAnalyticsEngine {
     };
   }
 
-  // Get performance alerts
   getPerformanceAlerts(metrics: PerformanceMetrics): Array<{
     level: 'info' | 'warning' | 'critical';
     message: string;
@@ -307,7 +308,13 @@ export class PerformanceAnalyticsEngine {
     value: number;
     threshold: number;
   }> {
-    const alerts = [];
+    const alerts: Array<{
+      level: 'info' | 'warning' | 'critical';
+      message: string;
+      metric: string;
+      value: number;
+      threshold: number;
+    }> = [];
 
     // Drawdown alerts
     if (metrics.currentDrawdown > 0.1) { // 10% drawdown
@@ -398,18 +405,20 @@ export class PerformanceAnalyticsEngine {
       timeBreakdown: metrics.byTimeOfDay
     };
 
+    const redis = await this.redis;
     // Cache report
-    await this.redis.set(`performance_report:${period}`, report, 3600); // 1 hour TTL
+    await redis.set(`performance_report:${period}`, report, 3600); // 1 hour TTL
 
     return report;
   }
 
   // Private helper methods
   private async initializeTradeHistory(): Promise<void> {
+    const redis = await this.redis;
     try {
       // Load recent trades from Redis
-      const recentTrades = await this.redis.lrange('trade_history', 0, 999);
-      this.tradeHistory = recentTrades.map(trade => JSON.parse(trade)).reverse();
+      const recentTrades = await redis.lrange('trade_history', 0, 999);
+      this.tradeHistory = recentTrades.map((trade: string) => JSON.parse(trade)).reverse();
     } catch (error) {
       logger.warn('Failed to load trade history from Redis', { error });
     }
@@ -695,8 +704,9 @@ export class PerformanceAnalyticsEngine {
   }
 
   private async cacheMetrics(metrics: PerformanceMetrics, period: string, startDate: number, endDate: number): Promise<void> {
+    const redis = await this.redis;
     const key = `performance_metrics:${period}:${startDate}:${endDate}`;
-    await this.redis.set(key, metrics, 3600); // 1 hour TTL
+    await redis.set(key, metrics, 3600); // 1 hour TTL
   }
 
   private async getBenchmarkReturn(benchmark: string, startDate: number, endDate: number): Promise<number> {

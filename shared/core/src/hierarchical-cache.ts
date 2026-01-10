@@ -214,6 +214,23 @@ export class HierarchicalCache {
     }
   }
 
+  async delete(key: string): Promise<void> {
+    return this.invalidate(key);
+  }
+
+  async clear(): Promise<void> {
+    if (this.config.l1Enabled) {
+      this.l1Metadata.clear();
+      this.l1EvictionQueue = [];
+    }
+    if (this.config.l2Enabled) {
+      await this.invalidateL2Pattern('*');
+    }
+    if (this.config.l3Enabled) {
+      this.l3Storage.clear();
+    }
+  }
+
   async invalidatePattern(pattern: string): Promise<void> {
     // Invalidate pattern across all levels
     if (this.config.l1Enabled) {

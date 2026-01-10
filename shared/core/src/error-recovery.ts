@@ -23,7 +23,7 @@ export interface RecoveryContext {
 export interface RecoveryResult {
   success: boolean;
   strategy: string;
-  duration: number;
+  duration?: number;
   nextAction?: string;
   error?: Error;
 }
@@ -148,7 +148,7 @@ export class ErrorRecoveryOrchestrator {
         // Retry for transient errors
         const retryableErrors = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'timeout'];
         return retryableErrors.some(code => context.error.message.includes(code)) &&
-               (context.attemptCount || 0) < 3;
+          (context.attemptCount || 0) < 3;
       },
       execute: async (context) => {
         const retryMechanism = new RetryMechanism({
@@ -176,8 +176,8 @@ export class ErrorRecoveryOrchestrator {
       canHandle: (context) => {
         // Use for rate limiting or server overload
         return context.error.message.includes('rate limit') ||
-               context.error.message.includes('too many requests') ||
-               context.error.status === 429;
+          context.error.message.includes('too many requests') ||
+          (context.error as any).status === 429;
       },
       execute: async (context) => {
         const retryMechanism = RetryPresets.EXTERNAL_API;
@@ -340,7 +340,7 @@ export function withErrorRecovery(options: {
     descriptor.value = async function (...args: any[]) {
       try {
         return await method.apply(this, args);
-      } catch (error) {
+      } catch (error: any) {
         const result = await recoverFromError(
           operationName,
           options.service,
@@ -356,7 +356,7 @@ export function withErrorRecovery(options: {
         // Return fallback value or throw depending on strategy
         if (result.nextAction === 'service_degraded') {
           // Return degraded response
-          return { degraded: true, error: error.message };
+          return { degraded: true, error: (error as Error).message };
         }
 
         throw error;

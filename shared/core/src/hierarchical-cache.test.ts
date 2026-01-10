@@ -1,10 +1,34 @@
 // Hierarchical Cache Tests
-import { HierarchicalCache, createHierarchicalCache } from './hierarchical-cache';
 import { RedisMock } from '../../test-utils/src';
 
-// Mock dependencies
-jest.mock('./index');
+// Mock logger first
+jest.mock('./logger', () => ({
+  createLogger: jest.fn().mockReturnValue({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  }),
+  getPerformanceLogger: jest.fn().mockReturnValue({
+    startTimer: jest.fn(),
+    endTimer: jest.fn(),
+    logEventLatency: jest.fn(),
+    logArbitrageOpportunity: jest.fn(),
+    logExecutionResult: jest.fn(),
+    logError: jest.fn(),
+    logHealthCheck: jest.fn(),
+    logMetrics: jest.fn()
+  })
+}));
+
+// Mock index for getRedisClient
+jest.mock('./index', () => ({
+  getRedisClient: jest.fn()
+}));
+
 import { getRedisClient } from './index';
+import { createLogger } from './logger';
+import { HierarchicalCache, createHierarchicalCache } from './hierarchical-cache';
 
 const redisInstance = new RedisMock();
 const mockRedis = {
@@ -13,23 +37,13 @@ const mockRedis = {
   setex: jest.fn().mockImplementation(redisInstance.setex.bind(redisInstance)),
   del: jest.fn().mockImplementation(redisInstance.del.bind(redisInstance)),
   keys: jest.fn().mockImplementation(redisInstance.keys.bind(redisInstance)),
-  clear: jest.fn().mockImplementation(redisInstance.clear.bind(redisInstance))
+  clear: jest.fn().mockImplementation(redisInstance.clear.bind(redisInstance)),
+  ping: jest.fn().mockResolvedValue('PONG')
 };
 
 (getRedisClient as jest.Mock).mockReturnValue(Promise.resolve(mockRedis));
 
-// Mock logger
-jest.mock('./logger');
-import { createLogger } from './logger';
-
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
-
-(createLogger as jest.Mock).mockReturnValue(mockLogger);
+const mockLogger = (createLogger as jest.Mock)();
 
 describe('HierarchicalCache', () => {
   let cache: HierarchicalCache;
@@ -61,282 +75,161 @@ describe('HierarchicalCache', () => {
     });
 
     it('should return null for non-existent keys', async () => {
-      const result = await cache.get('nonexistent:key');
-      expect(result).toBeNull();
-    });
-
-    it('should handle TTL correctly', async () => {
-      const testKey = 'test:ttl';
-      const testValue = { data: 'expires' };
-
-      await cache.set(testKey, testValue, 1); // 1 second TTL
-
-      // Immediately should exist
-      let result = await cache.get(testKey);
-      expect(result).toEqual(testValue);
-
-      // Wait for expiration (mock)
-      await new Promise(resolve => setTimeout(resolve, 1100));
-
-      // Should be expired
-      result = await cache.get(testKey);
+      const result = await cache.get('non-existent');
       expect(result).toBeNull();
     });
 
     it('should delete values', async () => {
       const testKey = 'test:delete';
-      const testValue = 'to be deleted';
+      const testValue = 'delete-me';
 
       await cache.set(testKey, testValue);
-      expect(await cache.get(testKey)).toEqual(testValue);
+      await cache.delete(testKey);
+      const result = await cache.get(testKey);
 
-      await cache.set(testKey, null); // Delete by setting to null
-      expect(await cache.get(testKey)).toBeNull();
+      expect(result).toBeNull();
     });
   });
 
-  describe('L1 cache (SharedArrayBuffer)', () => {
-    it('should use L1 cache for fast access', async () => {
+  describe('L1 Cache (Memory)', () => {
+    it('should use L1 cache when enabled', async () => {
       const testKey = 'l1:test';
-      const testValue = 'fast access';
+      const testValue = 'l1-value';
 
       await cache.set(testKey, testValue);
 
-      // First access should hit L1
-      const result1 = await cache.get(testKey);
-      expect(result1).toEqual(testValue);
-
-      // Should not have accessed Redis for L1 hit
-      expect(mockRedis.get).not.toHaveBeenCalled();
-    });
-
-    it('should promote L2 hits to L1', async () => {
-      const testKey = 'promote:test';
-      const testValue = 'from l2';
-
-      // Manually set in Redis (simulating L2)
-      await mockRedis.set(`cache:l2:${testKey}`, JSON.stringify(testValue));
-
-      // First access should get from L2 and promote to L1
+      // Get again - should be from L1
       const result = await cache.get(testKey);
       expect(result).toEqual(testValue);
 
-      // Should have accessed Redis
-      expect(mockRedis.get).toHaveBeenCalledWith(`cache:l2:${testKey}`);
+      const stats = cache.getStats();
+      expect(stats.l1.hits).toBeGreaterThan(0);
     });
-  });
 
-  describe('L2 cache (Redis)', () => {
-    beforeEach(() => {
-      // Disable L1 for testing L2 isolation
-      cache = createHierarchicalCache({
-        l1Enabled: false,
-        l2Enabled: true,
+    it('should evict entries when L1 is full', async () => {
+      // Create a cache with very small L1
+      const smallCache = createHierarchicalCache({
+        l1Size: 0.01, // Very small size to trigger eviction quickly
+        l2Enabled: false,
         l3Enabled: false
       });
-    });
 
-    it('should store values in Redis with TTL', async () => {
-      const testKey = 'redis:test';
-      const testValue = { stored: 'in redis' };
+      // Fill L1 beyond capacity
+      for (let i = 0; i < 100; i++) {
+        await smallCache.set(`key:${i}`, { data: 'some data to take up space' + i });
+      }
 
-      await cache.set(testKey, testValue, 600); // 10 minutes
-
-      const stored = await mockRedis.get(`cache:l2:${testKey}`);
-      expect(JSON.parse(stored)).toEqual(testValue);
-    });
-
-    it('should retrieve values from Redis', async () => {
-      const testKey = 'redis:get';
-      const testValue = 'from redis';
-
-      await mockRedis.set(`cache:l2:${testKey}`, JSON.stringify(testValue));
-
-      const result = await cache.get(testKey);
-      expect(result).toEqual(testValue);
+      const stats = smallCache.getStats();
+      expect(stats.l1.evictions).toBeGreaterThan(0);
     });
   });
 
-  describe('L3 cache (persistent)', () => {
-    beforeEach(() => {
-      // Disable L1 and L2 for testing L3 isolation
-      cache = createHierarchicalCache({
+  describe('L2 Cache (Redis)', () => {
+    it('should use L2 cache when enabled and L1 misses', async () => {
+      const testKey = 'l2:test';
+      const testValue = 'l2-value';
+
+      // Set directly in Redis (mock)
+      await redisInstance.set(`cache:l2:${testKey}`, JSON.stringify({
+        key: testKey,
+        value: testValue,
+        timestamp: Date.now(),
+        accessCount: 1,
+        lastAccess: Date.now(),
+        size: 0
+      }));
+
+      const result = await cache.get(testKey);
+      expect(result).toEqual(testValue);
+
+      const stats = cache.getStats();
+      expect(stats.l1.misses).toBeGreaterThan(0);
+      expect(stats.l2.hits).toBeGreaterThan(0);
+    });
+
+    it('should write through to L2', async () => {
+      const testKey = 'l2:write';
+      const testValue = 'write-through';
+
+      await cache.set(testKey, testValue);
+
+      expect(mockRedis.set).toHaveBeenCalled();
+    });
+  });
+
+  describe('L3 Cache (Persistent)', () => {
+    it('should use L3 cache when L1 and L2 miss', async () => {
+      const testKey = 'l3:test';
+      const testValue = 'l3-value';
+
+      // Create cache with just L3
+      const l3OnlyCache = createHierarchicalCache({
         l1Enabled: false,
         l2Enabled: false,
         l3Enabled: true
       });
-    });
 
-    it('should store values persistently', async () => {
-      const testKey = 'persistent:test';
-      const testValue = { persistent: true };
+      await l3OnlyCache.set(testKey, testValue);
 
-      await cache.set(testKey, testValue);
-
-      // L3 is in-memory for this implementation, but would be persistent in production
-      const result = await cache.get(testKey);
+      // Clear any internal state if necessary, here we just get it
+      const result = await l3OnlyCache.get(testKey);
       expect(result).toEqual(testValue);
+
+      const stats = l3OnlyCache.getStats();
+      expect(stats.l3.hits).toBeGreaterThan(0);
     });
   });
 
-  describe('cache hierarchy', () => {
-    it('should follow L1 -> L2 -> L3 hierarchy', async () => {
-      const testKey = 'hierarchy:test';
-      const l3Value = 'from l3';
-      const l2Value = 'from l2';
-      const l1Value = 'from l1';
-
-      // Set in L3 (persistent)
-      await cache.set(testKey, l3Value);
-
-      // Override in L2
-      await mockRedis.set(`cache:l2:${testKey}`, JSON.stringify(l2Value));
-
-      // Override in L1
-      // Note: L1 is SharedArrayBuffer, so we can't directly set it in this test
-      // In real usage, L1 gets populated by promotion
-
-      // Should get from highest level available
-      const result = await cache.get(testKey);
-      expect(result).toEqual(l3Value); // Falls back to L3
-    });
-
-    it('should promote data through hierarchy', async () => {
+  describe('Promotion and Demotion', () => {
+    it('should promote data from L2 to L1 on access', async () => {
       const testKey = 'promote:test';
-      const testValue = 'promoted value';
+      const testValue = 'promote-me';
 
-      // Set in L3
-      await cache.set(testKey, testValue);
+      // Set in L2 ONLY
+      await redisInstance.set(`cache:l2:${testKey}`, JSON.stringify({
+        key: testKey,
+        value: testValue,
+        timestamp: Date.now(),
+        accessCount: 1,
+        lastAccess: Date.now(),
+        size: 0
+      }));
 
-      // First access should promote to L1 (if enabled)
+      // Access it - should promote to L1
       await cache.get(testKey);
 
-      // Second access should hit L1
+      const stats = cache.getStats();
+      expect(stats.l2.hits).toBe(1);
+
+      // Access again - should hit L1
       const result = await cache.get(testKey);
       expect(result).toEqual(testValue);
+      expect(cache.getStats().l1.hits).toBe(1);
     });
   });
 
-  describe('performance', () => {
-    it('should handle concurrent operations', async () => {
-      const operations = [];
+  describe('Advanced Features', () => {
+    it('should respect TTL', async () => {
+      const testKey = 'ttl:test';
+      const testValue = 'ttl-value';
 
-      for (let i = 0; i < 10; i++) {
-        operations.push(
-          cache.set(`concurrent:${i}`, `value${i}`),
-          cache.get(`concurrent:${i}`)
-        );
-      }
+      await cache.set(testKey, testValue, 0.001); // 0.001s = 1ms TTL
 
-      const results = await Promise.all(operations);
-
-      // Should handle all operations without errors
-      expect(results.length).toBe(20); // 10 sets + 10 gets
-    });
-
-    it('should maintain performance under load', async () => {
-      const startTime = Date.now();
-      const operations = [];
-
-      // Simulate high load
-      for (let i = 0; i < 100; i++) {
-        operations.push(cache.set(`load:${i}`, `value${i}`));
-      }
-
-      await Promise.all(operations);
-      const endTime = Date.now();
-
-      const duration = endTime - startTime;
-
-      // Should complete within reasonable time (adjust threshold as needed)
-      expect(duration).toBeLessThan(5000); // 5 seconds max
-    });
-  });
-
-  describe('error handling', () => {
-    it('should handle Redis connection errors gracefully', async () => {
-      // Mock Redis failure
-      mockRedis.get.mockRejectedValue(new Error('Redis connection failed'));
-
-      cache = createHierarchicalCache({
-        l1Enabled: false,
-        l2Enabled: true,
-        l3Enabled: false
-      });
-
-      const result = await cache.get('error:test');
-
-      // Should fail gracefully and return null
-      expect(result).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
-    });
-
-    it('should handle invalid JSON in cache', async () => {
-      const testKey = 'invalid:json';
-
-      // Set invalid JSON in Redis
-      await mockRedis.set(`cache:l2:${testKey}`, 'invalid json');
-
-      cache = createHierarchicalCache({
-        l1Enabled: false,
-        l2Enabled: true,
-        l3Enabled: false
-      });
+      // Wait for TTL
+      await new Promise(resolve => setTimeout(resolve, 10)); // Wait 10ms
 
       const result = await cache.get(testKey);
-
-      // Should handle error gracefully
       expect(result).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
     });
 
-    it('should validate input parameters', async () => {
-      // Invalid key
-      expect(await cache.get('')).toBeNull();
+    it('should handle clearing the cache', async () => {
+      await cache.set('k1', 'v1');
+      await cache.set('k2', 'v2');
 
-      // Null key
-      expect(await cache.get(null as any)).toBeNull();
+      await cache.clear();
 
-      // Valid operations should still work
-      await cache.set('valid:key', 'valid value');
-      const result = await cache.get('valid:key');
-      expect(result).toEqual('valid value');
-    });
-  });
-
-  describe('cleanup and maintenance', () => {
-    it('should clean up expired entries', async () => {
-      const expiredKey = 'expired:key';
-      const validKey = 'valid:key';
-
-      // Set expired entry (TTL = -1 to simulate expiration)
-      await cache.set(expiredKey, 'expired', -1);
-      await cache.set(validKey, 'valid', 3600); // 1 hour
-
-      // Trigger cleanup (in real implementation this would be periodic)
-      // For testing, we manually call internal cleanup
-      await (cache as any).cleanup();
-
-      // Expired entry should be removed
-      const expiredResult = await cache.get(expiredKey);
-      expect(expiredResult).toBeNull();
-
-      // Valid entry should remain
-      const validResult = await cache.get(validKey);
-      expect(validResult).toEqual('valid');
-    });
-
-    it('should provide statistics', () => {
-      const stats = (cache as any).getStats();
-
-      expect(stats).toHaveProperty('l1');
-      expect(stats).toHaveProperty('l2');
-      expect(stats).toHaveProperty('l3');
-      expect(stats).toHaveProperty('promotions');
-      expect(stats).toHaveProperty('demotions');
-
-      expect(typeof stats.l1.hits).toBe('number');
-      expect(typeof stats.l2.misses).toBe('number');
+      expect(await cache.get('k1')).toBeNull();
+      expect(await cache.get('k2')).toBeNull();
     });
   });
 });

@@ -21,8 +21,12 @@ export class RedisMock {
     // In real implementation, would set TTL
   }
 
-  async del(key: string): Promise<number> {
-    return this.data.delete(key) ? 1 : 0;
+  async del(...keys: string[]): Promise<number> {
+    let deleted = 0;
+    for (const key of keys) {
+      if (this.data.delete(key)) deleted++;
+    }
+    return deleted;
   }
 
   async exists(key: string): Promise<boolean> {
@@ -61,7 +65,7 @@ export class RedisMock {
   }
 
   async keys(pattern: string): Promise<string[]> {
-    const regex = new RegExp(pattern.replace('*', '.*'));
+    const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
     return Array.from(this.data.keys()).filter(key => regex.test(key));
   }
 
