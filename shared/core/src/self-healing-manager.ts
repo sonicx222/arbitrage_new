@@ -115,12 +115,10 @@ export class SelfHealingManager {
     this.healthCheckTimers.clear();
     this.restartTimers.clear();
 
-    // Destroy circuit breakers
-    for (const breaker of this.circuitBreakers.values()) {
-      breaker.destroy();
-    }
+    // Circuit breakers don't need explicit destruction in this version
 
-    await this.redis.disconnect();
+    const redis = await this.redis;
+    await redis.disconnect();
     logger.info('Self-healing manager stopped');
   }
 
@@ -184,7 +182,7 @@ export class SelfHealingManager {
       priority: 90,
       canHandle: (service, error) => {
         return error instanceof CircuitBreakerError ||
-               service.consecutiveFailures >= 5;
+          service.consecutiveFailures >= 5;
       },
       execute: async (service) => {
         logger.info(`Activating circuit breaker for ${service.name}`);
@@ -425,12 +423,13 @@ export class SelfHealingManager {
   }
 
   private async subscribeToHealthUpdates(): Promise<void> {
-    await this.redis.subscribe('service-health-updates', (message) => {
+    const redis = await this.redis;
+    await redis.subscribe('service-health-updates', (messageEvent) => {
       try {
-        const healthUpdate = JSON.parse(message);
+        const healthUpdate = messageEvent.data;
         this.handleHealthUpdate(healthUpdate);
       } catch (error) {
-        logger.error('Failed to parse health update', { error });
+        logger.error('Failed to handle health update', { error });
       }
     });
   }
@@ -443,14 +442,20 @@ export class SelfHealingManager {
   }
 
   private async updateHealthInRedis(serviceName: string, health: ServiceHealth): Promise<void> {
-    await this.redis.set(`health:${serviceName}`, health, 300); // 5 minute TTL
+    const redis = await this.redis;
+    await redis.set(`health:${serviceName}`, health, 300); // 5 minute TTL
   }
 
   private async notifyServiceDegradation(serviceName: string): Promise<void> {
-    await this.redis.publish('service-degradation', {
-      service: serviceName,
+    const redis = await this.redis;
+    await redis.publish('service-degradation', {
+      type: 'service_degraded',
+      data: {
+        service: serviceName,
+        message: 'Service entered graceful degradation mode'
+      },
       timestamp: Date.now(),
-      message: 'Service entered graceful degradation mode'
+      source: 'self-healing-manager'
     });
   }
 }
