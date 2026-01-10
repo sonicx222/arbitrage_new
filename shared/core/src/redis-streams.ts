@@ -321,7 +321,8 @@ export class RedisStreamsClient {
       }
       args.push('STREAMS', streamName, lastId);
 
-      const result = await this.client.xread(...args);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await (this.client.xread as any)(...args);
 
       if (!result) {
         return [];
@@ -384,7 +385,8 @@ export class RedisStreamsClient {
       }
       args.push('STREAMS', config.streamName, options.startId ?? '>');
 
-      const result = await this.client.xreadgroup(...args);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await (this.client.xreadgroup as any)(...args);
 
       if (!result) {
         return [];
@@ -478,7 +480,8 @@ export class RedisStreamsClient {
         args.push(options.minId);
       }
 
-      return await this.client.xtrim(...args);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await (this.client.xtrim as any)(...args);
     } catch (error) {
       this.logger.error('XTRIM error', { error, streamName });
       throw error;
@@ -578,7 +581,7 @@ export class RedisStreamsClient {
           }
         }
 
-        messages.push({ id, data: data.data ?? data });
+        messages.push({ id, data: (data.data ?? data) as Record<string, unknown> });
       }
     }
 
