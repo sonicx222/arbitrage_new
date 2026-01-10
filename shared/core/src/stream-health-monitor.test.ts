@@ -7,20 +7,21 @@
  * @see S1.1.5: Add Stream health monitoring
  */
 
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { StreamHealthMonitor, StreamHealthStatus, StreamLagInfo } from './stream-health-monitor';
 
 // Mock Redis Streams Client
 jest.mock('./redis-streams', () => {
   const mockStreamsClient = {
-    xlen: jest.fn().mockResolvedValue(100),
-    xinfo: jest.fn().mockResolvedValue({
+    xlen: jest.fn<any>().mockResolvedValue(100),
+    xinfo: jest.fn<any>().mockResolvedValue({
       length: 100,
       radixTreeKeys: 1,
       radixTreeNodes: 2,
       lastGeneratedId: '1234567890-0',
       groups: 2
     }),
-    xpending: jest.fn().mockResolvedValue({
+    xpending: jest.fn<any>().mockResolvedValue({
       total: 5,
       smallestId: '1234-0',
       largestId: '1234-4',
@@ -29,12 +30,12 @@ jest.mock('./redis-streams', () => {
         { name: 'consumer-2', pending: 2 }
       ]
     }),
-    ping: jest.fn().mockResolvedValue(true),
-    disconnect: jest.fn().mockResolvedValue(undefined)
+    ping: jest.fn<any>().mockResolvedValue(true),
+    disconnect: jest.fn<any>().mockResolvedValue(undefined)
   };
 
   return {
-    getRedisStreamsClient: jest.fn().mockResolvedValue(mockStreamsClient),
+    getRedisStreamsClient: jest.fn<any>().mockResolvedValue(mockStreamsClient),
     RedisStreamsClient: {
       STREAMS: {
         PRICE_UPDATES: 'stream:price-updates',

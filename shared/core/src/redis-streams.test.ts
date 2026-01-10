@@ -7,27 +7,28 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { RedisStreamsClient, StreamMessage, ConsumerGroupConfig } from './redis-streams';
 
 // Mock ioredis
 jest.mock('ioredis', () => {
   const mockRedis = {
-    xadd: jest.fn(),
-    xread: jest.fn(),
-    xreadgroup: jest.fn(),
-    xack: jest.fn(),
-    xgroup: jest.fn(),
-    xinfo: jest.fn(),
-    xlen: jest.fn(),
-    xtrim: jest.fn(),
-    xpending: jest.fn(),
-    xclaim: jest.fn(),
-    ping: jest.fn().mockResolvedValue('PONG'),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    removeAllListeners: jest.fn(),
+    xadd: jest.fn<any>(),
+    xread: jest.fn<any>(),
+    xreadgroup: jest.fn<any>(),
+    xack: jest.fn<any>(),
+    xgroup: jest.fn<any>(),
+    xinfo: jest.fn<any>(),
+    xlen: jest.fn<any>(),
+    xtrim: jest.fn<any>(),
+    xpending: jest.fn<any>(),
+    xclaim: jest.fn<any>(),
+    ping: jest.fn<any>().mockResolvedValue('PONG'),
+    disconnect: jest.fn<any>().mockResolvedValue(undefined),
+    on: jest.fn<any>(),
+    removeAllListeners: jest.fn<any>(),
   };
-  return jest.fn(() => mockRedis);
+  return jest.fn<any>(() => mockRedis);
 });
 
 describe('RedisStreamsClient', () => {

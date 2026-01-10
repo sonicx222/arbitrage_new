@@ -16,7 +16,10 @@ import {
   WebSocketMessage,
   RedisStreamsClient,
   StreamBatcher,
-  getRedisStreamsClient
+  getRedisStreamsClient,
+  SwapEventFilter,
+  WhaleAlert,
+  VolumeAggregate
 } from './index';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG } from '../../config/src';
 import {
@@ -52,6 +55,9 @@ export abstract class BaseDetector {
   protected priceUpdateBatcher: StreamBatcher<any> | null = null;
   protected swapEventBatcher: StreamBatcher<any> | null = null;
   protected whaleAlertBatcher: StreamBatcher<any> | null = null;
+
+  // Smart Swap Event Filter (S1.2)
+  protected swapEventFilter: SwapEventFilter | null = null;
 
   protected dexes: Dex[];
   protected tokens: Token[];
@@ -161,6 +167,33 @@ export abstract class BaseDetector {
             priceUpdates: { maxBatch: 50, maxWaitMs: 100 },
             swapEvents: { maxBatch: 100, maxWaitMs: 500 },
             whaleAlerts: { maxBatch: 10, maxWaitMs: 50 }
+          });
+
+          // Initialize Smart Swap Event Filter (S1.2)
+          this.swapEventFilter = new SwapEventFilter({
+            minUsdValue: 10,       // Filter dust transactions < $10
+            whaleThreshold: 50000, // Alert for transactions >= $50K
+            dedupWindowMs: 5000,   // 5 second dedup window
+            aggregationWindowMs: 5000 // 5 second volume aggregation
+          });
+
+          // Set up whale alert handler to publish to stream
+          this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
+            this.publishWhaleAlert(alert).catch(err => {
+              this.logger.error('Failed to publish whale alert', { error: err });
+            });
+          });
+
+          // Set up volume aggregate handler to publish to stream
+          this.swapEventFilter.onVolumeAggregate((aggregate: VolumeAggregate) => {
+            this.publishVolumeAggregate(aggregate).catch(err => {
+              this.logger.error('Failed to publish volume aggregate', { error: err });
+            });
+          });
+
+          this.logger.info('Smart Swap Event Filter initialized', {
+            minUsdValue: 10,
+            whaleThreshold: 50000
           });
         } catch (streamsError) {
           this.logger.warn('Failed to initialize Redis Streams, falling back to Pub/Sub', {
@@ -489,6 +522,21 @@ export abstract class BaseDetector {
   }
 
   protected async publishSwapEvent(swapEvent: SwapEvent): Promise<void> {
+    // Apply Smart Swap Event Filter (S1.2) before publishing
+    // This filters dust transactions, deduplicates, and triggers whale alerts
+    if (this.swapEventFilter) {
+      const filterResult = this.swapEventFilter.processEvent(swapEvent);
+
+      // If filtered out, don't publish to downstream consumers
+      if (!filterResult.passed) {
+        this.logger.debug('Swap event filtered', {
+          reason: filterResult.filterReason,
+          txHash: swapEvent.transactionHash
+        });
+        return; // Event filtered - don't publish
+      }
+    }
+
     const message: MessageEvent = {
       type: 'swap-event',
       data: swapEvent,
@@ -554,6 +602,53 @@ export abstract class BaseDetector {
     }
   }
 
+  // Publish whale alert from SwapEventFilter (S1.2)
+  protected async publishWhaleAlert(alert: WhaleAlert): Promise<void> {
+    const message: MessageEvent = {
+      type: 'whale-alert',
+      data: alert,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    // Use Redis Streams with batching (primary) or fallback to Pub/Sub
+    if (this.useStreams && this.whaleAlertBatcher) {
+      try {
+        this.whaleAlertBatcher.add(message);
+      } catch (error) {
+        this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
+        await this.redis!.publish('whale-alerts', message);
+      }
+    } else {
+      await this.redis!.publish('whale-alerts', message);
+    }
+  }
+
+  // Publish volume aggregate from SwapEventFilter (S1.2)
+  protected async publishVolumeAggregate(aggregate: VolumeAggregate): Promise<void> {
+    const message: MessageEvent = {
+      type: 'volume-aggregate',
+      data: aggregate,
+      timestamp: Date.now(),
+      source: `${this.chain}-detector`
+    };
+
+    // Use Redis Streams (primary) or fallback to Pub/Sub
+    if (this.useStreams && this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(
+          RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
+          message
+        );
+      } catch (error) {
+        this.logger.warn('Stream publish failed, falling back to Pub/Sub', { error });
+        await this.redis!.publish('volume-aggregates', message);
+      }
+    } else {
+      await this.redis!.publish('volume-aggregates', message);
+    }
+  }
+
   // Cleanup method for stream batchers
   protected async cleanupStreamBatchers(): Promise<void> {
     const batchers = [
@@ -577,6 +672,13 @@ export abstract class BaseDetector {
     this.priceUpdateBatcher = null;
     this.swapEventBatcher = null;
     this.whaleAlertBatcher = null;
+
+    // Cleanup SwapEventFilter (S1.2)
+    if (this.swapEventFilter) {
+      this.swapEventFilter.destroy();
+      this.swapEventFilter = null;
+      this.logger.debug('Cleaned up swap event filter');
+    }
   }
 
   // Get batcher statistics for monitoring
@@ -585,7 +687,9 @@ export abstract class BaseDetector {
       priceUpdates: this.priceUpdateBatcher?.getStats() || null,
       swapEvents: this.swapEventBatcher?.getStats() || null,
       whaleAlerts: this.whaleAlertBatcher?.getStats() || null,
-      useStreams: this.useStreams
+      useStreams: this.useStreams,
+      // Smart Swap Event Filter stats (S1.2)
+      swapEventFilter: this.swapEventFilter?.getStats() || null
     };
   }
 

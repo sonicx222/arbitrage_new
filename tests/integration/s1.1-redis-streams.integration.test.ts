@@ -16,7 +16,7 @@ const mockStreams = new Map<string, any[]>();
 const mockConsumerGroups = new Map<string, Map<string, any>>();
 
 const mockRedis = {
-  xadd: jest.fn().mockImplementation(async (stream: string, id: string, ...args: string[]) => {
+  xadd: jest.fn<any>().mockImplementation(async (stream: string, id: string, ...args: string[]) => {
     const streamData = mockStreams.get(stream) || [];
     const messageId = id === '*' ? `${Date.now()}-${streamData.length}` : id;
     const fields: Record<string, string> = {};
@@ -27,7 +27,7 @@ const mockRedis = {
     mockStreams.set(stream, streamData);
     return messageId;
   }),
-  xread: jest.fn().mockImplementation(async (...args: any[]) => {
+  xread: jest.fn<any>().mockImplementation(async (...args: any[]) => {
     const streamsIdx = args.indexOf('STREAMS');
     if (streamsIdx === -1) return null;
     const streamName = args[streamsIdx + 1];
@@ -43,7 +43,7 @@ const mockRedis = {
     if (messages.length === 0) return null;
     return [[streamName, messages.map(m => [m.id, Object.entries(m.fields).flat()])]];
   }),
-  xreadgroup: jest.fn().mockImplementation(async (...args: any[]) => {
+  xreadgroup: jest.fn<any>().mockImplementation(async (...args: any[]) => {
     const groupIdx = args.indexOf('GROUP');
     const streamsIdx = args.indexOf('STREAMS');
     if (groupIdx === -1 || streamsIdx === -1) return null;
@@ -60,8 +60,8 @@ const mockRedis = {
     if (messages.length === 0) return null;
     return [[streamName, messages.map(m => [m.id, Object.entries(m.fields).flat()])]];
   }),
-  xack: jest.fn().mockResolvedValue(1),
-  xgroup: jest.fn().mockImplementation(async (command: string, stream: string, group: string) => {
+  xack: jest.fn<any>().mockResolvedValue(1),
+  xgroup: jest.fn<any>().mockImplementation(async (command: string, stream: string, group: string) => {
     if (command === 'CREATE') {
       const groups = mockConsumerGroups.get(stream) || new Map();
       if (groups.has(group)) {
@@ -72,7 +72,7 @@ const mockRedis = {
     }
     return 'OK';
   }),
-  xinfo: jest.fn().mockImplementation(async (command: string, stream: string) => {
+  xinfo: jest.fn<any>().mockImplementation(async (command: string, stream: string) => {
     const streamData = mockStreams.get(stream) || [];
     return [
       'length', streamData.length,
@@ -82,10 +82,10 @@ const mockRedis = {
       'groups', mockConsumerGroups.get(stream)?.size || 0
     ];
   }),
-  xlen: jest.fn().mockImplementation(async (stream: string) => {
+  xlen: jest.fn<any>().mockImplementation(async (stream: string) => {
     return (mockStreams.get(stream) || []).length;
   }),
-  xpending: jest.fn().mockImplementation(async (stream: string, group: string) => {
+  xpending: jest.fn<any>().mockImplementation(async (stream: string, group: string) => {
     const streamData = mockStreams.get(stream) || [];
     return [
       Math.min(5, streamData.length), // total pending
@@ -94,7 +94,7 @@ const mockRedis = {
       [['consumer-1', '3'], ['consumer-2', '2']] // consumer pending counts
     ];
   }),
-  xtrim: jest.fn().mockImplementation(async (stream: string, ...args: any[]) => {
+  xtrim: jest.fn<any>().mockImplementation(async (stream: string, ...args: any[]) => {
     const maxLenIdx = args.indexOf('MAXLEN');
     if (maxLenIdx !== -1) {
       const maxLen = parseInt(args[maxLenIdx + 2] || args[maxLenIdx + 1], 10);
@@ -105,10 +105,10 @@ const mockRedis = {
     }
     return 0;
   }),
-  ping: jest.fn().mockResolvedValue('PONG'),
-  disconnect: jest.fn().mockResolvedValue(undefined),
-  on: jest.fn(),
-  removeAllListeners: jest.fn()
+  ping: jest.fn<any>().mockResolvedValue('PONG'),
+  disconnect: jest.fn<any>().mockResolvedValue(undefined),
+  on: jest.fn<any>(),
+  removeAllListeners: jest.fn<any>()
 };
 
 jest.mock('ioredis', () => {
@@ -197,8 +197,8 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
         );
 
         expect(mockRedis.xadd).toHaveBeenCalled();
-        const callArgs = mockRedis.xadd.mock.calls[0];
-        const serialized = JSON.parse(callArgs[3]);
+        const callArgs = mockRedis.xadd.mock.calls[0] as unknown[];
+        const serialized = JSON.parse(callArgs[3] as string);
         expect(serialized).toEqual(complexMessage);
       });
 
@@ -736,7 +736,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
 
       // Messages should still be in queue
       const stats = batcher.getStats();
-      expect(stats.messagesQueued).toBe(5);
+      expect(stats.currentQueueSize).toBe(5);
 
       await batcher.destroy();
     });

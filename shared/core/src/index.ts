@@ -70,6 +70,20 @@ export type {
   StreamHealthThresholds,
   StreamAlert
 } from './stream-health-monitor';
+export {
+  SwapEventFilter,
+  getSwapEventFilter,
+  resetSwapEventFilter
+} from './swap-event-filter';
+export type {
+  SwapEventFilterConfig,
+  FilterResult,
+  FilterReason,
+  VolumeAggregate,
+  WhaleAlert,
+  FilterStats,
+  BatchResult
+} from './swap-event-filter';
 
 // Professional-grade arbitrage and analytics exports
 export {

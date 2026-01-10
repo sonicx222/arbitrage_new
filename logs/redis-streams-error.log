@@ -1,0 +1,4 @@
+2026-01-10T16:29:09.160Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T16:29:09.162Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T16:29:36.892Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T16:29:36.897Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
