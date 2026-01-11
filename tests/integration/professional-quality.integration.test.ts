@@ -5,13 +5,15 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { TestEnvironment, createMockPriceUpdate, createMockArbitrageOpportunity } from '../../shared/test-utils/src';
 import { ProfessionalQualityMonitor, getProfessionalQualityMonitor } from '../../shared/core/src/professional-quality-monitor';
 import { BSCDetectorService } from '../../services/bsc-detector/src/detector';
-import { ArbitrageDetector } from '../../shared/core/src/arbitrage-detector';
+// ArbitrageDetector module not yet implemented - tests work with detector service directly
+// import { ArbitrageDetector } from '../../shared/core/src/arbitrage-detector';
 
 describe('Professional Quality Integration Tests', () => {
   let testEnv: TestEnvironment;
   let qualityMonitor: ProfessionalQualityMonitor;
   let detector: BSCDetectorService;
-  let arbitrageDetector: ArbitrageDetector;
+  // ArbitrageDetector not available yet
+  // let arbitrageDetector: ArbitrageDetector;
 
   beforeAll(async () => {
     testEnv = await TestEnvironment.create();
@@ -25,11 +27,12 @@ describe('Professional Quality Integration Tests', () => {
       rpcUrl: 'http://mock-rpc'
     });
 
-    arbitrageDetector = new ArbitrageDetector({
-      minProfitThreshold: 0.005,
-      maxSlippage: 0.01,
-      detectionTimeout: 5000
-    });
+    // ArbitrageDetector not available yet - uses detector service directly
+    // arbitrageDetector = new ArbitrageDetector({
+    //   minProfitThreshold: 0.005,
+    //   maxSlippage: 0.01,
+    //   detectionTimeout: 5000
+    // });
   });
 
   afterAll(async () => {

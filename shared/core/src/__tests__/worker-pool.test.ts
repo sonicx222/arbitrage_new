@@ -53,7 +53,7 @@ describe('EventProcessingWorkerPool', () => {
 
     it('should create correct number of workers on start', async () => {
       // Mock worker setup
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'message') {
           // Simulate worker ready
         }
@@ -68,7 +68,7 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('task submission', () => {
     beforeEach(async () => {
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'message') {
           // Store message callback for later use
           mockWorker._messageCallback = callback;
@@ -142,7 +142,7 @@ describe('EventProcessingWorkerPool', () => {
     });
 
     it('should handle worker errors', async () => {
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'error') {
           // Simulate worker error
           setTimeout(() => callback(new Error('Worker crashed')), 10);
@@ -168,7 +168,7 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('batch task submission', () => {
     beforeEach(async () => {
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'message') {
           mockWorker._messageCallback = callback;
         }
@@ -240,7 +240,7 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('worker lifecycle', () => {
     it('should handle worker exit and restart', async () => {
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'exit') {
           mockWorker._exitCallback = callback;
         } else if (event === 'message') {
@@ -267,7 +267,7 @@ describe('EventProcessingWorkerPool', () => {
 
   describe('task prioritization', () => {
     beforeEach(async () => {
-      mockWorker.on.mockImplementation((event, callback) => {
+      mockWorker.on.mockImplementation((event: string, callback: (data?: unknown) => void) => {
         if (event === 'message') {
           mockWorker._messageCallback = callback;
         }

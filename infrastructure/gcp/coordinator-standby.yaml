@@ -1,0 +1,98 @@
+# GCP Cloud Run Service Configuration
+# Coordinator Standby Instance
+#
+# Deploys the coordinator as a standby instance on GCP
+# Automatically activates when primary coordinator fails
+#
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   gcloud run deploy arbitrage-coordinator-standby \
+#     --image gcr.io/PROJECT_ID/arbitrage-coordinator:latest \
+#     --platform managed \
+#     --region us-central1 \
+#     --allow-unauthenticated \
+#     --memory 256Mi \
+#     --cpu 1 \
+#     --min-instances 1 \
+#     --max-instances 1 \
+#     --env-vars-file infrastructure/gcp/coordinator-env.yaml
+#
+# GCP Free Tier Limits (as of 2025):
+# - Cloud Run: 2 million requests/month, 360,000 GB-seconds/month
+# - 1 f1-micro VM (Compute Engine) - 1 per month
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: arbitrage-coordinator-standby
+  annotations:
+    run.googleapis.com/launch-stage: GA
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 50
+      timeoutSeconds: 300
+      serviceAccountName: arbitrage-coordinator@PROJECT_ID.iam.gserviceaccount.com
+      containers:
+        - image: gcr.io/PROJECT_ID/arbitrage-coordinator:latest
+          name: coordinator
+          ports:
+            - containerPort: 3000
+              name: http1
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: REGION_ID
+              value: "us-central1"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: ENABLE_CROSS_REGION_HEALTH
+              value: "true"
+            - name: IS_STANDBY
+              value: "true"
+            - name: CAN_BECOME_LEADER
+              value: "true"
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redis-url
+                  key: latest
+          resources:
+            limits:
+              memory: 256Mi
+              cpu: "1"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3

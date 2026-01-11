@@ -564,3 +564,77 @@
 2026-01-10T19:25:10.221Z [redis-streams] info: Redis Streams client disconnected
 2026-01-10T19:25:10.224Z [redis-streams] info: Redis Streams client disconnected
 2026-01-10T19:25:10.228Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.316Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.356Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.394Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.499Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.503Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.506Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.510Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.511Z [redis-streams] info: Consumer group created {"stream":"stream:test","group":"test-group"}
+2026-01-10T23:30:56.523Z [redis-streams] info: Consumer group created {"stream":"stream:test","group":"existing-group"}
+2026-01-10T23:30:56.532Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.539Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.522Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.527Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.548Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.615Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.727Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.730Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.731Z [redis-streams] warn: Attempted to add message to destroyed batcher {"streamName":"stream:test"}
+2026-01-10T23:30:56.799Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.803Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:56.927Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.148Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.151Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.155Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.160Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.161Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:30:57.165Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T23:30:57.164Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.169Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.383Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:57.392Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.850Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.887Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.926Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.936Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.941Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.949Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.953Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.957Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.961Z [redis-streams] info: Consumer group created {"stream":"stream:test","group":"arbitrage-detectors"}
+2026-01-10T23:30:58.966Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.970Z [redis-streams] info: Consumer group created {"stream":"stream:test","group":"group-1"}
+2026-01-10T23:30:58.974Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.977Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.982Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.992Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.996Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.000Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.003Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.006Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.011Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.015Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.018Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.025Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.044Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.962Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:58.971Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.176Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.196Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.200Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.314Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.320Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.324Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:30:59.328Z [redis-streams] info: Redis Streams client disconnected
+2026-01-10T23:45:21.448Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:45:21.484Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T23:47:04.049Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:47:04.072Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T23:51:08.574Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:51:08.600Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T23:54:03.603Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:54:03.633Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-10T23:56:11.169Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-10T23:56:11.200Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}

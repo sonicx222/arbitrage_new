@@ -1,0 +1,29 @@
+{
+  "name": "@arbitrage/unified-detector",
+  "version": "1.0.0",
+  "description": "Unified Chain Detector - Multi-chain detector service for partitioned deployment",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@arbitrage/core": "workspace:*",
+    "@arbitrage/config": "workspace:*",
+    "@arbitrage/types": "workspace:*",
+    "ethers": "^6.9.0",
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11"
+  }
+}

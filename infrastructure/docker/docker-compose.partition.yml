@@ -1,0 +1,321 @@
+# Partitioned Chain Detector Deployment
+#
+# This docker-compose file implements ADR-003 (Partitioned Chain Detectors)
+# using the UnifiedChainDetector service with partition-based configuration.
+#
+# Partitions:
+# - partition-asia-fast: BSC + Polygon (asia-southeast1, heavy resources)
+# - partition-l2-fast: Arbitrum + Optimism + Base (asia-southeast1, standard resources)
+# - partition-high-value: Ethereum (us-east1, heavy resources)
+#
+# Usage:
+#   docker-compose -f docker-compose.partition.yml up -d
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see REFACTORING_ROADMAP.md Phase 2
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # Partitioned Chain Detectors (ADR-003)
+  # =============================================================================
+
+  # Partition: asia-fast (BSC + Polygon)
+  # Region: asia-southeast1, Provider: oracle, Profile: heavy
+  partition-asia-fast:
+    build:
+      context: ../..
+      dockerfile: services/unified-detector/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PARTITION_ID=asia-fast
+      - REGION_ID=asia-southeast1
+      - INSTANCE_ID=partition-asia-fast-${HOSTNAME:-local}
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HEALTH_CHECK_PORT=3001
+      - ENABLE_CROSS_REGION_HEALTH=true
+      # Chain-specific RPC URLs (override defaults)
+      - BSC_WS_URL=${BSC_WS_URL:-}
+      - BSC_RPC_URL=${BSC_RPC_URL:-}
+      - POLYGON_WS_URL=${POLYGON_WS_URL:-}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL:-}
+    ports:
+      - "3011:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=asia-fast"
+      - "com.arbitrage.chains=bsc,polygon"
+      - "com.arbitrage.region=asia-southeast1"
+      - "com.arbitrage.profile=heavy"
+
+  # Partition: l2-fast (Arbitrum + Optimism + Base)
+  # Region: asia-southeast1, Provider: fly, Profile: standard
+  partition-l2-fast:
+    build:
+      context: ../..
+      dockerfile: services/unified-detector/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PARTITION_ID=l2-fast
+      - REGION_ID=asia-southeast1
+      - INSTANCE_ID=partition-l2-fast-${HOSTNAME:-local}
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HEALTH_CHECK_PORT=3001
+      - ENABLE_CROSS_REGION_HEALTH=true
+      # Chain-specific RPC URLs (override defaults)
+      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:-}
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL:-}
+      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:-}
+      - BASE_WS_URL=${BASE_WS_URL:-}
+      - BASE_RPC_URL=${BASE_RPC_URL:-}
+    ports:
+      - "3012:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.75'
+        reservations:
+          memory: 192M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=l2-fast"
+      - "com.arbitrage.chains=arbitrum,optimism,base"
+      - "com.arbitrage.region=asia-southeast1"
+      - "com.arbitrage.profile=standard"
+
+  # Partition: high-value (Ethereum)
+  # Region: us-east1, Provider: oracle, Profile: heavy
+  partition-high-value:
+    build:
+      context: ../..
+      dockerfile: services/unified-detector/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PARTITION_ID=high-value
+      - REGION_ID=us-east1
+      - INSTANCE_ID=partition-high-value-${HOSTNAME:-local}
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HEALTH_CHECK_PORT=3001
+      - ENABLE_CROSS_REGION_HEALTH=true
+      # Chain-specific RPC URLs (override defaults)
+      - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:-}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:-}
+    ports:
+      - "3013:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=high-value"
+      - "com.arbitrage.chains=ethereum"
+      - "com.arbitrage.region=us-east1"
+      - "com.arbitrage.profile=heavy"
+
+  # =============================================================================
+  # Cross-Chain Analysis & Execution Services
+  # =============================================================================
+
+  # Cross-Chain Detector (consumes from all partitions via Redis Streams)
+  cross-chain-detector:
+    build:
+      context: ../..
+      dockerfile: services/cross-chain-detector/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - INSTANCE_ID=cross-chain-detector-${HOSTNAME:-local}
+      - HEALTH_CHECK_PORT=3001
+    ports:
+      - "3014:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      partition-asia-fast:
+        condition: service_healthy
+      partition-l2-fast:
+        condition: service_healthy
+      partition-high-value:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+
+  # Execution Engine
+  execution-engine:
+    build:
+      context: ../..
+      dockerfile: services/execution-engine/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - INSTANCE_ID=execution-engine-${HOSTNAME:-local}
+      - HEALTH_CHECK_PORT=3001
+      # Private keys for each chain (required for execution)
+      - ETHEREUM_PRIVATE_KEY=${ETHEREUM_PRIVATE_KEY}
+      - BSC_PRIVATE_KEY=${BSC_PRIVATE_KEY}
+      - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
+      - BASE_PRIVATE_KEY=${BASE_PRIVATE_KEY}
+      - POLYGON_PRIVATE_KEY=${POLYGON_PRIVATE_KEY}
+      - OPTIMISM_PRIVATE_KEY=${OPTIMISM_PRIVATE_KEY}
+    ports:
+      - "3015:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      cross-chain-detector:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # Dashboard & Monitoring
+  # =============================================================================
+
+  # Coordinator Dashboard
+  coordinator:
+    build:
+      context: ../..
+      dockerfile: services/coordinator/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - PORT=3000
+      - INSTANCE_ID=coordinator-${HOSTNAME:-local}
+      # Cross-region health configuration
+      - REGION_ID=${COORDINATOR_REGION:-us-east1}
+      - ENABLE_CROSS_REGION_HEALTH=true
+    depends_on:
+      redis:
+        condition: service_healthy
+      partition-asia-fast:
+        condition: service_healthy
+      partition-l2-fast:
+        condition: service_healthy
+      partition-high-value:
+        condition: service_healthy
+      cross-chain-detector:
+        condition: service_healthy
+      execution-engine:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+
+# =============================================================================
+# Networks & Volumes
+# =============================================================================
+
+networks:
+  arbitrage-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

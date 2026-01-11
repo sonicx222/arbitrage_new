@@ -72,6 +72,39 @@ export interface LockStats {
 }
 
 // =============================================================================
+// Lua Scripts for Atomic Operations
+// =============================================================================
+
+/**
+ * Atomic release: only delete if we own the lock.
+ * KEYS[1] = lock key
+ * ARGV[1] = expected lock value
+ * Returns 1 if released, 0 if not owner
+ */
+const RELEASE_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+`;
+
+/**
+ * Atomic extend: only extend TTL if we own the lock.
+ * KEYS[1] = lock key
+ * ARGV[1] = expected lock value
+ * ARGV[2] = new TTL in seconds
+ * Returns 1 if extended, 0 if not owner or key missing
+ */
+const EXTEND_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("expire", KEYS[1], ARGV[2])
+else
+  return 0
+end
+`;
+
+// =============================================================================
 // Distributed Lock Manager
 // =============================================================================
 
@@ -222,6 +255,7 @@ export class DistributedLockManager {
   /**
    * Release a held lock.
    * Only releases if the lock is still owned by this instance.
+   * Uses atomic Lua script to prevent TOCTOU race conditions.
    */
   private async releaseLock(key: string, lockValue: string): Promise<void> {
     if (!this.redis) {
@@ -229,20 +263,19 @@ export class DistributedLockManager {
     }
 
     try {
-      // Verify we still own the lock before releasing
-      const currentValue = await this.redis.get<string>(key);
+      // Atomic check-and-delete using Lua script
+      const released = await this.redis.eval<number>(
+        RELEASE_SCRIPT,
+        [key],
+        [lockValue]
+      );
 
-      if (currentValue === lockValue) {
-        await this.redis.del(key);
+      if (released === 1) {
         this.stats.releases++;
         this.stats.currentlyHeld = Math.max(0, this.stats.currentlyHeld - 1);
         this.logger.debug('Lock released', { key });
       } else {
-        this.logger.warn('Lock release skipped - not owner', {
-          key,
-          expectedValue: lockValue,
-          actualValue: currentValue
-        });
+        this.logger.warn('Lock release skipped - not owner or already released', { key });
       }
 
       // Clean up tracking
@@ -270,6 +303,7 @@ export class DistributedLockManager {
   /**
    * Extend a held lock's TTL.
    * Only extends if the lock is still owned by this instance.
+   * Uses atomic Lua script to prevent TOCTOU race conditions.
    */
   private async extendLock(key: string, lockValue: string, additionalMs: number): Promise<boolean> {
     if (!this.redis) {
@@ -277,17 +311,13 @@ export class DistributedLockManager {
     }
 
     try {
-      // Verify we still own the lock
-      const currentValue = await this.redis.get<string>(key);
-
-      if (currentValue !== lockValue) {
-        this.logger.warn('Lock extension failed - not owner', { key });
-        return false;
-      }
-
-      // Extend TTL
+      // Atomic check-and-extend using Lua script
       const ttlSeconds = Math.ceil(additionalMs / 1000);
-      const result = await this.redis.expire(key, ttlSeconds);
+      const result = await this.redis.eval<number>(
+        EXTEND_SCRIPT,
+        [key],
+        [lockValue, ttlSeconds.toString()]
+      );
 
       if (result === 1) {
         this.stats.extensions++;
@@ -295,6 +325,7 @@ export class DistributedLockManager {
         return true;
       }
 
+      this.logger.warn('Lock extension failed - not owner or key missing', { key });
       return false;
 
     } catch (error) {
@@ -454,17 +485,43 @@ export class DistributedLockManager {
 // =============================================================================
 
 let lockManagerInstance: DistributedLockManager | null = null;
+let lockManagerPromise: Promise<DistributedLockManager> | null = null;
+let lockManagerInitError: Error | null = null;
 
 /**
  * Get the singleton DistributedLockManager instance.
- * Creates and initializes on first call.
+ * Thread-safe: concurrent calls will wait for the same initialization.
  */
 export async function getDistributedLockManager(config?: LockConfig): Promise<DistributedLockManager> {
-  if (!lockManagerInstance) {
-    lockManagerInstance = new DistributedLockManager(config);
-    await lockManagerInstance.initialize();
+  // If already initialized successfully, return immediately
+  if (lockManagerInstance) {
+    return lockManagerInstance;
   }
-  return lockManagerInstance;
+
+  // If there's a cached error, throw it
+  if (lockManagerInitError) {
+    throw lockManagerInitError;
+  }
+
+  // If initialization is already in progress, wait for it
+  if (lockManagerPromise) {
+    return lockManagerPromise;
+  }
+
+  // Start new initialization (thread-safe: only first caller creates the promise)
+  lockManagerPromise = (async (): Promise<DistributedLockManager> => {
+    try {
+      const instance = new DistributedLockManager(config);
+      await instance.initialize();
+      lockManagerInstance = instance;
+      return instance;
+    } catch (error) {
+      lockManagerInitError = error as Error;
+      throw error;
+    }
+  })();
+
+  return lockManagerPromise;
 }
 
 /**
@@ -473,6 +530,8 @@ export async function getDistributedLockManager(config?: LockConfig): Promise<Di
 export async function resetDistributedLockManager(): Promise<void> {
   if (lockManagerInstance) {
     await lockManagerInstance.shutdown();
-    lockManagerInstance = null;
   }
+  lockManagerInstance = null;
+  lockManagerPromise = null;
+  lockManagerInitError = null;
 }

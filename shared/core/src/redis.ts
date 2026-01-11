@@ -152,12 +152,14 @@ export class RedisClient {
       // Check if already subscribed to prevent duplicate listeners
       if (this.subscriptions.has(channel)) {
         this.logger.warn(`Already subscribed to channel ${channel}, replacing callback`);
-        await this.unsubscribe(channel);
+        // Remove old listener first, then delete from map
+        const oldSubscription = this.subscriptions.get(channel)!;
+        this.subClient.removeListener('message', oldSubscription.listener as (...args: any[]) => void);
+        this.subscriptions.delete(channel);
+        // Note: We don't call subClient.unsubscribe() here because we're immediately resubscribing
       }
 
-      await this.subClient.subscribe(channel);
-
-      // Create and store the listener for cleanup
+      // Create the listener BEFORE subscribing to prevent missing messages
       const listener = (receivedChannel: string, message: string) => {
         if (receivedChannel === channel) {
           try {
@@ -169,10 +171,19 @@ export class RedisClient {
         }
       };
 
+      // Add listener first, then subscribe to channel
       this.subClient.on('message', listener);
       this.subscriptions.set(channel, { callback, listener });
 
-      this.logger.debug(`Subscribed to channel: ${channel}`);
+      try {
+        await this.subClient.subscribe(channel);
+        this.logger.debug(`Subscribed to channel: ${channel}`);
+      } catch (subscribeError) {
+        // Rollback: remove listener if subscribe fails
+        this.subClient.removeListener('message', listener as (...args: any[]) => void);
+        this.subscriptions.delete(channel);
+        throw subscribeError;
+      }
 
     } catch (error) {
       this.logger.error('Error subscribing to channel', { error, channel });
@@ -181,18 +192,23 @@ export class RedisClient {
   }
 
   async unsubscribe(channel: string): Promise<void> {
-    try {
-      const subscription = this.subscriptions.get(channel);
-      if (subscription) {
-        // Remove the specific listener
-        this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
-        this.subscriptions.delete(channel);
+    const subscription = this.subscriptions.get(channel);
+    if (!subscription) {
+      return; // Nothing to unsubscribe
+    }
 
-        await this.subClient.unsubscribe(channel);
-        this.logger.debug(`Unsubscribed from channel: ${channel}`);
-      }
+    // Delete from map first to prevent race conditions
+    this.subscriptions.delete(channel);
+
+    try {
+      // Remove listener
+      this.subClient.removeListener('message', subscription.listener as (...args: any[]) => void);
+      // Unsubscribe from channel
+      await this.subClient.unsubscribe(channel);
+      this.logger.debug(`Unsubscribed from channel: ${channel}`);
     } catch (error) {
       this.logger.error('Error unsubscribing from channel', { error, channel });
+      // Don't re-add to map - channel is considered unsubscribed even if cleanup failed
     }
   }
 
@@ -268,6 +284,25 @@ export class RedisClient {
     } catch (error) {
       this.logger.error('Error checking existence', { error });
       return false;
+    }
+  }
+
+  /**
+   * Execute a Lua script atomically.
+   * Used for atomic operations like conditional delete (check-and-delete).
+   *
+   * @param script - Lua script to execute
+   * @param keys - Array of keys to pass to the script (KEYS[1], KEYS[2], etc.)
+   * @param args - Array of arguments to pass to the script (ARGV[1], ARGV[2], etc.)
+   * @returns Script result
+   */
+  async eval<T = unknown>(script: string, keys: string[], args: string[]): Promise<T> {
+    try {
+      const result = await this.client.eval(script, keys.length, ...keys, ...args);
+      return result as T;
+    } catch (error) {
+      this.logger.error('Error executing Lua script', { error });
+      throw error;
     }
   }
 

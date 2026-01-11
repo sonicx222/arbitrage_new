@@ -3170,3 +3170,283 @@
 2026-01-10T19:25:09.559Z [price-matrix] info: PriceMatrix destroyed
 2026-01-10T19:25:09.559Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
 2026-01-10T19:25:09.563Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.935Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:57.968Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.970Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:57.971Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.973Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:57.976Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.979Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:57.982Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.985Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:57.987Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:57.989Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.015Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.017Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.019Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.020Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.021Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.023Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.025Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.026Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.032Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.033Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.043Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.045Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.048Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.049Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.058Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.059Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.068Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.069Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.071Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.072Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.073Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.074Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.075Z [price-matrix] info: PriceMatrix initialized {"maxPairs":50,"totalSlots":150,"useSharedMemory":true}
+2026-01-10T23:30:58.075Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key50"}
+2026-01-10T23:30:58.076Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key51"}
+2026-01-10T23:30:58.076Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key52"}
+2026-01-10T23:30:58.077Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key53"}
+2026-01-10T23:30:58.078Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key54"}
+2026-01-10T23:30:58.079Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key55"}
+2026-01-10T23:30:58.080Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key56"}
+2026-01-10T23:30:58.081Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key57"}
+2026-01-10T23:30:58.081Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key58"}
+2026-01-10T23:30:58.081Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key59"}
+2026-01-10T23:30:58.082Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key60"}
+2026-01-10T23:30:58.082Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key61"}
+2026-01-10T23:30:58.083Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key62"}
+2026-01-10T23:30:58.083Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key63"}
+2026-01-10T23:30:58.084Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key64"}
+2026-01-10T23:30:58.085Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key65"}
+2026-01-10T23:30:58.085Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key66"}
+2026-01-10T23:30:58.086Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key67"}
+2026-01-10T23:30:58.087Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key68"}
+2026-01-10T23:30:58.088Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key69"}
+2026-01-10T23:30:58.088Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key70"}
+2026-01-10T23:30:58.089Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key71"}
+2026-01-10T23:30:58.090Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key72"}
+2026-01-10T23:30:58.090Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key73"}
+2026-01-10T23:30:58.091Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key74"}
+2026-01-10T23:30:58.092Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key75"}
+2026-01-10T23:30:58.092Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key76"}
+2026-01-10T23:30:58.093Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key77"}
+2026-01-10T23:30:58.094Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key78"}
+2026-01-10T23:30:58.094Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key79"}
+2026-01-10T23:30:58.095Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key80"}
+2026-01-10T23:30:58.096Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key81"}
+2026-01-10T23:30:58.097Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key82"}
+2026-01-10T23:30:58.097Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key83"}
+2026-01-10T23:30:58.098Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key84"}
+2026-01-10T23:30:58.099Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key85"}
+2026-01-10T23:30:58.099Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key86"}
+2026-01-10T23:30:58.100Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key87"}
+2026-01-10T23:30:58.101Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key88"}
+2026-01-10T23:30:58.101Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key89"}
+2026-01-10T23:30:58.102Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key90"}
+2026-01-10T23:30:58.103Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key91"}
+2026-01-10T23:30:58.103Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key92"}
+2026-01-10T23:30:58.104Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key93"}
+2026-01-10T23:30:58.105Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key94"}
+2026-01-10T23:30:58.106Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key95"}
+2026-01-10T23:30:58.106Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key96"}
+2026-01-10T23:30:58.107Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key97"}
+2026-01-10T23:30:58.108Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key98"}
+2026-01-10T23:30:58.108Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"key99"}
+2026-01-10T23:30:58.109Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.110Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.116Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.122Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.123Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.124Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.125Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.134Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.136Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.137Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.139Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.149Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.150Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.151Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.151Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.152Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.153Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.154Z [price-matrix] info: PriceMatrix initialized {"maxPairs":500,"totalSlots":600,"useSharedMemory":true}
+2026-01-10T23:30:58.154Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.155Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.195Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1000,"useSharedMemory":true}
+2026-01-10T23:30:58.196Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.197Z [price-matrix] info: PriceMatrix initialized {"maxPairs":500,"totalSlots":550,"useSharedMemory":true}
+2026-01-10T23:30:58.198Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.200Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.201Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.202Z [price-matrix] info: PriceMatrix initialized {"maxPairs":500,"totalSlots":600,"useSharedMemory":true}
+2026-01-10T23:30:58.202Z [price-matrix] warn: getPriceMatrix called with config but instance already exists; config ignored
+2026-01-10T23:30:58.203Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.204Z [price-matrix] info: PriceMatrix initialized {"maxPairs":500,"totalSlots":600,"useSharedMemory":true}
+2026-01-10T23:30:58.204Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.205Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.205Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.207Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.207Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.208Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"overflow_key","hashIndex":2,"maxIndex":5}
+2026-01-10T23:30:58.210Z [price-matrix] info: PriceMatrix initialized {"maxPairs":100,"totalSlots":200,"useSharedMemory":true}
+2026-01-10T23:30:58.211Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.212Z [price-matrix] info: PriceMatrix initialized {"maxPairs":100,"totalSlots":200,"useSharedMemory":true}
+2026-01-10T23:30:58.222Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.222Z [price-matrix] info: PriceMatrix initialized {"maxPairs":100,"totalSlots":200,"useSharedMemory":true}
+2026-01-10T23:30:58.225Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.226Z [price-matrix] info: PriceMatrix initialized {"maxPairs":100,"totalSlots":200,"useSharedMemory":true}
+2026-01-10T23:30:58.227Z [price-matrix] info: PriceMatrix initialized {"maxPairs":10,"totalSlots":10,"useSharedMemory":true}
+2026-01-10T23:30:58.229Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"overflow_key"}
+2026-01-10T23:30:58.230Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.231Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.232Z [price-matrix] info: PriceMatrix initialized {"maxPairs":100,"totalSlots":200,"useSharedMemory":true}
+2026-01-10T23:30:58.234Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.235Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.240Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.241Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.243Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.244Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.250Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.033Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.070Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.072Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.074Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.075Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.077Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.078Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.080Z [price-matrix] info: PriceMatrix initialized {"maxPairs":500,"totalSlots":550,"useSharedMemory":true}
+2026-01-10T23:30:58.081Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.081Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.082Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.083Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.084Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.085Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.086Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.088Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.089Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.090Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.091Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.092Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.094Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.095Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.096Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.097Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.099Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.100Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.101Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.104Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.106Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.107Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.108Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.110Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.110Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.121Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.122Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.124Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.125Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.126Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.128Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.129Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.130Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.144Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.147Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.149Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.150Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.151Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.152Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.153Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.154Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.155Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.155Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.156Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.157Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.158Z [price-matrix] info: PriceMatrix initialized {"maxPairs":10,"totalSlots":110,"useSharedMemory":true}
+2026-01-10T23:30:58.158Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0010"}
+2026-01-10T23:30:58.159Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0011"}
+2026-01-10T23:30:58.160Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0012"}
+2026-01-10T23:30:58.160Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0013"}
+2026-01-10T23:30:58.161Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0014"}
+2026-01-10T23:30:58.162Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0015"}
+2026-01-10T23:30:58.162Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0016"}
+2026-01-10T23:30:58.163Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0017"}
+2026-01-10T23:30:58.163Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0018"}
+2026-01-10T23:30:58.164Z [price-matrix] warn: PriceMatrix maxPairs limit reached, ignoring new key {"key":"bsc:pancakeswap:0xpair0019"}
+2026-01-10T23:30:58.164Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.165Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.165Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.166Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.167Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.168Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.169Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.169Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.171Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.171Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.172Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.173Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.174Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.175Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.176Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.177Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.178Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.179Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.180Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.183Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key10","hashIndex":2,"maxIndex":10}
+2026-01-10T23:30:58.184Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key11","hashIndex":2,"maxIndex":10}
+2026-01-10T23:30:58.185Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key12","hashIndex":0,"maxIndex":10}
+2026-01-10T23:30:58.186Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key13","hashIndex":8,"maxIndex":10}
+2026-01-10T23:30:58.187Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key14","hashIndex":6,"maxIndex":10}
+2026-01-10T23:30:58.187Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key15","hashIndex":6,"maxIndex":10}
+2026-01-10T23:30:58.188Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key16","hashIndex":4,"maxIndex":10}
+2026-01-10T23:30:58.189Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key17","hashIndex":2,"maxIndex":10}
+2026-01-10T23:30:58.190Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key18","hashIndex":0,"maxIndex":10}
+2026-01-10T23:30:58.190Z [price-matrix] warn: PriceIndexMapper: All slots used, using hash-based index (potential collision) {"key":"key19","hashIndex":0,"maxIndex":10}
+2026-01-10T23:30:58.192Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.193Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.194Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.195Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.201Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.202Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.204Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.205Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.207Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.208Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.212Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.213Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.214Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.215Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.216Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.216Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.217Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.218Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.219Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.220Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.221Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.222Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.233Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.235Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.236Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.238Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.239Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.240Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.241Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.243Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.243Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.244Z [price-matrix] warn: setPrice called on destroyed PriceMatrix
+2026-01-10T23:30:58.249Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.250Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.251Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.252Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.254Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.294Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.295Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.296Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.297Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.297Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1000,"useSharedMemory":true}
+2026-01-10T23:30:58.298Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.298Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.299Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.301Z [price-matrix] info: PriceMatrix destroyed
+2026-01-10T23:30:58.301Z [price-matrix] info: PriceMatrix initialized {"maxPairs":1000,"totalSlots":1100,"useSharedMemory":true}
+2026-01-10T23:30:58.302Z [price-matrix] info: PriceMatrix destroyed

@@ -1,0 +1,111 @@
+#cloud-config
+# Cloud-init configuration for Cross-Chain Detector Service
+#
+# Runs on Oracle Cloud AMD instance (E2.1.Micro)
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker
+  - docker-compose
+  - git
+  - curl
+  - jq
+
+write_files:
+  - path: /opt/arbitrage/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      services:
+        cross-chain-detector:
+          image: ${docker_image}
+          restart: unless-stopped
+          ports:
+            - "3014:3001"
+          environment:
+            - NODE_ENV=production
+            - REDIS_URL=${redis_url}
+            - LOG_LEVEL=${log_level}
+            - INSTANCE_ID=oracle-cross-chain-$${HOSTNAME}
+            - HEALTH_CHECK_PORT=3001
+          healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+            interval: 15s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
+          deploy:
+            resources:
+              limits:
+                memory: 384M
+                cpus: '0.5'
+          logging:
+            driver: json-file
+            options:
+              max-size: "10m"
+              max-file: "3"
+
+  - path: /opt/arbitrage/scripts/health-check.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      HEALTH_URL="http://localhost:3014/health"
+      response=$(curl -s -o /dev/null -w "%%{http_code}" "$HEALTH_URL")
+      if [ "$response" = "200" ]; then
+        exit 0
+      fi
+      exit 1
+
+  - path: /opt/arbitrage/scripts/restart-service.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      cd /opt/arbitrage
+      docker-compose pull
+      docker-compose down
+      docker-compose up -d
+      echo "Service restarted at $(date)"
+
+  - path: /etc/systemd/system/arbitrage-cross-chain.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Arbitrage Cross-Chain Detector Service
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/arbitrage
+      ExecStart=/usr/bin/docker-compose up -d
+      ExecStop=/usr/bin/docker-compose down
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/cron.d/arbitrage-health
+    permissions: '0644'
+    content: |
+      */5 * * * * root /opt/arbitrage/scripts/health-check.sh || /opt/arbitrage/scripts/restart-service.sh >> /var/log/arbitrage-restart.log 2>&1
+
+runcmd:
+  - systemctl start docker
+  - systemctl enable docker
+  - usermod -aG docker opc
+  - mkdir -p /opt/arbitrage/scripts /opt/arbitrage/logs
+  - chown -R opc:opc /opt/arbitrage
+  - cd /opt/arbitrage && docker-compose pull
+  - cd /opt/arbitrage && docker-compose up -d
+  - systemctl daemon-reload
+  - systemctl enable arbitrage-cross-chain
+  - firewall-cmd --permanent --add-port=3014/tcp
+  - firewall-cmd --reload
+  - echo "Cross-chain detector initialized at $(date)" >> /var/log/arbitrage-init.log
+
+final_message: "Cross-chain detector initialized successfully!"

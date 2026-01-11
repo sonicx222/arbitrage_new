@@ -45,6 +45,8 @@ export interface PriceOracleConfig {
   useFallback?: boolean;
   /** Custom fallback prices (extends defaults) */
   customFallbackPrices?: Record<string, number>;
+  /** Maximum local cache size to prevent unbounded memory growth (default: 10000) */
+  maxCacheSize?: number;
 }
 
 export interface PriceBatchRequest {
@@ -53,23 +55,43 @@ export interface PriceBatchRequest {
 }
 
 // =============================================================================
+// Symbol Normalization
+// =============================================================================
+
+/** Wrapped token aliases - maps wrapped to native */
+const TOKEN_ALIASES: Record<string, string> = {
+  WETH: 'ETH',
+  WBNB: 'BNB',
+  WMATIC: 'MATIC',
+  WAVAX: 'AVAX',
+  WFTM: 'FTM',
+  WBTC: 'BTC'
+};
+
+/**
+ * Normalize a token symbol (uppercase, trim, resolve aliases).
+ * This is a module-level function for consistent behavior across
+ * both PriceOracle class methods and standalone utility functions.
+ */
+function normalizeTokenSymbol(symbol: string): string {
+  const upper = symbol.toUpperCase().trim();
+  return TOKEN_ALIASES[upper] || upper;
+}
+
+// =============================================================================
 // Default Fallback Prices
 // =============================================================================
 
+// Note: Wrapped token entries (WETH, WBNB, etc.) are NOT included here
+// because normalizeTokenSymbol() aliases them to their native counterparts.
 const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
-  // Major cryptocurrencies
+  // Major cryptocurrencies (native tokens only - wrapped aliases handled by normalizeTokenSymbol)
   ETH: 2500,
-  WETH: 2500,
   BTC: 45000,
-  WBTC: 45000,
   BNB: 300,
-  WBNB: 300,
   MATIC: 0.80,
-  WMATIC: 0.80,
   AVAX: 35,
-  WAVAX: 35,
   FTM: 0.40,
-  WFTM: 0.40,
   OP: 2.50,
   ARB: 1.20,
 
@@ -94,16 +116,19 @@ const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
   YFI: 8000,
 
   // Liquid staking
-  stETH: 2500,
-  wstETH: 2900,
-  rETH: 2700,
-  cbETH: 2600,
+  STETH: 2500,
+  WSTETH: 2900,
+  RETH: 2700,
+  CBETH: 2600,
 
   // Meme coins (approximate)
   SHIB: 0.00001,
   DOGE: 0.08,
   PEPE: 0.000001
 };
+
+// Cache size limit to prevent unbounded memory growth
+const DEFAULT_MAX_CACHE_SIZE = 10000;
 
 // =============================================================================
 // Price Oracle
@@ -122,7 +147,8 @@ export class PriceOracle {
       cacheTtlSeconds: config.cacheTtlSeconds ?? 60,
       stalenessThresholdMs: config.stalenessThresholdMs ?? 300000,
       useFallback: config.useFallback ?? true,
-      customFallbackPrices: config.customFallbackPrices ?? {}
+      customFallbackPrices: config.customFallbackPrices ?? {},
+      maxCacheSize: config.maxCacheSize ?? DEFAULT_MAX_CACHE_SIZE
     };
 
     // Merge custom fallback prices with defaults
@@ -178,8 +204,9 @@ export class PriceOracle {
             isStale
           };
 
-          // Update local cache
+          // Update local cache and prune if needed
           this.localCache.set(cacheKey, tokenPrice);
+          this.pruneCache();
 
           return tokenPrice;
         }
@@ -199,6 +226,10 @@ export class PriceOracle {
           timestamp: Date.now(),
           isStale: true // Fallback is always considered stale
         };
+
+        // Cache fallback in local cache to avoid repeated lookups
+        this.localCache.set(cacheKey, tokenPrice);
+        this.pruneCache();
 
         this.logger.debug('Using fallback price', { symbol, price: fallbackPrice });
         return tokenPrice;
@@ -282,7 +313,7 @@ export class PriceOracle {
     const cacheKey = this.buildCacheKey(normalizedSymbol, chain);
     const timestamp = Date.now();
 
-    // Update local cache
+    // Update local cache and prune if needed
     const tokenPrice: TokenPrice = {
       symbol: normalizedSymbol,
       price,
@@ -291,6 +322,7 @@ export class PriceOracle {
       isStale: false
     };
     this.localCache.set(cacheKey, tokenPrice);
+    this.pruneCache();
 
     // Update Redis cache
     if (this.redis) {
@@ -408,20 +440,11 @@ export class PriceOracle {
   // Private Helpers
   // ===========================================================================
 
+  /**
+   * Normalize symbol using module-level function for consistency.
+   */
   private normalizeSymbol(symbol: string): string {
-    // Uppercase and trim
-    const normalized = symbol.toUpperCase().trim();
-
-    // Handle wrapped token aliases
-    const aliases: Record<string, string> = {
-      WETH: 'ETH',
-      WBNB: 'BNB',
-      WMATIC: 'MATIC',
-      WAVAX: 'AVAX',
-      WFTM: 'FTM'
-    };
-
-    return aliases[normalized] || normalized;
+    return normalizeTokenSymbol(symbol);
   }
 
   private buildCacheKey(symbol: string, chain?: string): string {
@@ -434,15 +457,45 @@ export class PriceOracle {
     return Date.now() - timestamp > this.config.stalenessThresholdMs;
   }
 
+  /**
+   * Prune cache to prevent unbounded memory growth.
+   * Removes oldest entries when cache exceeds max size.
+   */
+  private pruneCache(): void {
+    if (this.localCache.size <= this.config.maxCacheSize) {
+      return;
+    }
+
+    // Sort entries by timestamp (oldest first)
+    const entries = [...this.localCache.entries()];
+    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+    // Remove oldest entries to get below max size (remove 20% extra for hysteresis)
+    const targetSize = Math.floor(this.config.maxCacheSize * 0.8);
+    const toRemove = entries.length - targetSize;
+
+    for (let i = 0; i < toRemove; i++) {
+      this.localCache.delete(entries[i][0]);
+    }
+
+    this.logger.debug('Cache pruned', {
+      removed: toRemove,
+      newSize: this.localCache.size
+    });
+  }
+
   private deduplicateRequests(requests: PriceBatchRequest[]): PriceBatchRequest[] {
     const seen = new Set<string>();
     const unique: PriceBatchRequest[] = [];
 
     for (const req of requests) {
-      const key = this.buildCacheKey(req.symbol, req.chain);
+      // Normalize symbol before building cache key for proper deduplication
+      const normalizedSymbol = this.normalizeSymbol(req.symbol);
+      const key = this.buildCacheKey(normalizedSymbol, req.chain);
       if (!seen.has(key)) {
         seen.add(key);
-        unique.push(req);
+        // Store with normalized symbol
+        unique.push({ ...req, symbol: normalizedSymbol });
       }
     }
 
@@ -455,16 +508,43 @@ export class PriceOracle {
 // =============================================================================
 
 let oracleInstance: PriceOracle | null = null;
+let oraclePromise: Promise<PriceOracle> | null = null;
+let oracleInitError: Error | null = null;
 
 /**
  * Get the singleton PriceOracle instance.
+ * Thread-safe: concurrent calls will wait for the same initialization.
  */
 export async function getPriceOracle(config?: PriceOracleConfig): Promise<PriceOracle> {
-  if (!oracleInstance) {
-    oracleInstance = new PriceOracle(config);
-    await oracleInstance.initialize();
+  // If already initialized successfully, return immediately
+  if (oracleInstance) {
+    return oracleInstance;
   }
-  return oracleInstance;
+
+  // If there's a cached error, throw it
+  if (oracleInitError) {
+    throw oracleInitError;
+  }
+
+  // If initialization is already in progress, wait for it
+  if (oraclePromise) {
+    return oraclePromise;
+  }
+
+  // Start new initialization (thread-safe: only first caller creates the promise)
+  oraclePromise = (async (): Promise<PriceOracle> => {
+    try {
+      const instance = new PriceOracle(config);
+      await instance.initialize();
+      oracleInstance = instance;
+      return instance;
+    } catch (error) {
+      oracleInitError = error as Error;
+      throw error;
+    }
+  })();
+
+  return oraclePromise;
 }
 
 /**
@@ -475,6 +555,8 @@ export function resetPriceOracle(): void {
     oracleInstance.clearLocalCache();
   }
   oracleInstance = null;
+  oraclePromise = null;
+  oracleInitError = null;
 }
 
 // =============================================================================
@@ -483,16 +565,18 @@ export function resetPriceOracle(): void {
 
 /**
  * Quick price lookup with fallback (doesn't require initialization).
+ * Uses normalizeTokenSymbol for consistent alias handling (e.g., WETH → ETH).
  */
 export function getDefaultPrice(symbol: string): number {
-  const normalized = symbol.toUpperCase().trim();
+  const normalized = normalizeTokenSymbol(symbol);
   return DEFAULT_FALLBACK_PRICES[normalized] ?? 0;
 }
 
 /**
  * Check if a token has a known default price.
+ * Uses normalizeTokenSymbol for consistent alias handling (e.g., WETH → ETH).
  */
 export function hasDefaultPrice(symbol: string): boolean {
-  const normalized = symbol.toUpperCase().trim();
+  const normalized = normalizeTokenSymbol(symbol);
   return normalized in DEFAULT_FALLBACK_PRICES;
 }

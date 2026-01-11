@@ -1,0 +1,27 @@
+{
+  "name": "@arbitrage/infrastructure-tests",
+  "version": "1.0.0",
+  "description": "Infrastructure configuration tests for Phase 3 multi-region deployment",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.0",
+    "jest": "^29.7.0",
+    "toml": "^3.0.0",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.3.0",
+    "yaml": "^2.3.4"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": ["**/*.test.ts"],
+    "moduleFileExtensions": ["ts", "js"],
+    "collectCoverageFrom": ["**/*.ts", "!**/*.test.ts"]
+  }
+}

@@ -9,32 +9,59 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Mock } from 'jest-mock';
 import { CoordinatorService } from '../coordinator';
 import { getRedisClient, resetRedisInstance, getRedisStreamsClient, resetRedisStreamsInstance, RedisStreamsClient } from '../../../../shared/core/src';
 
+// Type for mock Redis client
+interface MockRedisClient {
+  disconnect: Mock<() => Promise<void>>;
+  subscribe: Mock<() => Promise<void>>;
+  publish: Mock<() => Promise<number>>;
+  getAllServiceHealth: Mock<() => Promise<Record<string, unknown>>>;
+  updateServiceHealth: Mock<() => Promise<void>>;
+  getServiceHealth: Mock<() => Promise<unknown>>;
+  get: Mock<(key: string) => Promise<string | null>>;
+  set: Mock<() => Promise<string>>;
+  setNx: Mock<() => Promise<boolean>>;
+  del: Mock<() => Promise<number>>;
+  expire: Mock<() => Promise<number>>;
+}
+
+// Type for mock Streams client
+interface MockStreamsClient {
+  createConsumerGroup: Mock<() => Promise<void>>;
+  xreadgroup: Mock<() => Promise<unknown[]>>;
+  xack: Mock<() => Promise<number>>;
+  xadd: Mock<() => Promise<string>>;
+  disconnect: Mock<() => Promise<void>>;
+  ping: Mock<() => Promise<boolean>>;
+  STREAMS?: typeof RedisStreamsClient.STREAMS;
+}
+
 // Mock Redis client
-const mockRedisClient = {
-  disconnect: jest.fn().mockResolvedValue(undefined),
-  subscribe: jest.fn().mockResolvedValue(undefined),
-  publish: jest.fn().mockResolvedValue(1),
-  getAllServiceHealth: jest.fn().mockResolvedValue({}),
-  updateServiceHealth: jest.fn().mockResolvedValue(undefined),
-  getServiceHealth: jest.fn().mockResolvedValue(null),
-  get: jest.fn().mockResolvedValue(null),
-  set: jest.fn().mockResolvedValue('OK'),
-  setNx: jest.fn().mockResolvedValue(true),
-  del: jest.fn().mockResolvedValue(1),
-  expire: jest.fn().mockResolvedValue(1)
+const mockRedisClient: MockRedisClient = {
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  subscribe: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  publish: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  getAllServiceHealth: jest.fn<() => Promise<Record<string, unknown>>>().mockResolvedValue({}),
+  updateServiceHealth: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  getServiceHealth: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+  get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
+  set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
+  setNx: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  del: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  expire: jest.fn<() => Promise<number>>().mockResolvedValue(1)
 };
 
 // Mock Redis Streams client
-const mockStreamsClient = {
-  createConsumerGroup: jest.fn().mockResolvedValue(undefined),
-  xreadgroup: jest.fn().mockResolvedValue([]),
-  xack: jest.fn().mockResolvedValue(1),
-  xadd: jest.fn().mockResolvedValue('1234-0'),
-  disconnect: jest.fn().mockResolvedValue(undefined),
-  ping: jest.fn().mockResolvedValue(true)
+const mockStreamsClient: MockStreamsClient = {
+  createConsumerGroup: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  xreadgroup: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
+  xack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  xadd: jest.fn<() => Promise<string>>().mockResolvedValue('1234-0'),
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
 };
 
 // Add STREAMS constant to mock
@@ -77,11 +104,11 @@ describe('CoordinatorService Integration', () => {
     jest.clearAllMocks();
     resetRedisInstance();
 
-    // Setup mocks
-    (getRedisClient as jest.Mock).mockResolvedValue(mockRedisClient);
-    (getRedisStreamsClient as jest.Mock).mockResolvedValue(mockStreamsClient);
+    // Setup mocks - cast through unknown first for proper type casting
+    (getRedisClient as unknown as Mock<() => Promise<MockRedisClient>>).mockResolvedValue(mockRedisClient);
+    (getRedisStreamsClient as unknown as Mock<() => Promise<MockStreamsClient>>).mockResolvedValue(mockStreamsClient);
 
-    // Reset mock implementations
+    // Reset mock implementations - types already defined in interface
     mockRedisClient.setNx.mockResolvedValue(true);
     mockRedisClient.get.mockResolvedValue(null);
     mockStreamsClient.xreadgroup.mockResolvedValue([]);
@@ -113,7 +140,7 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should handle Redis connection failures gracefully', async () => {
-      (getRedisClient as jest.Mock).mockRejectedValue(new Error('Redis connection failed'));
+      (getRedisClient as unknown as Mock<() => Promise<MockRedisClient>>).mockRejectedValue(new Error('Redis connection failed'));
 
       await expect(coordinator.start(0)).rejects.toThrow('Redis connection failed');
     });
@@ -200,7 +227,7 @@ describe('CoordinatorService Integration', () => {
       const port = server.address().port;
 
       const response = await fetch(`http://localhost:${port}/api/leader`);
-      const data = await response.json();
+      const data = await response.json() as { isLeader: boolean; instanceId: string; lockKey: string };
 
       expect(data.isLeader).toBe(true);
       expect(data.instanceId).toBeDefined();
@@ -437,7 +464,7 @@ describe('CoordinatorService Integration', () => {
       const response = await fetch(`http://localhost:${port}/api/health`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as { status: string; isLeader: boolean; instanceId: string };
       expect(data.status).toBe('ok');
       expect(data.isLeader).toBeDefined();
       expect(data.instanceId).toBeDefined();
@@ -447,7 +474,7 @@ describe('CoordinatorService Integration', () => {
       const response = await fetch(`http://localhost:${port}/api/metrics`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as { totalOpportunities: number; whaleAlerts: number; pendingOpportunities: number };
       expect(data.totalOpportunities).toBeDefined();
       expect(data.whaleAlerts).toBeDefined();
       expect(data.pendingOpportunities).toBeDefined();
@@ -457,7 +484,7 @@ describe('CoordinatorService Integration', () => {
       const response = await fetch(`http://localhost:${port}/api/opportunities`);
       expect(response.status).toBe(200);
 
-      const data = await response.json();
+      const data = await response.json() as unknown[];
       expect(Array.isArray(data)).toBe(true);
     });
 
@@ -470,7 +497,7 @@ describe('CoordinatorService Integration', () => {
       });
 
       expect(response.status).toBe(403);
-      const data = await response.json();
+      const data = await response.json() as { error: string };
       expect(data.error).toContain('Only leader');
     });
 
@@ -483,7 +510,7 @@ describe('CoordinatorService Integration', () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = await response.json() as { success: boolean };
       expect(data.success).toBe(true);
     });
   });
