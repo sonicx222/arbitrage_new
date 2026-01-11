@@ -30,7 +30,7 @@ import {
   DistributedLockManager,
   getDistributedLockManager
 } from '../../../shared/core/src';
-import { CHAINS, ARBITRAGE_CONFIG } from '../../../shared/config/src';
+import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS } from '../../../shared/config/src';
 import {
   ArbitrageOpportunity,
   ServiceHealth
@@ -74,7 +74,23 @@ interface ExecutionStats {
   failedExecutions: number;
   queueRejects: number;
   lockConflicts: number;
+  executionTimeouts: number;
+  messageProcessingErrors: number;
+  providerReconnections: number;
+  providerHealthCheckFailures: number;
 }
+
+// P1-2 FIX: Provider health tracking
+interface ProviderHealth {
+  healthy: boolean;
+  lastCheck: number;
+  consecutiveFailures: number;
+  lastError?: string;
+}
+
+// P0-3 FIX: Execution timeout configuration
+const EXECUTION_TIMEOUT_MS = 55000; // 55 seconds - must be less than lock TTL (60s)
+const TRANSACTION_TIMEOUT_MS = 50000; // 50 seconds for blockchain operations
 
 // =============================================================================
 // Execution Engine Service
@@ -90,6 +106,8 @@ export class ExecutionEngineService {
 
   private wallets: Map<string, ethers.Wallet> = new Map();
   private providers: Map<string, ethers.JsonRpcProvider> = new Map();
+  // P1-2 FIX: Track provider health for each chain
+  private providerHealth: Map<string, ProviderHealth> = new Map();
   private executionQueue: ArbitrageOpportunity[] = [];
   private activeExecutions: Set<string> = new Set();
 
@@ -113,13 +131,22 @@ export class ExecutionEngineService {
     successfulExecutions: 0,
     failedExecutions: 0,
     queueRejects: 0,
-    lockConflicts: 0
+    lockConflicts: 0,
+    executionTimeouts: 0,
+    messageProcessingErrors: 0,
+    providerReconnections: 0,
+    providerHealthCheckFailures: 0
   };
+
+  // P0-1 FIX: Track pending messages for deferred ACK
+  private pendingMessages: Map<string, { streamName: string; groupName: string; messageId: string }> = new Map();
 
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
   private streamConsumerInterval: NodeJS.Timeout | null = null;
+  // P1-2/P1-3 FIX: Provider health check interval
+  private providerHealthCheckInterval: NodeJS.Timeout | null = null;
 
   constructor(queueConfig?: Partial<QueueConfig>) {
     this.perfLogger = getPerformanceLogger('execution-engine');
@@ -171,8 +198,14 @@ export class ExecutionEngineService {
       });
 
       // Initialize blockchain providers and wallets
-      this.initializeProviders();
+      await this.initializeProviders();
       this.initializeWallets();
+
+      // P1-2 FIX: Validate provider connectivity before starting
+      await this.validateProviderConnectivity();
+
+      // P1-3 FIX: Start provider health monitoring for reconnection
+      this.startProviderHealthChecks();
 
       // Create consumer groups for Redis Streams
       await this.createConsumerGroups();
@@ -227,6 +260,8 @@ export class ExecutionEngineService {
       this.activeExecutions.clear();
       this.wallets.clear();
       this.providers.clear();
+      // P1-2/P1-3 FIX: Clear provider health tracking
+      this.providerHealth.clear();
 
       this.logger.info('Execution Engine Service stopped');
     });
@@ -251,23 +286,222 @@ export class ExecutionEngineService {
       clearInterval(this.streamConsumerInterval);
       this.streamConsumerInterval = null;
     }
+    // P1-2/P1-3 FIX: Clear provider health check interval
+    if (this.providerHealthCheckInterval) {
+      clearInterval(this.providerHealthCheckInterval);
+      this.providerHealthCheckInterval = null;
+    }
   }
 
   // ===========================================================================
   // Initialization
   // ===========================================================================
 
-  private initializeProviders(): void {
+  /**
+   * P1-2 FIX: Initialize providers with health tracking
+   */
+  private async initializeProviders(): Promise<void> {
     for (const [chainName, chainConfig] of Object.entries(CHAINS)) {
       try {
-        this.providers.set(chainName, new ethers.JsonRpcProvider(chainConfig.rpcUrl));
+        const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        this.providers.set(chainName, provider);
+
+        // Initialize health tracking for this provider
+        this.providerHealth.set(chainName, {
+          healthy: false, // Will be verified in validateProviderConnectivity
+          lastCheck: 0,
+          consecutiveFailures: 0
+        });
       } catch (error) {
         this.logger.warn(`Failed to initialize provider for ${chainName}`, { error });
+        this.providerHealth.set(chainName, {
+          healthy: false,
+          lastCheck: Date.now(),
+          consecutiveFailures: 1,
+          lastError: (error as Error).message
+        });
       }
     }
     this.logger.info('Initialized blockchain providers', {
       count: this.providers.size
     });
+  }
+
+  /**
+   * P1-2 FIX: Validate provider connectivity before starting
+   * Ensures RPC endpoints are actually reachable
+   */
+  private async validateProviderConnectivity(): Promise<void> {
+    const healthyProviders: string[] = [];
+    const unhealthyProviders: string[] = [];
+
+    for (const [chainName, provider] of this.providers) {
+      try {
+        // Quick connectivity check - get block number
+        await Promise.race([
+          provider.getBlockNumber(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Connectivity check timeout')), 5000)
+          )
+        ]);
+
+        // Mark as healthy
+        this.providerHealth.set(chainName, {
+          healthy: true,
+          lastCheck: Date.now(),
+          consecutiveFailures: 0
+        });
+        healthyProviders.push(chainName);
+
+        this.logger.debug(`Provider connectivity verified for ${chainName}`);
+      } catch (error) {
+        // Mark as unhealthy
+        const health = this.providerHealth.get(chainName) || {
+          healthy: false,
+          lastCheck: 0,
+          consecutiveFailures: 0
+        };
+        this.providerHealth.set(chainName, {
+          ...health,
+          healthy: false,
+          lastCheck: Date.now(),
+          consecutiveFailures: health.consecutiveFailures + 1,
+          lastError: (error as Error).message
+        });
+        unhealthyProviders.push(chainName);
+        this.stats.providerHealthCheckFailures++;
+
+        this.logger.warn(`Provider connectivity failed for ${chainName}`, {
+          error: (error as Error).message
+        });
+      }
+    }
+
+    this.logger.info('Provider connectivity validation complete', {
+      healthy: healthyProviders,
+      unhealthy: unhealthyProviders,
+      healthyCount: healthyProviders.length,
+      unhealthyCount: unhealthyProviders.length
+    });
+
+    // Don't fail startup if some providers are unhealthy - they may recover
+    if (healthyProviders.length === 0 && this.providers.size > 0) {
+      this.logger.warn('No providers are currently healthy - service may be limited');
+    }
+  }
+
+  /**
+   * P1-3 FIX: Start periodic provider health checks for reconnection
+   */
+  private startProviderHealthChecks(): void {
+    // Check provider health every 30 seconds
+    this.providerHealthCheckInterval = setInterval(async () => {
+      if (!this.stateManager.isRunning()) return;
+
+      for (const [chainName, provider] of this.providers) {
+        await this.checkAndReconnectProvider(chainName, provider);
+      }
+    }, 30000);
+  }
+
+  /**
+   * P1-3 FIX: Check provider health and attempt reconnection if needed
+   */
+  private async checkAndReconnectProvider(
+    chainName: string,
+    provider: ethers.JsonRpcProvider
+  ): Promise<void> {
+    const health = this.providerHealth.get(chainName);
+    if (!health) return;
+
+    try {
+      // Quick health check
+      await Promise.race([
+        provider.getBlockNumber(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Health check timeout')), 5000)
+        )
+      ]);
+
+      // Update health status
+      if (!health.healthy) {
+        // Provider recovered
+        this.logger.info(`Provider recovered for ${chainName}`, {
+          previousFailures: health.consecutiveFailures
+        });
+      }
+
+      this.providerHealth.set(chainName, {
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0
+      });
+    } catch (error) {
+      // Provider unhealthy - attempt reconnection
+      const newFailures = health.consecutiveFailures + 1;
+      this.providerHealth.set(chainName, {
+        healthy: false,
+        lastCheck: Date.now(),
+        consecutiveFailures: newFailures,
+        lastError: (error as Error).message
+      });
+      this.stats.providerHealthCheckFailures++;
+
+      this.logger.warn(`Provider health check failed for ${chainName}`, {
+        consecutiveFailures: newFailures,
+        error: (error as Error).message
+      });
+
+      // Attempt reconnection after 3 consecutive failures
+      if (newFailures >= 3) {
+        await this.attemptProviderReconnection(chainName);
+      }
+    }
+  }
+
+  /**
+   * P1-3 FIX: Attempt to reconnect a failed provider
+   */
+  private async attemptProviderReconnection(chainName: string): Promise<void> {
+    const chainConfig = CHAINS[chainName];
+    if (!chainConfig) return;
+
+    try {
+      this.logger.info(`Attempting provider reconnection for ${chainName}`);
+
+      // Create new provider instance
+      const newProvider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+
+      // Verify connectivity
+      await Promise.race([
+        newProvider.getBlockNumber(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Reconnection timeout')), 10000)
+        )
+      ]);
+
+      // Replace old provider
+      this.providers.set(chainName, newProvider);
+      this.providerHealth.set(chainName, {
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0
+      });
+      this.stats.providerReconnections++;
+
+      // Update wallet if exists
+      const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
+      if (privateKey && this.wallets.has(chainName)) {
+        const wallet = new ethers.Wallet(privateKey, newProvider);
+        this.wallets.set(chainName, wallet);
+      }
+
+      this.logger.info(`Provider reconnection successful for ${chainName}`);
+    } catch (error) {
+      this.logger.error(`Provider reconnection failed for ${chainName}`, {
+        error: (error as Error).message
+      });
+    }
   }
 
   private initializeWallets(): void {
@@ -331,6 +565,10 @@ export class ExecutionEngineService {
     }, 50);
   }
 
+  /**
+   * P0-1 FIX: Deferred ACK - messages are ACKed only after successful execution
+   * P0-12 FIX: Exception handling - wrap individual message handling in try/catch
+   */
   private async consumeOpportunitiesStream(): Promise<void> {
     if (!this.streamsClient) return;
 
@@ -347,13 +585,82 @@ export class ExecutionEngineService {
       });
 
       for (const message of messages) {
-        this.handleArbitrageOpportunity(message.data as ArbitrageOpportunity);
-        await this.streamsClient.xack(config.streamName, config.groupName, message.id);
+        // P0-12 FIX: Wrap individual message handling in try/catch
+        try {
+          const opportunity = message.data as ArbitrageOpportunity;
+
+          // P0-1 FIX: Store message info for deferred ACK after execution
+          this.pendingMessages.set(opportunity.id, {
+            streamName: config.streamName,
+            groupName: config.groupName,
+            messageId: message.id
+          });
+
+          // Queue the opportunity - ACK will happen after execution completes
+          this.handleArbitrageOpportunity(opportunity);
+        } catch (error) {
+          // P0-12 FIX: Always ACK on processing error to prevent infinite redelivery
+          this.stats.messageProcessingErrors++;
+          this.logger.error('Message processing error - ACKing to prevent redelivery loop', {
+            messageId: message.id,
+            error: (error as Error).message
+          });
+
+          // Move to Dead Letter Queue and ACK
+          await this.moveToDeadLetterQueue(message, error as Error);
+          await this.streamsClient!.xack(config.streamName, config.groupName, message.id);
+        }
       }
     } catch (error) {
       if (!(error as Error).message?.includes('timeout')) {
         this.logger.error('Error consuming opportunities stream', { error });
       }
+    }
+  }
+
+  /**
+   * P0-1 FIX: ACK message after successful execution
+   */
+  private async ackMessageAfterExecution(opportunityId: string): Promise<void> {
+    const pendingInfo = this.pendingMessages.get(opportunityId);
+    if (!pendingInfo || !this.streamsClient) return;
+
+    try {
+      await this.streamsClient.xack(
+        pendingInfo.streamName,
+        pendingInfo.groupName,
+        pendingInfo.messageId
+      );
+      this.pendingMessages.delete(opportunityId);
+      this.logger.debug('Message ACKed after execution', { opportunityId });
+    } catch (error) {
+      this.logger.error('Failed to ACK message after execution', {
+        opportunityId,
+        error: (error as Error).message
+      });
+    }
+  }
+
+  /**
+   * P0-12 FIX: Move failed messages to Dead Letter Queue
+   */
+  private async moveToDeadLetterQueue(message: { id: string; data: unknown }, error: Error): Promise<void> {
+    if (!this.streamsClient) return;
+
+    try {
+      await this.streamsClient.xadd('stream:dead-letter-queue', {
+        originalMessageId: message.id,
+        originalStream: RedisStreamsClient.STREAMS.OPPORTUNITIES,
+        data: message.data,
+        error: error.message,
+        timestamp: Date.now(),
+        service: 'execution-engine'
+      });
+    } catch (dlqError) {
+      this.logger.error('Failed to move message to DLQ', {
+        messageId: message.id,
+        error: (dlqError as Error).message
+      });
     }
   }
 
@@ -395,40 +702,54 @@ export class ExecutionEngineService {
     }
   }
 
-  private canEnqueue(): boolean {
-    // If paused, check if we're below low water mark
+  /**
+   * P1-2 fix: Consolidated backpressure logic to prevent race conditions.
+   * This is the ONLY method that modifies queuePaused state.
+   * Returns whether new items can be enqueued.
+   */
+  private updateAndCheckBackpressure(): boolean {
+    const queueSize = this.executionQueue.length;
+    const prevPaused = this.queuePaused;
+
+    // Update backpressure state atomically
     if (this.queuePaused) {
-      if (this.executionQueue.length <= this.queueConfig.lowWaterMark) {
+      // If paused, only release when below low water mark (hysteresis)
+      if (queueSize <= this.queueConfig.lowWaterMark) {
         this.queuePaused = false;
-        this.logger.info('Queue backpressure released', {
-          queueSize: this.executionQueue.length,
-          lowWaterMark: this.queueConfig.lowWaterMark
-        });
-      } else {
-        return false;
+      }
+    } else {
+      // If not paused, engage at high water mark
+      if (queueSize >= this.queueConfig.highWaterMark) {
+        this.queuePaused = true;
       }
     }
 
-    // Check if we've hit high water mark
-    if (this.executionQueue.length >= this.queueConfig.highWaterMark) {
-      this.queuePaused = true;
-      this.logger.warn('Queue backpressure engaged', {
-        queueSize: this.executionQueue.length,
-        highWaterMark: this.queueConfig.highWaterMark
-      });
-      return false;
+    // Log state changes
+    if (prevPaused !== this.queuePaused) {
+      if (this.queuePaused) {
+        this.logger.warn('Queue backpressure engaged', {
+          queueSize,
+          highWaterMark: this.queueConfig.highWaterMark
+        });
+      } else {
+        this.logger.info('Queue backpressure released', {
+          queueSize,
+          lowWaterMark: this.queueConfig.lowWaterMark
+        });
+      }
     }
 
-    return this.executionQueue.length < this.queueConfig.maxSize;
+    // Return whether we can accept new items
+    return !this.queuePaused && queueSize < this.queueConfig.maxSize;
+  }
+
+  private canEnqueue(): boolean {
+    return this.updateAndCheckBackpressure();
   }
 
   private updateQueueStatus(): void {
-    // Check if we need to engage/release backpressure
-    if (!this.queuePaused && this.executionQueue.length >= this.queueConfig.highWaterMark) {
-      this.queuePaused = true;
-    } else if (this.queuePaused && this.executionQueue.length <= this.queueConfig.lowWaterMark) {
-      this.queuePaused = false;
-    }
+    // P1-2 fix: Delegate to single source of truth
+    this.updateAndCheckBackpressure();
   }
 
   private validateOpportunity(opportunity: ArbitrageOpportunity): boolean {
@@ -489,6 +810,9 @@ export class ExecutionEngineService {
   /**
    * Execute opportunity with distributed lock to prevent duplicate executions.
    * This fixes the TOCTOU race condition.
+   *
+   * P0-2 FIX: Lock TTL now matches execution timeout
+   * P0-3 FIX: Execution is wrapped with timeout to prevent indefinite hangs
    */
   private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
     if (!this.lockManager) {
@@ -499,13 +823,18 @@ export class ExecutionEngineService {
     const lockResult = await this.lockManager.withLock(
       `opportunity:${opportunity.id}`,
       async () => {
-        await this.executeOpportunity(opportunity);
+        // P0-3 FIX: Wrap execution with timeout
+        await this.executeWithTimeout(opportunity);
       },
       {
-        ttlMs: 60000, // 60 second lock
-        retries: 0    // No retry - if locked, another instance is handling it
+        // P0-2 FIX: Lock TTL increased to 120s to accommodate execution timeout + buffer
+        ttlMs: 120000, // 120 second lock (2x execution timeout for safety)
+        retries: 0     // No retry - if locked, another instance is handling it
       }
     );
+
+    // P0-1 FIX: ACK the message after execution (success or failure)
+    await this.ackMessageAfterExecution(opportunity.id);
 
     if (!lockResult.success) {
       if (lockResult.reason === 'lock_not_acquired') {
@@ -519,6 +848,33 @@ export class ExecutionEngineService {
           error: lockResult.error
         });
       }
+    }
+  }
+
+  /**
+   * P0-3 FIX: Execute with timeout to prevent indefinite hangs
+   */
+  private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Execution timeout after ${EXECUTION_TIMEOUT_MS}ms`));
+      }, EXECUTION_TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([
+        this.executeOpportunity(opportunity),
+        timeoutPromise
+      ]);
+    } catch (error) {
+      if ((error as Error).message.includes('timeout')) {
+        this.stats.executionTimeouts++;
+        this.logger.error('Execution timed out', {
+          opportunityId: opportunity.id,
+          timeoutMs: EXECUTION_TIMEOUT_MS
+        });
+      }
+      throw error;
     }
   }
 
@@ -609,9 +965,17 @@ export class ExecutionEngineService {
     // Apply MEV protection
     const protectedTx = await this.applyMEVProtection(flashLoanTx, chain);
 
-    // Execute transaction
-    const txResponse = await wallet.sendTransaction(protectedTx);
-    const receipt = await txResponse.wait();
+    // P0-3 FIX: Execute transaction with timeout
+    const txResponse = await this.withTransactionTimeout(
+      () => wallet.sendTransaction(protectedTx),
+      'sendTransaction'
+    );
+
+    // P0-3 FIX: Wait for receipt with timeout
+    const receipt = await this.withTransactionTimeout(
+      () => txResponse.wait(),
+      'waitForReceipt'
+    );
 
     if (!receipt) {
       throw new Error('Transaction receipt not received');
@@ -631,6 +995,22 @@ export class ExecutionEngineService {
       chain,
       dex: opportunity.buyDex
     };
+  }
+
+  /**
+   * P0-3 FIX: Wrap blockchain operations with timeout
+   */
+  private async withTransactionTimeout<T>(
+    operation: () => Promise<T>,
+    operationName: string
+  ): Promise<T> {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Transaction ${operationName} timeout after ${TRANSACTION_TIMEOUT_MS}ms`));
+      }, TRANSACTION_TIMEOUT_MS);
+    });
+
+    return Promise.race([operation(), timeoutPromise]);
   }
 
   private async executeCrossChainArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {
@@ -682,24 +1062,18 @@ export class ExecutionEngineService {
       throw new Error(`No provider for chain: ${chain}`);
     }
 
-    // Aave V3 flash loan contract addresses
-    const flashLoanAddresses: {[chain: string]: string} = {
-      ethereum: '0x87870Bcd2C4c2e84A8c3C3a3FcACC94666c0d6Cf',
-      polygon: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
-      arbitrum: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
-      base: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5'
-    };
-
-    const address = flashLoanAddresses[chain];
-    if (!address) {
-      throw new Error(`No flash loan contract for chain: ${chain}`);
+    // P1-4 fix: Use centralized config instead of hardcoded addresses
+    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+    if (!flashLoanConfig) {
+      throw new Error(`No flash loan provider configured for chain: ${chain}`);
     }
 
-    const flashLoanAbi = [
-      'function executeFlashLoan(address asset, uint256 amount, address[] calldata path, uint256 minProfit) external'
-    ];
+    // Select ABI based on protocol type
+    const flashLoanAbi = flashLoanConfig.protocol === 'aave_v3'
+      ? ['function executeFlashLoan(address asset, uint256 amount, address[] calldata path, uint256 minProfit) external']
+      : ['function flashSwap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, bytes calldata data) external'];
 
-    return new ethers.Contract(address, flashLoanAbi, provider);
+    return new ethers.Contract(flashLoanConfig.address, flashLoanAbi, provider);
   }
 
   private async applyMEVProtection(
@@ -834,5 +1208,23 @@ export class ExecutionEngineService {
 
   getActiveExecutionsCount(): number {
     return this.activeExecutions.size;
+  }
+
+  /**
+   * P1-2/P1-3 FIX: Get provider health status for monitoring
+   */
+  getProviderHealth(): Map<string, ProviderHealth> {
+    return new Map(this.providerHealth);
+  }
+
+  /**
+   * P1-2/P1-3 FIX: Get healthy providers count
+   */
+  getHealthyProvidersCount(): number {
+    let count = 0;
+    for (const health of this.providerHealth.values()) {
+      if (health.healthy) count++;
+    }
+    return count;
   }
 }

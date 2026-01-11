@@ -1,7 +1,60 @@
 # ADR-003: Partitioned Chain Detectors
 
 ## Status
-**Accepted** | 2025-01-10
+**Implemented** | 2025-01-10 | Updated 2025-01-11
+
+## Implementation Status
+
+### Single-Chain Detector Deprecation (2025-01-11)
+
+All single-chain detector services are now deprecated in favor of `unified-detector`:
+
+| Service | Status | Replacement |
+|---------|--------|-------------|
+| `services/ethereum-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=high-value |
+| `services/arbitrum-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
+| `services/optimism-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
+| `services/base-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
+| `services/polygon-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=asia-fast |
+| `services/bsc-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=asia-fast |
+
+### Migration Markers Added
+
+Each deprecated service has:
+- `DEPRECATED.md` - Detailed migration instructions
+- `package.json` - `"deprecated"` field with migration notice
+
+### Usage
+
+```bash
+# Run with partition configuration
+PARTITION_ID=asia-fast npm start
+
+# Or specify chains directly
+ENABLED_CHAINS=bsc,polygon,avalanche npm start
+```
+
+### Documentation
+
+See [unified-detector README](../../../services/unified-detector/README.md) for complete usage instructions.
+
+### Cross-Chain Detector Exception
+
+The `cross-chain-detector` service is an intentional exception to the BaseDetector pattern:
+
+| Aspect | BaseDetector | CrossChainDetector |
+|--------|--------------|-------------------|
+| Role | Event producer | Event consumer |
+| Chain connection | WebSocket to 1 chain | None (reads Redis Streams) |
+| Data flow | Chain -> Redis Streams | Redis Streams -> Analysis |
+| Scaling | 1 instance per partition | 1 global instance |
+
+The CrossChainDetector consumes price updates from ALL chains to detect cross-chain arbitrage opportunities. It does not extend BaseDetector because:
+- No blockchain WebSocket connection required
+- Aggregates multiple chains by design
+- Different lifecycle (tied to Redis, not chain availability)
+
+See `services/cross-chain-detector/src/detector.ts` for full documentation.
 
 ## Context
 

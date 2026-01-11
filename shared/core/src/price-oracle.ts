@@ -521,9 +521,12 @@ export async function getPriceOracle(config?: PriceOracleConfig): Promise<PriceO
     return oracleInstance;
   }
 
-  // If there's a cached error, throw it
-  if (oracleInitError) {
-    throw oracleInitError;
+  // P0-5 fix: Don't cache errors forever - allow retry on subsequent calls
+  // If there's a cached error but no pending promise, clear it to allow retry
+  if (oracleInitError && !oraclePromise) {
+    const cachedError = oracleInitError;
+    oracleInitError = null; // Clear so next call can retry
+    throw cachedError;
   }
 
   // If initialization is already in progress, wait for it
@@ -540,6 +543,7 @@ export async function getPriceOracle(config?: PriceOracleConfig): Promise<PriceO
       return instance;
     } catch (error) {
       oracleInitError = error as Error;
+      oraclePromise = null; // P0-5 fix: clear promise to allow retry
       throw error;
     }
   })();

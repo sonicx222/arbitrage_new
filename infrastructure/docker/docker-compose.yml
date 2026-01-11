@@ -15,61 +15,17 @@ services:
       timeout: 10s
       retries: 3
 
-  # BSC Detector
-  bsc-detector:
-    build: ../../services/bsc-detector
+  # Unified Chain Detector (ADR-003 - replaces single-chain detectors)
+  # Handles all chains: BSC, Ethereum, Arbitrum, Base, Polygon, Optimism
+  unified-detector:
+    build: ../../services/unified-detector
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Ethereum Detector
-  ethereum-detector:
-    build: ../../services/ethereum-detector
-    environment:
-      - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=info
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Arbitrum Detector
-  arbitrum-detector:
-    build: ../../services/arbitrum-detector
-    environment:
-      - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=info
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Base Detector
-  base-detector:
-    build: ../../services/base-detector
-    environment:
-      - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=info
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # Polygon Detector
-  polygon-detector:
-    build: ../../services/polygon-detector
-    environment:
-      - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=info
+      - PARTITION_ID=${PARTITION_ID:-default}
+      - INSTANCE_ID=${INSTANCE_ID:-unified-1}
+      - REGION_ID=${REGION_ID:-us-east-1}
     depends_on:
       redis:
         condition: service_healthy
@@ -85,15 +41,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      bsc-detector:
-        condition: service_started
-      ethereum-detector:
-        condition: service_started
-      arbitrum-detector:
-        condition: service_started
-      base-detector:
-        condition: service_started
-      polygon-detector:
+      unified-detector:
         condition: service_started
     restart: unless-stopped
 
@@ -129,15 +77,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      bsc-detector:
-        condition: service_started
-      ethereum-detector:
-        condition: service_started
-      arbitrum-detector:
-        condition: service_started
-      base-detector:
-        condition: service_started
-      polygon-detector:
+      unified-detector:
         condition: service_started
       cross-chain-detector:
         condition: service_started

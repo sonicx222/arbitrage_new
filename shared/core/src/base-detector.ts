@@ -108,8 +108,8 @@ export abstract class BaseDetector {
   // Race condition protection (additional guard alongside state machine)
   protected isStopping = false;
 
-  // Feature flag for gradual migration (default: use streams)
-  protected useStreams = true;
+  // Redis Streams is REQUIRED per ADR-002 - fail fast if unavailable
+  // Removed useStreams flag - Streams is always required
 
   protected config: DetectorConfig;
   protected chain: string;
@@ -181,83 +181,78 @@ export abstract class BaseDetector {
 
   protected async initializeRedis(): Promise<void> {
     try {
-      // Initialize legacy Redis Pub/Sub client (for backward compatibility)
+      // Initialize Redis client for basic operations
       this.redis = await getRedisClient() as RedisClient;
-      this.logger.debug('Redis Pub/Sub client initialized');
+      this.logger.debug('Redis client initialized');
 
-      // Initialize Redis Streams client (ADR-002)
-      if (this.useStreams) {
-        try {
-          this.streamsClient = await getRedisStreamsClient();
-          this.logger.debug('Redis Streams client initialized');
+      // Initialize Redis Streams client (REQUIRED per ADR-002 - no fallback)
+      this.streamsClient = await getRedisStreamsClient();
+      this.logger.debug('Redis Streams client initialized');
 
-          // Create batchers for efficient command usage (50:1 target ratio)
-          this.priceUpdateBatcher = this.streamsClient.createBatcher(
-            RedisStreamsClient.STREAMS.PRICE_UPDATES,
-            {
-              maxBatchSize: 50,
-              maxWaitMs: 100 // Flush every 100ms for latency-sensitive price data
-            }
-          );
-
-          this.swapEventBatcher = this.streamsClient.createBatcher(
-            RedisStreamsClient.STREAMS.SWAP_EVENTS,
-            {
-              maxBatchSize: 100,
-              maxWaitMs: 500 // Less time-sensitive
-            }
-          );
-
-          this.whaleAlertBatcher = this.streamsClient.createBatcher(
-            RedisStreamsClient.STREAMS.WHALE_ALERTS,
-            {
-              maxBatchSize: 10,
-              maxWaitMs: 50 // Whale alerts are time-sensitive
-            }
-          );
-
-          this.logger.info('Redis Streams batchers initialized', {
-            priceUpdates: { maxBatch: 50, maxWaitMs: 100 },
-            swapEvents: { maxBatch: 100, maxWaitMs: 500 },
-            whaleAlerts: { maxBatch: 10, maxWaitMs: 50 }
-          });
-
-          // Initialize Smart Swap Event Filter (S1.2)
-          this.swapEventFilter = new SwapEventFilter({
-            minUsdValue: 10,       // Filter dust transactions < $10
-            whaleThreshold: 50000, // Alert for transactions >= $50K
-            dedupWindowMs: 5000,   // 5 second dedup window
-            aggregationWindowMs: 5000 // 5 second volume aggregation
-          });
-
-          // Set up whale alert handler to publish to stream
-          this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
-            this.publishWhaleAlert(alert).catch(err => {
-              this.logger.error('Failed to publish whale alert', { error: err });
-            });
-          });
-
-          // Set up volume aggregate handler to publish to stream
-          this.swapEventFilter.onVolumeAggregate((aggregate: VolumeAggregate) => {
-            this.publishVolumeAggregate(aggregate).catch(err => {
-              this.logger.error('Failed to publish volume aggregate', { error: err });
-            });
-          });
-
-          this.logger.info('Smart Swap Event Filter initialized', {
-            minUsdValue: 10,
-            whaleThreshold: 50000
-          });
-        } catch (streamsError) {
-          this.logger.warn('Failed to initialize Redis Streams, falling back to Pub/Sub', {
-            error: streamsError
-          });
-          this.useStreams = false;
+      // Create batchers for efficient command usage (50:1 target ratio)
+      this.priceUpdateBatcher = this.streamsClient.createBatcher(
+        RedisStreamsClient.STREAMS.PRICE_UPDATES,
+        {
+          maxBatchSize: 50,
+          maxWaitMs: 100 // Flush every 100ms for latency-sensitive price data
         }
-      }
+      );
+
+      this.swapEventBatcher = this.streamsClient.createBatcher(
+        RedisStreamsClient.STREAMS.SWAP_EVENTS,
+        {
+          maxBatchSize: 100,
+          maxWaitMs: 500 // Less time-sensitive
+        }
+      );
+
+      this.whaleAlertBatcher = this.streamsClient.createBatcher(
+        RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        {
+          maxBatchSize: 10,
+          maxWaitMs: 50 // Whale alerts are time-sensitive
+        }
+      );
+
+      this.logger.info('Redis Streams batchers initialized', {
+        priceUpdates: { maxBatch: 50, maxWaitMs: 100 },
+        swapEvents: { maxBatch: 100, maxWaitMs: 500 },
+        whaleAlerts: { maxBatch: 10, maxWaitMs: 50 }
+      });
+
+      // Initialize Smart Swap Event Filter (S1.2)
+      this.swapEventFilter = new SwapEventFilter({
+        minUsdValue: 10,       // Filter dust transactions < $10
+        whaleThreshold: 50000, // Alert for transactions >= $50K
+        dedupWindowMs: 5000,   // 5 second dedup window
+        aggregationWindowMs: 5000 // 5 second volume aggregation
+      });
+
+      // Set up whale alert handler to publish to stream with retry (P0-6 fix)
+      this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
+        this.publishWithRetry(
+          () => this.publishWhaleAlert(alert),
+          'whale alert',
+          3 // max retries
+        );
+      });
+
+      // Set up volume aggregate handler to publish to stream with retry
+      this.swapEventFilter.onVolumeAggregate((aggregate: VolumeAggregate) => {
+        this.publishWithRetry(
+          () => this.publishVolumeAggregate(aggregate),
+          'volume aggregate',
+          3 // max retries
+        );
+      });
+
+      this.logger.info('Smart Swap Event Filter initialized', {
+        minUsdValue: 10,
+        whaleThreshold: 50000
+      });
     } catch (error) {
-      this.logger.error('Failed to initialize Redis client', { error });
-      throw new Error('Redis initialization failed');
+      this.logger.error('Failed to initialize Redis/Streams', { error });
+      throw new Error('Redis Streams initialization failed - Streams required per ADR-002');
     }
   }
 
@@ -424,6 +419,11 @@ export abstract class BaseDetector {
     this.pairsByAddress.clear();
     this.monitoredPairs.clear();
 
+    // P0-2 fix: Clean up state manager event listeners
+    if (this.stateManager) {
+      this.stateManager.removeAllListeners();
+    }
+
     this.logger.info(`${this.chain} detector service stopped`);
   }
 
@@ -554,12 +554,16 @@ export abstract class BaseDetector {
         ? parseInt(log.blockNumber, 16)
         : log.blockNumber;
 
-      // Update pair data
+      // Update pair data atomically (P0-1 fix: prevents race conditions)
+      // Using Object.assign ensures all properties are updated in a single operation,
+      // so readers either see all old values or all new values, never a mix
       const extendedPair = pair as ExtendedPair;
-      extendedPair.reserve0 = reserve0;
-      extendedPair.reserve1 = reserve1;
-      extendedPair.blockNumber = blockNumber;
-      extendedPair.lastUpdate = Date.now();
+      Object.assign(extendedPair, {
+        reserve0,
+        reserve1,
+        blockNumber,
+        lastUpdate: Date.now()
+      });
 
       // Calculate price
       const price = this.calculatePrice(extendedPair);
@@ -1206,9 +1210,14 @@ export abstract class BaseDetector {
   }
 
   // Common publishing methods
-  // Updated 2025-01-10: Migrated to Redis Streams with batching (ADR-002, S1.1.4)
+  // Updated 2025-01-11: ADR-002 compliant - Redis Streams ONLY (no Pub/Sub fallback)
 
   protected async publishPriceUpdate(update: PriceUpdate): Promise<void> {
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.priceUpdateBatcher) {
+      throw new Error('Price update batcher not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'price-update',
       data: update,
@@ -1216,19 +1225,8 @@ export abstract class BaseDetector {
       source: `${this.chain}-detector`
     };
 
-    // Use Redis Streams with batching (primary) or fallback to Pub/Sub
-    if (this.useStreams && this.priceUpdateBatcher) {
-      try {
-        this.priceUpdateBatcher.add(message);
-      } catch (error) {
-        this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('price-updates', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('price-updates', message);
-    }
+    // Use Redis Streams with batching (ADR-002 - no fallback)
+    this.priceUpdateBatcher.add(message);
   }
 
   protected async publishSwapEvent(swapEvent: SwapEvent): Promise<void> {
@@ -1247,6 +1245,11 @@ export abstract class BaseDetector {
       }
     }
 
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.swapEventBatcher) {
+      throw new Error('Swap event batcher not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'swap-event',
       data: swapEvent,
@@ -1254,22 +1257,16 @@ export abstract class BaseDetector {
       source: `${this.chain}-detector`
     };
 
-    // Use Redis Streams with batching (primary) or fallback to Pub/Sub
-    if (this.useStreams && this.swapEventBatcher) {
-      try {
-        this.swapEventBatcher.add(message);
-      } catch (error) {
-        this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('swap-events', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('swap-events', message);
-    }
+    // Use Redis Streams with batching (ADR-002 - no fallback)
+    this.swapEventBatcher.add(message);
   }
 
   protected async publishArbitrageOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.streamsClient) {
+      throw new Error('Streams client not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'arbitrage-opportunity',
       data: opportunity,
@@ -1278,24 +1275,18 @@ export abstract class BaseDetector {
     };
 
     // Arbitrage opportunities are high-priority - publish directly to stream (no batching)
-    if (this.useStreams && this.streamsClient) {
-      try {
-        await this.streamsClient.xadd(
-          RedisStreamsClient.STREAMS.OPPORTUNITIES,
-          message
-        );
-      } catch (error) {
-        this.logger.warn('Stream publish failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('arbitrage-opportunities', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('arbitrage-opportunities', message);
-    }
+    await this.streamsClient.xadd(
+      RedisStreamsClient.STREAMS.OPPORTUNITIES,
+      message
+    );
   }
 
   protected async publishWhaleTransaction(whaleTransaction: any): Promise<void> {
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.whaleAlertBatcher) {
+      throw new Error('Whale alert batcher not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'whale-transaction',
       data: whaleTransaction,
@@ -1303,23 +1294,17 @@ export abstract class BaseDetector {
       source: `${this.chain}-detector`
     };
 
-    // Use Redis Streams with batching (primary) or fallback to Pub/Sub
-    if (this.useStreams && this.whaleAlertBatcher) {
-      try {
-        this.whaleAlertBatcher.add(message);
-      } catch (error) {
-        this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('whale-transactions', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('whale-transactions', message);
-    }
+    // Use Redis Streams with batching (ADR-002 - no fallback)
+    this.whaleAlertBatcher.add(message);
   }
 
   // Publish whale alert from SwapEventFilter (S1.2)
   protected async publishWhaleAlert(alert: WhaleAlert): Promise<void> {
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.whaleAlertBatcher) {
+      throw new Error('Whale alert batcher not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'whale-alert',
       data: alert,
@@ -1327,23 +1312,17 @@ export abstract class BaseDetector {
       source: `${this.chain}-detector`
     };
 
-    // Use Redis Streams with batching (primary) or fallback to Pub/Sub
-    if (this.useStreams && this.whaleAlertBatcher) {
-      try {
-        this.whaleAlertBatcher.add(message);
-      } catch (error) {
-        this.logger.warn('Stream batcher failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('whale-alerts', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('whale-alerts', message);
-    }
+    // Use Redis Streams with batching (ADR-002 - no fallback)
+    this.whaleAlertBatcher.add(message);
   }
 
   // Publish volume aggregate from SwapEventFilter (S1.2)
   protected async publishVolumeAggregate(aggregate: VolumeAggregate): Promise<void> {
+    // Streams required per ADR-002 - fail fast if not available
+    if (!this.streamsClient) {
+      throw new Error('Streams client not initialized - Streams required per ADR-002');
+    }
+
     const message: MessageEvent = {
       type: 'volume-aggregate',
       data: aggregate,
@@ -1351,22 +1330,11 @@ export abstract class BaseDetector {
       source: `${this.chain}-detector`
     };
 
-    // Use Redis Streams (primary) or fallback to Pub/Sub
-    if (this.useStreams && this.streamsClient) {
-      try {
-        await this.streamsClient.xadd(
-          RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
-          message
-        );
-      } catch (error) {
-        this.logger.warn('Stream publish failed, falling back to Pub/Sub', { error });
-        if (this.redis) {
-          await this.redis.publish('volume-aggregates', message);
-        }
-      }
-    } else if (this.redis) {
-      await this.redis.publish('volume-aggregates', message);
-    }
+    // Use Redis Streams directly (ADR-002 - no fallback)
+    await this.streamsClient.xadd(
+      RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
+      message
+    );
   }
 
   // Cleanup method for stream batchers
@@ -1421,7 +1389,7 @@ export abstract class BaseDetector {
       priceUpdates: this.priceUpdateBatcher?.getStats() || null,
       swapEvents: this.swapEventBatcher?.getStats() || null,
       whaleAlerts: this.whaleAlertBatcher?.getStats() || null,
-      useStreams: this.useStreams,
+      streamsEnabled: true, // Always true per ADR-002
       // Smart Swap Event Filter stats (S1.2)
       swapEventFilter: this.swapEventFilter?.getStats() || null
     };
@@ -1442,6 +1410,45 @@ export abstract class BaseDetector {
   }
 
   // Utility methods
+
+  /**
+   * Publish with retry and exponential backoff (P0-6 fix).
+   * Prevents silent failures for critical alerts like whale transactions.
+   */
+  protected async publishWithRetry(
+    publishFn: () => Promise<void>,
+    operationName: string,
+    maxRetries: number = 3
+  ): Promise<void> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await publishFn();
+        return; // Success
+      } catch (error) {
+        lastError = error as Error;
+
+        if (attempt < maxRetries) {
+          // Exponential backoff: 100ms, 200ms, 400ms...
+          const backoffMs = 100 * Math.pow(2, attempt - 1);
+          this.logger.warn(`${operationName} publish failed, retrying in ${backoffMs}ms`, {
+            attempt,
+            maxRetries,
+            error: this.formatError(error)
+          });
+          await this.sleep(backoffMs);
+        }
+      }
+    }
+
+    // All retries exhausted - log error with full context
+    this.logger.error(`${operationName} publish failed after ${maxRetries} attempts`, {
+      error: lastError,
+      operationName
+    });
+  }
+
   protected sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

@@ -52,6 +52,10 @@ export interface XTrimOptions {
 export interface XAddOptions {
   retry?: boolean;
   maxRetries?: number;
+  /** P1-3 fix: Maximum stream length to prevent unbounded growth */
+  maxLen?: number;
+  /** Use approximate (~) trimming for better performance (default: true) */
+  approximate?: boolean;
 }
 
 export interface StreamInfo {
@@ -94,6 +98,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
   private queue: T[] = [];
   private timer: NodeJS.Timeout | null = null;
   private flushing = false; // Guard against concurrent flushes
+  private flushLock: Promise<void> | null = null; // P0-1 fix: Mutex for atomic flush
   private destroyed = false;
   private stats: BatcherStats = {
     currentQueueSize: 0,
@@ -136,7 +141,17 @@ export class StreamBatcher<T = Record<string, unknown>> {
   }
 
   async flush(): Promise<void> {
-    // Guard against concurrent flushes (race condition fix)
+    // P0-1 fix: Use mutex lock to prevent concurrent flushes
+    // Wait for any existing flush operation to complete
+    if (this.flushLock) {
+      await this.flushLock;
+      // After waiting, check if queue was already emptied by previous flush
+      if (this.queue.length === 0) {
+        return;
+      }
+    }
+
+    // Guard against concurrent flushes (additional safety)
     if (this.flushing) {
       return;
     }
@@ -150,6 +165,9 @@ export class StreamBatcher<T = Record<string, unknown>> {
       return;
     }
 
+    // P0-1 fix: Create mutex lock BEFORE setting flushing flag
+    let resolveLock: () => void;
+    this.flushLock = new Promise(resolve => { resolveLock = resolve; });
     this.flushing = true;
 
     // Atomically take the batch - prevents race condition
@@ -182,6 +200,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
       throw error;
     } finally {
       this.flushing = false;
+      this.flushLock = null;
+      resolveLock!();
     }
   }
 
@@ -232,6 +252,19 @@ export class RedisStreamsClient {
     VOLUME_AGGREGATES: 'stream:volume-aggregates',
     HEALTH: 'stream:health'
   } as const;
+
+  /**
+   * P1-3 fix: Recommended MAXLEN values to prevent unbounded stream growth.
+   * These are approximate (~) limits for performance.
+   */
+  static readonly STREAM_MAX_LENGTHS: Record<string, number> = {
+    [RedisStreamsClient.STREAMS.PRICE_UPDATES]: 100000,    // High volume, keep more history
+    [RedisStreamsClient.STREAMS.SWAP_EVENTS]: 50000,       // Medium volume
+    [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 10000,     // Lower volume, important data
+    [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
+    [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
+    [RedisStreamsClient.STREAMS.HEALTH]: 1000              // Health checks, short history
+  };
 
   constructor(url: string, password?: string) {
     this.logger = createLogger('redis-streams');
@@ -284,8 +317,33 @@ export class RedisStreamsClient {
 
     for (let attempt = 0; attempt <= (options.retry ? maxRetries : 0); attempt++) {
       try {
-        const messageId = await this.client.xadd(streamName, id, 'data', serialized);
-        return messageId as string;
+        let messageId: string;
+
+        // P1-3 fix: Support MAXLEN to prevent unbounded stream growth
+        if (options.maxLen !== undefined) {
+          const approximate = options.approximate !== false; // Default to approximate
+          if (approximate) {
+            // Use approximate (~) trimming for better performance
+            messageId = await this.client.xadd(
+              streamName,
+              'MAXLEN', '~', options.maxLen.toString(),
+              id,
+              'data', serialized
+            ) as string;
+          } else {
+            // Exact trimming (slower but precise)
+            messageId = await this.client.xadd(
+              streamName,
+              'MAXLEN', options.maxLen.toString(),
+              id,
+              'data', serialized
+            ) as string;
+          }
+        } else {
+          messageId = await this.client.xadd(streamName, id, 'data', serialized) as string;
+        }
+
+        return messageId;
       } catch (error) {
         lastError = error as Error;
         if (!options.retry || attempt === maxRetries) {
@@ -297,6 +355,23 @@ export class RedisStreamsClient {
     }
 
     throw lastError;
+  }
+
+  /**
+   * P1-3 fix: Add message with automatic MAXLEN based on stream type.
+   * Uses recommended limits from STREAM_MAX_LENGTHS.
+   */
+  async xaddWithLimit<T = Record<string, unknown>>(
+    streamName: string,
+    message: T,
+    options: Omit<XAddOptions, 'maxLen'> = {}
+  ): Promise<string> {
+    const maxLen = RedisStreamsClient.STREAM_MAX_LENGTHS[streamName];
+    return this.xadd(streamName, message, '*', {
+      ...options,
+      maxLen,
+      approximate: true
+    });
   }
 
   // ===========================================================================

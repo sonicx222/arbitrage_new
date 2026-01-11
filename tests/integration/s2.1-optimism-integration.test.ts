@@ -247,7 +247,7 @@ describe('S2.1.3: Optimism Token Configurations', () => {
 // S2.1.1: Optimism Detector Core Logic Tests
 // =============================================================================
 
-describe('S2.1.1: OptimismDetectorService Core Logic', () => {
+describe('S2.1.1: Optimism Chain Detection Logic', () => {
   describe('Price Calculation Logic', () => {
     it('should calculate correct price ratio', () => {
       // Price calculation: reserve0 / reserve1

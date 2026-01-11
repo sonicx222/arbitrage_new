@@ -1,14 +1,32 @@
 // Expert Self-Healing Manager
 // Implements enterprise-grade automatic recovery patterns with intelligent decision making
+//
+// P0-10 FIX (Partial): Migrating from Pub/Sub to Redis Streams for critical system control messages
+// This ensures guaranteed delivery per ADR-002.
+//
+// Migration Status:
+// - [DONE] Added streams client for publishing to streams
+// - [DONE] Created helper for dual publish (streams + pub/sub for backward compatibility)
+// - [TODO] Add consumer groups for stream consumption
+// - [TODO] Remove Pub/Sub after all consumers migrated
 
 import { createLogger } from './logger';
 import { getRedisClient } from './redis';
+import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getEnhancedHealthMonitor } from './enhanced-health-monitor';
 import { getErrorRecoveryOrchestrator } from './error-recovery';
 
 const logger = createLogger('expert-self-healing-manager');
+
+// P0-10 FIX: Stream names for system control messages (ADR-002 compliant)
+const SYSTEM_STREAMS = {
+  FAILURES: 'stream:system-failures',
+  CONTROL: 'stream:system-control',
+  FAILOVER: 'stream:system-failover',
+  SCALING: 'stream:system-scaling'
+} as const;
 
 export enum FailureSeverity {
   LOW = 'low',           // Temporary glitch, self-correcting
@@ -65,6 +83,7 @@ export interface ServiceHealthState {
 
 export class ExpertSelfHealingManager {
   private redis = getRedisClient();
+  private streamsClient: RedisStreamsClient | null = null; // P0-10 FIX: Add streams client
   private circuitBreakers = getCircuitBreakerRegistry();
   private dlq = getDeadLetterQueue();
   private healthMonitor = getEnhancedHealthMonitor();
@@ -81,12 +100,59 @@ export class ExpertSelfHealingManager {
     this.initializeDefaultStates();
   }
 
+  /**
+   * P0-10 FIX: Initialize streams client for ADR-002 compliant message delivery
+   */
+  private async initializeStreamsClient(): Promise<void> {
+    if (!this.streamsClient) {
+      this.streamsClient = await getRedisStreamsClient();
+    }
+  }
+
+  /**
+   * P0-10 FIX: Publish to both Redis Streams (for guaranteed delivery) and Pub/Sub (for backward compatibility)
+   * This ensures messages are not lost even if the target service is temporarily unavailable.
+   */
+  private async publishControlMessage(
+    streamName: string,
+    pubsubChannel: string,
+    message: Record<string, any>
+  ): Promise<void> {
+    const redis = await this.redis;
+
+    // Primary: Publish to Redis Streams (guaranteed delivery)
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(streamName, message, { maxLen: 10000 });
+        logger.debug('Published control message to stream', { streamName, type: message.type });
+      } catch (error) {
+        logger.error('Failed to publish to stream, falling back to pub/sub only', {
+          streamName,
+          error: (error as Error).message
+        });
+      }
+    }
+
+    // Secondary: Publish to Pub/Sub (backward compatibility during migration)
+    try {
+      await redis.publish(pubsubChannel, message);
+    } catch (error) {
+      logger.error('Failed to publish to pub/sub', {
+        channel: pubsubChannel,
+        error: (error as Error).message
+      });
+    }
+  }
+
   async start(): Promise<void> {
     if (this.isRunning) return;
 
     logger.info('Starting Expert Self-Healing Manager');
 
     this.isRunning = true;
+
+    // P0-10 FIX: Initialize streams client for ADR-002 compliant messaging
+    await this.initializeStreamsClient();
 
     // Start monitoring and recovery loops
     this.startHealthMonitoring();
@@ -149,14 +215,25 @@ export class ExpertSelfHealingManager {
     // Update service health state
     await this.updateServiceHealthState(serviceName, failure);
 
-    const redis = await this.redis;
-    // Publish failure event
-    await redis.publish('system:failures', {
-      type: 'failure_reported',
-      data: failure,
-      timestamp: Date.now(),
-      source: 'expert-self-healing-manager'
-    });
+    // P0-10 FIX: Publish failure event to streams for guaranteed delivery
+    await this.publishControlMessage(
+      SYSTEM_STREAMS.FAILURES,
+      'system:failures',
+      {
+        type: 'failure_reported',
+        data: {
+          id: failure.id,
+          serviceName: failure.serviceName,
+          component: failure.component,
+          errorMessage: failure.error.message,
+          severity: failure.severity,
+          context: failure.context,
+          timestamp: failure.timestamp
+        },
+        timestamp: Date.now(),
+        source: 'expert-self-healing-manager'
+      }
+    );
 
     // Trigger immediate analysis and recovery
     await this.analyzeAndRecover(failure);
@@ -470,18 +547,21 @@ export class ExpertSelfHealingManager {
   }
 
   // Individual recovery action implementations
+  // P0-10 FIX: Updated to use publishControlMessage for dual stream/pub-sub delivery
   private async restartService(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      // Publish restart command to service
-      await redis.publish(`service:${serviceName}:control`, {
-        type: 'restart_command',
-        data: {
-          command: 'restart'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.CONTROL,
+        `service:${serviceName}:control`,
+        {
+          type: 'restart_command',
+          serviceName,
+          data: { command: 'restart' },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
 
       // Wait for service to report healthy
       const healthy = await this.waitForServiceHealth(serviceName, 30000);
@@ -494,15 +574,18 @@ export class ExpertSelfHealingManager {
 
   private async resetNetworkConnection(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      await redis.publish(`service:${serviceName}:control`, {
-        type: 'reset_network_command',
-        data: {
-          command: 'reset_network'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.CONTROL,
+        `service:${serviceName}:control`,
+        {
+          type: 'reset_network_command',
+          serviceName,
+          data: { command: 'reset_network' },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Network reset failed', { service: serviceName, error });
@@ -512,15 +595,18 @@ export class ExpertSelfHealingManager {
 
   private async performMemoryCompaction(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      await redis.publish(`service:${serviceName}:control`, {
-        type: 'memory_compaction_command',
-        data: {
-          command: 'memory_compaction'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.CONTROL,
+        `service:${serviceName}:control`,
+        {
+          type: 'memory_compaction_command',
+          serviceName,
+          data: { command: 'memory_compaction' },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Memory compaction failed', { service: serviceName, error });
@@ -544,16 +630,18 @@ export class ExpertSelfHealingManager {
 
   private async repairDataIntegrity(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      // Trigger data integrity check and repair
-      await redis.publish(`service:${serviceName}:control`, {
-        type: 'repair_data_command',
-        data: {
-          command: 'repair_data'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.CONTROL,
+        `service:${serviceName}:control`,
+        {
+          type: 'repair_data_command',
+          serviceName,
+          data: { command: 'repair_data' },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Data repair failed', { service: serviceName, error });
@@ -563,15 +651,18 @@ export class ExpertSelfHealingManager {
 
   private async resetConfiguration(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      await redis.publish(`service:${serviceName}:control`, {
-        type: 'reset_config_command',
-        data: {
-          command: 'reset_config'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.CONTROL,
+        `service:${serviceName}:control`,
+        {
+          type: 'reset_config_command',
+          serviceName,
+          data: { command: 'reset_config' },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Configuration reset failed', { service: serviceName, error });
@@ -581,16 +672,20 @@ export class ExpertSelfHealingManager {
 
   private async failoverToBackup(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      await redis.publish(`system:failover`, {
-        type: 'failover_command',
-        data: {
-          service: serviceName,
-          action: 'activate_backup'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery of critical failover commands
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.FAILOVER,
+        'system:failover',
+        {
+          type: 'failover_command',
+          data: {
+            service: serviceName,
+            action: 'activate_backup'
+          },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Failover failed', { service: serviceName, error });
@@ -600,16 +695,20 @@ export class ExpertSelfHealingManager {
 
   private async scaleUpResources(serviceName: string): Promise<boolean> {
     try {
-      const redis = await this.redis;
-      await redis.publish(`system:scaling`, {
-        type: 'scaling_command',
-        data: {
-          service: serviceName,
-          action: 'scale_up'
-        },
-        timestamp: Date.now(),
-        source: 'expert-self-healing-manager'
-      });
+      // P0-10 FIX: Use streams for guaranteed delivery of scaling commands
+      await this.publishControlMessage(
+        SYSTEM_STREAMS.SCALING,
+        'system:scaling',
+        {
+          type: 'scaling_command',
+          data: {
+            service: serviceName,
+            action: 'scale_up'
+          },
+          timestamp: Date.now(),
+          source: 'expert-self-healing-manager'
+        }
+      );
       return true;
     } catch (error) {
       logger.error('Scaling failed', { service: serviceName, error });

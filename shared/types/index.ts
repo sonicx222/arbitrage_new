@@ -141,6 +141,7 @@ export interface ServiceHealth {
   memoryUsage: number;
   cpuUsage: number;
   lastHeartbeat: number;
+  latency?: number;  // P0-5 fix: Optional latency measurement in ms
   error?: string;
 }
 

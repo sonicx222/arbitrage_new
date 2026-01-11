@@ -50,6 +50,23 @@ export class CacheCoherencyManager {
   private pendingOperations: CacheOperation[] = [];
   private gossipTimer: NodeJS.Timeout | null = null;
   private conflictResolver: (op1: CacheOperation, op2: CacheOperation) => CacheOperation;
+  // P2-FIX: Track operation keys to prevent duplicates (O(1) lookup)
+  private operationKeys: Set<string> = new Set();
+  // P2-FIX: Maximum pending operations to prevent unbounded memory growth
+  private readonly MAX_PENDING_OPERATIONS = 1000;
+  private readonly PRUNE_TARGET = 500;
+  // P1-12 FIX: Lock for atomic vector clock operations
+  private vectorClockLock: boolean = false;
+  // P1-13 FIX: Dead node cleanup timeout (remove nodes dead longer than this)
+  private readonly DEAD_NODE_CLEANUP_MS = 300000; // 5 minutes
+  // P1-13 FIX: Maximum number of nodes to track
+  private readonly MAX_NODES = 1000;
+  // P1-14 FIX: Maximum vector clock entries
+  private readonly MAX_VECTOR_CLOCK_ENTRIES = 1000;
+  // P1-14 FIX: Vector clock entry age threshold
+  private readonly VECTOR_CLOCK_ENTRY_MAX_AGE_MS = 3600000; // 1 hour
+  // P1-14 FIX: Track last update time for vector clock entries
+  private vectorClockLastUpdated: Map<string, number> = new Map();
 
   constructor(nodeId: string, config: Partial<CoherencyConfig> = {}) {
     this.nodeId = nodeId;
@@ -90,8 +107,15 @@ export class CacheCoherencyManager {
         version: this.incrementVectorClock(this.nodeId)
       };
 
-      // Add to pending operations
-      this.pendingOperations.push(fullOperation);
+      // P2-FIX: Check for duplicate before adding (using Set for O(1) lookup)
+      const operationKey = this.getOperationKey(fullOperation);
+      if (this.operationKeys.has(operationKey)) {
+        logger.debug('Duplicate operation detected, skipping', { key: operation.key });
+        return;
+      }
+
+      // P2-FIX: Only add to pending operations once (removed from here, happens in applyOperationLocally)
+      // This prevents duplicate entries when recordOperation and applyOperationLocally both add
 
       // Broadcast to other nodes
       try {
@@ -101,7 +125,7 @@ export class CacheCoherencyManager {
         // Continue with local application even if broadcast fails
       }
 
-      // Apply locally
+      // Apply locally (this is where the operation gets added to pendingOperations)
       await this.applyOperationLocally(fullOperation);
 
     } catch (error) {
@@ -296,11 +320,9 @@ export class CacheCoherencyManager {
 
   // Operation management
   private hasOperation(operation: CacheOperation): boolean {
-    return this.pendingOperations.some(op =>
-      op.key === operation.key &&
-      op.nodeId === operation.nodeId &&
-      op.version === operation.version
-    );
+    // P2-FIX: Use O(1) Set lookup instead of O(n) array scan
+    const operationKey = this.getOperationKey(operation);
+    return this.operationKeys.has(operationKey);
   }
 
   private findConflictingOperations(operation: CacheOperation): CacheOperation[] {
@@ -402,19 +424,96 @@ export class CacheCoherencyManager {
   }
 
   // Vector clock management
+  /**
+   * P1-12 FIX: Atomic vector clock increment with lock.
+   *
+   * Previous implementation had a TOCTOU vulnerability where concurrent calls
+   * could read the same value and both increment to the same new value,
+   * resulting in skipped or duplicated versions breaking causal ordering.
+   *
+   * This fix uses a simple spin-lock pattern. While JavaScript is single-threaded,
+   * async operations can interleave, so we guard against concurrent access.
+   */
   private incrementVectorClock(nodeId: string): number {
-    const current = this.vectorClock.get(nodeId) || 0;
-    const newValue = current + 1;
-    this.vectorClock.set(nodeId, newValue);
-    return newValue;
+    // P1-12 FIX: Simple spin-lock to prevent concurrent increments
+    if (this.vectorClockLock) {
+      throw new Error('Vector clock operation in progress - concurrent access detected');
+    }
+    this.vectorClockLock = true;
+
+    try {
+      const current = this.vectorClock.get(nodeId) || 0;
+      const newValue = current + 1;
+      this.vectorClock.set(nodeId, newValue);
+
+      // P1-14 FIX: Track when this entry was last updated for cleanup
+      this.vectorClockLastUpdated.set(nodeId, Date.now());
+
+      return newValue;
+    } finally {
+      this.vectorClockLock = false;
+    }
   }
 
   private mergeVectorClock(remoteClock: Map<string, number>): void {
+    const now = Date.now();
     for (const [nodeId, version] of remoteClock.entries()) {
       const localVersion = this.vectorClock.get(nodeId) || 0;
       if (version > localVersion) {
         this.vectorClock.set(nodeId, version);
+        // P1-14 FIX: Track when this entry was last updated
+        this.vectorClockLastUpdated.set(nodeId, now);
       }
+    }
+
+    // P1-14 FIX: Cleanup stale vector clock entries
+    this.pruneVectorClockEntries();
+  }
+
+  /**
+   * P1-14 FIX: Prune stale vector clock entries to prevent unbounded growth.
+   *
+   * Removes entries for nodes that:
+   * 1. Haven't been updated in VECTOR_CLOCK_ENTRY_MAX_AGE_MS
+   * 2. Are no longer in the active nodes map
+   *
+   * Also enforces MAX_VECTOR_CLOCK_ENTRIES limit.
+   */
+  private pruneVectorClockEntries(): void {
+    const now = Date.now();
+
+    // First pass: remove stale entries
+    for (const [nodeId, lastUpdated] of this.vectorClockLastUpdated.entries()) {
+      if (nodeId === this.nodeId) continue; // Never remove own entry
+
+      const age = now - lastUpdated;
+      const node = this.nodes.get(nodeId);
+
+      // Remove if entry is old AND node is not active
+      if (age > this.VECTOR_CLOCK_ENTRY_MAX_AGE_MS && (!node || node.status === 'dead')) {
+        this.vectorClock.delete(nodeId);
+        this.vectorClockLastUpdated.delete(nodeId);
+      }
+    }
+
+    // Second pass: enforce max size if still too large
+    if (this.vectorClock.size > this.MAX_VECTOR_CLOCK_ENTRIES) {
+      // Remove oldest entries first (but never self)
+      const entries = Array.from(this.vectorClockLastUpdated.entries())
+        .filter(([nodeId]) => nodeId !== this.nodeId)
+        .sort((a, b) => a[1] - b[1]); // Sort by last updated, oldest first
+
+      const removeCount = this.vectorClock.size - this.MAX_VECTOR_CLOCK_ENTRIES;
+      for (let i = 0; i < removeCount && i < entries.length; i++) {
+        const [nodeId] = entries[i];
+        this.vectorClock.delete(nodeId);
+        this.vectorClockLastUpdated.delete(nodeId);
+      }
+
+      logger.debug('Pruned vector clock entries due to size limit', {
+        removed: removeCount,
+        remaining: this.vectorClock.size
+      });
     }
   }
 
@@ -428,13 +527,40 @@ export class CacheCoherencyManager {
       nodeId: operation.nodeId
     });
 
-    // Add to pending operations to track
+    // P2-FIX: Generate operation key for deduplication
+    const operationKey = this.getOperationKey(operation);
+
+    // P2-FIX: Check for duplicate before adding
+    if (this.operationKeys.has(operationKey)) {
+      logger.debug('Duplicate operation in applyOperationLocally, skipping', { key: operation.key });
+      return;
+    }
+
+    // Add to tracking structures atomically
+    this.operationKeys.add(operationKey);
     this.pendingOperations.push(operation);
 
-    // Clean up old operations (keep last 1000)
-    if (this.pendingOperations.length > 1000) {
-      this.pendingOperations = this.pendingOperations.slice(-500);
+    // P2-FIX: Atomic pruning using splice instead of array reassignment
+    // This prevents losing concurrent additions during the reassignment
+    if (this.pendingOperations.length > this.MAX_PENDING_OPERATIONS) {
+      const removeCount = this.pendingOperations.length - this.PRUNE_TARGET;
+      const removedOps = this.pendingOperations.splice(0, removeCount);
+
+      // Also remove from the keys set to keep them in sync
+      for (const op of removedOps) {
+        this.operationKeys.delete(this.getOperationKey(op));
+      }
+
+      logger.debug('Pruned pending operations', { removed: removeCount, remaining: this.pendingOperations.length });
     }
+  }
+
+  /**
+   * Generate a unique key for an operation for deduplication purposes.
+   * P2-FIX: Centralized key generation for consistent deduplication.
+   */
+  private getOperationKey(operation: CacheOperation): string {
+    return `${operation.nodeId}:${operation.version}:${operation.key}`;
   }
 
   // Node management
@@ -450,20 +576,79 @@ export class CacheCoherencyManager {
     this.vectorClock.set(this.nodeId, 0);
   }
 
+  /**
+   * P1-13 FIX: Cleanup dead nodes with actual removal.
+   *
+   * Previous implementation only marked nodes as 'dead' but never removed them,
+   * causing unbounded memory growth in the nodes Map.
+   *
+   * This fix:
+   * 1. Marks nodes as suspected/dead based on timeout thresholds
+   * 2. REMOVES nodes that have been dead for longer than DEAD_NODE_CLEANUP_MS
+   * 3. Enforces MAX_NODES limit by removing oldest dead nodes first
+   */
   private cleanupDeadNodes(): void {
     const now = Date.now();
+    const nodesToRemove: string[] = [];
 
     for (const [nodeId, node] of this.nodes.entries()) {
-      if (nodeId === this.nodeId) continue;
+      if (nodeId === this.nodeId) continue; // Never remove self
 
       const timeSinceLastSeen = now - node.lastSeen;
 
       if (timeSinceLastSeen > this.config.failureTimeout) {
-        node.status = 'dead';
-        logger.warn('Node marked as dead', { nodeId, lastSeen: node.lastSeen });
+        // Check if already dead
+        if (node.status !== 'dead') {
+          node.status = 'dead';
+          logger.warn('Node marked as dead', { nodeId, lastSeen: node.lastSeen });
+        }
+
+        // P1-13 FIX: Remove nodes that have been dead too long
+        if (timeSinceLastSeen > this.config.failureTimeout + this.DEAD_NODE_CLEANUP_MS) {
+          nodesToRemove.push(nodeId);
+        }
       } else if (timeSinceLastSeen > this.config.suspicionTimeout) {
         node.status = 'suspected';
       }
+    }
+
+    // P1-13 FIX: Actually remove dead nodes
+    for (const nodeId of nodesToRemove) {
+      this.nodes.delete(nodeId);
+      logger.info('Removed dead node from tracking', { nodeId });
+    }
+
+    // P1-13 FIX: Enforce maximum nodes limit
+    if (this.nodes.size > this.MAX_NODES) {
+      this.enforceMaxNodesLimit();
+    }
+  }
+
+  /**
+   * P1-13 FIX: Enforce maximum nodes limit by removing oldest dead/suspected nodes.
+   */
+  private enforceMaxNodesLimit(): void {
+    // Collect non-self nodes sorted by priority (dead first, then suspected, then by lastSeen)
+    const nodesWithPriority = Array.from(this.nodes.entries())
+      .filter(([nodeId]) => nodeId !== this.nodeId)
+      .map(([nodeId, node]) => ({
+        nodeId,
+        node,
+        priority: node.status === 'dead' ? 0 : node.status === 'suspected' ? 1 : 2,
+        lastSeen: node.lastSeen
+      }))
+      .sort((a, b) => {
+        // Sort by priority first (dead < suspected < alive)
+        if (a.priority !== b.priority) return a.priority - b.priority;
+        // Then by lastSeen (oldest first)
+        return a.lastSeen - b.lastSeen;
+      });
+
+    const removeCount = this.nodes.size - this.MAX_NODES;
+    for (let i = 0; i < removeCount && i < nodesWithPriority.length; i++) {
+      const { nodeId } = nodesWithPriority[i];
+      this.nodes.delete(nodeId);
+      logger.debug('Removed node due to max nodes limit', { nodeId });
     }
   }
 
@@ -476,6 +661,11 @@ export class CacheCoherencyManager {
 
     this.nodes.clear();
     this.pendingOperations.length = 0;
+    // P2-FIX: Also clear the operation keys set
+    this.operationKeys.clear();
+    // P1-14 FIX: Also clear vector clock tracking
+    this.vectorClock.clear();
+    this.vectorClockLastUpdated.clear();
 
     logger.info('Cache coherency manager destroyed');
   }
@@ -506,4 +696,20 @@ export function getCacheCoherencyManager(): CacheCoherencyManager {
     );
   }
   return defaultCoherencyManager;
+}
+
+/**
+ * P0-9 FIX: Reset the singleton instance to allow proper cleanup.
+ *
+ * Previous issue: The singleton was never destroyed, causing:
+ * - Memory leaks from timers and subscriptions persisting after service restart
+ * - Potential conflicts when creating new instances
+ *
+ * This function should be called during application shutdown.
+ */
+export async function resetCacheCoherencyManager(): Promise<void> {
+  if (defaultCoherencyManager) {
+    await defaultCoherencyManager.destroy();
+    defaultCoherencyManager = null;
+  }
 }

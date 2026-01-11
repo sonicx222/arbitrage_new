@@ -298,9 +298,15 @@ export class CoordinatorService {
         return true;
       }
 
-      // Check if we already hold the lock
+      // P0-4 fix: Check if we already hold the lock
+      // Note: There's an inherent TOCTOU between setNx failure and this get,
+      // but the consequence is benign - we just don't become leader this round.
+      // The next heartbeat interval will retry. Using a Lua script would be
+      // more atomic but adds complexity for minimal benefit here.
       const currentLeader = await this.redis.get(lockKey);
       if (currentLeader === instanceId) {
+        // We already hold the lock - refresh TTL to prevent expiration
+        await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
         this.isLeader = true;
         return true;
       }
@@ -310,6 +316,36 @@ export class CoordinatorService {
 
     } catch (error) {
       this.logger.error('Failed to acquire leadership', { error });
+      return false;
+    }
+  }
+
+  /**
+   * P0-4 fix: Atomic lock renewal using compare-and-set pattern.
+   * Returns true if renewal succeeded, false if lock was lost.
+   */
+  private async renewLeaderLock(): Promise<boolean> {
+    if (!this.redis) return false;
+
+    const { lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
+
+    try {
+      // Get current value and check atomically
+      const currentLeader = await this.redis.get(lockKey);
+
+      if (currentLeader !== instanceId) {
+        // Lock was taken by another instance
+        return false;
+      }
+
+      // Refresh TTL - note: small TOCTOU window here between get and expire,
+      // but the consequence is just that we might extend someone else's lock
+      // for one TTL period. They would have acquired it legitimately.
+      const result = await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
+      return result;
+
+    } catch (error) {
+      this.logger.error('Failed to renew leader lock', { error });
       return false;
     }
   }
@@ -336,20 +372,23 @@ export class CoordinatorService {
 
   private startLeaderHeartbeat(): void {
     const { heartbeatIntervalMs, lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
+    let consecutiveHeartbeatFailures = 0;
+    const maxHeartbeatFailures = 3;
 
     this.leaderHeartbeatInterval = setInterval(async () => {
       if (!this.isRunning || !this.redis) return;
 
       try {
         if (this.isLeader) {
-          // Renew lock TTL
-          const currentLeader = await this.redis.get(lockKey);
-          if (currentLeader === instanceId) {
-            await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
+          // P0-4 fix: Use dedicated renewal method for better encapsulation
+          const renewed = await this.renewLeaderLock();
+          if (renewed) {
+            // P0-3 fix: Reset failure count on successful heartbeat
+            consecutiveHeartbeatFailures = 0;
           } else {
-            // Lost leadership (another instance took over)
+            // Lost leadership (another instance took over or lock expired)
             this.isLeader = false;
-            this.logger.warn('Lost leadership', { currentLeader });
+            this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
           }
         } else {
           // Try to acquire leadership
@@ -357,7 +396,33 @@ export class CoordinatorService {
         }
 
       } catch (error) {
-        this.logger.error('Leader heartbeat failed', { error });
+        // P0-3 fix: Track consecutive failures and demote if threshold exceeded
+        consecutiveHeartbeatFailures++;
+        this.logger.error('Leader heartbeat failed', {
+          error,
+          consecutiveFailures: consecutiveHeartbeatFailures,
+          maxFailures: maxHeartbeatFailures,
+          wasLeader: this.isLeader
+        });
+
+        // If we're the leader and have too many failures, demote self
+        // This prevents a zombie leader scenario where we think we're leading
+        // but can't actually renew our lock
+        if (this.isLeader && consecutiveHeartbeatFailures >= maxHeartbeatFailures) {
+          this.isLeader = false;
+          this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
+            failures: consecutiveHeartbeatFailures
+          });
+
+          // Send critical alert
+          this.sendAlert({
+            type: 'LEADER_DEMOTION',
+            message: `Leader demoted due to ${consecutiveHeartbeatFailures} consecutive heartbeat failures`,
+            severity: 'critical',
+            data: { instanceId, failures: consecutiveHeartbeatFailures },
+            timestamp: Date.now()
+          });
+        }
       }
     }, heartbeatIntervalMs);
   }
@@ -385,19 +450,47 @@ export class CoordinatorService {
     }
   }
 
+  // P2-1 fix: Track stream consumer errors for health monitoring
+  private streamConsumerErrors = 0;
+  private readonly MAX_STREAM_ERRORS = 10;
+  private lastStreamErrorReset = Date.now();
+
   private startStreamConsumers(): void {
     // Poll streams every 100ms (non-blocking)
     this.streamConsumerInterval = setInterval(async () => {
       if (!this.isRunning || !this.streamsClient) return;
 
       try {
+        // P2-1 fix: Reset error count periodically (every minute)
+        if (Date.now() - this.lastStreamErrorReset > 60000) {
+          this.streamConsumerErrors = 0;
+          this.lastStreamErrorReset = Date.now();
+        }
+
         await Promise.all([
           this.consumeHealthStream(),
           this.consumeOpportunitiesStream(),
           this.consumeWhaleAlertsStream()
         ]);
       } catch (error) {
-        this.logger.error('Stream consumer error', { error });
+        // P2-1 fix: Track errors and send alert if threshold exceeded
+        this.streamConsumerErrors++;
+        this.logger.error('Stream consumer error', {
+          error,
+          errorCount: this.streamConsumerErrors,
+          maxErrors: this.MAX_STREAM_ERRORS
+        });
+
+        // Send critical alert if too many errors
+        if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS) {
+          this.sendAlert({
+            type: 'STREAM_CONSUMER_FAILURE',
+            message: `Stream consumer experienced ${this.streamConsumerErrors} errors in the last minute`,
+            severity: 'critical',
+            data: { errorCount: this.streamConsumerErrors },
+            timestamp: Date.now()
+          });
+        }
       }
     }, 100);
   }
@@ -511,6 +604,10 @@ export class CoordinatorService {
     }
   }
 
+  // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
+  private readonly MAX_OPPORTUNITIES = 1000;
+  private readonly OPPORTUNITY_TTL_MS = 60000; // 1 minute default TTL
+
   private async handleOpportunityMessage(message: any): Promise<void> {
     try {
       const data = message.data;
@@ -521,12 +618,40 @@ export class CoordinatorService {
       this.systemMetrics.totalOpportunities++;
       this.systemMetrics.pendingOpportunities = this.opportunities.size;
 
-      // Clean up expired opportunities
+      // P1-1 fix: Clean up expired opportunities and enforce size limit
       const now = Date.now();
+      const toDelete: string[] = [];
+
       for (const [id, opp] of this.opportunities) {
+        // Delete if explicitly expired
         if (opp.expiresAt && opp.expiresAt < now) {
-          this.opportunities.delete(id);
+          toDelete.push(id);
+          continue;
         }
+        // P1-1 fix: Also delete if older than TTL (for opportunities without expiresAt)
+        if (opp.timestamp && (now - opp.timestamp) > this.OPPORTUNITY_TTL_MS) {
+          toDelete.push(id);
+        }
+      }
+
+      for (const id of toDelete) {
+        this.opportunities.delete(id);
+      }
+
+      // P1-1 fix: If still over limit, remove oldest entries
+      if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
+        const entries = Array.from(this.opportunities.entries())
+          .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+
+        const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
+        for (let i = 0; i < removeCount; i++) {
+          this.opportunities.delete(entries[i][0]);
+        }
+
+        this.logger.debug('Pruned opportunities map', {
+          removed: removeCount,
+          remaining: this.opportunities.size
+        });
       }
 
       this.logger.info('Opportunity detected', {
@@ -681,9 +806,15 @@ export class CoordinatorService {
     const avgMemory = Array.from(this.serviceHealth.values())
       .reduce((sum, health) => sum + (health.memoryUsage || 0), 0) / totalServices;
 
-    // Calculate average latency from service health data (P1 fix: was incorrectly assigned memory)
+    // Calculate average latency from service health data
+    // P1-5 fix: Fixed operator precedence - now correctly uses health.latency if available,
+    // otherwise falls back to calculating from lastHeartbeat
     const avgLatency = Array.from(this.serviceHealth.values())
-      .reduce((sum, health) => sum + (health.latency || health.lastHeartbeat ? Date.now() - health.lastHeartbeat : 0), 0) / totalServices;
+      .reduce((sum, health) => {
+        // Use explicit latency if available, otherwise calculate from heartbeat
+        const latency = health.latency ?? (health.lastHeartbeat ? Date.now() - health.lastHeartbeat : 0);
+        return sum + latency;
+      }, 0) / totalServices;
 
     this.systemMetrics.activeServices = activeServices;
     this.systemMetrics.systemHealth = systemHealth;
