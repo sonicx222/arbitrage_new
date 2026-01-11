@@ -6,6 +6,7 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Mock } from 'jest-mock';
 import {
   DistributedLockManager,
   getDistributedLockManager,
@@ -13,19 +14,34 @@ import {
   LockConfig
 } from './distributed-lock';
 
-// Mock Redis client
-const mockRedisClient = {
-  setNx: jest.fn(),
-  get: jest.fn(),
-  del: jest.fn(),
-  expire: jest.fn(),
-  exists: jest.fn(),
-  ping: jest.fn().mockResolvedValue(true)
-};
+// Mock Redis client interface
+interface MockRedisClient {
+  setNx: Mock<(key: string, value: string, ttl: number) => Promise<boolean>>;
+  get: Mock<(key: string) => Promise<string | null>>;
+  del: Mock<(key: string) => Promise<number>>;
+  expire: Mock<(key: string, ttl: number) => Promise<number>>;
+  eval: Mock<(script: string, keys: string[], args: string[]) => Promise<number>>;
+  exists: Mock<(key: string) => Promise<boolean>>;
+  ping: Mock<() => Promise<boolean>>;
+}
+
+// Mock Redis client - created as a factory to avoid hoisting issues
+const createMockRedisClient = (): MockRedisClient => ({
+  setNx: jest.fn<(key: string, value: string, ttl: number) => Promise<boolean>>(),
+  get: jest.fn<(key: string) => Promise<string | null>>(),
+  del: jest.fn<(key: string) => Promise<number>>(),
+  expire: jest.fn<(key: string, ttl: number) => Promise<number>>(),
+  eval: jest.fn<(script: string, keys: string[], args: string[]) => Promise<number>>(),
+  exists: jest.fn<(key: string) => Promise<boolean>>(),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
+});
+
+// Shared mock reference
+let mockRedisClient: MockRedisClient;
 
 // Mock the redis module
 jest.mock('./redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue(mockRedisClient),
+  getRedisClient: jest.fn<() => Promise<MockRedisClient>>().mockImplementation(() => Promise.resolve(mockRedisClient)),
   RedisClient: jest.fn()
 }));
 
@@ -45,6 +61,9 @@ describe('DistributedLockManager', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     await resetDistributedLockManager();
+
+    // Create fresh mock for each test
+    mockRedisClient = createMockRedisClient();
 
     // Default mock implementations
     mockRedisClient.setNx.mockResolvedValue(true);
@@ -95,13 +114,20 @@ describe('DistributedLockManager', () => {
       const handle = await lockManager.acquireLock('test-resource');
       expect(handle.acquired).toBe(true);
 
-      // Mock get to return the lock value (we own it)
-      const lockValue = (mockRedisClient.setNx as jest.Mock).mock.calls[0][1];
-      mockRedisClient.get.mockResolvedValue(lockValue);
+      // Mock eval to return 1 (lock deleted)
+      mockRedisClient.eval.mockResolvedValue(1);
+
+      // Get the lock value that was set
+      const lockValue = (mockRedisClient.setNx as jest.Mock).mock.calls[0][1] as string;
 
       await handle.release();
 
-      expect(mockRedisClient.del).toHaveBeenCalledWith('lock:test-resource');
+      // Should use atomic Lua script via eval instead of del
+      expect(mockRedisClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('redis.call("get"'),
+        ['lock:test-resource'],
+        [lockValue]
+      );
     });
 
     it('should not release lock if not owner', async () => {
@@ -110,13 +136,14 @@ describe('DistributedLockManager', () => {
       const handle = await lockManager.acquireLock('test-resource');
       expect(handle.acquired).toBe(true);
 
-      // Mock get to return different value (someone else owns it now)
-      mockRedisClient.get.mockResolvedValue('different-owner-value');
+      // Mock eval to return 0 (lock not deleted - someone else owns it)
+      // The atomic Lua script checks ownership internally
+      mockRedisClient.eval.mockResolvedValue(0);
 
       await handle.release();
 
-      // Should not call del since we're not the owner
-      expect(mockRedisClient.del).not.toHaveBeenCalled();
+      // Should still call eval (which atomically checks ownership and skips delete)
+      expect(mockRedisClient.eval).toHaveBeenCalled();
     });
 
     it('should use custom TTL when provided', async () => {
@@ -226,14 +253,19 @@ describe('DistributedLockManager', () => {
       expect(handle.acquired).toBe(true);
 
       // Get the lock value that was set
-      const lockValue = (mockRedisClient.setNx as jest.Mock).mock.calls[0][1];
-      mockRedisClient.get.mockResolvedValue(lockValue);
-      mockRedisClient.expire.mockResolvedValue(1);
+      const lockValue = (mockRedisClient.setNx as jest.Mock).mock.calls[0][1] as string;
+      // Mock eval to return 1 (successfully extended)
+      mockRedisClient.eval.mockResolvedValue(1);
 
       const extended = await handle.extend(60000);
 
       expect(extended).toBe(true);
-      expect(mockRedisClient.expire).toHaveBeenCalledWith('lock:test-resource', 60);
+      // Should use atomic Lua script via eval instead of expire
+      expect(mockRedisClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('redis.call("expire"'),
+        ['lock:test-resource'],
+        [lockValue, '60']
+      );
     });
 
     it('should fail to extend lock when not owner', async () => {
@@ -242,13 +274,14 @@ describe('DistributedLockManager', () => {
       const handle = await lockManager.acquireLock('test-resource');
       expect(handle.acquired).toBe(true);
 
-      // Someone else owns the lock now
-      mockRedisClient.get.mockResolvedValue('different-owner');
+      // Mock eval to return 0 (not owner - extend failed)
+      mockRedisClient.eval.mockResolvedValue(0);
 
       const extended = await handle.extend(60000);
 
       expect(extended).toBe(false);
-      expect(mockRedisClient.expire).not.toHaveBeenCalled();
+      // Eval is still called, but returns 0 to indicate failure
+      expect(mockRedisClient.eval).toHaveBeenCalled();
     });
   });
 
@@ -293,16 +326,16 @@ describe('DistributedLockManager', () => {
 
     it('should release lock even on function error', async () => {
       mockRedisClient.setNx.mockResolvedValue(true);
-      const lockValue = (await (mockRedisClient.setNx as jest.Mock).mock.results[0]?.value) || 'mock-value';
 
       // Need to capture the actual lock value used
       let capturedLockValue: string | undefined;
-      mockRedisClient.setNx.mockImplementation(async (_key, value, _ttl) => {
+      mockRedisClient.setNx.mockImplementation(async (_key: string, value: string, _ttl: number) => {
         capturedLockValue = value;
         return true;
       });
 
-      mockRedisClient.get.mockImplementation(async () => capturedLockValue);
+      // Mock eval to return 1 (lock released successfully)
+      mockRedisClient.eval.mockResolvedValue(1);
 
       const result = await lockManager.withLock('test-resource', async () => {
         throw new Error('Test error');
@@ -314,8 +347,8 @@ describe('DistributedLockManager', () => {
         expect(result.error?.message).toBe('Test error');
       }
 
-      // Lock should still be released
-      expect(mockRedisClient.del).toHaveBeenCalled();
+      // Lock should still be released via atomic Lua script
+      expect(mockRedisClient.eval).toHaveBeenCalled();
     });
 
     it('should pass through acquisition options', async () => {

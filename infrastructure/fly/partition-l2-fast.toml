@@ -1,0 +1,130 @@
+# Fly.io Deployment Configuration for L2-Fast Partition
+#
+# Partition: l2-fast
+# Chains: Arbitrum, Optimism, Base
+# Region: asia-southeast1 (Singapore)
+# Resource Profile: standard (384MB)
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/partition-l2-fast.toml
+#
+# Scaling:
+#   fly scale memory 384 -c infrastructure/fly/partition-l2-fast.toml
+
+app = "arbitrage-l2-fast"
+primary_region = "sin"
+
+[build]
+  dockerfile = "services/unified-detector/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PARTITION_ID = "l2-fast"
+  REGION_ID = "asia-southeast1"
+  LOG_LEVEL = "info"
+  HEALTH_CHECK_PORT = "3001"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  # Chain-specific RPC URLs set via secrets
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3001
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.tcp_checks]]
+    grace_period = "30s"
+    interval = "10s"
+    restart_limit = 3
+    timeout = "5s"
+
+  [[services.http_checks]]
+    grace_period = "30s"
+    interval = "10s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+    restart_limit = 3
+    timeout = "5s"
+    tls_skip_verify = false
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 384
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    interval = "10s"
+    method = "GET"
+    path = "/health"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+  [checks.ready]
+    grace_period = "60s"
+    interval = "15s"
+    method = "GET"
+    path = "/ready"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+# Statics are served from the CDN (if applicable)
+# [statics]
+#   guest_path = "/app/public"
+#   url_prefix = "/static/"
+
+# Mounts (not needed for stateless service)
+# [[mounts]]
+#   source = "data"
+#   destination = "/data"
+
+# Processes
+[processes]
+  app = "node dist/index.js"
+
+# Deploy strategy
+[deploy]
+  release_command = "echo 'L2-Fast partition deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Upstash Redis connection URL
+# ARBITRUM_WS_URL - Arbitrum WebSocket RPC
+# ARBITRUM_RPC_URL - Arbitrum HTTP RPC (fallback)
+# OPTIMISM_WS_URL - Optimism WebSocket RPC
+# OPTIMISM_RPC_URL - Optimism HTTP RPC (fallback)
+# BASE_WS_URL - Base WebSocket RPC
+# BASE_RPC_URL - Base HTTP RPC (fallback)

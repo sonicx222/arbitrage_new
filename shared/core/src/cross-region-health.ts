@@ -1,0 +1,845 @@
+/**
+ * Cross-Region Health Manager
+ *
+ * Manages health monitoring across multiple geographic regions for failover support.
+ * Implements ADR-007 (Cross-Region Failover Strategy).
+ *
+ * Features:
+ * - Leader election using Redis distributed locks
+ * - Cross-region health aggregation
+ * - Automatic failover triggering
+ * - Standby service activation
+ * - Split-brain prevention
+ *
+ * @see ADR-007: Cross-Region Failover Strategy
+ */
+
+import { EventEmitter } from 'events';
+import { createLogger } from './logger';
+import { getRedisClient, RedisClient } from './redis';
+import { getDistributedLockManager, DistributedLockManager } from './distributed-lock';
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export type RegionStatus = 'healthy' | 'degraded' | 'unhealthy' | 'failed' | 'unknown';
+
+export interface RegionHealth {
+  /** Region identifier */
+  regionId: string;
+
+  /** Current health status */
+  status: RegionStatus;
+
+  /** Whether this region is the leader */
+  isLeader: boolean;
+
+  /** Services running in this region */
+  services: ServiceRegionHealth[];
+
+  /** Last health check timestamp */
+  lastHealthCheck: number;
+
+  /** Consecutive failure count */
+  consecutiveFailures: number;
+
+  /** Average latency to this region in ms */
+  avgLatencyMs: number;
+
+  /** Memory usage percentage */
+  memoryUsagePercent: number;
+
+  /** CPU usage percentage */
+  cpuUsagePercent: number;
+}
+
+export interface ServiceRegionHealth {
+  /** Service name */
+  serviceName: string;
+
+  /** Service status */
+  status: 'healthy' | 'degraded' | 'unhealthy';
+
+  /** Is this the primary instance? */
+  isPrimary: boolean;
+
+  /** Is this instance on standby? */
+  isStandby: boolean;
+
+  /** Last heartbeat timestamp */
+  lastHeartbeat: number;
+
+  /** Service-specific metrics */
+  metrics: Record<string, number>;
+}
+
+export interface FailoverEvent {
+  /** Event type */
+  type: 'failover_started' | 'failover_completed' | 'failover_failed' | 'leader_changed';
+
+  /** Source region (failed/old leader) */
+  sourceRegion: string;
+
+  /** Target region (new active/leader) */
+  targetRegion: string;
+
+  /** Affected services */
+  services: string[];
+
+  /** Event timestamp */
+  timestamp: number;
+
+  /** Duration of failover in ms (for completed events) */
+  durationMs?: number;
+
+  /** Error message (for failed events) */
+  error?: string;
+}
+
+export interface CrossRegionHealthConfig {
+  /** Unique instance ID */
+  instanceId: string;
+
+  /** Region this instance belongs to */
+  regionId: string;
+
+  /** Service name */
+  serviceName: string;
+
+  /** Health check interval in ms (default: 10000) */
+  healthCheckIntervalMs?: number;
+
+  /** Number of consecutive failures before failover (default: 3) */
+  failoverThreshold?: number;
+
+  /** Maximum time for failover in ms (default: 60000) */
+  failoverTimeoutMs?: number;
+
+  /** Leader heartbeat interval in ms (default: 5000) */
+  leaderHeartbeatIntervalMs?: number;
+
+  /** Leader lock TTL in ms (default: 30000) */
+  leaderLockTtlMs?: number;
+
+  /** Whether this instance can become leader (default: true) */
+  canBecomeLeader?: boolean;
+
+  /** Whether this instance is a standby (default: false) */
+  isStandby?: boolean;
+}
+
+export interface GlobalHealthStatus {
+  /** Redis connection health */
+  redis: { healthy: boolean; latencyMs: number };
+
+  /** Executor service health */
+  executor: { healthy: boolean; region: string };
+
+  /** Detector services health */
+  detectors: Array<{ name: string; healthy: boolean; region: string }>;
+
+  /** Current degradation level */
+  degradationLevel: DegradationLevel;
+
+  /** Overall system status */
+  overallStatus: 'healthy' | 'degraded' | 'critical';
+}
+
+export enum DegradationLevel {
+  FULL_OPERATION = 0,      // All services healthy
+  REDUCED_CHAINS = 1,      // Some chain detectors down
+  DETECTION_ONLY = 2,      // Execution disabled
+  READ_ONLY = 3,           // Only dashboard/monitoring
+  COMPLETE_OUTAGE = 4      // All services down
+}
+
+// =============================================================================
+// Cross-Region Health Manager
+// =============================================================================
+
+export class CrossRegionHealthManager extends EventEmitter {
+  private redis: RedisClient | null = null;
+  private lockManager: DistributedLockManager | null = null;
+  private logger: ReturnType<typeof createLogger>;
+  private config: Required<CrossRegionHealthConfig>;
+
+  private regions: Map<string, RegionHealth> = new Map();
+  private isLeader: boolean = false;
+  private leaderLock: { release: () => Promise<void>; extend: (additionalMs?: number) => Promise<boolean> } | null = null;
+  private leaderHeartbeatInterval: NodeJS.Timeout | null = null;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private isRunning: boolean = false;
+
+  private readonly LEADER_LOCK_KEY = 'coordinator:leader:lock';
+  private readonly HEALTH_KEY_PREFIX = 'region:health:';
+  private readonly FAILOVER_CHANNEL = 'cross-region:failover';
+
+  constructor(config: CrossRegionHealthConfig) {
+    super();
+
+    this.config = {
+      instanceId: config.instanceId,
+      regionId: config.regionId,
+      serviceName: config.serviceName,
+      healthCheckIntervalMs: config.healthCheckIntervalMs ?? 10000,
+      failoverThreshold: config.failoverThreshold ?? 3,
+      failoverTimeoutMs: config.failoverTimeoutMs ?? 60000,
+      leaderHeartbeatIntervalMs: config.leaderHeartbeatIntervalMs ?? 5000,
+      leaderLockTtlMs: config.leaderLockTtlMs ?? 30000,
+      canBecomeLeader: config.canBecomeLeader ?? true,
+      isStandby: config.isStandby ?? false
+    };
+
+    this.logger = createLogger(`cross-region:${config.regionId}`);
+  }
+
+  // ===========================================================================
+  // Lifecycle
+  // ===========================================================================
+
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      this.logger.warn('CrossRegionHealthManager already running');
+      return;
+    }
+
+    this.logger.info('Starting CrossRegionHealthManager', {
+      instanceId: this.config.instanceId,
+      regionId: this.config.regionId,
+      canBecomeLeader: this.config.canBecomeLeader
+    });
+
+    // Initialize Redis and lock manager
+    this.redis = await getRedisClient();
+    this.lockManager = await getDistributedLockManager();
+
+    // Initialize own region
+    this.initializeOwnRegion();
+
+    // Start health monitoring
+    this.startHealthMonitoring();
+
+    // Attempt leader election if eligible
+    if (this.config.canBecomeLeader && !this.config.isStandby) {
+      await this.attemptLeaderElection();
+    }
+
+    // Subscribe to failover events
+    await this.subscribeToFailoverEvents();
+
+    this.isRunning = true;
+    this.logger.info('CrossRegionHealthManager started');
+  }
+
+  async stop(): Promise<void> {
+    if (!this.isRunning) {
+      return;
+    }
+
+    this.logger.info('Stopping CrossRegionHealthManager');
+
+    // Clear intervals
+    if (this.leaderHeartbeatInterval) {
+      clearInterval(this.leaderHeartbeatInterval);
+      this.leaderHeartbeatInterval = null;
+    }
+
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+
+    // Release leadership if held
+    if (this.isLeader) {
+      await this.releaseLeadership();
+    }
+
+    // Update region status to offline
+    await this.updateOwnRegionStatus('unknown');
+
+    this.isRunning = false;
+    this.logger.info('CrossRegionHealthManager stopped');
+  }
+
+  // ===========================================================================
+  // Leader Election (ADR-007)
+  // ===========================================================================
+
+  /**
+   * Attempt to become the leader using Redis distributed lock.
+   * Uses SETNX pattern for atomic leader election.
+   */
+  async attemptLeaderElection(): Promise<boolean> {
+    if (!this.lockManager || !this.config.canBecomeLeader) {
+      return false;
+    }
+
+    try {
+      const lock = await this.lockManager.acquireLock(this.LEADER_LOCK_KEY, {
+        ttlMs: this.config.leaderLockTtlMs,
+        retries: 0 // Don't wait, just try once
+      });
+
+      if (lock.acquired) {
+        this.leaderLock = lock;
+        this.isLeader = true;
+        this.startLeaderHeartbeat();
+
+        this.logger.info('Acquired leadership', {
+          instanceId: this.config.instanceId,
+          regionId: this.config.regionId
+        });
+
+        // Emit leader change event
+        this.emit('leaderChange', {
+          type: 'leader_changed',
+          sourceRegion: '',
+          targetRegion: this.config.regionId,
+          services: [this.config.serviceName],
+          timestamp: Date.now()
+        } as FailoverEvent);
+
+        // Update region health
+        const region = this.regions.get(this.config.regionId);
+        if (region) {
+          region.isLeader = true;
+        }
+
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      this.logger.error('Leader election failed', { error });
+      return false;
+    }
+  }
+
+  /**
+   * Maintain leadership via heartbeat.
+   * Extends lock TTL periodically.
+   */
+  private startLeaderHeartbeat(): void {
+    if (this.leaderHeartbeatInterval) {
+      clearInterval(this.leaderHeartbeatInterval);
+    }
+
+    this.leaderHeartbeatInterval = setInterval(async () => {
+      if (!this.isLeader || !this.leaderLock) {
+        return;
+      }
+
+      try {
+        // Extend the lock using the lock handle
+        const extended = await this.leaderLock.extend(this.config.leaderLockTtlMs);
+
+        if (!extended) {
+          // Lost leadership
+          this.logger.warn('Lost leadership - lock extension failed');
+          this.onLeadershipLost();
+        }
+      } catch (error) {
+        this.logger.error('Leader heartbeat failed', { error });
+        this.onLeadershipLost();
+      }
+    }, this.config.leaderHeartbeatIntervalMs);
+  }
+
+  /**
+   * Handle loss of leadership.
+   */
+  private onLeadershipLost(): void {
+    this.isLeader = false;
+    this.leaderLock = null;
+
+    if (this.leaderHeartbeatInterval) {
+      clearInterval(this.leaderHeartbeatInterval);
+      this.leaderHeartbeatInterval = null;
+    }
+
+    const region = this.regions.get(this.config.regionId);
+    if (region) {
+      region.isLeader = false;
+    }
+
+    this.logger.warn('Leadership lost', {
+      instanceId: this.config.instanceId,
+      regionId: this.config.regionId
+    });
+
+    this.emit('leadershipLost', {
+      instanceId: this.config.instanceId,
+      regionId: this.config.regionId,
+      timestamp: Date.now()
+    });
+
+    // Attempt to re-acquire leadership after delay
+    setTimeout(() => {
+      if (this.isRunning && this.config.canBecomeLeader) {
+        this.attemptLeaderElection();
+      }
+    }, 5000);
+  }
+
+  /**
+   * Voluntarily release leadership.
+   */
+  private async releaseLeadership(): Promise<void> {
+    if (!this.isLeader || !this.leaderLock) {
+      return;
+    }
+
+    try {
+      await this.leaderLock.release();
+      this.isLeader = false;
+      this.leaderLock = null;
+
+      if (this.leaderHeartbeatInterval) {
+        clearInterval(this.leaderHeartbeatInterval);
+        this.leaderHeartbeatInterval = null;
+      }
+
+      this.logger.info('Released leadership', {
+        instanceId: this.config.instanceId
+      });
+    } catch (error) {
+      this.logger.error('Failed to release leadership', { error });
+    }
+  }
+
+  // ===========================================================================
+  // Health Monitoring
+  // ===========================================================================
+
+  private initializeOwnRegion(): void {
+    const regionHealth: RegionHealth = {
+      regionId: this.config.regionId,
+      status: 'healthy',
+      isLeader: false,
+      services: [{
+        serviceName: this.config.serviceName,
+        status: 'healthy',
+        isPrimary: !this.config.isStandby,
+        isStandby: this.config.isStandby,
+        lastHeartbeat: Date.now(),
+        metrics: {}
+      }],
+      lastHealthCheck: Date.now(),
+      consecutiveFailures: 0,
+      avgLatencyMs: 0,
+      memoryUsagePercent: 0,
+      cpuUsagePercent: 0
+    };
+
+    this.regions.set(this.config.regionId, regionHealth);
+  }
+
+  private startHealthMonitoring(): void {
+    this.healthCheckInterval = setInterval(async () => {
+      // Skip health checks if not running
+      if (!this.isRunning) {
+        return;
+      }
+      await this.performHealthCheck();
+    }, this.config.healthCheckIntervalMs);
+
+    // Perform initial health check (fire-and-forget with error handling)
+    this.performHealthCheck().catch(error => {
+      this.logger.error('Initial health check failed', { error });
+    });
+  }
+
+  private async performHealthCheck(): Promise<void> {
+    try {
+      // Update own region health
+      await this.updateOwnRegionHealth();
+
+      // Fetch health from other regions
+      await this.fetchRemoteRegionHealth();
+
+      // Evaluate failover conditions (only if leader)
+      if (this.isLeader) {
+        await this.evaluateFailoverConditions();
+      }
+    } catch (error) {
+      this.logger.error('Health check failed', { error });
+    }
+  }
+
+  private async updateOwnRegionHealth(): Promise<void> {
+    const region = this.regions.get(this.config.regionId);
+    if (!region) return;
+
+    // Update metrics
+    const memUsage = process.memoryUsage();
+    region.memoryUsagePercent = (memUsage.heapUsed / memUsage.heapTotal) * 100;
+    region.lastHealthCheck = Date.now();
+
+    // Update service health
+    const service = region.services.find(s => s.serviceName === this.config.serviceName);
+    if (service) {
+      service.lastHeartbeat = Date.now();
+      service.metrics = {
+        memoryMB: Math.round(memUsage.heapUsed / 1024 / 1024),
+        uptime: process.uptime()
+      };
+    }
+
+    // Persist to Redis
+    await this.persistRegionHealth(region);
+  }
+
+  private async persistRegionHealth(region: RegionHealth): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      const key = `${this.HEALTH_KEY_PREFIX}${region.regionId}`;
+      await this.redis.set(key, region, 60); // 60 second TTL
+    } catch (error) {
+      this.logger.error('Failed to persist region health', { error });
+    }
+  }
+
+  private async fetchRemoteRegionHealth(): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      // Get all region health keys
+      const keys = await this.redis.keys(`${this.HEALTH_KEY_PREFIX}*`);
+
+      for (const key of keys) {
+        const regionId = key.replace(this.HEALTH_KEY_PREFIX, '');
+
+        // Skip own region
+        if (regionId === this.config.regionId) continue;
+
+        const healthData = await this.redis.get<RegionHealth>(key);
+        if (healthData) {
+          this.regions.set(regionId, healthData);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to fetch remote region health', { error });
+    }
+  }
+
+  private async updateOwnRegionStatus(status: RegionStatus): Promise<void> {
+    const region = this.regions.get(this.config.regionId);
+    if (region) {
+      region.status = status;
+      await this.persistRegionHealth(region);
+    }
+  }
+
+  // ===========================================================================
+  // Failover Logic (ADR-007)
+  // ===========================================================================
+
+  private async evaluateFailoverConditions(): Promise<void> {
+    for (const [regionId, region] of this.regions) {
+      // Skip own region
+      if (regionId === this.config.regionId) continue;
+
+      // Check for stale health data
+      const healthAge = Date.now() - region.lastHealthCheck;
+      const isStale = healthAge > this.config.healthCheckIntervalMs * 3;
+
+      if (isStale || region.status === 'failed') {
+        region.consecutiveFailures++;
+
+        if (region.consecutiveFailures >= this.config.failoverThreshold) {
+          await this.triggerFailover(regionId);
+        }
+      } else {
+        region.consecutiveFailures = 0;
+      }
+    }
+  }
+
+  /**
+   * Trigger failover for a failed region.
+   */
+  async triggerFailover(failedRegion: string): Promise<void> {
+    this.logger.warn(`Triggering failover for region: ${failedRegion}`);
+
+    const startTime = Date.now();
+    const region = this.regions.get(failedRegion);
+
+    if (!region) {
+      return;
+    }
+
+    // 1. Mark region as failed
+    region.status = 'failed';
+
+    // 2. Emit failover started event
+    const failoverEvent: FailoverEvent = {
+      type: 'failover_started',
+      sourceRegion: failedRegion,
+      targetRegion: this.config.regionId,
+      services: region.services.map(s => s.serviceName),
+      timestamp: startTime
+    };
+
+    this.emit('failoverStarted', failoverEvent);
+
+    // 3. Publish failover event to Redis for other services
+    await this.publishFailoverEvent(failoverEvent);
+
+    try {
+      // 4. Activate standby services for the failed region
+      await this.activateStandbyServices(failedRegion);
+
+      // 5. Update routing (if applicable)
+      await this.updateRoutingTable(failedRegion);
+
+      // 6. Emit completion
+      const completedEvent: FailoverEvent = {
+        type: 'failover_completed',
+        sourceRegion: failedRegion,
+        targetRegion: this.config.regionId,
+        services: region.services.map(s => s.serviceName),
+        timestamp: Date.now(),
+        durationMs: Date.now() - startTime
+      };
+
+      this.emit('failoverCompleted', completedEvent);
+      await this.publishFailoverEvent(completedEvent);
+
+      this.logger.info('Failover completed', {
+        failedRegion,
+        durationMs: completedEvent.durationMs
+      });
+
+    } catch (error) {
+      // Emit failure
+      const failedEvent: FailoverEvent = {
+        type: 'failover_failed',
+        sourceRegion: failedRegion,
+        targetRegion: this.config.regionId,
+        services: region.services.map(s => s.serviceName),
+        timestamp: Date.now(),
+        durationMs: Date.now() - startTime,
+        error: (error as Error).message
+      };
+
+      this.emit('failoverFailed', failedEvent);
+      await this.publishFailoverEvent(failedEvent);
+
+      this.logger.error('Failover failed', { error, failedRegion });
+    }
+  }
+
+  private async activateStandbyServices(failedRegion: string): Promise<void> {
+    // This would activate standby services for the failed region
+    // Implementation depends on deployment infrastructure (Fly.io, Oracle, etc.)
+
+    this.logger.info('Activating standby services', { failedRegion });
+
+    // Emit activation request for standby services to handle
+    this.emit('activateStandby', {
+      failedRegion,
+      timestamp: Date.now()
+    });
+  }
+
+  private async updateRoutingTable(failedRegion: string): Promise<void> {
+    // Update any routing configuration to redirect traffic from failed region
+    // This is infrastructure-specific
+
+    this.logger.info('Updating routing table', { failedRegion });
+
+    if (this.redis) {
+      await this.redis.set(`routing:failed:${failedRegion}`, {
+        failedAt: Date.now(),
+        redirectTo: this.config.regionId
+      });
+    }
+  }
+
+  // ===========================================================================
+  // Event Subscription
+  // ===========================================================================
+
+  private async subscribeToFailoverEvents(): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      await this.redis.subscribe(this.FAILOVER_CHANNEL, (message: any) => {
+        const event = message.data as FailoverEvent;
+
+        this.logger.info('Received failover event', {
+          type: event.type,
+          sourceRegion: event.sourceRegion,
+          targetRegion: event.targetRegion
+        });
+
+        // Handle standby activation if this is the target
+        if (event.type === 'failover_started' &&
+            event.targetRegion === this.config.regionId &&
+            this.config.isStandby) {
+          this.onStandbyActivation(event);
+        }
+
+        this.emit('failoverEvent', event);
+      });
+    } catch (error) {
+      this.logger.error('Failed to subscribe to failover events', { error });
+    }
+  }
+
+  private async publishFailoverEvent(event: FailoverEvent): Promise<void> {
+    if (!this.redis) return;
+
+    try {
+      await this.redis.publish(this.FAILOVER_CHANNEL, {
+        type: 'failover_event',
+        data: event,
+        timestamp: Date.now(),
+        source: this.config.instanceId
+      });
+    } catch (error) {
+      this.logger.error('Failed to publish failover event', { error });
+    }
+  }
+
+  private onStandbyActivation(event: FailoverEvent): void {
+    this.logger.info('Standby activation requested', {
+      sourceRegion: event.sourceRegion
+    });
+
+    // Transition from standby to active
+    const region = this.regions.get(this.config.regionId);
+    if (region) {
+      for (const service of region.services) {
+        if (service.isStandby) {
+          service.isStandby = false;
+          service.isPrimary = true;
+        }
+      }
+    }
+
+    this.emit('activated', { previouslyStandby: true, timestamp: Date.now() });
+  }
+
+  // ===========================================================================
+  // Global Health Status
+  // ===========================================================================
+
+  /**
+   * Evaluate the global system health status.
+   * Used by GracefulDegradationManager to determine degradation level.
+   */
+  evaluateGlobalHealth(): GlobalHealthStatus {
+    const detectors: Array<{ name: string; healthy: boolean; region: string }> = [];
+    let executorHealthy = false;
+    let executorRegion = '';
+
+    for (const [regionId, region] of this.regions) {
+      for (const service of region.services) {
+        if (service.serviceName.includes('detector')) {
+          detectors.push({
+            name: service.serviceName,
+            healthy: service.status === 'healthy',
+            region: regionId
+          });
+        }
+
+        if (service.serviceName.includes('execution') || service.serviceName.includes('executor')) {
+          executorHealthy = service.status === 'healthy';
+          executorRegion = regionId;
+        }
+      }
+    }
+
+    const healthyDetectors = detectors.filter(d => d.healthy).length;
+    const totalDetectors = detectors.length;
+
+    // Determine degradation level
+    // Priority: No detectors/executor > No healthy detectors > Executor down > Partial detectors > Full operation
+    let degradationLevel: DegradationLevel;
+
+    if (totalDetectors === 0) {
+      // No detectors registered yet
+      degradationLevel = DegradationLevel.READ_ONLY;
+    } else if (healthyDetectors === 0) {
+      // All detectors unhealthy
+      degradationLevel = DegradationLevel.READ_ONLY;
+    } else if (!executorHealthy) {
+      // Detectors working but executor down - can detect but not execute
+      degradationLevel = DegradationLevel.DETECTION_ONLY;
+    } else if (healthyDetectors < totalDetectors) {
+      // Some detectors unhealthy
+      degradationLevel = DegradationLevel.REDUCED_CHAINS;
+    } else {
+      // All systems healthy
+      degradationLevel = DegradationLevel.FULL_OPERATION;
+    }
+
+    // Overall status
+    let overallStatus: 'healthy' | 'degraded' | 'critical';
+    if (degradationLevel === DegradationLevel.FULL_OPERATION) {
+      overallStatus = 'healthy';
+    } else if (degradationLevel >= DegradationLevel.READ_ONLY) {
+      overallStatus = 'critical';
+    } else {
+      overallStatus = 'degraded';
+    }
+
+    return {
+      redis: { healthy: this.redis !== null, latencyMs: 0 },
+      executor: { healthy: executorHealthy, region: executorRegion },
+      detectors,
+      degradationLevel,
+      overallStatus
+    };
+  }
+
+  // ===========================================================================
+  // Public Getters
+  // ===========================================================================
+
+  getIsLeader(): boolean {
+    return this.isLeader;
+  }
+
+  getRegionHealth(regionId: string): RegionHealth | undefined {
+    return this.regions.get(regionId);
+  }
+
+  getAllRegionsHealth(): Map<string, RegionHealth> {
+    return new Map(this.regions);
+  }
+
+  getOwnRegionId(): string {
+    return this.config.regionId;
+  }
+
+  isActive(): boolean {
+    return this.isRunning;
+  }
+}
+
+// =============================================================================
+// Singleton Instance
+// =============================================================================
+
+let globalCrossRegionHealthManager: CrossRegionHealthManager | null = null;
+
+export function getCrossRegionHealthManager(config?: CrossRegionHealthConfig): CrossRegionHealthManager {
+  if (!globalCrossRegionHealthManager && config) {
+    globalCrossRegionHealthManager = new CrossRegionHealthManager(config);
+  }
+  if (!globalCrossRegionHealthManager) {
+    throw new Error('CrossRegionHealthManager not initialized. Call with config first.');
+  }
+  return globalCrossRegionHealthManager;
+}
+
+export async function resetCrossRegionHealthManager(): Promise<void> {
+  if (globalCrossRegionHealthManager) {
+    await globalCrossRegionHealthManager.stop();
+    globalCrossRegionHealthManager = null;
+  }
+}

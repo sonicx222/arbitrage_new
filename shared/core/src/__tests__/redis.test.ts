@@ -1,14 +1,15 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Mock } from 'jest-mock';
 import { RedisClient, getRedisClient, resetRedisInstance } from '../redis';
 
-// Mock ioredis
+// Mock ioredis - using default export pattern
 jest.mock('ioredis', () => {
-  return jest.fn().mockImplementation(() => ({
+  const mockImplementation = jest.fn().mockImplementation(() => ({
     on: jest.fn(),
     removeAllListeners: jest.fn(),
     connect: jest.fn(),
     disconnect: jest.fn(),
-    ping: jest.fn().mockResolvedValue('PONG'),
+    ping: jest.fn<() => Promise<string>>().mockResolvedValue('PONG'),
     set: jest.fn(),
     get: jest.fn(),
     setex: jest.fn(),
@@ -27,6 +28,11 @@ jest.mock('ioredis', () => {
     ltrim: jest.fn(),
     llen: jest.fn()
   }));
+  return {
+    __esModule: true,
+    default: mockImplementation,
+    Redis: mockImplementation
+  };
 });
 
 describe('RedisClient', () => {

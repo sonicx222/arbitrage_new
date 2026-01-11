@@ -2,12 +2,14 @@
 // Updated: 2025-01-10 - Phase 1 expansion (7 chains, 25 DEXs, 60 tokens)
 import { Chain, Dex, Token } from '../../types';
 
-// Validate required environment variables at startup
-if (!process.env.ETHEREUM_RPC_URL) {
-  throw new Error('CRITICAL CONFIG ERROR: ETHEREUM_RPC_URL environment variable is required');
-}
-if (!process.env.ETHEREUM_WS_URL) {
-  throw new Error('CRITICAL CONFIG ERROR: ETHEREUM_WS_URL environment variable is required');
+// Validate required environment variables at startup (skip in test environment)
+if (process.env.NODE_ENV !== 'test') {
+  if (!process.env.ETHEREUM_RPC_URL) {
+    throw new Error('CRITICAL CONFIG ERROR: ETHEREUM_RPC_URL environment variable is required');
+  }
+  if (!process.env.ETHEREUM_WS_URL) {
+    throw new Error('CRITICAL CONFIG ERROR: ETHEREUM_WS_URL environment variable is required');
+  }
 }
 
 // =============================================================================
@@ -61,8 +63,8 @@ export const CHAINS: Record<string, Chain> = {
   ethereum: {
     id: 1,
     name: 'Ethereum',
-    rpcUrl: process.env.ETHEREUM_RPC_URL,
-    wsUrl: process.env.ETHEREUM_WS_URL,
+    rpcUrl: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
+    wsUrl: process.env.ETHEREUM_WS_URL || 'wss://eth.llamarpc.com',
     blockTime: 12,
     nativeToken: 'ETH'
   }
@@ -629,3 +631,8 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
     nativeTokenKey: 'nativeWrapper'  // WBNB for USD calc
   }
 };
+
+// =============================================================================
+// PARTITION EXPORTS (ADR-003)
+// =============================================================================
+export * from './partitions';

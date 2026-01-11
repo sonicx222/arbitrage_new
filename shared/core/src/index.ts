@@ -89,6 +89,22 @@ export {
 } from './circuit-breaker';
 export { RetryMechanism, RetryPresets, withRetry, retry, retryAdvanced } from './retry-mechanism';
 export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './graceful-degradation';
+
+// Cross-Region Health (ADR-007)
+export {
+  CrossRegionHealthManager,
+  getCrossRegionHealthManager,
+  resetCrossRegionHealthManager,
+  DegradationLevel
+} from './cross-region-health';
+export type {
+  RegionHealth,
+  RegionStatus,
+  ServiceRegionHealth,
+  FailoverEvent,
+  CrossRegionHealthConfig,
+  GlobalHealthStatus
+} from './cross-region-health';
 export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './dead-letter-queue';
 export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './self-healing-manager';
 export { ExpertSelfHealingManager, getExpertSelfHealingManager } from './expert-self-healing-manager';

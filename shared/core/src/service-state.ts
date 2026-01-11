@@ -99,6 +99,14 @@ export class ServiceStateManager extends EventEmitter {
     };
 
     this.logger = createLogger(`state:${this.config.serviceName}`);
+
+    // Add default error listener to prevent Node.js from crashing
+    // when emitting 'error' state events with no listeners
+    if (this.config.emitEvents) {
+      this.on('error', () => {
+        // Default no-op listener - users should add their own error handlers
+      });
+    }
   }
 
   // ===========================================================================
@@ -192,10 +200,11 @@ export class ServiceStateManager extends EventEmitter {
 
     // Wait for any pending transition
     if (this.transitionLock) {
+      const timeout = this.createTimeout();
       try {
         await Promise.race([
           this.transitionLock,
-          this.createTimeout()
+          timeout.promise
         ]);
       } catch (error) {
         return {
@@ -203,6 +212,20 @@ export class ServiceStateManager extends EventEmitter {
           previousState,
           currentState: this.state,
           error: error as Error
+        };
+      } finally {
+        timeout.clear(); // Prevent memory leak
+      }
+
+      // Re-validate transition after waiting - state may have changed
+      if (!this.isValidTransition(newState)) {
+        return {
+          success: false,
+          previousState,
+          currentState: this.state,
+          error: new Error(
+            `Invalid state transition after lock wait: ${this.state} -> ${newState}`
+          )
         };
       }
     }
@@ -224,7 +247,7 @@ export class ServiceStateManager extends EventEmitter {
       transitionCount: this.transitionCount
     });
 
-    // Emit event if configured
+    // Emit event if configured (wrapped in try-catch for safety)
     if (this.config.emitEvents) {
       const event: StateChangeEvent = {
         previousState,
@@ -232,8 +255,17 @@ export class ServiceStateManager extends EventEmitter {
         timestamp: this.lastTransition,
         serviceName: this.config.serviceName
       };
-      this.emit('stateChange', event);
-      this.emit(newState, event);
+      try {
+        this.emit('stateChange', event);
+        this.emit(newState, event);
+      } catch (emitError) {
+        // Don't let listener errors crash the state transition
+        this.logger.error('Error in state change event listener', {
+          error: emitError,
+          previousState,
+          newState
+        });
+      }
     }
 
     return {
@@ -269,46 +301,56 @@ export class ServiceStateManager extends EventEmitter {
       return startingResult;
     }
 
-    // Create transition lock
+    // Create transition lock to prevent external transitions during startup
     let resolveLock: () => void;
     this.transitionLock = new Promise(resolve => {
       resolveLock = resolve;
     });
 
+    const timeout = this.createTimeout();
     try {
       // Execute start with timeout
       await Promise.race([
         startFn(),
-        this.createTimeout()
+        timeout.promise
       ]);
+
+      // Release lock before transitioning to final state
+      resolveLock!();
+      this.transitionLock = null;
 
       // Transition to RUNNING
       const runningResult = await this.transitionTo(ServiceState.RUNNING);
       return runningResult;
 
     } catch (error) {
+      // Release lock before transitioning to error state
+      resolveLock!();
+      this.transitionLock = null;
+
       // Transition to ERROR
       const errorResult = await this.transitionTo(
         ServiceState.ERROR,
         (error as Error).message
       );
+      // Return failure - the start operation failed even though transition to ERROR succeeded
       return {
         ...errorResult,
+        success: false,
         error: error as Error
       };
-
     } finally {
-      resolveLock!();
-      this.transitionLock = null;
+      timeout.clear(); // Prevent memory leak
     }
   }
 
   /**
    * Execute a stop sequence with proper state transitions.
    * Transitions: RUNNING -> STOPPING -> (STOPPED | ERROR)
+   * Special case: ERROR -> STOPPED (direct, for cleanup)
    */
   async executeStop(stopFn: () => Promise<void>): Promise<StateTransitionResult> {
-    // Can also stop from ERROR state
+    // Can also stop from ERROR state (for cleanup)
     if (this.state !== ServiceState.RUNNING && this.state !== ServiceState.ERROR) {
       return {
         success: false,
@@ -318,43 +360,63 @@ export class ServiceStateManager extends EventEmitter {
       };
     }
 
-    // Transition to STOPPING
+    // When stopping from ERROR state, go directly to STOPPED (for cleanup)
+    if (this.state === ServiceState.ERROR) {
+      try {
+        await stopFn();
+        return await this.transitionTo(ServiceState.STOPPED);
+      } catch (error) {
+        // Even if cleanup fails, mark as stopped
+        return await this.transitionTo(ServiceState.STOPPED);
+      }
+    }
+
+    // Transition to STOPPING (from RUNNING state)
     const stoppingResult = await this.transitionTo(ServiceState.STOPPING);
     if (!stoppingResult.success) {
       return stoppingResult;
     }
 
-    // Create transition lock
+    // Create transition lock to prevent external transitions during shutdown
     let resolveLock: () => void;
     this.transitionLock = new Promise(resolve => {
       resolveLock = resolve;
     });
 
+    const timeout = this.createTimeout();
     try {
       // Execute stop with timeout
       await Promise.race([
         stopFn(),
-        this.createTimeout()
+        timeout.promise
       ]);
+
+      // Release lock before transitioning to final state
+      resolveLock!();
+      this.transitionLock = null;
 
       // Transition to STOPPED
       const stoppedResult = await this.transitionTo(ServiceState.STOPPED);
       return stoppedResult;
 
     } catch (error) {
+      // Release lock before transitioning to error state
+      resolveLock!();
+      this.transitionLock = null;
+
       // Transition to ERROR on failure
       const errorResult = await this.transitionTo(
         ServiceState.ERROR,
         (error as Error).message
       );
+      // Return failure - the stop operation failed even though transition to ERROR succeeded
       return {
         ...errorResult,
+        success: false,
         error: error as Error
       };
-
     } finally {
-      resolveLock!();
-      this.transitionLock = null;
+      timeout.clear(); // Prevent memory leak
     }
   }
 
@@ -463,12 +525,21 @@ export class ServiceStateManager extends EventEmitter {
     return validTargets.includes(newState);
   }
 
-  private createTimeout(): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => {
+  /**
+   * Create a clearable timeout promise.
+   * Returns both the promise and a clear function to prevent memory leaks.
+   */
+  private createTimeout(): { promise: Promise<never>; clear: () => void } {
+    let timeoutId: NodeJS.Timeout;
+    const promise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
         reject(new Error(`State transition timeout after ${this.config.transitionTimeoutMs}ms`));
       }, this.config.transitionTimeoutMs);
     });
+    return {
+      promise,
+      clear: () => clearTimeout(timeoutId)
+    };
   }
 }
 

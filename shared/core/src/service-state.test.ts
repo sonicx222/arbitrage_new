@@ -35,6 +35,11 @@ describe('ServiceStateManager', () => {
       transitionTimeoutMs: 1000,
       emitEvents: true
     });
+    // Add error listener to prevent unhandled 'error' events from crashing tests
+    // The ServiceStateManager emits state name as event, including 'error' state
+    stateManager.on('error', () => {
+      // Intentionally empty - we just need to prevent unhandled error events
+    });
   });
 
   afterEach(() => {
@@ -246,18 +251,23 @@ describe('ServiceStateManager', () => {
 
   describe('executeStart', () => {
     it('should transition through STARTING to RUNNING on success', async () => {
-      const startFn = jest.fn().mockResolvedValue(undefined);
+      let called = false;
+      const startFn = async (): Promise<void> => {
+        called = true;
+      };
 
       const result = await stateManager.executeStart(startFn);
 
       expect(result.success).toBe(true);
       expect(result.currentState).toBe(ServiceState.RUNNING);
-      expect(startFn).toHaveBeenCalledTimes(1);
+      expect(called).toBe(true);
       expect(stateManager.isRunning()).toBe(true);
     });
 
     it('should transition to ERROR on start failure', async () => {
-      const startFn = jest.fn().mockRejectedValue(new Error('Start failed'));
+      const startFn = async (): Promise<void> => {
+        throw new Error('Start failed');
+      };
 
       const result = await stateManager.executeStart(startFn);
 
@@ -271,11 +281,14 @@ describe('ServiceStateManager', () => {
       await stateManager.transitionTo(ServiceState.STARTING);
       await stateManager.transitionTo(ServiceState.RUNNING);
 
-      const startFn = jest.fn();
+      let called = false;
+      const startFn = async (): Promise<void> => {
+        called = true;
+      };
       const result = await stateManager.executeStart(startFn);
 
       expect(result.success).toBe(false);
-      expect(startFn).not.toHaveBeenCalled();
+      expect(called).toBe(false);
     });
 
     it('should timeout if start takes too long', async () => {
@@ -283,8 +296,12 @@ describe('ServiceStateManager', () => {
         serviceName: 'slow-service',
         transitionTimeoutMs: 100
       });
+      // Add error listener for this manager too
+      manager.on('error', () => {});
 
-      const slowStartFn = jest.fn(() => new Promise(resolve => setTimeout(resolve, 500)));
+      const slowStartFn = async (): Promise<void> => {
+        await new Promise<void>(resolve => setTimeout(resolve, 500));
+      };
 
       const result = await manager.executeStart(slowStartFn);
 
@@ -305,18 +322,23 @@ describe('ServiceStateManager', () => {
     });
 
     it('should transition through STOPPING to STOPPED on success', async () => {
-      const stopFn = jest.fn().mockResolvedValue(undefined);
+      let called = false;
+      const stopFn = async (): Promise<void> => {
+        called = true;
+      };
 
       const result = await stateManager.executeStop(stopFn);
 
       expect(result.success).toBe(true);
       expect(result.currentState).toBe(ServiceState.STOPPED);
-      expect(stopFn).toHaveBeenCalledTimes(1);
+      expect(called).toBe(true);
       expect(stateManager.isStopped()).toBe(true);
     });
 
     it('should transition to ERROR on stop failure', async () => {
-      const stopFn = jest.fn().mockRejectedValue(new Error('Stop failed'));
+      const stopFn = async (): Promise<void> => {
+        throw new Error('Stop failed');
+      };
 
       const result = await stateManager.executeStop(stopFn);
 
@@ -327,18 +349,22 @@ describe('ServiceStateManager', () => {
 
     it('should fail if not in RUNNING state', async () => {
       const freshManager = createServiceState({ serviceName: 'fresh-service' });
+      freshManager.on('error', () => {});
 
-      const stopFn = jest.fn();
+      let called = false;
+      const stopFn = async (): Promise<void> => {
+        called = true;
+      };
       const result = await freshManager.executeStop(stopFn);
 
       expect(result.success).toBe(false);
-      expect(stopFn).not.toHaveBeenCalled();
+      expect(called).toBe(false);
     });
 
     it('should allow stop from ERROR state', async () => {
       await stateManager.transitionTo(ServiceState.ERROR);
 
-      const stopFn = jest.fn().mockResolvedValue(undefined);
+      const stopFn = async (): Promise<void> => {};
       const result = await stateManager.executeStop(stopFn);
 
       expect(result.success).toBe(true);
@@ -355,26 +381,38 @@ describe('ServiceStateManager', () => {
       await stateManager.transitionTo(ServiceState.STARTING);
       await stateManager.transitionTo(ServiceState.RUNNING);
 
-      const stopFn = jest.fn().mockResolvedValue(undefined);
-      const startFn = jest.fn().mockResolvedValue(undefined);
+      let stopCalled = false;
+      let startCalled = false;
+      const stopFn = async (): Promise<void> => {
+        stopCalled = true;
+      };
+      const startFn = async (): Promise<void> => {
+        startCalled = true;
+      };
 
       const result = await stateManager.executeRestart(stopFn, startFn);
 
       expect(result.success).toBe(true);
       expect(result.currentState).toBe(ServiceState.RUNNING);
-      expect(stopFn).toHaveBeenCalledTimes(1);
-      expect(startFn).toHaveBeenCalledTimes(1);
+      expect(stopCalled).toBe(true);
+      expect(startCalled).toBe(true);
     });
 
     it('should just start when not running', async () => {
-      const stopFn = jest.fn();
-      const startFn = jest.fn().mockResolvedValue(undefined);
+      let stopCalled = false;
+      let startCalled = false;
+      const stopFn = async (): Promise<void> => {
+        stopCalled = true;
+      };
+      const startFn = async (): Promise<void> => {
+        startCalled = true;
+      };
 
       const result = await stateManager.executeRestart(stopFn, startFn);
 
       expect(result.success).toBe(true);
-      expect(stopFn).not.toHaveBeenCalled();
-      expect(startFn).toHaveBeenCalledTimes(1);
+      expect(stopCalled).toBe(false);
+      expect(startCalled).toBe(true);
     });
   });
 
@@ -534,13 +572,16 @@ describe('ServiceStateManager', () => {
   describe('concurrent access', () => {
     it('should handle concurrent transition attempts', async () => {
       // Try to start twice simultaneously
+      const startFn1 = async (): Promise<void> => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      };
+      const startFn2 = async (): Promise<void> => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      };
+
       const [result1, result2] = await Promise.all([
-        stateManager.executeStart(async () => {
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }),
-        stateManager.executeStart(async () => {
-          await new Promise(resolve => setTimeout(resolve, 50));
-        })
+        stateManager.executeStart(startFn1),
+        stateManager.executeStart(startFn2)
       ]);
 
       // One should succeed, one should fail

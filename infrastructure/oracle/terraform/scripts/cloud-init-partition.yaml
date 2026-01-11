@@ -1,0 +1,153 @@
+#cloud-config
+# Cloud-init configuration for Arbitrage Partition Service
+#
+# This script bootstraps an Oracle Cloud instance to run a partition detector
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker
+  - docker-compose
+  - git
+  - curl
+  - jq
+
+write_files:
+  - path: /opt/arbitrage/docker-compose.yml
+    permissions: '0644'
+    content: |
+      version: '3.8'
+      services:
+        partition:
+          image: ${docker_image}
+          restart: unless-stopped
+          ports:
+            - "${health_port}:3001"
+          environment:
+            - NODE_ENV=production
+            - PARTITION_ID=${partition_id}
+            - PARTITION_CHAINS=${chains}
+            - REGION_ID=${region_id}
+            - INSTANCE_ID=oracle-${partition_id}-$${HOSTNAME}
+            - REDIS_URL=${redis_url}
+            - LOG_LEVEL=${log_level}
+            - HEALTH_CHECK_PORT=3001
+            - ENABLE_CROSS_REGION_HEALTH=true
+            - BSC_WS_URL=${bsc_ws_url}
+            - BSC_RPC_URL=${bsc_rpc_url}
+            - POLYGON_WS_URL=${polygon_ws_url}
+            - POLYGON_RPC_URL=${polygon_rpc_url}
+            - ETHEREUM_WS_URL=${ethereum_ws_url}
+            - ETHEREUM_RPC_URL=${ethereum_rpc_url}
+          healthcheck:
+            test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+            interval: 15s
+            timeout: 10s
+            retries: 3
+            start_period: 30s
+          deploy:
+            resources:
+              limits:
+                memory: 512M
+                cpus: '1.0'
+          logging:
+            driver: json-file
+            options:
+              max-size: "10m"
+              max-file: "3"
+
+  - path: /opt/arbitrage/scripts/health-check.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Health check script for partition service
+
+      HEALTH_URL="http://localhost:${health_port}/health"
+      MAX_RETRIES=3
+      RETRY_DELAY=5
+
+      for i in $(seq 1 $MAX_RETRIES); do
+        response=$(curl -s -o /dev/null -w "%%{http_code}" "$HEALTH_URL")
+        if [ "$response" = "200" ]; then
+          echo "Health check passed"
+          exit 0
+        fi
+        echo "Health check failed (attempt $i/$MAX_RETRIES), retrying in $RETRY_DELAY seconds..."
+        sleep $RETRY_DELAY
+      done
+
+      echo "Health check failed after $MAX_RETRIES attempts"
+      exit 1
+
+  - path: /opt/arbitrage/scripts/restart-service.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Restart the partition service
+
+      cd /opt/arbitrage
+      docker-compose pull
+      docker-compose down
+      docker-compose up -d
+
+      echo "Service restarted at $(date)"
+
+  - path: /etc/systemd/system/arbitrage-partition.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Arbitrage Partition Service
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/arbitrage
+      ExecStart=/usr/bin/docker-compose up -d
+      ExecStop=/usr/bin/docker-compose down
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /etc/cron.d/arbitrage-health
+    permissions: '0644'
+    content: |
+      # Health check every 5 minutes, restart if unhealthy
+      */5 * * * * root /opt/arbitrage/scripts/health-check.sh || /opt/arbitrage/scripts/restart-service.sh >> /var/log/arbitrage-restart.log 2>&1
+
+runcmd:
+  # Start and enable Docker
+  - systemctl start docker
+  - systemctl enable docker
+
+  # Add opc user to docker group
+  - usermod -aG docker opc
+
+  # Create arbitrage directories
+  - mkdir -p /opt/arbitrage/scripts
+  - mkdir -p /opt/arbitrage/logs
+
+  # Set ownership
+  - chown -R opc:opc /opt/arbitrage
+
+  # Pull and start the service
+  - cd /opt/arbitrage && docker-compose pull
+  - cd /opt/arbitrage && docker-compose up -d
+
+  # Enable systemd service
+  - systemctl daemon-reload
+  - systemctl enable arbitrage-partition
+
+  # Open firewall for health port
+  - firewall-cmd --permanent --add-port=${health_port}/tcp
+  - firewall-cmd --reload
+
+  # Log completion
+  - echo "Partition ${partition_id} initialized at $(date)" >> /var/log/arbitrage-init.log
+
+final_message: "Arbitrage partition ${partition_id} initialized successfully!"

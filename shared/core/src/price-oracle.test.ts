@@ -5,6 +5,7 @@
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Mock } from 'jest-mock';
 import {
   PriceOracle,
   getPriceOracle,
@@ -13,16 +14,26 @@ import {
   hasDefaultPrice
 } from './price-oracle';
 
-// Mock Redis client
-const mockRedisClient = {
-  get: jest.fn(),
-  set: jest.fn(),
-  ping: jest.fn().mockResolvedValue(true)
-};
+// Mock Redis client interface
+interface MockRedisClient {
+  get: Mock<(key: string) => Promise<unknown>>;
+  set: Mock<(key: string, value: unknown, ttl?: number) => Promise<string>>;
+  ping: Mock<() => Promise<boolean>>;
+}
+
+// Mock Redis client factory
+const createMockRedisClient = (): MockRedisClient => ({
+  get: jest.fn<(key: string) => Promise<unknown>>(),
+  set: jest.fn<(key: string, value: unknown, ttl?: number) => Promise<string>>(),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
+});
+
+// Shared mock reference
+let mockRedisClient: MockRedisClient;
 
 // Mock the redis module
 jest.mock('./redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue(mockRedisClient)
+  getRedisClient: jest.fn<() => Promise<MockRedisClient>>().mockImplementation(() => Promise.resolve(mockRedisClient))
 }));
 
 // Mock logger
@@ -41,6 +52,9 @@ describe('PriceOracle', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     resetPriceOracle();
+
+    // Create fresh mock for each test
+    mockRedisClient = createMockRedisClient();
 
     // Default mock implementations
     mockRedisClient.get.mockResolvedValue(null);

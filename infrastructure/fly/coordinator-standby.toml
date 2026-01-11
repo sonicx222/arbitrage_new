@@ -1,0 +1,91 @@
+# Fly.io Deployment Configuration for Coordinator Standby
+#
+# Service: Coordinator (Standby Instance)
+# Region: sjc (San Jose, US-West) for geographic redundancy
+# Purpose: Backup coordinator that activates on primary failure
+#
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/coordinator-standby.toml
+#
+# Notes:
+# - Runs in standby mode (IS_STANDBY=true)
+# - Automatically activates if primary coordinator fails
+# - Uses Redis-based leader election for failover
+
+app = "arbitrage-coordinator-standby"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "services/coordinator/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  REGION_ID = "us-west1"
+  LOG_LEVEL = "info"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  IS_STANDBY = "true"
+  CAN_BECOME_LEADER = "true"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 50
+    soft_limit = 40
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 3000
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.http_checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+    restart_limit = 3
+    timeout = "5s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 3000
+    timeout = "5s"
+    type = "http"
+
+[processes]
+  app = "node dist/index.js"
+
+[deploy]
+  release_command = "echo 'Coordinator standby deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Upstash Redis connection URL (same as primary)

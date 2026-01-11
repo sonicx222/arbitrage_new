@@ -330,90 +330,101 @@ export abstract class BaseDetector {
    * Override onStop() for chain-specific cleanup.
    */
   async stop(): Promise<void> {
-    // Guard against double stop
-    if (this.isStopping || !this.isRunning) {
-      this.logger.debug('Service is already stopped or stopping');
-      if (this.stopPromise) {
-        return this.stopPromise;
-      }
+    // If stop is already in progress, wait for it (regardless of other state)
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+
+    // Guard against double stop when already stopped
+    if (!this.isRunning && !this.isStopping) {
+      this.logger.debug('Service is already stopped');
       return;
     }
 
+    // Mark as stopping BEFORE creating the promise to prevent races
     this.isStopping = true;
-    this.logger.info(`Stopping ${this.chain} detector service`);
     this.isRunning = false;
+    this.logger.info(`Stopping ${this.chain} detector service`);
 
+    // Create and store the promise BEFORE awaiting
     this.stopPromise = this.performCleanup();
-    await this.stopPromise;
+
+    try {
+      await this.stopPromise;
+    } finally {
+      // Only clear state after cleanup is fully complete
+      this.isStopping = false;
+      this.stopPromise = null;
+    }
   }
 
   /**
    * Internal cleanup method called by stop()
+   * Note: State cleanup (isStopping, stopPromise) is handled in stop()
    */
   private async performCleanup(): Promise<void> {
-    try {
-      // Stop health monitoring first to prevent racing
-      if (this.healthMonitoringInterval) {
-        clearInterval(this.healthMonitoringInterval);
-        this.healthMonitoringInterval = null;
-      }
-
-      // Hook for chain-specific cleanup
-      await this.onStop();
-
-      // Flush any remaining batched events
-      if (this.eventBatcher) {
-        try {
-          this.eventBatcher.flushAll();
-          this.eventBatcher.destroy();
-        } catch (error) {
-          this.logger.warn('Error flushing event batcher', { error });
-        }
-        this.eventBatcher = null as any;
-      }
-
-      // Clean up Redis Streams batchers (ADR-002, S1.1.4)
-      await this.cleanupStreamBatchers();
-
-      // Disconnect WebSocket manager
-      if (this.wsManager) {
-        try {
-          this.wsManager.disconnect();
-        } catch (error) {
-          this.logger.warn('Error disconnecting WebSocket', { error });
-        }
-      }
-
-      // Disconnect Redis Streams client
-      if (this.streamsClient) {
-        try {
-          await this.streamsClient.disconnect();
-        } catch (error) {
-          this.logger.warn('Error disconnecting Redis Streams client', { error });
-        }
-        this.streamsClient = null;
-      }
-
-      // Disconnect Redis
-      if (this.redis) {
-        try {
-          await this.redis.disconnect();
-        } catch (error) {
-          this.logger.warn('Error disconnecting Redis', { error });
-        }
-        this.redis = null;
-      }
-
-      // Clear collections to prevent memory leaks
-      this.pairs.clear();
-      this.pairsByAddress.clear();
-      this.monitoredPairs.clear();
-
-      this.logger.info(`${this.chain} detector service stopped`);
-    } finally {
-      this.isStopping = false;
-      this.stopPromise = null;
+    // Stop health monitoring first to prevent racing
+    if (this.healthMonitoringInterval) {
+      clearInterval(this.healthMonitoringInterval);
+      this.healthMonitoringInterval = null;
     }
+
+    // Hook for chain-specific cleanup
+    await this.onStop();
+
+    // Flush any remaining batched events
+    if (this.eventBatcher) {
+      try {
+        if (this.eventBatcher.flushAll) {
+          await Promise.resolve(this.eventBatcher.flushAll());
+        }
+        if (this.eventBatcher.destroy) {
+          this.eventBatcher.destroy();
+        }
+      } catch (error) {
+        this.logger.warn('Error flushing event batcher', { error });
+      }
+      this.eventBatcher = null as any;
+    }
+
+    // Clean up Redis Streams batchers (ADR-002, S1.1.4)
+    await this.cleanupStreamBatchers();
+
+    // Disconnect WebSocket manager
+    if (this.wsManager) {
+      try {
+        this.wsManager.disconnect();
+      } catch (error) {
+        this.logger.warn('Error disconnecting WebSocket', { error });
+      }
+    }
+
+    // Disconnect Redis Streams client
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.disconnect();
+      } catch (error) {
+        this.logger.warn('Error disconnecting Redis Streams client', { error });
+      }
+      this.streamsClient = null;
+    }
+
+    // Disconnect Redis
+    if (this.redis) {
+      try {
+        await this.redis.disconnect();
+      } catch (error) {
+        this.logger.warn('Error disconnecting Redis', { error });
+      }
+      this.redis = null;
+    }
+
+    // Clear collections to prevent memory leaks
+    this.pairs.clear();
+    this.pairsByAddress.clear();
+    this.monitoredPairs.clear();
+
+    this.logger.info(`${this.chain} detector service stopped`);
   }
 
   /**
@@ -462,7 +473,7 @@ export abstract class BaseDetector {
   protected startHealthMonitoring(): void {
     const interval = this.config.healthCheckInterval || 30000;
     this.healthMonitoringInterval = setInterval(async () => {
-      // Guard against running during shutdown (P2 fix: consistent order)
+      // Guard against running during shutdown (check multiple times to prevent races)
       if (this.isStopping || !this.isRunning) {
         return;
       }
@@ -470,14 +481,27 @@ export abstract class BaseDetector {
       try {
         const health = await this.getHealth();
 
-        if (this.redis) {
-          await this.redis.updateServiceHealth(`${this.chain}-detector`, health);
+        // Re-check shutdown state after async operation
+        if (this.isStopping || !this.isRunning) {
+          return;
         }
 
-        this.perfLogger.logHealthCheck(`${this.chain}-detector`, health);
+        // Capture redis reference to prevent null access during shutdown
+        const redis = this.redis;
+        if (redis) {
+          await redis.updateServiceHealth(`${this.chain}-detector`, health);
+        }
+
+        // Final check before logging
+        if (!this.isStopping) {
+          this.perfLogger.logHealthCheck(`${this.chain}-detector`, health);
+        }
 
       } catch (error) {
-        this.logger.error('Health monitoring failed', { error });
+        // Only log error if not stopping (errors during shutdown are expected)
+        if (!this.isStopping) {
+          this.logger.error('Health monitoring failed', { error });
+        }
       }
     }, interval);
   }
@@ -1346,6 +1370,7 @@ export abstract class BaseDetector {
   }
 
   // Cleanup method for stream batchers
+  // Uses Promise.allSettled for parallel, resilient cleanup (one failure doesn't block others)
   protected async cleanupStreamBatchers(): Promise<void> {
     const batchers = [
       { name: 'priceUpdate', batcher: this.priceUpdateBatcher },
@@ -1353,27 +1378,40 @@ export abstract class BaseDetector {
       { name: 'whaleAlert', batcher: this.whaleAlertBatcher }
     ];
 
-    for (const { name, batcher } of batchers) {
-      if (batcher) {
-        try {
-          // destroy() flushes remaining messages internally before cleanup
-          await batcher.destroy();
-          this.logger.debug(`Cleaned up ${name} batcher`);
-        } catch (error) {
-          this.logger.warn(`Failed to cleanup ${name} batcher`, { error });
-        }
-      }
-    }
+    // Use Promise.allSettled for parallel cleanup - one failure doesn't block others
+    const cleanupPromises = batchers
+      .filter(({ batcher }) => batcher !== null)
+      .map(async ({ name, batcher }) => {
+        // destroy() flushes remaining messages internally before cleanup
+        await batcher!.destroy();
+        this.logger.debug(`Cleaned up ${name} batcher`);
+        return name;
+      });
 
+    const results = await Promise.allSettled(cleanupPromises);
+
+    // Log any failures
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const batcherName = batchers.filter(b => b.batcher !== null)[index]?.name || 'unknown';
+        this.logger.warn(`Failed to cleanup ${batcherName} batcher`, { error: result.reason });
+      }
+    });
+
+    // Always null out references regardless of cleanup success
     this.priceUpdateBatcher = null;
     this.swapEventBatcher = null;
     this.whaleAlertBatcher = null;
 
     // Cleanup SwapEventFilter (S1.2)
     if (this.swapEventFilter) {
-      this.swapEventFilter.destroy();
+      try {
+        this.swapEventFilter.destroy();
+        this.logger.debug('Cleaned up swap event filter');
+      } catch (error) {
+        this.logger.warn('Failed to cleanup swap event filter', { error });
+      }
       this.swapEventFilter = null;
-      this.logger.debug('Cleaned up swap event filter');
     }
   }
 
