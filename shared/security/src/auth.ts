@@ -1,7 +1,7 @@
 // Authentication and Authorization Service
 // Implements JWT-based authentication with role-based access control
 
-import jwt from 'jsonwebtoken';
+import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { createLogger } from '../../core/src/logger';
 import { getRedisClient } from '../../core/src/redis';
@@ -175,7 +175,7 @@ export class AuthService {
 
       return user;
     } catch (error) {
-      logger.debug('Token validation failed', { error: error.message });
+      logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -242,7 +242,7 @@ export class AuthService {
       permissions: user.permissions
     };
 
-    return jwt.sign(payload, this.jwtSecret, { expiresIn: this.jwtExpiresIn });
+    return jwt.sign(payload as object, this.jwtSecret as Secret, { expiresIn: this.jwtExpiresIn } as SignOptions);
   }
 
   private validateRegistrationRequest(request: RegisterRequest): void {

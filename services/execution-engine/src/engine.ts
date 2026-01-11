@@ -587,7 +587,11 @@ export class ExecutionEngineService {
       for (const message of messages) {
         // P0-12 FIX: Wrap individual message handling in try/catch
         try {
-          const opportunity = message.data as ArbitrageOpportunity;
+          if (!message.data) {
+            this.logger.warn('Skipping message with no data', { messageId: message.id });
+            continue;
+          }
+          const opportunity = message.data as unknown as ArbitrageOpportunity;
 
           // P0-1 FIX: Store message info for deferred ACK after execution
           this.pendingMessages.set(opportunity.id, {
@@ -762,7 +766,7 @@ export class ExecutionEngineService {
       return false;
     }
 
-    if (opportunity.expectedProfit < ARBITRAGE_CONFIG.minProfitPercentage) {
+    if ((opportunity.expectedProfit ?? 0) < ARBITRAGE_CONFIG.minProfitPercentage) {
       this.logger.debug('Opportunity rejected: insufficient profit', {
         id: opportunity.id,
         profit: opportunity.expectedProfit
@@ -932,7 +936,7 @@ export class ExecutionEngineService {
         error: (error as Error).message,
         timestamp: Date.now(),
         chain: opportunity.buyChain || 'unknown',
-        dex: opportunity.buyDex
+        dex: opportunity.buyDex || 'unknown'
       };
 
       await this.publishExecutionResult(errorResult);
@@ -993,7 +997,7 @@ export class ExecutionEngineService {
       gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
       timestamp: Date.now(),
       chain,
-      dex: opportunity.buyDex
+      dex: opportunity.buyDex || 'unknown'
     };
   }
 
@@ -1025,7 +1029,7 @@ export class ExecutionEngineService {
       error: 'Cross-chain execution not implemented',
       timestamp: Date.now(),
       chain: opportunity.buyChain || 'unknown',
-      dex: opportunity.buyDex
+      dex: opportunity.buyDex || 'unknown'
     };
   }
 
@@ -1033,6 +1037,10 @@ export class ExecutionEngineService {
     opportunity: ArbitrageOpportunity,
     chain: string
   ): Promise<ethers.TransactionRequest> {
+    if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.expectedProfit) {
+      throw new Error('Invalid opportunity: missing required fields (tokenIn, amountIn, expectedProfit)');
+    }
+
     const flashParams: FlashLoanParams = {
       token: opportunity.tokenIn,
       amount: opportunity.amountIn,
@@ -1053,6 +1061,9 @@ export class ExecutionEngineService {
   }
 
   private buildSwapPath(opportunity: ArbitrageOpportunity): string[] {
+    if (!opportunity.tokenIn || !opportunity.tokenOut) {
+      throw new Error('Invalid opportunity: missing tokenIn or tokenOut');
+    }
     return [opportunity.tokenIn, opportunity.tokenOut];
   }
 
@@ -1121,7 +1132,8 @@ export class ExecutionEngineService {
     // Simplified - in production would parse specific events
     const gasPrice = receipt.gasPrice || BigInt(0);
     const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
-    return opportunity.expectedProfit - gasCost;
+    const expectedProfit = opportunity.expectedProfit || 0;
+    return expectedProfit - gasCost;
   }
 
   // ===========================================================================

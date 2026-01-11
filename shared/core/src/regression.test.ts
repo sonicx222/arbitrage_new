@@ -130,7 +130,7 @@ describe('Singleton Race Condition Regression Tests', () => {
     it('should cache initialization errors', async () => {
       // Make getRedisClient fail
       const { getRedisClient } = await import('./redis');
-      (getRedisClient as jest.Mock).mockRejectedValue(new Error('Init failed'));
+      (getRedisClient as jest.Mock).mockImplementation(() => Promise.reject(new Error('Init failed')));
 
       // First call should fail
       await expect(getDistributedLockManager()).rejects.toThrow('Init failed');
@@ -169,7 +169,7 @@ describe('Singleton Race Condition Regression Tests', () => {
     it('should cache initialization errors', async () => {
       // Make getRedisClient fail
       const { getRedisClient } = await import('./redis');
-      (getRedisClient as jest.Mock).mockRejectedValue(new Error('Connection failed'));
+      (getRedisClient as jest.Mock).mockImplementation(() => Promise.reject(new Error('Connection failed')));
 
       // First call should fail
       await expect(getPriceOracle()).rejects.toThrow('Connection failed');
@@ -273,7 +273,7 @@ describe('Redis Subscription Memory Leak Regression Tests', () => {
           listeners.splice(index, 1);
         }
       }),
-      subscribe: jest.fn().mockRejectedValue(new Error('Subscribe failed')),
+      subscribe: jest.fn((_channel: string) => Promise.reject(new Error('Subscribe failed'))),
       removeAllListeners: jest.fn()
     };
 

@@ -23,8 +23,8 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 // =============================================================================
 
 describe('ADR-003: Partitioned Chain Detectors Compliance', () => {
-  describe('Single-Chain Service Deprecation', () => {
-    const singleChainServices = [
+  describe('Single-Chain Service Removal', () => {
+    const deprecatedServices = [
       'ethereum-detector',
       'arbitrum-detector',
       'bsc-detector',
@@ -33,59 +33,45 @@ describe('ADR-003: Partitioned Chain Detectors Compliance', () => {
       'base-detector'
     ];
 
-    it('should have DEPRECATED.md in each single-chain service directory', async () => {
+    it('should have removed single-chain service directories per ADR-003', async () => {
       const fs = await import('fs/promises');
       const path = await import('path');
 
-      for (const service of singleChainServices) {
-        const deprecatedFile = path.resolve(
+      for (const service of deprecatedServices) {
+        const servicePath = path.resolve(
           __dirname,
-          `../../../services/${service}/DEPRECATED.md`
+          `../../../services/${service}`
         );
 
+        // Verify service directory does NOT exist (has been removed per ADR-003)
+        let exists = true;
         try {
-          const content = await fs.readFile(deprecatedFile, 'utf-8');
-
-          // Should reference ADR-003 and unified-detector
-          expect(content).toMatch(/ADR-003|unified-detector|deprecated/i);
-        } catch (error: any) {
-          if (error.code === 'ENOENT') {
-            throw new Error(
-              `Single-chain service ${service} missing DEPRECATED.md per ADR-003`
-            );
-          }
-          throw error;
+          await fs.access(servicePath);
+        } catch {
+          exists = false;
         }
+
+        expect(exists).toBe(false);
       }
     });
 
-    it('should not export single-chain detectors as primary services', async () => {
-      // Check that single-chain detector package.json doesn't have "main" entry
-      // or has deprecation notice
+    it('should only have unified-detector and core services', async () => {
       const fs = await import('fs/promises');
       const path = await import('path');
 
-      for (const service of singleChainServices) {
-        const pkgFile = path.resolve(
-          __dirname,
-          `../../../services/${service}/package.json`
-        );
+      const servicesPath = path.resolve(__dirname, '../../../services');
+      const entries = await fs.readdir(servicesPath, { withFileTypes: true });
+      const serviceNames = entries
+        .filter(e => e.isDirectory())
+        .map(e => e.name);
 
-        try {
-          const content = await fs.readFile(pkgFile, 'utf-8');
-          const pkg = JSON.parse(content);
+      // Should have unified-detector, coordinator, cross-chain-detector, execution-engine
+      expect(serviceNames).toContain('unified-detector');
+      expect(serviceNames).toContain('coordinator');
 
-          // Should be marked as deprecated or disabled
-          expect(pkg.deprecated || pkg.private || pkg.description).toMatch(
-            /deprecated|ADR-003|use unified/i
-          );
-        } catch (error: any) {
-          // If package.json doesn't exist, service may have been removed
-          // which is also valid
-          if (error.code !== 'ENOENT') {
-            throw error;
-          }
-        }
+      // Should NOT have deprecated single-chain detectors
+      for (const deprecated of deprecatedServices) {
+        expect(serviceNames).not.toContain(deprecated);
       }
     });
   });
@@ -246,36 +232,22 @@ describe('ADR-003: Centralized Chain Configuration', () => {
     expect(content).toMatch(/ethereum|arbitrum|bsc|polygon/);
   });
 
-  it('should NOT have duplicate chain configs in individual detector services', async () => {
+  it('should NOT have chain configs in unified-detector (uses shared/config)', async () => {
     const fs = await import('fs/promises');
     const path = await import('path');
 
-    const servicesPath = path.resolve(__dirname, '../../../services');
+    const unifiedDetectorPath = path.resolve(
+      __dirname,
+      '../../../services/unified-detector/src/unified-detector.ts'
+    );
 
-    const singleChainServices = [
-      'ethereum-detector',
-      'arbitrum-detector',
-      'bsc-detector',
-      'polygon-detector',
-      'optimism-detector',
-      'base-detector'
-    ];
+    const content = await fs.readFile(unifiedDetectorPath, 'utf-8');
 
-    for (const service of singleChainServices) {
-      const detectorPath = path.join(servicesPath, service, 'src', 'detector.ts');
+    // Should import from shared/config, not define own chains
+    expect(content).toMatch(/from.*shared\/config|from.*config/);
 
-      try {
-        const content = await fs.readFile(detectorPath, 'utf-8');
-
-        // Should import from shared/config, not define own chains
-        expect(content).toMatch(/from.*shared\/config/);
-
-        // Should NOT have hardcoded chain config (except for type overrides)
-        expect(content).not.toMatch(/chainId:\s*\d+.*wsUrl:/);
-      } catch {
-        // Service may have been removed
-      }
-    }
+    // Should NOT have hardcoded chain definitions
+    expect(content).not.toMatch(/chainId:\s*\d+,\s*wsUrl:/);
   });
 
   it('should have partition assignment algorithm', async () => {

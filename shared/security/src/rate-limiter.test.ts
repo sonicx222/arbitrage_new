@@ -1,28 +1,5 @@
 // Rate Limiter Tests
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { RateLimiter } from './rate-limiter';
-
-// Mock Redis client
-jest.mock('../../core/src/redis');
-import { getRedisClient } from '../../core/src/redis';
-
-// Mock logger
-jest.mock('../../core/src/logger');
-import { createLogger } from '../../core/src/logger';
-
-const mockRedis = {
-  multi: jest.fn().mockReturnThis(),
-  zremrangebyscore: jest.fn().mockReturnThis(),
-  zadd: jest.fn().mockReturnThis(),
-  zcard: jest.fn().mockReturnThis(),
-  expire: jest.fn().mockReturnThis(),
-  exec: jest.fn(),
-  del: jest.fn(),
-  zrange: jest.fn(),
-  keys: jest.fn(),
-  zremrangebyscore: jest.fn(),
-  zcard: jest.fn()
-};
 
 const mockLogger = {
   warn: jest.fn(),
@@ -31,8 +8,28 @@ const mockLogger = {
   info: jest.fn()
 };
 
-(getRedisClient as jest.Mock).mockReturnValue(mockRedis);
-(createLogger as jest.Mock).mockReturnValue(mockLogger);
+const mockRedis: Record<string, jest.Mock> = {
+  multi: jest.fn().mockReturnThis(),
+  zremrangebyscore: jest.fn().mockReturnThis(),
+  zadd: jest.fn().mockReturnThis(),
+  zcard: jest.fn(() => Promise.resolve(0)),
+  expire: jest.fn().mockReturnThis(),
+  exec: jest.fn(() => Promise.resolve([] as Array<[null, number]>)),
+  del: jest.fn(() => Promise.resolve(1)),
+  zrange: jest.fn(() => Promise.resolve([] as string[])),
+  keys: jest.fn(() => Promise.resolve([] as string[]))
+};
+
+// Mock dependencies with factory functions (before import)
+jest.mock('../../core/src/logger', () => ({
+  createLogger: jest.fn(() => mockLogger)
+}));
+
+jest.mock('../../core/src/redis', () => ({
+  getRedisClient: jest.fn(() => mockRedis)
+}));
+
+import { RateLimiter } from './rate-limiter';
 
 describe('RateLimiter', () => {
   let rateLimiter: RateLimiter;
@@ -49,12 +46,12 @@ describe('RateLimiter', () => {
   describe('checkLimit', () => {
     it('should allow requests within limit', async () => {
       // Mock Redis responses for within limit
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], // zremrangebyscore
         [null, 1], // zadd
         [null, 5], // zcard (5 requests so far)
         [null, 1]  // expire
-      ]);
+      ]));
 
       const result = await rateLimiter.checkLimit('user_123');
 
@@ -66,12 +63,12 @@ describe('RateLimiter', () => {
 
     it('should block requests over limit', async () => {
       // Mock Redis responses for over limit
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], // zremrangebyscore
         [null, 1], // zadd
         [null, 12], // zcard (12 requests, over limit of 10)
         [null, 1]  // expire
-      ]);
+      ]));
 
       const result = await rateLimiter.checkLimit('user_123');
 
@@ -81,7 +78,7 @@ describe('RateLimiter', () => {
     });
 
     it('should handle Redis errors gracefully', async () => {
-      mockRedis.exec.mockRejectedValue(new Error('Redis connection failed'));
+      mockRedis.exec.mockImplementation(() => Promise.reject(new Error('Redis connection failed')));
 
       const result = await rateLimiter.checkLimit('user_123');
 
@@ -95,14 +92,14 @@ describe('RateLimiter', () => {
       const now = Date.now();
       const oldestTimestamp = now - 30000; // 30 seconds ago
 
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], // zremrangebyscore
         [null, 1], // zadd
         [null, 5], // zcard
         [null, 1]  // expire
-      ]);
+      ]));
 
-      mockRedis.zrange.mockResolvedValue([oldestTimestamp.toString(), oldestTimestamp.toString()]);
+      mockRedis.zrange.mockImplementation(() => Promise.resolve([oldestTimestamp.toString(), oldestTimestamp.toString()]));
 
       const result = await rateLimiter.checkLimit('user_123');
 
@@ -133,9 +130,9 @@ describe('RateLimiter', () => {
     });
 
     it('should allow requests within limit', async () => {
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], [null, 1], [null, 5], [null, 1]
-      ]);
+      ]));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
@@ -151,9 +148,9 @@ describe('RateLimiter', () => {
     });
 
     it('should block requests over limit', async () => {
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], [null, 1], [null, 12], [null, 1]
-      ]);
+      ]));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
@@ -168,9 +165,9 @@ describe('RateLimiter', () => {
 
     it('should use API key for identification', async () => {
       mockReq.headers['x-api-key'] = 'test-api-key';
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], [null, 1], [null, 3], [null, 1]
-      ]);
+      ]));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
@@ -181,9 +178,9 @@ describe('RateLimiter', () => {
 
     it('should use user ID when authenticated', async () => {
       mockReq.user = { id: 'user_456' };
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], [null, 1], [null, 3], [null, 1]
-      ]);
+      ]));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
@@ -192,9 +189,9 @@ describe('RateLimiter', () => {
     });
 
     it('should fallback to IP address', async () => {
-      mockRedis.exec.mockResolvedValue([
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], [null, 1], [null, 3], [null, 1]
-      ]);
+      ]));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
@@ -203,20 +200,20 @@ describe('RateLimiter', () => {
     });
 
     it('should handle middleware errors gracefully', async () => {
-      mockRedis.exec.mockRejectedValue(new Error('Redis error'));
+      mockRedis.exec.mockImplementation(() => Promise.reject(new Error('Redis error')));
 
       const middleware = rateLimiter.middleware();
       await middleware(mockReq, mockRes, mockNext);
 
       // Should fail open
       expect(mockNext).toHaveBeenCalled();
-      expect(mockLogger.error).toHaveBeenCalledWith('Rate limiter middleware error', expect.any(Object));
+      expect(mockLogger.error).toHaveBeenCalledWith('Rate limiter error', expect.any(Object));
     });
   });
 
   describe('resetLimit', () => {
     it('should reset rate limit for identifier', async () => {
-      mockRedis.del.mockResolvedValue(1);
+      mockRedis.del.mockImplementation(() => Promise.resolve(1));
 
       await rateLimiter.resetLimit('user_123');
 
@@ -227,11 +224,12 @@ describe('RateLimiter', () => {
 
   describe('getLimitStatus', () => {
     it('should return current limit status', async () => {
-      mockRedis.exec.mockResolvedValue([
+      // Mock the multi.exec() to return all 3 results
+      mockRedis.exec.mockImplementation(() => Promise.resolve([
         [null, 0], // zremrangebyscore
         [null, 7], // zcard
-        ['timestamp', '1234567890'] // zrange
-      ]);
+        [null, ['timestamp', '1234567890']] // zrange with WITHSCORES returns [key, score]
+      ]));
 
       const status = await rateLimiter.getLimitStatus('user_123');
 
@@ -244,7 +242,7 @@ describe('RateLimiter', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      mockRedis.exec.mockRejectedValue(new Error('Redis error'));
+      mockRedis.exec.mockImplementation(() => Promise.reject(new Error('Redis error')));
 
       const status = await rateLimiter.getLimitStatus('user_123');
 
@@ -256,8 +254,8 @@ describe('RateLimiter', () => {
   describe('cleanup', () => {
     it('should clean up old rate limit data', async () => {
       const oldKeys = ['test:user1', 'test:user2'];
-      mockRedis.keys.mockResolvedValue(oldKeys);
-      mockRedis.zcard.mockResolvedValue(0); // Empty sets
+      mockRedis.keys.mockImplementation(() => Promise.resolve(oldKeys));
+      mockRedis.zcard.mockImplementation(() => Promise.resolve(0)); // Empty sets
 
       await rateLimiter.cleanup();
 
@@ -267,7 +265,7 @@ describe('RateLimiter', () => {
     });
 
     it('should handle cleanup errors gracefully', async () => {
-      mockRedis.keys.mockRejectedValue(new Error('Redis error'));
+      mockRedis.keys.mockImplementation(() => Promise.reject(new Error('Redis error')));
 
       await rateLimiter.cleanup();
 

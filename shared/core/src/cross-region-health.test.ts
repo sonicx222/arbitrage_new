@@ -33,10 +33,34 @@ jest.mock('./redis', () => ({
   })
 }));
 
+// Mock Redis Streams client
+jest.mock('./redis-streams', () => ({
+  getRedisStreamsClient: jest.fn().mockResolvedValue({
+    xadd: jest.fn().mockResolvedValue('1234-0'),
+    xread: jest.fn().mockResolvedValue([]),
+    xreadgroup: jest.fn().mockResolvedValue([]),
+    xack: jest.fn().mockResolvedValue(1),
+    createConsumerGroup: jest.fn().mockResolvedValue(undefined),
+    ping: jest.fn().mockResolvedValue(true),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+    createBatcher: jest.fn().mockReturnValue({
+      add: jest.fn(),
+      flush: jest.fn().mockResolvedValue(undefined),
+      destroy: jest.fn().mockResolvedValue(undefined)
+    })
+  }),
+  RedisStreamsClient: jest.fn()
+}));
+
 // Mock distributed lock manager
 jest.mock('./distributed-lock', () => ({
   getDistributedLockManager: jest.fn().mockReturnValue({
-    acquireLock: jest.fn().mockResolvedValue({ release: jest.fn() }),
+    acquireLock: jest.fn().mockResolvedValue({
+      acquired: true,
+      key: 'test-lock-key',
+      release: jest.fn().mockResolvedValue(undefined),
+      extend: jest.fn().mockResolvedValue(true)
+    }),
     extendLock: jest.fn().mockResolvedValue(true),
     releaseLock: jest.fn().mockResolvedValue(undefined)
   })
@@ -244,9 +268,33 @@ describe('CrossRegionHealthManager', () => {
   });
 
   describe('failover', () => {
+    // Helper function to set up a remote region for failover testing
+    const setupRemoteRegion = (mgr: CrossRegionHealthManager, regionId: string) => {
+      const regions = (mgr as any).regions as Map<string, RegionHealth>;
+      regions.set(regionId, {
+        regionId,
+        status: 'healthy',
+        isLeader: false,
+        services: [{
+          serviceName: 'remote-service',
+          status: 'healthy',
+          isPrimary: true,
+          isStandby: false,
+          lastHeartbeat: Date.now(),
+          metrics: {}
+        }],
+        lastHealthCheck: Date.now(),
+        consecutiveFailures: 0,
+        avgLatencyMs: 0,
+        memoryUsagePercent: 0,
+        cpuUsagePercent: 0
+      });
+    };
+
     it('should emit failover events', async () => {
       manager = new CrossRegionHealthManager(defaultConfig);
       await manager.start();
+      setupRemoteRegion(manager, 'asia-southeast1');
 
       const failoverHandler = jest.fn();
       manager.on('failoverStarted', failoverHandler);
@@ -263,6 +311,7 @@ describe('CrossRegionHealthManager', () => {
 
       manager = new CrossRegionHealthManager(defaultConfig);
       await manager.start();
+      setupRemoteRegion(manager, 'asia-southeast1');
 
       await manager.triggerFailover('asia-southeast1');
 
@@ -272,6 +321,7 @@ describe('CrossRegionHealthManager', () => {
     it('should emit failoverCompleted on successful failover', async () => {
       manager = new CrossRegionHealthManager(defaultConfig);
       await manager.start();
+      setupRemoteRegion(manager, 'asia-southeast1');
 
       const completedHandler = jest.fn();
       manager.on('failoverCompleted', completedHandler);
@@ -339,6 +389,27 @@ describe('CrossRegionHealthManager', () => {
     it('should emit activateStandby on failover', async () => {
       manager = new CrossRegionHealthManager(defaultConfig);
       await manager.start();
+
+      // Set up remote region for failover
+      const regions = (manager as any).regions as Map<string, RegionHealth>;
+      regions.set('asia-southeast1', {
+        regionId: 'asia-southeast1',
+        status: 'healthy',
+        isLeader: false,
+        services: [{
+          serviceName: 'remote-service',
+          status: 'healthy',
+          isPrimary: true,
+          isStandby: false,
+          lastHeartbeat: Date.now(),
+          metrics: {}
+        }],
+        lastHealthCheck: Date.now(),
+        consecutiveFailures: 0,
+        avgLatencyMs: 0,
+        memoryUsagePercent: 0,
+        cpuUsagePercent: 0
+      });
 
       const activateHandler = jest.fn();
       manager.on('activateStandby', activateHandler);

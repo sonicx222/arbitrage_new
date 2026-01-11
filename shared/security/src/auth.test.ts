@@ -1,15 +1,5 @@
 // Authentication Service Tests
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { AuthService, User } from './auth';
-
-// Mock dependencies
-jest.mock('jsonwebtoken');
-jest.mock('bcrypt');
-jest.mock('../../core/src/logger');
-
-import jwt from 'jsonwebtoken';
-import bcrypt from 'bcrypt';
-import { createLogger } from '../../core/src/logger';
 
 const mockLogger = {
   info: jest.fn(),
@@ -18,15 +8,55 @@ const mockLogger = {
   debug: jest.fn()
 };
 
-(createLogger as jest.Mock).mockReturnValue(mockLogger);
+// Mock dependencies with factory functions
+jest.mock('jsonwebtoken', () => ({
+  sign: jest.fn(),
+  verify: jest.fn()
+}));
+
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(),
+  compare: jest.fn()
+}));
+
+jest.mock('../../core/src/logger', () => ({
+  createLogger: jest.fn(() => mockLogger)
+}));
+
+const mockRedis = {
+  get: jest.fn(() => Promise.resolve(null)),
+  set: jest.fn(() => Promise.resolve('OK')),
+  setex: jest.fn(() => Promise.resolve('OK')),
+  del: jest.fn(() => Promise.resolve(1)),
+  incr: jest.fn(() => Promise.resolve(1)),
+  expire: jest.fn(() => Promise.resolve(1))
+};
+
+jest.mock('../../core/src/redis', () => ({
+  getRedisClient: jest.fn(() => Promise.resolve(mockRedis))
+}));
+
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
+import { AuthService, User } from './auth';
 
 describe('AuthService', () => {
   let authService: AuthService;
   let mockUser: User;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
+
+    // Set environment variables BEFORE creating AuthService
+    process.env.JWT_SECRET = 'test-secret';
+    process.env.JWT_EXPIRES_IN = '1h';
+    process.env.BCRYPT_ROUNDS = '8';
+
     authService = new AuthService();
+    // Wait for Redis initialization
+    await new Promise(resolve => setTimeout(resolve, 10));
+    // Ensure Redis mock is set (in case async init didn't complete)
+    (authService as any).redis = mockRedis;
 
     mockUser = {
       id: 'user_123',
@@ -37,11 +67,6 @@ describe('AuthService', () => {
       isActive: true,
       lastLogin: new Date()
     };
-
-    // Mock environment variables
-    process.env.JWT_SECRET = 'test-secret';
-    process.env.JWT_EXPIRES_IN = '1h';
-    process.env.BCRYPT_ROUNDS = '8';
   });
 
   describe('register', () => {
@@ -57,7 +82,7 @@ describe('AuthService', () => {
       const mockFindUserByEmail = jest.spyOn(authService as any, 'findUserByEmail').mockResolvedValue(null);
       const mockSaveUser = jest.spyOn(authService as any, 'saveUser').mockResolvedValue(undefined);
 
-      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_password');
+      (bcrypt.hash as jest.Mock).mockImplementation(() => Promise.resolve('hashed_password'));
 
       const result = await authService.register(registerRequest);
 
@@ -113,7 +138,7 @@ describe('AuthService', () => {
       const mockGetUserPasswordHash = jest.spyOn(authService as any, 'getUserPasswordHash').mockResolvedValue('hashed_password');
       const mockUpdateUser = jest.spyOn(authService as any, 'updateUser').mockResolvedValue(undefined);
 
-      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      (bcrypt.compare as jest.Mock).mockImplementation(() => Promise.resolve(true));
       (jwt.sign as jest.Mock).mockReturnValue('mock_jwt_token');
 
       const result = await authService.login(loginRequest);
@@ -133,10 +158,10 @@ describe('AuthService', () => {
       jest.spyOn(authService as any, 'findUserByUsername').mockResolvedValue(mockUser);
       jest.spyOn(authService as any, 'getUserPasswordHash').mockResolvedValue('hashed_password');
 
-      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      (bcrypt.compare as jest.Mock).mockImplementation(() => Promise.resolve(false));
 
-      await expect(authService.login(loginRequest)).rejects.toThrow('Invalid credentials');
-      expect(mockLogger.warn).toHaveBeenCalledWith('Failed login attempt', { username: 'testuser' });
+      await expect(authService.login(loginRequest)).rejects.toThrow('Invalid username or password');
+      expect(mockLogger.warn).toHaveBeenCalledWith('Failed login attempt - invalid password', { userId: 'user_123', username: 'testuser' });
     });
 
     it('should reject inactive users', async () => {
@@ -148,7 +173,7 @@ describe('AuthService', () => {
 
       jest.spyOn(authService as any, 'findUserByUsername').mockResolvedValue(inactiveUser);
 
-      await expect(authService.login(loginRequest)).rejects.toThrow('Invalid credentials');
+      await expect(authService.login(loginRequest)).rejects.toThrow('Invalid username or password');
     });
   });
 

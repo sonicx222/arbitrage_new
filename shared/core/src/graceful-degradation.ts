@@ -89,7 +89,7 @@ export class GracefulDegradationManager {
     // Secondary: Pub/Sub (backwards compatibility)
     try {
       const redis = await this.redis;
-      await redis.publish(pubsubChannel, message);
+      await redis.publish(pubsubChannel, message as any);
     } catch (error) {
       logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
     }
