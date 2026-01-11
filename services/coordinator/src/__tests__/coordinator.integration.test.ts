@@ -67,6 +67,15 @@ const mockStreamsClient: MockStreamsClient = {
 // Add STREAMS constant to mock
 (mockStreamsClient as any).STREAMS = RedisStreamsClient.STREAMS;
 
+// Mock state manager
+const mockStateManager = {
+  getState: jest.fn(() => 'STOPPED'),
+  executeStart: jest.fn((callback: () => Promise<void>) => callback().then(() => ({ success: true }))),
+  executeStop: jest.fn((callback: () => Promise<void>) => callback().then(() => ({ success: true }))),
+  isRunning: jest.fn(() => false),
+  setState: jest.fn()
+};
+
 jest.mock('../../../../shared/core/src', () => ({
   getRedisClient: jest.fn(),
   resetRedisInstance: jest.fn(),
@@ -92,6 +101,14 @@ jest.mock('../../../../shared/core/src', () => ({
     logEventLatency: jest.fn(),
     logHealthCheck: jest.fn()
   })),
+  createServiceState: jest.fn(() => mockStateManager),
+  ServiceState: {
+    STOPPED: 'STOPPED',
+    STARTING: 'STARTING',
+    RUNNING: 'RUNNING',
+    STOPPING: 'STOPPING',
+    ERROR: 'ERROR'
+  },
   ValidationMiddleware: {
     validateHealthCheck: (req: any, res: any, next: any) => next()
   }

@@ -26,3 +26,450 @@
 2026-01-10T23:54:03.633Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
 2026-01-10T23:56:11.169Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
 2026-01-10T23:56:11.200Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:37:41.091Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:37:41.121Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:42:36.797Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:42:36.822Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:42:40.881Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.014Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.226Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.535Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.536Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:41.561Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.669Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:41.873Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.184Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.185Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:42.192Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.310Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.522Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.827Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.828Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:42.836Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:42.944Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:43.160Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:43.471Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:43.472Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:43.480Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:43.589Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:43.806Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.121Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.121Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:44.128Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.231Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.444Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.749Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.750Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:44.758Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:44.873Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:45.081Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:45.387Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:45.388Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:45.396Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:45.504Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:45.715Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.027Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.028Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:46.037Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.140Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.344Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.657Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.658Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:46.664Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.773Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:46.990Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.297Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.297Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:47.304Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.419Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.623Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.941Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:47.942Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:47.951Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.055Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.259Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.573Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.574Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:48.582Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.689Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:48.892Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.204Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.205Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:49.214Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.322Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.540Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.850Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.851Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:49.858Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:49.972Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:50.180Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:50.490Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:50.491Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:50.498Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:50.607Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:50.818Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.121Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.122Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:51.133Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.251Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.455Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.766Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.767Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:51.775Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:51.892Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:52.106Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:52.422Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:52.423Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:42:52.431Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:52.541Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:52.756Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:53.144Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:42:53.145Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:21.532Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:21.659Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:21.864Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.175Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.133Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:46:22.160Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:46:22.177Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:22.215Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.330Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.540Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.858Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.859Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:22.866Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:22.977Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:23.192Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:23.504Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:23.505Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:23.516Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:23.619Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:23.824Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.140Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.141Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:24.148Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.258Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.473Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.778Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.778Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:24.787Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:24.897Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:25.106Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:25.422Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:25.423Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:25.431Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:25.540Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:25.757Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.071Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.072Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:26.080Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.184Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.388Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.693Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.694Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:26.700Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:26.818Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.036Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.340Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.341Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:27.349Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.457Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.661Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.972Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:27.974Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:27.983Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.090Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.307Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.610Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.611Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:28.620Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.727Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:28.941Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.256Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.257Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:29.264Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.372Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.588Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.904Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:29.904Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:29.913Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.020Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.238Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.550Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.550Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:30.559Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.675Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:30.884Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.198Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.199Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:31.208Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.322Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.540Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.857Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.858Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:31.870Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:31.976Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:32.186Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:32.490Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:32.491Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:32.498Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:32.606Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:32.810Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.125Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.126Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:46:33.134Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.240Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.459Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.766Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:46:33.767Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:36.785Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:36.927Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:37.143Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:37.340Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:47:37.316Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:47:37.452Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:37.453Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:37.482Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:37.597Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:37.807Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.124Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.125Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:38.132Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.241Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.457Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.774Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.775Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:38.785Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:38.891Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:39.107Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:39.422Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:39.423Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:39.431Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:39.541Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:39.758Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.073Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.074Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:40.083Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.190Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.412Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.723Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.724Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:40.733Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:40.838Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:41.042Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:41.358Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:41.359Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:41.366Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:41.476Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:41.692Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.009Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.010Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:42.019Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.138Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.345Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.660Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.660Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:42.668Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.773Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:42.990Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.308Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.309Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:43.316Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.424Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.645Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.957Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:43.958Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:43.964Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.074Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.291Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.607Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.608Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:44.614Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.723Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:44.938Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.241Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.242Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:45.250Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.367Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.575Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.893Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:45.893Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:45.900Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.008Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.221Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.538Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.539Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:46.546Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.658Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:46.875Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.190Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.191Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:47.203Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.310Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.526Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.842Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.843Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:47.851Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:47.957Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:48.176Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:48.489Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:48.490Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:47:48.498Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:48.609Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:48.823Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:49.126Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T14:47:49.127Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T14:51:06.766Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:51:06.796Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:54:30.892Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:54:30.864Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:55:58.179Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:55:58.202Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T14:57:37.413Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T14:57:37.437Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T15:39:52.882Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T15:39:52.910Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T15:42:26.224Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T15:42:26.252Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T15:44:36.392Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T15:44:36.416Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T15:45:35.658Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T15:45:35.684Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:02:33.727Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:02:33.751Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:05:39.624Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:05:39.648Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:08:54.861Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:08:54.886Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:09:54.245Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:09:54.277Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:29:54.964Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:29:54.939Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:30:50.241Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:30:50.272Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:33:18.273Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:33:18.305Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:42:25.988Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:42:26.013Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:43:04.893Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:43:04.916Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:47:38.424Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:47:38.453Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:52:47.755Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:52:47.727Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:56:28.669Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:56:28.693Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:59:26.129Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:59:26.160Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T16:59:59.849Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T16:59:59.887Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T17:02:38.705Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T17:02:38.730Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T17:04:36.137Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T17:04:36.163Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T17:07:03.960Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T17:07:03.984Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T17:08:42.650Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T17:08:42.660Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T17:10:23.553Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T17:10:23.582Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:23:00.038Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:23:00.066Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:25:59.113Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:25:59.122Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:38:36.359Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:38:36.383Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:46:57.227Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:46:57.239Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:48:07.201Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:48:07.228Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:48:40.432Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:48:40.458Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:51:37.962Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.074Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.289Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.594Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.594Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:51:38.615Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.720Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:38.937Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.242Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.243Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:51:39.249Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.359Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.571Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.883Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:39.883Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:51:39.889Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:40.005Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:40.209Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:40.521Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:51:40.521Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:52:08.841Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:52:08.866Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:52:29.223Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:29.336Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:29.553Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:29.859Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:29.860Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:52:29.881Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:29.985Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:30.202Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:30.505Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:30.506Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:52:30.512Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:30.621Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:30.825Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.142Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.142Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:52:31.148Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.253Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.461Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.770Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:52:31.771Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:53:07.424Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T18:53:07.450Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T18:53:27.742Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:27.854Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:28.060Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:28.369Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:28.370Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:53:28.391Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:28.502Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:28.718Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.025Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.026Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:53:29.031Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.137Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.353Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.669Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.670Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T18:53:29.675Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.786Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:29.993Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:30.302Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T18:53:30.302Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T19:01:20.493Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T19:01:20.518Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-11T19:01:40.856Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:40.970Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:41.186Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:41.501Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:41.502Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T19:01:41.524Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:41.639Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:41.858Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.170Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.171Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T19:01:42.177Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.281Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.490Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.808Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.808Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T19:01:42.814Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:42.919Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:43.137Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:43.442Z [redis-streams] error: Redis Streams client error {"error":""}
+2026-01-11T19:01:43.443Z [redis-streams] error: Redis connection failed after 3 retries
+2026-01-11T19:05:53.922Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-11T19:05:53.946Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}

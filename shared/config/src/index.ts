@@ -416,6 +416,13 @@ export const ARBITRAGE_CONFIG = {
   triangularEnabled: true,
   crossChainEnabled: false, // Enable in Phase 2
   predictiveEnabled: false, // Enable in Phase 3
+  // Additional config properties for opportunity calculation
+  defaultAmount: 1000, // Default trade amount in USD
+  estimatedGasCost: 5, // Estimated gas cost in USD
+  opportunityTimeoutMs: 30000, // 30 seconds
+  minProfitThreshold: 10, // Minimum $10 net profit
+  minConfidenceThreshold: 0.7, // Minimum 70% confidence
+  feePercentage: 0.003, // 0.3% DEX trading fee
   // Chain-specific minimum profits (due to gas costs)
   chainMinProfits: {
     ethereum: 0.005,   // 0.5% - higher due to gas
@@ -784,3 +791,12 @@ export function calculateBridgeCostUsd(
 // PARTITION EXPORTS (ADR-003)
 // =============================================================================
 export * from './partitions';
+
+// Named re-exports for ADR-003 compliance tests
+export {
+  PARTITIONS,
+  PartitionConfig,
+  getPartition,
+  getPartitionFromEnv,
+  assignChainToPartition
+} from './partitions';

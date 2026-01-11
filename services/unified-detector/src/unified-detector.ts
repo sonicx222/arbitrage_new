@@ -351,8 +351,8 @@ export class UnifiedChainDetector extends EventEmitter {
         instance.stop(),
         new Promise<void>((_, reject) =>
           setTimeout(
-            () => reject(new Error(`Chain ${chainId} stop timeout after ${UnifiedDetectorService.CHAIN_STOP_TIMEOUT_MS}ms`)),
-            UnifiedDetectorService.CHAIN_STOP_TIMEOUT_MS
+            () => reject(new Error(`Chain ${chainId} stop timeout after ${UnifiedChainDetector.CHAIN_STOP_TIMEOUT_MS}ms`)),
+            UnifiedChainDetector.CHAIN_STOP_TIMEOUT_MS
           )
         )
       ]).catch((error) => {

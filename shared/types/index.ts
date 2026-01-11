@@ -67,10 +67,10 @@ export interface PriceUpdate {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
   chain?: string;        // Single chain for same-chain arbitrage
-  buyDex: string;
-  sellDex: string;
+  buyDex?: string;
+  sellDex?: string;
   buyChain?: string;     // Optional for same-chain arbitrage
   sellChain?: string;
   buyPair?: string;      // Pair address for buy side
@@ -84,8 +84,8 @@ export interface ArbitrageOpportunity {
   sellPrice?: number;    // Price on sell DEX
   expectedProfit?: number;
   estimatedProfit?: number;
-  profitPercentage: number;
-  gasEstimate: number | string; // Support both number and string (wei)
+  profitPercentage?: number;
+  gasEstimate?: number | string; // Support both number and string (wei)
   confidence: number;
   timestamp: number;
   blockNumber?: number;
@@ -94,6 +94,17 @@ export interface ArbitrageOpportunity {
   path?: string[];       // For triangular arbitrage
   bridgeRequired?: boolean;
   bridgeCost?: number;
+  // Additional fields for base-detector compatibility
+  sourceChain?: string;
+  targetChain?: string;
+  sourceDex?: string;
+  targetDex?: string;
+  tokenAddress?: string;
+  amount?: number;
+  priceDifference?: number;
+  percentageDifference?: number;
+  gasCost?: number;
+  netProfit?: number;
 }
 
 export interface SwapEvent {

@@ -342,7 +342,7 @@ export class CoordinatorService {
       // but the consequence is just that we might extend someone else's lock
       // for one TTL period. They would have acquired it legitimately.
       const result = await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
-      return result;
+      return result === 1;
 
     } catch (error) {
       this.logger.error('Failed to renew leader lock', { error });

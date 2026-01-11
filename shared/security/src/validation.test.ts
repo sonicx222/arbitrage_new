@@ -1,11 +1,6 @@
 // Validation Middleware Tests
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import Joi from 'joi';
-import { validateArbitrageRequest, validateHealthRequest, validateMetricsRequest, validateLoginRequest, validateRegisterRequest, sanitizeInput } from './validation';
-
-// Mock logger
-jest.mock('../../core/src/logger');
-import { createLogger } from '../../core/src/logger';
 
 const mockLogger = {
   warn: jest.fn(),
@@ -14,7 +9,12 @@ const mockLogger = {
   debug: jest.fn()
 };
 
-(createLogger as jest.Mock).mockReturnValue(mockLogger);
+// Mock logger before importing validation module
+jest.mock('../../core/src/logger', () => ({
+  createLogger: jest.fn(() => mockLogger)
+}));
+
+import { validateArbitrageRequest, validateHealthRequest, validateMetricsRequest, validateLoginRequest, validateRegisterRequest, sanitizeInput } from './validation';
 
 describe('Validation Middleware', () => {
   let mockReq: any;
@@ -43,7 +43,7 @@ describe('Validation Middleware', () => {
         targetChain: 'bsc',
         sourceDex: 'uniswap',
         targetDex: 'pancakeswap',
-        tokenAddress: '0xa0b86a33e6fb38c74e6f8f3f8e8b8a2b2b2b2b2b2',
+        tokenAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f41234',
         amount: 1.5,
         slippage: 0.5
       };
@@ -60,7 +60,7 @@ describe('Validation Middleware', () => {
         targetChain: 'bsc',
         sourceDex: 'uniswap',
         targetDex: 'pancakeswap',
-        tokenAddress: '0xa0b86a33e6fb38c74e6f8f3f8e8b8a2b2b2b2b2b2',
+        tokenAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f41234',
         amount: 1.5
       };
 
@@ -99,7 +99,7 @@ describe('Validation Middleware', () => {
         targetChain: 'bsc',
         sourceDex: 'uniswap',
         targetDex: 'pancakeswap',
-        tokenAddress: '0xa0b86a33e6fb38c74e6f8f3f8e8b8a2b2b2b2b2b2',
+        tokenAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f41234',
         amount: -1 // Negative amount
       };
 
@@ -115,7 +115,7 @@ describe('Validation Middleware', () => {
         targetChain: 'bsc',
         sourceDex: 'uniswap',
         targetDex: 'pancakeswap',
-        tokenAddress: '0xa0b86a33e6fb38c74e6f8f3f8e8b8a2b2b2b2b2b2',
+        tokenAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f41234',
         amount: 1.5
         // No slippage provided
       };

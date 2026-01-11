@@ -157,9 +157,9 @@ export abstract class BaseDetector {
     );
 
     // Initialize WebSocket manager
-    const wsUrl = config.wsUrl || chainConfig.wsUrl;
+    const wsUrl = config.wsUrl || chainConfig.wsUrl || chainConfig.rpcUrl;
     this.wsManager = new WebSocketManager({
-      url: wsUrl,
+      url: wsUrl!,
       reconnectInterval: 5000,
       maxReconnectAttempts: 10,
       heartbeatInterval: 30000,
@@ -937,8 +937,8 @@ export abstract class BaseDetector {
   ): ArbitrageOpportunity | null {
     try {
       // Basic arbitrage calculation
-      const priceDiff = Math.abs(sourceUpdate.price0 - targetUpdate.price0);
-      const avgPrice = (sourceUpdate.price0 + targetUpdate.price0) / 2;
+      const priceDiff = Math.abs(sourceUpdate.price - targetUpdate.price);
+      const avgPrice = (sourceUpdate.price + targetUpdate.price) / 2;
       const percentageDiff = (priceDiff / avgPrice) * 100;
 
       // Apply fees and slippage
@@ -980,7 +980,7 @@ export abstract class BaseDetector {
 
   protected validateOpportunity(opportunity: ArbitrageOpportunity): boolean {
     // Validate opportunity meets minimum requirements
-    if (opportunity.netProfit < ARBITRAGE_CONFIG.minProfitThreshold) {
+    if ((opportunity.netProfit ?? 0) < ARBITRAGE_CONFIG.minProfitThreshold) {
       return false;
     }
 
@@ -988,7 +988,7 @@ export abstract class BaseDetector {
       return false;
     }
 
-    if (opportunity.expiresAt < Date.now()) {
+    if (opportunity.expiresAt && opportunity.expiresAt < Date.now()) {
       return false;
     }
 
@@ -1134,7 +1134,10 @@ export abstract class BaseDetector {
       const reserve0 = parseFloat(pair.reserve0 || '0');
       const reserve1 = parseFloat(pair.reserve1 || '0');
 
-      if (reserve0 === 0 || reserve1 === 0) return 0;
+      // Return 0 for invalid reserves (zero, NaN, or infinite values)
+      if (reserve0 === 0 || reserve1 === 0 || isNaN(reserve0) || isNaN(reserve1)) {
+        return 0;
+      }
 
       // Price of token1 in terms of token0
       return reserve0 / reserve1;

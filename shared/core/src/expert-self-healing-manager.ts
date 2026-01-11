@@ -123,7 +123,7 @@ export class ExpertSelfHealingManager {
     // Primary: Publish to Redis Streams (guaranteed delivery)
     if (this.streamsClient) {
       try {
-        await this.streamsClient.xadd(streamName, message, { maxLen: 10000 });
+        await this.streamsClient.xadd(streamName, message, '*', { maxLen: 10000 });
         logger.debug('Published control message to stream', { streamName, type: message.type });
       } catch (error) {
         logger.error('Failed to publish to stream, falling back to pub/sub only', {
@@ -135,7 +135,7 @@ export class ExpertSelfHealingManager {
 
     // Secondary: Publish to Pub/Sub (backward compatibility during migration)
     try {
-      await redis.publish(pubsubChannel, message);
+      await redis.publish(pubsubChannel, message as any);
     } catch (error) {
       logger.error('Failed to publish to pub/sub', {
         channel: pubsubChannel,

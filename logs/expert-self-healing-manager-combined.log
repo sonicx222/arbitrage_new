@@ -1,0 +1,14 @@
+2026-01-11T18:51:24.907Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"service:failing-service:control","error":"Redis publish failed"}
+2026-01-11T18:51:40.523Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T18:51:40.524Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768157500524_w5nvkpy3t","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T18:52:16.156Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"service:failing-service:control","error":"Redis publish failed"}
+2026-01-11T18:52:31.773Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T18:52:31.774Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768157551774_fwifvc9qs","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T18:53:14.688Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"service:failing-service:control","error":"Redis publish failed"}
+2026-01-11T18:53:30.304Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T18:53:30.306Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768157610306_27jv0bqpu","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T19:01:27.788Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"service:failing-service:control","error":"Redis publish failed"}
+2026-01-11T19:01:43.445Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T19:01:43.446Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768158103446_javw86j65","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T19:05:54.286Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T19:05:54.314Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768158354314_apdqkyz8h","strategy":"restart_service","error":"Recovery failed"}

@@ -519,10 +519,17 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
       healthMonitor.onAlert(alertHandler);
       healthMonitor.setAlertCooldown(100); // 100ms cooldown for testing
 
+      // Clear default monitored streams and add only one for this test
+      const defaultStreams = healthMonitor.getMonitoredStreams();
+      for (const stream of defaultStreams) {
+        healthMonitor.removeStream(stream);
+      }
+      healthMonitor.addStream('stream:test-alert');
+
       // Mock critical lag
       mockRedis.xpending.mockResolvedValue([5000, '1-0', '5000-0', []]);
 
-      // First check should trigger alert
+      // First check should trigger alert (1 stream = 1 alert)
       await healthMonitor.checkStreamHealth();
       expect(alertHandler).toHaveBeenCalledTimes(1);
 
