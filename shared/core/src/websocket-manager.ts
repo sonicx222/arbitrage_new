@@ -41,6 +41,10 @@ export class WebSocketManager {
   private reconnectAttempts = 0;
   private isConnecting = false;
   private isConnected = false;
+  // P2-FIX: Track if reconnection is actively in progress to prevent overlapping attempts
+  private isReconnecting = false;
+  // P2-FIX: Track if manager has been explicitly disconnected
+  private isDisconnected = false;
 
   private subscriptions = new Map<number, WebSocketSubscription>();
   private messageHandlers = new Set<WebSocketEventHandler>();
@@ -64,6 +68,8 @@ export class WebSocketManager {
     }
 
     this.isConnecting = true;
+    // P2-FIX: Clear disconnected flag when explicitly connecting
+    this.isDisconnected = false;
 
     return new Promise((resolve, reject) => {
       try {
@@ -137,6 +143,9 @@ export class WebSocketManager {
   disconnect(): void {
     this.logger.info('Disconnecting WebSocket');
 
+    // P2-FIX: Set disconnected flag to prevent reconnection attempts
+    this.isDisconnected = true;
+
     // Clear timers
     this.clearReconnectionTimer();
     this.clearConnectionTimeout();
@@ -149,8 +158,15 @@ export class WebSocketManager {
       this.ws = null;
     }
 
+    // P0-2 fix: Clear handler sets to prevent memory leaks
+    this.messageHandlers.clear();
+    this.connectionHandlers.clear();
+    this.subscriptions.clear();
+
     this.isConnected = false;
     this.isConnecting = false;
+    // P2-FIX: Reset reconnection state
+    this.isReconnecting = false;
   }
 
   subscribe(subscription: Omit<WebSocketSubscription, 'id'>): number {
@@ -214,6 +230,15 @@ export class WebSocketManager {
     };
   }
 
+  /**
+   * P0-2 fix: Public method to clear all handlers.
+   * Call this before stopping to prevent memory leaks from stale handlers.
+   */
+  removeAllListeners(): void {
+    this.messageHandlers.clear();
+    this.connectionHandlers.clear();
+  }
+
   private handleMessage(data: Buffer): void {
     try {
       const message: WebSocketMessage = JSON.parse(data.toString());
@@ -258,7 +283,19 @@ export class WebSocketManager {
   }
 
   private scheduleReconnection(): void {
-    if (this.reconnectTimer || this.reconnectAttempts >= (this.config.maxReconnectAttempts || 10)) {
+    // P2-FIX: Don't reconnect if explicitly disconnected
+    if (this.isDisconnected) {
+      this.logger.debug('Skipping reconnection - manager was explicitly disconnected');
+      return;
+    }
+
+    // P2-FIX: Don't schedule if already reconnecting or timer exists
+    if (this.reconnectTimer || this.isReconnecting) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= (this.config.maxReconnectAttempts || 10)) {
+      this.logger.error('Max reconnection attempts reached');
       return;
     }
 
@@ -268,14 +305,28 @@ export class WebSocketManager {
     this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
 
     this.reconnectTimer = setTimeout(async () => {
+      // P2-FIX: Clear timer reference immediately and set reconnecting flag
       this.reconnectTimer = null;
+
+      // P2-FIX: Check if we were disconnected while waiting
+      if (this.isDisconnected) {
+        this.logger.debug('Aborting reconnection - manager was disconnected during wait');
+        return;
+      }
+
+      this.isReconnecting = true;
 
       try {
         await this.connect();
+        this.isReconnecting = false;
       } catch (error) {
+        this.isReconnecting = false;
         this.logger.error(`Reconnection attempt ${this.reconnectAttempts} failed`, { error });
-        // Schedule next attempt with exponential backoff
-        this.scheduleReconnection();
+
+        // P2-FIX: Only schedule next attempt if not disconnected
+        if (!this.isDisconnected) {
+          this.scheduleReconnection();
+        }
       }
     }, delay);
   }

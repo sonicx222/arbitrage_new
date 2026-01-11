@@ -60,8 +60,7 @@ export type {
   BatcherStats
 } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger } from './logger';
-export { MatrixPriceCache, getMatrixPriceCache } from './matrix-cache';
-export { PredictiveCacheWarmer, getPredictiveCacheWarmer } from './predictive-warmer';
+// REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
 export {
@@ -74,8 +73,8 @@ export {
 } from './websocket-manager';
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './hierarchical-cache';
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './shared-memory-cache';
-export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager } from './cache-coherency-manager';
-export { ABTestingFramework, createABTestingFramework, getABTestingFramework, quickExperiment } from './ab-testing';
+export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './cache-coherency-manager';
+// REMOVED: ABTestingFramework (unused module cleaned up)
 export {
   CircuitBreaker,
   CircuitBreakerError,
@@ -87,7 +86,17 @@ export {
   getCircuitBreakerRegistry,
   withCircuitBreaker
 } from './circuit-breaker';
-export { RetryMechanism, RetryPresets, withRetry, retry, retryAdvanced } from './retry-mechanism';
+export {
+  RetryMechanism,
+  RetryPresets,
+  withRetry,
+  retry,
+  retryAdvanced,
+  // P1-2 fix: Error classification utilities
+  ErrorCategory,
+  classifyError,
+  isRetryableError
+} from './retry-mechanism';
 export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './graceful-degradation';
 
 // Cross-Region Health (ADR-007)
@@ -155,22 +164,13 @@ export type {
   BatchUpdate
 } from './price-matrix';
 
-// Professional-grade arbitrage and analytics exports
-export {
-  AdvancedStatisticalArbitrage,
-  MarketRegime,
-  StatisticalSignal,
-  RegimeTransition,
-  AdaptiveThresholds
-} from './advanced-statistical-arbitrage';
-export {
-  RiskManagementEngine,
-  Position,
-  PositionRisk,
-  PortfolioMetrics,
-  RiskLimits,
-  RiskAlert
-} from './risk-management';
+// REMOVED: Professional-grade modules (unused, cleaned up):
+// - AdvancedStatisticalArbitrage
+// - RiskManagementEngine
+// - EnterpriseTestingFramework
+// - EnterpriseConfigurationManager
+
+// Keeping PerformanceAnalyticsEngine and CrossDexTriangularArbitrage as they may be needed
 export {
   PerformanceAnalyticsEngine,
   StrategyPerformance,
@@ -187,25 +187,6 @@ export {
   ArbitragePath
 } from './cross-dex-triangular-arbitrage';
 export {
-  EnterpriseTestingFramework,
-  TestScenario,
-  TestAssertion,
-  TestResult,
-  TestMetrics,
-  AssertionResult,
-  ChaosEvent,
-  LoadProfile,
-  TestSuite,
-  TestSuiteResult,
-  getEnterpriseTestingFramework
-} from './enterprise-testing';
-export {
-  EnterpriseConfigurationManager,
-  ConfigurationSchema,
-  ConfigurationLayer,
-  ValidationResult,
-} from './enterprise-config';
-export {
   ValidationMiddleware,
   ValidationSchemas
 } from './validation';
@@ -221,21 +202,11 @@ export {
   createExecutionRepository
 } from './repositories';
 
-// Refactored service layer
-export { ArbitrageService } from './arbitrage-service';
-export type { ArbitrageServiceConfig } from './arbitrage-service';
-
-export {
-  ConfigurationChange,
-  getEnterpriseConfigManager,
-  DEFAULT_CONFIG_SCHEMA
-} from './enterprise-config';
-export {
-  AdvancedArbitrageOrchestrator,
-  ArbitrageExecution,
-  ExecutionStep,
-  getAdvancedArbitrageOrchestrator
-} from './advanced-arbitrage-orchestrator';
+// REMOVED: ArbitrageService and EnterpriseConfigManager (unused, cleaned up)
+// DEPRECATED: AdvancedArbitrageOrchestrator removed per ADR-002
+// The orchestrator used Pub/Sub which violates ADR-002 (Redis Streams required)
+// Use the coordinator service pattern with Redis Streams instead
+// See: services/coordinator/src/coordinator.ts
 
 // Base detector for chain-specific implementations
 export { BaseDetector } from './base-detector';

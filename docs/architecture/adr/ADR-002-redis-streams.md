@@ -1,7 +1,44 @@
 # ADR-002: Redis Streams over Pub/Sub for Event Backbone
 
 ## Status
-**Accepted** | 2025-01-10
+**Implemented** | 2025-01-10 | Updated 2025-01-11
+
+## Implementation Status
+
+### Phase 4 Complete: Pub/Sub Removal (2025-01-11)
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `shared/core/src/base-detector.ts` | DONE | Removed `useStreams` flag and Pub/Sub fallback |
+| `shared/core/src/advanced-arbitrage-orchestrator.ts` | DEPRECATED | Uses Pub/Sub, deprecated per this ADR |
+| `shared/core/src/index.ts` | DONE | Removed orchestrator exports |
+| All detector publish methods | DONE | Now fail-fast if Streams unavailable |
+
+### Key Changes
+
+1. **Streams is REQUIRED** - No Pub/Sub fallback:
+   ```typescript
+   // Error thrown if Streams not initialized
+   throw new Error('Price update batcher not initialized - Streams required per ADR-002');
+   ```
+
+2. **AdvancedArbitrageOrchestrator Deprecated**:
+   ```typescript
+   // @deprecated Use coordinator service pattern instead
+   // See: services/coordinator/src/coordinator.ts
+   ```
+
+3. **StreamBatcher Pattern** - All publish methods use batching:
+   - `publishPriceUpdate()` - Uses `priceUpdateBatcher`
+   - `publishOpportunity()` - Uses `opportunityBatcher`
+   - `publishAlert()` - Uses `alertBatcher`
+
+### Migration Complete
+
+- Phase 1: Add Streams Infrastructure - COMPLETE
+- Phase 2: Migrate Critical Channels - COMPLETE
+- Phase 3: Migrate Secondary Channels - COMPLETE
+- Phase 4: Cleanup (Pub/Sub removal) - COMPLETE
 
 ## Context
 

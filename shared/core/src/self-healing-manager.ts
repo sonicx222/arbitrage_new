@@ -3,6 +3,7 @@
 
 import { createLogger } from './logger';
 import { getRedisClient } from './redis';
+import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
 
 const logger = createLogger('self-healing-manager');
@@ -39,6 +40,8 @@ export interface RecoveryStrategy {
 
 export class SelfHealingManager {
   private redis = getRedisClient();
+  // P1-16 FIX: Add Redis Streams client for ADR-002 compliance
+  private streamsClient: RedisStreamsClient | null = null;
   private services = new Map<string, ServiceDefinition>();
   private serviceHealth = new Map<string, ServiceHealth>();
   private recoveryStrategies: RecoveryStrategy[] = [];
@@ -46,9 +49,51 @@ export class SelfHealingManager {
   private restartTimers = new Map<string, NodeJS.Timeout>();
   private circuitBreakers = new Map<string, CircuitBreaker>();
   private isRunning = false;
+  // P2-FIX: Lock to prevent concurrent health check updates for the same service
+  private healthUpdateLocks = new Map<string, Promise<void>>();
 
   constructor() {
     this.initializeRecoveryStrategies();
+    // P1-16 FIX: Initialize streams client asynchronously
+    this.initializeStreamsClient();
+  }
+
+  /**
+   * P1-16 FIX: Initialize Redis Streams client for dual-publish pattern.
+   */
+  private async initializeStreamsClient(): Promise<void> {
+    try {
+      this.streamsClient = await getRedisStreamsClient();
+    } catch (error) {
+      logger.warn('Failed to initialize Redis Streams client, will use Pub/Sub only', { error });
+    }
+  }
+
+  /**
+   * P1-16 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
+   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   */
+  private async dualPublish(
+    streamName: string,
+    pubsubChannel: string,
+    message: Record<string, any>
+  ): Promise<void> {
+    // Primary: Redis Streams (ADR-002 compliant)
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(streamName, message);
+      } catch (error) {
+        logger.error('Failed to publish to Redis Stream', { error, streamName });
+      }
+    }
+
+    // Secondary: Pub/Sub (backwards compatibility)
+    try {
+      const redis = await this.redis;
+      await redis.publish(pubsubChannel, message);
+    } catch (error) {
+      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
+    }
   }
 
   // Register a service for self-healing management
@@ -113,6 +158,14 @@ export class SelfHealingManager {
 
     this.healthCheckTimers.clear();
     this.restartTimers.clear();
+
+    // P2-FIX: Wait for any pending health checks to complete before stopping
+    const pendingLocks = Array.from(this.healthUpdateLocks.values());
+    if (pendingLocks.length > 0) {
+      logger.debug(`Waiting for ${pendingLocks.length} pending health checks to complete`);
+      await Promise.all(pendingLocks);
+    }
+    this.healthUpdateLocks.clear();
 
     // Circuit breakers don't need explicit destruction in this version
 
@@ -300,6 +353,20 @@ export class SelfHealingManager {
 
     if (!serviceDef || !health || !breaker) return;
 
+    // P2-FIX: Wait for any existing health check to complete for this service
+    // This prevents TOCTOU race conditions when multiple health checks run concurrently
+    const existingLock = this.healthUpdateLocks.get(serviceName);
+    if (existingLock) {
+      await existingLock;
+    }
+
+    // P2-FIX: Create a lock for this health check
+    let resolveLock: () => void;
+    const lockPromise = new Promise<void>(resolve => {
+      resolveLock = resolve;
+    });
+    this.healthUpdateLocks.set(serviceName, lockPromise);
+
     try {
       const isHealthy = await breaker.execute(async () => {
         if (serviceDef.healthCheckUrl) {
@@ -311,22 +378,33 @@ export class SelfHealingManager {
         }
       });
 
-      health.lastHealthCheck = Date.now();
-
+      // P2-FIX: Atomic health update using Object.assign to prevent partial updates
+      const now = Date.now();
       if (isHealthy) {
         if (health.status !== 'healthy') {
           logger.info(`Service ${serviceName} recovered`);
-          health.status = 'healthy';
-          health.consecutiveFailures = 0;
-          health.uptime = Date.now();
-          health.errorMessage = undefined;
+          // Atomic update of all fields at once
+          Object.assign(health, {
+            status: 'healthy' as const,
+            lastHealthCheck: now,
+            consecutiveFailures: 0,
+            uptime: now,
+            errorMessage: undefined
+          });
+        } else {
+          health.lastHealthCheck = now;
         }
       } else {
-        health.status = 'unhealthy';
-        health.consecutiveFailures++;
+        // P2-FIX: Capture failure count before increment for recovery decision
+        const newFailureCount = health.consecutiveFailures + 1;
+        Object.assign(health, {
+          status: 'unhealthy' as const,
+          lastHealthCheck: now,
+          consecutiveFailures: newFailureCount
+        });
 
-        // Trigger recovery if needed
-        if (health.consecutiveFailures >= 3) {
+        // Trigger recovery if needed (using the captured count to avoid race)
+        if (newFailureCount >= 3) {
           await this.executeRecoveryStrategies(serviceDef, health);
         }
       }
@@ -335,16 +413,26 @@ export class SelfHealingManager {
       await this.updateHealthInRedis(serviceName, health);
 
     } catch (error: any) {
+      // P2-FIX: Atomic error state update
+      const newFailureCount = health.consecutiveFailures + 1;
       if (error instanceof CircuitBreakerError) {
         logger.warn(`Health check circuit breaker open for ${serviceName}`);
-        health.status = 'unhealthy';
-        health.errorMessage = 'Health check circuit breaker open';
+        Object.assign(health, {
+          status: 'unhealthy' as const,
+          errorMessage: 'Health check circuit breaker open'
+        });
       } else {
         logger.error(`Health check failed for ${serviceName}`, { error });
-        health.status = 'unhealthy';
-        health.consecutiveFailures++;
-        health.errorMessage = error.message;
+        Object.assign(health, {
+          status: 'unhealthy' as const,
+          consecutiveFailures: newFailureCount,
+          errorMessage: error.message
+        });
       }
+    } finally {
+      // P2-FIX: Release the lock
+      this.healthUpdateLocks.delete(serviceName);
+      resolveLock!();
     }
   }
 
@@ -446,8 +534,8 @@ export class SelfHealingManager {
   }
 
   private async notifyServiceDegradation(serviceName: string): Promise<void> {
-    const redis = await this.redis;
-    await redis.publish('service-degradation', {
+    // P1-16 FIX: Use dual-publish pattern (Streams + Pub/Sub)
+    const degradationMessage = {
       type: 'service_degraded',
       data: {
         service: serviceName,
@@ -455,7 +543,13 @@ export class SelfHealingManager {
       },
       timestamp: Date.now(),
       source: 'self-healing-manager'
-    });
+    };
+
+    await this.dualPublish(
+      'stream:service-degradation',  // Primary: Redis Streams
+      'service-degradation',  // Secondary: Pub/Sub
+      degradationMessage
+    );
   }
 }
 

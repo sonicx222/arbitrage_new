@@ -179,6 +179,15 @@ export class UnifiedChainDetector extends EventEmitter {
       this.redis = await getRedisClient();
       this.streamsClient = await getRedisStreamsClient();
 
+      // P0-7 FIX: Validate all critical dependencies BEFORE continuing with startup
+      // If these fail, state transition hasn't committed any resources yet
+      if (!this.redis) {
+        throw new Error('Failed to initialize Redis client - service cannot start');
+      }
+      if (!this.streamsClient) {
+        throw new Error('Failed to initialize Redis Streams client - service cannot start');
+      }
+
       // Initialize cross-region health if enabled
       if (this.config.enableCrossRegionHealth) {
         await this.initializeCrossRegionHealth();
@@ -227,8 +236,9 @@ export class UnifiedChainDetector extends EventEmitter {
       // Stop all chain instances
       await this.stopChainInstances();
 
-      // Stop cross-region health
+      // Stop cross-region health (P1-1 fix: remove listeners before stopping)
       if (this.crossRegionHealth) {
+        this.crossRegionHealth.removeAllListeners();
         await this.crossRegionHealth.stop();
         this.crossRegionHealth = null;
       }
@@ -323,15 +333,33 @@ export class UnifiedChainDetector extends EventEmitter {
     });
   }
 
+  // P1-8 FIX: Timeout for individual chain shutdown operations
+  private static readonly CHAIN_STOP_TIMEOUT_MS = 30000; // 30 seconds
+
   private async stopChainInstances(): Promise<void> {
     const stopPromises: Promise<void>[] = [];
 
-    for (const [chainId, instance] of this.chainInstances) {
-      stopPromises.push(
-        instance.stop().catch((error) => {
-          this.logger.error(`Error stopping chain instance: ${chainId}`, { error });
-        })
-      );
+    // P1-7 FIX: Take snapshot of chainInstances to avoid iterator issues during modification
+    const instancesSnapshot = Array.from(this.chainInstances.entries());
+
+    for (const [chainId, instance] of instancesSnapshot) {
+      // P1-1 fix: Remove listeners before stopping to prevent memory leak
+      instance.removeAllListeners();
+
+      // P1-8 FIX: Wrap stop() with timeout to prevent indefinite hangs
+      const stopWithTimeout = Promise.race([
+        instance.stop(),
+        new Promise<void>((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`Chain ${chainId} stop timeout after ${UnifiedDetectorService.CHAIN_STOP_TIMEOUT_MS}ms`)),
+            UnifiedDetectorService.CHAIN_STOP_TIMEOUT_MS
+          )
+        )
+      ]).catch((error) => {
+        this.logger.error(`Error stopping chain instance: ${chainId}`, { error: (error as Error).message });
+      });
+
+      stopPromises.push(stopWithTimeout);
     }
 
     await Promise.allSettled(stopPromises);
@@ -498,7 +526,11 @@ export class UnifiedChainDetector extends EventEmitter {
     let totalEvents = 0;
     let totalLatency = 0;
 
-    for (const [chainId, instance] of this.chainInstances) {
+    // P1-7 FIX: Take snapshot of chainInstances to avoid iterator errors
+    // during concurrent startup/shutdown operations
+    const instancesSnapshot = Array.from(this.chainInstances.entries());
+
+    for (const [chainId, instance] of instancesSnapshot) {
       const stats = instance.getStats();
       const health: ChainHealth = {
         chainId,

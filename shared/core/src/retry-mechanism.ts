@@ -5,6 +5,98 @@ import { createLogger } from './logger';
 
 const logger = createLogger('retry-mechanism');
 
+// =============================================================================
+// P1-2 fix: Error Classification Utility
+// =============================================================================
+
+/**
+ * Error classification for determining retry behavior.
+ * P1-2 fix: Categorize errors as transient (retryable) vs permanent (not retryable).
+ */
+export enum ErrorCategory {
+  TRANSIENT = 'transient',     // Temporary errors - retry
+  PERMANENT = 'permanent',     // Permanent errors - don't retry
+  UNKNOWN = 'unknown'          // Unknown - retry with caution
+}
+
+/**
+ * P1-2 fix: Classify an error to determine if it should be retried.
+ */
+export function classifyError(error: any): ErrorCategory {
+  if (!error) return ErrorCategory.PERMANENT;
+
+  const errorName = error.name || error.constructor?.name || '';
+  const errorCode = error.code;
+  const statusCode = error.status || error.statusCode;
+  const message = (error.message || '').toLowerCase();
+
+  // Permanent errors - never retry
+  // P1-10 FIX: Use exact matching instead of .includes() to prevent false positives
+  // e.g., "MyValidationErrorHandler" should NOT match "ValidationError"
+  const permanentErrors = [
+    'ValidationError', 'AuthenticationError', 'AuthorizationError',
+    'NotFoundError', 'InvalidInputError', 'CircuitBreakerError',
+    'InsufficientFundsError', 'GasEstimationFailed'
+  ];
+  if (permanentErrors.some(type => errorName === type)) {
+    return ErrorCategory.PERMANENT;
+  }
+
+  // Permanent HTTP status codes (4xx client errors, except 429)
+  if (statusCode && statusCode >= 400 && statusCode < 500 && statusCode !== 429) {
+    return ErrorCategory.PERMANENT;
+  }
+
+  // Transient errors - always retry
+  const transientCodes = [
+    'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED',
+    'EAI_AGAIN', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH'
+  ];
+  if (errorCode && transientCodes.includes(errorCode)) {
+    return ErrorCategory.TRANSIENT;
+  }
+
+  // Transient HTTP status codes
+  const transientStatuses = [429, 500, 502, 503, 504];
+  if (statusCode && transientStatuses.includes(statusCode)) {
+    return ErrorCategory.TRANSIENT;
+  }
+
+  // Transient error messages
+  const transientMessages = [
+    'timeout', 'connection', 'network', 'retry', 'temporary',
+    'rate limit', 'too many requests', 'service unavailable'
+  ];
+  if (transientMessages.some(msg => message.includes(msg))) {
+    return ErrorCategory.TRANSIENT;
+  }
+
+  // Blockchain/RPC transient errors
+  // P1-11 FIX: Removed duplicate -32603, added missing codes -32700 (parse error), -32600 (invalid request)
+  // JSON-RPC 2.0 Error Codes: https://www.jsonrpc.org/specification#error_object
+  const rpcTransientCodes = [
+    -32700, // Parse error (malformed JSON - may be transient network issue)
+    -32600, // Invalid request (can occur during node sync)
+    -32000, // Server error (generic - often transient)
+    -32005, // Rate limit exceeded
+    -32603  // Internal error (often transient node issues)
+  ];
+  if (errorCode && rpcTransientCodes.includes(errorCode)) {
+    return ErrorCategory.TRANSIENT;
+  }
+
+  // Unknown - default to retryable for resilience
+  return ErrorCategory.UNKNOWN;
+}
+
+/**
+ * P1-2 fix: Check if an error should be retried based on classification.
+ */
+export function isRetryableError(error: any): boolean {
+  const category = classifyError(error);
+  return category !== ErrorCategory.PERMANENT;
+}
+
 export interface RetryConfig {
   maxAttempts: number;
   initialDelay: number;        // Base delay in milliseconds
@@ -136,31 +228,19 @@ export class RetryMechanism {
     return Math.floor(delay);
   }
 
+  /**
+   * P0-8 FIX: Use classifyError() as single source of truth for retry decisions.
+   *
+   * Previous implementation was INCONSISTENT with classifyError():
+   * - Didn't check RPC transient codes (-32005, -32603, etc.)
+   * - Didn't handle 429 (rate limit) as retryable
+   * - Didn't check transient message patterns
+   *
+   * Now delegates to isRetryableError() which uses classifyError() internally.
+   */
   private defaultRetryCondition(error: any): boolean {
-    // Default retry conditions
-    if (!error) return false;
-
-    // Don't retry certain types of errors
-    const nonRetryableErrors = [
-      'CircuitBreakerError',
-      'ValidationError',
-      'AuthenticationError',
-      'AuthorizationError',
-      'NotFoundError'
-    ];
-
-    const errorName = error.name || error.constructor?.name || '';
-    if (nonRetryableErrors.some(type => errorName.includes(type))) {
-      return false;
-    }
-
-    // Don't retry 4xx HTTP errors (client errors)
-    if (error.status && error.status >= 400 && error.status < 500) {
-      return false;
-    }
-
-    // Retry network errors, timeouts, and 5xx errors
-    return true;
+    // P0-8 FIX: Use single source of truth for error classification
+    return isRetryableError(error);
   }
 
   private delay(ms: number): Promise<void> {

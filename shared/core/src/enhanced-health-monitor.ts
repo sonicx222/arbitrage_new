@@ -4,6 +4,7 @@
 
 import { createLogger } from './logger';
 import { getRedisClient } from './redis';
+import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getGracefulDegradationManager } from './graceful-degradation';
@@ -78,6 +79,8 @@ export interface ResilienceHealth {
 
 export class EnhancedHealthMonitor {
   private redis = getRedisClient();
+  // P1-17 FIX: Add Redis Streams client for ADR-002 compliance
+  private streamsClient: RedisStreamsClient | null = null;
   private circuitBreakers = getCircuitBreakerRegistry();
   private dlq = getDeadLetterQueue();
   private degradationManager = getGracefulDegradationManager();
@@ -90,6 +93,46 @@ export class EnhancedHealthMonitor {
   constructor() {
     this.initializeDefaultRules();
     this.initializeDefaultThresholds();
+    // P1-17 FIX: Initialize streams client asynchronously
+    this.initializeStreamsClient();
+  }
+
+  /**
+   * P1-17 FIX: Initialize Redis Streams client for dual-publish pattern.
+   */
+  private async initializeStreamsClient(): Promise<void> {
+    try {
+      this.streamsClient = await getRedisStreamsClient();
+    } catch (error) {
+      logger.warn('Failed to initialize Redis Streams client, will use Pub/Sub only', { error });
+    }
+  }
+
+  /**
+   * P1-17 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
+   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   */
+  private async dualPublish(
+    streamName: string,
+    pubsubChannel: string,
+    message: Record<string, any>
+  ): Promise<void> {
+    // Primary: Redis Streams (ADR-002 compliant)
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(streamName, message);
+      } catch (error) {
+        logger.error('Failed to publish to Redis Stream', { error, streamName });
+      }
+    }
+
+    // Secondary: Pub/Sub (backwards compatibility)
+    try {
+      const redis = await this.redis;
+      await redis.publish(pubsubChannel, message);
+    } catch (error) {
+      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
+    }
   }
 
   // Start comprehensive health monitoring
@@ -414,9 +457,9 @@ export class EnhancedHealthMonitor {
       await this.executeAlertAction(action, rule, health);
     }
 
-    const redis = await this.redis;
-    // Publish alert to Redis for other services
-    await redis.publish('health-alerts', {
+    // P1-17 FIX: Use dual-publish pattern (Streams + Pub/Sub)
+    // Publish alert for other services
+    const alertMessage = {
       type: 'health_alert',
       data: {
         rule: rule.name,
@@ -426,7 +469,13 @@ export class EnhancedHealthMonitor {
       },
       timestamp: Date.now(),
       source: 'enhanced-health-monitor'
-    });
+    };
+
+    await this.dualPublish(
+      'stream:health-alerts',  // Primary: Redis Streams
+      'health-alerts',  // Secondary: Pub/Sub
+      alertMessage
+    );
   }
 
   private async executeAlertAction(action: string, rule: AlertRule, health: SystemHealth): Promise<void> {

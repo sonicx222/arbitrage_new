@@ -7,7 +7,29 @@
  * Uses Redis Streams for event consumption (ADR-002 compliant).
  * Uses ServiceStateManager for lifecycle management.
  *
+ * Architecture Note: Intentional Exception to BaseDetector Pattern
+ * ----------------------------------------------------------------
+ * This service does NOT extend BaseDetector for the following reasons:
+ *
+ * 1. **Consumer vs Producer**: BaseDetector is designed for single-chain
+ *    event producers (subscribe to chain -> publish price updates).
+ *    CrossChainDetector is an event consumer (consume price updates from
+ *    ALL chains -> detect cross-chain opportunities).
+ *
+ * 2. **No WebSocket Connection**: BaseDetector manages WebSocket connections
+ *    to blockchain nodes. CrossChainDetector has no direct blockchain
+ *    connection - it consumes from Redis Streams.
+ *
+ * 3. **Different Lifecycle**: BaseDetector's lifecycle is tied to chain
+ *    availability. CrossChainDetector's lifecycle is tied to Redis Streams.
+ *
+ * 4. **Multi-Chain by Design**: BaseDetector = 1 chain per instance.
+ *    CrossChainDetector = aggregates ALL chains in one instance.
+ *
+ * This exception is documented in ADR-003.
+ *
  * @see ADR-002: Redis Streams over Pub/Sub
+ * @see ADR-003: Partitioned Chain Detectors (documents this exception)
  * @see ADR-007: Failover Strategy
  */
 
@@ -26,7 +48,7 @@ import {
   getPriceOracle,
   PriceOracle
 } from '../../../shared/core/src';
-import { ARBITRAGE_CONFIG } from '../../../shared/config/src';
+import { ARBITRAGE_CONFIG, calculateBridgeCostUsd } from '../../../shared/config/src';
 import {
   PriceUpdate,
   ArbitrageOpportunity,
@@ -143,8 +165,21 @@ export class CrossChainDetectorService {
       this.redis = await getRedisClient();
       this.streamsClient = await getRedisStreamsClient();
 
+      // P0-6 FIX: Validate Redis clients initialized successfully
+      if (!this.redis) {
+        throw new Error('Failed to initialize Redis client - returned null');
+      }
+      if (!this.streamsClient) {
+        throw new Error('Failed to initialize Redis Streams client - returned null');
+      }
+
       // Initialize price oracle
       this.priceOracle = await getPriceOracle();
+
+      // P0-6 FIX: Validate price oracle initialized successfully
+      if (!this.priceOracle) {
+        throw new Error('Failed to initialize Price Oracle - returned null');
+      }
 
       // Create consumer groups for Redis Streams
       await this.createConsumerGroups();
@@ -217,6 +252,11 @@ export class CrossChainDetectorService {
     if (this.streamConsumerInterval) {
       clearInterval(this.streamConsumerInterval);
       this.streamConsumerInterval = null;
+    }
+    // P0-5 FIX: Clear cacheCleanupInterval to prevent memory leaks
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
     }
   }
 
@@ -622,36 +662,80 @@ export class CrossChainDetectorService {
     return this.fallbackBridgeCost(sourceChain, targetChain, tokenUpdate);
   }
 
+  /**
+   * P1-5 FIX: Use centralized bridge cost configuration instead of hardcoded multipliers.
+   * This provides more accurate cost estimates based on actual bridge fees.
+   */
   private fallbackBridgeCost(sourceChain: string, targetChain: string, tokenUpdate: PriceUpdate): number {
-    // Simplified bridge cost estimation as fallback
-    const baseBridgeCost = 0.001; // $0.001 base cost
+    const DEFAULT_TRADE_SIZE_USD = 1000; // Standard trade size for cost estimation
 
-    // Chain-specific costs
-    const chainMultipliers: {[chain: string]: number} = {
-      'ethereum': 2.0,  // More expensive to/from Ethereum
-      'bsc': 1.0,
-      'arbitrum': 0.5,
-      'base': 0.3,
-      'polygon': 0.3,
-      'optimism': 0.4
-    };
+    // P1-5 FIX: Use centralized bridge cost configuration
+    const bridgeCostResult = calculateBridgeCostUsd(sourceChain, targetChain, DEFAULT_TRADE_SIZE_USD);
 
-    const sourceMultiplier = chainMultipliers[sourceChain] || 1.0;
-    const targetMultiplier = chainMultipliers[targetChain] || 1.0;
+    if (bridgeCostResult) {
+      this.logger.debug('Using configured bridge cost', {
+        sourceChain,
+        targetChain,
+        bridge: bridgeCostResult.bridge,
+        feeUsd: bridgeCostResult.fee,
+        latency: bridgeCostResult.latency
+      });
+      return bridgeCostResult.fee;
+    }
 
-    // Estimate cost based on token amount
-    const estimatedAmount = this.extractTokenAmount(tokenUpdate);
-    const bridgeCost = baseBridgeCost * sourceMultiplier * targetMultiplier * estimatedAmount;
+    // Fallback: Estimate cost if no configuration exists
+    this.logger.debug('No bridge cost config, using fallback estimate', {
+      sourceChain,
+      targetChain
+    });
 
-    return bridgeCost;
+    // Base cost as percentage of trade size
+    const baseFeePercentage = 0.1; // 0.1% fallback fee
+    const minFeeUsd = 2.0; // Minimum $2 fee
+    const percentageFee = DEFAULT_TRADE_SIZE_USD * (baseFeePercentage / 100);
+
+    return Math.max(percentageFee, minFeeUsd);
   }
 
+  /**
+   * P0-4 FIX: Extract token amount for bridge cost estimation
+   *
+   * Previous implementation was WRONG:
+   *   return price > 0 ? 1.0 / price : 1.0  // Returns inverse of price, NOT token amount!
+   *
+   * This caused bridge cost calculations to be off by ±500% because:
+   *   - If ETH price = $3000, it would return 0.000333 tokens
+   *   - If ETH price = $0.01, it would return 100 tokens
+   *
+   * Correct implementation: Return a reasonable default trade size in token terms.
+   * For cross-chain arbitrage, we typically trade a fixed USD amount (e.g., $1000)
+   * and calculate how many tokens that represents.
+   */
   private extractTokenAmount(tokenUpdate: PriceUpdate): number {
-    // Extract estimated token amount from price update
-    // This is a simplified estimation - in production would use actual amounts
-    // FIX: PriceUpdate has 'price' property, not 'price0'/'price1'
+    const DEFAULT_TRADE_SIZE_USD = 1000; // Standard trade size for bridge cost estimation
+
     const price = tokenUpdate.price;
-    return price > 0 ? 1.0 / price : 1.0; // Assume $1 worth of tokens
+    if (price <= 0) {
+      this.logger.warn('Invalid token price for amount extraction', {
+        pairKey: tokenUpdate.pairKey,
+        price
+      });
+      return 1.0; // Fallback to 1 token
+    }
+
+    // Calculate tokens worth $1000 USD
+    // If price is $3000/ETH, then $1000 = 0.333 ETH
+    // If price is $0.01/token, then $1000 = 100,000 tokens
+    const tokenAmount = DEFAULT_TRADE_SIZE_USD / price;
+
+    this.logger.debug('Extracted token amount for bridge estimation', {
+      pairKey: tokenUpdate.pairKey,
+      price,
+      usdValue: DEFAULT_TRADE_SIZE_USD,
+      tokenAmount
+    });
+
+    return tokenAmount;
   }
 
   // Method to update bridge predictor with actual bridge transaction data

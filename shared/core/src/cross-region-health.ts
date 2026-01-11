@@ -11,13 +11,21 @@
  * - Standby service activation
  * - Split-brain prevention
  *
+ * P0-11 FIX: Migrating failover events from Pub/Sub to Redis Streams per ADR-002.
+ * This ensures failover commands are not lost if services are temporarily unavailable.
+ *
+ * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
 import { getRedisClient, RedisClient } from './redis';
+import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { getDistributedLockManager, DistributedLockManager } from './distributed-lock';
+
+// P0-11 FIX: Stream name for failover events (ADR-002 compliant)
+const FAILOVER_STREAM = 'stream:system-failover';
 
 // =============================================================================
 // Types
@@ -160,6 +168,7 @@ export enum DegradationLevel {
 
 export class CrossRegionHealthManager extends EventEmitter {
   private redis: RedisClient | null = null;
+  private streamsClient: RedisStreamsClient | null = null; // P0-11 FIX: Add streams client
   private lockManager: DistributedLockManager | null = null;
   private logger: ReturnType<typeof createLogger>;
   private config: Required<CrossRegionHealthConfig>;
@@ -213,6 +222,9 @@ export class CrossRegionHealthManager extends EventEmitter {
     // Initialize Redis and lock manager
     this.redis = await getRedisClient();
     this.lockManager = await getDistributedLockManager();
+
+    // P0-11 FIX: Initialize streams client for ADR-002 compliant failover messaging
+    this.streamsClient = await getRedisStreamsClient();
 
     // Initialize own region
     this.initializeOwnRegion();
@@ -689,18 +701,35 @@ export class CrossRegionHealthManager extends EventEmitter {
     }
   }
 
+  /**
+   * P0-11 FIX: Publish failover events to both Redis Streams (guaranteed delivery)
+   * and Pub/Sub (backward compatibility during migration).
+   */
   private async publishFailoverEvent(event: FailoverEvent): Promise<void> {
-    if (!this.redis) return;
+    const message = {
+      type: 'failover_event',
+      data: event,
+      timestamp: Date.now(),
+      source: this.config.instanceId
+    };
 
-    try {
-      await this.redis.publish(this.FAILOVER_CHANNEL, {
-        type: 'failover_event',
-        data: event,
-        timestamp: Date.now(),
-        source: this.config.instanceId
-      });
-    } catch (error) {
-      this.logger.error('Failed to publish failover event', { error });
+    // P0-11 FIX: Primary - Publish to Redis Streams for guaranteed delivery
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(FAILOVER_STREAM, message, { maxLen: 10000 });
+        this.logger.debug('Published failover event to stream', { eventType: event.type });
+      } catch (error) {
+        this.logger.error('Failed to publish failover event to stream', { error });
+      }
+    }
+
+    // Secondary - Publish to Pub/Sub for backward compatibility
+    if (this.redis) {
+      try {
+        await this.redis.publish(this.FAILOVER_CHANNEL, message);
+      } catch (error) {
+        this.logger.error('Failed to publish failover event to pub/sub', { error });
+      }
     }
   }
 

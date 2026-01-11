@@ -75,7 +75,8 @@ jest.mock('../../../shared/core/src', () => ({
   getCrossRegionHealthManager: jest.fn().mockReturnValue({
     start: jest.fn().mockResolvedValue(undefined),
     stop: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn()
+    on: jest.fn(),
+    removeAllListeners: jest.fn()
   }),
   getGracefulDegradationManager: jest.fn().mockReturnValue({
     triggerDegradation: jest.fn().mockResolvedValue(true)
@@ -127,6 +128,7 @@ jest.mock('./chain-instance', () => ({
       ...emitter,
       on: emitter.on.bind(emitter),
       emit: emitter.emit.bind(emitter),
+      removeAllListeners: emitter.removeAllListeners.bind(emitter),
       start: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
       isConnected: jest.fn().mockReturnValue(true),

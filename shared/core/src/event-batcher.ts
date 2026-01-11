@@ -17,6 +17,8 @@ export interface BatchConfig {
   maxWaitTime: number; // milliseconds
   enableDeduplication: boolean;
   enablePrioritization: boolean;
+  // P1-3 fix: Maximum queue size to prevent unbounded memory growth
+  maxQueueSize?: number;
 }
 
 export class EventBatcher {
@@ -25,10 +27,14 @@ export class EventBatcher {
     timeout: NodeJS.Timeout;
     created: number;
   }> = new Map();
-  private config: BatchConfig;
+  private config: Required<BatchConfig>;
   private onBatchReady: (batch: BatchedEvent) => void;
   private processingQueue: BatchedEvent[] = [];
   private isProcessing = false;
+  // P2-FIX: Mutex lock to prevent TOCTOU race condition in processQueue
+  private processingLock: Promise<void> | null = null;
+  // P1-3 fix: Track dropped batches for monitoring
+  private droppedBatches = 0;
 
   constructor(
     config: Partial<BatchConfig> = {},
@@ -38,13 +44,16 @@ export class EventBatcher {
       maxBatchSize: config.maxBatchSize || 10,
       maxWaitTime: config.maxWaitTime || 50, // 50ms for ultra-fast processing
       enableDeduplication: config.enableDeduplication !== false,
-      enablePrioritization: config.enablePrioritization !== false
+      enablePrioritization: config.enablePrioritization !== false,
+      // P1-3 fix: Default max queue size to prevent unbounded growth
+      maxQueueSize: config.maxQueueSize || 1000
     };
     this.onBatchReady = onBatchReady;
 
     logger.info('EventBatcher initialized', {
       maxBatchSize: this.config.maxBatchSize,
-      maxWaitTime: this.config.maxWaitTime
+      maxWaitTime: this.config.maxWaitTime,
+      maxQueueSize: this.config.maxQueueSize
     });
   }
 
@@ -109,6 +118,20 @@ export class EventBatcher {
       batchSize: batch.events.length
     };
 
+    // P1-3 fix: Check queue size limit before adding
+    if (this.processingQueue.length >= this.config.maxQueueSize) {
+      // Drop oldest batches to make room (FIFO eviction)
+      const toRemove = this.processingQueue.length - this.config.maxQueueSize + 1;
+      const removed = this.processingQueue.splice(0, toRemove);
+      this.droppedBatches += removed.length;
+
+      logger.warn('Processing queue at capacity, dropping oldest batches', {
+        dropped: removed.length,
+        totalDropped: this.droppedBatches,
+        queueSize: this.processingQueue.length
+      });
+    }
+
     // Add to processing queue
     this.processingQueue.push(batchedEvent);
 
@@ -143,6 +166,9 @@ export class EventBatcher {
     queuedBatches: number;
     totalEventsProcessed: number;
     averageBatchSize: number;
+    // P1-3 fix: Track dropped batches for monitoring
+    droppedBatches: number;
+    maxQueueSize: number;
   } {
     let totalEvents = 0;
     let totalBatches = 0;
@@ -161,7 +187,10 @@ export class EventBatcher {
       activeBatches: this.batches.size,
       queuedBatches: this.processingQueue.length,
       totalEventsProcessed: totalEvents,
-      averageBatchSize: totalBatches > 0 ? totalEvents / totalBatches : 0
+      averageBatchSize: totalBatches > 0 ? totalEvents / totalBatches : 0,
+      // P1-3 fix: Include dropped batches in stats
+      droppedBatches: this.droppedBatches,
+      maxQueueSize: this.config.maxQueueSize
     };
   }
 
@@ -224,12 +253,37 @@ export class EventBatcher {
     });
   }
 
+  /**
+   * Process the queue with mutex lock to prevent TOCTOU race condition.
+   * P2-FIX: Uses Promise-based lock to ensure only one processQueue runs at a time.
+   */
   private async processQueue(): Promise<void> {
-    if (this.isProcessing || this.processingQueue.length === 0) {
+    // If queue is empty, nothing to do
+    if (this.processingQueue.length === 0) {
       return;
     }
 
+    // P2-FIX: Wait for any existing processing to complete before starting
+    // This prevents the TOCTOU race between checking isProcessing and setting it
+    if (this.processingLock) {
+      await this.processingLock;
+      // After waiting, check if queue is still non-empty (might have been processed)
+      if (this.processingQueue.length === 0) {
+        return;
+      }
+    }
+
+    // Atomic check-and-set using synchronous flag + promise
+    if (this.isProcessing) {
+      return;
+    }
     this.isProcessing = true;
+
+    // Create a lock promise that resolves when processing completes
+    let resolveLock: () => void;
+    this.processingLock = new Promise<void>(resolve => {
+      resolveLock = resolve;
+    });
 
     try {
       while (this.processingQueue.length > 0) {
@@ -240,6 +294,8 @@ export class EventBatcher {
       }
     } finally {
       this.isProcessing = false;
+      this.processingLock = null;
+      resolveLock!();
     }
   }
 
@@ -255,12 +311,26 @@ export class EventBatcher {
     this.onBatchReady(batchedEvent);
   }
 
-  // Cleanup method
-  destroy(): void {
+  /**
+   * Cleanup method.
+   * P2-2 fix: Made async to properly wait for pending processing to complete.
+   */
+  async destroy(): Promise<void> {
     logger.info('Destroying EventBatcher');
+
+    // P2-2 fix: Wait for any pending processing to complete first
+    if (this.processingLock) {
+      logger.debug('Waiting for pending processing to complete');
+      await this.processingLock;
+    }
 
     // Flush all remaining batches
     this.flushAll();
+
+    // P2-2 fix: Wait again in case flushAll triggered more processing
+    if (this.processingLock) {
+      await this.processingLock;
+    }
 
     // Clear any remaining timeouts (double-check)
     for (const batch of this.batches.values()) {

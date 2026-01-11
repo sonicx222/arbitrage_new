@@ -3,6 +3,7 @@
 
 import { createLogger } from './logger';
 import { getRedisClient } from './redis';
+import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 
 const logger = createLogger('graceful-degradation');
 
@@ -39,6 +40,8 @@ export interface DegradationState {
 
 export class GracefulDegradationManager {
   private redis = getRedisClient();
+  // P1-15 FIX: Add Redis Streams client for ADR-002 compliance
+  private streamsClient: RedisStreamsClient | null = null;
   private degradationLevels = new Map<string, DegradationLevel>();
   private serviceCapabilities = new Map<string, ServiceCapability[]>();
   private serviceStates = new Map<string, DegradationState>();
@@ -46,6 +49,50 @@ export class GracefulDegradationManager {
 
   constructor() {
     this.initializeDefaultDegradationLevels();
+    // P1-15 FIX: Initialize streams client asynchronously
+    this.initializeStreamsClient();
+  }
+
+  /**
+   * P1-15 FIX: Initialize Redis Streams client for dual-publish pattern.
+   * Streams is the primary transport (ADR-002), Pub/Sub is fallback.
+   */
+  private async initializeStreamsClient(): Promise<void> {
+    try {
+      this.streamsClient = await getRedisStreamsClient();
+    } catch (error) {
+      logger.warn('Failed to initialize Redis Streams client, will use Pub/Sub only', { error });
+    }
+  }
+
+  /**
+   * P1-15 FIX: Dual-publish helper - publishes to both Redis Streams (primary)
+   * and Pub/Sub (secondary/fallback) for backwards compatibility.
+   *
+   * This follows the migration pattern from ADR-002 where we transition
+   * from Pub/Sub to Streams while maintaining backwards compatibility.
+   */
+  private async dualPublish(
+    streamName: string,
+    pubsubChannel: string,
+    message: Record<string, any>
+  ): Promise<void> {
+    // Primary: Redis Streams (ADR-002 compliant)
+    if (this.streamsClient) {
+      try {
+        await this.streamsClient.xadd(streamName, message);
+      } catch (error) {
+        logger.error('Failed to publish to Redis Stream', { error, streamName });
+      }
+    }
+
+    // Secondary: Pub/Sub (backwards compatibility)
+    try {
+      const redis = await this.redis;
+      await redis.publish(pubsubChannel, message);
+    } catch (error) {
+      logger.error('Failed to publish to Pub/Sub', { error, pubsubChannel });
+    }
   }
 
   // Register degradation levels for a service
@@ -259,8 +306,10 @@ export class GracefulDegradationManager {
 
   private async applyDegradation(serviceName: string, level: DegradationLevel): Promise<void> {
     const redis = await this.redis;
+
+    // P1-15 FIX: Use dual-publish pattern (Streams + Pub/Sub)
     // Notify the service to adjust its behavior
-    await redis.publish(`service-degradation:${serviceName}`, {
+    const degradationMessage = {
       type: 'degradation_applied',
       data: {
         serviceName,
@@ -271,7 +320,13 @@ export class GracefulDegradationManager {
       },
       timestamp: Date.now(),
       source: 'graceful-degradation-manager'
-    });
+    };
+
+    await this.dualPublish(
+      'stream:service-degradation',  // Primary: Redis Streams
+      `service-degradation:${serviceName}`,  // Secondary: Pub/Sub
+      degradationMessage
+    );
 
     // Update service configuration in Redis
     await redis.set(`service-config:${serviceName}:degradation`, {
@@ -333,8 +388,10 @@ export class GracefulDegradationManager {
       this.serviceStates.delete(serviceName);
 
       const redis = await this.redis;
+
+      // P1-15 FIX: Use dual-publish pattern (Streams + Pub/Sub)
       // Notify service of recovery
-      await redis.publish(`service-recovery:${serviceName}`, {
+      const recoveryMessage = {
         type: 'service_recovered',
         data: {
           serviceName,
@@ -342,7 +399,13 @@ export class GracefulDegradationManager {
         },
         timestamp: Date.now(),
         source: 'graceful-degradation-manager'
-      });
+      };
+
+      await this.dualPublish(
+        'stream:service-recovery',  // Primary: Redis Streams
+        `service-recovery:${serviceName}`,  // Secondary: Pub/Sub
+        recoveryMessage
+      );
 
       // Clear recovery timer
       const timer = this.recoveryTimers.get(serviceName);
@@ -377,8 +440,8 @@ export class GracefulDegradationManager {
   }
 
   private async notifyDegradation(serviceName: string, state: DegradationState): Promise<void> {
-    const redis = await this.redis;
-    await redis.publish('service-degradation', {
+    // P1-15 FIX: Use dual-publish pattern (Streams + Pub/Sub)
+    const notifyMessage = {
       type: 'service_degradation',
       data: {
         serviceName,
@@ -388,7 +451,13 @@ export class GracefulDegradationManager {
       },
       timestamp: state.timestamp,
       source: 'graceful-degradation-manager'
-    });
+    };
+
+    await this.dualPublish(
+      'stream:service-degradation',  // Primary: Redis Streams
+      'service-degradation',  // Secondary: Pub/Sub (broadcast channel)
+      notifyMessage
+    );
   }
 }
 

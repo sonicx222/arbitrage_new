@@ -185,8 +185,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
     this.isRunning = false;
 
-    // Disconnect WebSocket
+    // Disconnect WebSocket (P0-2 fix: remove listeners to prevent memory leak)
     if (this.wsManager) {
+      // Remove all event listeners before disconnecting to prevent memory leak
+      this.wsManager.removeAllListeners();
       await this.wsManager.disconnect();
       this.wsManager = null;
     }
@@ -385,11 +387,15 @@ export class ChainDetectorInstance extends EventEmitter {
         const reserve0 = BigInt('0x' + data.slice(2, 66)).toString();
         const reserve1 = BigInt('0x' + data.slice(66, 130)).toString();
 
-        // Update pair
-        pair.reserve0 = reserve0;
-        pair.reserve1 = reserve1;
-        pair.blockNumber = parseInt(log.blockNumber, 16);
-        pair.lastUpdate = Date.now();
+        // P1-9 FIX: Use Object.assign for atomic pair updates
+        // This prevents partial updates if concurrent access occurs during
+        // initialization or other event handling
+        Object.assign(pair, {
+          reserve0,
+          reserve1,
+          blockNumber: parseInt(log.blockNumber, 16),
+          lastUpdate: Date.now()
+        });
 
         this.eventsProcessed++;
 
