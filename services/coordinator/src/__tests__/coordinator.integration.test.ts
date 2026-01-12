@@ -26,6 +26,9 @@ interface MockRedisClient {
   setNx: Mock<() => Promise<boolean>>;
   del: Mock<() => Promise<number>>;
   expire: Mock<() => Promise<number>>;
+  // P0-NEW-5 FIX: Atomic lock operations
+  renewLockIfOwned: Mock<() => Promise<boolean>>;
+  releaseLockIfOwned: Mock<() => Promise<boolean>>;
 }
 
 // Type for mock Streams client
@@ -51,7 +54,10 @@ const mockRedisClient: MockRedisClient = {
   set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
   setNx: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
   del: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-  expire: jest.fn<() => Promise<number>>().mockResolvedValue(1)
+  expire: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  // P0-NEW-5 FIX: Atomic lock operations
+  renewLockIfOwned: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  releaseLockIfOwned: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
 };
 
 // Mock Redis Streams client
@@ -67,12 +73,28 @@ const mockStreamsClient: MockStreamsClient = {
 // Add STREAMS constant to mock
 (mockStreamsClient as any).STREAMS = RedisStreamsClient.STREAMS;
 
-// Mock state manager
+// Mock state manager with proper state tracking (P1-8 FIX)
+let mockIsRunning = false;
 const mockStateManager = {
-  getState: jest.fn(() => 'STOPPED'),
-  executeStart: jest.fn((callback: () => Promise<void>) => callback().then(() => ({ success: true }))),
-  executeStop: jest.fn((callback: () => Promise<void>) => callback().then(() => ({ success: true }))),
-  isRunning: jest.fn(() => false),
+  getState: jest.fn(() => mockIsRunning ? 'RUNNING' : 'STOPPED'),
+  executeStart: jest.fn((callback: () => Promise<void>) =>
+    callback().then(() => {
+      mockIsRunning = true;
+      return { success: true };
+    }).catch((error) => {
+      mockIsRunning = false;
+      return { success: false, error };
+    })
+  ),
+  executeStop: jest.fn((callback: () => Promise<void>) =>
+    callback().then(() => {
+      mockIsRunning = false;
+      return { success: true };
+    }).catch((error) => {
+      return { success: false, error };
+    })
+  ),
+  isRunning: jest.fn(() => mockIsRunning),
   setState: jest.fn()
 };
 
@@ -120,6 +142,8 @@ describe('CoordinatorService Integration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetRedisInstance();
+    // P1-8 FIX: Reset mock state for clean tests
+    mockIsRunning = false;
 
     // Setup mocks - cast through unknown first for proper type casting
     (getRedisClient as unknown as Mock<() => Promise<MockRedisClient>>).mockResolvedValue(mockRedisClient);
@@ -216,7 +240,11 @@ describe('CoordinatorService Integration', () => {
 
       await coordinator.stop();
 
-      expect(mockRedisClient.del).toHaveBeenCalledWith('coordinator:leader:lock');
+      // P0-NEW-5 FIX: Now uses atomic releaseLockIfOwned instead of del
+      expect(mockRedisClient.releaseLockIfOwned).toHaveBeenCalledWith(
+        'coordinator:leader:lock',
+        instanceId
+      );
     });
 
     it('should detect when leadership is lost', async () => {

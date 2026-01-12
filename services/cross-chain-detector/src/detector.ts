@@ -207,6 +207,9 @@ export class CrossChainDetectorService {
     }
   }
 
+  // P0-NEW-6 FIX: Timeout constant for shutdown operations
+  private static readonly SHUTDOWN_TIMEOUT_MS = 5000;
+
   async stop(): Promise<void> {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Cross-Chain Detector Service');
@@ -214,21 +217,41 @@ export class CrossChainDetectorService {
       // Clear all intervals
       this.clearAllIntervals();
 
-      // Disconnect streams client
+      // P0-NEW-6 FIX: Disconnect streams client with timeout
       if (this.streamsClient) {
-        await this.streamsClient.disconnect();
+        try {
+          await Promise.race([
+            this.streamsClient.disconnect(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Streams client disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS)
+            )
+          ]);
+        } catch (error) {
+          this.logger.warn('Streams client disconnect timeout or error', { error: (error as Error).message });
+        }
         this.streamsClient = null;
       }
 
-      // Disconnect Redis
+      // P0-NEW-6 FIX: Disconnect Redis with timeout
       if (this.redis) {
-        await this.redis.disconnect();
+        try {
+          await Promise.race([
+            this.redis.disconnect(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Redis disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS)
+            )
+          ]);
+        } catch (error) {
+          this.logger.warn('Redis disconnect timeout or error', { error: (error as Error).message });
+        }
         this.redis = null;
       }
 
       // Clear caches
       this.priceData = {};
       this.opportunitiesCache.clear();
+      // P1-NEW-7 FIX: Reset counter for clean restart
+      this.priceUpdateCounter = 0;
 
       this.logger.info('Cross-Chain Detector Service stopped');
     });
@@ -315,7 +338,14 @@ export class CrossChainDetectorService {
       });
 
       for (const message of messages) {
-        this.handlePriceUpdate(message.data as PriceUpdate);
+        // P1-6 FIX: Validate message data before processing
+        const update = message.data as unknown as PriceUpdate;
+        if (!this.validatePriceUpdate(update)) {
+          this.logger.warn('Skipping invalid price update message', { messageId: message.id });
+          await this.streamsClient.xack(config.streamName, config.groupName, message.id);
+          continue;
+        }
+        this.handlePriceUpdate(update);
         await this.streamsClient.xack(config.streamName, config.groupName, message.id);
       }
     } catch (error) {
@@ -341,7 +371,14 @@ export class CrossChainDetectorService {
       });
 
       for (const message of messages) {
-        this.handleWhaleTransaction(message.data as WhaleTransaction);
+        // P1-6 FIX: Validate message data before processing
+        const whaleTx = message.data as unknown as WhaleTransaction;
+        if (!this.validateWhaleTransaction(whaleTx)) {
+          this.logger.warn('Skipping invalid whale transaction message', { messageId: message.id });
+          await this.streamsClient.xack(config.streamName, config.groupName, message.id);
+          continue;
+        }
+        this.handleWhaleTransaction(whaleTx);
         await this.streamsClient.xack(config.streamName, config.groupName, message.id);
       }
     } catch (error) {
@@ -388,6 +425,60 @@ export class CrossChainDetectorService {
     } catch (error) {
       this.logger.error('Failed to handle whale transaction', { error });
     }
+  }
+
+  // ===========================================================================
+  // P1-6 FIX: Message Validation
+  // ===========================================================================
+
+  /**
+   * Validate PriceUpdate message has all required fields
+   */
+  private validatePriceUpdate(update: PriceUpdate | null | undefined): update is PriceUpdate {
+    if (!update || typeof update !== 'object') {
+      return false;
+    }
+
+    // Required fields for price updates
+    if (typeof update.chain !== 'string' || !update.chain) {
+      return false;
+    }
+    if (typeof update.dex !== 'string' || !update.dex) {
+      return false;
+    }
+    if (typeof update.pairKey !== 'string' || !update.pairKey) {
+      return false;
+    }
+    if (typeof update.price !== 'number' || isNaN(update.price) || update.price < 0) {
+      return false;
+    }
+    if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Validate WhaleTransaction message has all required fields
+   */
+  private validateWhaleTransaction(tx: WhaleTransaction | null | undefined): tx is WhaleTransaction {
+    if (!tx || typeof tx !== 'object') {
+      return false;
+    }
+
+    // Required fields for whale transactions
+    if (typeof tx.chain !== 'string' || !tx.chain) {
+      return false;
+    }
+    if (typeof tx.usdValue !== 'number' || isNaN(tx.usdValue) || tx.usdValue < 0) {
+      return false;
+    }
+    if (typeof tx.direction !== 'string' || !['buy', 'sell'].includes(tx.direction)) {
+      return false;
+    }
+
+    return true;
   }
 
   private cleanOldPriceData(): void {

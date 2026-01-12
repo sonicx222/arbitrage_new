@@ -1,10 +1,10 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.8
+> **Version**: 1.9
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-12 (S2.2.5 pair initialization completed - PairDiscoveryService + PairCacheService)
-> **Tests**: 1880 passing
+> **Last Updated**: 2025-01-12 (S2.2.5 fully completed - V3 fee tier capture, BaseDetector integration, unit tests)
+> **Tests**: 1907 passing
 
 ---
 
@@ -23,7 +23,7 @@
 
 ## 1. Executive Summary
 
-### Current State (After S2.2.4)
+### Current State (After S2.2.5)
 - **Chains**: 6 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism)
 - **DEXs**: 33 (Phase 1 target achieved ✓)
   - Arbitrum: 9, BSC: 8, Base: 7, Polygon: 4, Optimism: 3, Ethereum: 2
@@ -462,9 +462,14 @@
     - Redis-based pair address caching with TTL
     - Circuit breaker for RPC error handling
     - Batch discovery for efficiency
-    - Files created:
-      - shared/core/src/pair-discovery.ts (PairDiscoveryService)
-      - shared/core/src/pair-cache.ts (PairCacheService)
+    - V3 fee tier capture (100, 500, 3000, 10000 basis points)
+    - BaseDetector.getPairAddress integration (cache-first strategy)
+    - Files created/modified:
+      - shared/core/src/pair-discovery.ts (PairDiscoveryService + DiscoveredPair.feeTier)
+      - shared/core/src/pair-cache.ts (PairCacheService + @reserved docs)
+      - shared/core/src/pair-discovery.test.ts (27 unit tests)
+      - shared/core/src/base-detector.ts (getPairAddress integration)
+      - shared/core/src/base-detector.test.ts (S2.2.5 integration tests)
       - tests/integration/s2.2.5-pair-initialization.integration.test.ts (35 tests)
     - COMPLETED: 2025-01-12
 ```
@@ -801,7 +806,7 @@
 - [x] Redis Streams operational with batching
 - [x] Swap filtering reducing events by 99%
 - [x] L1 Price Matrix benchmarked <1μs (~3ns achieved)
-- [x] All unit tests passing (1880 tests after S2.2.5)
+- [x] All unit tests passing (1907 tests after S2.2.5)
 
 **Success Metrics**:
 | Metric | Target | Actual |
@@ -820,6 +825,8 @@
 - [x] 60 tokens configured and **verified** (S2.2.4 - 390 tests)
 - [x] Integration tests passing (679+ S2.2 integration tests)
 - [x] Pair discovery and caching services implemented (S2.2.5)
+- [x] V3 fee tier capture in discovery results (S2.2.5)
+- [x] BaseDetector.getPairAddress integrated with cache-first strategy (S2.2.5)
 
 **Success Metrics**:
 | Metric | Target | Actual |

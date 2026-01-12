@@ -50,10 +50,18 @@ export declare class CoordinatorService {
     private clearAllIntervals;
     private tryAcquireLeadership;
     /**
-     * P0-4 fix: Atomic lock renewal using compare-and-set pattern.
+     * P0-NEW-5 FIX: Truly atomic lock renewal using Lua script.
+     * Uses renewLockIfOwned() which atomically checks ownership and extends TTL.
+     * This eliminates the TOCTOU race condition that existed before.
+     *
      * Returns true if renewal succeeded, false if lock was lost.
      */
     private renewLeaderLock;
+    /**
+     * P0-NEW-5 FIX: Atomic lock release using Lua script.
+     * Uses releaseLockIfOwned() which atomically checks ownership and deletes.
+     * This prevents releasing a lock that was acquired by another instance.
+     */
     private releaseLeadership;
     private startLeaderHeartbeat;
     private createConsumerGroups;

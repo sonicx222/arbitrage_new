@@ -62,6 +62,7 @@ export declare class ExecutionEngineService {
     private providerHealthCheckInterval;
     constructor(queueConfig?: Partial<QueueConfig>);
     start(): Promise<void>;
+    private static readonly SHUTDOWN_TIMEOUT_MS;
     stop(): Promise<void>;
     private clearAllIntervals;
     /**

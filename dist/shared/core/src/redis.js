@@ -294,6 +294,75 @@ class RedisClient {
             throw error;
         }
     }
+    /**
+     * P0-NEW-5 FIX: Atomic lock renewal using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and extends TTL.
+     * This prevents the TOCTOU race condition where another instance could acquire
+     * the lock between the check and the TTL extension.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @param ttlSeconds - New TTL to set if renewal succeeds
+     * @returns true if lock was renewed, false if lock is owned by another instance or doesn't exist
+     */
+    async renewLockIfOwned(key, instanceId, ttlSeconds) {
+        // Lua script for atomic compare-and-extend-TTL
+        // Returns 1 if successful, 0 if lock doesn't exist or is owned by another instance
+        const script = `
+      local key = KEYS[1]
+      local expected_owner = ARGV[1]
+      local ttl_seconds = tonumber(ARGV[2])
+
+      local current_owner = redis.call('GET', key)
+
+      if current_owner == expected_owner then
+        redis.call('EXPIRE', key, ttl_seconds)
+        return 1
+      else
+        return 0
+      end
+    `;
+        try {
+            const result = await this.eval(script, [key], [instanceId, String(ttlSeconds)]);
+            return result === 1;
+        }
+        catch (error) {
+            this.logger.error('Error renewing lock', { error, key, instanceId });
+            return false;
+        }
+    }
+    /**
+     * P0-NEW-5 FIX: Atomic lock release using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and deletes it.
+     * This prevents releasing a lock that was acquired by another instance.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
+     */
+    async releaseLockIfOwned(key, instanceId) {
+        const script = `
+      local key = KEYS[1]
+      local expected_owner = ARGV[1]
+
+      local current_owner = redis.call('GET', key)
+
+      if current_owner == expected_owner then
+        redis.call('DEL', key)
+        return 1
+      else
+        return 0
+      end
+    `;
+        try {
+            const result = await this.eval(script, [key], [instanceId]);
+            return result === 1;
+        }
+        catch (error) {
+            this.logger.error('Error releasing lock', { error, key, instanceId });
+            return false;
+        }
+    }
     // Hash operations for complex data
     async hset(key, field, value) {
         try {

@@ -54,6 +54,7 @@ export declare class CrossChainDetectorService {
     private readonly CLEANUP_FREQUENCY;
     constructor();
     start(): Promise<void>;
+    private static readonly SHUTDOWN_TIMEOUT_MS;
     stop(): Promise<void>;
     private clearAllIntervals;
     private createConsumerGroups;
@@ -62,6 +63,14 @@ export declare class CrossChainDetectorService {
     private consumeWhaleAlertsStream;
     private handlePriceUpdate;
     private handleWhaleTransaction;
+    /**
+     * Validate PriceUpdate message has all required fields
+     */
+    private validatePriceUpdate;
+    /**
+     * Validate WhaleTransaction message has all required fields
+     */
+    private validateWhaleTransaction;
     private cleanOldPriceData;
     /**
      * Clean old entries from opportunity cache to prevent memory leak (P0 fix)
