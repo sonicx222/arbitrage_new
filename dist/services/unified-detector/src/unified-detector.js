@@ -259,12 +259,18 @@ class UnifiedChainDetector extends events_1.EventEmitter {
             }
         }, interval);
         // Initial health report (fire-and-forget with proper error handling)
+        // P1-NEW-4 FIX: Check state before publishing
         this.getPartitionHealth()
-            .then(health => this.publishHealth(health))
+            .then(health => {
+            if (this.stateManager.isRunning()) {
+                return this.publishHealth(health);
+            }
+        })
             .catch(error => this.logger.error('Initial health report failed', { error }));
     }
     async publishHealth(health) {
-        if (!this.streamsClient)
+        // P1-NEW-4 FIX: Also check state at publish time
+        if (!this.streamsClient || !this.stateManager.isRunning())
             return;
         try {
             await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.HEALTH, {

@@ -143,3 +143,11 @@
 2026-01-12T18:56:48.819Z [redis-client] error: Error getting cache {"error":{}}
 2026-01-12T18:56:48.856Z [redis-client] error: Error getting cache {"error":{}}
 2026-01-12T18:56:48.861Z [redis-client] error: Error subscribing to channel {"error":{},"channel":"test-channel"}
+2026-01-12T19:35:42.029Z [redis-client] error: Error publishing message {"error":{},"channel":"test"}
+2026-01-12T19:35:42.127Z [redis-client] error: Error getting cache {"error":{}}
+2026-01-12T19:35:42.167Z [redis-client] error: Error getting cache {"error":{}}
+2026-01-12T19:35:42.172Z [redis-client] error: Error subscribing to channel {"error":{},"channel":"test-channel"}
+2026-01-12T19:50:52.024Z [redis-client] error: Error publishing message {"error":{},"channel":"test"}
+2026-01-12T19:50:52.078Z [redis-client] error: Error getting cache {"error":{}}
+2026-01-12T19:50:52.102Z [redis-client] error: Error getting cache {"error":{}}
+2026-01-12T19:50:52.106Z [redis-client] error: Error subscribing to channel {"error":{},"channel":"test-channel"}

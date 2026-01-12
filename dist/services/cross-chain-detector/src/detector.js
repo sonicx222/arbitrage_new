@@ -369,23 +369,40 @@ class CrossChainDetectorService {
         }
         return true;
     }
+    /**
+     * P0-NEW-7 FIX: Clean old price data using snapshot-based iteration
+     * Prevents race conditions where priceData is modified during cleanup
+     */
     cleanOldPriceData() {
         const cutoffTime = Date.now() - (5 * 60 * 1000); // 5 minutes ago
-        for (const chain of Object.keys(this.priceData)) {
-            for (const dex of Object.keys(this.priceData[chain])) {
-                for (const pairKey of Object.keys(this.priceData[chain][dex])) {
+        // P0-NEW-7 FIX: Take snapshot of keys to prevent iterator invalidation
+        const chainSnapshot = Object.keys(this.priceData);
+        for (const chain of chainSnapshot) {
+            // Check if chain still exists (may have been deleted by concurrent operation)
+            if (!this.priceData[chain])
+                continue;
+            const dexSnapshot = Object.keys(this.priceData[chain]);
+            for (const dex of dexSnapshot) {
+                // Check if dex still exists
+                if (!this.priceData[chain] || !this.priceData[chain][dex])
+                    continue;
+                const pairSnapshot = Object.keys(this.priceData[chain][dex]);
+                for (const pairKey of pairSnapshot) {
+                    // Check if pair still exists before accessing
+                    if (!this.priceData[chain]?.[dex]?.[pairKey])
+                        continue;
                     const update = this.priceData[chain][dex][pairKey];
-                    if (update.timestamp < cutoffTime) {
+                    if (update && update.timestamp < cutoffTime) {
                         delete this.priceData[chain][dex][pairKey];
                     }
                 }
-                // Clean empty dex objects
-                if (Object.keys(this.priceData[chain][dex]).length === 0) {
+                // Clean empty dex objects (re-check existence)
+                if (this.priceData[chain]?.[dex] && Object.keys(this.priceData[chain][dex]).length === 0) {
                     delete this.priceData[chain][dex];
                 }
             }
-            // Clean empty chain objects
-            if (Object.keys(this.priceData[chain]).length === 0) {
+            // Clean empty chain objects (re-check existence)
+            if (this.priceData[chain] && Object.keys(this.priceData[chain]).length === 0) {
                 delete this.priceData[chain];
             }
         }
@@ -393,31 +410,24 @@ class CrossChainDetectorService {
     /**
      * Clean old entries from opportunity cache to prevent memory leak (P0 fix)
      * Keeps cache bounded to prevent unbounded growth
+     * P1-NEW-3 FIX: Uses createdAt field instead of parsing from ID
      */
     cleanOldOpportunityCache() {
         const maxCacheSize = 1000; // Hard limit on cache size
         const maxAgeMs = 10 * 60 * 1000; // 10 minutes TTL
         const now = Date.now();
-        // First pass: remove old entries
+        // First pass: remove old entries using createdAt field
         for (const [id, opp] of this.opportunitiesCache) {
-            // Extract timestamp from ID (format: cross-chain-{timestamp}-{random})
-            const idParts = id.split('-');
-            if (idParts.length >= 3) {
-                const timestamp = parseInt(idParts[2], 10);
-                if (!isNaN(timestamp) && (now - timestamp) > maxAgeMs) {
-                    this.opportunitiesCache.delete(id);
-                }
+            // P1-NEW-3 FIX: Use createdAt field for reliable age checking
+            if (opp.createdAt && (now - opp.createdAt) > maxAgeMs) {
+                this.opportunitiesCache.delete(id);
             }
         }
         // Second pass: if still over limit, remove oldest entries
         if (this.opportunitiesCache.size > maxCacheSize) {
             const entries = Array.from(this.opportunitiesCache.entries());
-            // Sort by timestamp in ID (oldest first)
-            entries.sort((a, b) => {
-                const tsA = parseInt(a[0].split('-')[2], 10) || 0;
-                const tsB = parseInt(b[0].split('-')[2], 10) || 0;
-                return tsA - tsB;
-            });
+            // P1-NEW-3 FIX: Sort by createdAt field (oldest first)
+            entries.sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
             // Remove oldest entries to get under limit
             const toRemove = entries.slice(0, entries.length - maxCacheSize);
             for (const [id] of toRemove) {
@@ -562,7 +572,9 @@ class CrossChainDetectorService {
                     estimatedProfit: priceDiff,
                     bridgeCost,
                     netProfit,
-                    confidence: this.calculateConfidence(lowestPrice, highestPrice)
+                    confidence: this.calculateConfidence(lowestPrice, highestPrice),
+                    // P1-NEW-3 FIX: Include createdAt for reliable cleanup
+                    createdAt: Date.now()
                 };
                 opportunities.push(opportunity);
             }
@@ -736,7 +748,11 @@ class CrossChainDetectorService {
             await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, arbitrageOpp);
             this.perfLogger.logArbitrageOpportunity(arbitrageOpp);
             // Cache opportunity to avoid duplicates
-            this.opportunitiesCache.set(arbitrageOpp.id, opportunity);
+            // P1-NEW-3 FIX: Add createdAt timestamp for reliable cleanup
+            this.opportunitiesCache.set(arbitrageOpp.id, {
+                ...opportunity,
+                createdAt: Date.now()
+            });
         }
         catch (error) {
             this.logger.error('Failed to publish arbitrage opportunity', { error });

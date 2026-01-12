@@ -424,13 +424,20 @@ export class ExecutionEngineService {
 
   /**
    * P1-3 FIX: Start periodic provider health checks for reconnection
+   * P1-NEW-5 FIX: Added state check inside loop to abort early if stopping
    */
   private startProviderHealthChecks(): void {
     // Check provider health every 30 seconds
     this.providerHealthCheckInterval = setInterval(async () => {
+      // P1-NEW-5 FIX: Early exit if not running
       if (!this.stateManager.isRunning()) return;
 
       for (const [chainName, provider] of this.providers) {
+        // P1-NEW-5 FIX: Check state before each provider check to abort early during shutdown
+        if (!this.stateManager.isRunning()) {
+          this.logger.debug('Aborting provider health checks - service stopping');
+          return;
+        }
         await this.checkAndReconnectProvider(chainName, provider);
       }
     }, 30000);
