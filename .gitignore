@@ -5,3 +5,15 @@ logs/expert-self-healing-manager-error.log
 logs/redis-client-combined.log
 logs/redis-client-error.log
 logs/redis-streams-combined.log
+logs/ethereum-detector-combined.log
+logs/ethereum-detector-error.log
+logs/expert-self-healing-manager-combined.log
+logs/expert-self-healing-manager-error.log
+logs/pair-cache-combined.log
+logs/pair-cache-error.log
+logs/redis-streams-error.log
+logs/pair-discovery-combined.log
+logs/pair-discovery-error.log
+logs/redis-client-combined.log
+logs/redis-client-error.log
+logs/redis-streams-combined.log

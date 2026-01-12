@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ETHEREUM_RPC_URL=\"https://test\" ETHEREUM_WS_URL=\"wss://test\" REDIS_URL=\"redis://localhost\" node:*)"
+      "Bash(ETHEREUM_RPC_URL=\"https://test\" ETHEREUM_WS_URL=\"wss://test\" REDIS_URL=\"redis://localhost\" node:*)",
+      "Bash(timeout 120 npm run test -- --testPathPattern=\"base-detector.test.ts\" --no-coverage --forceExit)"
     ]
   }
 }
