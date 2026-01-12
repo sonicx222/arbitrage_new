@@ -1,8 +1,0 @@
-2026-01-12T18:56:49.297Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
-2026-01-12T18:56:49.339Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}
-2026-01-12T19:35:41.261Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
-2026-01-12T19:35:41.289Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}
-2026-01-12T19:50:20.428Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
-2026-01-12T19:50:20.456Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}
-2026-01-12T19:50:50.642Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
-2026-01-12T19:50:50.668Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}
