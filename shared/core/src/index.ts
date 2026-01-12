@@ -167,6 +167,29 @@ export type {
   BatchUpdate
 } from './price-matrix';
 
+// Pair Discovery and Caching (S2.2.5)
+export {
+  PairDiscoveryService,
+  getPairDiscoveryService,
+  resetPairDiscoveryService
+} from './pair-discovery';
+export type {
+  PairDiscoveryConfig,
+  DiscoveredPair,
+  PairDiscoveryStats
+} from './pair-discovery';
+export {
+  PairCacheService,
+  getPairCacheService,
+  resetPairCacheService
+} from './pair-cache';
+export type {
+  PairCacheConfig,
+  CachedPairData,
+  PairCacheStats,
+  CacheLookupResult
+} from './pair-cache';
+
 // REMOVED: Professional-grade modules (unused, cleaned up):
 // - AdvancedStatisticalArbitrage
 // - RiskManagementEngine

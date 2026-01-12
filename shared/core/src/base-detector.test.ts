@@ -130,6 +130,22 @@ class TestDetector extends BaseDetector {
     // Mock - add test pairs
   }
 
+  protected async initializePairServices(): Promise<void> {
+    this.testCalls.push('initializePairServices');
+    // Mock - don't initialize actual services
+  }
+
+  // Expose getPairAddress for testing
+  public async testGetPairAddress(dex: any, token0: any, token1: any): Promise<string | null> {
+    return this.getPairAddress(dex, token0, token1);
+  }
+
+  // Allow setting mock services for testing
+  public setMockPairServices(discoveryService: any, cacheService: any): void {
+    this.pairDiscoveryService = discoveryService;
+    this.pairCacheService = cacheService;
+  }
+
   protected async connectWebSocket(): Promise<void> {
     this.testCalls.push('connectWebSocket');
     // Mock - don't actually connect
@@ -282,6 +298,7 @@ describe('BaseDetector', () => {
 
         expect(detector.testCalls).toEqual([
           'initializeRedis',
+          'initializePairServices', // S2.2.5: Pair discovery and caching
           'initializePairs',
           'connectWebSocket',
           'subscribeToEvents',
@@ -981,5 +998,230 @@ describe('BaseDetector Integration', () => {
 
     // 1000 lookups should be very fast (< 10ms)
     expect(endTime - startTime).toBeLessThan(100);
+  });
+});
+
+// =============================================================================
+// S2.2.5: getPairAddress Integration Tests
+// =============================================================================
+
+describe('S2.2.5 getPairAddress Integration', () => {
+  let detector: TestDetector;
+
+  const testDex = {
+    name: 'uniswap_v2',
+    chain: 'ethereum',
+    factoryAddress: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+    routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
+    fee: 30,
+    enabled: true
+  };
+
+  const testToken0 = {
+    address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    symbol: 'WETH',
+    decimals: 18,
+    chainId: 1
+  };
+
+  const testToken1 = {
+    address: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    symbol: 'USDT',
+    decimals: 6,
+    chainId: 1
+  };
+
+  const testPairAddress = '0x0d4a11d5EEaaC28EC3F61d100daF4d40471f1852';
+
+  beforeEach(async () => {
+    detector = new TestDetector();
+    await detector.start();
+  });
+
+  afterEach(async () => {
+    await detector.stop();
+  });
+
+  describe('Cache-First Strategy', () => {
+    it('should return cached address on cache hit', async () => {
+      // Mock cache service to return hit
+      const mockCacheService = {
+        get: jest.fn().mockResolvedValue({
+          status: 'hit',
+          data: { address: testPairAddress }
+        }),
+        set: jest.fn(),
+        setNull: jest.fn()
+      };
+
+      const mockDiscoveryService = {
+        incrementCacheHits: jest.fn(),
+        discoverPair: jest.fn()
+      };
+
+      detector.setMockPairServices(mockDiscoveryService, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBe(testPairAddress);
+      expect(mockCacheService.get).toHaveBeenCalledWith(
+        'ethereum',
+        'uniswap_v2',
+        testToken0.address,
+        testToken1.address
+      );
+      expect(mockDiscoveryService.incrementCacheHits).toHaveBeenCalled();
+      expect(mockDiscoveryService.discoverPair).not.toHaveBeenCalled();
+    });
+
+    it('should return null for cached null result', async () => {
+      const mockCacheService = {
+        get: jest.fn().mockResolvedValue({
+          status: 'null',
+          reason: 'pair_not_exists'
+        }),
+        set: jest.fn(),
+        setNull: jest.fn()
+      };
+
+      const mockDiscoveryService = {
+        incrementCacheHits: jest.fn(),
+        discoverPair: jest.fn()
+      };
+
+      detector.setMockPairServices(mockDiscoveryService, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBeNull();
+      expect(mockDiscoveryService.discoverPair).not.toHaveBeenCalled();
+    });
+
+    it('should discover pair on cache miss', async () => {
+      const mockCacheService = {
+        get: jest.fn().mockResolvedValue({ status: 'miss' }),
+        set: jest.fn().mockResolvedValue(true),
+        setNull: jest.fn()
+      };
+
+      const mockDiscoveryService = {
+        incrementCacheHits: jest.fn(),
+        discoverPair: jest.fn().mockResolvedValue({
+          address: testPairAddress,
+          token0: testToken0.address,
+          token1: testToken1.address,
+          dex: testDex.name,
+          chain: 'ethereum',
+          factoryAddress: testDex.factoryAddress,
+          discoveredAt: Date.now(),
+          discoveryMethod: 'factory_query'
+        })
+      };
+
+      detector.setMockPairServices(mockDiscoveryService, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBe(testPairAddress);
+      expect(mockDiscoveryService.discoverPair).toHaveBeenCalledWith(
+        'ethereum',
+        testDex,
+        testToken0,
+        testToken1
+      );
+      expect(mockCacheService.set).toHaveBeenCalled();
+    });
+
+    it('should cache null result when pair not found', async () => {
+      const mockCacheService = {
+        get: jest.fn().mockResolvedValue({ status: 'miss' }),
+        set: jest.fn(),
+        setNull: jest.fn().mockResolvedValue(true)
+      };
+
+      const mockDiscoveryService = {
+        incrementCacheHits: jest.fn(),
+        discoverPair: jest.fn().mockResolvedValue(null)
+      };
+
+      detector.setMockPairServices(mockDiscoveryService, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBeNull();
+      expect(mockCacheService.setNull).toHaveBeenCalledWith(
+        'ethereum',
+        'uniswap_v2',
+        testToken0.address,
+        testToken1.address
+      );
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should return null when services not initialized', async () => {
+      // Reset services to null
+      detector.setMockPairServices(null, null);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle cache errors gracefully', async () => {
+      const mockCacheService = {
+        get: jest.fn().mockRejectedValue(new Error('Redis connection failed')),
+        set: jest.fn(),
+        setNull: jest.fn()
+      };
+
+      detector.setMockPairServices(null, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle discovery errors gracefully', async () => {
+      const mockCacheService = {
+        get: jest.fn().mockResolvedValue({ status: 'miss' }),
+        set: jest.fn(),
+        setNull: jest.fn()
+      };
+
+      const mockDiscoveryService = {
+        incrementCacheHits: jest.fn(),
+        discoverPair: jest.fn().mockRejectedValue(new Error('RPC timeout'))
+      };
+
+      detector.setMockPairServices(mockDiscoveryService, mockCacheService);
+
+      const result = await detector.testGetPairAddress(testDex, testToken0, testToken1);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('Service Initialization', () => {
+    it('should call initializePairServices during start', async () => {
+      const freshDetector = new TestDetector();
+      await freshDetector.start();
+
+      expect(freshDetector.testCalls).toContain('initializePairServices');
+
+      await freshDetector.stop();
+    });
+
+    it('should initialize pair services after Redis', async () => {
+      const freshDetector = new TestDetector();
+      await freshDetector.start();
+
+      const redisIndex = freshDetector.testCalls.indexOf('initializeRedis');
+      const pairServicesIndex = freshDetector.testCalls.indexOf('initializePairServices');
+
+      expect(redisIndex).toBeLessThan(pairServicesIndex);
+
+      await freshDetector.stop();
+    });
   });
 });

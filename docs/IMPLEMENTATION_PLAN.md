@@ -1,10 +1,10 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.7
+> **Version**: 1.8
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-12 (S2.2.4 token coverage verification completed - 60 tokens verified across 6 chains)
-> **Tests**: 1845 passing
+> **Last Updated**: 2025-01-12 (S2.2.5 pair initialization completed - PairDiscoveryService + PairCacheService)
+> **Tests**: 1880 passing
 
 ---
 
@@ -23,11 +23,12 @@
 
 ## 1. Executive Summary
 
-### Current State (After S2.2.3)
+### Current State (After S2.2.4)
 - **Chains**: 6 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism)
 - **DEXs**: 33 (Phase 1 target achieved ✓)
   - Arbitrum: 9, BSC: 8, Base: 7, Polygon: 4, Optimism: 3, Ethereum: 2
-- **Tokens**: 60 (~10 per chain)
+- **Tokens**: 60 (Phase 1 target achieved ✓) - Verified with 390 tests
+  - Arbitrum: 12, BSC: 10, Base: 10, Polygon: 10, Optimism: 10, Ethereum: 8
 - **Detection Latency**: ~150ms
 - **Architecture**: Redis Streams + Event-Driven (ADR-002 compliant)
 
@@ -404,9 +405,9 @@
 ---
 
 #### S2.2: Expand Existing Chain Coverage
-**Status**: `[x] DEX Expansion Complete` (S2.2.1-S2.2.3 done, S2.2.4-S2.2.5 deferred to Phase 2)
+**Status**: `[x] Completed` (S2.2.1-S2.2.5 all done)
 **Priority**: P0 | **Effort**: 2 days | **Confidence**: 90%
-**Result**: Phase 1 DEX target of 33 achieved ✓
+**Result**: Phase 1 targets achieved ✓ (33 DEXs, 60 tokens verified, dynamic pair discovery)
 
 **Tasks**:
 ```
@@ -455,9 +456,17 @@
     - BSC exception documented: USDT and USDC use 18 decimals (not 6)
     - COMPLETED: 2025-01-12
 
-[ ] S2.2.5 Update pair initialization
-    - Dynamic pair discovery
-    - Cache pair addresses
+[x] S2.2.5 Update pair initialization
+    - Dynamic pair discovery from DEX factory contracts (V2/V3)
+    - CREATE2 address computation fallback
+    - Redis-based pair address caching with TTL
+    - Circuit breaker for RPC error handling
+    - Batch discovery for efficiency
+    - Files created:
+      - shared/core/src/pair-discovery.ts (PairDiscoveryService)
+      - shared/core/src/pair-cache.ts (PairCacheService)
+      - tests/integration/s2.2.5-pair-initialization.integration.test.ts (35 tests)
+    - COMPLETED: 2025-01-12
 ```
 
 ---
@@ -774,11 +783,11 @@
 | Sprint | Total Tasks | Completed | In Progress | Blocked |
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
-| Sprint 2 | 10 | 9 | 0 | 0 |
+| Sprint 2 | 10 | 10 | 0 | 0 |
 | Sprint 3 | 18 | 0 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **30** | **0** | **0** |
+| **Total** | **67** | **31** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 
@@ -792,7 +801,7 @@
 - [x] Redis Streams operational with batching
 - [x] Swap filtering reducing events by 99%
 - [x] L1 Price Matrix benchmarked <1μs (~3ns achieved)
-- [x] All unit tests passing (1455 tests)
+- [x] All unit tests passing (1880 tests after S2.2.5)
 
 **Success Metrics**:
 | Metric | Target | Actual |
@@ -808,14 +817,16 @@
 **Validation Tasks**:
 - [x] Optimism detector operational (config complete, S2.1)
 - [x] 25 DEXs across 7 chains → **33 DEXs across 6 chains** (exceeded!)
-- [x] 60 tokens configured (~10 per chain)
-- [x] Integration tests passing (224+ integration tests)
+- [x] 60 tokens configured and **verified** (S2.2.4 - 390 tests)
+- [x] Integration tests passing (679+ S2.2 integration tests)
+- [x] Pair discovery and caching services implemented (S2.2.5)
 
 **Success Metrics**:
 | Metric | Target | Actual |
 |--------|--------|--------|
 | Chains | 7 | 6 ✓ |
 | DEXs | 25 | **33** ✓ (132% of target) |
+| Tokens | 60 | **60** ✓ (100% verified) |
 | Opportunities/day | 300+ | TBD |
 
 ---
