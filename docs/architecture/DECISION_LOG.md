@@ -390,6 +390,100 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
 
 ---
 
+---
+
+## Session: 2025-01-12 - Solana Integration Decision
+
+### Session Context
+
+**Objective**: Add Solana blockchain to the arbitrage system to significantly improve profitable arbitrage opportunity detection.
+
+**Key Questions Addressed**:
+1. Should Solana be added to the system?
+2. How to integrate a non-EVM chain?
+3. Which Solana DEXs and tokens to monitor?
+4. How to partition Solana within the existing architecture?
+
+### Analysis Summary
+
+#### Finding 12: Solana Provides Significant Opportunity Volume
+- **Observation**: Solana has $1-2B+ daily DEX volume (top 3 globally)
+- **Observation**: 400ms block time enables faster arbitrage cycles than any EVM chain
+- **Observation**: <$0.001 transaction fees enable micro-arbitrage
+- **Decision**: Add Solana as T1 (Critical) chain with Arb Score of 90
+- **Confidence**: 94%
+
+#### Finding 13: Solana Requires Dedicated Partition
+- **Observation**: Solana is not EVM-compatible
+- **Observation**: Requires @solana/web3.js instead of ethers.js
+- **Observation**: Uses account subscriptions instead of event logs
+- **Decision**: Create P4 (Solana) partition, isolated from EVM partitions
+- **Confidence**: 92%
+- **ADR**: [ADR-003](./adr/ADR-003-partitioned-detectors.md) (Updated)
+
+#### Finding 14: Key Solana DEXs Identified
+- **Observation**: Jupiter aggregator routes through all major DEXs
+- **Observation**: Raydium and Orca dominate liquidity
+- **Decision**: Monitor 7 Solana DEXs (Jupiter, Raydium AMM/CLMM, Orca, Meteora, Phoenix, Lifinity)
+- **Confidence**: 90%
+- **ADR**: [ADR-008](./adr/ADR-008-chain-dex-token-selection.md) (Updated)
+
+#### Finding 15: Solana Token Selection
+- **Observation**: Solana has unique ecosystem (memecoins, LSTs)
+- **Observation**: BONK, WIF have massive volume not available on EVM
+- **Observation**: mSOL, jitoSOL LSTs provide arbitrage opportunities
+- **Decision**: Monitor 15 Solana tokens (SOL, USDC, USDT, JUP, RAY, ORCA, BONK, WIF, JTO, PYTH, mSOL, jitoSOL, BSOL, W, MNDE)
+- **Confidence**: 88%
+
+### Implementation Impact
+
+#### Updated Metrics
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Total Chains | 10 | 11 | +1 |
+| Total DEXs | 55 | 62 | +7 |
+| Total Tokens | 150 | 165 | +15 |
+| Total Pairs | ~500 | ~600 | +100 |
+| Expected Opportunities/day | 780+ | 950+ | +22% |
+
+#### Updated Partitioning
+
+| Partition | Chains | Notes |
+|-----------|--------|-------|
+| P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Unchanged |
+| P2: L2-Turbo | Arbitrum, Optimism, Base | Unchanged |
+| P3: High-Value | Ethereum, zkSync, Linea | Unchanged |
+| **P4: Solana** | **Solana** | **NEW - Non-EVM partition** |
+
+### Updated Hypotheses
+
+| Hypothesis | Confidence | Validation Method |
+|------------|------------|-------------------|
+| Solana adds 25-35% more arbitrage opportunities | 80% | Compare opportunity count before/after |
+| Solana detection <100ms achievable | 75% | Implement and benchmark |
+| Solana RPC free tier sufficient (Helius 100K/day) | 70% | Monitor Helius dashboard |
+| Cross-chain SOL-EVM arbitrage viable | 65% | Implement cross-chain analyzer |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `docs/IMPLEMENTATION_PLAN.md` | Added S3.3 Solana Integration (7 tasks), updated metrics |
+| `docs/architecture/ARCHITECTURE_V2.md` | Added Solana to diagrams, tables, sections |
+| `docs/architecture/adr/ADR-003-partitioned-detectors.md` | P4 Solana details, assignment algorithm |
+| `docs/architecture/adr/ADR-008-chain-dex-token-selection.md` | Solana chain, DEXs, tokens |
+| `docs/architecture/DECISION_LOG.md` | This session entry |
+
+### Open Questions
+
+1. **Helius RPC Limits**: Will 100K credits/day be sufficient for real-time monitoring?
+2. **Jito Integration**: How to integrate Jito bundles for MEV protection on Solana?
+3. **Cross-chain Bridges**: Which SOL-EVM bridges to monitor for cross-chain arbitrage?
+4. **Account Data Parsing**: Best approach to parse Raydium/Orca pool account data?
+
+---
+
 ## Previous Sessions
 
 ### Session 1: 2025-01-10 - Comprehensive Architecture Analysis
@@ -431,28 +525,31 @@ When a decision is made:
 
 ### Architecture Confidence Scores
 
-| Area | Initial (2025-01-10) | Current | Target |
-|------|----------------------|---------|--------|
-| Overall Architecture | 92% | 92% | 95% |
+| Area | Initial (2025-01-10) | Current (2025-01-12) | Target |
+|------|----------------------|----------------------|--------|
+| Overall Architecture | 92% | 94% | 95% |
 | Event Processing | 88% | 88% | 90% |
-| Scaling Strategy | 90% | 90% | 95% |
+| Scaling Strategy | 90% | 92% | 95% |
 | Free Hosting Viability | 95% | 95% | 98% |
 | Reliability/Uptime | 90% | 90% | 95% |
-| Chain/DEX/Token Selection | - | 92% | 95% |
+| Chain/DEX/Token Selection | 92% | 94% | 95% |
+| Solana Integration | - | 80% | 90% |
 
 ### Key Metrics to Track
 
 | Metric | Baseline | Phase 1 | Phase 2 | Phase 3 | Actual |
 |--------|----------|---------|---------|---------|--------|
-| Detection latency (same-chain) | ~150ms | <100ms | <75ms | <50ms | TBD |
+| Detection latency (EVM) | ~150ms | <100ms | <75ms | <50ms | TBD |
+| Detection latency (Solana) | N/A | N/A | <100ms | <100ms | TBD |
 | Detection latency (cross-chain) | ~30s | <20s | <15s | <10s | TBD |
-| Redis commands/day | ~3,000 | ~5,000 | ~7,000 | ~8,500 | TBD |
+| Redis commands/day | ~3,000 | ~5,000 | ~8,000 | ~9,500 | TBD |
+| Solana RPC (Helius)/day | N/A | N/A | ~50K | ~80K | TBD |
 | System uptime | ~95% | 97% | 99% | 99.9% | TBD |
-| Chains supported | 5 | 7 | 9 | 10 | 6 |
-| DEXs monitored | 10 | 25 | 45 | 55 | 22 |
-| Tokens tracked | 23 | 60 | 110 | 150 | 60 |
-| Token pairs | ~50 | ~150 | ~350 | ~500 | ~150 |
-| Opportunities/day | ~100 | ~300 | ~550 | ~780 | TBD |
+| Chains supported | 5 | 7 | 10 (9+Sol) | 11 | 6 |
+| DEXs monitored | 10 | 25 | 52 | 62 | 22 |
+| Tokens tracked | 23 | 60 | 125 | 165 | 60 |
+| Token pairs | ~50 | ~150 | ~450 | ~600 | ~150 |
+| Opportunities/day | ~100 | ~300 | ~700 | ~950 | TBD |
 | Test coverage | - | 80% | 85% | 90% | 379 tests pass |
 
 ---

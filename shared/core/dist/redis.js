@@ -8,6 +8,19 @@ exports.resetRedisInstance = resetRedisInstance;
 // Redis client for message queue and caching
 const ioredis_1 = require("ioredis");
 const logger_1 = require("./logger");
+// P2-2-FIX: Import config with fallback for test environment
+let SYSTEM_CONSTANTS;
+try {
+    SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+}
+catch {
+    // Config not available, will use defaults
+}
+// P2-2-FIX: Default values for when config is not available
+const REDIS_DEFAULTS = {
+    maxMessageSize: SYSTEM_CONSTANTS?.redis?.maxMessageSize ?? 1024 * 1024, // 1MB
+    maxChannelNameLength: SYSTEM_CONSTANTS?.redis?.maxChannelNameLength ?? 128,
+};
 class RedisClient {
     constructor(url, password) {
         // Message subscription with cleanup tracking
@@ -76,7 +89,8 @@ class RedisClient {
                 timestamp: Date.now()
             });
             // SECURITY: Limit message size to prevent DoS
-            if (serializedMessage.length > 1024 * 1024) { // 1MB limit
+            // P2-2-FIX: Use configured constant instead of magic number
+            if (serializedMessage.length > REDIS_DEFAULTS.maxMessageSize) {
                 throw new Error('Message too large');
             }
             return await this.pubClient.publish(channel, serializedMessage);
@@ -91,7 +105,8 @@ class RedisClient {
         if (!channel || typeof channel !== 'string') {
             throw new Error('Invalid channel name: must be non-empty string');
         }
-        if (channel.length > 128) {
+        // P2-2-FIX: Use configured constant instead of magic number
+        if (channel.length > REDIS_DEFAULTS.maxChannelNameLength) {
             throw new Error('Channel name too long');
         }
         // Allow only alphanumeric, dash, underscore, and colon

@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.0
-> **Last Updated:** 2025-01-10
+> **Document Version:** 2.1
+> **Last Updated:** 2025-01-12
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -25,8 +25,8 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **9+ blockchains** with **55+ DEXs** and **150+ tokens**
-- Achieve **<50ms detection latency** for same-chain arbitrage
+- Monitor **11 blockchains** (10 EVM + Solana) with **62 DEXs** and **165 tokens**
+- Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
 - Generate **profitable arbitrage opportunities** with MEV protection
@@ -37,9 +37,10 @@ This document describes the target architecture for a **professional-grade, mult
 |----------|--------|-----------|
 | Architecture Pattern | Hybrid Microservices + Event-Driven | Best of both: deployment isolation + async communication |
 | Message Broker | Redis Streams (not Pub/Sub) | Persistence, consumer groups, backpressure |
-| Chain Scaling | Partitioned Detectors | Resource efficiency, dynamic assignment |
+| Chain Scaling | Partitioned Detectors (4 partitions) | Resource efficiency, dynamic assignment |
 | Event Strategy | Sync-Primary + Smart Swap Filtering | Speed + predictive signals without resource drain |
 | Caching | L1/L2/L3 Hierarchical | Sub-millisecond access with distributed fallback |
+| Non-EVM Support | Dedicated Solana Partition (P4) | Different SDK, event model, requires isolation |
 
 ---
 
@@ -57,14 +58,15 @@ Build a **professional and reliable profitable arbitrage application** with:
 
 | Metric | Target | Current | Gap |
 |--------|--------|---------|-----|
-| Chains Supported | 15 | 5 | +10 |
-| DEXs Monitored | 55+ | 10 | +45 |
-| Tokens Tracked | 150+ | 23 | +127 |
-| Detection Latency (same-chain) | <50ms | ~150ms | -100ms |
+| Chains Supported | 11 (10 EVM + Solana) | 5 | +6 |
+| DEXs Monitored | 62 (55 EVM + 7 Solana) | 10 | +52 |
+| Tokens Tracked | 165 | 23 | +142 |
+| Detection Latency (EVM same-chain) | <50ms | ~150ms | -100ms |
+| Detection Latency (Solana) | <100ms | N/A | New |
 | Detection Latency (cross-chain) | <10s | ~30s | -20s |
 | System Uptime | 99.9% | ~95% | +4.9% |
 | Monthly Cost | $0 | $0 | ✓ |
-| Daily Opportunities | 500+ | ~100 | +400 |
+| Daily Opportunities | 950+ | ~100 | +850 |
 
 ### 2.3 Constraints
 
@@ -73,7 +75,8 @@ Build a **professional and reliable profitable arbitrage application** with:
 | Upstash Redis | 10K commands/day | Aggressive batching (50:1 ratio) |
 | Fly.io Memory | 256MB per instance | Streaming mode, no large buffers |
 | Oracle Cloud | 4 OCPU, 24GB total | Efficient partitioning |
-| RPC Rate Limits | Varies by provider | Multi-provider rotation |
+| RPC Rate Limits (EVM) | Varies by provider | Multi-provider rotation |
+| Solana RPC (Helius) | 100K credits/day | WebSocket over polling, batched queries |
 
 ---
 
@@ -82,49 +85,48 @@ Build a **professional and reliable profitable arbitrage application** with:
 ### 3.1 High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         ARBITRAGE SYSTEM ARCHITECTURE v2.0                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│                              ┌─────────────────────────┐                        │
-│                              │   GLOBAL COORDINATOR    │                        │
-│                              │   (Leader Election)     │                        │
-│                              │   Koyeb US-East         │                        │
-│                              └───────────┬─────────────┘                        │
-│                                          │                                       │
-│          ┌───────────────────────────────┼───────────────────────────┐          │
-│          │                               │                           │          │
-│          ▼                               ▼                           ▼          │
-│  ┌───────────────────┐      ┌───────────────────┐      ┌───────────────────┐   │
-│  │   ASIA-PACIFIC    │      │     US-EAST       │      │     US-WEST       │   │
-│  │   ───────────     │      │     ───────       │      │     ───────       │   │
-│  │                   │      │                   │      │                   │   │
-│  │ ┌───────────────┐ │      │ ┌───────────────┐ │      │ ┌───────────────┐ │   │
-│  │ │ Partition 1   │ │      │ │ Partition 3   │ │      │ │ Executor Pri  │ │   │
-│  │ │ BSC/Poly/Avax │ │      │ │ ETH/zkSync    │ │      │ │ MEV Protected │ │   │
-│  │ │ Oracle ARM    │ │      │ │ Oracle ARM    │ │      │ │ Railway       │ │   │
-│  │ └───────────────┘ │      │ └───────────────┘ │      │ └───────────────┘ │   │
-│  │                   │      │                   │      │                   │   │
-│  │ ┌───────────────┐ │      │ ┌───────────────┐ │      │ ┌───────────────┐ │   │
-│  │ │ Partition 2   │ │      │ │ Cross-Chain   │ │      │ │ Executor Bkp  │ │   │
-│  │ │ ARB/OP/Base   │ │      │ │ Analyzer      │ │      │ │ Render        │ │   │
-│  │ │ Fly.io SG     │ │      │ │ Oracle AMD    │ │      │ │               │ │   │
-│  │ └───────────────┘ │      │ └───────────────┘ │      │ └───────────────┘ │   │
-│  │                   │      │                   │      │                   │   │
-│  └───────────────────┘      └───────────────────┘      └───────────────────┘   │
-│                                                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │                         DATA PLANE (Global)                             │    │
-│  │                                                                          │    │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐          │    │
-│  │  │ Upstash Redis   │  │ MongoDB Atlas   │  │ L1 Cache        │          │    │
-│  │  │ Streams         │  │ Opportunity Log │  │ SharedArrayBuf  │          │    │
-│  │  │ (Event Backbone)│  │ (Analytics)     │  │ (Per-Instance)  │          │    │
-│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘          │    │
-│  │                                                                          │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                         ARBITRAGE SYSTEM ARCHITECTURE v2.1                            │
+├──────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                       │
+│                              ┌─────────────────────────┐                             │
+│                              │   GLOBAL COORDINATOR    │                             │
+│                              │   (Leader Election)     │                             │
+│                              │   Koyeb US-East         │                             │
+│                              └───────────┬─────────────┘                             │
+│                                          │                                            │
+│    ┌─────────────────────────────────────┼────────────────────────────────────┐      │
+│    │                    │                │                │                   │      │
+│    ▼                    ▼                ▼                ▼                   ▼      │
+│ ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌────────────────┐ ┌──────┐│
+│ │ ASIA-PACIFIC   │ │  US-EAST       │ │  US-WEST       │ │ US-WEST (SOL)  │ │ EXEC ││
+│ │ ────────────   │ │  ───────       │ │  ───────       │ │ ────────────   │ │      ││
+│ │                │ │                │ │                │ │                │ │      ││
+│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │ Rail ││
+│ ││ Partition 1  ││ ││ Partition 3  ││ ││ Cross-Chain  ││ ││ Partition 4  ││ │ way  ││
+│ ││BSC/Poly/Avax ││ ││ ETH/zkSync   ││ ││ Analyzer     ││ ││ SOLANA       ││ │      ││
+│ ││ Oracle ARM   ││ ││ Oracle ARM   ││ ││ Oracle AMD   ││ ││ Fly.io US-W  ││ │ + Bkp││
+│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │Render││
+│ │                │ │                │ │                │ │                │ │      ││
+│ │┌──────────────┐│ │                │ │                │ │ @solana/web3  │ │      ││
+│ ││ Partition 2  ││ │                │ │                │ │ Account Subs  │ │      ││
+│ ││ ARB/OP/Base  ││ │                │ │                │ │ Helius RPC    │ │      ││
+│ ││ Fly.io SG    ││ │                │ │                │ │                │ │      ││
+│ │└──────────────┘│ │                │ │                │ │                │ │      ││
+│ └────────────────┘ └────────────────┘ └────────────────┘ └────────────────┘ └──────┘│
+│                                                                                       │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐   │
+│  │                            DATA PLANE (Global)                                 │   │
+│  │                                                                                │   │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │   │
+│  │  │ Upstash Redis   │  │ MongoDB Atlas   │  │ L1 Cache        │                │   │
+│  │  │ Streams         │  │ Opportunity Log │  │ SharedArrayBuf  │                │   │
+│  │  │ (Event Backbone)│  │ (Analytics)     │  │ (Per-Instance)  │                │   │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                │   │
+│  │                                                                                │   │
+│  └───────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.2 Architecture Pattern: Hybrid Microservices + Event-Driven
@@ -166,7 +168,7 @@ The architecture combines two patterns:
 │  ├── Chain Detector Partition 1 (Asia-Fast: BSC, Polygon, Avalanche, Fantom)    │
 │  ├── Chain Detector Partition 2 (L2-Fast: Arbitrum, Optimism, Base)             │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
-│  └── Chain Detector Partition 4 (Non-EVM: Solana) [Future]                      │
+│  └── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
 │  ├── Cross-Chain Analyzer (Multi-chain opportunity detection)                   │
@@ -181,7 +183,8 @@ The architecture combines two patterns:
 │  LAYER 4: EXECUTION                                                              │
 │  ├── Execution Engine Primary (MEV-protected trades)                            │
 │  ├── Execution Engine Backup (Failover)                                         │
-│  └── Flash Loan Manager (Capital efficiency)                                    │
+│  ├── Flash Loan Manager (Capital efficiency)                                    │
+│  └── Solana Executor (Jito bundles, priority fees)                              │
 │                                                                                  │
 │  LAYER 5: COORDINATION                                                           │
 │  ├── Global Coordinator (Health, leader election)                               │
@@ -192,7 +195,7 @@ The architecture combines two patterns:
 │  ├── Redis Streams (Event backbone)                                             │
 │  ├── Hierarchical Cache (L1/L2/L3)                                              │
 │  ├── Circuit Breaker Registry                                                   │
-│  └── RPC Provider Pool                                                          │
+│  └── RPC Provider Pool (EVM + Solana)                                           │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -209,8 +212,35 @@ Instead of one service per chain, chains are grouped into partitions based on:
 |-----------|--------|----------|----------|-----------|
 | P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Singapore | Oracle ARM | 2 OCPU, 12GB |
 | P2: L2-Fast | Arbitrum, Optimism, Base | Singapore | Fly.io x2 | 512MB total |
-| P3: High-Value | Ethereum, zkSync, Linea, Scroll | US-East | Oracle ARM | 2 OCPU, 12GB |
-| P4: Non-EVM | Solana (future) | US-West | Fly.io | 256MB |
+| P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
+| P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
+
+### 4.2.1 Solana Partition Details (P4)
+
+Solana requires a dedicated partition due to fundamental architectural differences:
+
+| Aspect | EVM Chains (P1-P3) | Solana (P4) |
+|--------|-------------------|-------------|
+| SDK | ethers.js | @solana/web3.js |
+| Events | Contract event logs | Program account changes |
+| Subscription | eth_subscribe (logs) | accountSubscribe |
+| Block Time | 2-12 seconds | ~400ms |
+| Finality | ~2-60 confirmations | ~32 slots (~13s) |
+| MEV Protection | Flashbots, private pools | Jito bundles |
+
+**Solana DEXs (7 DEXs)**:
+| DEX | Type | Program ID |
+|-----|------|------------|
+| Jupiter | Aggregator | `JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4` |
+| Raydium AMM | AMM | `675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8` |
+| Raydium CLMM | CLMM | `CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK` |
+| Orca Whirlpools | CLMM | `whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc` |
+| Meteora DLMM | Dynamic AMM | `LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo` |
+| Phoenix | Order Book | `PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY` |
+| Lifinity | Proactive MM | `2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c` |
+
+**Solana Tokens (15 tokens)**:
+SOL, USDC, USDT, JUP, RAY, ORCA, BONK, WIF, JTO, PYTH, mSOL, jitoSOL, BSOL, W, MNDE
 
 ### 4.3 Event Processing Strategy
 
@@ -325,11 +355,16 @@ Within each partition, scale by:
 | Scale | Chains | DEXs | Tokens | Pairs | Events/sec | Redis Cmds/day |
 |-------|--------|------|--------|-------|------------|----------------|
 | Current | 5 | 10 | 23 | 50 | ~100 | ~3,000 |
-| Phase 1 | 9 | 25 | 50 | 150 | ~300 | ~5,000 |
-| Phase 2 | 12 | 40 | 100 | 300 | ~500 | ~7,000 |
-| Phase 3 | 15 | 55 | 150 | 500 | ~800 | ~9,000 |
+| Phase 1 | 7 | 25 | 60 | 150 | ~300 | ~5,000 |
+| Phase 2 | 9 | 45 | 110 | 350 | ~500 | ~7,000 |
+| Phase 3 | 11 (10 EVM + Solana) | 62 | 165 | 600 | ~1000 | ~9,500 |
 
 All phases remain within Upstash 10K/day limit due to batching.
+
+**Solana Impact**:
+- Adds ~200 events/sec due to fast block times
+- 7 DEXs with 15 tokens = ~100 additional pairs
+- Uses accountSubscribe (efficient WebSocket) to minimize RPC calls
 
 ---
 
@@ -410,13 +445,14 @@ All phases remain within Upstash 10K/day limit due to batching.
 
 ## 9. Chain, DEX, and Token Selection
 
-### 9.1 Recommended Chain Coverage (10 Chains)
+### 9.1 Recommended Chain Coverage (11 Chains)
 
 | Tier | Chain | Priority | Arb Score | Partition | Phase |
 |------|-------|----------|-----------|-----------|-------|
 | T1 | **Arbitrum** | IMMEDIATE | 95 | P2: L2-Turbo | Current |
 | T1 | **BSC** | IMMEDIATE | 92 | P1: Asia-Fast | Current |
 | T1 | **Base** | IMMEDIATE | 88 | P2: L2-Turbo | Current |
+| T1 | **Solana** | HIGH | 90 | P4: Solana | Phase 2 |
 | T2 | **Polygon** | IMMEDIATE | 82 | P1: Asia-Fast | Current |
 | T2 | **Optimism** | IMMEDIATE | 78 | P2: L2-Turbo | Phase 1 |
 | T2 | **Avalanche** | PHASE 2 | 75 | P1: Asia-Fast | Phase 2 |
@@ -425,7 +461,13 @@ All phases remain within Upstash 10K/day limit due to batching.
 | T3 | **zkSync Era** | PHASE 3 | 55 | P3: High-Value | Phase 3 |
 | T3 | **Linea** | PHASE 3 | 50 | P3: High-Value | Phase 3 |
 
-### 9.2 DEX Distribution (55 DEXs)
+**Why Solana is T1**:
+- $1-2B+ daily DEX volume (top 3 globally)
+- ~400ms block time enables faster execution
+- Low fees (<$0.001) enable micro-arbitrage
+- Unique ecosystem (memecoins, LSTs) not available on EVM
+
+### 9.2 DEX Distribution (62 DEXs: 55 EVM + 7 Solana)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -457,21 +499,33 @@ All phases remain within Upstash 10K/day limit due to batching.
 │  ├── SushiSwap [H]          ├── SpiritSwap [H]        ├── SpaceFi [H]           │
 │  ├── GMX [H]                └── Beethoven X [M]       └── Velocore [M]          │
 │  ├── Platypus [M]                                                               │
-│  └── KyberSwap [M]          [C]=Critical [H]=High [M]=Medium                    │
+│  └── KyberSwap [M]                                                              │
 │                                                                                  │
+│  ═══════════════════════════════════════════════════════════════════════════    │
+│  SOLANA (7 DEXs) - NON-EVM                                                      │
+│  ├── Jupiter [C]            Main aggregator, routes through all DEXs            │
+│  ├── Raydium AMM [C]        Largest AMM by volume                               │
+│  ├── Raydium CLMM [C]       Concentrated liquidity pools                        │
+│  ├── Orca Whirlpools [C]    Second largest, concentrated liquidity              │
+│  ├── Meteora DLMM [H]       Dynamic liquidity market maker                      │
+│  ├── Phoenix [H]            On-chain order book                                 │
+│  └── Lifinity [M]           Proactive market maker                              │
+│                                                                                  │
+│  [C]=Critical [H]=High [M]=Medium                                               │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.3 Token Strategy (150 Tokens, 500 Pairs)
+### 9.3 Token Strategy (165 Tokens, 600 Pairs)
 
-| Token Category | Count | Per Chain | Example Tokens |
-|----------------|-------|-----------|----------------|
-| Native Wrapped | 10 | 1 | WETH, WBNB, WMATIC, WAVAX |
-| Major Stables | 30 | 3 | USDT, USDC, DAI |
-| Bridged BTC | 10 | 1 | WBTC |
-| Protocol Tokens | 50 | 5 | UNI, AAVE, LINK, CRV, MKR, LDO |
-| Chain Governance | 15 | 1-2 | ARB, OP, MATIC, AVAX, FTM |
-| High-Volume | 35 | 3-5 | PEPE, SHIB, stETH, rETH |
+| Token Category | Count | Per Chain (EVM) | Solana | Example Tokens |
+|----------------|-------|-----------------|--------|----------------|
+| Native Wrapped | 11 | 1 | SOL | WETH, WBNB, WMATIC, WAVAX, SOL |
+| Major Stables | 33 | 3 | 3 | USDT, USDC, DAI |
+| Bridged BTC | 10 | 1 | - | WBTC |
+| Protocol Tokens | 50 | 5 | - | UNI, AAVE, LINK, CRV, MKR, LDO |
+| Chain Governance | 16 | 1-2 | JUP | ARB, OP, MATIC, AVAX, FTM, JUP |
+| High-Volume | 35 | 3-5 | 11 | PEPE, SHIB, stETH, BONK, WIF |
+| Solana-Native | 15 | - | 15 | RAY, ORCA, JTO, PYTH, mSOL, jitoSOL |
 
 ### 9.4 Implementation Phases
 
@@ -479,8 +533,8 @@ All phases remain within Upstash 10K/day limit due to batching.
 |-------|--------|------|--------|-------|----------|
 | **Current** | 5 | 10 | 23 | ~50 | Now |
 | **Phase 1** | 7 | 25 | 60 | ~150 | Week 1-2 |
-| **Phase 2** | 9 | 45 | 110 | ~350 | Week 3-4 |
-| **Phase 3** | 10 | 55 | 150 | ~500 | Week 5-6 |
+| **Phase 2** | 9 + Solana | 52 | 125 | ~450 | Week 3-4 |
+| **Phase 3** | 11 | 62 | 165 | ~600 | Week 5-6 |
 
 ---
 
@@ -505,6 +559,7 @@ The following Architecture Decision Records document key decisions:
 |---------|------|--------|---------|
 | 1.0 | 2024-XX-XX | Original | Initial microservices design |
 | 2.0 | 2025-01-10 | Analysis Session | Hybrid architecture, scaling strategy, swap filtering |
+| 2.1 | 2025-01-12 | Architecture Update | Added Solana as P4 partition, 11 chains, 62 DEXs, 165 tokens |
 
 ---
 

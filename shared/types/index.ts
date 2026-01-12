@@ -5,6 +5,10 @@ export interface Chain {
   name: string;
   rpcUrl: string;
   wsUrl?: string;
+  /** Fallback WebSocket URLs if primary fails */
+  wsFallbackUrls?: string[];
+  /** Fallback RPC URLs if primary fails */
+  rpcFallbackUrls?: string[];
   blockTime: number;
   nativeToken: string;
 }

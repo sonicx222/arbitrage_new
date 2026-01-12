@@ -6,10 +6,14 @@ import { createLogger } from './logger';
 
 export interface WebSocketConfig {
   url: string;
+  /** Fallback URLs to try if primary URL fails */
+  fallbackUrls?: string[];
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
   heartbeatInterval?: number;
   connectionTimeout?: number;
+  /** Alias for heartbeatInterval for compatibility */
+  pingInterval?: number;
 }
 
 export interface WebSocketSubscription {
@@ -61,14 +65,48 @@ export class WebSocketManager {
 
   private nextSubscriptionId = 1;
 
+  /** All available URLs (primary + fallbacks) */
+  private allUrls: string[] = [];
+  /** Current URL index being used */
+  private currentUrlIndex = 0;
+
   constructor(config: WebSocketConfig) {
     this.config = {
       reconnectInterval: 5000,
       maxReconnectAttempts: 10,
-      heartbeatInterval: 30000,
+      heartbeatInterval: config.pingInterval || 30000,
       connectionTimeout: 10000,
       ...config
     };
+
+    // Build list of all URLs (primary + fallbacks)
+    this.allUrls = [config.url];
+    if (config.fallbackUrls && config.fallbackUrls.length > 0) {
+      this.allUrls.push(...config.fallbackUrls);
+    }
+    this.currentUrlIndex = 0;
+  }
+
+  /**
+   * Get the current active WebSocket URL
+   */
+  getCurrentUrl(): string {
+    return this.allUrls[this.currentUrlIndex] || this.config.url;
+  }
+
+  /**
+   * Switch to the next fallback URL
+   * Returns true if there's another URL to try, false if we've exhausted all options
+   */
+  private switchToNextUrl(): boolean {
+    if (this.currentUrlIndex < this.allUrls.length - 1) {
+      this.currentUrlIndex++;
+      this.logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
+      return true;
+    }
+    // Reset to primary URL for next reconnection cycle
+    this.currentUrlIndex = 0;
+    return false;
   }
 
   async connect(): Promise<void> {
@@ -94,9 +132,10 @@ export class WebSocketManager {
 
     const connectionPromise = new Promise<void>((resolve, reject) => {
       try {
-        this.logger.info(`Connecting to WebSocket: ${this.config.url}`);
+        const currentUrl = this.getCurrentUrl();
+        this.logger.info(`Connecting to WebSocket: ${currentUrl}${this.currentUrlIndex > 0 ? ' (fallback)' : ''}`);
 
-        this.ws = new WebSocket(this.config.url);
+        this.ws = new WebSocket(currentUrl);
 
         this.connectionTimeoutTimer = setTimeout(() => {
           if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
@@ -311,7 +350,10 @@ export class WebSocketManager {
       connecting: this.isConnecting,
       reconnectAttempts: this.reconnectAttempts,
       subscriptions: this.subscriptions.size,
-      readyState: this.ws?.readyState
+      readyState: this.ws?.readyState,
+      currentUrl: this.getCurrentUrl(),
+      currentUrlIndex: this.currentUrlIndex,
+      totalUrls: this.allUrls.length
     };
   }
 
@@ -382,14 +424,28 @@ export class WebSocketManager {
     }
 
     if (this.reconnectAttempts >= (this.config.maxReconnectAttempts || 10)) {
-      this.logger.error('Max reconnection attempts reached');
+      this.logger.error('Max reconnection attempts reached across all URLs');
+      // Emit error for handlers
+      this.errorHandlers.forEach(handler => {
+        try {
+          handler(new Error('Max reconnection attempts reached'));
+        } catch (e) {
+          this.logger.error('Error in error handler', { error: e });
+        }
+      });
       return;
     }
 
-    this.reconnectAttempts++;
+    // Try fallback URL if available, otherwise increment attempts
+    const hasNextUrl = this.switchToNextUrl();
+    if (!hasNextUrl) {
+      // We've tried all URLs, increment the cycle counter
+      this.reconnectAttempts++;
+    }
+
     const delay = this.config.reconnectInterval || 5000;
 
-    this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
+    this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} to ${this.getCurrentUrl()} in ${delay}ms`);
 
     this.reconnectTimer = setTimeout(async () => {
       // P2-FIX: Clear timer reference immediately and set reconnecting flag
@@ -408,7 +464,7 @@ export class WebSocketManager {
         this.isReconnecting = false;
       } catch (error) {
         this.isReconnecting = false;
-        this.logger.error(`Reconnection attempt ${this.reconnectAttempts} failed`, { error });
+        this.logger.error(`Reconnection to ${this.getCurrentUrl()} failed`, { error });
 
         // P2-FIX: Only schedule next attempt if not disconnected
         if (!this.isDisconnected) {

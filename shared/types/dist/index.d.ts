@@ -3,6 +3,10 @@ export interface Chain {
     name: string;
     rpcUrl: string;
     wsUrl?: string;
+    /** Fallback WebSocket URLs if primary fails */
+    wsFallbackUrls?: string[];
+    /** Fallback RPC URLs if primary fails */
+    rpcFallbackUrls?: string[];
     blockTime: number;
     nativeToken: string;
 }
@@ -44,6 +48,7 @@ export interface PairFull {
 }
 export interface PriceUpdate {
     pairKey: string;
+    pairAddress?: string;
     dex: string;
     chain: string;
     token0: string;
@@ -57,7 +62,7 @@ export interface PriceUpdate {
 }
 export interface ArbitrageOpportunity {
     id: string;
-    type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+    type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive' | 'intra-dex';
     chain?: string;
     buyDex?: string;
     sellDex?: string;

@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
+exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
 exports.getBridgeCost = getBridgeCost;
 exports.calculateBridgeCostUsd = calculateBridgeCostUsd;
 // Validate required environment variables at startup (skip in test environment)
@@ -68,8 +68,18 @@ exports.CHAINS = {
     optimism: {
         id: 10,
         name: 'Optimism',
-        rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
-        wsUrl: process.env.OPTIMISM_WS_URL || 'wss://mainnet.optimism.io',
+        rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+        wsUrl: process.env.OPTIMISM_WS_URL || 'wss://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+        wsFallbackUrls: [
+            'wss://mainnet.optimism.io',
+            'wss://optimism.publicnode.com',
+            'wss://optimism-mainnet.public.blastapi.io'
+        ],
+        rpcFallbackUrls: [
+            'https://mainnet.optimism.io',
+            'https://optimism.publicnode.com',
+            'https://optimism-mainnet.public.blastapi.io'
+        ],
         blockTime: 2,
         nativeToken: 'ETH'
     },
@@ -712,6 +722,81 @@ function calculateBridgeCostUsd(sourceChain, targetChain, amountUsd, bridge) {
         bridge: config.bridge
     };
 }
+// =============================================================================
+// SYSTEM CONSTANTS (P2-2-FIX)
+// Centralized configuration to eliminate magic numbers across the codebase
+// =============================================================================
+exports.SYSTEM_CONSTANTS = {
+    // Redis configuration
+    redis: {
+        /** Maximum message size in bytes for Redis pub/sub (1MB) */
+        maxMessageSize: 1024 * 1024,
+        /** Maximum channel name length */
+        maxChannelNameLength: 128,
+        /** Default SCAN batch size for iterating keys */
+        scanBatchSize: 100,
+        /** Default TTL for health data in seconds */
+        healthDataTtl: 300,
+        /** Default TTL for metrics data in seconds */
+        metricsDataTtl: 86400,
+        /** Maximum rolling metrics entries */
+        maxRollingMetrics: 100,
+        /** Disconnect timeout in milliseconds */
+        disconnectTimeout: 5000,
+    },
+    // Cache configuration
+    cache: {
+        /** Average entry size estimate in bytes for L1 capacity calculation */
+        averageEntrySize: 1024,
+        /** Default L1 cache size in MB */
+        defaultL1SizeMb: 64,
+        /** Default L2 TTL in seconds */
+        defaultL2TtlSeconds: 300,
+        /** Auto-demotion threshold in milliseconds */
+        demotionThresholdMs: 5 * 60 * 1000,
+        /** Minimum access count before demotion */
+        minAccessCountBeforeDemotion: 3,
+    },
+    // Self-healing configuration
+    selfHealing: {
+        /** Circuit breaker recovery cooldown in milliseconds */
+        circuitBreakerCooldownMs: 60000,
+        /** Health check failure threshold before recovery */
+        healthCheckFailureThreshold: 3,
+        /** Graceful degradation failure threshold */
+        gracefulDegradationThreshold: 10,
+        /** Maximum restart delay in milliseconds */
+        maxRestartDelayMs: 300000,
+        /** Simulated restart delay for testing in milliseconds */
+        simulatedRestartDelayMs: 2000,
+        /** Simulated restart failure rate (0-1) */
+        simulatedRestartFailureRate: 0.2,
+    },
+    // WebSocket configuration
+    webSocket: {
+        /** Default reconnect delay in milliseconds */
+        defaultReconnectDelayMs: 1000,
+        /** Maximum reconnect delay in milliseconds */
+        maxReconnectDelayMs: 30000,
+        /** Reconnect backoff multiplier */
+        reconnectBackoffMultiplier: 2,
+        /** Maximum reconnect attempts */
+        maxReconnectAttempts: 10,
+        /** Connection timeout in milliseconds */
+        connectionTimeoutMs: 10000,
+    },
+    // Circuit breaker configuration
+    circuitBreaker: {
+        /** Default failure threshold */
+        defaultFailureThreshold: 3,
+        /** Default recovery timeout in milliseconds */
+        defaultRecoveryTimeoutMs: 30000,
+        /** Default monitoring period in milliseconds */
+        defaultMonitoringPeriodMs: 60000,
+        /** Default success threshold for closing */
+        defaultSuccessThreshold: 2,
+    },
+};
 // =============================================================================
 // PARTITION EXPORTS (ADR-003)
 // =============================================================================
