@@ -508,8 +508,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (reserve0 === 0n || reserve1 === 0n) return;
 
-    // Calculate price (token1/token0)
-    const price = Number(reserve1 * 10n ** 18n / reserve0) / 1e18;
+    // Calculate price (token0/token1) - consistent with base-detector.ts
+    // This gives "price of token1 in terms of token0"
+    const price = Number(reserve0) / Number(reserve1);
 
     const priceUpdate: PriceUpdate = {
       chain: this.chainId,
@@ -523,7 +524,9 @@ export class ChainDetectorInstance extends EventEmitter {
       reserve1: pair.reserve1,
       timestamp: Date.now(),
       blockNumber: pair.blockNumber,
-      latency: 0 // Calculated by downstream consumers if needed
+      latency: 0, // Calculated by downstream consumers if needed
+      // Include DEX-specific fee for accurate arbitrage calculations (S2.2.2 fix)
+      fee: pair.fee
     };
 
     // Publish to Redis Streams
@@ -666,9 +669,10 @@ export class ChainDetectorInstance extends EventEmitter {
       return null;
     }
 
-    // Calculate prices (price = token1/token0)
-    const price1 = Number(reserve1_1) / Number(reserve1_0);
-    let price2 = Number(reserve2_1) / Number(reserve2_0);
+    // Calculate prices (price = token0/token1) - consistent with base-detector.ts
+    // This gives "price of token1 in terms of token0"
+    const price1 = Number(reserve1_0) / Number(reserve1_1);
+    let price2 = Number(reserve2_0) / Number(reserve2_1);
 
     // BUG FIX: Adjust price for reverse order pairs
     // If tokens are in reverse order, invert the price for accurate comparison
@@ -684,7 +688,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // Calculate fee-adjusted profit
     // Fees are stored as decimals (e.g., 0.003 for 0.3%)
-    const totalFees = (pair1.fee || 0.003) + (pair2.fee || 0.003);
+    // Use ?? instead of || to correctly handle fee: 0 (if a DEX ever has 0% fee)
+    const totalFees = (pair1.fee ?? 0.003) + (pair2.fee ?? 0.003);
     const netProfitPct = priceDiff - totalFees;
 
     // Check if profitable after fees

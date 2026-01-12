@@ -234,7 +234,7 @@ describe('DEX Helper Functions', () => {
 
     it('should return all DEXs for base', () => {
       const enabled = getEnabledDexes('base');
-      expect(enabled.length).toBe(5);
+      expect(enabled.length).toBe(7); // Updated after S2.2.2: 5 → 7
     });
 
     it('should return all DEXs for polygon', () => {
