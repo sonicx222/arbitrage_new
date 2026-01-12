@@ -14,7 +14,10 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
+exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
+exports.getEnabledDexes = getEnabledDexes;
+exports.dexFeeToPercentage = dexFeeToPercentage;
+exports.percentageToBasisPoints = percentageToBasisPoints;
 exports.getBridgeCost = getBridgeCost;
 exports.calculateBridgeCostUsd = calculateBridgeCostUsd;
 // Validate required environment variables at startup (skip in test environment)
@@ -68,8 +71,18 @@ exports.CHAINS = {
     optimism: {
         id: 10,
         name: 'Optimism',
-        rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
-        wsUrl: process.env.OPTIMISM_WS_URL || 'wss://mainnet.optimism.io',
+        rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+        wsUrl: process.env.OPTIMISM_WS_URL || 'wss://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+        wsFallbackUrls: [
+            'wss://mainnet.optimism.io',
+            'wss://optimism.publicnode.com',
+            'wss://optimism-mainnet.public.blastapi.io'
+        ],
+        rpcFallbackUrls: [
+            'https://mainnet.optimism.io',
+            'https://optimism.publicnode.com',
+            'https://optimism-mainnet.public.blastapi.io'
+        ],
         blockTime: 2,
         nativeToken: 'ETH'
     },
@@ -84,11 +97,11 @@ exports.CHAINS = {
     }
 };
 // =============================================================================
-// DEX CONFIGURATIONS - Phase 1: 25 DEXs
+// DEX CONFIGURATIONS - 28 DEXs (S2.2.1: Arbitrum expanded 6→9)
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 exports.DEXES = {
-    // Arbitrum: 6 DEXs (highest fragmentation)
+    // Arbitrum: 9 DEXs (highest fragmentation) - S2.2.1 expanded
     arbitrum: [
         {
             name: 'uniswap_v3', // [C]
@@ -130,6 +143,28 @@ exports.DEXES = {
             chain: 'arbitrum',
             factoryAddress: '0xAAA20D08e59F6561f242b08513D36266C5A29415',
             routerAddress: '0xAAA87963EFeB6f7E0a2711F397663105Acb1805e',
+            fee: 30
+        },
+        // === S2.2.1: New DEXs (6 → 9) ===
+        {
+            name: 'balancer_v2', // [H] - Major liquidity protocol
+            chain: 'arbitrum',
+            factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault
+            routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Vault is also router for swaps
+            fee: 30 // Variable fees per pool, using default
+        },
+        {
+            name: 'curve', // [H] - Major stablecoin DEX
+            chain: 'arbitrum',
+            factoryAddress: '0xb17b674D9c5CB2e441F8e196a2f048A81355d031', // Curve Factory
+            routerAddress: '0xF0d4c12A5768D806021F80a262B4d39d26C58b8D', // Curve Router
+            fee: 4 // 0.04% typical for stablecoin pools
+        },
+        {
+            name: 'chronos', // [M] - ve(3,3) DEX
+            chain: 'arbitrum',
+            factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cB98CB5B0722', // Chronos Factory
+            routerAddress: '0xE708aA9E887980750C040a6A2Cb901c37Aa34f3b', // Chronos Router
             fee: 30
         }
     ],
@@ -483,7 +518,10 @@ exports.PHASE_METRICS = {
         targetOpportunities: 300
     },
     targets: {
-        phase1: { chains: 7, dexes: 25, tokens: 60, opportunities: 300 },
+        // Phase 1 targets updated after S2.2 DEX expansion:
+        // S2.2.1: Arbitrum 6→9 (+3), S2.2.2: Base 5→7 (+2), S2.2.3: BSC 5→8 (+3)
+        // Original 25 + 8 = 33 DEXs when S2.2 completes
+        phase1: { chains: 7, dexes: 33, tokens: 60, opportunities: 300 },
         phase2: { chains: 9, dexes: 45, tokens: 110, opportunities: 550 },
         phase3: { chains: 10, dexes: 55, tokens: 150, opportunities: 780 }
     }
@@ -556,6 +594,43 @@ exports.EVENT_SIGNATURES = {
     // Alternative signatures for different DEX implementations
     SWAP_V3: '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67'
 };
+// =============================================================================
+// DEX HELPER FUNCTIONS
+// Standardize DEX access patterns across the codebase
+// =============================================================================
+/**
+ * Get enabled DEXs for a chain.
+ * Filters out DEXs with enabled === false (enabled defaults to true if not specified).
+ *
+ * @param chainId - The chain identifier (e.g., 'arbitrum', 'bsc')
+ * @returns Array of enabled Dex objects for the chain
+ */
+function getEnabledDexes(chainId) {
+    const chainDexes = exports.DEXES[chainId];
+    if (!chainDexes)
+        return [];
+    return chainDexes.filter(dex => dex.enabled !== false);
+}
+/**
+ * Convert DEX fee from basis points to percentage.
+ * Config stores fees in basis points (e.g., 30 = 0.30%), calculations use percentage.
+ *
+ * @param feeBasisPoints - Fee in basis points (e.g., 30 for 0.30%)
+ * @returns Fee as a decimal percentage (e.g., 0.003 for 0.30%)
+ */
+function dexFeeToPercentage(feeBasisPoints) {
+    return feeBasisPoints / 10000;
+}
+/**
+ * Convert percentage to basis points.
+ * Inverse of dexFeeToPercentage.
+ *
+ * @param percentage - Fee as decimal (e.g., 0.003 for 0.30%)
+ * @returns Fee in basis points (e.g., 30 for 0.30%)
+ */
+function percentageToBasisPoints(percentage) {
+    return Math.round(percentage * 10000);
+}
 exports.DETECTOR_CONFIG = {
     ethereum: {
         batchSize: 15, // Lower batch size for 12s blocks
@@ -712,6 +787,81 @@ function calculateBridgeCostUsd(sourceChain, targetChain, amountUsd, bridge) {
         bridge: config.bridge
     };
 }
+// =============================================================================
+// SYSTEM CONSTANTS (P2-2-FIX)
+// Centralized configuration to eliminate magic numbers across the codebase
+// =============================================================================
+exports.SYSTEM_CONSTANTS = {
+    // Redis configuration
+    redis: {
+        /** Maximum message size in bytes for Redis pub/sub (1MB) */
+        maxMessageSize: 1024 * 1024,
+        /** Maximum channel name length */
+        maxChannelNameLength: 128,
+        /** Default SCAN batch size for iterating keys */
+        scanBatchSize: 100,
+        /** Default TTL for health data in seconds */
+        healthDataTtl: 300,
+        /** Default TTL for metrics data in seconds */
+        metricsDataTtl: 86400,
+        /** Maximum rolling metrics entries */
+        maxRollingMetrics: 100,
+        /** Disconnect timeout in milliseconds */
+        disconnectTimeout: 5000,
+    },
+    // Cache configuration
+    cache: {
+        /** Average entry size estimate in bytes for L1 capacity calculation */
+        averageEntrySize: 1024,
+        /** Default L1 cache size in MB */
+        defaultL1SizeMb: 64,
+        /** Default L2 TTL in seconds */
+        defaultL2TtlSeconds: 300,
+        /** Auto-demotion threshold in milliseconds */
+        demotionThresholdMs: 5 * 60 * 1000,
+        /** Minimum access count before demotion */
+        minAccessCountBeforeDemotion: 3,
+    },
+    // Self-healing configuration
+    selfHealing: {
+        /** Circuit breaker recovery cooldown in milliseconds */
+        circuitBreakerCooldownMs: 60000,
+        /** Health check failure threshold before recovery */
+        healthCheckFailureThreshold: 3,
+        /** Graceful degradation failure threshold */
+        gracefulDegradationThreshold: 10,
+        /** Maximum restart delay in milliseconds */
+        maxRestartDelayMs: 300000,
+        /** Simulated restart delay for testing in milliseconds */
+        simulatedRestartDelayMs: 2000,
+        /** Simulated restart failure rate (0-1) */
+        simulatedRestartFailureRate: 0.2,
+    },
+    // WebSocket configuration
+    webSocket: {
+        /** Default reconnect delay in milliseconds */
+        defaultReconnectDelayMs: 1000,
+        /** Maximum reconnect delay in milliseconds */
+        maxReconnectDelayMs: 30000,
+        /** Reconnect backoff multiplier */
+        reconnectBackoffMultiplier: 2,
+        /** Maximum reconnect attempts */
+        maxReconnectAttempts: 10,
+        /** Connection timeout in milliseconds */
+        connectionTimeoutMs: 10000,
+    },
+    // Circuit breaker configuration
+    circuitBreaker: {
+        /** Default failure threshold */
+        defaultFailureThreshold: 3,
+        /** Default recovery timeout in milliseconds */
+        defaultRecoveryTimeoutMs: 30000,
+        /** Default monitoring period in milliseconds */
+        defaultMonitoringPeriodMs: 60000,
+        /** Default success threshold for closing */
+        defaultSuccessThreshold: 2,
+    },
+};
 // =============================================================================
 // PARTITION EXPORTS (ADR-003)
 // =============================================================================

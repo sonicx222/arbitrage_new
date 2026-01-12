@@ -23,11 +23,13 @@ import {
 
 import {
   CHAINS,
-  DEXES,
   CORE_TOKENS,
   EVENT_SIGNATURES,
   DETECTOR_CONFIG,
-  TOKEN_METADATA
+  TOKEN_METADATA,
+  ARBITRAGE_CONFIG,
+  getEnabledDexes,
+  dexFeeToPercentage
 } from '../../../shared/config/src';
 
 import {
@@ -59,6 +61,22 @@ interface ExtendedPair extends Pair {
   reserve1: string;
   blockNumber: number;
   lastUpdate: number;
+}
+
+/**
+ * Snapshot of pair data for thread-safe arbitrage detection.
+ * Captures reserve values at a point in time to avoid race conditions
+ * when reserves are updated by concurrent Sync events.
+ */
+interface PairSnapshot {
+  address: string;
+  dex: string;
+  token0: string;
+  token1: string;
+  reserve0: string;
+  reserve1: string;
+  fee: number;
+  blockNumber: number;
 }
 
 // =============================================================================
@@ -93,6 +111,7 @@ export class ChainDetectorInstance extends EventEmitter {
   private blockLatencies: number[] = [];
 
   private isRunning: boolean = false;
+  private isStopping: boolean = false;
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
@@ -113,7 +132,7 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     this.detectorConfig = DETECTOR_CONFIG[this.chainId as keyof typeof DETECTOR_CONFIG] || DETECTOR_CONFIG.ethereum;
-    this.dexes = DEXES[this.chainId as keyof typeof DEXES] || [];
+    this.dexes = getEnabledDexes(this.chainId);
     this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
 
@@ -177,12 +196,14 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning) {
+    if (!this.isRunning || this.isStopping) {
       return;
     }
 
     this.logger.info('Stopping ChainDetectorInstance', { chainId: this.chainId });
 
+    // Set stopping flag FIRST to prevent new event processing
+    this.isStopping = true;
     this.isRunning = false;
 
     // Disconnect WebSocket (P0-2 fix: remove listeners to prevent memory leak)
@@ -206,6 +227,7 @@ export class ChainDetectorInstance extends EventEmitter {
     this.blockLatencies = [];
 
     this.status = 'disconnected';
+    this.isStopping = false; // Reset for potential restart
     this.emit('statusChange', this.status);
 
     this.logger.info('ChainDetectorInstance stopped');
@@ -276,6 +298,7 @@ export class ChainDetectorInstance extends EventEmitter {
   private async initializePairs(): Promise<void> {
     // This is a simplified version - in production would query DEX factories
     // For now, create pairs from token combinations
+    // Note: this.dexes is already filtered by getEnabledDexes() in constructor
 
     for (const dex of this.dexes) {
       for (let i = 0; i < this.tokens.length; i++) {
@@ -286,12 +309,16 @@ export class ChainDetectorInstance extends EventEmitter {
           // Generate a deterministic pair address (placeholder)
           const pairAddress = this.generatePairAddress(dex.factoryAddress, token0.address, token1.address);
 
+          // Convert fee from basis points to percentage for pair storage
+          // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
+          const feePercentage = dex.fee ? dexFeeToPercentage(dex.fee) : 0.003;
+
           const pair: ExtendedPair = {
             address: pairAddress,
             dex: dex.name,
             token0: token0.address,
             token1: token1.address,
-            fee: dex.fee,
+            fee: feePercentage,
             reserve0: '0',
             reserve1: '0',
             blockNumber: 0,
@@ -327,8 +354,13 @@ export class ChainDetectorInstance extends EventEmitter {
   private async subscribeToEvents(): Promise<void> {
     if (!this.wsManager) return;
 
+    // Get monitored pair addresses for filtering
+    const pairAddresses = Array.from(this.pairsByAddress.keys());
+
     // Subscribe to Sync events
     await this.wsManager.subscribe({
+      method: 'eth_subscribe',
+      params: ['logs', { topics: [EVENT_SIGNATURES.SYNC], address: pairAddresses }],
       type: 'logs',
       topics: [EVENT_SIGNATURES.SYNC],
       callback: (log) => this.handleSyncEvent(log)
@@ -336,6 +368,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // Subscribe to Swap events
     await this.wsManager.subscribe({
+      method: 'eth_subscribe',
+      params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
       type: 'logs',
       topics: [EVENT_SIGNATURES.SWAP_V2],
       callback: (log) => this.handleSwapEvent(log)
@@ -343,6 +377,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // Subscribe to new blocks for latency tracking
     await this.wsManager.subscribe({
+      method: 'eth_subscribe',
+      params: ['newHeads'],
       type: 'newHeads',
       callback: (block) => this.handleNewBlock(block)
     });
@@ -378,7 +414,8 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private handleSyncEvent(log: any): void {
-    if (!this.isRunning) return;
+    // Guard against processing during shutdown (consistent with base-detector.ts)
+    if (this.isStopping || !this.isRunning) return;
 
     try {
       const pairAddress = log.address?.toLowerCase();
@@ -416,7 +453,8 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private handleSwapEvent(log: any): void {
-    if (!this.isRunning) return;
+    // Guard against processing during shutdown (consistent with base-detector.ts)
+    if (this.isStopping || !this.isRunning) return;
 
     try {
       const pairAddress = log.address?.toLowerCase();
@@ -484,7 +522,8 @@ export class ChainDetectorInstance extends EventEmitter {
       reserve0: pair.reserve0,
       reserve1: pair.reserve1,
       timestamp: Date.now(),
-      blockNumber: pair.blockNumber
+      blockNumber: pair.blockNumber,
+      latency: 0 // Calculated by downstream consumers if needed
     };
 
     // Publish to Redis Streams
@@ -504,20 +543,72 @@ export class ChainDetectorInstance extends EventEmitter {
     }
   }
 
+  /**
+   * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
+   * Captures all mutable values at a point in time.
+   */
+  private createPairSnapshot(pair: ExtendedPair): PairSnapshot | null {
+    // Skip pairs without initialized reserves
+    if (!pair.reserve0 || !pair.reserve1 || pair.reserve0 === '0' || pair.reserve1 === '0') {
+      return null;
+    }
+
+    return {
+      address: pair.address,
+      dex: pair.dex,
+      token0: pair.token0,
+      token1: pair.token1,
+      reserve0: pair.reserve0,
+      reserve1: pair.reserve1,
+      fee: pair.fee ?? 0.003, // Default 0.3% fee if undefined
+      blockNumber: pair.blockNumber
+    };
+  }
+
+  /**
+   * Create deep snapshots of all pairs for thread-safe iteration.
+   * This prevents race conditions where concurrent Sync events could
+   * modify pair reserves while we're iterating for arbitrage detection.
+   */
+  private createPairsSnapshot(): Map<string, PairSnapshot> {
+    const snapshots = new Map<string, PairSnapshot>();
+
+    for (const [key, pair] of this.pairs.entries()) {
+      const snapshot = this.createPairSnapshot(pair);
+      if (snapshot) {
+        snapshots.set(key, snapshot);
+      }
+    }
+
+    return snapshots;
+  }
+
   private checkArbitrageOpportunity(updatedPair: ExtendedPair): void {
-    // Create atomic snapshot of pairs to prevent race conditions during iteration
-    // Without this, concurrent Sync events could modify pairs while we're iterating
-    const pairsSnapshot = new Map(this.pairs);
+    // Guard against processing during shutdown (consistent with base-detector.ts)
+    if (this.isStopping || !this.isRunning) return;
+
+    // Create snapshot of the updated pair first
+    const currentSnapshot = this.createPairSnapshot(updatedPair);
+    if (!currentSnapshot) return;
+
+    // Create deep snapshots of ALL pairs to prevent race conditions
+    // This captures reserve values atomically - concurrent Sync events
+    // won't affect these snapshot values during iteration
+    const pairsSnapshot = this.createPairsSnapshot();
 
     // Find pairs with same tokens but different DEXes
-    for (const [key, pair] of pairsSnapshot) {
-      if (pair.address === updatedPair.address) continue;
+    for (const [key, otherSnapshot] of pairsSnapshot) {
+      // Skip same pair
+      if (otherSnapshot.address === currentSnapshot.address) continue;
 
-      // Check if same token pair
-      if (this.isSameTokenPair(pair, updatedPair)) {
-        const opportunity = this.calculateArbitrage(updatedPair, pair);
+      // BUG FIX: Skip same DEX - arbitrage requires different DEXes
+      if (otherSnapshot.dex === currentSnapshot.dex) continue;
 
-        if (opportunity && opportunity.expectedProfit > 0) {
+      // Check if same token pair (in either order)
+      if (this.isSameTokenPair(currentSnapshot, otherSnapshot)) {
+        const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
+
+        if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
           this.opportunitiesFound++;
           this.emitOpportunity(opportunity);
         }
@@ -525,16 +616,46 @@ export class ChainDetectorInstance extends EventEmitter {
     }
   }
 
-  private isSameTokenPair(pair1: ExtendedPair, pair2: ExtendedPair): boolean {
+  /**
+   * Check if two pairs represent the same token pair (in either order).
+   * Returns { sameOrder: boolean, reverseOrder: boolean }
+   */
+  private isSameTokenPair(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
+    const token1_0 = pair1.token0.toLowerCase();
+    const token1_1 = pair1.token1.toLowerCase();
+    const token2_0 = pair2.token0.toLowerCase();
+    const token2_1 = pair2.token1.toLowerCase();
+
     return (
-      (pair1.token0 === pair2.token0 && pair1.token1 === pair2.token1) ||
-      (pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0)
+      (token1_0 === token2_0 && token1_1 === token2_1) ||
+      (token1_0 === token2_1 && token1_1 === token2_0)
     );
   }
 
+  /**
+   * Check if token order is reversed between two pairs.
+   */
+  private isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
+    const token1_0 = pair1.token0.toLowerCase();
+    const token1_1 = pair1.token1.toLowerCase();
+    const token2_0 = pair2.token0.toLowerCase();
+    const token2_1 = pair2.token1.toLowerCase();
+
+    return token1_0 === token2_1 && token1_1 === token2_0;
+  }
+
+  /**
+   * Get minimum profit threshold for this chain from config.
+   * Uses ARBITRAGE_CONFIG.chainMinProfits for consistency with base-detector.ts.
+   */
+  private getMinProfitThreshold(): number {
+    const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
+    return chainMinProfits[this.chainId] || 0.003; // Default 0.3%
+  }
+
   private calculateArbitrage(
-    pair1: ExtendedPair,
-    pair2: ExtendedPair
+    pair1: PairSnapshot,
+    pair2: PairSnapshot
   ): ArbitrageOpportunity | null {
     const reserve1_0 = BigInt(pair1.reserve0);
     const reserve1_1 = BigInt(pair1.reserve1);
@@ -545,35 +666,53 @@ export class ChainDetectorInstance extends EventEmitter {
       return null;
     }
 
-    // Calculate prices
+    // Calculate prices (price = token1/token0)
     const price1 = Number(reserve1_1) / Number(reserve1_0);
-    const price2 = Number(reserve2_1) / Number(reserve2_0);
+    let price2 = Number(reserve2_1) / Number(reserve2_0);
 
-    const priceDiff = Math.abs(price1 - price2);
-    const avgPrice = (price1 + price2) / 2;
-    const percentageDiff = priceDiff / avgPrice;
+    // BUG FIX: Adjust price for reverse order pairs
+    // If tokens are in reverse order, invert the price for accurate comparison
+    if (this.isReverseOrder(pair1, pair2) && price2 !== 0) {
+      price2 = 1 / price2;
+    }
 
-    // Check if profitable (basic check)
-    if (percentageDiff < 0.003) { // 0.3% minimum
+    // Calculate price difference as a percentage of the lower price
+    const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
+
+    // Use config-based profit threshold (not hardcoded)
+    const minProfitThreshold = this.getMinProfitThreshold();
+
+    // Calculate fee-adjusted profit
+    // Fees are stored as decimals (e.g., 0.003 for 0.3%)
+    const totalFees = (pair1.fee || 0.003) + (pair2.fee || 0.003);
+    const netProfitPct = priceDiff - totalFees;
+
+    // Check if profitable after fees
+    if (netProfitPct < minProfitThreshold) {
       return null;
     }
 
     const opportunity: ArbitrageOpportunity = {
       id: `${this.chainId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      type: 'intra-dex',
+      type: 'simple', // Standardized with base-detector.ts
+      chain: this.chainId,
       buyDex: price1 < price2 ? pair1.dex : pair2.dex,
       sellDex: price1 < price2 ? pair2.dex : pair1.dex,
-      buyChain: this.chainId,
-      sellChain: this.chainId,
-      tokenIn: pair1.token0,
-      tokenOut: pair1.token1,
-      amountIn: '1000000000000000000', // 1 token
-      expectedProfit: priceDiff,
-      profitPercentage: percentageDiff,
+      buyPair: price1 < price2 ? pair1.address : pair2.address,
+      sellPair: price1 < price2 ? pair2.address : pair1.address,
+      token0: pair1.token0,
+      token1: pair1.token1,
+      buyPrice: Math.min(price1, price2),
+      sellPrice: Math.max(price1, price2),
+      profitPercentage: netProfitPct * 100, // Convert to percentage
+      expectedProfit: netProfitPct, // Net profit after fees
+      estimatedProfit: 0, // To be calculated by execution engine
       gasEstimate: this.detectorConfig.gasEstimate,
       confidence: this.detectorConfig.confidence,
       timestamp: Date.now(),
-      blockNumber: pair1.blockNumber
+      expiresAt: Date.now() + this.detectorConfig.expiryMs,
+      blockNumber: pair1.blockNumber,
+      status: 'pending'
     };
 
     return opportunity;

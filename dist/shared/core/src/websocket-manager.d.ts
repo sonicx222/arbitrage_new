@@ -1,15 +1,21 @@
 export interface WebSocketConfig {
     url: string;
+    /** Fallback URLs to try if primary URL fails */
+    fallbackUrls?: string[];
     reconnectInterval?: number;
     maxReconnectAttempts?: number;
     heartbeatInterval?: number;
     connectionTimeout?: number;
+    /** Alias for heartbeatInterval for compatibility */
+    pingInterval?: number;
 }
 export interface WebSocketSubscription {
     id: number;
     method: string;
     params: any[];
     type?: string;
+    topics?: string[];
+    callback?: (data: any) => void;
 }
 export interface WebSocketMessage {
     jsonrpc?: string;
@@ -35,13 +41,27 @@ export declare class WebSocketManager {
     private isConnected;
     private isReconnecting;
     private isDisconnected;
+    private connectMutex;
     private subscriptions;
     private messageHandlers;
     private connectionHandlers;
     private errorHandlers;
     private eventHandlers;
     private nextSubscriptionId;
+    /** All available URLs (primary + fallbacks) */
+    private allUrls;
+    /** Current URL index being used */
+    private currentUrlIndex;
     constructor(config: WebSocketConfig);
+    /**
+     * Get the current active WebSocket URL
+     */
+    getCurrentUrl(): string;
+    /**
+     * Switch to the next fallback URL
+     * Returns true if there's another URL to try, false if we've exhausted all options
+     */
+    private switchToNextUrl;
     connect(): Promise<void>;
     disconnect(): void;
     subscribe(subscription: Omit<WebSocketSubscription, 'id'>): number;

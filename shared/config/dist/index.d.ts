@@ -106,6 +106,30 @@ export declare const EVENT_SIGNATURES: {
     SWAP_V2: string;
     SWAP_V3: string;
 };
+/**
+ * Get enabled DEXs for a chain.
+ * Filters out DEXs with enabled === false (enabled defaults to true if not specified).
+ *
+ * @param chainId - The chain identifier (e.g., 'arbitrum', 'bsc')
+ * @returns Array of enabled Dex objects for the chain
+ */
+export declare function getEnabledDexes(chainId: string): Dex[];
+/**
+ * Convert DEX fee from basis points to percentage.
+ * Config stores fees in basis points (e.g., 30 = 0.30%), calculations use percentage.
+ *
+ * @param feeBasisPoints - Fee in basis points (e.g., 30 for 0.30%)
+ * @returns Fee as a decimal percentage (e.g., 0.003 for 0.30%)
+ */
+export declare function dexFeeToPercentage(feeBasisPoints: number): number;
+/**
+ * Convert percentage to basis points.
+ * Inverse of dexFeeToPercentage.
+ *
+ * @param percentage - Fee as decimal (e.g., 0.003 for 0.30%)
+ * @returns Fee in basis points (e.g., 30 for 0.30%)
+ */
+export declare function percentageToBasisPoints(percentage: number): number;
 export interface DetectorChainConfig {
     batchSize: number;
     batchTimeout: number;

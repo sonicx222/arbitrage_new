@@ -3,7 +3,7 @@
 > **Version**: 1.2
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-12 (S2.1.4 WebSocket fallback URLs completed)
+> **Last Updated**: 2025-01-12 (S2.2.1 Arbitrum DEXs expanded to 9)
 
 ---
 
@@ -101,8 +101,8 @@
 **Key Deliverables**:
 - [x] Redis Streams migration for critical channels (S1.1 - Completed 2025-01-10)
 - [x] Smart swap event filtering (S1.2 - Completed 2025-01-10)
-- [ ] Optimism chain integration
-- [ ] L1 Price Matrix implementation
+- [x] Optimism chain integration (S2.1 - Completed 2025-01-12)
+- [x] L1 Price Matrix implementation (S1.3 - Completed 2025-01-10)
 
 **Success Criteria**:
 - Redis commands/day reduced by 50%
@@ -345,8 +345,9 @@
 ### Sprint 2 (Days 8-14): Chain Expansion
 
 #### S2.1: Optimism Chain Integration
-**Status**: `[~] In Progress`
+**Status**: `[x] Completed`
 **Priority**: P0 | **Effort**: 3 days | **Confidence**: 92%
+**Completed**: 2025-01-12
 
 **Hypothesis**: Optimism adds 15-20% more arbitrage opportunities due to OP incentives.
 
@@ -401,14 +402,16 @@
 ---
 
 #### S2.2: Expand Existing Chain Coverage
-**Status**: `[ ] Not Started`
+**Status**: `[~] In Progress`
 **Priority**: P0 | **Effort**: 2 days | **Confidence**: 90%
 
 **Tasks**:
 ```
-[ ] S2.2.1 Add Arbitrum DEXs (6 → 9)
-    - Add: Camelot V3, Trader Joe, Zyberswap, Ramses
-    - Verify factory addresses
+[x] S2.2.1 Add Arbitrum DEXs (6 → 9)
+    - Added: Balancer V2, Curve, Chronos (existing: Camelot V3, Trader Joe, Zyberswap, Ramses)
+    - Factory addresses verified via TDD tests
+    - Tests: shared/config/src/dex-expansion.test.ts (25 tests)
+    - COMPLETED: 2025-01-12
 
 [ ] S2.2.2 Add Base DEXs (1 → 7)
     - Add: Aerodrome, BaseSwap, SushiSwap, Maverick, SwapBased, Synthswap
@@ -741,11 +744,11 @@
 | Sprint | Total Tasks | Completed | In Progress | Blocked |
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
-| Sprint 2 | 10 | 5 | 0 | 0 |
+| Sprint 2 | 10 | 6 | 0 | 0 |
 | Sprint 3 | 18 | 0 | 0 | 0 |
-| Sprint 4 | 9 | 1 | 1 | 0 |
+| Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **26** | **1** | **0** |
+| **Total** | **67** | **27** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 

@@ -47,7 +47,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             throw new Error(`Chain configuration not found: ${this.chainId}`);
         }
         this.detectorConfig = src_2.DETECTOR_CONFIG[this.chainId] || src_2.DETECTOR_CONFIG.ethereum;
-        this.dexes = src_2.DEXES[this.chainId] || [];
+        this.dexes = (0, src_2.getEnabledDexes)(this.chainId);
         this.tokens = src_2.CORE_TOKENS[this.chainId] || [];
         this.tokenMetadata = src_2.TOKEN_METADATA[this.chainId] || {};
         // Override URLs if provided
@@ -128,14 +128,18 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     // WebSocket Management
     // ===========================================================================
     async initializeWebSocket() {
+        // Use wsUrl, fallback to rpcUrl if not available
+        const primaryWsUrl = this.chainConfig.wsUrl || this.chainConfig.rpcUrl;
         const wsConfig = {
-            url: this.chainConfig.wsUrl,
+            url: primaryWsUrl,
+            fallbackUrls: this.chainConfig.wsFallbackUrls,
             reconnectInterval: 5000,
             maxReconnectAttempts: this.MAX_RECONNECT_ATTEMPTS,
             pingInterval: 30000,
             connectionTimeout: 10000
         };
         this.wsManager = new src_1.WebSocketManager(wsConfig);
+        this.logger.info(`WebSocket configured with ${1 + (this.chainConfig.wsFallbackUrls?.length || 0)} URL(s)`);
         // Set up WebSocket event handlers
         this.wsManager.on('message', (message) => {
             this.handleWebSocketMessage(message);
@@ -173,6 +177,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     async initializePairs() {
         // This is a simplified version - in production would query DEX factories
         // For now, create pairs from token combinations
+        // Note: this.dexes is already filtered by getEnabledDexes() in constructor
         for (const dex of this.dexes) {
             for (let i = 0; i < this.tokens.length; i++) {
                 for (let j = i + 1; j < this.tokens.length; j++) {
@@ -180,12 +185,15 @@ class ChainDetectorInstance extends events_1.EventEmitter {
                     const token1 = this.tokens[j];
                     // Generate a deterministic pair address (placeholder)
                     const pairAddress = this.generatePairAddress(dex.factoryAddress, token0.address, token1.address);
+                    // Convert fee from basis points to percentage for pair storage
+                    // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
+                    const feePercentage = dex.fee ? (0, src_2.dexFeeToPercentage)(dex.fee) : 0.003;
                     const pair = {
                         address: pairAddress,
                         dex: dex.name,
                         token0: token0.address,
                         token1: token1.address,
-                        fee: dex.fee,
+                        fee: feePercentage,
                         reserve0: '0',
                         reserve1: '0',
                         blockNumber: 0,
@@ -211,20 +219,28 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     async subscribeToEvents() {
         if (!this.wsManager)
             return;
+        // Get monitored pair addresses for filtering
+        const pairAddresses = Array.from(this.pairsByAddress.keys());
         // Subscribe to Sync events
         await this.wsManager.subscribe({
+            method: 'eth_subscribe',
+            params: ['logs', { topics: [src_2.EVENT_SIGNATURES.SYNC], address: pairAddresses }],
             type: 'logs',
             topics: [src_2.EVENT_SIGNATURES.SYNC],
             callback: (log) => this.handleSyncEvent(log)
         });
         // Subscribe to Swap events
         await this.wsManager.subscribe({
+            method: 'eth_subscribe',
+            params: ['logs', { topics: [src_2.EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
             type: 'logs',
             topics: [src_2.EVENT_SIGNATURES.SWAP_V2],
             callback: (log) => this.handleSwapEvent(log)
         });
         // Subscribe to new blocks for latency tracking
         await this.wsManager.subscribe({
+            method: 'eth_subscribe',
+            params: ['newHeads'],
             type: 'newHeads',
             callback: (block) => this.handleNewBlock(block)
         });
@@ -350,7 +366,8 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             reserve0: pair.reserve0,
             reserve1: pair.reserve1,
             timestamp: Date.now(),
-            blockNumber: pair.blockNumber
+            blockNumber: pair.blockNumber,
+            latency: 0 // Calculated by downstream consumers if needed
         };
         // Publish to Redis Streams
         this.publishPriceUpdate(priceUpdate);
@@ -364,18 +381,58 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             this.logger.error('Failed to publish price update', { error });
         }
     }
+    /**
+     * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
+     * Captures all mutable values at a point in time.
+     */
+    createPairSnapshot(pair) {
+        // Skip pairs without initialized reserves
+        if (!pair.reserve0 || !pair.reserve1 || pair.reserve0 === '0' || pair.reserve1 === '0') {
+            return null;
+        }
+        return {
+            address: pair.address,
+            dex: pair.dex,
+            token0: pair.token0,
+            token1: pair.token1,
+            reserve0: pair.reserve0,
+            reserve1: pair.reserve1,
+            fee: pair.fee ?? 0.003, // Default 0.3% fee if undefined
+            blockNumber: pair.blockNumber
+        };
+    }
+    /**
+     * Create deep snapshots of all pairs for thread-safe iteration.
+     * This prevents race conditions where concurrent Sync events could
+     * modify pair reserves while we're iterating for arbitrage detection.
+     */
+    createPairsSnapshot() {
+        const snapshots = new Map();
+        for (const [key, pair] of this.pairs.entries()) {
+            const snapshot = this.createPairSnapshot(pair);
+            if (snapshot) {
+                snapshots.set(key, snapshot);
+            }
+        }
+        return snapshots;
+    }
     checkArbitrageOpportunity(updatedPair) {
-        // Create atomic snapshot of pairs to prevent race conditions during iteration
-        // Without this, concurrent Sync events could modify pairs while we're iterating
-        const pairsSnapshot = new Map(this.pairs);
+        // Create snapshot of the updated pair first
+        const currentSnapshot = this.createPairSnapshot(updatedPair);
+        if (!currentSnapshot)
+            return;
+        // Create deep snapshots of ALL pairs to prevent race conditions
+        // This captures reserve values atomically - concurrent Sync events
+        // won't affect these snapshot values during iteration
+        const pairsSnapshot = this.createPairsSnapshot();
         // Find pairs with same tokens but different DEXes
-        for (const [key, pair] of pairsSnapshot) {
-            if (pair.address === updatedPair.address)
+        for (const [key, otherSnapshot] of pairsSnapshot) {
+            if (otherSnapshot.address === currentSnapshot.address)
                 continue;
             // Check if same token pair
-            if (this.isSameTokenPair(pair, updatedPair)) {
-                const opportunity = this.calculateArbitrage(updatedPair, pair);
-                if (opportunity && opportunity.expectedProfit > 0) {
+            if (this.isSameTokenPair(currentSnapshot, otherSnapshot)) {
+                const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
+                if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
                     this.opportunitiesFound++;
                     this.emitOpportunity(opportunity);
                 }

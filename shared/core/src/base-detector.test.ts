@@ -12,6 +12,22 @@
  * - Pair snapshots for thread safety
  */
 
+// Mock the config module BEFORE importing BaseDetector
+// This is required because BaseDetector's constructor calls getEnabledDexes
+jest.mock('../../config/src', () => {
+  const originalModule = jest.requireActual('../../config/src');
+  return {
+    ...originalModule,
+    // Provide getEnabledDexes implementation for tests
+    getEnabledDexes: (chainId: string) => {
+      const dexes = originalModule.DEXES[chainId] || [];
+      return dexes.filter((d: any) => d.enabled !== false);
+    },
+    // Provide dexFeeToPercentage implementation for tests
+    dexFeeToPercentage: (feeBasisPoints: number) => feeBasisPoints / 10000
+  };
+});
+
 import { BaseDetector, DetectorConfig, ExtendedPair, PairSnapshot } from './base-detector';
 import type { Pair, PriceUpdate, SwapEvent, ArbitrageOpportunity } from '../../types/src';
 

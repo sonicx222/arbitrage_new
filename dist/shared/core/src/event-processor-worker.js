@@ -4,7 +4,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const worker_threads_1 = require("worker_threads");
 const { workerId } = worker_threads_1.workerData;
-// Task processing functions
 async function processArbitrageDetection(data) {
     const { prices, minProfit } = data;
     // Use WebAssembly engine for arbitrage detection

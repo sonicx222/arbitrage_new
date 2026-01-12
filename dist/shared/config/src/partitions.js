@@ -195,7 +195,7 @@ function createChainInstance(chainId) {
     if (!chain) {
         return null;
     }
-    const dexes = index_1.DEXES[chainId] || [];
+    const dexes = (0, index_1.getEnabledDexes)(chainId);
     const tokens = index_1.CORE_TOKENS[chainId] || [];
     return {
         chainId,
@@ -235,9 +235,10 @@ function calculatePartitionResources(partitionId) {
     // Base memory per chain
     const baseMemoryPerChain = 64; // MB
     // DEX factor (more DEXes = more memory)
+    // Use getEnabledDexes to only count DEXs that will actually be monitored
     let totalDexes = 0;
     for (const chainId of partition.chains) {
-        const dexes = index_1.DEXES[chainId] || [];
+        const dexes = (0, index_1.getEnabledDexes)(chainId);
         totalDexes += dexes.length;
     }
     const dexMemory = totalDexes * 8; // 8MB per DEX

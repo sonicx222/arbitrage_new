@@ -59,6 +59,17 @@ export declare class ChainDetectorInstance extends EventEmitter {
     private handleNewBlock;
     private emitPriceUpdate;
     private publishPriceUpdate;
+    /**
+     * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
+     * Captures all mutable values at a point in time.
+     */
+    private createPairSnapshot;
+    /**
+     * Create deep snapshots of all pairs for thread-safe iteration.
+     * This prevents race conditions where concurrent Sync events could
+     * modify pair reserves while we're iterating for arbitrage detection.
+     */
+    private createPairsSnapshot;
     private checkArbitrageOpportunity;
     private isSameTokenPair;
     private calculateArbitrage;

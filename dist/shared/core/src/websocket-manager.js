@@ -22,31 +22,74 @@ class WebSocketManager {
         this.isReconnecting = false;
         // P2-FIX: Track if manager has been explicitly disconnected
         this.isDisconnected = false;
+        // P1-FIX: Connection mutex to prevent TOCTOU race condition
+        this.connectMutex = null;
         this.subscriptions = new Map();
         this.messageHandlers = new Set();
         this.connectionHandlers = new Set();
         this.errorHandlers = new Set();
         this.eventHandlers = new Map();
         this.nextSubscriptionId = 1;
+        /** All available URLs (primary + fallbacks) */
+        this.allUrls = [];
+        /** Current URL index being used */
+        this.currentUrlIndex = 0;
         this.config = {
             reconnectInterval: 5000,
             maxReconnectAttempts: 10,
-            heartbeatInterval: 30000,
+            heartbeatInterval: config.pingInterval || 30000,
             connectionTimeout: 10000,
             ...config
         };
+        // Build list of all URLs (primary + fallbacks)
+        this.allUrls = [config.url];
+        if (config.fallbackUrls && config.fallbackUrls.length > 0) {
+            this.allUrls.push(...config.fallbackUrls);
+        }
+        this.currentUrlIndex = 0;
+    }
+    /**
+     * Get the current active WebSocket URL
+     */
+    getCurrentUrl() {
+        return this.allUrls[this.currentUrlIndex] || this.config.url;
+    }
+    /**
+     * Switch to the next fallback URL
+     * Returns true if there's another URL to try, false if we've exhausted all options
+     */
+    switchToNextUrl() {
+        if (this.currentUrlIndex < this.allUrls.length - 1) {
+            this.currentUrlIndex++;
+            this.logger.info(`Switching to fallback URL ${this.currentUrlIndex}: ${this.getCurrentUrl()}`);
+            return true;
+        }
+        // Reset to primary URL for next reconnection cycle
+        this.currentUrlIndex = 0;
+        return false;
     }
     async connect() {
-        if (this.isConnecting || this.isConnected) {
+        // P1-FIX: Use mutex to prevent TOCTOU race condition
+        // If a connection is already in progress, wait for it instead of starting a new one
+        if (this.connectMutex) {
+            return this.connectMutex;
+        }
+        if (this.isConnected) {
             return;
         }
+        // Create mutex promise before any async operations
+        let resolveMutex;
+        this.connectMutex = new Promise((resolve) => {
+            resolveMutex = resolve;
+        });
         this.isConnecting = true;
         // P2-FIX: Clear disconnected flag when explicitly connecting
         this.isDisconnected = false;
-        return new Promise((resolve, reject) => {
+        const connectionPromise = new Promise((resolve, reject) => {
             try {
-                this.logger.info(`Connecting to WebSocket: ${this.config.url}`);
-                this.ws = new ws_1.default(this.config.url);
+                const currentUrl = this.getCurrentUrl();
+                this.logger.info(`Connecting to WebSocket: ${currentUrl}${this.currentUrlIndex > 0 ? ' (fallback)' : ''}`);
+                this.ws = new ws_1.default(currentUrl);
                 this.connectionTimeoutTimer = setTimeout(() => {
                     if (this.ws && this.ws.readyState !== ws_1.default.OPEN) {
                         this.ws.close();
@@ -106,11 +149,21 @@ class WebSocketManager {
                 reject(error);
             }
         });
+        // P1-FIX: Wrap promise to clear mutex when done (success or failure)
+        try {
+            await connectionPromise;
+        }
+        finally {
+            this.connectMutex = null;
+            resolveMutex();
+        }
     }
     disconnect() {
         this.logger.info('Disconnecting WebSocket');
         // P2-FIX: Set disconnected flag to prevent reconnection attempts
         this.isDisconnected = true;
+        // P1-FIX: Clear connection mutex on disconnect
+        this.connectMutex = null;
         // Clear timers
         this.clearReconnectionTimer();
         this.clearConnectionTimeout();
@@ -223,7 +276,10 @@ class WebSocketManager {
             connecting: this.isConnecting,
             reconnectAttempts: this.reconnectAttempts,
             subscriptions: this.subscriptions.size,
-            readyState: this.ws?.readyState
+            readyState: this.ws?.readyState,
+            currentUrl: this.getCurrentUrl(),
+            currentUrlIndex: this.currentUrlIndex,
+            totalUrls: this.allUrls.length
         };
     }
     /**
@@ -287,12 +343,26 @@ class WebSocketManager {
             return;
         }
         if (this.reconnectAttempts >= (this.config.maxReconnectAttempts || 10)) {
-            this.logger.error('Max reconnection attempts reached');
+            this.logger.error('Max reconnection attempts reached across all URLs');
+            // Emit error for handlers
+            this.errorHandlers.forEach(handler => {
+                try {
+                    handler(new Error('Max reconnection attempts reached'));
+                }
+                catch (e) {
+                    this.logger.error('Error in error handler', { error: e });
+                }
+            });
             return;
         }
-        this.reconnectAttempts++;
+        // Try fallback URL if available, otherwise increment attempts
+        const hasNextUrl = this.switchToNextUrl();
+        if (!hasNextUrl) {
+            // We've tried all URLs, increment the cycle counter
+            this.reconnectAttempts++;
+        }
         const delay = this.config.reconnectInterval || 5000;
-        this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
+        this.logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts} to ${this.getCurrentUrl()} in ${delay}ms`);
         this.reconnectTimer = setTimeout(async () => {
             // P2-FIX: Clear timer reference immediately and set reconnecting flag
             this.reconnectTimer = null;
@@ -308,7 +378,7 @@ class WebSocketManager {
             }
             catch (error) {
                 this.isReconnecting = false;
-                this.logger.error(`Reconnection attempt ${this.reconnectAttempts} failed`, { error });
+                this.logger.error(`Reconnection to ${this.getCurrentUrl()} failed`, { error });
                 // P2-FIX: Only schedule next attempt if not disconnected
                 if (!this.isDisconnected) {
                     this.scheduleReconnection();

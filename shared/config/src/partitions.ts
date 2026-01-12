@@ -13,7 +13,7 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
-import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA } from './index';
+import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes } from './index';
 
 // =============================================================================
 // Types
@@ -327,7 +327,7 @@ export function createChainInstance(chainId: string): ChainInstance | null {
     return null;
   }
 
-  const dexes = DEXES[chainId] || [];
+  const dexes = getEnabledDexes(chainId);
   const tokens = CORE_TOKENS[chainId] || [];
 
   return {
@@ -377,9 +377,10 @@ export function calculatePartitionResources(partitionId: string): {
   const baseMemoryPerChain = 64; // MB
 
   // DEX factor (more DEXes = more memory)
+  // Use getEnabledDexes to only count DEXs that will actually be monitored
   let totalDexes = 0;
   for (const chainId of partition.chains) {
-    const dexes = DEXES[chainId] || [];
+    const dexes = getEnabledDexes(chainId);
     totalDexes += dexes.length;
   }
   const dexMemory = totalDexes * 8; // 8MB per DEX

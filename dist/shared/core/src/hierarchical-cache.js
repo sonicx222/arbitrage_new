@@ -9,6 +9,23 @@ exports.createHierarchicalCache = createHierarchicalCache;
 exports.getHierarchicalCache = getHierarchicalCache;
 const redis_1 = require("./redis");
 const logger_1 = require("./logger");
+// P2-2-FIX: Import config with fallback for test environment
+let SYSTEM_CONSTANTS;
+try {
+    SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+}
+catch {
+    // Config not available, will use defaults
+}
+// P2-2-FIX: Default values for when config is not available
+const CACHE_DEFAULTS = {
+    averageEntrySize: SYSTEM_CONSTANTS?.cache?.averageEntrySize ?? 1024,
+    defaultL1SizeMb: SYSTEM_CONSTANTS?.cache?.defaultL1SizeMb ?? 64,
+    defaultL2TtlSeconds: SYSTEM_CONSTANTS?.cache?.defaultL2TtlSeconds ?? 300,
+    demotionThresholdMs: SYSTEM_CONSTANTS?.cache?.demotionThresholdMs ?? 5 * 60 * 1000,
+    minAccessCountBeforeDemotion: SYSTEM_CONSTANTS?.cache?.minAccessCountBeforeDemotion ?? 3,
+    scanBatchSize: SYSTEM_CONSTANTS?.redis?.scanBatchSize ?? 100,
+};
 const logger = (0, logger_1.createLogger)('hierarchical-cache');
 class HierarchicalCache {
     constructor(config = {}) {
@@ -28,16 +45,18 @@ class HierarchicalCache {
             promotions: 0,
             demotions: 0
         };
+        // P2-2-FIX: Use configured constants instead of magic numbers
         this.config = {
             l1Enabled: config.l1Enabled !== false,
-            l1Size: config.l1Size || 64, // 64MB default
+            l1Size: config.l1Size || CACHE_DEFAULTS.defaultL1SizeMb,
             l2Enabled: config.l2Enabled !== false,
-            l2Ttl: config.l2Ttl || 300, // 5 minutes
+            l2Ttl: config.l2Ttl || CACHE_DEFAULTS.defaultL2TtlSeconds,
             l3Enabled: config.l3Enabled !== false,
             enablePromotion: config.enablePromotion !== false,
             enableDemotion: config.enableDemotion !== false
         };
-        this.l1MaxEntries = Math.floor(this.config.l1Size * 1024 * 1024 / 1024); // Rough estimate
+        // P2-2-FIX: Use configured average entry size for capacity calculation
+        this.l1MaxEntries = Math.floor(this.config.l1Size * 1024 * 1024 / CACHE_DEFAULTS.averageEntrySize);
         if (this.config.l2Enabled) {
             this.redis = (0, redis_1.getRedisClient)();
         }
@@ -347,7 +366,8 @@ class HierarchicalCache {
             // P0-FIX: Use cursor-based SCAN iteration instead of KEYS
             let cursor = '0';
             let deletedCount = 0;
-            const batchSize = 100; // Process keys in batches
+            // P2-2-FIX: Use configured constant instead of magic number
+            const batchSize = CACHE_DEFAULTS.scanBatchSize;
             do {
                 // SCAN returns [cursor, keys] - cursor is '0' when scan is complete
                 const [nextCursor, keys] = await this.scanKeys(redis, cursor, searchPattern, batchSize);
@@ -461,9 +481,11 @@ class HierarchicalCache {
         if (!this.config.l1Enabled || !this.config.l2Enabled)
             return;
         const now = Date.now();
-        const demotionThreshold = 5 * 60 * 1000; // 5 minutes
+        // P2-2-FIX: Use configured constants instead of magic numbers
+        const demotionThreshold = CACHE_DEFAULTS.demotionThresholdMs;
+        const minAccessCount = CACHE_DEFAULTS.minAccessCountBeforeDemotion;
         for (const [key, entry] of this.l1Metadata.entries()) {
-            if (now - entry.lastAccess > demotionThreshold && entry.accessCount < 3) {
+            if (now - entry.lastAccess > demotionThreshold && entry.accessCount < minAccessCount) {
                 // Move to L2 only, keep in L3
                 await this.setInL2(key, entry.value, entry.ttl);
                 this.invalidateL1(key);

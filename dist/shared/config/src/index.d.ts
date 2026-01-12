@@ -106,6 +106,30 @@ export declare const EVENT_SIGNATURES: {
     SWAP_V2: string;
     SWAP_V3: string;
 };
+/**
+ * Get enabled DEXs for a chain.
+ * Filters out DEXs with enabled === false (enabled defaults to true if not specified).
+ *
+ * @param chainId - The chain identifier (e.g., 'arbitrum', 'bsc')
+ * @returns Array of enabled Dex objects for the chain
+ */
+export declare function getEnabledDexes(chainId: string): Dex[];
+/**
+ * Convert DEX fee from basis points to percentage.
+ * Config stores fees in basis points (e.g., 30 = 0.30%), calculations use percentage.
+ *
+ * @param feeBasisPoints - Fee in basis points (e.g., 30 for 0.30%)
+ * @returns Fee as a decimal percentage (e.g., 0.003 for 0.30%)
+ */
+export declare function dexFeeToPercentage(feeBasisPoints: number): number;
+/**
+ * Convert percentage to basis points.
+ * Inverse of dexFeeToPercentage.
+ *
+ * @param percentage - Fee as decimal (e.g., 0.003 for 0.30%)
+ * @returns Fee in basis points (e.g., 30 for 0.30%)
+ */
+export declare function percentageToBasisPoints(percentage: number): number;
 export interface DetectorChainConfig {
     batchSize: number;
     batchTimeout: number;
@@ -155,6 +179,72 @@ export declare function calculateBridgeCostUsd(sourceChain: string, targetChain:
     latency: number;
     bridge: string;
 } | undefined;
+export declare const SYSTEM_CONSTANTS: {
+    redis: {
+        /** Maximum message size in bytes for Redis pub/sub (1MB) */
+        maxMessageSize: number;
+        /** Maximum channel name length */
+        maxChannelNameLength: number;
+        /** Default SCAN batch size for iterating keys */
+        scanBatchSize: number;
+        /** Default TTL for health data in seconds */
+        healthDataTtl: number;
+        /** Default TTL for metrics data in seconds */
+        metricsDataTtl: number;
+        /** Maximum rolling metrics entries */
+        maxRollingMetrics: number;
+        /** Disconnect timeout in milliseconds */
+        disconnectTimeout: number;
+    };
+    cache: {
+        /** Average entry size estimate in bytes for L1 capacity calculation */
+        averageEntrySize: number;
+        /** Default L1 cache size in MB */
+        defaultL1SizeMb: number;
+        /** Default L2 TTL in seconds */
+        defaultL2TtlSeconds: number;
+        /** Auto-demotion threshold in milliseconds */
+        demotionThresholdMs: number;
+        /** Minimum access count before demotion */
+        minAccessCountBeforeDemotion: number;
+    };
+    selfHealing: {
+        /** Circuit breaker recovery cooldown in milliseconds */
+        circuitBreakerCooldownMs: number;
+        /** Health check failure threshold before recovery */
+        healthCheckFailureThreshold: number;
+        /** Graceful degradation failure threshold */
+        gracefulDegradationThreshold: number;
+        /** Maximum restart delay in milliseconds */
+        maxRestartDelayMs: number;
+        /** Simulated restart delay for testing in milliseconds */
+        simulatedRestartDelayMs: number;
+        /** Simulated restart failure rate (0-1) */
+        simulatedRestartFailureRate: number;
+    };
+    webSocket: {
+        /** Default reconnect delay in milliseconds */
+        defaultReconnectDelayMs: number;
+        /** Maximum reconnect delay in milliseconds */
+        maxReconnectDelayMs: number;
+        /** Reconnect backoff multiplier */
+        reconnectBackoffMultiplier: number;
+        /** Maximum reconnect attempts */
+        maxReconnectAttempts: number;
+        /** Connection timeout in milliseconds */
+        connectionTimeoutMs: number;
+    };
+    circuitBreaker: {
+        /** Default failure threshold */
+        defaultFailureThreshold: number;
+        /** Default recovery timeout in milliseconds */
+        defaultRecoveryTimeoutMs: number;
+        /** Default monitoring period in milliseconds */
+        defaultMonitoringPeriodMs: number;
+        /** Default success threshold for closing */
+        defaultSuccessThreshold: number;
+    };
+};
 export * from './partitions';
 export { PARTITIONS, PartitionConfig, getPartition, getPartitionFromEnv, assignChainToPartition } from './partitions';
 //# sourceMappingURL=index.d.ts.map
