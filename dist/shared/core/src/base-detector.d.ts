@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { RedisClient, PerformanceLogger, BatchedEvent, WebSocketManager, WebSocketMessage, RedisStreamsClient, StreamBatcher, SwapEventFilter, WhaleAlert, VolumeAggregate, ServiceStateManager } from './index';
+import { RedisClient, PerformanceLogger, BatchedEvent, WebSocketManager, WebSocketMessage, RedisStreamsClient, StreamBatcher, SwapEventFilter, WhaleAlert, VolumeAggregate, ServiceStateManager, PairDiscoveryService, PairCacheService } from './index';
 import { Dex, Token, PriceUpdate, ArbitrageOpportunity, SwapEvent, Pair } from '../../types/src';
 export interface DetectorConfig {
     chain: string;
@@ -45,6 +45,8 @@ export declare abstract class BaseDetector {
     protected swapEventBatcher: StreamBatcher<any> | null;
     protected whaleAlertBatcher: StreamBatcher<any> | null;
     protected swapEventFilter: SwapEventFilter | null;
+    protected pairDiscoveryService: PairDiscoveryService | null;
+    protected pairCacheService: PairCacheService | null;
     protected dexes: Dex[];
     protected tokens: Token[];
     protected pairs: Map<string, Pair>;
@@ -60,6 +62,11 @@ export declare abstract class BaseDetector {
     protected tokenMetadata: any;
     constructor(config: DetectorConfig);
     protected initializeRedis(): Promise<void>;
+    /**
+     * S2.2.5: Initialize pair discovery and caching services.
+     * Sets up the provider for factory contract queries and initializes cache.
+     */
+    protected initializePairServices(): Promise<void>;
     /**
      * Start the detector service.
      * Uses ServiceStateManager to prevent race conditions.
@@ -137,6 +144,13 @@ export declare abstract class BaseDetector {
      */
     protected calculatePriceImpact(swapEvent: SwapEvent): Promise<number>;
     protected initializePairs(): Promise<void>;
+    /**
+     * S2.2.5: Get pair address using cache-first strategy.
+     * 1. Check Redis cache for existing pair address
+     * 2. On miss, query factory contract via PairDiscoveryService
+     * 3. Cache the result for future lookups
+     * 4. Fall back to CREATE2 computation if factory query fails
+     */
     protected getPairAddress(dex: Dex, token0: Token, token1: Token): Promise<string | null>;
     protected calculateArbitrageOpportunity(sourceUpdate: PriceUpdate, targetUpdate: PriceUpdate): ArbitrageOpportunity | null;
     protected validateOpportunity(opportunity: ArbitrageOpportunity): boolean;

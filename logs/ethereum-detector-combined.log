@@ -1,0 +1,2 @@
+2026-01-12T18:56:49.297Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
+2026-01-12T18:56:49.339Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}

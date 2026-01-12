@@ -134,19 +134,43 @@ class ExecutionEngineService {
             this.logger.info('Stopping Execution Engine Service');
             // Clear all intervals
             this.clearAllIntervals();
-            // Shutdown lock manager
+            // Shutdown lock manager with timeout (P0-NEW-6 FIX)
             if (this.lockManager) {
-                await this.lockManager.shutdown();
+                try {
+                    await Promise.race([
+                        this.lockManager.shutdown(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Lock manager shutdown timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Lock manager shutdown timeout or error', { error: error.message });
+                }
                 this.lockManager = null;
             }
-            // Disconnect streams client
+            // Disconnect streams client with timeout (P0-NEW-6 FIX)
             if (this.streamsClient) {
-                await this.streamsClient.disconnect();
+                try {
+                    await Promise.race([
+                        this.streamsClient.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Streams client disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Streams client disconnect timeout or error', { error: error.message });
+                }
                 this.streamsClient = null;
             }
-            // Disconnect Redis
+            // Disconnect Redis with timeout (P0-NEW-6 FIX)
             if (this.redis) {
-                await this.redis.disconnect();
+                try {
+                    await Promise.race([
+                        this.redis.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Redis disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Redis disconnect timeout or error', { error: error.message });
+                }
                 this.redis = null;
             }
             // Clear state
@@ -156,6 +180,8 @@ class ExecutionEngineService {
             this.providers.clear();
             // P1-2/P1-3 FIX: Clear provider health tracking
             this.providerHealth.clear();
+            // P0-NEW-2 FIX: Clear pending messages (messages will be redelivered by Redis Streams)
+            this.pendingMessages.clear();
             this.logger.info('Execution Engine Service stopped');
         });
         if (!result.success) {
@@ -741,9 +767,10 @@ class ExecutionEngineService {
                 this.stats.failedExecutions++;
             }
             const latency = performance.now() - startTime;
+            // S2.2.3 FIX: Use ?? instead of || to correctly handle actualProfit: 0
             this.perfLogger.logEventLatency('opportunity_execution', latency, {
                 success: result.success,
-                profit: result.actualProfit || 0
+                profit: result.actualProfit ?? 0
             });
         }
         catch (error) {
@@ -992,4 +1019,6 @@ class ExecutionEngineService {
     }
 }
 exports.ExecutionEngineService = ExecutionEngineService;
+// P0-NEW-6 FIX: Timeout constant for shutdown operations
+ExecutionEngineService.SHUTDOWN_TIMEOUT_MS = 5000;
 //# sourceMappingURL=engine.js.map

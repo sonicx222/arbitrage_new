@@ -31,6 +31,10 @@ export { SwapEventFilter, getSwapEventFilter, resetSwapEventFilter } from './swa
 export type { SwapEventFilterConfig, FilterResult, FilterReason, VolumeAggregate, WhaleAlert, FilterStats, BatchResult } from './swap-event-filter';
 export { PriceMatrix, PriceIndexMapper, getPriceMatrix, resetPriceMatrix } from './price-matrix';
 export type { PriceMatrixConfig, PriceEntry, MemoryUsage, PriceMatrixStats, BatchUpdate } from './price-matrix';
+export { PairDiscoveryService, getPairDiscoveryService, resetPairDiscoveryService } from './pair-discovery';
+export type { PairDiscoveryConfig, DiscoveredPair, PairDiscoveryStats } from './pair-discovery';
+export { PairCacheService, getPairCacheService, resetPairCacheService } from './pair-cache';
+export type { PairCacheConfig, CachedPairData, PairCacheStats, CacheLookupResult } from './pair-cache';
 export { PerformanceAnalyticsEngine, StrategyPerformance, AssetPerformance, TimePerformance, BenchmarkComparison, AttributionAnalysis } from './performance-analytics';
 export { CrossDexTriangularArbitrage, DexPool, TriangularOpportunity, TriangularStep, ArbitragePath } from './cross-dex-triangular-arbitrage';
 export { ValidationMiddleware, ValidationSchemas } from './validation';

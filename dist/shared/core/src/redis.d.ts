@@ -34,6 +34,28 @@ export declare class RedisClient {
      * @returns Script result
      */
     eval<T = unknown>(script: string, keys: string[], args: string[]): Promise<T>;
+    /**
+     * P0-NEW-5 FIX: Atomic lock renewal using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and extends TTL.
+     * This prevents the TOCTOU race condition where another instance could acquire
+     * the lock between the check and the TTL extension.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @param ttlSeconds - New TTL to set if renewal succeeds
+     * @returns true if lock was renewed, false if lock is owned by another instance or doesn't exist
+     */
+    renewLockIfOwned(key: string, instanceId: string, ttlSeconds: number): Promise<boolean>;
+    /**
+     * P0-NEW-5 FIX: Atomic lock release using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and deletes it.
+     * This prevents releasing a lock that was acquired by another instance.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
+     */
+    releaseLockIfOwned(key: string, instanceId: string): Promise<boolean>;
     hset(key: string, field: string, value: any): Promise<number>;
     hget<T = any>(key: string, field: string): Promise<T | null>;
     hgetall<T = any>(key: string): Promise<Record<string, T> | null>;

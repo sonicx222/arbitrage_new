@@ -36,11 +36,12 @@ async function processPriceCalculation(data) {
         throw new Error('Invalid reserve data');
     }
     // Calculate price with fee adjustment
-    const price = (reserves.reserve1 * (1 - (fee || 0))) / reserves.reserve0;
+    // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0 (if any DEX has 0% fee)
+    const price = (reserves.reserve1 * (1 - (fee ?? 0))) / reserves.reserve0;
     return {
         price,
         adjustedPrice: price,
-        fee: fee || 0
+        fee: fee ?? 0
     };
 }
 async function processCorrelationAnalysis(data) {

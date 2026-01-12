@@ -238,6 +238,99 @@ export {
 export { BaseDetector } from './base-detector';
 export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
 
+// =============================================================================
+// REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
+// =============================================================================
+
+// REF-1/ARCH-1: Shared arbitrage calculation logic
+export {
+  calculatePriceFromReserves,
+  invertPrice,
+  calculatePriceDifferencePercent,
+  isSameTokenPair,
+  isReverseOrder,
+  getMinProfitThreshold,
+  getDefaultFee,
+  calculateIntraChainArbitrage,
+  calculateCrossChainArbitrage,
+  validatePairSnapshot,
+  createPairSnapshot
+} from './arbitrage-calculator';
+export type {
+  PairSnapshot as ArbitragePairSnapshot,
+  ChainPriceData,
+  PriceComparisonResult,
+  ArbitrageCalcConfig,
+  CrossChainOpportunityResult
+} from './arbitrage-calculator';
+
+// REF-2: Shared message validation utilities
+export {
+  validatePriceUpdate,
+  validateWhaleTransaction,
+  validateSwapEvent,
+  validateReserveUpdate,
+  validateCoordinatorCommand,
+  validateServiceHealthStatus,
+  validateMessage,
+  validateBatch,
+  createPriceUpdate,
+  createWhaleTransaction,
+  createCoordinatorCommand
+} from './message-validators';
+export type {
+  PriceUpdate as ValidatedPriceUpdate,
+  WhaleTransaction as ValidatedWhaleTransaction,
+  SwapEvent as ValidatedSwapEvent,
+  ReserveUpdate,
+  CoordinatorCommand,
+  ServiceHealthStatus,
+  ValidationResult
+} from './message-validators';
+
+// REF-3/ARCH-2: Standardized error handling
+export {
+  ArbitrageError as BaseArbitrageError,
+  ConnectionError,
+  ValidationError as SharedValidationError,
+  LifecycleError,
+  ExecutionError,
+  ErrorCode,
+  ErrorSeverity,
+  success,
+  failure,
+  tryCatch,
+  tryCatchSync,
+  isRetryableError as isRetryableErrorCheck,
+  isCriticalError,
+  getErrorSeverity,
+  formatErrorForLog,
+  formatErrorForResponse,
+  ErrorAggregator
+} from './error-handling';
+export type { Result } from './error-handling';
+
+// REF-4/ARCH-3: Shared async utilities
+export {
+  TimeoutError,
+  withTimeout,
+  withTimeoutDefault,
+  withTimeoutSafe,
+  withRetry as withRetryAsync,
+  sleep,
+  createDeferred,
+  mapConcurrent,
+  mapSequential,
+  debounceAsync,
+  throttleAsync,
+  gracefulShutdown,
+  waitWithTimeouts
+} from './async-utils';
+export type {
+  RetryConfig,
+  Deferred
+} from './async-utils';
+
 // Re-export types for convenience
 export type {
   Chain,

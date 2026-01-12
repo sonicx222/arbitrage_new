@@ -46,9 +46,19 @@ export declare class ChainDetectorInstance extends EventEmitter {
     private isStopping;
     private reconnectAttempts;
     private readonly MAX_RECONNECT_ATTEMPTS;
+    private startPromise;
+    private stopPromise;
     constructor(config: ChainInstanceConfig);
     start(): Promise<void>;
+    /**
+     * P0-NEW-3 FIX: Internal start implementation separated for promise tracking
+     */
+    private performStart;
     stop(): Promise<void>;
+    /**
+     * P0-NEW-4 FIX: Internal stop implementation separated for promise tracking
+     */
+    private performStop;
     private initializeWebSocket;
     private handleConnectionError;
     private initializePairs;

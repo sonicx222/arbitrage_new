@@ -28,7 +28,9 @@ class CoordinatorService {
         this.streamsClient = null;
         this.logger = (0, src_1.createLogger)('coordinator');
         this.server = null;
-        this.isRunning = false; // Kept for backwards compat, derived from stateManager
+        // P1-8 FIX: isRunning kept for internal state tracking within executeStart/Stop callbacks
+        // External checks should use stateManager.isRunning() for consistency
+        this.isRunning = false;
         this.isLeader = false;
         this.serviceHealth = new Map();
         this.alertCooldowns = new Map();
@@ -162,20 +164,38 @@ class CoordinatorService {
                 });
                 this.server = null;
             }
-            // Disconnect Redis Streams client
+            // P0-NEW-6 FIX: Disconnect Redis Streams client with timeout
             if (this.streamsClient) {
-                await this.streamsClient.disconnect();
+                try {
+                    await Promise.race([
+                        this.streamsClient.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Streams client disconnect timeout')), 5000))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Streams client disconnect timeout or error', { error: error.message });
+                }
                 this.streamsClient = null;
             }
-            // Disconnect legacy Redis
+            // P0-NEW-6 FIX: Disconnect legacy Redis with timeout
             if (this.redis) {
-                await this.redis.disconnect();
+                try {
+                    await Promise.race([
+                        this.redis.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Redis disconnect timeout')), 5000))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Redis disconnect timeout or error', { error: error.message });
+                }
                 this.redis = null;
             }
             // Clear collections
             this.serviceHealth.clear();
             this.alertCooldowns.clear();
             this.opportunities.clear();
+            // P2-1 FIX: Reset stream error counter
+            this.streamConsumerErrors = 0;
             this.logger.info('Coordinator Service stopped successfully');
         });
         if (!result.success) {
@@ -236,7 +256,10 @@ class CoordinatorService {
         }
     }
     /**
-     * P0-4 fix: Atomic lock renewal using compare-and-set pattern.
+     * P0-NEW-5 FIX: Truly atomic lock renewal using Lua script.
+     * Uses renewLockIfOwned() which atomically checks ownership and extends TTL.
+     * This eliminates the TOCTOU race condition that existed before.
+     *
      * Returns true if renewal succeeded, false if lock was lost.
      */
     async renewLeaderLock() {
@@ -244,33 +267,34 @@ class CoordinatorService {
             return false;
         const { lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
         try {
-            // Get current value and check atomically
-            const currentLeader = await this.redis.get(lockKey);
-            if (currentLeader !== instanceId) {
-                // Lock was taken by another instance
-                return false;
-            }
-            // Refresh TTL - note: small TOCTOU window here between get and expire,
-            // but the consequence is just that we might extend someone else's lock
-            // for one TTL period. They would have acquired it legitimately.
-            const result = await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
-            return result === 1;
+            // P0-NEW-5 FIX: Use atomic Lua script for check-and-extend
+            // This prevents the TOCTOU race where another instance could acquire
+            // the lock between our GET and EXPIRE calls
+            const renewed = await this.redis.renewLockIfOwned(lockKey, instanceId, Math.ceil(lockTtlMs / 1000));
+            return renewed;
         }
         catch (error) {
             this.logger.error('Failed to renew leader lock', { error });
             return false;
         }
     }
+    /**
+     * P0-NEW-5 FIX: Atomic lock release using Lua script.
+     * Uses releaseLockIfOwned() which atomically checks ownership and deletes.
+     * This prevents releasing a lock that was acquired by another instance.
+     */
     async releaseLeadership() {
         if (!this.redis || !this.isLeader)
             return;
         try {
             const { lockKey, instanceId } = this.config.leaderElection;
-            // Only release if we hold the lock
-            const currentLeader = await this.redis.get(lockKey);
-            if (currentLeader === instanceId) {
-                await this.redis.del(lockKey);
+            // P0-NEW-5 FIX: Use atomic Lua script for check-and-delete
+            const released = await this.redis.releaseLockIfOwned(lockKey, instanceId);
+            if (released) {
                 this.logger.info('Released leadership', { instanceId });
+            }
+            else {
+                this.logger.warn('Lock was not released - not owned by this instance', { instanceId });
             }
             this.isLeader = false;
         }
@@ -283,7 +307,8 @@ class CoordinatorService {
         let consecutiveHeartbeatFailures = 0;
         const maxHeartbeatFailures = 3;
         this.leaderHeartbeatInterval = setInterval(async () => {
-            if (!this.isRunning || !this.redis)
+            // P1-8 FIX: Use stateManager.isRunning() for consistency
+            if (!this.stateManager.isRunning() || !this.redis)
                 return;
             try {
                 if (this.isLeader) {
@@ -358,7 +383,8 @@ class CoordinatorService {
     startStreamConsumers() {
         // Poll streams every 100ms (non-blocking)
         this.streamConsumerInterval = setInterval(async () => {
-            if (!this.isRunning || !this.streamsClient)
+            // P1-8 FIX: Use stateManager.isRunning() for consistency
+            if (!this.stateManager.isRunning() || !this.streamsClient)
                 return;
             try {
                 // P2-1 fix: Reset error count periodically (every minute)
@@ -601,7 +627,8 @@ class CoordinatorService {
     startHealthMonitoring() {
         // Update metrics periodically
         this.metricsUpdateInterval = setInterval(async () => {
-            if (!this.isRunning)
+            // P1-8 FIX: Use stateManager.isRunning() for consistency
+            if (!this.stateManager.isRunning())
                 return;
             try {
                 this.updateSystemMetrics();
@@ -615,7 +642,8 @@ class CoordinatorService {
         }, 5000);
         // Legacy health polling (fallback for services not yet on streams)
         this.healthCheckInterval = setInterval(async () => {
-            if (!this.isRunning || !this.redis)
+            // P1-8 FIX: Use stateManager.isRunning() for consistency
+            if (!this.stateManager.isRunning() || !this.redis)
                 return;
             try {
                 const allHealth = await this.redis.getAllServiceHealth();
@@ -638,7 +666,8 @@ class CoordinatorService {
         try {
             const health = {
                 service: 'coordinator',
-                status: this.isRunning ? 'healthy' : 'unhealthy',
+                // P1-8 FIX: Use stateManager.isRunning() for consistency
+                status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
                 isLeader: this.isLeader,
                 uptime: process.uptime(),
                 memoryUsage: process.memoryUsage().heapUsed,
@@ -965,7 +994,8 @@ class CoordinatorService {
         return this.isLeader;
     }
     getIsRunning() {
-        return this.isRunning;
+        // P1-8 FIX: Use stateManager.isRunning() for consistency with other services
+        return this.stateManager.isRunning();
     }
     getServiceHealthMap() {
         return new Map(this.serviceHealth);

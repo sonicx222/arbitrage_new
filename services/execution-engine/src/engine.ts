@@ -230,6 +230,9 @@ export class ExecutionEngineService {
     }
   }
 
+  // P0-NEW-6 FIX: Timeout constant for shutdown operations
+  private static readonly SHUTDOWN_TIMEOUT_MS = 5000;
+
   async stop(): Promise<void> {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Execution Engine Service');
@@ -237,21 +240,48 @@ export class ExecutionEngineService {
       // Clear all intervals
       this.clearAllIntervals();
 
-      // Shutdown lock manager
+      // Shutdown lock manager with timeout (P0-NEW-6 FIX)
       if (this.lockManager) {
-        await this.lockManager.shutdown();
+        try {
+          await Promise.race([
+            this.lockManager.shutdown(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Lock manager shutdown timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+            )
+          ]);
+        } catch (error) {
+          this.logger.warn('Lock manager shutdown timeout or error', { error: (error as Error).message });
+        }
         this.lockManager = null;
       }
 
-      // Disconnect streams client
+      // Disconnect streams client with timeout (P0-NEW-6 FIX)
       if (this.streamsClient) {
-        await this.streamsClient.disconnect();
+        try {
+          await Promise.race([
+            this.streamsClient.disconnect(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Streams client disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+            )
+          ]);
+        } catch (error) {
+          this.logger.warn('Streams client disconnect timeout or error', { error: (error as Error).message });
+        }
         this.streamsClient = null;
       }
 
-      // Disconnect Redis
+      // Disconnect Redis with timeout (P0-NEW-6 FIX)
       if (this.redis) {
-        await this.redis.disconnect();
+        try {
+          await Promise.race([
+            this.redis.disconnect(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('Redis disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+            )
+          ]);
+        } catch (error) {
+          this.logger.warn('Redis disconnect timeout or error', { error: (error as Error).message });
+        }
         this.redis = null;
       }
 
@@ -262,6 +292,8 @@ export class ExecutionEngineService {
       this.providers.clear();
       // P1-2/P1-3 FIX: Clear provider health tracking
       this.providerHealth.clear();
+      // P0-NEW-2 FIX: Clear pending messages (messages will be redelivered by Redis Streams)
+      this.pendingMessages.clear();
 
       this.logger.info('Execution Engine Service stopped');
     });

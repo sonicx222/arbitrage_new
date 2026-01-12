@@ -115,6 +115,11 @@ export class ChainDetectorInstance extends EventEmitter {
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
+  // P0-NEW-3/P0-NEW-4 FIX: Lifecycle promises to prevent race conditions
+  // These ensure concurrent start/stop calls are handled correctly
+  private startPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
+
   constructor(config: ChainInstanceConfig) {
     super();
 
@@ -150,11 +155,41 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
 
   async start(): Promise<void> {
+    // P0-NEW-3 FIX: Return existing promise if start is already in progress
+    if (this.startPromise) {
+      return this.startPromise;
+    }
+
+    // P0-NEW-4 FIX: Wait for any pending stop operation to complete
+    if (this.stopPromise) {
+      await this.stopPromise;
+    }
+
+    // Guard against starting while stopping or already running
+    if (this.isStopping) {
+      this.logger.warn('Cannot start: ChainDetectorInstance is stopping');
+      return;
+    }
+
     if (this.isRunning) {
       this.logger.warn('ChainDetectorInstance already running');
       return;
     }
 
+    // P0-NEW-3 FIX: Create and store the start promise for concurrent callers
+    this.startPromise = this.performStart();
+
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  /**
+   * P0-NEW-3 FIX: Internal start implementation separated for promise tracking
+   */
+  private async performStart(): Promise<void> {
     this.logger.info('Starting ChainDetectorInstance', {
       chainId: this.chainId,
       partitionId: this.partitionId,
@@ -196,21 +231,51 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning || this.isStopping) {
+    // P0-NEW-4 FIX: Return existing promise if stop is already in progress
+    // This allows concurrent callers to await the same stop operation
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+
+    // Guard: Can't stop if not running and not stopping
+    if (!this.isRunning && !this.isStopping) {
       return;
     }
 
+    // P0-NEW-4 FIX: Create and store the stop promise for concurrent callers
+    this.stopPromise = this.performStop();
+
+    try {
+      await this.stopPromise;
+    } finally {
+      this.stopPromise = null;
+    }
+  }
+
+  /**
+   * P0-NEW-4 FIX: Internal stop implementation separated for promise tracking
+   */
+  private async performStop(): Promise<void> {
     this.logger.info('Stopping ChainDetectorInstance', { chainId: this.chainId });
 
     // Set stopping flag FIRST to prevent new event processing
     this.isStopping = true;
     this.isRunning = false;
 
-    // Disconnect WebSocket (P0-2 fix: remove listeners to prevent memory leak)
+    // P0-NEW-6 FIX: Disconnect WebSocket with timeout to prevent indefinite hangs
     if (this.wsManager) {
       // Remove all event listeners before disconnecting to prevent memory leak
       this.wsManager.removeAllListeners();
-      await this.wsManager.disconnect();
+      try {
+        await Promise.race([
+          this.wsManager.disconnect(),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error('WebSocket disconnect timeout')), 5000)
+          )
+        ]);
+      } catch (error) {
+        this.logger.warn('WebSocket disconnect timeout or error', { error: (error as Error).message });
+      }
       this.wsManager = null;
     }
 
@@ -223,8 +288,15 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairs.clear();
     this.pairsByAddress.clear();
 
-    // Clear latency tracking
+    // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
     this.blockLatencies = [];
+
+    // Reset stats for clean restart
+    this.eventsProcessed = 0;
+    this.opportunitiesFound = 0;
+    this.lastBlockNumber = 0;
+    this.lastBlockTimestamp = 0;
+    this.reconnectAttempts = 0;
 
     this.status = 'disconnected';
     this.isStopping = false; // Reset for potential restart

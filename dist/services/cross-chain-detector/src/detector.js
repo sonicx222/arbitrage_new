@@ -131,19 +131,37 @@ class CrossChainDetectorService {
             this.logger.info('Stopping Cross-Chain Detector Service');
             // Clear all intervals
             this.clearAllIntervals();
-            // Disconnect streams client
+            // P0-NEW-6 FIX: Disconnect streams client with timeout
             if (this.streamsClient) {
-                await this.streamsClient.disconnect();
+                try {
+                    await Promise.race([
+                        this.streamsClient.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Streams client disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Streams client disconnect timeout or error', { error: error.message });
+                }
                 this.streamsClient = null;
             }
-            // Disconnect Redis
+            // P0-NEW-6 FIX: Disconnect Redis with timeout
             if (this.redis) {
-                await this.redis.disconnect();
+                try {
+                    await Promise.race([
+                        this.redis.disconnect(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Redis disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS))
+                    ]);
+                }
+                catch (error) {
+                    this.logger.warn('Redis disconnect timeout or error', { error: error.message });
+                }
                 this.redis = null;
             }
             // Clear caches
             this.priceData = {};
             this.opportunitiesCache.clear();
+            // P1-NEW-7 FIX: Reset counter for clean restart
+            this.priceUpdateCounter = 0;
             this.logger.info('Cross-Chain Detector Service stopped');
         });
         if (!result.success) {
@@ -222,7 +240,14 @@ class CrossChainDetectorService {
                 startId: '>'
             });
             for (const message of messages) {
-                this.handlePriceUpdate(message.data);
+                // P1-6 FIX: Validate message data before processing
+                const update = message.data;
+                if (!this.validatePriceUpdate(update)) {
+                    this.logger.warn('Skipping invalid price update message', { messageId: message.id });
+                    await this.streamsClient.xack(config.streamName, config.groupName, message.id);
+                    continue;
+                }
+                this.handlePriceUpdate(update);
                 await this.streamsClient.xack(config.streamName, config.groupName, message.id);
             }
         }
@@ -245,7 +270,14 @@ class CrossChainDetectorService {
                 startId: '>'
             });
             for (const message of messages) {
-                this.handleWhaleTransaction(message.data);
+                // P1-6 FIX: Validate message data before processing
+                const whaleTx = message.data;
+                if (!this.validateWhaleTransaction(whaleTx)) {
+                    this.logger.warn('Skipping invalid whale transaction message', { messageId: message.id });
+                    await this.streamsClient.xack(config.streamName, config.groupName, message.id);
+                    continue;
+                }
+                this.handleWhaleTransaction(whaleTx);
                 await this.streamsClient.xack(config.streamName, config.groupName, message.id);
             }
         }
@@ -289,6 +321,53 @@ class CrossChainDetectorService {
         catch (error) {
             this.logger.error('Failed to handle whale transaction', { error });
         }
+    }
+    // ===========================================================================
+    // P1-6 FIX: Message Validation
+    // ===========================================================================
+    /**
+     * Validate PriceUpdate message has all required fields
+     */
+    validatePriceUpdate(update) {
+        if (!update || typeof update !== 'object') {
+            return false;
+        }
+        // Required fields for price updates
+        if (typeof update.chain !== 'string' || !update.chain) {
+            return false;
+        }
+        if (typeof update.dex !== 'string' || !update.dex) {
+            return false;
+        }
+        if (typeof update.pairKey !== 'string' || !update.pairKey) {
+            return false;
+        }
+        if (typeof update.price !== 'number' || isNaN(update.price) || update.price < 0) {
+            return false;
+        }
+        if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
+            return false;
+        }
+        return true;
+    }
+    /**
+     * Validate WhaleTransaction message has all required fields
+     */
+    validateWhaleTransaction(tx) {
+        if (!tx || typeof tx !== 'object') {
+            return false;
+        }
+        // Required fields for whale transactions
+        if (typeof tx.chain !== 'string' || !tx.chain) {
+            return false;
+        }
+        if (typeof tx.usdValue !== 'number' || isNaN(tx.usdValue) || tx.usdValue < 0) {
+            return false;
+        }
+        if (typeof tx.direction !== 'string' || !['buy', 'sell'].includes(tx.direction)) {
+            return false;
+        }
+        return true;
     }
     cleanOldPriceData() {
         const cutoffTime = Date.now() - (5 * 60 * 1000); // 5 minutes ago
@@ -712,4 +791,6 @@ class CrossChainDetectorService {
     }
 }
 exports.CrossChainDetectorService = CrossChainDetectorService;
+// P0-NEW-6 FIX: Timeout constant for shutdown operations
+CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS = 5000;
 //# sourceMappingURL=detector.js.map
