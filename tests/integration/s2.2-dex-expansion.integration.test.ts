@@ -229,7 +229,7 @@ describe('DEX Helper Functions', () => {
 
     it('should return all DEXs for bsc', () => {
       const enabled = getEnabledDexes('bsc');
-      expect(enabled.length).toBe(5);
+      expect(enabled.length).toBe(8); // Updated after S2.2.3: 5 → 8
     });
 
     it('should return all DEXs for base', () => {

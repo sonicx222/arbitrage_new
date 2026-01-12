@@ -357,7 +357,8 @@ class BaseDetector {
      */
     getMinProfitThreshold() {
         const chainMinProfits = src_1.ARBITRAGE_CONFIG.chainMinProfits;
-        return chainMinProfits[this.chain] || 0.003; // Default 0.3%
+        // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
+        return chainMinProfits[this.chain] ?? 0.003; // Default 0.3%
     }
     /**
      * Get chain-specific detector config.
@@ -411,7 +412,9 @@ class BaseDetector {
                 reserve1,
                 blockNumber,
                 timestamp: Date.now(),
-                latency: 0
+                latency: 0,
+                // Include DEX-specific fee for accurate arbitrage calculations (supports Maverick 1bp, Curve 4bp, etc.)
+                fee: pair.fee
             };
             // Publish price update (uses Redis Streams batching)
             await this.publishPriceUpdate(priceUpdate);
@@ -509,9 +512,15 @@ class BaseDetector {
                 if (reverseOrder && otherPrice !== 0) {
                     otherPrice = 1 / otherPrice;
                 }
-                // Calculate price difference percentage
+                // Calculate price difference percentage (gross spread)
                 const priceDiff = Math.abs(currentPrice - otherPrice) / Math.min(currentPrice, otherPrice);
-                if (priceDiff >= this.getMinProfitThreshold()) {
+                // Calculate fee-adjusted net profit (S2.2.2 fix: use pair-specific fees)
+                const currentFee = currentSnapshot.fee ?? 0.003;
+                const otherFee = otherSnapshot.fee ?? 0.003;
+                const totalFees = currentFee + otherFee;
+                const netProfitPct = priceDiff - totalFees;
+                // Check against threshold using NET profit (not gross)
+                if (netProfitPct >= this.getMinProfitThreshold()) {
                     const chainConfig = this.getChainDetectorConfig();
                     const opportunity = {
                         id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
@@ -525,7 +534,8 @@ class BaseDetector {
                         token1: currentSnapshot.token1,
                         buyPrice: Math.min(currentPrice, otherPrice),
                         sellPrice: Math.max(currentPrice, otherPrice),
-                        profitPercentage: priceDiff * 100,
+                        profitPercentage: netProfitPct * 100, // Report NET profit percentage
+                        expectedProfit: netProfitPct, // Net profit as decimal
                         estimatedProfit: 0,
                         confidence: chainConfig.confidence,
                         timestamp: Date.now(),
@@ -653,7 +663,8 @@ class BaseDetector {
                         if (pairAddress && pairAddress !== ethers_1.ethers.ZeroAddress) {
                             // Convert fee from basis points to percentage for pair storage
                             // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-                            const feePercentage = dex.fee ? (0, src_1.dexFeeToPercentage)(dex.fee) : 0.003;
+                            // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0 (if any DEX has 0% fee)
+                            const feePercentage = (0, src_1.dexFeeToPercentage)(dex.fee ?? 30);
                             const pair = {
                                 name: `${token0.symbol}/${token1.symbol}`,
                                 address: pairAddress,
@@ -706,9 +717,15 @@ class BaseDetector {
             // Basic arbitrage calculation
             const priceDiff = Math.abs(sourceUpdate.price - targetUpdate.price);
             const avgPrice = (sourceUpdate.price + targetUpdate.price) / 2;
-            const percentageDiff = (priceDiff / avgPrice) * 100;
+            // BUG FIX: Keep percentageDiff as decimal (0.005 = 0.5%), not multiplied by 100
+            // This ensures consistent units with ARBITRAGE_CONFIG values (also in decimal)
+            const percentageDiff = priceDiff / avgPrice;
             // Apply fees and slippage
-            const totalFees = src_1.ARBITRAGE_CONFIG.feePercentage * 2; // Round trip
+            // Use pair-specific fees when available (supports different DEX fees like Maverick 1bp)
+            // Fallback to config default if pair fees not available
+            const sourceFee = sourceUpdate.fee ?? src_1.ARBITRAGE_CONFIG.feePercentage;
+            const targetFee = targetUpdate.fee ?? src_1.ARBITRAGE_CONFIG.feePercentage;
+            const totalFees = sourceFee + targetFee; // Round trip
             const netPercentage = percentageDiff - totalFees;
             if (netPercentage < src_1.ARBITRAGE_CONFIG.minProfitPercentage) {
                 return null;
@@ -726,9 +743,10 @@ class BaseDetector {
                 amount: src_1.ARBITRAGE_CONFIG.defaultAmount,
                 priceDifference: priceDiff,
                 percentageDifference: percentageDiff,
-                estimatedProfit: (src_1.ARBITRAGE_CONFIG.defaultAmount * netPercentage) / 100,
+                // BUG FIX: No division by 100 needed since percentageDiff is already in decimal form
+                estimatedProfit: src_1.ARBITRAGE_CONFIG.defaultAmount * netPercentage,
                 gasCost: src_1.ARBITRAGE_CONFIG.estimatedGasCost,
-                netProfit: ((src_1.ARBITRAGE_CONFIG.defaultAmount * netPercentage) / 100) - src_1.ARBITRAGE_CONFIG.estimatedGasCost,
+                netProfit: (src_1.ARBITRAGE_CONFIG.defaultAmount * netPercentage) - src_1.ARBITRAGE_CONFIG.estimatedGasCost,
                 confidence,
                 timestamp: Date.now(),
                 expiresAt: Date.now() + src_1.ARBITRAGE_CONFIG.opportunityTimeoutMs
@@ -913,7 +931,10 @@ class BaseDetector {
             token1: pair.token1,
             reserve0: reserve0,
             reserve1: reserve1,
-            fee: pair.fee || 30
+            // BUG FIX: Fallback should be in percentage (0.003 = 0.3%), not basis points (30)
+            // Pair.fee is already converted from basis points to percentage during initialization
+            // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0
+            fee: pair.fee ?? 0.003
         };
     }
     /**

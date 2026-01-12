@@ -97,7 +97,7 @@ exports.CHAINS = {
     }
 };
 // =============================================================================
-// DEX CONFIGURATIONS - 28 DEXs (S2.2.1: Arbitrum expanded 6→9)
+// DEX CONFIGURATIONS - 33 DEXs (S2.2.1: Arbitrum 6→9, S2.2.2: Base 5→7, S2.2.3: BSC 5→8)
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 exports.DEXES = {
@@ -168,7 +168,7 @@ exports.DEXES = {
             fee: 30
         }
     ],
-    // BSC: 5 DEXs (highest volume)
+    // BSC: 8 DEXs (highest volume) - S2.2.3 expanded from 5 → 8
     bsc: [
         {
             name: 'pancakeswap_v3', // [C]
@@ -204,6 +204,28 @@ exports.DEXES = {
             factoryAddress: '0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6',
             routerAddress: '0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7',
             fee: 20
+        },
+        // === S2.2.3: New DEXs (5 → 8) ===
+        {
+            name: 'mdex', // [H] - Major BSC/HECO DEX
+            chain: 'bsc',
+            factoryAddress: '0x3CD1C46068dAEa5Ebb0d3f55F6915B10648062B8',
+            routerAddress: '0x7DAe51BD3E3376B8c7c4900E9107f12Be3AF1bA8',
+            fee: 30
+        },
+        {
+            name: 'ellipsis', // [H] - Curve fork for stablecoins (low fees)
+            chain: 'bsc',
+            factoryAddress: '0xf65BEd27e96a367c61e0E06C54e14B16b84a5870',
+            routerAddress: '0x160CAed03795365F3A589f10C379FfA7d75d4E76',
+            fee: 4 // 0.04% typical for stablecoin pools
+        },
+        {
+            name: 'nomiswap', // [M] - Competitive fees
+            chain: 'bsc',
+            factoryAddress: '0xd6715A8be3944ec72738F0BFDC739571659D8010',
+            routerAddress: '0xD654953D746f0b114d1F85332Dc43446ac79413d',
+            fee: 10 // 0.1% competitive fee
         }
     ],
     // Base: 7 DEXs (fastest growing) - S2.2.2 expanded from 5 → 7

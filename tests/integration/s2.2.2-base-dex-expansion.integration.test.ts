@@ -812,16 +812,16 @@ describe('S2.2.2 Regression Tests', () => {
       expect(metricsCount).toBe(actualDexCount);
     });
 
-    it('should have 30 DEXs after S2.2.2 completion', () => {
+    it('should have 33 DEXs after S2.2.3 completion', () => {
       const totalDexes = Object.values(DEXES).flat().length;
-      // After S2.2.1 (28) + S2.2.2 (2) = 30
-      expect(totalDexes).toBe(30);
+      // After S2.2.1 (28) + S2.2.2 (2) + S2.2.3 (3) = 33
+      expect(totalDexes).toBe(33);
     });
 
     it('should have correct DEX counts per chain', () => {
       expect(DEXES.arbitrum.length).toBe(9);   // S2.2.1: 6→9
       expect(DEXES.base.length).toBe(7);       // S2.2.2: 5→7
-      expect(DEXES.bsc.length).toBe(5);        // No change yet
+      expect(DEXES.bsc.length).toBe(8);        // S2.2.3: 5→8
       expect(DEXES.polygon.length).toBe(4);
       expect(DEXES.optimism.length).toBe(3);
       expect(DEXES.ethereum.length).toBe(2);

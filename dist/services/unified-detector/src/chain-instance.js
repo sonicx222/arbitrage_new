@@ -34,6 +34,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         this.lastBlockTimestamp = 0;
         this.blockLatencies = [];
         this.isRunning = false;
+        this.isStopping = false;
         this.reconnectAttempts = 0;
         this.MAX_RECONNECT_ATTEMPTS = 5;
         this.chainId = config.chainId;
@@ -99,10 +100,12 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         }
     }
     async stop() {
-        if (!this.isRunning) {
+        if (!this.isRunning || this.isStopping) {
             return;
         }
         this.logger.info('Stopping ChainDetectorInstance', { chainId: this.chainId });
+        // Set stopping flag FIRST to prevent new event processing
+        this.isStopping = true;
         this.isRunning = false;
         // Disconnect WebSocket (P0-2 fix: remove listeners to prevent memory leak)
         if (this.wsManager) {
@@ -121,6 +124,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         // Clear latency tracking
         this.blockLatencies = [];
         this.status = 'disconnected';
+        this.isStopping = false; // Reset for potential restart
         this.emit('statusChange', this.status);
         this.logger.info('ChainDetectorInstance stopped');
     }
@@ -187,7 +191,8 @@ class ChainDetectorInstance extends events_1.EventEmitter {
                     const pairAddress = this.generatePairAddress(dex.factoryAddress, token0.address, token1.address);
                     // Convert fee from basis points to percentage for pair storage
                     // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-                    const feePercentage = dex.fee ? (0, src_2.dexFeeToPercentage)(dex.fee) : 0.003;
+                    // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
+                    const feePercentage = (0, src_2.dexFeeToPercentage)(dex.fee ?? 30);
                     const pair = {
                         address: pairAddress,
                         dex: dex.name,
@@ -275,7 +280,8 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         }
     }
     handleSyncEvent(log) {
-        if (!this.isRunning)
+        // Guard against processing during shutdown (consistent with base-detector.ts)
+        if (this.isStopping || !this.isRunning)
             return;
         try {
             const pairAddress = log.address?.toLowerCase();
@@ -308,7 +314,8 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         }
     }
     handleSwapEvent(log) {
-        if (!this.isRunning)
+        // Guard against processing during shutdown (consistent with base-detector.ts)
+        if (this.isStopping || !this.isRunning)
             return;
         try {
             const pairAddress = log.address?.toLowerCase();
@@ -353,8 +360,9 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         const reserve1 = BigInt(pair.reserve1);
         if (reserve0 === 0n || reserve1 === 0n)
             return;
-        // Calculate price (token1/token0)
-        const price = Number(reserve1 * 10n ** 18n / reserve0) / 1e18;
+        // Calculate price (token0/token1) - consistent with base-detector.ts
+        // This gives "price of token1 in terms of token0"
+        const price = Number(reserve0) / Number(reserve1);
         const priceUpdate = {
             chain: this.chainId,
             dex: pair.dex,
@@ -367,7 +375,9 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             reserve1: pair.reserve1,
             timestamp: Date.now(),
             blockNumber: pair.blockNumber,
-            latency: 0 // Calculated by downstream consumers if needed
+            latency: 0, // Calculated by downstream consumers if needed
+            // Include DEX-specific fee for accurate arbitrage calculations (S2.2.2 fix)
+            fee: pair.fee
         };
         // Publish to Redis Streams
         this.publishPriceUpdate(priceUpdate);
@@ -417,6 +427,9 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         return snapshots;
     }
     checkArbitrageOpportunity(updatedPair) {
+        // Guard against processing during shutdown (consistent with base-detector.ts)
+        if (this.isStopping || !this.isRunning)
+            return;
         // Create snapshot of the updated pair first
         const currentSnapshot = this.createPairSnapshot(updatedPair);
         if (!currentSnapshot)
@@ -427,9 +440,13 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         const pairsSnapshot = this.createPairsSnapshot();
         // Find pairs with same tokens but different DEXes
         for (const [key, otherSnapshot] of pairsSnapshot) {
+            // Skip same pair
             if (otherSnapshot.address === currentSnapshot.address)
                 continue;
-            // Check if same token pair
+            // BUG FIX: Skip same DEX - arbitrage requires different DEXes
+            if (otherSnapshot.dex === currentSnapshot.dex)
+                continue;
+            // Check if same token pair (in either order)
             if (this.isSameTokenPair(currentSnapshot, otherSnapshot)) {
                 const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
                 if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
@@ -439,9 +456,36 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             }
         }
     }
+    /**
+     * Check if two pairs represent the same token pair (in either order).
+     * Returns { sameOrder: boolean, reverseOrder: boolean }
+     */
     isSameTokenPair(pair1, pair2) {
-        return ((pair1.token0 === pair2.token0 && pair1.token1 === pair2.token1) ||
-            (pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0));
+        const token1_0 = pair1.token0.toLowerCase();
+        const token1_1 = pair1.token1.toLowerCase();
+        const token2_0 = pair2.token0.toLowerCase();
+        const token2_1 = pair2.token1.toLowerCase();
+        return ((token1_0 === token2_0 && token1_1 === token2_1) ||
+            (token1_0 === token2_1 && token1_1 === token2_0));
+    }
+    /**
+     * Check if token order is reversed between two pairs.
+     */
+    isReverseOrder(pair1, pair2) {
+        const token1_0 = pair1.token0.toLowerCase();
+        const token1_1 = pair1.token1.toLowerCase();
+        const token2_0 = pair2.token0.toLowerCase();
+        const token2_1 = pair2.token1.toLowerCase();
+        return token1_0 === token2_1 && token1_1 === token2_0;
+    }
+    /**
+     * Get minimum profit threshold for this chain from config.
+     * Uses ARBITRAGE_CONFIG.chainMinProfits for consistency with base-detector.ts.
+     */
+    getMinProfitThreshold() {
+        const chainMinProfits = src_2.ARBITRAGE_CONFIG.chainMinProfits;
+        // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
+        return chainMinProfits[this.chainId] ?? 0.003; // Default 0.3%
     }
     calculateArbitrage(pair1, pair2) {
         const reserve1_0 = BigInt(pair1.reserve0);
@@ -451,32 +495,49 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         if (reserve1_0 === 0n || reserve1_1 === 0n || reserve2_0 === 0n || reserve2_1 === 0n) {
             return null;
         }
-        // Calculate prices
-        const price1 = Number(reserve1_1) / Number(reserve1_0);
-        const price2 = Number(reserve2_1) / Number(reserve2_0);
-        const priceDiff = Math.abs(price1 - price2);
-        const avgPrice = (price1 + price2) / 2;
-        const percentageDiff = priceDiff / avgPrice;
-        // Check if profitable (basic check)
-        if (percentageDiff < 0.003) { // 0.3% minimum
+        // Calculate prices (price = token0/token1) - consistent with base-detector.ts
+        // This gives "price of token1 in terms of token0"
+        const price1 = Number(reserve1_0) / Number(reserve1_1);
+        let price2 = Number(reserve2_0) / Number(reserve2_1);
+        // BUG FIX: Adjust price for reverse order pairs
+        // If tokens are in reverse order, invert the price for accurate comparison
+        if (this.isReverseOrder(pair1, pair2) && price2 !== 0) {
+            price2 = 1 / price2;
+        }
+        // Calculate price difference as a percentage of the lower price
+        const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
+        // Use config-based profit threshold (not hardcoded)
+        const minProfitThreshold = this.getMinProfitThreshold();
+        // Calculate fee-adjusted profit
+        // Fees are stored as decimals (e.g., 0.003 for 0.3%)
+        // Use ?? instead of || to correctly handle fee: 0 (if a DEX ever has 0% fee)
+        const totalFees = (pair1.fee ?? 0.003) + (pair2.fee ?? 0.003);
+        const netProfitPct = priceDiff - totalFees;
+        // Check if profitable after fees
+        if (netProfitPct < minProfitThreshold) {
             return null;
         }
         const opportunity = {
             id: `${this.chainId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-            type: 'intra-dex',
+            type: 'simple', // Standardized with base-detector.ts
+            chain: this.chainId,
             buyDex: price1 < price2 ? pair1.dex : pair2.dex,
             sellDex: price1 < price2 ? pair2.dex : pair1.dex,
-            buyChain: this.chainId,
-            sellChain: this.chainId,
-            tokenIn: pair1.token0,
-            tokenOut: pair1.token1,
-            amountIn: '1000000000000000000', // 1 token
-            expectedProfit: priceDiff,
-            profitPercentage: percentageDiff,
+            buyPair: price1 < price2 ? pair1.address : pair2.address,
+            sellPair: price1 < price2 ? pair2.address : pair1.address,
+            token0: pair1.token0,
+            token1: pair1.token1,
+            buyPrice: Math.min(price1, price2),
+            sellPrice: Math.max(price1, price2),
+            profitPercentage: netProfitPct * 100, // Convert to percentage
+            expectedProfit: netProfitPct, // Net profit after fees
+            estimatedProfit: 0, // To be calculated by execution engine
             gasEstimate: this.detectorConfig.gasEstimate,
             confidence: this.detectorConfig.confidence,
             timestamp: Date.now(),
-            blockNumber: pair1.blockNumber
+            expiresAt: Date.now() + this.detectorConfig.expiryMs,
+            blockNumber: pair1.blockNumber,
+            status: 'pending'
         };
         return opportunity;
     }

@@ -311,7 +311,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
           // Convert fee from basis points to percentage for pair storage
           // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-          const feePercentage = dex.fee ? dexFeeToPercentage(dex.fee) : 0.003;
+          // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
+          const feePercentage = dexFeeToPercentage(dex.fee ?? 30);
 
           const pair: ExtendedPair = {
             address: pairAddress,
@@ -653,7 +654,8 @@ export class ChainDetectorInstance extends EventEmitter {
    */
   private getMinProfitThreshold(): number {
     const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
-    return chainMinProfits[this.chainId] || 0.003; // Default 0.3%
+    // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
+    return chainMinProfits[this.chainId] ?? 0.003; // Default 0.3%
   }
 
   private calculateArbitrage(

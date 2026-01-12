@@ -59,6 +59,7 @@ export interface PriceUpdate {
     blockNumber: number;
     timestamp: number;
     latency: number;
+    fee?: number;
 }
 export interface ArbitrageOpportunity {
     id: string;

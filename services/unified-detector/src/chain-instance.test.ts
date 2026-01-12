@@ -97,7 +97,8 @@ function isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
 
 function getMinProfitThreshold(chainId: string): number {
   const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
-  return chainMinProfits[chainId] || 0.003;
+  // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit
+  return chainMinProfits[chainId] ?? 0.003;
 }
 
 function calculateArbitrage(
@@ -127,7 +128,8 @@ function calculateArbitrage(
   const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
 
   // Calculate fee-adjusted profit
-  const totalFees = (pair1.fee || 0.003) + (pair2.fee || 0.003);
+  // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0
+  const totalFees = (pair1.fee ?? 0.003) + (pair2.fee ?? 0.003);
   const netProfitPct = priceDiff - totalFees;
 
   // Check against threshold
