@@ -92,6 +92,9 @@ export class ServiceStateManager extends EventEmitter {
   constructor(config: ServiceStateConfig) {
     super();
 
+    // P2-3 FIX: Set max listeners to prevent memory leak warnings
+    this.setMaxListeners(20);
+
     this.config = {
       serviceName: config.serviceName,
       transitionTimeoutMs: config.transitionTimeoutMs ?? 30000,

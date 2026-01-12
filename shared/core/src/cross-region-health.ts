@@ -513,24 +513,34 @@ export class CrossRegionHealthManager extends EventEmitter {
     }
   }
 
+  /**
+   * P1-4 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+   */
   private async fetchRemoteRegionHealth(): Promise<void> {
     if (!this.redis) return;
 
     try {
-      // Get all region health keys
-      const keys = await this.redis.keys(`${this.HEALTH_KEY_PREFIX}*`);
+      // P1-4 FIX: Use SCAN iterator instead of KEYS
+      const pattern = `${this.HEALTH_KEY_PREFIX}*`;
+      let cursor = '0';
 
-      for (const key of keys) {
-        const regionId = key.replace(this.HEALTH_KEY_PREFIX, '');
+      do {
+        // SCAN returns [cursor, keys[]]
+        const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
 
-        // Skip own region
-        if (regionId === this.config.regionId) continue;
+        for (const key of keys) {
+          const regionId = key.replace(this.HEALTH_KEY_PREFIX, '');
 
-        const healthData = await this.redis.get<RegionHealth>(key);
-        if (healthData) {
-          this.regions.set(regionId, healthData);
+          // Skip own region
+          if (regionId === this.config.regionId) continue;
+
+          const healthData = await this.redis.get<RegionHealth>(key);
+          if (healthData) {
+            this.regions.set(regionId, healthData);
+          }
         }
-      }
+      } while (cursor !== '0');
     } catch (error) {
       this.logger.error('Failed to fetch remote region health', { error });
     }

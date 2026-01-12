@@ -526,8 +526,19 @@ export async function getDistributedLockManager(config?: LockConfig): Promise<Di
 
 /**
  * Reset the singleton instance (for testing).
+ * P2-4 FIX: Wait for pending initialization before resetting
  */
 export async function resetDistributedLockManager(): Promise<void> {
+  // P2-4 FIX: If initialization is in progress, wait for it to complete
+  // This prevents race conditions during test cleanup
+  if (lockManagerPromise && !lockManagerInstance) {
+    try {
+      await lockManagerPromise;
+    } catch {
+      // Ignore init errors - we're resetting anyway
+    }
+  }
+
   if (lockManagerInstance) {
     await lockManagerInstance.shutdown();
   }
