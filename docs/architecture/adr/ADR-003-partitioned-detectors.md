@@ -1,7 +1,7 @@
 # ADR-003: Partitioned Chain Detectors
 
 ## Status
-**Implemented** | 2025-01-10 | Updated 2025-01-11
+**Implemented** | 2025-01-10 | Updated 2025-01-12 (Solana P4 added)
 
 ## Implementation Status
 
@@ -84,8 +84,37 @@ Adopt **Partitioned Chain Detectors** where multiple chains are grouped into a s
 |-----------|--------|-----------|------------|
 | **P1: Asia-Fast** | BSC, Polygon, Avalanche, Fantom | Sub-5s blocks, Asia validators | Oracle Cloud Singapore |
 | **P2: L2-Fast** | Arbitrum, Optimism, Base | Sub-1s blocks, shared sequencers | Fly.io Singapore |
-| **P3: High-Value** | Ethereum, zkSync, Linea, Scroll | Higher value, more analysis needed | Oracle Cloud US-East |
-| **P4: Non-EVM** | Solana (future) | Different SDK requirements | Fly.io US |
+| **P3: High-Value** | Ethereum, zkSync, Linea | Higher value, more analysis needed | Oracle Cloud US-East |
+| **P4: Solana** | Solana | Non-EVM, @solana/web3.js, 400ms blocks | Fly.io US-West |
+
+### P4: Solana Partition Details
+
+Solana requires a dedicated partition due to fundamental architectural differences:
+
+| Aspect | EVM Partitions (P1-P3) | Solana (P4) |
+|--------|------------------------|-------------|
+| SDK | ethers.js | @solana/web3.js |
+| Event Model | Contract event logs | Program account subscriptions |
+| RPC Method | eth_subscribe (logs) | accountSubscribe |
+| Block Time | 2-12 seconds | ~400ms (slot time) |
+| Finality | 2-60 confirmations | ~32 slots (~13s) |
+| MEV Protection | Flashbots, private pools | Jito bundles |
+| DEX Architecture | Factory + pairs | Program accounts |
+
+**Solana DEXs Monitored (7)**:
+- Jupiter (aggregator)
+- Raydium AMM + CLMM
+- Orca Whirlpools
+- Meteora DLMM
+- Phoenix (order book)
+- Lifinity
+
+**Why Separate Partition**:
+1. Different technology stack (not ethers.js compatible)
+2. Different event subscription model
+3. Different RPC rate limits (Helius vs EVM providers)
+4. Different performance characteristics
+5. Isolated failure domain
 
 ### Implementation
 
@@ -198,28 +227,45 @@ Deploying detectors near validators reduces event latency by 20-50ms.
 
 ```typescript
 function assignChainToPartition(chain: ChainConfig): PartitionConfig {
-  // Rule 1: Non-EVM chains get dedicated partition
-  if (!chain.isEVM) {
-    return PARTITIONS.NON_EVM;
+  // Rule 1: Solana gets dedicated partition (non-EVM)
+  if (chain.id === 'solana' || !chain.isEVM) {
+    return PARTITIONS.SOLANA;  // P4
   }
 
-  // Rule 2: Group by block time
+  // Rule 2: L2 rollups with sub-1s blocks
   if (chain.blockTime < 1) {
-    return PARTITIONS.L2_FAST;
+    return PARTITIONS.L2_FAST;  // P2
   }
 
-  // Rule 3: High-value chains (Ethereum + L2s) together
+  // Rule 3: High-value chains (Ethereum + ZK rollups)
   if (chain.id === 1 || chain.isZkRollup) {
-    return PARTITIONS.HIGH_VALUE;
+    return PARTITIONS.HIGH_VALUE;  // P3
   }
 
-  // Rule 4: Fast Asian chains together
+  // Rule 4: Fast Asian chains (sub-5s blocks)
   if (chain.blockTime < 5) {
-    return PARTITIONS.ASIA_FAST;
+    return PARTITIONS.ASIA_FAST;  // P1
   }
 
   // Default: High-value partition
   return PARTITIONS.HIGH_VALUE;
+}
+
+// Solana-specific detector initialization
+async function initializeSolanaPartition(): Promise<void> {
+  const connection = new Connection(
+    process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    { wsEndpoint: process.env.SOLANA_WS_URL }
+  );
+
+  // Subscribe to DEX program accounts
+  for (const dex of SOLANA_DEXS) {
+    connection.onProgramAccountChange(
+      new PublicKey(dex.programId),
+      (accountInfo) => processSolanaSwap(dex, accountInfo),
+      'confirmed'
+    );
+  }
 }
 ```
 
@@ -259,8 +305,10 @@ No new service creation required.
 
 ## Confidence Level
 
-**90%** - High confidence based on:
+**92%** - High confidence based on:
 - Clear resource math supporting partition approach
 - Proven pattern in multi-tenant systems
 - Reversible if needed (can split partitions)
 - Aligns with free hosting constraints
+- Solana partition (P4) isolates non-EVM complexity
+- Mature Solana tooling reduces integration risk

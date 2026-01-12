@@ -216,8 +216,12 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
 
   private async initializeWebSocket(): Promise<void> {
+    // Use wsUrl, fallback to rpcUrl if not available
+    const primaryWsUrl = this.chainConfig.wsUrl || this.chainConfig.rpcUrl;
+
     const wsConfig: WebSocketConfig = {
-      url: this.chainConfig.wsUrl,
+      url: primaryWsUrl,
+      fallbackUrls: this.chainConfig.wsFallbackUrls,
       reconnectInterval: 5000,
       maxReconnectAttempts: this.MAX_RECONNECT_ATTEMPTS,
       pingInterval: 30000,
@@ -225,6 +229,7 @@ export class ChainDetectorInstance extends EventEmitter {
     };
 
     this.wsManager = new WebSocketManager(wsConfig);
+    this.logger.info(`WebSocket configured with ${1 + (this.chainConfig.wsFallbackUrls?.length || 0)} URL(s)`);
 
     // Set up WebSocket event handlers
     this.wsManager.on('message', (message) => {

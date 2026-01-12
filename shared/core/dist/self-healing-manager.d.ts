@@ -36,7 +36,13 @@ export declare class SelfHealingManager {
     private circuitBreakers;
     private isRunning;
     private healthUpdateLocks;
+    private initializationPromise;
     constructor();
+    /**
+     * P1-2-FIX: Ensure the manager is fully initialized before operations.
+     * Call this before performing any operations that require the streams client.
+     */
+    ensureInitialized(): Promise<void>;
     /**
      * P1-16 FIX: Initialize Redis Streams client for dual-publish pattern.
      */

@@ -54,8 +54,18 @@ export const CHAINS: Record<string, Chain> = {
   optimism: {
     id: 10,
     name: 'Optimism',
-    rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://mainnet.optimism.io',
-    wsUrl: process.env.OPTIMISM_WS_URL || 'wss://mainnet.optimism.io',
+    rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+    wsUrl: process.env.OPTIMISM_WS_URL || 'wss://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+    wsFallbackUrls: [
+      'wss://mainnet.optimism.io',
+      'wss://optimism.publicnode.com',
+      'wss://optimism-mainnet.public.blastapi.io'
+    ],
+    rpcFallbackUrls: [
+      'https://mainnet.optimism.io',
+      'https://optimism.publicnode.com',
+      'https://optimism-mainnet.public.blastapi.io'
+    ],
     blockTime: 2,
     nativeToken: 'ETH'
   },

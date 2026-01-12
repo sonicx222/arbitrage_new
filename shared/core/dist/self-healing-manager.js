@@ -9,6 +9,29 @@ const logger_1 = require("./logger");
 const redis_1 = require("./redis");
 const redis_streams_1 = require("./redis-streams");
 const circuit_breaker_1 = require("./circuit-breaker");
+// P2-2-FIX: Import config with fallback for test environment
+let SYSTEM_CONSTANTS;
+try {
+    SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+}
+catch {
+    // Config not available, will use defaults
+}
+// P2-2-FIX: Default values for when config is not available
+const SELF_HEALING_DEFAULTS = {
+    circuitBreakerCooldownMs: SYSTEM_CONSTANTS?.selfHealing?.circuitBreakerCooldownMs ?? 60000,
+    healthCheckFailureThreshold: SYSTEM_CONSTANTS?.selfHealing?.healthCheckFailureThreshold ?? 3,
+    gracefulDegradationThreshold: SYSTEM_CONSTANTS?.selfHealing?.gracefulDegradationThreshold ?? 10,
+    maxRestartDelayMs: SYSTEM_CONSTANTS?.selfHealing?.maxRestartDelayMs ?? 300000,
+    simulatedRestartDelayMs: SYSTEM_CONSTANTS?.selfHealing?.simulatedRestartDelayMs ?? 2000,
+    simulatedRestartFailureRate: SYSTEM_CONSTANTS?.selfHealing?.simulatedRestartFailureRate ?? 0.2,
+};
+const CIRCUIT_BREAKER_DEFAULTS = {
+    failureThreshold: SYSTEM_CONSTANTS?.circuitBreaker?.defaultFailureThreshold ?? 3,
+    recoveryTimeoutMs: SYSTEM_CONSTANTS?.circuitBreaker?.defaultRecoveryTimeoutMs ?? 30000,
+    monitoringPeriodMs: SYSTEM_CONSTANTS?.circuitBreaker?.defaultMonitoringPeriodMs ?? 60000,
+    successThreshold: SYSTEM_CONSTANTS?.circuitBreaker?.defaultSuccessThreshold ?? 2,
+};
 const logger = (0, logger_1.createLogger)('self-healing-manager');
 class SelfHealingManager {
     constructor() {
@@ -25,8 +48,15 @@ class SelfHealingManager {
         // P2-FIX: Lock to prevent concurrent health check updates for the same service
         this.healthUpdateLocks = new Map();
         this.initializeRecoveryStrategies();
-        // P1-16 FIX: Initialize streams client asynchronously
-        this.initializeStreamsClient();
+        // P1-2-FIX: Store promise so we can await it before using streams client
+        this.initializationPromise = this.initializeStreamsClient();
+    }
+    /**
+     * P1-2-FIX: Ensure the manager is fully initialized before operations.
+     * Call this before performing any operations that require the streams client.
+     */
+    async ensureInitialized() {
+        await this.initializationPromise;
     }
     /**
      * P1-16 FIX: Initialize Redis Streams client for dual-publish pattern.
@@ -75,11 +105,12 @@ class SelfHealingManager {
             uptime: 0
         });
         // Create circuit breaker for health checks
+        // P2-2-FIX: Use configured constants instead of magic numbers
         const circuitBreaker = (0, circuit_breaker_1.createCircuitBreaker)(`${serviceDef.name}-health-check`, {
-            failureThreshold: 3,
-            recoveryTimeout: 30000,
-            monitoringPeriod: 60000,
-            successThreshold: 2
+            failureThreshold: CIRCUIT_BREAKER_DEFAULTS.failureThreshold,
+            recoveryTimeout: CIRCUIT_BREAKER_DEFAULTS.recoveryTimeoutMs,
+            monitoringPeriod: CIRCUIT_BREAKER_DEFAULTS.monitoringPeriodMs,
+            successThreshold: CIRCUIT_BREAKER_DEFAULTS.successThreshold
         });
         this.circuitBreakers.set(serviceDef.name, circuitBreaker);
         logger.info(`Registered service for self-healing: ${serviceDef.name}`);
@@ -88,6 +119,8 @@ class SelfHealingManager {
     async start() {
         if (this.isRunning)
             return;
+        // P1-2-FIX: Ensure async initialization is complete before starting
+        await this.ensureInitialized();
         this.isRunning = true;
         logger.info('Self-healing manager started');
         // Start health monitoring for all registered services
@@ -185,10 +218,11 @@ class SelfHealingManager {
                 if (breaker) {
                     breaker.forceOpen();
                     // Schedule automatic recovery after cooldown
+                    // P2-2-FIX: Use configured constant instead of magic number
                     setTimeout(() => {
                         logger.info(`Testing recovery for ${service.name}`);
                         this.performHealthCheck(service.name);
-                    }, 60000); // 1 minute cooldown
+                    }, SELF_HEALING_DEFAULTS.circuitBreakerCooldownMs);
                 }
                 return true;
             }
@@ -230,7 +264,8 @@ class SelfHealingManager {
                 const serviceDef = this.services.get(service.name);
                 if (!serviceDef)
                     return false;
-                const delay = Math.min(serviceDef.restartDelay * Math.pow(2, service.restartCount), 300000); // Max 5 minutes
+                // P2-2-FIX: Use configured constant instead of magic number
+                const delay = Math.min(serviceDef.restartDelay * Math.pow(2, service.restartCount), SELF_HEALING_DEFAULTS.maxRestartDelayMs);
                 logger.info(`Executing escalated restart for ${service.name} with ${delay}ms delay`);
                 return new Promise((resolve) => {
                     setTimeout(async () => {
@@ -251,7 +286,8 @@ class SelfHealingManager {
             name: 'graceful_degradation',
             priority: 50,
             canHandle: (service, error) => {
-                return service.consecutiveFailures >= 10;
+                // P2-2-FIX: Use configured constant instead of magic number
+                return service.consecutiveFailures >= SELF_HEALING_DEFAULTS.gracefulDegradationThreshold;
             },
             execute: async (service) => {
                 logger.warn(`Activating graceful degradation for ${service.name}`);
@@ -332,7 +368,8 @@ class SelfHealingManager {
                     consecutiveFailures: newFailureCount
                 });
                 // Trigger recovery if needed (using the captured count to avoid race)
-                if (newFailureCount >= 3) {
+                // P2-2-FIX: Use configured constant instead of magic number
+                if (newFailureCount >= SELF_HEALING_DEFAULTS.healthCheckFailureThreshold) {
                     await this.executeRecoveryStrategies(serviceDef, health);
                 }
             }
@@ -420,10 +457,11 @@ class SelfHealingManager {
         return health ? health.status === 'healthy' : false;
     }
     async simulateServiceRestart(serviceDef) {
+        // P2-2-FIX: Use configured constants instead of magic numbers
         // Simulate restart delay
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, SELF_HEALING_DEFAULTS.simulatedRestartDelayMs));
         // Simulate occasional restart failures
-        if (Math.random() < 0.2) { // 20% failure rate
+        if (Math.random() < SELF_HEALING_DEFAULTS.simulatedRestartFailureRate) {
             throw new Error('Simulated restart failure');
         }
     }

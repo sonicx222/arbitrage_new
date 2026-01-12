@@ -155,6 +155,72 @@ export declare function calculateBridgeCostUsd(sourceChain: string, targetChain:
     latency: number;
     bridge: string;
 } | undefined;
+export declare const SYSTEM_CONSTANTS: {
+    redis: {
+        /** Maximum message size in bytes for Redis pub/sub (1MB) */
+        maxMessageSize: number;
+        /** Maximum channel name length */
+        maxChannelNameLength: number;
+        /** Default SCAN batch size for iterating keys */
+        scanBatchSize: number;
+        /** Default TTL for health data in seconds */
+        healthDataTtl: number;
+        /** Default TTL for metrics data in seconds */
+        metricsDataTtl: number;
+        /** Maximum rolling metrics entries */
+        maxRollingMetrics: number;
+        /** Disconnect timeout in milliseconds */
+        disconnectTimeout: number;
+    };
+    cache: {
+        /** Average entry size estimate in bytes for L1 capacity calculation */
+        averageEntrySize: number;
+        /** Default L1 cache size in MB */
+        defaultL1SizeMb: number;
+        /** Default L2 TTL in seconds */
+        defaultL2TtlSeconds: number;
+        /** Auto-demotion threshold in milliseconds */
+        demotionThresholdMs: number;
+        /** Minimum access count before demotion */
+        minAccessCountBeforeDemotion: number;
+    };
+    selfHealing: {
+        /** Circuit breaker recovery cooldown in milliseconds */
+        circuitBreakerCooldownMs: number;
+        /** Health check failure threshold before recovery */
+        healthCheckFailureThreshold: number;
+        /** Graceful degradation failure threshold */
+        gracefulDegradationThreshold: number;
+        /** Maximum restart delay in milliseconds */
+        maxRestartDelayMs: number;
+        /** Simulated restart delay for testing in milliseconds */
+        simulatedRestartDelayMs: number;
+        /** Simulated restart failure rate (0-1) */
+        simulatedRestartFailureRate: number;
+    };
+    webSocket: {
+        /** Default reconnect delay in milliseconds */
+        defaultReconnectDelayMs: number;
+        /** Maximum reconnect delay in milliseconds */
+        maxReconnectDelayMs: number;
+        /** Reconnect backoff multiplier */
+        reconnectBackoffMultiplier: number;
+        /** Maximum reconnect attempts */
+        maxReconnectAttempts: number;
+        /** Connection timeout in milliseconds */
+        connectionTimeoutMs: number;
+    };
+    circuitBreaker: {
+        /** Default failure threshold */
+        defaultFailureThreshold: number;
+        /** Default recovery timeout in milliseconds */
+        defaultRecoveryTimeoutMs: number;
+        /** Default monitoring period in milliseconds */
+        defaultMonitoringPeriodMs: number;
+        /** Default success threshold for closing */
+        defaultSuccessThreshold: number;
+    };
+};
 export * from './partitions';
 export { PARTITIONS, PartitionConfig, getPartition, getPartitionFromEnv, assignChainToPartition } from './partitions';
 //# sourceMappingURL=index.d.ts.map

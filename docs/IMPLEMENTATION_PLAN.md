@@ -1,9 +1,9 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.1
+> **Version**: 1.2
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-10 (Coordinator alignment completed)
+> **Last Updated**: 2025-01-12 (S2.1.4 WebSocket fallback URLs completed)
 
 ---
 
@@ -30,11 +30,11 @@
 - **Architecture**: Hybrid Microservices + Event-Driven (Pub/Sub)
 
 ### Target State (Phase 3 Complete)
-- **Chains**: 10 (+ Optimism, Avalanche, Fantom, zkSync, Linea)
-- **DEXs**: 55
-- **Tokens**: 150 (~500 pairs)
-- **Detection Latency**: <50ms
-- **Architecture**: Optimized with Redis Streams, L1 Cache, Partitioned Detectors
+- **Chains**: 11 (+ Optimism, Avalanche, Fantom, zkSync, Linea, **Solana**)
+- **DEXs**: 62 (55 EVM + 7 Solana)
+- **Tokens**: 165 (~600 pairs)
+- **Detection Latency**: <50ms (EVM), <100ms (Solana)
+- **Architecture**: Optimized with Redis Streams, L1 Cache, Partitioned Detectors + Solana Partition
 
 ### Implementation Timeline
 | Phase | Duration | Focus | Confidence |
@@ -371,9 +371,19 @@
     - All addresses verified for Optimism (chainId: 10)
     - COMPLETED: Already in shared/config/src (Phase 1)
 
-[ ] S2.1.4 Configure WebSocket connection
-    - Primary: Alchemy/Infura WS
-    - Fallback: Public endpoint
+[x] S2.1.4 Configure WebSocket connection
+    - Primary: Alchemy WS (wss://opt-mainnet.g.alchemy.com/v2/{ALCHEMY_OPTIMISM_KEY})
+    - Fallback: Public endpoints (mainnet.optimism.io, optimism.publicnode.com, blastapi.io)
+    - WebSocketManager updated with fallback URL support
+    - Chain type extended with wsFallbackUrls and rpcFallbackUrls
+    - Tests: shared/core/src/websocket-manager.test.ts (27 tests)
+    - Files modified:
+      - shared/types/index.ts (Chain interface)
+      - shared/config/src/index.ts (Optimism config)
+      - shared/core/src/websocket-manager.ts (fallback support)
+      - services/unified-detector/src/chain-instance.ts (fallback integration)
+      - infrastructure/docker/.env.partition.example (documentation)
+    - COMPLETED: 2025-01-12
 
 [x] S2.1.5 Integration testing
     - tests/integration/s2.1-optimism-integration.test.ts (79 tests)
@@ -434,10 +444,11 @@
     - Accepts array of chains
     - Manages multiple WebSocket connections
 
-[ ] S3.1.2 Implement partition assignment
-    - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom)
-    - P2: L2-Turbo (Arbitrum, Optimism, Base)
-    - P3: High-Value (Ethereum, zkSync, Linea)
+[ ] S3.1.2 Implement partition assignment (4 partitions)
+    - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
+    - P2: L2-Turbo (Arbitrum, Optimism, Base) - Ethereum L2 rollups
+    - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
+    - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
 
 [ ] S3.1.3 Create P1 detector service
     - services/partition-asia-fast/
@@ -451,7 +462,13 @@
     - services/partition-high-value/
     - Deploy to Oracle Cloud US-East
 
-[ ] S3.1.6 Migrate existing detectors
+[ ] S3.1.6 Create P4 Solana detector service
+    - services/partition-solana/
+    - Uses @solana/web3.js instead of ethers.js
+    - Subscribes to program account changes
+    - Deploy to Fly.io US-West (low latency to Solana validators)
+
+[ ] S3.1.7 Migrate existing detectors
     - Deprecate single-chain detectors
     - Route all traffic through partitions
 ```
@@ -482,6 +499,96 @@
     - AVAX-BSC arbitrage paths
     - FTM-Polygon arbitrage paths
 ```
+
+---
+
+#### S3.3: Solana Blockchain Integration
+**Status**: `[ ] Not Started`
+**Priority**: P0 | **Effort**: 5 days | **Confidence**: 80%
+
+**Hypothesis**: Solana adds 25-35% more arbitrage opportunities due to high DEX volume, fast finality (~400ms), and low fees.
+
+**Why Solana is Critical for Arbitrage**:
+- **Volume**: $1-2B+ daily DEX volume (top 3 globally)
+- **Speed**: ~400ms block time enables faster arbitrage execution
+- **Fees**: <$0.001 per transaction enables micro-arbitrage
+- **Ecosystem**: Unique tokens (memecoins, LSTs) not on EVM chains
+- **Cross-chain**: SOL/USDC pairs bridge to EVM opportunities
+
+**Tasks**:
+```
+[ ] S3.3.1 Create Solana detector base infrastructure
+    - File: shared/core/src/solana-detector.ts
+    - Uses @solana/web3.js for RPC/WebSocket
+    - Different architecture: Program account subscriptions vs event logs
+    - Connection pooling for RPC rate limits
+    - Tests: shared/core/src/solana-detector.test.ts
+
+[ ] S3.3.2 Add Solana DEX configurations (7 DEXs)
+    - Jupiter (aggregator): Program ID JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
+    - Raydium AMM: Program ID 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
+    - Raydium CLMM: Program ID CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
+    - Orca Whirlpools: Program ID whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc
+    - Meteora DLMM: Program ID LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo
+    - Phoenix: Program ID PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY
+    - Lifinity: Program ID 2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c
+    - Config: shared/config/src/chains/solana.ts
+
+[ ] S3.3.3 Add Solana token configurations (15 tokens)
+    - SOL (native): So11111111111111111111111111111111111111112
+    - USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+    - USDT: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+    - JUP: JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN
+    - RAY: 4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R
+    - ORCA: orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE
+    - BONK: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+    - WIF: EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm
+    - JTO: jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL
+    - PYTH: HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3
+    - mSOL: mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So
+    - jitoSOL: J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn
+    - BSOL: bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1
+    - W (Wormhole): 85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ
+    - MNDE: MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey
+
+[ ] S3.3.4 Implement Solana swap event parsing
+    - Parse Jupiter swap instructions
+    - Parse Raydium swap events
+    - Parse Orca Whirlpool swaps
+    - Handle Solana's instruction format (not event logs)
+    - File: shared/core/src/solana-swap-parser.ts
+
+[ ] S3.3.5 Create Solana price feed integration
+    - Subscribe to Raydium pool account updates
+    - Subscribe to Orca pool account updates
+    - Real-time price updates via accountSubscribe
+    - File: shared/core/src/solana-price-feed.ts
+
+[ ] S3.3.6 Implement Solana-specific arbitrage detection
+    - Intra-Solana arbitrage (between Solana DEXs)
+    - Cross-chain price comparison (SOL-USDC vs EVM)
+    - Account for Solana's priority fees
+    - File: services/partition-solana/src/arbitrage-detector.ts
+
+[ ] S3.3.7 Deploy and test Solana partition (P4)
+    - services/partition-solana/
+    - WebSocket to Helius/Triton RPC (free tier)
+    - Fallback: Public Solana RPC
+    - Integration tests with devnet
+```
+
+**Solana-Specific Considerations**:
+- **RPC Limits**: Helius free tier: 100K credits/day (~10K getAccountInfo calls)
+- **WebSocket**: accountSubscribe more efficient than polling
+- **Program IDs**: Different from EVM contract addresses
+- **Instruction Parsing**: Solana uses instructions, not event logs
+- **Priority Fees**: Dynamic fees based on compute units
+
+**Validation**:
+- [ ] Solana detector connects and receives account updates
+- [ ] Price updates from Raydium/Orca pools
+- [ ] Arbitrage detection working for SOL/USDC pairs
+- [ ] Cross-chain price comparison operational
 
 ---
 
@@ -634,11 +741,13 @@
 | Sprint | Total Tasks | Completed | In Progress | Blocked |
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
-| Sprint 2 | 10 | 4 | 0 | 0 |
-| Sprint 3 | 10 | 0 | 0 | 0 |
+| Sprint 2 | 10 | 5 | 0 | 0 |
+| Sprint 3 | 18 | 0 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 1 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **59** | **25** | **1** | **0** |
+| **Total** | **67** | **26** | **1** | **0** |
+
+*Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 
 ---
 
@@ -681,17 +790,18 @@
 ### Checkpoint 3: End of Sprint 4
 **Date**: Day 28
 **Validation Tasks**:
-- [ ] Partitioned architecture deployed
-- [ ] 9 chains operational
+- [ ] Partitioned architecture deployed (4 partitions: P1-P4)
+- [ ] 10 chains operational (including Solana)
 - [ ] Failover tested successfully
-- [ ] Detection latency <75ms
+- [ ] Detection latency <75ms (EVM), <100ms (Solana)
 
 **Success Metrics**:
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Chains | 9 | TBD |
-| DEXs | 45 | TBD |
-| Latency | <75ms | TBD |
+| Chains | 10 (9 EVM + Solana) | TBD |
+| DEXs | 52 (45 EVM + 7 Solana) | TBD |
+| Latency (EVM) | <75ms | TBD |
+| Latency (Solana) | <100ms | TBD |
 | Failover time | <60s | TBD |
 
 ---
@@ -699,19 +809,21 @@
 ### Checkpoint 4: End of Sprint 6 (Final)
 **Date**: Day 42
 **Validation Tasks**:
-- [ ] All 10 chains operational
-- [ ] 55 DEXs monitored
-- [ ] 150 tokens, ~500 pairs
+- [ ] All 11 chains operational (10 EVM + Solana)
+- [ ] 62 DEXs monitored (55 EVM + 7 Solana)
+- [ ] 165 tokens, ~600 pairs
 - [ ] 99.9% uptime achieved
+- [ ] Solana partition fully operational
 
 **Success Metrics**:
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Chains | 10 | TBD |
-| DEXs | 55 | TBD |
-| Tokens | 150 | TBD |
-| Opportunities/day | 780+ | TBD |
-| Detection latency | <50ms | TBD |
+| Chains | 11 (10 EVM + Solana) | TBD |
+| DEXs | 62 (55 EVM + 7 Solana) | TBD |
+| Tokens | 165 | TBD |
+| Opportunities/day | 950+ | TBD |
+| Detection latency (EVM) | <50ms | TBD |
+| Detection latency (Solana) | <100ms | TBD |
 | Uptime | 99.9% | TBD |
 
 ---
@@ -727,6 +839,10 @@
 | DEX contract changes | Low | High | Monitoring, quick config updates |
 | Free tier policy changes | Low | Critical | Backup provider allocation ready |
 | Performance regression | Medium | Medium | Benchmarking in CI/CD |
+| Solana RPC rate limits | High | High | Helius free tier + fallback RPCs, WebSocket over polling |
+| Solana network congestion | Medium | Medium | Priority fee estimation, retry with backoff |
+| Solana program upgrades | Low | High | Monitor program authorities, version tracking |
+| Non-EVM complexity | Medium | Medium | Dedicated Solana expertise, comprehensive testing |
 
 ### Contingency Plans
 
@@ -744,6 +860,17 @@
 1. Execute backup allocation plan (ADR-006)
 2. Move to alternative providers
 3. Consider minimal paid tier ($10/month max)
+
+**If Solana RPC limits exceeded**:
+1. Switch to Triton (free tier) or QuickNode
+2. Reduce accountSubscribe frequency
+3. Batch multiple account queries
+4. Use getProgramAccounts with filters for efficiency
+
+**If Solana integration blocked**:
+1. Focus on EVM chains first (still delivers 70% value)
+2. Explore Solana RPC alternatives (Syndica, Chainstack)
+3. Consider Solana-specific monitoring services (Birdeye API)
 
 ---
 
@@ -811,12 +938,34 @@ npm run typecheck
 | H1 | Hybrid architecture scales to 15+ chains | 92% | Pending | - |
 | H2 | Redis Streams reduces commands 98% | 88% | Pending | - |
 | H3 | Smart swap filtering retains 100% signal | 88% | Pending | - |
-| H4 | <50ms detection latency achievable | 80% | Pending | - |
+| H4 | <50ms detection latency achievable (EVM) | 80% | Pending | - |
 | H5 | 99.9% uptime with free hosting | 85% | Pending | - |
-| H6 | 10 chains captures 90%+ arb volume | 92% | Pending | - |
-| H7 | 55 DEXs provides competitive coverage | 90% | Pending | - |
-| H8 | 500 pairs fits in L1 cache (16KB) | 95% | Pending | - |
-| H9 | Phase 3 achieves 780+ opps/day | 85% | Pending | - |
+| H6 | 11 chains captures 95%+ arb volume | 94% | Pending | - |
+| H7 | 62 DEXs provides competitive coverage | 92% | Pending | - |
+| H8 | 600 pairs fits in L1 cache (20KB) | 95% | Pending | - |
+| H9 | Phase 3 achieves 950+ opps/day | 85% | Pending | - |
+| H10 | Solana adds 25-35% more arb opportunities | 80% | Pending | - |
+| H11 | Solana detection <100ms achievable | 75% | Pending | - |
+| H12 | Solana RPC free tier sufficient (Helius) | 70% | Pending | - |
+| H13 | Cross-chain SOL-EVM arbitrage viable | 65% | Pending | - |
+
+---
+
+## Appendix: Partition Architecture Summary
+
+| Partition | Chains | Focus | Deployment | Rationale |
+|-----------|--------|-------|------------|-----------|
+| P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | High-throughput EVM | Oracle Cloud Singapore | Low latency to Asian validators |
+| P2: L2-Turbo | Arbitrum, Optimism, Base | Ethereum L2 rollups | Fly.io Singapore | L2 sequencer proximity |
+| P3: High-Value | Ethereum, zkSync, Linea | High-value chains | Oracle Cloud US-East | Ethereum mainnet focus |
+| P4: Solana-Native | Solana | Non-EVM ecosystem | Fly.io US-West | Solana validator proximity |
+
+**Why Solana is a Separate Partition**:
+1. **Non-EVM**: Requires @solana/web3.js, completely different tech stack
+2. **Different Event Model**: Account subscriptions vs EVM event logs
+3. **Unique DEX Architecture**: AMMs, CLMMs, order books (Phoenix)
+4. **RPC Differences**: Different rate limits, different APIs
+5. **Optimization**: Dedicated resources for Solana's high-throughput needs
 
 ---
 
