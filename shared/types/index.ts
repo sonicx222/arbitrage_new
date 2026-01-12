@@ -18,7 +18,7 @@ export interface Dex {
   chain: string;
   factoryAddress: string;
   routerAddress: string;
-  fee: number; // in basis points (e.g., 25 = 0.25%)
+  fee: number; // Config stores in basis points (e.g., 30 = 0.30%). Use dexFeeToPercentage() to convert.
   enabled?: boolean; // Optional: defaults to true if not specified
 }
 
@@ -36,7 +36,7 @@ export interface Pair {
   token0: string; // Token address
   token1: string; // Token address
   dex: string;    // DEX name
-  fee?: number;   // Fee in basis points
+  fee?: number;   // Fee as decimal percentage (e.g., 0.003 = 0.3%). Converted from Dex.fee at initialization.
   reserve0?: string;
   reserve1?: string;
   blockNumber?: number;
@@ -68,6 +68,7 @@ export interface PriceUpdate {
   blockNumber: number;
   timestamp: number;
   latency: number;
+  fee?: number; // DEX fee in decimal percentage (e.g., 0.003 = 0.3%)
 }
 
 export interface ArbitrageOpportunity {

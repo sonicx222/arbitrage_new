@@ -1,9 +1,9 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.2
+> **Version**: 1.3
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-12 (S2.2.1 Arbitrum DEXs expanded to 9)
+> **Last Updated**: 2025-01-12 (S2.2.2 Base DEXs expanded to 7, critical bug fixes)
 
 ---
 
@@ -413,12 +413,20 @@
     - Tests: shared/config/src/dex-expansion.test.ts (25 tests)
     - COMPLETED: 2025-01-12
 
-[ ] S2.2.2 Add Base DEXs (1 → 7)
-    - Add: Aerodrome, BaseSwap, SushiSwap, Maverick, SwapBased, Synthswap
-    - Verify factory addresses
+[x] S2.2.2 Add Base DEXs (5 → 7)
+    - Added: Maverick (1bp dynamic fee), Alienbase
+    - Existing: Uniswap V3, Aerodrome, BaseSwap, SushiSwap, SwapBased
+    - Tests: tests/integration/s2.2.2-base-dex-expansion.integration.test.ts (91 tests)
+    - Bug fixes during implementation:
+      * Fixed missing fee in chain-instance PriceUpdate (critical for arbitrage accuracy)
+      * Standardized price formula (reserve0/reserve1) across all detectors
+      * Changed profit calculation from gross to NET (minus fees)
+      * Fixed || to ?? for fee handling (supports 0% fee DEXs)
+    - Regression tests added to prevent recurrence
+    - COMPLETED: 2025-01-12
 
-[ ] S2.2.3 Add BSC DEXs (3 → 8)
-    - Add: PancakeSwap V3, THENA, BabyDogeSwap, Nomiswap, KnightSwap
+[ ] S2.2.3 Add BSC DEXs (5 → 8)
+    - Add: 3 additional DEXs (TBD)
     - Verify factory addresses
 
 [ ] S2.2.4 Expand token coverage to 60
@@ -744,11 +752,11 @@
 | Sprint | Total Tasks | Completed | In Progress | Blocked |
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
-| Sprint 2 | 10 | 6 | 0 | 0 |
+| Sprint 2 | 10 | 7 | 0 | 0 |
 | Sprint 3 | 18 | 0 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **27** | **0** | **0** |
+| **Total** | **67** | **28** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 

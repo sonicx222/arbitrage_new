@@ -192,7 +192,7 @@ function createMockPair(overrides?: Partial<ExtendedPair>): ExtendedPair {
     token0: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
     token1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
     dex: 'uniswap_v2',
-    fee: 30,
+    fee: 0.003, // Fee as decimal percentage (0.3%), matching production Pair.fee format
     reserve0: '1000000000000000000000', // 1000 ETH
     reserve1: '2500000000000',          // 2,500,000 USDC (6 decimals)
     blockNumber: 18000000,
@@ -518,7 +518,7 @@ describe('BaseDetector', () => {
           token1: '0xtoken1',
           reserve0: '1000000000000000000000',
           reserve1: '2500000000000',
-          fee: 30
+          fee: 0.003 // Decimal percentage (0.3%)
         };
 
         const price = detector.testCalculatePriceFromSnapshot(snapshot);
@@ -534,7 +534,7 @@ describe('BaseDetector', () => {
           token1: '0xtoken1',
           reserve0: '0',
           reserve1: '2500000000000',
-          fee: 30
+          fee: 0.003 // Decimal percentage (0.3%)
         };
 
         const price = detector.testCalculatePriceFromSnapshot(snapshot);
@@ -585,7 +585,8 @@ describe('BaseDetector', () => {
 
         const snapshot = detector.testCreatePairSnapshot(pair);
 
-        expect(snapshot!.fee).toBe(30); // Default fee
+        // Default fee is 0.003 (0.3%) in decimal format, not basis points
+        expect(snapshot!.fee).toBe(0.003);
       });
     });
 

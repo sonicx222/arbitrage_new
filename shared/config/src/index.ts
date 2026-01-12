@@ -81,7 +81,7 @@ export const CHAINS: Record<string, Chain> = {
 };
 
 // =============================================================================
-// DEX CONFIGURATIONS - 28 DEXs (S2.2.1: Arbitrum expanded 6→9)
+// DEX CONFIGURATIONS - 30 DEXs (S2.2.1: Arbitrum 6→9, S2.2.2: Base 5→7)
 // [C] = Critical, [H] = High Priority, [M] = Medium Priority
 // =============================================================================
 export const DEXES: Record<string, Dex[]> = {
@@ -190,7 +190,7 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 20
     }
   ],
-  // Base: 5 DEXs (fastest growing)
+  // Base: 7 DEXs (fastest growing) - S2.2.2 expanded from 5 → 7
   base: [
     {
       name: 'uniswap_v3',       // [C]
@@ -225,6 +225,21 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'base',
       factoryAddress: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
       routerAddress: '0xaaa3b1F1bd7BCc97fD1917c18ADE665C5D31F066',
+      fee: 30
+    },
+    // S2.2.2: New DEXs added (5 → 7)
+    {
+      name: 'maverick',         // [H] - Dynamic fee AMM
+      chain: 'base',
+      factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1E',
+      routerAddress: '0x32AED3Bce901DA12ca8F29D3E95Fc3cc54A85fd9',
+      fee: 1  // 1 bp base fee (dynamic)
+    },
+    {
+      name: 'alienbase',        // [M] - Native Base DEX
+      chain: 'base',
+      factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14c0FDe7',
+      routerAddress: '0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7',
       fee: 30
     }
   ],
@@ -559,6 +574,7 @@ export const TOKEN_METADATA: Record<string, {
     nativeWrapper: '0x4200000000000000000000000000000000000006',
     stablecoins: [
       { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
+      { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDbC', decimals: 6 }, // Bridged USDC
       { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', decimals: 18 }
     ]
   },
