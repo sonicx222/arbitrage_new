@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@arbitrage/types": ["./shared/types/src"],
+      "@arbitrage/types/*": ["./shared/types/src/*"],
+      "@arbitrage/config": ["./shared/config/src"],
+      "@arbitrage/config/*": ["./shared/config/src/*"],
+      "@arbitrage/core": ["./shared/core/src"],
+      "@arbitrage/core/*": ["./shared/core/src/*"]
+    }
+  },
+  "references": [
+    { "path": "./shared/types" },
+    { "path": "./shared/config" },
+    { "path": "./shared/core" },
+    { "path": "./services/unified-detector" },
+    { "path": "./services/coordinator" },
+    { "path": "./services/execution-engine" },
+    { "path": "./services/cross-chain-detector" }
+  ],
+  "files": []
+}

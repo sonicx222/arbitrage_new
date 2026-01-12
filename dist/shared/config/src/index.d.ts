@@ -1,0 +1,160 @@
+import { Chain, Dex, Token } from '../../types';
+export declare const CHAINS: Record<string, Chain>;
+export declare const DEXES: Record<string, Dex[]>;
+export declare const CORE_TOKENS: Record<string, Token[]>;
+export declare const SERVICE_CONFIGS: {
+    redis: {
+        url: string;
+        password: string | undefined;
+    };
+    monitoring: {
+        enabled: boolean;
+        interval: number;
+        endpoints: string[];
+    };
+};
+export declare const PERFORMANCE_THRESHOLDS: {
+    maxEventLatency: number;
+    minCacheHitRate: number;
+    maxMemoryUsage: number;
+    maxCpuUsage: number;
+    maxFalsePositiveRate: number;
+};
+export declare const ARBITRAGE_CONFIG: {
+    minProfitPercentage: number;
+    maxGasPrice: number;
+    confidenceThreshold: number;
+    maxTradeSize: string;
+    triangularEnabled: boolean;
+    crossChainEnabled: boolean;
+    predictiveEnabled: boolean;
+    defaultAmount: number;
+    estimatedGasCost: number;
+    opportunityTimeoutMs: number;
+    minProfitThreshold: number;
+    minConfidenceThreshold: number;
+    feePercentage: number;
+    chainMinProfits: {
+        ethereum: number;
+        arbitrum: number;
+        optimism: number;
+        base: number;
+        polygon: number;
+        bsc: number;
+    };
+};
+export declare const EVENT_CONFIG: {
+    syncEvents: {
+        enabled: boolean;
+        priority: string;
+    };
+    swapEvents: {
+        enabled: boolean;
+        priority: string;
+        minAmountUSD: number;
+        whaleThreshold: number;
+        samplingRate: number;
+    };
+};
+export declare const PARTITION_CONFIG: {
+    P1_ASIA_FAST: string[];
+    P2_L2_TURBO: string[];
+    P3_HIGH_VALUE: string[];
+    P1_ASIA_FAST_PHASE2: string[];
+    P3_HIGH_VALUE_PHASE3: string[];
+};
+export declare const PHASE_METRICS: {
+    current: {
+        phase: number;
+        chains: number;
+        dexes: number;
+        tokens: number;
+        targetOpportunities: number;
+    };
+    targets: {
+        phase1: {
+            chains: number;
+            dexes: number;
+            tokens: number;
+            opportunities: number;
+        };
+        phase2: {
+            chains: number;
+            dexes: number;
+            tokens: number;
+            opportunities: number;
+        };
+        phase3: {
+            chains: number;
+            dexes: number;
+            tokens: number;
+            opportunities: number;
+        };
+    };
+};
+export declare const TOKEN_METADATA: Record<string, {
+    weth: string;
+    stablecoins: {
+        address: string;
+        symbol: string;
+        decimals: number;
+    }[];
+    nativeWrapper: string;
+}>;
+export declare const EVENT_SIGNATURES: {
+    SYNC: string;
+    SWAP_V2: string;
+    SWAP_V3: string;
+};
+export interface DetectorChainConfig {
+    batchSize: number;
+    batchTimeout: number;
+    healthCheckInterval: number;
+    confidence: number;
+    expiryMs: number;
+    gasEstimate: number;
+    whaleThreshold: number;
+    nativeTokenKey: 'weth' | 'nativeWrapper';
+}
+export declare const DETECTOR_CONFIG: Record<string, DetectorChainConfig>;
+export declare const FLASH_LOAN_PROVIDERS: Record<string, {
+    address: string;
+    protocol: string;
+    fee: number;
+}>;
+/**
+ * P1-5 FIX: Bridge cost configuration to replace hardcoded multipliers.
+ * Fees are in basis points (1 bp = 0.01%). Latency in seconds.
+ *
+ * Data sources:
+ * - Stargate: https://stargate.finance/bridge (fees vary by route)
+ * - Across: https://across.to/ (dynamic fees)
+ * - LayerZero: https://layerzero.network/ (gas-dependent fees)
+ *
+ * Note: These are baseline estimates. Production should use real-time API data.
+ */
+export interface BridgeCostConfig {
+    bridge: string;
+    sourceChain: string;
+    targetChain: string;
+    feePercentage: number;
+    minFeeUsd: number;
+    estimatedLatencySeconds: number;
+    reliability: number;
+}
+export declare const BRIDGE_COSTS: BridgeCostConfig[];
+/**
+ * P1-5 FIX: Get bridge cost for a specific route
+ */
+export declare function getBridgeCost(sourceChain: string, targetChain: string, bridge?: string): BridgeCostConfig | undefined;
+/**
+ * P1-5 FIX: Calculate bridge cost for a given USD amount
+ */
+export declare function calculateBridgeCostUsd(sourceChain: string, targetChain: string, amountUsd: number, bridge?: string): {
+    fee: number;
+    latency: number;
+    bridge: string;
+} | undefined;
+export * from './partitions';
+export { PARTITIONS, PartitionConfig, getPartition, getPartitionFromEnv, assignChainToPartition } from './partitions';
+//# sourceMappingURL=index.d.ts.map

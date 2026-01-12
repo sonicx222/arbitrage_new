@@ -6,6 +6,24 @@
 import { getRedisClient } from './redis';
 import { createLogger } from './logger';
 
+// P2-2-FIX: Import config with fallback for test environment
+let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
+try {
+  SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+} catch {
+  // Config not available, will use defaults
+}
+
+// P2-2-FIX: Default values for when config is not available
+const CACHE_DEFAULTS = {
+  averageEntrySize: SYSTEM_CONSTANTS?.cache?.averageEntrySize ?? 1024,
+  defaultL1SizeMb: SYSTEM_CONSTANTS?.cache?.defaultL1SizeMb ?? 64,
+  defaultL2TtlSeconds: SYSTEM_CONSTANTS?.cache?.defaultL2TtlSeconds ?? 300,
+  demotionThresholdMs: SYSTEM_CONSTANTS?.cache?.demotionThresholdMs ?? 5 * 60 * 1000,
+  minAccessCountBeforeDemotion: SYSTEM_CONSTANTS?.cache?.minAccessCountBeforeDemotion ?? 3,
+  scanBatchSize: SYSTEM_CONSTANTS?.redis?.scanBatchSize ?? 100,
+};
+
 const logger = createLogger('hierarchical-cache');
 
 export interface CacheConfig {
@@ -54,17 +72,21 @@ export class HierarchicalCache {
   };
 
   constructor(config: Partial<CacheConfig> = {}) {
+    // P2-2-FIX: Use configured constants instead of magic numbers
     this.config = {
       l1Enabled: config.l1Enabled !== false,
-      l1Size: config.l1Size || 64, // 64MB default
+      l1Size: config.l1Size || CACHE_DEFAULTS.defaultL1SizeMb,
       l2Enabled: config.l2Enabled !== false,
-      l2Ttl: config.l2Ttl || 300, // 5 minutes
+      l2Ttl: config.l2Ttl || CACHE_DEFAULTS.defaultL2TtlSeconds,
       l3Enabled: config.l3Enabled !== false,
       enablePromotion: config.enablePromotion !== false,
       enableDemotion: config.enableDemotion !== false
     };
 
-    this.l1MaxEntries = Math.floor(this.config.l1Size * 1024 * 1024 / 1024); // Rough estimate
+    // P2-2-FIX: Use configured average entry size for capacity calculation
+    this.l1MaxEntries = Math.floor(
+      this.config.l1Size * 1024 * 1024 / CACHE_DEFAULTS.averageEntrySize
+    );
 
     if (this.config.l2Enabled) {
       this.redis = getRedisClient();
@@ -387,16 +409,75 @@ export class HierarchicalCache {
     }
   }
 
+  /**
+   * P0-FIX: Use SCAN instead of KEYS to prevent blocking Redis server.
+   * KEYS command blocks the server for the duration of the scan, which can
+   * cause performance issues in production with large keyspaces.
+   * SCAN iterates incrementally and doesn't block.
+   */
   private async invalidateL2Pattern(pattern: string): Promise<void> {
     try {
       const redis = await this.redis;
-      // Use Redis SCAN for pattern deletion
-      const keys = await redis.keys(`${this.l2Prefix}*${pattern}*`);
-      if (keys.length > 0) {
-        await redis.del(...keys);
+      const searchPattern = `${this.l2Prefix}*${pattern}*`;
+
+      // P0-FIX: Use cursor-based SCAN iteration instead of KEYS
+      let cursor = '0';
+      let deletedCount = 0;
+      // P2-2-FIX: Use configured constant instead of magic number
+      const batchSize = CACHE_DEFAULTS.scanBatchSize;
+
+      do {
+        // SCAN returns [cursor, keys] - cursor is '0' when scan is complete
+        const [nextCursor, keys] = await this.scanKeys(redis, cursor, searchPattern, batchSize);
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+          await redis.del(...keys);
+          deletedCount += keys.length;
+        }
+      } while (cursor !== '0');
+
+      if (deletedCount > 0) {
+        logger.debug('L2 cache pattern invalidation complete', {
+          pattern,
+          deletedCount
+        });
       }
     } catch (error) {
       logger.error('L2 cache pattern invalidate error', { error, pattern });
+    }
+  }
+
+  /**
+   * P0-FIX: Helper method to perform SCAN operation.
+   * Uses the underlying Redis client's scan capability.
+   */
+  private async scanKeys(
+    redis: any,
+    cursor: string,
+    pattern: string,
+    count: number
+  ): Promise<[string, string[]]> {
+    try {
+      // Try to use the native scan method if available
+      if (typeof redis.scan === 'function') {
+        const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+        return result;
+      }
+
+      // Fallback: if scan is not available on the wrapper, try the underlying client
+      if (redis.client && typeof redis.client.scan === 'function') {
+        const result = await redis.client.scan(cursor, 'MATCH', pattern, 'COUNT', count);
+        return result;
+      }
+
+      // Last resort fallback: use keys but with warning (should not happen in production)
+      logger.warn('SCAN not available, falling back to KEYS command');
+      const keys = await redis.keys(pattern);
+      return ['0', keys];
+    } catch (error) {
+      logger.error('SCAN operation failed', { error, cursor, pattern });
+      return ['0', []];
     }
   }
 
@@ -479,10 +560,12 @@ export class HierarchicalCache {
     if (!this.config.l1Enabled || !this.config.l2Enabled) return;
 
     const now = Date.now();
-    const demotionThreshold = 5 * 60 * 1000; // 5 minutes
+    // P2-2-FIX: Use configured constants instead of magic numbers
+    const demotionThreshold = CACHE_DEFAULTS.demotionThresholdMs;
+    const minAccessCount = CACHE_DEFAULTS.minAccessCountBeforeDemotion;
 
     for (const [key, entry] of this.l1Metadata.entries()) {
-      if (now - entry.lastAccess > demotionThreshold && entry.accessCount < 3) {
+      if (now - entry.lastAccess > demotionThreshold && entry.accessCount < minAccessCount) {
         // Move to L2 only, keep in L3
         await this.setInL2(key, entry.value, entry.ttl);
         this.invalidateL1(key);

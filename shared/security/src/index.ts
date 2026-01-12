@@ -4,4 +4,5 @@ export { validateArbitrageRequest, validateHealthRequest, validateMetricsRequest
 export { RateLimiter, createApiRateLimiter, createArbitrageRateLimiter, createAuthRateLimiter, createCriticalRateLimiter } from './rate-limiter';
 
 // Re-export types for convenience
-export type { User, AuthToken, LoginRequest, RegisterRequest, RateLimitInfo, RateLimitConfig } from './auth';
+export type { User, AuthToken, LoginRequest, RegisterRequest } from './auth';
+export type { RateLimitInfo, RateLimitConfig } from './rate-limiter';

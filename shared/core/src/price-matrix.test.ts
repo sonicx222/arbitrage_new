@@ -121,7 +121,7 @@ describe('PriceMatrix', () => {
       matrix.setPrice(priceKey, 1850.50, Date.now());
 
       // Read multiple times
-      const reads = [];
+      const reads: (PriceEntry | null)[] = [];
       for (let i = 0; i < 100; i++) {
         reads.push(matrix.getPrice(priceKey));
       }

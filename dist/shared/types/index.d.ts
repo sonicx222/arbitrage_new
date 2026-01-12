@@ -12,6 +12,7 @@ export interface Dex {
     factoryAddress: string;
     routerAddress: string;
     fee: number;
+    enabled?: boolean;
 }
 export interface Token {
     address: string;
@@ -20,6 +21,18 @@ export interface Token {
     chainId: number;
 }
 export interface Pair {
+    name?: string;
+    address: string;
+    token0: string;
+    token1: string;
+    dex: string;
+    fee?: number;
+    reserve0?: string;
+    reserve1?: string;
+    blockNumber?: number;
+    lastUpdate?: number;
+}
+export interface PairFull {
     address: string;
     token0: Token;
     token1: Token;
@@ -31,6 +44,7 @@ export interface Pair {
 }
 export interface PriceUpdate {
     pairKey: string;
+    pairAddress?: string;
     dex: string;
     chain: string;
     token0: string;
@@ -44,23 +58,43 @@ export interface PriceUpdate {
 }
 export interface ArbitrageOpportunity {
     id: string;
-    type: 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
-    buyDex: string;
-    sellDex: string;
-    buyChain: string;
+    type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive' | 'intra-dex';
+    chain?: string;
+    buyDex?: string;
+    sellDex?: string;
+    buyChain?: string;
     sellChain?: string;
-    tokenIn: string;
-    tokenOut: string;
-    amountIn: string;
-    expectedProfit: number;
-    profitPercentage: number;
-    gasEstimate: number;
+    buyPair?: string;
+    sellPair?: string;
+    token0?: string;
+    token1?: string;
+    tokenIn?: string;
+    tokenOut?: string;
+    amountIn?: string;
+    buyPrice?: number;
+    sellPrice?: number;
+    expectedProfit?: number;
+    estimatedProfit?: number;
+    profitPercentage?: number;
+    gasEstimate?: number | string;
     confidence: number;
     timestamp: number;
-    blockNumber: number;
+    blockNumber?: number;
+    expiresAt?: number;
+    status?: 'pending' | 'executing' | 'completed' | 'failed' | 'expired';
     path?: string[];
     bridgeRequired?: boolean;
     bridgeCost?: number;
+    sourceChain?: string;
+    targetChain?: string;
+    sourceDex?: string;
+    targetDex?: string;
+    tokenAddress?: string;
+    amount?: number;
+    priceDifference?: number;
+    percentageDifference?: number;
+    gasCost?: number;
+    netProfit?: number;
 }
 export interface SwapEvent {
     pairAddress: string;
@@ -104,6 +138,7 @@ export interface ServiceHealth {
     memoryUsage: number;
     cpuUsage: number;
     lastHeartbeat: number;
+    latency?: number;
     error?: string;
 }
 export interface PerformanceMetrics {
@@ -187,5 +222,27 @@ export declare class NetworkError extends ArbitrageError {
 export declare class ValidationError extends ArbitrageError {
     field: string;
     constructor(message: string, service: string, field: string);
+}
+export interface CrossChainBridge {
+    bridge: string;
+    sourceChain: string;
+    targetChain: string;
+    token: string;
+    amount: number;
+    estimatedLatency?: number;
+    estimatedCost?: number;
+}
+export interface BridgeLatencyData {
+    bridge: string;
+    sourceChain: string;
+    targetChain: string;
+    token: string;
+    amount: number;
+    latency: number;
+    cost: number;
+    success: boolean;
+    timestamp: number;
+    congestionLevel: number;
+    gasPrice: number;
 }
 //# sourceMappingURL=index.d.ts.map

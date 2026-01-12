@@ -3,6 +3,20 @@ import { Redis } from 'ioredis';
 import { MessageEvent, ServiceHealth, PerformanceMetrics } from '../../types';
 import { createLogger } from './logger';
 
+// P2-2-FIX: Import config with fallback for test environment
+let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
+try {
+  SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+} catch {
+  // Config not available, will use defaults
+}
+
+// P2-2-FIX: Default values for when config is not available
+const REDIS_DEFAULTS = {
+  maxMessageSize: SYSTEM_CONSTANTS?.redis?.maxMessageSize ?? 1024 * 1024,  // 1MB
+  maxChannelNameLength: SYSTEM_CONSTANTS?.redis?.maxChannelNameLength ?? 128,
+};
+
 export class RedisClient {
   private client: Redis;
   private pubClient: Redis;
@@ -89,7 +103,8 @@ export class RedisClient {
       });
 
       // SECURITY: Limit message size to prevent DoS
-      if (serializedMessage.length > 1024 * 1024) { // 1MB limit
+      // P2-2-FIX: Use configured constant instead of magic number
+      if (serializedMessage.length > REDIS_DEFAULTS.maxMessageSize) {
         throw new Error('Message too large');
       }
 
@@ -106,7 +121,8 @@ export class RedisClient {
       throw new Error('Invalid channel name: must be non-empty string');
     }
 
-    if (channel.length > 128) {
+    // P2-2-FIX: Use configured constant instead of magic number
+    if (channel.length > REDIS_DEFAULTS.maxChannelNameLength) {
       throw new Error('Channel name too long');
     }
 

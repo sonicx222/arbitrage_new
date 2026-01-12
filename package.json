@@ -13,14 +13,17 @@
     "test:professional-quality": "node scripts/run-professional-quality-tests.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "build": "npm run build --workspaces",
+    "build": "tsc -p tsconfig.json",
+    "build:clean": "rimraf dist && tsc -p tsconfig.json",
+    "build:workspaces": "npm run build --workspaces",
     "start": "npm start --workspaces",
     "dev": "npm run dev --workspaces",
     "validate": "npm run test && npm run lint",
     "quality-check": "npm run test:professional-quality",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down"
+    "docker:down": "docker-compose down",
+    "typecheck": "tsc --noEmit"
   },
   "workspaces": [
     "shared/*",

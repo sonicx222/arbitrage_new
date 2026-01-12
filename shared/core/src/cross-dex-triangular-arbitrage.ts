@@ -1,10 +1,16 @@
 // Cross-DEX Triangular Arbitrage Engine
 // Finds arbitrage opportunities across multiple DEXes on the same blockchain
+// P0-FIX: Uses BigInt for precise wei calculations to prevent precision loss
 
 import { createLogger } from './logger';
 import { getHierarchicalCache } from './hierarchical-cache';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
+
+// P0-FIX: Constants for BigInt calculations
+const PRECISION_MULTIPLIER = 10n ** 18n; // 18 decimal places for wei precision
+const BASIS_POINTS_DIVISOR = 10000n;
+const ONE_ETH_WEI = 10n ** 18n; // 1 ETH in wei
 
 export interface DexPool {
   dex: string;
@@ -188,6 +194,7 @@ export class CrossDexTriangularArbitrage {
   }
 
   // Simulate a triangular arbitrage execution
+  // P0-FIX: Uses BigInt for precise wei calculations
   private async simulateTriangle(
     tokens: [string, string, string, string],
     pools: [DexPool, DexPool, DexPool],
@@ -196,30 +203,34 @@ export class CrossDexTriangularArbitrage {
     const [token0, token1, token2, token3] = tokens;
     const [pool1, pool2, pool3] = pools;
 
-    // Start with 1 unit of token0
-    let amount = 1000000000000000000; // 1 ETH in wei (18 decimals)
+    // P0-FIX: Use BigInt for wei amounts to prevent precision loss
+    // Start with 1 unit of token0 (1 ETH = 10^18 wei)
+    let amountBigInt = ONE_ETH_WEI;
+    const initialAmountBigInt = ONE_ETH_WEI;
     let steps: TriangularStep[] = [];
 
     try {
       // Leg 1: token0 -> token1
-      const step1 = this.simulateSwap(token0, token1, amount, pool1);
-      amount = step1.amountOut;
-      steps.push(step1);
+      const step1 = this.simulateSwapBigInt(token0, token1, amountBigInt, pool1);
+      amountBigInt = step1.amountOutBigInt;
+      steps.push(step1.step);
 
       // Leg 2: token1 -> token2
-      const step2 = this.simulateSwap(token1, token2, amount, pool2);
-      amount = step2.amountOut;
-      steps.push(step2);
+      const step2 = this.simulateSwapBigInt(token1, token2, amountBigInt, pool2);
+      amountBigInt = step2.amountOutBigInt;
+      steps.push(step2.step);
 
       // Leg 3: token2 -> token0 (close triangle)
-      const step3 = this.simulateSwap(token2, token0, amount, pool3);
-      amount = step3.amountOut;
-      steps.push(step3);
+      const step3 = this.simulateSwapBigInt(token2, token0, amountBigInt, pool3);
+      amountBigInt = step3.amountOutBigInt;
+      steps.push(step3.step);
 
-      // Calculate profit
-      const initialAmount = 1000000000000000000;
-      const finalAmount = amount;
-      const grossProfit = (finalAmount - initialAmount) / initialAmount;
+      // P0-FIX: Calculate profit using BigInt then convert to decimal
+      // grossProfit = (finalAmount - initialAmount) / initialAmount
+      // To avoid precision loss: multiply by PRECISION_MULTIPLIER first
+      const profitBigInt = amountBigInt - initialAmountBigInt;
+      const grossProfitScaled = (profitBigInt * PRECISION_MULTIPLIER) / initialAmountBigInt;
+      const grossProfit = Number(grossProfitScaled) / Number(PRECISION_MULTIPLIER);
 
       // Estimate gas costs (simplified)
       const gasCost = this.estimateGasCost(chain, steps.length);
@@ -265,7 +276,70 @@ export class CrossDexTriangularArbitrage {
     }
   }
 
-  // Simulate a single swap
+  // P0-FIX: BigInt version of swap simulation for precise calculations
+  private simulateSwapBigInt(
+    fromToken: string,
+    toToken: string,
+    amountInBigInt: bigint,
+    pool: DexPool
+  ): { amountOutBigInt: bigint; step: TriangularStep } {
+    // Use AMM formula with BigInt: amountOut = (amountIn * reserveOut * (10000 - fee)) / (reserveIn * 10000 + amountIn * (10000 - fee))
+
+    let reserveInStr: string, reserveOutStr: string;
+
+    if (pool.token0 === fromToken && pool.token1 === toToken) {
+      reserveInStr = pool.reserve0;
+      reserveOutStr = pool.reserve1;
+    } else if (pool.token0 === toToken && pool.token1 === fromToken) {
+      reserveInStr = pool.reserve1;
+      reserveOutStr = pool.reserve0;
+    } else {
+      throw new Error(`Pool does not contain token pair ${fromToken}/${toToken}`);
+    }
+
+    // P0-FIX: Parse reserves as BigInt (they're stored as strings in wei)
+    const reserveInBigInt = BigInt(reserveInStr);
+    const reserveOutBigInt = BigInt(reserveOutStr);
+    const feeBigInt = BigInt(pool.fee);
+
+    // P0-FIX: Apply fee using BigInt arithmetic
+    // feeMultiplier = (10000 - fee) / 10000
+    const feeMultiplierNumerator = BASIS_POINTS_DIVISOR - feeBigInt;
+
+    // amountInWithFee = amountIn * (10000 - fee) / 10000
+    const amountInWithFee = (amountInBigInt * feeMultiplierNumerator) / BASIS_POINTS_DIVISOR;
+
+    // P0-FIX: Constant product formula with BigInt
+    // amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee)
+    const numerator = amountInWithFee * reserveOutBigInt;
+    const denominator = reserveInBigInt + amountInWithFee;
+    const amountOutBigInt = numerator / denominator;
+
+    // Calculate slippage (convert to number for ratio calculation - safe as it's a small ratio)
+    const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6; // Scale down for safe number conversion
+    const amountInNumber = Number(amountInBigInt / (10n ** 12n)) / 1e6;
+    const priceImpact = amountInNumber / (reserveInNumber + amountInNumber);
+    const slippage = Math.min(priceImpact, this.maxSlippage);
+
+    // Convert BigInt to number for step (for display purposes only)
+    const amountInDisplay = Number(amountInBigInt) / 1e18;
+    const amountOutDisplay = Number(amountOutBigInt) / 1e18;
+
+    const step: TriangularStep = {
+      fromToken,
+      toToken,
+      dex: pool.dex,
+      amountIn: amountInDisplay,
+      amountOut: amountOutDisplay,
+      price: pool.price,
+      fee: pool.fee / 10000, // Convert to decimal
+      slippage
+    };
+
+    return { amountOutBigInt, step };
+  }
+
+  // Legacy swap simulation (kept for backwards compatibility)
   private simulateSwap(
     fromToken: string,
     toToken: string,

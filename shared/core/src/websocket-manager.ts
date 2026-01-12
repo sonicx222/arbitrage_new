@@ -16,6 +16,9 @@ export interface WebSocketSubscription {
   id: number;
   method: string;
   params: any[];
+  type?: string; // Optional subscription type (e.g., 'logs', 'newHeads', 'sync')
+  topics?: string[]; // Optional topics for log subscriptions
+  callback?: (data: any) => void; // Optional callback for subscription results
 }
 
 export interface WebSocketMessage {
@@ -29,6 +32,8 @@ export interface WebSocketMessage {
 
 export type WebSocketEventHandler = (data: WebSocketMessage) => void;
 export type ConnectionStateHandler = (connected: boolean) => void;
+export type ErrorEventHandler = (error: Error) => void;
+export type GenericEventHandler = (...args: any[]) => void;
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -45,10 +50,14 @@ export class WebSocketManager {
   private isReconnecting = false;
   // P2-FIX: Track if manager has been explicitly disconnected
   private isDisconnected = false;
+  // P1-FIX: Connection mutex to prevent TOCTOU race condition
+  private connectMutex: Promise<void> | null = null;
 
   private subscriptions = new Map<number, WebSocketSubscription>();
   private messageHandlers = new Set<WebSocketEventHandler>();
   private connectionHandlers = new Set<ConnectionStateHandler>();
+  private errorHandlers = new Set<ErrorEventHandler>();
+  private eventHandlers = new Map<string, Set<GenericEventHandler>>();
 
   private nextSubscriptionId = 1;
 
@@ -63,15 +72,27 @@ export class WebSocketManager {
   }
 
   async connect(): Promise<void> {
-    if (this.isConnecting || this.isConnected) {
+    // P1-FIX: Use mutex to prevent TOCTOU race condition
+    // If a connection is already in progress, wait for it instead of starting a new one
+    if (this.connectMutex) {
+      return this.connectMutex;
+    }
+
+    if (this.isConnected) {
       return;
     }
+
+    // Create mutex promise before any async operations
+    let resolveMutex: () => void;
+    this.connectMutex = new Promise<void>((resolve) => {
+      resolveMutex = resolve;
+    });
 
     this.isConnecting = true;
     // P2-FIX: Clear disconnected flag when explicitly connecting
     this.isDisconnected = false;
 
-    return new Promise((resolve, reject) => {
+    const connectionPromise = new Promise<void>((resolve, reject) => {
       try {
         this.logger.info(`Connecting to WebSocket: ${this.config.url}`);
 
@@ -111,6 +132,14 @@ export class WebSocketManager {
           this.clearConnectionTimeout();
           this.logger.error('WebSocket error', { error });
           this.isConnecting = false;
+          // Notify error handlers
+          this.errorHandlers.forEach(handler => {
+            try {
+              handler(error as Error);
+            } catch (handlerError) {
+              this.logger.error('Error in error handler', { handlerError });
+            }
+          });
           reject(error);
         });
 
@@ -138,6 +167,14 @@ export class WebSocketManager {
         reject(error);
       }
     });
+
+    // P1-FIX: Wrap promise to clear mutex when done (success or failure)
+    try {
+      await connectionPromise;
+    } finally {
+      this.connectMutex = null;
+      resolveMutex!();
+    }
   }
 
   disconnect(): void {
@@ -145,6 +182,8 @@ export class WebSocketManager {
 
     // P2-FIX: Set disconnected flag to prevent reconnection attempts
     this.isDisconnected = true;
+    // P1-FIX: Clear connection mutex on disconnect
+    this.connectMutex = null;
 
     // Clear timers
     this.clearReconnectionTimer();
@@ -216,6 +255,52 @@ export class WebSocketManager {
     return () => this.connectionHandlers.delete(handler);
   }
 
+  /**
+   * Event emitter-style API for subscribing to WebSocket events.
+   * Supports: 'message', 'error', 'connected', 'disconnected'
+   */
+  on(event: string, handler: GenericEventHandler): () => void {
+    if (event === 'message') {
+      this.messageHandlers.add(handler as WebSocketEventHandler);
+      return () => this.messageHandlers.delete(handler as WebSocketEventHandler);
+    }
+    if (event === 'error') {
+      this.errorHandlers.add(handler as ErrorEventHandler);
+      return () => this.errorHandlers.delete(handler as ErrorEventHandler);
+    }
+    if (event === 'connected' || event === 'disconnected') {
+      const wrappedHandler: ConnectionStateHandler = (connected: boolean) => {
+        if ((event === 'connected' && connected) || (event === 'disconnected' && !connected)) {
+          handler();
+        }
+      };
+      this.connectionHandlers.add(wrappedHandler);
+      return () => this.connectionHandlers.delete(wrappedHandler);
+    }
+    // Generic event handler
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, new Set());
+    }
+    this.eventHandlers.get(event)!.add(handler);
+    return () => this.eventHandlers.get(event)?.delete(handler);
+  }
+
+  /**
+   * Emit an event to all registered handlers.
+   */
+  private emit(event: string, ...args: any[]): void {
+    const handlers = this.eventHandlers.get(event);
+    if (handlers) {
+      handlers.forEach(handler => {
+        try {
+          handler(...args);
+        } catch (error) {
+          this.logger.error(`Error in event handler for ${event}`, { error });
+        }
+      });
+    }
+  }
+
   isWebSocketConnected(): boolean {
     return this.isConnected && this.ws?.readyState === WebSocket.OPEN;
   }
@@ -237,6 +322,8 @@ export class WebSocketManager {
   removeAllListeners(): void {
     this.messageHandlers.clear();
     this.connectionHandlers.clear();
+    this.errorHandlers.clear();
+    this.eventHandlers.clear();
   }
 
   private handleMessage(data: Buffer): void {
