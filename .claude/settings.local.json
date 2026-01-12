@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ETHEREUM_RPC_URL=\"https://test\" ETHEREUM_WS_URL=\"wss://test\" REDIS_URL=\"redis://localhost\" node:*)"
+    ]
+  }
+}

@@ -1,2 +1,7 @@
 node_modules
 nul
+logs/expert-self-healing-manager-combined.log
+logs/expert-self-healing-manager-error.log
+logs/redis-client-combined.log
+logs/redis-client-error.log
+logs/redis-streams-combined.log
