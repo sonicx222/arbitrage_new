@@ -918,9 +918,10 @@ export class ExecutionEngineService {
       }
 
       const latency = performance.now() - startTime;
+      // S2.2.3 FIX: Use ?? instead of || to correctly handle actualProfit: 0
       this.perfLogger.logEventLatency('opportunity_execution', latency, {
         success: result.success,
-        profit: result.actualProfit || 0
+        profit: result.actualProfit ?? 0
       });
 
     } catch (error) {

@@ -44,3 +44,13 @@
 2026-01-12T14:30:28.798Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768228228798_vd1r1c8p1","strategy":"restart_service","error":"Recovery failed"}
 2026-01-12T14:44:55.205Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
 2026-01-12T14:44:55.232Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768229095232_p0smk9u33","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T15:34:47.102Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T15:34:47.110Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768232087110_njw20wdaa","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T15:36:24.203Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T15:36:24.238Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768232184238_e4w1f8h8e","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T15:46:21.070Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T15:46:21.088Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768232781088_s70c99e6f","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T15:47:57.653Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T15:47:57.661Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768232877661_x4lelos1t","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T16:24:33.731Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T16:24:33.744Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768235073744_szhk77w50","strategy":"restart_service","error":"Recovery failed"}

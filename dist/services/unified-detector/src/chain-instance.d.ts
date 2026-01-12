@@ -43,6 +43,7 @@ export declare class ChainDetectorInstance extends EventEmitter {
     private lastBlockTimestamp;
     private blockLatencies;
     private isRunning;
+    private isStopping;
     private reconnectAttempts;
     private readonly MAX_RECONNECT_ATTEMPTS;
     constructor(config: ChainInstanceConfig);
@@ -71,7 +72,20 @@ export declare class ChainDetectorInstance extends EventEmitter {
      */
     private createPairsSnapshot;
     private checkArbitrageOpportunity;
+    /**
+     * Check if two pairs represent the same token pair (in either order).
+     * Returns { sameOrder: boolean, reverseOrder: boolean }
+     */
     private isSameTokenPair;
+    /**
+     * Check if token order is reversed between two pairs.
+     */
+    private isReverseOrder;
+    /**
+     * Get minimum profit threshold for this chain from config.
+     * Uses ARBITRAGE_CONFIG.chainMinProfits for consistency with base-detector.ts.
+     */
+    private getMinProfitThreshold;
     private calculateArbitrage;
     private emitOpportunity;
     private getPairKey;

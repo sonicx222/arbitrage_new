@@ -516,7 +516,8 @@ export abstract class BaseDetector {
    */
   getMinProfitThreshold(): number {
     const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
-    return chainMinProfits[this.chain] || 0.003; // Default 0.3%
+    // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
+    return chainMinProfits[this.chain] ?? 0.003; // Default 0.3%
   }
 
   /**
@@ -889,7 +890,8 @@ export abstract class BaseDetector {
             if (pairAddress && pairAddress !== ethers.ZeroAddress) {
               // Convert fee from basis points to percentage for pair storage
               // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-              const feePercentage = dex.fee ? dexFeeToPercentage(dex.fee) : 0.003;
+              // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0 (if any DEX has 0% fee)
+              const feePercentage = dexFeeToPercentage(dex.fee ?? 30);
               const pair: Pair = {
                 name: `${token0.symbol}/${token1.symbol}`,
                 address: pairAddress,
@@ -1191,7 +1193,8 @@ export abstract class BaseDetector {
       reserve1: reserve1,
       // BUG FIX: Fallback should be in percentage (0.003 = 0.3%), not basis points (30)
       // Pair.fee is already converted from basis points to percentage during initialization
-      fee: pair.fee || 0.003
+      // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0
+      fee: pair.fee ?? 0.003
     };
   }
 
