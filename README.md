@@ -2,12 +2,37 @@
 
 A production-ready, institutional-grade arbitrage detection system built with microservices architecture. Achieves professional performance at zero infrastructure cost through strategic cloud provider utilization.
 
-## 🚀 Key Achievements
+## Key Achievements
 
 - **Latency**: <5ms (30x improvement)
 - **Scale**: 500+ opportunities/day
 - **Efficiency**: $0 infrastructure cost
 - **Resilience**: 99.95% target uptime
+- **Test Coverage**: 1126 tests across 35 test suites
+
+---
+
+## Recent Code Quality Improvements (v1.1.0)
+
+The codebase has undergone a comprehensive code quality review addressing critical bugs, race conditions, and architectural inconsistencies:
+
+### P0 (Critical Fixes)
+- **Precision Loss Prevention**: Replaced floating-point arithmetic with BigInt for wei calculations in `cross-dex-triangular-arbitrage.ts` to prevent execution of unprofitable trades due to rounding errors
+- **Redis KEYS Elimination**: Replaced blocking `KEYS` command with cursor-based `SCAN` in `hierarchical-cache.ts` to prevent production Redis server blocking
+
+### P1 (Short-term Fixes)
+- **WebSocket Race Condition**: Added mutex pattern to `WebSocketManager.connect()` to prevent TOCTOU race conditions during reconnection
+- **Async Constructor Fix**: Fixed `SelfHealingManager` to properly await async initialization before operations
+- **Standardized Singleton Pattern**: Created `async-singleton.ts` utility for thread-safe lazy initialization across all modules
+
+### P2 (Medium-term Improvements)
+- **Type-Safe Events**: Created centralized event type registry (`shared/types/events.ts`) to eliminate stringly-typed events
+- **Configurable Constants**: Replaced magic numbers with centralized configuration in `SYSTEM_CONSTANTS` for Redis, cache, circuit breaker, and self-healing parameters
+
+### TypeScript Configuration
+- Fixed monorepo TypeScript configuration for proper cross-package imports
+- Added missing type exports (`BridgeLatencyData`, `CrossChainBridge`, `intra-dex`, `pairAddress`)
+- Resolved array type inference issues
 
 ---
 

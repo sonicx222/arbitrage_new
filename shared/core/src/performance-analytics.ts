@@ -469,7 +469,7 @@ export class PerformanceAnalyticsEngine {
   }
 
   private calculateCumulativeReturns(returns: number[]): number[] {
-    const cumulative = [];
+    const cumulative: number[] = [];
     let current = 1;
 
     for (const ret of returns) {

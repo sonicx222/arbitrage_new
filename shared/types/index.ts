@@ -53,6 +53,7 @@ export interface PairFull {
 
 export interface PriceUpdate {
   pairKey: string;
+  pairAddress?: string; // Optional pair contract address
   dex: string;
   chain: string;
   token0: string;
@@ -67,7 +68,7 @@ export interface PriceUpdate {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive' | 'intra-dex';
   chain?: string;        // Single chain for same-chain arbitrage
   buyDex?: string;
   sellDex?: string;
@@ -257,4 +258,29 @@ export class ValidationError extends ArbitrageError {
     super(message, 'VALIDATION_ERROR', service, false);
     this.name = 'ValidationError';
   }
+}
+
+// Cross-chain bridge types
+export interface CrossChainBridge {
+  bridge: string;
+  sourceChain: string;
+  targetChain: string;
+  token: string;
+  amount: number;
+  estimatedLatency?: number;
+  estimatedCost?: number;
+}
+
+export interface BridgeLatencyData {
+  bridge: string;
+  sourceChain: string;
+  targetChain: string;
+  token: string;
+  amount: number;
+  latency: number; // in seconds
+  cost: number; // in wei
+  success: boolean;
+  timestamp: number;
+  congestionLevel: number;
+  gasPrice: number;
 }

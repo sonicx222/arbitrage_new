@@ -13,13 +13,20 @@ interface TaskMessage {
 }
 
 // Task processing functions
+interface ArbitrageResult {
+  pairKey: string;
+  profit: number;
+  buyPrice: number;
+  sellPrice: number;
+}
+
 async function processArbitrageDetection(data: any): Promise<any> {
   const { prices, minProfit } = data;
 
   // Use WebAssembly engine for arbitrage detection
   // For now, simulate with mock calculations
 
-  const opportunities = [];
+  const opportunities: ArbitrageResult[] = [];
 
   // Mock arbitrage detection logic
   if (prices && prices.length >= 2) {
@@ -120,14 +127,14 @@ async function processStatisticalAnalysis(data: any): Promise<any> {
   }
 
   // Calculate moving average
-  const movingAverage = [];
+  const movingAverage: number[] = [];
   for (let i = window - 1; i < prices.length; i++) {
     const sum = prices.slice(i - window + 1, i + 1).reduce((a: number, b: number) => a + b, 0);
     movingAverage.push(sum / window);
   }
 
   // Calculate volatility (standard deviation)
-  const returns = [];
+  const returns: number[] = [];
   for (let i = 1; i < prices.length; i++) {
     returns.push((prices[i] - prices[i - 1]) / prices[i - 1]);
   }

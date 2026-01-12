@@ -121,7 +121,7 @@ class AuthService {
             return user;
         }
         catch (error) {
-            logger.debug('Token validation failed', { error: error.message });
+            logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }

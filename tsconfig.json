@@ -17,22 +17,33 @@
     "emitDecoratorMetadata": true,
     "allowSyntheticDefaultImports": true,
     "moduleResolution": "node",
+    "noImplicitAny": false,
+    "strictNullChecks": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "baseUrl": ".",
     "paths": {
       "@/*": ["./*"],
       "@/shared/*": ["./shared/*"],
-      "@/services/*": ["./services/*"]
+      "@/services/*": ["./services/*"],
+      "@arbitrage/types": ["./shared/types"],
+      "@arbitrage/types/*": ["./shared/types/*"],
+      "@arbitrage/config": ["./shared/config/src"],
+      "@arbitrage/config/*": ["./shared/config/src/*"],
+      "@arbitrage/core": ["./shared/core/src"],
+      "@arbitrage/core/*": ["./shared/core/src/*"]
     }
   },
   "include": [
-    "services/**/*",
-    "shared/**/*",
-    "infrastructure/**/*"
+    "services/**/*.ts",
+    "shared/**/*.ts",
+    "infrastructure/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
     "**/*.test.ts",
-    "**/*.spec.ts"
+    "**/*.spec.ts",
+    "**/__tests__/**"
   ]
 }

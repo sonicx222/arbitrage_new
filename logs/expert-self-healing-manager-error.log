@@ -12,3 +12,17 @@
 2026-01-11T19:01:43.446Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768158103446_javw86j65","strategy":"restart_service","error":"Recovery failed"}
 2026-01-11T19:05:54.286Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
 2026-01-11T19:05:54.314Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768158354314_apdqkyz8h","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T19:14:56.441Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T19:14:56.479Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768158896479_pf2vl5u74","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T19:54:56.044Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T19:54:56.070Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768161296070_yx5wz82mq","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T20:09:21.430Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T20:09:21.459Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768162161459_krjlwl5w7","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T20:13:12.022Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T20:13:12.069Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768162392069_a0cxfbykk","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T20:19:53.621Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T20:19:53.645Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768162793645_v9zyeqgxf","strategy":"restart_service","error":"Recovery failed"}
+2026-01-11T20:29:44.054Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-11T20:29:44.079Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768163384079_2eg7028cv","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T06:34:27.397Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T06:34:27.423Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768199667423_4gszaa5fj","strategy":"restart_service","error":"Recovery failed"}

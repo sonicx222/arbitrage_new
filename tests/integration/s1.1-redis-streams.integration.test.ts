@@ -608,7 +608,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
       );
 
       // Simulate detector publishing price updates
-      const priceUpdates = [];
+      const priceUpdates: any[] = [];
       for (let i = 0; i < 100; i++) {
         priceUpdates.push(createMockPriceUpdate({
           price0: 1800 + i * 0.1,

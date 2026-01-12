@@ -14,8 +14,7 @@
     "noUnusedParameters": false,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": false,
-    "inlineSourceMap": true,
-    "inlineSources": true,
+    "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
@@ -23,6 +22,6 @@
     "rootDir": ".",
     "composite": true
   },
-  "include": ["*.ts", "**/*.ts"],
+  "include": ["*.ts", "src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }
