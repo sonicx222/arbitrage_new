@@ -1,10 +1,10 @@
 # Implementation Plan: Professional Multi-Chain Arbitrage System
 
-> **Version**: 1.9
+> **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-12 (S2.2.5 fully completed - V3 fee tier capture, BaseDetector integration, unit tests)
-> **Tests**: 1907 passing
+> **Last Updated**: 2025-01-12 (S3.1.1 completed with integration tests - PartitionedDetector base class with multi-chain management)
+> **Tests**: 2267 passing
 
 ---
 
@@ -479,17 +479,23 @@
 ### Sprint 3 (Days 15-21): Partitioning & Performance
 
 #### S3.1: Partitioned Detector Architecture
-**Status**: `[ ] Not Started`
+**Status**: `[ ] In Progress`
 **Priority**: P1 | **Effort**: 4 days | **Confidence**: 90%
 
 **Hypothesis**: Partitioned detectors enable 15+ chains within free tier limits.
 
 **Tasks**:
 ```
-[ ] S3.1.1 Create PartitionedDetector base class
+[x] S3.1.1 Create PartitionedDetector base class
     - File: shared/core/src/partitioned-detector.ts
     - Accepts array of chains
     - Manages multiple WebSocket connections
+    - COMPLETED: 2025-01-12 - TDD implementation with 41 unit tests + 48 integration tests
+    - Features: Multi-chain WebSocket management, health aggregation,
+      cross-chain price tracking, graceful degradation, dynamic chain add/remove
+    - Integration Test: tests/integration/s3.1.1-partitioned-detector.integration.test.ts
+    - P0-1 FIX: Type safety - EthereumLog/EthereumBlockHeader types (no any)
+    - P1-1 FIX: Race condition in findCrossChainDiscrepancies (snapshot-based iteration)
 
 [ ] S3.1.2 Implement partition assignment (4 partitions)
     - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
@@ -789,10 +795,10 @@
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 10 | 0 | 0 |
-| Sprint 3 | 18 | 0 | 0 | 0 |
+| Sprint 3 | 18 | 1 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **31** | **0** | **0** |
+| **Total** | **67** | **32** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 
@@ -806,7 +812,7 @@
 - [x] Redis Streams operational with batching
 - [x] Swap filtering reducing events by 99%
 - [x] L1 Price Matrix benchmarked <1μs (~3ns achieved)
-- [x] All unit tests passing (1907 tests after S2.2.5)
+- [x] All unit tests passing (2267 tests after S3.1.1)
 
 **Success Metrics**:
 | Metric | Target | Actual |
@@ -957,6 +963,8 @@ After each work session:
 | Config | shared/config/src/index.ts |
 | Core Modules | shared/core/src/ |
 | Services | services/ |
+| Integration Tests | tests/integration/ |
+| PartitionedDetector | shared/core/src/partitioned-detector.ts |
 
 ### Key Commands
 

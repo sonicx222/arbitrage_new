@@ -238,6 +238,17 @@ export {
 export { BaseDetector } from './base-detector';
 export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
 
+// Partitioned detector for multi-chain management (ADR-003, S3.1)
+export { PartitionedDetector } from './partitioned-detector';
+export type {
+  PartitionedDetectorConfig,
+  ChainHealth as PartitionChainHealth,
+  PartitionHealth,
+  ChainStats as PartitionChainStats,
+  PricePoint,
+  CrossChainDiscrepancy
+} from './partitioned-detector';
+
 // =============================================================================
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
 // =============================================================================
