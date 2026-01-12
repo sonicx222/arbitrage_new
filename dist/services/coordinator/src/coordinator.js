@@ -4,17 +4,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CoordinatorService = void 0;
-/**
- * System Coordinator Service with Monitoring Dashboard
- *
- * Orchestrates all detector services and manages system health.
- * Uses Redis Streams for event consumption (ADR-002) and implements
- * leader election for failover (ADR-007).
- *
- * @see ARCHITECTURE_V2.md Section 4.5 (Layer 5: Coordination)
- * @see ADR-002: Redis Streams over Pub/Sub
- * @see ADR-007: Failover Strategy
- */
 const express_1 = __importDefault(require("express"));
 const helmet_1 = __importDefault(require("helmet"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
@@ -27,6 +16,7 @@ class CoordinatorService {
         this.redis = null;
         this.streamsClient = null;
         this.logger = (0, src_1.createLogger)('coordinator');
+        // P2 FIX: Proper type instead of any
         this.server = null;
         // P1-8 FIX: isRunning kept for internal state tracking within executeStart/Stop callbacks
         // External checks should use stateManager.isRunning() for consistency
@@ -44,6 +34,7 @@ class CoordinatorService {
         this.streamConsumerErrors = 0;
         this.MAX_STREAM_ERRORS = 10;
         this.lastStreamErrorReset = Date.now();
+        this.alertSentForCurrentErrorBurst = false; // P1-NEW-2: Prevent duplicate alerts
         // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
         this.MAX_OPPORTUNITIES = 1000;
         this.OPPORTUNITY_TTL_MS = 60000; // 1 minute default TTL
@@ -125,8 +116,9 @@ class CoordinatorService {
                     isLeader: this.isLeader
                 });
             });
+            // P2 FIX: Use proper Error type
             this.server.on('error', (error) => {
-                this.logger.error('HTTP server error', { error });
+                this.logger.error('HTTP server error', { error: error.message });
             });
             this.logger.info('Coordinator Service started successfully', {
                 isLeader: this.isLeader,
@@ -151,12 +143,14 @@ class CoordinatorService {
             this.clearAllIntervals();
             // Close HTTP server gracefully
             if (this.server) {
+                // P2 FIX: Capture server reference to satisfy TypeScript null check
+                const serverRef = this.server;
                 await new Promise((resolve) => {
                     const timeout = setTimeout(() => {
                         this.logger.warn('Force closing HTTP server after timeout');
                         resolve();
                     }, 5000);
-                    this.server.close(() => {
+                    serverRef.close(() => {
                         clearTimeout(timeout);
                         this.logger.info('HTTP server closed successfully');
                         resolve();
@@ -387,16 +381,20 @@ class CoordinatorService {
             if (!this.stateManager.isRunning() || !this.streamsClient)
                 return;
             try {
-                // P2-1 fix: Reset error count periodically (every minute)
-                if (Date.now() - this.lastStreamErrorReset > 60000) {
-                    this.streamConsumerErrors = 0;
-                    this.lastStreamErrorReset = Date.now();
-                }
                 await Promise.all([
                     this.consumeHealthStream(),
                     this.consumeOpportunitiesStream(),
                     this.consumeWhaleAlertsStream()
                 ]);
+                // P1-NEW-2 FIX: Reset error count on successful consumption
+                // This provides immediate recovery signal and prevents false positives
+                if (this.streamConsumerErrors > 0) {
+                    this.logger.debug('Stream consumer recovered', {
+                        previousErrors: this.streamConsumerErrors
+                    });
+                    this.streamConsumerErrors = 0;
+                    this.alertSentForCurrentErrorBurst = false;
+                }
             }
             catch (error) {
                 // P2-1 fix: Track errors and send alert if threshold exceeded
@@ -406,15 +404,15 @@ class CoordinatorService {
                     errorCount: this.streamConsumerErrors,
                     maxErrors: this.MAX_STREAM_ERRORS
                 });
-                // Send critical alert if too many errors
-                if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS) {
+                // P1-NEW-2 FIX: Send critical alert only once per error burst
+                if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS && !this.alertSentForCurrentErrorBurst) {
                     this.sendAlert({
                         type: 'STREAM_CONSUMER_FAILURE',
-                        message: `Stream consumer experienced ${this.streamConsumerErrors} errors in the last minute`,
+                        message: `Stream consumer experienced ${this.streamConsumerErrors} consecutive errors`,
                         severity: 'critical',
-                        data: { errorCount: this.streamConsumerErrors },
                         timestamp: Date.now()
                     });
+                    this.alertSentForCurrentErrorBurst = true;
                 }
             }
         }, 100);
@@ -492,18 +490,25 @@ class CoordinatorService {
     // ===========================================================================
     // Stream Message Handlers
     // ===========================================================================
+    // P2 FIX: Use StreamMessage type instead of any
     async handleHealthMessage(message) {
         try {
             const data = message.data;
-            if (!data || !data.service)
+            // P2 FIX: Type guard for required service field
+            if (!data || typeof data.service !== 'string')
                 return;
+            // P2 FIX: Validate status is a known value, default to 'unknown'
+            const statusValue = data.status;
+            const validStatus = statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy'
+                ? statusValue
+                : 'unknown';
             const health = {
                 service: data.service,
-                status: data.status || 'unknown',
-                uptime: data.uptime || 0,
-                memoryUsage: data.memoryUsage || 0,
-                cpuUsage: data.cpuUsage || 0,
-                lastHeartbeat: data.timestamp || Date.now()
+                status: validStatus,
+                uptime: typeof data.uptime === 'number' ? data.uptime : 0,
+                memoryUsage: typeof data.memoryUsage === 'number' ? data.memoryUsage : 0,
+                cpuUsage: typeof data.cpuUsage === 'number' ? data.cpuUsage : 0,
+                lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now()
             };
             this.serviceHealth.set(data.service, health);
             this.logger.debug('Health update received', {
@@ -515,13 +520,28 @@ class CoordinatorService {
             this.logger.error('Failed to handle health message', { error, message });
         }
     }
+    // P2 FIX: Use StreamMessage type instead of any
     async handleOpportunityMessage(message) {
         try {
             const data = message.data;
-            if (!data || !data.id)
+            // P2 FIX: Type guard for required id field
+            if (!data || typeof data.id !== 'string')
                 return;
+            // P2 FIX: Create ArbitrageOpportunity with proper type safety
+            const opportunity = {
+                id: data.id,
+                confidence: typeof data.confidence === 'number' ? data.confidence : 0,
+                timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+                // Optional fields
+                chain: typeof data.chain === 'string' ? data.chain : undefined,
+                buyDex: typeof data.buyDex === 'string' ? data.buyDex : undefined,
+                sellDex: typeof data.sellDex === 'string' ? data.sellDex : undefined,
+                profitPercentage: typeof data.profitPercentage === 'number' ? data.profitPercentage : undefined,
+                expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : undefined,
+                status: typeof data.status === 'string' ? data.status : undefined
+            };
             // Track opportunity
-            this.opportunities.set(data.id, data);
+            this.opportunities.set(data.id, opportunity);
             this.systemMetrics.totalOpportunities++;
             this.systemMetrics.pendingOpportunities = this.opportunities.size;
             // P1-1 fix: Clean up expired opportunities and enforce size limit
@@ -555,40 +575,45 @@ class CoordinatorService {
                 });
             }
             this.logger.info('Opportunity detected', {
-                id: data.id,
-                chain: data.chain,
-                profitPercentage: data.profitPercentage,
-                buyDex: data.buyDex,
-                sellDex: data.sellDex
+                id: opportunity.id,
+                chain: opportunity.chain,
+                profitPercentage: opportunity.profitPercentage,
+                buyDex: opportunity.buyDex,
+                sellDex: opportunity.sellDex
             });
             // Only leader should forward to execution engine
-            if (this.isLeader && data.status === 'pending') {
-                await this.forwardToExecutionEngine(data);
+            if (this.isLeader && opportunity.status === 'pending') {
+                await this.forwardToExecutionEngine(opportunity);
             }
         }
         catch (error) {
             this.logger.error('Failed to handle opportunity message', { error, message });
         }
     }
+    // P2 FIX: Use StreamMessage type instead of any
     async handleWhaleAlertMessage(message) {
         try {
             const data = message.data;
             if (!data)
                 return;
             this.systemMetrics.whaleAlerts++;
+            // P2 FIX: Extract values with proper type checking
+            const usdValue = typeof data.usdValue === 'number' ? data.usdValue : 0;
+            const direction = typeof data.direction === 'string' ? data.direction : 'unknown';
+            const chain = typeof data.chain === 'string' ? data.chain : 'unknown';
             this.logger.warn('Whale alert received', {
                 address: data.address,
-                usdValue: data.usdValue,
-                direction: data.direction,
-                chain: data.chain,
+                usdValue,
+                direction,
+                chain,
                 dex: data.dex,
                 impact: data.impact
             });
             // Send alert notification
             this.sendAlert({
                 type: 'WHALE_TRANSACTION',
-                message: `Whale ${data.direction} detected: $${data.usdValue?.toLocaleString()} on ${data.chain}`,
-                severity: data.usdValue > 100000 ? 'critical' : 'high',
+                message: `Whale ${direction} detected: $${usdValue.toLocaleString()} on ${chain}`,
+                severity: usdValue > 100000 ? 'critical' : 'high',
                 data,
                 timestamp: Date.now()
             });
@@ -710,6 +735,7 @@ class CoordinatorService {
         this.systemMetrics.pendingOpportunities = this.opportunities.size;
     }
     checkForAlerts() {
+        // P2 FIX: Use Alert type instead of any
         const alerts = [];
         // Check service health
         for (const [serviceName, health] of this.serviceHealth) {
@@ -737,15 +763,45 @@ class CoordinatorService {
             this.sendAlert(alert);
         }
     }
+    /**
+     * P1-NEW-1 FIX: Send alert with cooldown and periodic cleanup
+     * P2 FIX: Use Alert type for proper type safety
+     */
     sendAlert(alert) {
         const alertKey = `${alert.type}_${alert.service || 'system'}`;
         const now = Date.now();
         const lastAlert = this.alertCooldowns.get(alertKey) || 0;
+        const cooldownMs = 300000; // 5 minutes
         // 5 minute cooldown for same alert type
-        if (now - lastAlert > 300000) {
+        if (now - lastAlert > cooldownMs) {
             this.logger.warn('Alert triggered', alert);
             this.alertCooldowns.set(alertKey, now);
+            // P1-NEW-1 FIX: Periodic cleanup of stale cooldowns (every 100 alerts or 1000+ entries)
+            if (this.alertCooldowns.size > 1000) {
+                this.cleanupAlertCooldowns(now);
+            }
             // TODO: Send to Discord/Telegram/email in production
+        }
+    }
+    /**
+     * P1-NEW-1 FIX: Clean up stale alert cooldown entries
+     */
+    cleanupAlertCooldowns(now) {
+        const maxAge = 3600000; // 1 hour - remove cooldowns older than this
+        const toDelete = [];
+        for (const [key, timestamp] of this.alertCooldowns) {
+            if (now - timestamp > maxAge) {
+                toDelete.push(key);
+            }
+        }
+        for (const key of toDelete) {
+            this.alertCooldowns.delete(key);
+        }
+        if (toDelete.length > 0) {
+            this.logger.debug('Cleaned up stale alert cooldowns', {
+                removed: toDelete.length,
+                remaining: this.alertCooldowns.size
+            });
         }
     }
     // ===========================================================================
@@ -840,7 +896,8 @@ class CoordinatorService {
     // ===========================================================================
     // Route Handlers
     // ===========================================================================
-    getDashboard(req, res) {
+    // P2 FIX: Use Express types instead of any
+    getDashboard(_req, res) {
         const leaderBadge = this.isLeader
             ? '<span style="background:green;color:white;padding:2px 8px;border-radius:3px;">LEADER</span>'
             : '<span style="background:orange;color:white;padding:2px 8px;border-radius:3px;">STANDBY</span>';
@@ -912,7 +969,7 @@ class CoordinatorService {
       </html>
     `);
     }
-    getHealth(req, res) {
+    getHealth(_req, res) {
         res.json({
             status: 'ok',
             isLeader: this.isLeader,
@@ -922,23 +979,23 @@ class CoordinatorService {
             timestamp: Date.now()
         });
     }
-    getMetrics(req, res) {
+    getMetrics(_req, res) {
         res.json(this.systemMetrics);
     }
-    getServices(req, res) {
+    getServices(_req, res) {
         res.json(Object.fromEntries(this.serviceHealth));
     }
-    getOpportunities(req, res) {
+    getOpportunities(_req, res) {
         const opportunities = Array.from(this.opportunities.values())
             .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
             .slice(0, 100); // Return last 100
         res.json(opportunities);
     }
-    getAlerts(req, res) {
+    getAlerts(_req, res) {
         // Return recent alerts (in production, store in database)
         res.json([]);
     }
-    getLeaderStatus(req, res) {
+    getLeaderStatus(_req, res) {
         res.json({
             isLeader: this.isLeader,
             instanceId: this.config.leaderElection.instanceId,
@@ -948,26 +1005,31 @@ class CoordinatorService {
     // ===========================================================================
     // Validation Methods
     // ===========================================================================
+    // P2 FIX: Use Express types instead of any
     validateServiceRestart(req, res, next) {
         const { service } = req.params;
         if (!service || typeof service !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(service)) {
-            return res.status(400).json({ error: 'Invalid service name' });
+            res.status(400).json({ error: 'Invalid service name' });
+            return;
         }
         const allowedServices = ['bsc-detector', 'ethereum-detector', 'arbitrum-detector',
             'polygon-detector', 'optimism-detector', 'base-detector', 'execution-engine'];
         if (!allowedServices.includes(service)) {
-            return res.status(404).json({ error: 'Service not found' });
+            res.status(404).json({ error: 'Service not found' });
+            return;
         }
         // Only leader can restart services
         if (!this.isLeader) {
-            return res.status(403).json({ error: 'Only leader can restart services' });
+            res.status(403).json({ error: 'Only leader can restart services' });
+            return;
         }
         next();
     }
     validateAlertAcknowledge(req, res, next) {
         const { alert } = req.params;
         if (!alert || typeof alert !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(alert)) {
-            return res.status(400).json({ error: 'Invalid alert ID' });
+            res.status(400).json({ error: 'Invalid alert ID' });
+            return;
         }
         next();
     }

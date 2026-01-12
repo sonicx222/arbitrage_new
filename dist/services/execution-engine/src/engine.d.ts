@@ -76,6 +76,7 @@ export declare class ExecutionEngineService {
     private validateProviderConnectivity;
     /**
      * P1-3 FIX: Start periodic provider health checks for reconnection
+     * P1-NEW-5 FIX: Added state check inside loop to abort early if stopping
      */
     private startProviderHealthChecks;
     /**

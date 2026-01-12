@@ -79,6 +79,39 @@ interface PairSnapshot {
   blockNumber: number;
 }
 
+// P2 FIX: Proper type for Ethereum RPC log events
+interface EthereumLog {
+  address: string;
+  data: string;
+  topics: string[];
+  blockNumber: string;  // Hex string
+  transactionHash?: string;
+}
+
+// P2 FIX: Proper type for Ethereum block header
+interface EthereumBlockHeader {
+  number: string;  // Hex string
+  timestamp?: string;
+  hash?: string;
+}
+
+// P2 FIX: Proper type for WebSocket subscription messages
+interface WebSocketMessage {
+  method?: string;
+  params?: {
+    result?: EthereumLog | EthereumBlockHeader | Record<string, unknown>;
+    subscription?: string;
+  };
+  error?: { code: number; message: string };
+}
+
+// P2 FIX: Type for token metadata
+interface TokenMetadata {
+  weth: string;
+  stablecoins: { address: string; symbol: string; decimals: number }[];
+  nativeWrapper: string;
+}
+
 // =============================================================================
 // Chain Detector Instance
 // =============================================================================
@@ -98,7 +131,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private dexes: Dex[];
   private tokens: Token[];
-  private tokenMetadata: any;
+  // P2 FIX: Use TokenMetadata type instead of any
+  private tokenMetadata: TokenMetadata | undefined;
 
   private pairs: Map<string, ExtendedPair> = new Map();
   private pairsByAddress: Map<string, ExtendedPair> = new Map();
@@ -463,22 +497,24 @@ export class ChainDetectorInstance extends EventEmitter {
   // Event Handlers
   // ===========================================================================
 
-  private handleWebSocketMessage(message: any): void {
+  // P2 FIX: Use WebSocketMessage type instead of any
+  private handleWebSocketMessage(message: WebSocketMessage): void {
     try {
       // Route message based on type
       if (message.method === 'eth_subscription') {
         const params = message.params;
-        if (params?.result?.topics) {
+        const result = params?.result as EthereumLog | EthereumBlockHeader | undefined;
+        if (result && 'topics' in result && result.topics) {
           // Log event
-          const topic0 = params.result.topics[0];
+          const topic0 = result.topics[0];
           if (topic0 === EVENT_SIGNATURES.SYNC) {
-            this.handleSyncEvent(params.result);
+            this.handleSyncEvent(result);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
-            this.handleSwapEvent(params.result);
+            this.handleSwapEvent(result);
           }
-        } else if (params?.result?.number) {
+        } else if (result && 'number' in result && result.number) {
           // New block
-          this.handleNewBlock(params.result);
+          this.handleNewBlock(result as EthereumBlockHeader);
         }
       }
     } catch (error) {
@@ -486,7 +522,8 @@ export class ChainDetectorInstance extends EventEmitter {
     }
   }
 
-  private handleSyncEvent(log: any): void {
+  // P2 FIX: Use EthereumLog type instead of any
+  private handleSyncEvent(log: EthereumLog): void {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
@@ -525,7 +562,8 @@ export class ChainDetectorInstance extends EventEmitter {
     }
   }
 
-  private handleSwapEvent(log: any): void {
+  // P2 FIX: Use EthereumLog type instead of any
+  private handleSwapEvent(log: EthereumLog): void {
     // Guard against processing during shutdown (consistent with base-detector.ts)
     if (this.isStopping || !this.isRunning) return;
 
@@ -553,7 +591,8 @@ export class ChainDetectorInstance extends EventEmitter {
     }
   }
 
-  private handleNewBlock(block: any): void {
+  // P2 FIX: Use EthereumBlockHeader type instead of any
+  private handleNewBlock(block: EthereumBlockHeader): void {
     const blockNumber = parseInt(block.number, 16);
     const now = Date.now();
 

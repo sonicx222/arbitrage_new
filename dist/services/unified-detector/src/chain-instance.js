@@ -317,24 +317,26 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     // ===========================================================================
     // Event Handlers
     // ===========================================================================
+    // P2 FIX: Use WebSocketMessage type instead of any
     handleWebSocketMessage(message) {
         try {
             // Route message based on type
             if (message.method === 'eth_subscription') {
                 const params = message.params;
-                if (params?.result?.topics) {
+                const result = params?.result;
+                if (result && 'topics' in result && result.topics) {
                     // Log event
-                    const topic0 = params.result.topics[0];
+                    const topic0 = result.topics[0];
                     if (topic0 === src_2.EVENT_SIGNATURES.SYNC) {
-                        this.handleSyncEvent(params.result);
+                        this.handleSyncEvent(result);
                     }
                     else if (topic0 === src_2.EVENT_SIGNATURES.SWAP_V2) {
-                        this.handleSwapEvent(params.result);
+                        this.handleSwapEvent(result);
                     }
                 }
-                else if (params?.result?.number) {
+                else if (result && 'number' in result && result.number) {
                     // New block
-                    this.handleNewBlock(params.result);
+                    this.handleNewBlock(result);
                 }
             }
         }
@@ -342,6 +344,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             this.logger.error('Error handling WebSocket message', { error });
         }
     }
+    // P2 FIX: Use EthereumLog type instead of any
     handleSyncEvent(log) {
         // Guard against processing during shutdown (consistent with base-detector.ts)
         if (this.isStopping || !this.isRunning)
@@ -376,6 +379,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             this.logger.error('Error handling Sync event', { error });
         }
     }
+    // P2 FIX: Use EthereumLog type instead of any
     handleSwapEvent(log) {
         // Guard against processing during shutdown (consistent with base-detector.ts)
         if (this.isStopping || !this.isRunning)
@@ -401,6 +405,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             this.logger.error('Error handling Swap event', { error });
         }
     }
+    // P2 FIX: Use EthereumBlockHeader type instead of any
     handleNewBlock(block) {
         const blockNumber = parseInt(block.number, 16);
         const now = Date.now();

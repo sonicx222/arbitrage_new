@@ -22,6 +22,29 @@ HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-10}
 FAILOVER_THRESHOLD=${FAILOVER_THRESHOLD:-3}
 ALERT_WEBHOOK=${ALERT_WEBHOOK:-}
 
+# Lock file for preventing concurrent monitor instances
+LOCK_FILE="/tmp/arbitrage-failover-monitor.lock"
+LOCK_FD=201
+FAILURE_COUNTS_INITIALIZED=false
+
+# Acquire lock to prevent concurrent monitor instances
+acquire_monitor_lock() {
+    exec 201>"$LOCK_FILE"
+    if ! flock -n 201; then
+        log_error "Another failover monitor is already running"
+        exit 1
+    fi
+    # Clean up on exit
+    trap cleanup_on_exit EXIT INT TERM
+}
+
+# Cleanup function
+cleanup_on_exit() {
+    log_info "Shutting down failover monitor..."
+    flock -u 201 2>/dev/null || true
+    rm -f "$LOCK_FILE" 2>/dev/null || true
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -56,11 +79,45 @@ declare -A STANDBY_SERVICES=(
 # Failure counters
 declare -A FAILURE_COUNTS
 
-# Initialize failure counts
+# Initialize failure counts (safe to call multiple times)
 init_failure_counts() {
+    if [ "$FAILURE_COUNTS_INITIALIZED" = "true" ]; then
+        return
+    fi
     for service in "${!SERVICE_ENDPOINTS[@]}"; do
         FAILURE_COUNTS[$service]=0
     done
+    FAILURE_COUNTS_INITIALIZED=true
+}
+
+# Safe getter for failure count (returns 0 if not initialized)
+get_failure_count() {
+    local service=$1
+    # Ensure initialized
+    if [ "$FAILURE_COUNTS_INITIALIZED" != "true" ]; then
+        init_failure_counts
+    fi
+    echo "${FAILURE_COUNTS[$service]:-0}"
+}
+
+# Safe increment for failure count
+increment_failure_count() {
+    local service=$1
+    # Ensure initialized
+    if [ "$FAILURE_COUNTS_INITIALIZED" != "true" ]; then
+        init_failure_counts
+    fi
+    local current="${FAILURE_COUNTS[$service]:-0}"
+    FAILURE_COUNTS[$service]=$((current + 1))
+}
+
+# Reset failure count for a service
+reset_failure_count() {
+    local service=$1
+    if [ "$FAILURE_COUNTS_INITIALIZED" != "true" ]; then
+        init_failure_counts
+    fi
+    FAILURE_COUNTS[$service]=0
 }
 
 # Check health of a single service
@@ -89,28 +146,33 @@ check_service_health() {
 check_all_health() {
     local all_healthy=true
 
+    # Ensure failure counts are initialized
+    init_failure_counts
+
     echo ""
     printf "%-25s %-10s %-15s\n" "SERVICE" "STATUS" "FAILURES"
     printf "%-25s %-10s %-15s\n" "-------" "------" "--------"
 
     for service in "${!SERVICE_ENDPOINTS[@]}"; do
-        local endpoint=${SERVICE_ENDPOINTS[$service]}
+        local endpoint="${SERVICE_ENDPOINTS[$service]:-}"
         if [ -z "$endpoint" ] || [ "$endpoint" = "/health" ]; then
             printf "%-25s %-10s %-15s\n" "$service" "SKIPPED" "-"
             continue
         fi
 
         if check_service_health "$service"; then
-            FAILURE_COUNTS[$service]=0
+            reset_failure_count "$service"
             printf "%-25s ${GREEN}%-10s${NC} %-15s\n" "$service" "HEALTHY" "0"
         else
-            ((FAILURE_COUNTS[$service]++))
-            printf "%-25s ${RED}%-10s${NC} %-15s\n" "$service" "UNHEALTHY" "${FAILURE_COUNTS[$service]}"
+            increment_failure_count "$service"
+            local current_count
+            current_count=$(get_failure_count "$service")
+            printf "%-25s ${RED}%-10s${NC} %-15s\n" "$service" "UNHEALTHY" "$current_count"
             all_healthy=false
 
             # Check if failover threshold reached
-            if [ "${FAILURE_COUNTS[$service]}" -ge "$FAILOVER_THRESHOLD" ]; then
-                log_warn "Service $service has reached failover threshold (${FAILURE_COUNTS[$service]}/$FAILOVER_THRESHOLD)"
+            if [ "$current_count" -ge "$FAILOVER_THRESHOLD" ]; then
+                log_warn "Service $service has reached failover threshold ($current_count/$FAILOVER_THRESHOLD)"
                 trigger_failover "$service"
             fi
         fi
@@ -128,18 +190,28 @@ check_all_health() {
 # Trigger failover for a service
 trigger_failover() {
     local service=$1
-    local standby=${STANDBY_SERVICES[$service]:-}
+
+    # Validate service parameter
+    if [ -z "$service" ]; then
+        log_error "trigger_failover called with empty service name"
+        return 1
+    fi
+
+    local standby="${STANDBY_SERVICES[$service]:-}"
+    local failure_count
+    failure_count=$(get_failure_count "$service")
 
     log_warn "Triggering failover for $service"
 
-    # Record failover event
-    local failover_event=$(cat <<EOF
+    # Record failover event with safe JSON escaping
+    local failover_event
+    failover_event=$(cat <<EOF
 {
     "type": "failover_triggered",
     "service": "$service",
-    "standby": "$standby",
+    "standby": "${standby:-null}",
     "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-    "consecutive_failures": ${FAILURE_COUNTS[$service]}
+    "consecutive_failures": $failure_count
 }
 EOF
 )
@@ -151,16 +223,18 @@ EOF
         send_alert "$failover_event"
     fi
 
-    # Activate standby if available
+    # Activate standby if available and configured
     if [ -n "$standby" ]; then
         log_info "Activating standby service: $standby"
         activate_standby "$standby"
     else
         log_warn "No standby configured for $service - entering degraded mode"
+        # Log to system log for visibility
+        logger -t "arbitrage-failover" "No standby for $service, degraded mode"
     fi
 
     # Reset failure counter
-    FAILURE_COUNTS[$service]=0
+    reset_failure_count "$service"
 }
 
 # Activate a standby service
@@ -198,14 +272,18 @@ send_alert() {
 
 # Continuous monitoring
 monitor() {
+    # Acquire lock to prevent multiple monitor instances
+    acquire_monitor_lock
+
     log_info "Starting continuous health monitoring"
     log_info "Check interval: ${HEALTH_CHECK_INTERVAL}s"
     log_info "Failover threshold: ${FAILOVER_THRESHOLD} consecutive failures"
+    log_info "PID: $$"
 
     init_failure_counts
 
     while true; do
-        check_all_health
+        check_all_health || true  # Don't exit on check failure
         sleep "$HEALTH_CHECK_INTERVAL"
     done
 }
@@ -227,14 +305,17 @@ manual_trigger() {
         exit 1
     fi
 
-    if [ -z "${SERVICE_ENDPOINTS[$service]}" ]; then
+    if [ -z "${SERVICE_ENDPOINTS[$service]:-}" ]; then
         log_error "Unknown service: $service"
         echo "Available services: ${!SERVICE_ENDPOINTS[*]}"
         exit 1
     fi
 
-    log_warn "Manual failover triggered for $service"
+    # Initialize and set failure count to threshold
+    init_failure_counts
     FAILURE_COUNTS[$service]=$FAILOVER_THRESHOLD
+
+    log_warn "Manual failover triggered for $service"
     trigger_failover "$service"
 }
 

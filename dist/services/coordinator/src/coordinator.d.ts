@@ -68,6 +68,7 @@ export declare class CoordinatorService {
     private streamConsumerErrors;
     private readonly MAX_STREAM_ERRORS;
     private lastStreamErrorReset;
+    private alertSentForCurrentErrorBurst;
     private startStreamConsumers;
     private consumeHealthStream;
     private consumeOpportunitiesStream;
@@ -83,7 +84,15 @@ export declare class CoordinatorService {
     private reportHealth;
     private updateSystemMetrics;
     private checkForAlerts;
+    /**
+     * P1-NEW-1 FIX: Send alert with cooldown and periodic cleanup
+     * P2 FIX: Use Alert type for proper type safety
+     */
     private sendAlert;
+    /**
+     * P1-NEW-1 FIX: Clean up stale alert cooldown entries
+     */
+    private cleanupAlertCooldowns;
     private setupMiddleware;
     private setupRoutes;
     private getDashboard;

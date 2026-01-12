@@ -121,6 +121,37 @@ setup_coordinator_secrets() {
     log_info "Secrets set for Coordinator standby"
 }
 
+# Verify deployment health
+verify_deployment_health() {
+    local app_name=$1
+    local config_file=$2
+    local max_attempts=${3:-10}
+    local wait_time=${4:-10}
+
+    log_info "Verifying deployment health for $app_name..."
+
+    for attempt in $(seq 1 "$max_attempts"); do
+        log_info "Health check attempt $attempt/$max_attempts..."
+
+        # Check if any machine is running
+        local status
+        status=$(fly status -c "$config_file" --json 2>/dev/null | grep -o '"state":"started"' | head -1 || true)
+
+        if [ -n "$status" ]; then
+            log_info "Deployment healthy: $app_name is running"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            log_warn "Waiting ${wait_time}s before next health check..."
+            sleep "$wait_time"
+        fi
+    done
+
+    log_error "Deployment verification failed: $app_name did not become healthy after $max_attempts attempts"
+    return 1
+}
+
 # Deploy L2-Fast partition
 deploy_l2_fast() {
     log_info "Deploying L2-Fast partition..."
@@ -129,18 +160,37 @@ deploy_l2_fast() {
 
     if [ "$DRY_RUN" = true ]; then
         log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/partition-l2-fast.toml"
-        return
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/partition-l2-fast.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/partition-l2-fast.toml"
+        return 1
     fi
 
     # Create app if it doesn't exist
-    if ! fly apps list | grep -q "arbitrage-l2-fast"; then
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-l2-fast"; then
         log_info "Creating app: arbitrage-l2-fast"
-        fly apps create arbitrage-l2-fast --org personal
+        if ! fly apps create arbitrage-l2-fast --org personal; then
+            log_error "Failed to create app: arbitrage-l2-fast"
+            return 1
+        fi
     fi
 
-    fly deploy -c "$SCRIPT_DIR/partition-l2-fast.toml"
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/partition-l2-fast.toml"; then
+        log_error "Deployment failed for L2-Fast partition"
+        return 1
+    fi
 
-    log_info "L2-Fast partition deployed successfully"
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-l2-fast" "$SCRIPT_DIR/partition-l2-fast.toml"; then
+        log_error "Deployment verification failed for L2-Fast partition"
+        return 1
+    fi
+
+    log_info "L2-Fast partition deployed and verified successfully"
 }
 
 # Deploy Coordinator standby
@@ -151,18 +201,37 @@ deploy_coordinator_standby() {
 
     if [ "$DRY_RUN" = true ]; then
         log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/coordinator-standby.toml"
-        return
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/coordinator-standby.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/coordinator-standby.toml"
+        return 1
     fi
 
     # Create app if it doesn't exist
-    if ! fly apps list | grep -q "arbitrage-coordinator-standby"; then
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-coordinator-standby"; then
         log_info "Creating app: arbitrage-coordinator-standby"
-        fly apps create arbitrage-coordinator-standby --org personal
+        if ! fly apps create arbitrage-coordinator-standby --org personal; then
+            log_error "Failed to create app: arbitrage-coordinator-standby"
+            return 1
+        fi
     fi
 
-    fly deploy -c "$SCRIPT_DIR/coordinator-standby.toml"
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/coordinator-standby.toml"; then
+        log_error "Deployment failed for Coordinator standby"
+        return 1
+    fi
 
-    log_info "Coordinator standby deployed successfully"
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-coordinator-standby" "$SCRIPT_DIR/coordinator-standby.toml"; then
+        log_error "Deployment verification failed for Coordinator standby"
+        return 1
+    fi
+
+    log_info "Coordinator standby deployed and verified successfully"
 }
 
 # Show status of all Fly.io services

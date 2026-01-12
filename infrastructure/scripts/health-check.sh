@@ -25,6 +25,27 @@ TIMEOUT=${TIMEOUT:-5}
 RETRIES=${RETRIES:-3}
 RETRY_DELAY=${RETRY_DELAY:-2}
 
+# Lock file for preventing concurrent execution
+LOCK_FILE="/tmp/arbitrage-health-check.lock"
+LOCK_FD=200
+
+# Acquire lock to prevent concurrent execution race conditions
+acquire_lock() {
+    exec 200>"$LOCK_FILE"
+    if ! flock -n 200; then
+        echo "Another health check is already running" >&2
+        exit 1
+    fi
+    # Ensure lock is released on exit
+    trap release_lock EXIT
+}
+
+# Release lock
+release_lock() {
+    flock -u 200 2>/dev/null || true
+    rm -f "$LOCK_FILE" 2>/dev/null || true
+}
+
 # Service definitions
 declare -A SERVICES=(
     ["coordinator"]="http://localhost:3000/health"
@@ -300,9 +321,18 @@ main() {
         esac
     done
 
+    # Acquire lock to prevent race conditions with concurrent executions
+    acquire_lock
+
+    # Initialize result arrays to ensure clean state
+    for service in "${!SERVICES[@]}"; do
+        RESULTS[$service]=""
+        RESPONSE_TIMES[$service]=0
+    done
+
     # Run checks
     if [ -n "$target_service" ]; then
-        if [ -z "${SERVICES[$target_service]}" ]; then
+        if [ -z "${SERVICES[$target_service]:-}" ]; then
             echo "Unknown service: $target_service"
             exit 1
         fi

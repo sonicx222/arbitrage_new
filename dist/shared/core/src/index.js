@@ -16,7 +16,8 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RetryMechanism = exports.withCircuitBreaker = exports.getCircuitBreakerRegistry = exports.createCircuitBreaker = exports.CircuitBreakerRegistry = exports.CircuitState = exports.CircuitBreakerError = exports.CircuitBreaker = exports.resetCacheCoherencyManager = exports.getCacheCoherencyManager = exports.createCacheCoherencyManager = exports.CacheCoherencyManager = exports.getSharedMemoryCache = exports.createSharedMemoryCache = exports.SharedMemoryCache = exports.getHierarchicalCache = exports.createHierarchicalCache = exports.HierarchicalCache = exports.WebSocketManager = exports.getDefaultEventBatcher = exports.createEventBatcher = exports.EventBatcher = exports.PriorityQueue = exports.getWorkerPool = exports.EventProcessingWorkerPool = exports.getPerformanceLogger = exports.PerformanceLogger = exports.createLogger = exports.hasDefaultPrice = exports.getDefaultPrice = exports.resetPriceOracle = exports.getPriceOracle = exports.PriceOracle = exports.isServiceState = exports.createServiceState = exports.ServiceState = exports.ServiceStateManager = exports.resetDistributedLockManager = exports.getDistributedLockManager = exports.DistributedLockManager = exports.resetRedisStreamsInstance = exports.getRedisStreamsClient = exports.StreamBatcher = exports.RedisStreamsClient = exports.singleton = exports.createSingleton = exports.createAsyncSingleton = exports.resetRedisInstance = exports.getRedisClient = exports.RedisClient = void 0;
 exports.CrossDexTriangularArbitrage = exports.PerformanceAnalyticsEngine = exports.resetPairCacheService = exports.getPairCacheService = exports.PairCacheService = exports.resetPairDiscoveryService = exports.getPairDiscoveryService = exports.PairDiscoveryService = exports.resetPriceMatrix = exports.getPriceMatrix = exports.PriceIndexMapper = exports.PriceMatrix = exports.resetSwapEventFilter = exports.getSwapEventFilter = exports.SwapEventFilter = exports.resetStreamHealthMonitor = exports.getStreamHealthMonitor = exports.StreamHealthMonitor = exports.getCurrentSystemHealth = exports.recordHealthMetric = exports.getEnhancedHealthMonitor = exports.EnhancedHealthMonitor = exports.withErrorRecovery = exports.recoverFromError = exports.getErrorRecoveryOrchestrator = exports.ErrorRecoveryOrchestrator = exports.getExpertSelfHealingManager = exports.ExpertSelfHealingManager = exports.registerServiceForSelfHealing = exports.getSelfHealingManager = exports.SelfHealingManager = exports.enqueueFailedOperation = exports.getDeadLetterQueue = exports.DeadLetterQueue = exports.DegradationLevel = exports.resetCrossRegionHealthManager = exports.getCrossRegionHealthManager = exports.CrossRegionHealthManager = exports.getCapabilityFallback = exports.isFeatureEnabled = exports.triggerDegradation = exports.getGracefulDegradationManager = exports.GracefulDegradationManager = exports.isRetryableError = exports.classifyError = exports.ErrorCategory = exports.retryAdvanced = exports.retry = exports.withRetry = exports.RetryPresets = void 0;
-exports.BaseDetector = exports.createExecutionRepository = exports.createArbitrageRepository = exports.RedisExecutionRepository = exports.RedisArbitrageRepository = exports.ValidationSchemas = exports.ValidationMiddleware = void 0;
+exports.withTimeoutSafe = exports.withTimeoutDefault = exports.withTimeout = exports.TimeoutError = exports.ErrorAggregator = exports.formatErrorForResponse = exports.formatErrorForLog = exports.getErrorSeverity = exports.isCriticalError = exports.isRetryableErrorCheck = exports.tryCatchSync = exports.tryCatch = exports.failure = exports.success = exports.ErrorSeverity = exports.ErrorCode = exports.ExecutionError = exports.LifecycleError = exports.SharedValidationError = exports.ConnectionError = exports.BaseArbitrageError = exports.createCoordinatorCommand = exports.createWhaleTransaction = exports.createPriceUpdate = exports.validateBatch = exports.validateMessage = exports.validateServiceHealthStatus = exports.validateCoordinatorCommand = exports.validateReserveUpdate = exports.validateSwapEvent = exports.validateWhaleTransaction = exports.validatePriceUpdate = exports.createPairSnapshot = exports.validatePairSnapshot = exports.calculateCrossChainArbitrage = exports.calculateIntraChainArbitrage = exports.getDefaultFee = exports.getMinProfitThreshold = exports.isReverseOrder = exports.isSameTokenPair = exports.calculatePriceDifferencePercent = exports.invertPrice = exports.calculatePriceFromReserves = exports.BaseDetector = exports.createExecutionRepository = exports.createArbitrageRepository = exports.RedisExecutionRepository = exports.RedisArbitrageRepository = exports.ValidationSchemas = exports.ValidationMiddleware = void 0;
+exports.waitWithTimeouts = exports.gracefulShutdown = exports.throttleAsync = exports.debounceAsync = exports.mapSequential = exports.mapConcurrent = exports.createDeferred = exports.sleep = exports.withRetryAsync = void 0;
 // Core utilities exports
 var redis_1 = require("./redis");
 Object.defineProperty(exports, "RedisClient", { enumerable: true, get: function () { return redis_1.RedisClient; } });
@@ -181,4 +182,67 @@ Object.defineProperty(exports, "createExecutionRepository", { enumerable: true, 
 // Base detector for chain-specific implementations
 var base_detector_1 = require("./base-detector");
 Object.defineProperty(exports, "BaseDetector", { enumerable: true, get: function () { return base_detector_1.BaseDetector; } });
+// =============================================================================
+// REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
+// =============================================================================
+// REF-1/ARCH-1: Shared arbitrage calculation logic
+var arbitrage_calculator_1 = require("./arbitrage-calculator");
+Object.defineProperty(exports, "calculatePriceFromReserves", { enumerable: true, get: function () { return arbitrage_calculator_1.calculatePriceFromReserves; } });
+Object.defineProperty(exports, "invertPrice", { enumerable: true, get: function () { return arbitrage_calculator_1.invertPrice; } });
+Object.defineProperty(exports, "calculatePriceDifferencePercent", { enumerable: true, get: function () { return arbitrage_calculator_1.calculatePriceDifferencePercent; } });
+Object.defineProperty(exports, "isSameTokenPair", { enumerable: true, get: function () { return arbitrage_calculator_1.isSameTokenPair; } });
+Object.defineProperty(exports, "isReverseOrder", { enumerable: true, get: function () { return arbitrage_calculator_1.isReverseOrder; } });
+Object.defineProperty(exports, "getMinProfitThreshold", { enumerable: true, get: function () { return arbitrage_calculator_1.getMinProfitThreshold; } });
+Object.defineProperty(exports, "getDefaultFee", { enumerable: true, get: function () { return arbitrage_calculator_1.getDefaultFee; } });
+Object.defineProperty(exports, "calculateIntraChainArbitrage", { enumerable: true, get: function () { return arbitrage_calculator_1.calculateIntraChainArbitrage; } });
+Object.defineProperty(exports, "calculateCrossChainArbitrage", { enumerable: true, get: function () { return arbitrage_calculator_1.calculateCrossChainArbitrage; } });
+Object.defineProperty(exports, "validatePairSnapshot", { enumerable: true, get: function () { return arbitrage_calculator_1.validatePairSnapshot; } });
+Object.defineProperty(exports, "createPairSnapshot", { enumerable: true, get: function () { return arbitrage_calculator_1.createPairSnapshot; } });
+// REF-2: Shared message validation utilities
+var message_validators_1 = require("./message-validators");
+Object.defineProperty(exports, "validatePriceUpdate", { enumerable: true, get: function () { return message_validators_1.validatePriceUpdate; } });
+Object.defineProperty(exports, "validateWhaleTransaction", { enumerable: true, get: function () { return message_validators_1.validateWhaleTransaction; } });
+Object.defineProperty(exports, "validateSwapEvent", { enumerable: true, get: function () { return message_validators_1.validateSwapEvent; } });
+Object.defineProperty(exports, "validateReserveUpdate", { enumerable: true, get: function () { return message_validators_1.validateReserveUpdate; } });
+Object.defineProperty(exports, "validateCoordinatorCommand", { enumerable: true, get: function () { return message_validators_1.validateCoordinatorCommand; } });
+Object.defineProperty(exports, "validateServiceHealthStatus", { enumerable: true, get: function () { return message_validators_1.validateServiceHealthStatus; } });
+Object.defineProperty(exports, "validateMessage", { enumerable: true, get: function () { return message_validators_1.validateMessage; } });
+Object.defineProperty(exports, "validateBatch", { enumerable: true, get: function () { return message_validators_1.validateBatch; } });
+Object.defineProperty(exports, "createPriceUpdate", { enumerable: true, get: function () { return message_validators_1.createPriceUpdate; } });
+Object.defineProperty(exports, "createWhaleTransaction", { enumerable: true, get: function () { return message_validators_1.createWhaleTransaction; } });
+Object.defineProperty(exports, "createCoordinatorCommand", { enumerable: true, get: function () { return message_validators_1.createCoordinatorCommand; } });
+// REF-3/ARCH-2: Standardized error handling
+var error_handling_1 = require("./error-handling");
+Object.defineProperty(exports, "BaseArbitrageError", { enumerable: true, get: function () { return error_handling_1.ArbitrageError; } });
+Object.defineProperty(exports, "ConnectionError", { enumerable: true, get: function () { return error_handling_1.ConnectionError; } });
+Object.defineProperty(exports, "SharedValidationError", { enumerable: true, get: function () { return error_handling_1.ValidationError; } });
+Object.defineProperty(exports, "LifecycleError", { enumerable: true, get: function () { return error_handling_1.LifecycleError; } });
+Object.defineProperty(exports, "ExecutionError", { enumerable: true, get: function () { return error_handling_1.ExecutionError; } });
+Object.defineProperty(exports, "ErrorCode", { enumerable: true, get: function () { return error_handling_1.ErrorCode; } });
+Object.defineProperty(exports, "ErrorSeverity", { enumerable: true, get: function () { return error_handling_1.ErrorSeverity; } });
+Object.defineProperty(exports, "success", { enumerable: true, get: function () { return error_handling_1.success; } });
+Object.defineProperty(exports, "failure", { enumerable: true, get: function () { return error_handling_1.failure; } });
+Object.defineProperty(exports, "tryCatch", { enumerable: true, get: function () { return error_handling_1.tryCatch; } });
+Object.defineProperty(exports, "tryCatchSync", { enumerable: true, get: function () { return error_handling_1.tryCatchSync; } });
+Object.defineProperty(exports, "isRetryableErrorCheck", { enumerable: true, get: function () { return error_handling_1.isRetryableError; } });
+Object.defineProperty(exports, "isCriticalError", { enumerable: true, get: function () { return error_handling_1.isCriticalError; } });
+Object.defineProperty(exports, "getErrorSeverity", { enumerable: true, get: function () { return error_handling_1.getErrorSeverity; } });
+Object.defineProperty(exports, "formatErrorForLog", { enumerable: true, get: function () { return error_handling_1.formatErrorForLog; } });
+Object.defineProperty(exports, "formatErrorForResponse", { enumerable: true, get: function () { return error_handling_1.formatErrorForResponse; } });
+Object.defineProperty(exports, "ErrorAggregator", { enumerable: true, get: function () { return error_handling_1.ErrorAggregator; } });
+// REF-4/ARCH-3: Shared async utilities
+var async_utils_1 = require("./async-utils");
+Object.defineProperty(exports, "TimeoutError", { enumerable: true, get: function () { return async_utils_1.TimeoutError; } });
+Object.defineProperty(exports, "withTimeout", { enumerable: true, get: function () { return async_utils_1.withTimeout; } });
+Object.defineProperty(exports, "withTimeoutDefault", { enumerable: true, get: function () { return async_utils_1.withTimeoutDefault; } });
+Object.defineProperty(exports, "withTimeoutSafe", { enumerable: true, get: function () { return async_utils_1.withTimeoutSafe; } });
+Object.defineProperty(exports, "withRetryAsync", { enumerable: true, get: function () { return async_utils_1.withRetry; } });
+Object.defineProperty(exports, "sleep", { enumerable: true, get: function () { return async_utils_1.sleep; } });
+Object.defineProperty(exports, "createDeferred", { enumerable: true, get: function () { return async_utils_1.createDeferred; } });
+Object.defineProperty(exports, "mapConcurrent", { enumerable: true, get: function () { return async_utils_1.mapConcurrent; } });
+Object.defineProperty(exports, "mapSequential", { enumerable: true, get: function () { return async_utils_1.mapSequential; } });
+Object.defineProperty(exports, "debounceAsync", { enumerable: true, get: function () { return async_utils_1.debounceAsync; } });
+Object.defineProperty(exports, "throttleAsync", { enumerable: true, get: function () { return async_utils_1.throttleAsync; } });
+Object.defineProperty(exports, "gracefulShutdown", { enumerable: true, get: function () { return async_utils_1.gracefulShutdown; } });
+Object.defineProperty(exports, "waitWithTimeouts", { enumerable: true, get: function () { return async_utils_1.waitWithTimeouts; } });
 //# sourceMappingURL=index.js.map

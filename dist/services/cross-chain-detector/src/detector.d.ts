@@ -71,10 +71,15 @@ export declare class CrossChainDetectorService {
      * Validate WhaleTransaction message has all required fields
      */
     private validateWhaleTransaction;
+    /**
+     * P0-NEW-7 FIX: Clean old price data using snapshot-based iteration
+     * Prevents race conditions where priceData is modified during cleanup
+     */
     private cleanOldPriceData;
     /**
      * Clean old entries from opportunity cache to prevent memory leak (P0 fix)
      * Keeps cache bounded to prevent unbounded growth
+     * P1-NEW-3 FIX: Uses createdAt field instead of parsing from ID
      */
     private cleanOldOpportunityCache;
     /**

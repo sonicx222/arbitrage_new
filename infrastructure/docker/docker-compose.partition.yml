@@ -8,8 +8,38 @@
 # - partition-l2-fast: Arbitrum + Optimism + Base (asia-southeast1, standard resources)
 # - partition-high-value: Ethereum (us-east1, heavy resources)
 #
+# ============================================================================
+# REQUIRED Environment Variables (create .env file or export before running):
+# ============================================================================
+# Partition asia-fast (BSC + Polygon):
+#   BSC_WS_URL      - WebSocket URL for BSC (e.g., wss://bsc.example.com)
+#   BSC_RPC_URL     - RPC URL for BSC (e.g., https://bsc.example.com)
+#   POLYGON_WS_URL  - WebSocket URL for Polygon
+#   POLYGON_RPC_URL - RPC URL for Polygon
+#
+# Partition l2-fast (Arbitrum + Optimism + Base):
+#   ARBITRUM_WS_URL  - WebSocket URL for Arbitrum
+#   ARBITRUM_RPC_URL - RPC URL for Arbitrum
+#   OPTIMISM_WS_URL  - WebSocket URL for Optimism
+#   OPTIMISM_RPC_URL - RPC URL for Optimism
+#   BASE_WS_URL      - WebSocket URL for Base
+#   BASE_RPC_URL     - RPC URL for Base
+#
+# Partition high-value (Ethereum):
+#   ETHEREUM_WS_URL  - WebSocket URL for Ethereum
+#   ETHEREUM_RPC_URL - RPC URL for Ethereum
+#
+# Execution Engine (private keys - KEEP SECURE):
+#   ETHEREUM_PRIVATE_KEY - Private key for Ethereum transactions
+#   BSC_PRIVATE_KEY      - Private key for BSC transactions
+#   ARBITRUM_PRIVATE_KEY - Private key for Arbitrum transactions
+#   BASE_PRIVATE_KEY     - Private key for Base transactions
+#   POLYGON_PRIVATE_KEY  - Private key for Polygon transactions
+#   OPTIMISM_PRIVATE_KEY - Private key for Optimism transactions
+#
 # Usage:
-#   docker-compose -f docker-compose.partition.yml up -d
+#   1. Copy .env.example to .env and fill in values
+#   2. docker-compose -f docker-compose.partition.yml up -d
 #
 # @see ADR-003: Partitioned Chain Detectors
 # @see REFACTORING_ROADMAP.md Phase 2
@@ -56,11 +86,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
-      # Chain-specific RPC URLs (override defaults)
-      - BSC_WS_URL=${BSC_WS_URL:-}
-      - BSC_RPC_URL=${BSC_RPC_URL:-}
-      - POLYGON_WS_URL=${POLYGON_WS_URL:-}
-      - POLYGON_RPC_URL=${POLYGON_RPC_URL:-}
+      # Chain-specific RPC URLs (REQUIRED - no defaults, will fail if not set)
+      - BSC_WS_URL=${BSC_WS_URL:?BSC_WS_URL is required}
+      - BSC_RPC_URL=${BSC_RPC_URL:?BSC_RPC_URL is required}
+      - POLYGON_WS_URL=${POLYGON_WS_URL:?POLYGON_WS_URL is required}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL:?POLYGON_RPC_URL is required}
     ports:
       - "3011:3001"
     depends_on:
@@ -104,13 +134,13 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
-      # Chain-specific RPC URLs (override defaults)
-      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:-}
-      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL:-}
-      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-}
-      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:-}
-      - BASE_WS_URL=${BASE_WS_URL:-}
-      - BASE_RPC_URL=${BASE_RPC_URL:-}
+      # Chain-specific RPC URLs (REQUIRED - no defaults, will fail if not set)
+      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:?ARBITRUM_WS_URL is required}
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL:?ARBITRUM_RPC_URL is required}
+      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:?OPTIMISM_WS_URL is required}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:?OPTIMISM_RPC_URL is required}
+      - BASE_WS_URL=${BASE_WS_URL:?BASE_WS_URL is required}
+      - BASE_RPC_URL=${BASE_RPC_URL:?BASE_RPC_URL is required}
     ports:
       - "3012:3001"
     depends_on:
@@ -154,9 +184,9 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
-      # Chain-specific RPC URLs (override defaults)
-      - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:-}
-      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:-}
+      # Chain-specific RPC URLs (REQUIRED - no defaults, will fail if not set)
+      - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:?ETHEREUM_WS_URL is required}
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:?ETHEREUM_RPC_URL is required}
     ports:
       - "3013:3001"
     depends_on:

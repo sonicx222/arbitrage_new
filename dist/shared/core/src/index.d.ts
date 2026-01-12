@@ -42,5 +42,13 @@ export * from './domain-models';
 export { RedisArbitrageRepository, RedisExecutionRepository, createArbitrageRepository, createExecutionRepository } from './repositories';
 export { BaseDetector } from './base-detector';
 export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
+export { calculatePriceFromReserves, invertPrice, calculatePriceDifferencePercent, isSameTokenPair, isReverseOrder, getMinProfitThreshold, getDefaultFee, calculateIntraChainArbitrage, calculateCrossChainArbitrage, validatePairSnapshot, createPairSnapshot } from './arbitrage-calculator';
+export type { PairSnapshot as ArbitragePairSnapshot, ChainPriceData, PriceComparisonResult, ArbitrageCalcConfig, CrossChainOpportunityResult } from './arbitrage-calculator';
+export { validatePriceUpdate, validateWhaleTransaction, validateSwapEvent, validateReserveUpdate, validateCoordinatorCommand, validateServiceHealthStatus, validateMessage, validateBatch, createPriceUpdate, createWhaleTransaction, createCoordinatorCommand } from './message-validators';
+export type { PriceUpdate as ValidatedPriceUpdate, WhaleTransaction as ValidatedWhaleTransaction, SwapEvent as ValidatedSwapEvent, ReserveUpdate, CoordinatorCommand, ServiceHealthStatus, ValidationResult } from './message-validators';
+export { ArbitrageError as BaseArbitrageError, ConnectionError, ValidationError as SharedValidationError, LifecycleError, ExecutionError, ErrorCode, ErrorSeverity, success, failure, tryCatch, tryCatchSync, isRetryableError as isRetryableErrorCheck, isCriticalError, getErrorSeverity, formatErrorForLog, formatErrorForResponse, ErrorAggregator } from './error-handling';
+export type { Result } from './error-handling';
+export { TimeoutError, withTimeout, withTimeoutDefault, withTimeoutSafe, withRetry as withRetryAsync, sleep, createDeferred, mapConcurrent, mapSequential, debounceAsync, throttleAsync, gracefulShutdown, waitWithTimeouts } from './async-utils';
+export type { RetryConfig, Deferred } from './async-utils';
 export type { Chain, Dex, Token, Pair, PriceUpdate, ArbitrageOpportunity, SwapEvent, WhaleTransaction, MessageEvent, ServiceHealth, PerformanceMetrics, PredictionResult, MLModelMetrics, ServiceConfig, DetectorConfig, ExecutionConfig, ArbitrageError, NetworkError, ValidationError } from '../../types';
 //# sourceMappingURL=index.d.ts.map

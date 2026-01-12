@@ -83,10 +83,42 @@ setup_secrets() {
     fi
 }
 
+# Verify deployment health by calling health endpoint
+verify_deployment_health() {
+    local service_url=$1
+    local max_attempts=${2:-10}
+    local wait_time=${3:-10}
+
+    log_info "Verifying deployment health at $service_url/health..."
+
+    for attempt in $(seq 1 "$max_attempts"); do
+        log_info "Health check attempt $attempt/$max_attempts..."
+
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 --max-time 30 "$service_url/health" 2>/dev/null || echo "000")
+
+        if [ "$http_code" = "200" ]; then
+            log_info "Deployment health verified: service is responding with HTTP 200"
+            return 0
+        fi
+
+        log_warn "Health check returned HTTP $http_code"
+
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            log_info "Waiting ${wait_time}s before next health check..."
+            sleep "$wait_time"
+        fi
+    done
+
+    log_error "Deployment verification failed: service did not become healthy after $max_attempts attempts"
+    return 1
+}
+
 deploy_service() {
     log_info "Deploying coordinator standby to Cloud Run..."
 
-    gcloud run deploy "$SERVICE_NAME" \
+    # Deploy with error handling
+    if ! gcloud run deploy "$SERVICE_NAME" \
         --image "$IMAGE_NAME:latest" \
         --platform managed \
         --region "$GCP_REGION" \
@@ -97,7 +129,10 @@ deploy_service() {
         --max-instances 1 \
         --set-env-vars "NODE_ENV=production,PORT=3000,REGION_ID=$GCP_REGION,LOG_LEVEL=info,ENABLE_CROSS_REGION_HEALTH=true,IS_STANDBY=true,CAN_BECOME_LEADER=true" \
         --set-secrets "REDIS_URL=redis-url:latest" \
-        --project="$GCP_PROJECT"
+        --project="$GCP_PROJECT"; then
+        log_error "Deployment command failed"
+        return 1
+    fi
 
     # Get service URL
     SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" \
@@ -106,8 +141,22 @@ deploy_service() {
         --format="value(status.url)" \
         --project="$GCP_PROJECT")
 
+    if [ -z "$SERVICE_URL" ]; then
+        log_error "Failed to retrieve service URL after deployment"
+        return 1
+    fi
+
     log_info "Service deployed: $SERVICE_URL"
-    log_info "Health check: $SERVICE_URL/health"
+    log_info "Health endpoint: $SERVICE_URL/health"
+
+    # Verify deployment health
+    if ! verify_deployment_health "$SERVICE_URL"; then
+        log_error "Service deployed but failed health verification"
+        log_warn "Check Cloud Run logs: gcloud run services logs read $SERVICE_NAME --region $GCP_REGION --project $GCP_PROJECT"
+        return 1
+    fi
+
+    log_info "Deployment completed and verified successfully"
 }
 
 show_status() {
