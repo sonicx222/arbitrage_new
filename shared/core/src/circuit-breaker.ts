@@ -1,4 +1,13 @@
 // Circuit Breaker Pattern Implementation for Resilience
+//
+// P0-1 FIX: Added mutex lock for thread-safe state transitions
+// P0-2 FIX: Replaced console.log with structured logger
+// P2-2 FIX: Added monitoring period window for failure tracking
+
+import { createLogger } from './logger';
+
+const logger = createLogger('circuit-breaker');
+
 export enum CircuitState {
   CLOSED = 'CLOSED',
   OPEN = 'OPEN',
@@ -22,6 +31,8 @@ export interface CircuitBreakerStats {
   totalRequests: number;
   totalFailures: number;
   totalSuccesses: number;
+  /** P2-2 FIX: Failures within current monitoring window */
+  windowFailures: number;
 }
 
 export class CircuitBreakerError extends Error {
@@ -46,11 +57,19 @@ export class CircuitBreaker {
   private totalSuccesses = 0;
   private nextAttemptTime = 0;
 
+  // P0-1 FIX: Mutex lock for thread-safe state transitions
+  private transitionLock: Promise<void> | null = null;
+  private halfOpenInProgress = false;
+
+  // P2-2 FIX: Track failure timestamps for monitoring window
+  private failureTimestamps: number[] = [];
+
   constructor(private config: CircuitBreakerConfig) { }
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
     this.totalRequests++;
 
+    // P0-1 FIX: Thread-safe state check and transition
     if (this.state === CircuitState.OPEN) {
       if (Date.now() < this.nextAttemptTime) {
         throw new CircuitBreakerError(
@@ -60,9 +79,26 @@ export class CircuitBreaker {
         );
       }
 
-      // Transition to HALF_OPEN for testing
+      // P0-1 FIX: Use atomic lock to prevent race condition
+      // Only one request can transition to HALF_OPEN
+      if (this.halfOpenInProgress) {
+        throw new CircuitBreakerError(
+          `Circuit breaker is testing recovery for ${this.config.name}`,
+          this.config.name,
+          CircuitState.HALF_OPEN
+        );
+      }
+
+      // Atomically set flag before state change
+      this.halfOpenInProgress = true;
       this.state = CircuitState.HALF_OPEN;
-      console.log(`Circuit breaker ${this.config.name} transitioning to HALF_OPEN`);
+      this.successes = 0; // Reset success counter for HALF_OPEN
+
+      // P0-2 FIX: Use structured logger
+      logger.info('Circuit breaker transitioning to HALF_OPEN', {
+        name: this.config.name,
+        recoveryTimeout: this.config.recoveryTimeout
+      });
     }
 
     try {
@@ -86,30 +122,73 @@ export class CircuitBreaker {
         this.state = CircuitState.CLOSED;
         this.failures = 0;
         this.successes = 0;
-        console.log(`Circuit breaker ${this.config.name} transitioned to CLOSED`);
+        this.halfOpenInProgress = false; // P0-1 FIX: Reset flag
+        this.failureTimestamps = []; // P2-2 FIX: Clear failure history
+
+        // P0-2 FIX: Use structured logger
+        logger.info('Circuit breaker transitioned to CLOSED', {
+          name: this.config.name,
+          successThreshold: this.config.successThreshold
+        });
       }
     }
   }
 
   private onFailure(): void {
+    const now = Date.now();
     this.failures++;
-    this.lastFailureTime = Date.now();
+    this.lastFailureTime = now;
     this.totalFailures++;
+
+    // P2-2 FIX: Track failure within monitoring window
+    this.failureTimestamps.push(now);
+    this.pruneOldFailures();
 
     if (this.state === CircuitState.HALF_OPEN) {
       // Back to OPEN on any failure in HALF_OPEN
       this.state = CircuitState.OPEN;
-      this.nextAttemptTime = Date.now() + this.config.recoveryTimeout;
+      this.nextAttemptTime = now + this.config.recoveryTimeout;
       this.successes = 0;
-      console.log(`Circuit breaker ${this.config.name} back to OPEN after failure in HALF_OPEN`);
+      this.halfOpenInProgress = false; // P0-1 FIX: Reset flag
+
+      // P0-2 FIX: Use structured logger
+      logger.warn('Circuit breaker back to OPEN after failure in HALF_OPEN', {
+        name: this.config.name,
+        recoveryTimeout: this.config.recoveryTimeout
+      });
     } else if (this.state === CircuitState.CLOSED) {
-      // Check if we've exceeded failure threshold
-      if (this.failures >= this.config.failureThreshold) {
+      // P2-2 FIX: Check failures within monitoring window, not total
+      const windowFailures = this.getWindowFailureCount();
+
+      if (windowFailures >= this.config.failureThreshold) {
         this.state = CircuitState.OPEN;
-        this.nextAttemptTime = Date.now() + this.config.recoveryTimeout;
-        console.log(`Circuit breaker ${this.config.name} opened due to ${this.failures} failures`);
+        this.nextAttemptTime = now + this.config.recoveryTimeout;
+
+        // P0-2 FIX: Use structured logger
+        logger.warn('Circuit breaker opened due to failures', {
+          name: this.config.name,
+          windowFailures,
+          failureThreshold: this.config.failureThreshold,
+          monitoringPeriod: this.config.monitoringPeriod
+        });
       }
     }
+  }
+
+  /**
+   * P2-2 FIX: Remove failures older than monitoring period
+   */
+  private pruneOldFailures(): void {
+    const cutoff = Date.now() - this.config.monitoringPeriod;
+    this.failureTimestamps = this.failureTimestamps.filter(ts => ts > cutoff);
+  }
+
+  /**
+   * P2-2 FIX: Get failure count within monitoring window
+   */
+  private getWindowFailureCount(): number {
+    this.pruneOldFailures();
+    return this.failureTimestamps.length;
   }
 
   getStats(): CircuitBreakerStats {
@@ -121,22 +200,38 @@ export class CircuitBreaker {
       lastSuccessTime: this.lastSuccessTime,
       totalRequests: this.totalRequests,
       totalFailures: this.totalFailures,
-      totalSuccesses: this.totalSuccesses
+      totalSuccesses: this.totalSuccesses,
+      windowFailures: this.getWindowFailureCount() // P2-2 FIX: Include window failures
     };
+  }
+
+  getState(): CircuitState {
+    return this.state;
   }
 
   // Manual state control for testing/administration
   forceOpen(): void {
     this.state = CircuitState.OPEN;
     this.nextAttemptTime = Date.now() + this.config.recoveryTimeout;
-    console.log(`Circuit breaker ${this.config.name} manually opened`);
+    this.halfOpenInProgress = false;
+
+    // P0-2 FIX: Use structured logger
+    logger.warn('Circuit breaker manually opened', {
+      name: this.config.name
+    });
   }
 
   forceClose(): void {
     this.state = CircuitState.CLOSED;
     this.failures = 0;
     this.successes = 0;
-    console.log(`Circuit breaker ${this.config.name} manually closed`);
+    this.halfOpenInProgress = false;
+    this.failureTimestamps = [];
+
+    // P0-2 FIX: Use structured logger
+    logger.info('Circuit breaker manually closed', {
+      name: this.config.name
+    });
   }
 
   reset(): void {
@@ -149,7 +244,13 @@ export class CircuitBreaker {
     this.totalFailures = 0;
     this.totalSuccesses = 0;
     this.nextAttemptTime = 0;
-    console.log(`Circuit breaker ${this.config.name} reset`);
+    this.halfOpenInProgress = false;
+    this.failureTimestamps = [];
+
+    // P0-2 FIX: Use structured logger
+    logger.info('Circuit breaker reset', {
+      name: this.config.name
+    });
   }
 }
 
@@ -171,6 +272,18 @@ export class CircuitBreakerRegistry {
     return this.breakers.get(name);
   }
 
+  /**
+   * Get or create a breaker with specified config.
+   * If breaker exists, returns existing instance (ignores config).
+   */
+  getOrCreateBreaker(name: string, config: Omit<CircuitBreakerConfig, 'name'>): CircuitBreaker {
+    const existing = this.breakers.get(name);
+    if (existing) {
+      return existing;
+    }
+    return this.createBreaker(name, config);
+  }
+
   getAllStats(): Record<string, CircuitBreakerStats> {
     const stats: Record<string, CircuitBreakerStats> = {};
     for (const [name, breaker] of this.breakers) {
@@ -184,6 +297,20 @@ export class CircuitBreakerRegistry {
       breaker.reset();
     }
   }
+
+  /**
+   * Remove a breaker from the registry.
+   */
+  removeBreaker(name: string): boolean {
+    return this.breakers.delete(name);
+  }
+
+  /**
+   * Clear all breakers from the registry.
+   */
+  clearAll(): void {
+    this.breakers.clear();
+  }
 }
 
 // Global registry instance
@@ -194,6 +321,16 @@ export function getCircuitBreakerRegistry(): CircuitBreakerRegistry {
     globalRegistry = new CircuitBreakerRegistry();
   }
   return globalRegistry;
+}
+
+/**
+ * Reset the global registry (for testing).
+ */
+export function resetCircuitBreakerRegistry(): void {
+  if (globalRegistry) {
+    globalRegistry.clearAll();
+  }
+  globalRegistry = null;
 }
 
 // Convenience functions
@@ -207,17 +344,15 @@ export async function withCircuitBreaker<T>(
   config?: Partial<CircuitBreakerConfig>
 ): Promise<T> {
   const registry = getCircuitBreakerRegistry();
-  let breaker = registry.getBreaker(breakerName);
 
-  if (!breaker) {
-    breaker = registry.createBreaker(breakerName, {
-      failureThreshold: 5,
-      recoveryTimeout: 60000,
-      monitoringPeriod: 60000,
-      successThreshold: 3,
-      ...config
-    });
-  }
+  // Use getOrCreateBreaker to avoid "already exists" error
+  const breaker = registry.getOrCreateBreaker(breakerName, {
+    failureThreshold: 5,
+    recoveryTimeout: 60000,
+    monitoringPeriod: 60000,
+    successThreshold: 3,
+    ...config
+  });
 
   return breaker.execute(operation);
 }

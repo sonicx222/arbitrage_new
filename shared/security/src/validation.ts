@@ -1,5 +1,8 @@
 // Input validation middleware using Joi
 // Comprehensive validation for all API endpoints
+//
+// P0-4 FIX: Added 'optimism' to valid chains list
+// P2-1 FIX: Created centralized SUPPORTED_CHAINS constant
 
 import Joi from 'joi';
 import { Request, Response, NextFunction } from 'express';
@@ -7,11 +10,17 @@ import { createLogger } from '../../core/src/logger';
 
 const logger = createLogger('validation');
 
+// P2-1 FIX: Centralized supported chains list for consistency
+// When adding new chains, only update this array
+const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism'] as const;
+type SupportedChain = typeof SUPPORTED_CHAINS[number];
+
 // Arbitrage opportunity validation
 export const validateArbitrageRequest = (req: Request, res: Response, next: NextFunction) => {
   const schema = Joi.object({
-    sourceChain: Joi.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon').required(),
-    targetChain: Joi.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon').required(),
+    // P0-4 FIX: Use centralized SUPPORTED_CHAINS
+    sourceChain: Joi.string().valid(...SUPPORTED_CHAINS).required(),
+    targetChain: Joi.string().valid(...SUPPORTED_CHAINS).required(),
     sourceDex: Joi.string().min(1).max(50).required(),
     targetDex: Joi.string().min(1).max(50).required(),
     tokenAddress: Joi.string().pattern(/^0x[a-fA-F0-9]{40}$/).required(),
@@ -91,8 +100,9 @@ export const validateConfigUpdate = (req: Request, res: Response, next: NextFunc
       enabled: Joi.boolean().optional(),
       threshold: Joi.number().min(0).max(100).optional(),
       interval: Joi.number().integer().min(1000).max(3600000).optional(), // 1s to 1h
+      // P0-4 FIX: Use centralized SUPPORTED_CHAINS
       chains: Joi.array().items(
-        Joi.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon')
+        Joi.string().valid(...SUPPORTED_CHAINS)
       ).optional()
     }).required()
   });
