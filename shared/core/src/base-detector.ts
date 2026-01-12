@@ -25,7 +25,7 @@ import {
   ServiceState,
   createServiceState
 } from './index';
-import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA } from '../../config/src';
+import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, dexFeeToPercentage } from '../../config/src';
 import {
   Dex,
   Token,
@@ -130,8 +130,8 @@ export abstract class BaseDetector {
       transitionTimeoutMs: 30000
     });
 
-    // Initialize chain-specific data
-    this.dexes = DEXES[this.chain as keyof typeof DEXES] || [];
+    // Initialize chain-specific data (using getEnabledDexes to filter disabled DEXs)
+    this.dexes = getEnabledDexes(this.chain);
     this.tokens = CORE_TOKENS[this.chain as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chain as keyof typeof TOKEN_METADATA] || {};
 
@@ -863,9 +863,8 @@ export abstract class BaseDetector {
 
     const pairsProcessed = new Set<string>();
 
+    // Note: this.dexes is already filtered by getEnabledDexes() in constructor
     for (const dex of this.dexes) {
-      if (!dex.enabled) continue;
-
       for (let i = 0; i < this.tokens.length; i++) {
         for (let j = i + 1; j < this.tokens.length; j++) {
           const token0 = this.tokens[i];
@@ -878,13 +877,16 @@ export abstract class BaseDetector {
           try {
             const pairAddress = await this.getPairAddress(dex, token0, token1);
             if (pairAddress && pairAddress !== ethers.ZeroAddress) {
+              // Convert fee from basis points to percentage for pair storage
+              // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
+              const feePercentage = dex.fee ? dexFeeToPercentage(dex.fee) : 0.003;
               const pair: Pair = {
                 name: `${token0.symbol}/${token1.symbol}`,
                 address: pairAddress,
                 token0: token0.address,
                 token1: token1.address,
                 dex: dex.name,
-                fee: dex.fee || 0.003 // Default 0.3% fee
+                fee: feePercentage
               };
 
               const fullPairKey = `${dex.name}_${pair.name}`;

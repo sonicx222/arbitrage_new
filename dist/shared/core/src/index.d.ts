@@ -1,4 +1,5 @@
 export { RedisClient, getRedisClient, resetRedisInstance } from './redis';
+export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';
 export { RedisStreamsClient, StreamBatcher, getRedisStreamsClient, resetRedisStreamsInstance } from './redis-streams';
 export { DistributedLockManager, getDistributedLockManager, resetDistributedLockManager } from './distributed-lock';
 export type { LockConfig, AcquireOptions, LockHandle, LockStats } from './distributed-lock';

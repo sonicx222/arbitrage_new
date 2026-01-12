@@ -485,3 +485,9 @@
 2026-01-11T20:29:42.537Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
 2026-01-12T06:34:27.338Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
 2026-01-12T06:34:27.310Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-12T10:28:20.773Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-12T10:28:20.799Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-12T10:40:44.592Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-12T10:40:44.624Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}
+2026-01-12T11:12:15.274Z [redis-streams] error: Error flushing batch {"error":{},"streamName":"stream:test","batchSize":5}
+2026-01-12T11:12:15.299Z [redis-streams] error: XINFO error {"error":{},"streamName":"stream:price-updates"}

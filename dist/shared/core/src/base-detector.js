@@ -39,8 +39,8 @@ class BaseDetector {
             serviceName: `${this.chain}-detector`,
             transitionTimeoutMs: 30000
         });
-        // Initialize chain-specific data
-        this.dexes = src_1.DEXES[this.chain] || [];
+        // Initialize chain-specific data (using getEnabledDexes to filter disabled DEXs)
+        this.dexes = (0, src_1.getEnabledDexes)(this.chain);
         this.tokens = src_1.CORE_TOKENS[this.chain] || [];
         this.tokenMetadata = src_1.TOKEN_METADATA[this.chain] || {};
         // Initialize provider
@@ -638,9 +638,8 @@ class BaseDetector {
     async initializePairs() {
         this.logger.info(`Initializing ${this.chain} trading pairs`);
         const pairsProcessed = new Set();
+        // Note: this.dexes is already filtered by getEnabledDexes() in constructor
         for (const dex of this.dexes) {
-            if (!dex.enabled)
-                continue;
             for (let i = 0; i < this.tokens.length; i++) {
                 for (let j = i + 1; j < this.tokens.length; j++) {
                     const token0 = this.tokens[i];
@@ -652,13 +651,16 @@ class BaseDetector {
                     try {
                         const pairAddress = await this.getPairAddress(dex, token0, token1);
                         if (pairAddress && pairAddress !== ethers_1.ethers.ZeroAddress) {
+                            // Convert fee from basis points to percentage for pair storage
+                            // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
+                            const feePercentage = dex.fee ? (0, src_1.dexFeeToPercentage)(dex.fee) : 0.003;
                             const pair = {
                                 name: `${token0.symbol}/${token1.symbol}`,
                                 address: pairAddress,
                                 token0: token0.address,
                                 token1: token1.address,
                                 dex: dex.name,
-                                fee: dex.fee || 0.003 // Default 0.3% fee
+                                fee: feePercentage
                             };
                             const fullPairKey = `${dex.name}_${pair.name}`;
                             this.pairs.set(fullPairKey, pair);

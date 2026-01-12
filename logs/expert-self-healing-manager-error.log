@@ -26,3 +26,9 @@
 2026-01-11T20:29:44.079Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768163384079_2eg7028cv","strategy":"restart_service","error":"Recovery failed"}
 2026-01-12T06:34:27.397Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
 2026-01-12T06:34:27.423Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768199667423_4gszaa5fj","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T10:28:26.830Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T10:28:26.861Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768213706860_1x4amiau9","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T10:40:51.058Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T10:40:51.084Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768214451083_7sp103fi3","strategy":"restart_service","error":"Recovery failed"}
+2026-01-12T11:12:19.006Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-12T11:12:19.013Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768216339013_4odahnxd1","strategy":"restart_service","error":"Recovery failed"}
