@@ -17,3 +17,13 @@ logs/pair-discovery-error.log
 logs/redis-client-combined.log
 logs/redis-client-error.log
 logs/redis-streams-combined.log
+logs/circuit-breaker-combined.log
+logs/circuit-breaker-error.log
+logs/ethereum-detector-combined.log
+logs/ethereum-detector-error.log
+logs/expert-self-healing-manager-combined.log
+logs/expert-self-healing-manager-error.log
+logs/redis-client-combined.log
+logs/redis-client-error.log
+logs/redis-streams-combined.log
+logs/redis-streams-error.log

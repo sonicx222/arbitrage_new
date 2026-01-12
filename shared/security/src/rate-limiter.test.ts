@@ -17,7 +17,9 @@ const mockRedis: Record<string, jest.Mock> = {
   exec: jest.fn(() => Promise.resolve([] as Array<[null, number]>)),
   del: jest.fn(() => Promise.resolve(1)),
   zrange: jest.fn(() => Promise.resolve([] as string[])),
-  keys: jest.fn(() => Promise.resolve([] as string[]))
+  keys: jest.fn(() => Promise.resolve([] as string[])),
+  // P1-3 FIX: Add scan mock for SCAN-based cleanup
+  scan: jest.fn(() => Promise.resolve(['0', []] as [string, string[]]))
 };
 
 // Mock dependencies with factory functions (before import)
@@ -25,8 +27,9 @@ jest.mock('../../core/src/logger', () => ({
   createLogger: jest.fn(() => mockLogger)
 }));
 
+// P0-3 FIX: getRedisClient now returns a Promise
 jest.mock('../../core/src/redis', () => ({
-  getRedisClient: jest.fn(() => mockRedis)
+  getRedisClient: jest.fn(() => Promise.resolve(mockRedis))
 }));
 
 import { RateLimiter } from './rate-limiter';
@@ -252,20 +255,22 @@ describe('RateLimiter', () => {
   });
 
   describe('cleanup', () => {
+    // P1-3 FIX: Updated tests to use SCAN instead of KEYS
     it('should clean up old rate limit data', async () => {
       const oldKeys = ['test:user1', 'test:user2'];
-      mockRedis.keys.mockImplementation(() => Promise.resolve(oldKeys));
+      // SCAN returns [cursor, keys[]] - '0' cursor means done
+      mockRedis.scan.mockImplementation(() => Promise.resolve(['0', oldKeys]));
       mockRedis.zcard.mockImplementation(() => Promise.resolve(0)); // Empty sets
 
       await rateLimiter.cleanup();
 
-      expect(mockRedis.keys).toHaveBeenCalledWith('test:*');
+      expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'test:*', 'COUNT', 100);
       expect(mockRedis.del).toHaveBeenCalledTimes(oldKeys.length);
       expect(mockLogger.info).toHaveBeenCalledWith('Rate limiter cleanup completed', { keysProcessed: 2 });
     });
 
     it('should handle cleanup errors gracefully', async () => {
-      mockRedis.keys.mockImplementation(() => Promise.reject(new Error('Redis error')));
+      mockRedis.scan.mockImplementation(() => Promise.reject(new Error('Redis error')));
 
       await rateLimiter.cleanup();
 
