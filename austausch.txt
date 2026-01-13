@@ -1,0 +1,38 @@
+pho@CVDEM053 arbitrage_new % npm install
+npm warn deprecated npmlog@5.0.1: This package is no longer supported.
+npm warn deprecated are-we-there-yet@2.0.0: This package is no longer supported.
+npm warn deprecated gauge@3.0.2: This package is no longer supported.
+npm error code 1
+npm error path /Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node
+npm error command failed
+npm error command sh -c node scripts/install.js
+npm error node:internal/modules/cjs/loader:1423
+npm error   throw err;
+npm error   ^
+npm error
+npm error Error: Cannot find module 'es6-promisify'
+npm error Require stack:
+npm error - /Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/agent-base/index.js
+npm error - /Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/node_modules/https-proxy-agent/index.js
+npm error - /Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/scripts/resources.js
+npm error - /Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/scripts/install.js
+npm error     at Module._resolveFilename (node:internal/modules/cjs/loader:1420:15)
+npm error     at defaultResolveImpl (node:internal/modules/cjs/loader:1058:19)
+npm error     at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1063:22)
+npm error     at Module._load (node:internal/modules/cjs/loader:1226:37)
+npm error     at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+npm error     at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)
+npm error     at Module.require (node:internal/modules/cjs/loader:1503:12)
+npm error     at require (node:internal/modules/helpers:152:16)
+npm error     at Object.<anonymous> (/Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/agent-base/index.js:4:19)
+npm error     at Module._compile (node:internal/modules/cjs/loader:1760:14) {
+npm error   code: 'MODULE_NOT_FOUND',
+npm error   requireStack: [
+npm error     '/Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/agent-base/index.js',
+npm error     '/Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/node_modules/https-proxy-agent/index.js',
+npm error     '/Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/scripts/resources.js',
+npm error     '/Users/pho/DEV/Arbitrage_Bot/arbitrage_new/shared/ml/node_modules/@tensorflow/tfjs-node/scripts/install.js'
+npm error   ]
+npm error }
+npm error
+npm error Node.js v25.2.1
