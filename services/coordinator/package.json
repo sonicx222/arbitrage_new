@@ -12,10 +12,14 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "dependencies": {
+    "@arbitrage/core": "*",
+    "@arbitrage/types": "*",
     "express": "^5.0.0",
     "redis": "^4.7.0",
     "winston": "^3.14.2",
-    "ioredis": "^5.4.1"
+    "ioredis": "^5.4.1",
+    "helmet": "^8.0.0",
+    "express-rate-limit": "^7.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",

@@ -1,6 +1,6 @@
 // Coordinator Service Entry Point
 import { CoordinatorService } from './coordinator';
-import { createLogger } from '../../../shared/core/src';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('coordinator');
 

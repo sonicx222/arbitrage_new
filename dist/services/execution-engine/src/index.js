@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 // Execution Engine Service Entry Point
 const engine_1 = require("./engine");
-const src_1 = require("../../../shared/core/src");
-const logger = (0, src_1.createLogger)('execution-engine');
+const core_1 = require("@arbitrage/core");
+const logger = (0, core_1.createLogger)('execution-engine');
 async function main() {
     try {
         logger.info('Starting Execution Engine Service');

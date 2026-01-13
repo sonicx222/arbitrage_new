@@ -7,7 +7,7 @@ exports.CoordinatorService = void 0;
 const express_1 = __importDefault(require("express"));
 const helmet_1 = __importDefault(require("helmet"));
 const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
-const src_1 = require("../../../shared/core/src");
+const core_1 = require("@arbitrage/core");
 // =============================================================================
 // Coordinator Service
 // =============================================================================
@@ -15,7 +15,7 @@ class CoordinatorService {
     constructor(config) {
         this.redis = null;
         this.streamsClient = null;
-        this.logger = (0, src_1.createLogger)('coordinator');
+        this.logger = (0, core_1.createLogger)('coordinator');
         // P2 FIX: Proper type instead of any
         this.server = null;
         // P1-8 FIX: isRunning kept for internal state tracking within executeStart/Stop callbacks
@@ -38,11 +38,11 @@ class CoordinatorService {
         // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
         this.MAX_OPPORTUNITIES = 1000;
         this.OPPORTUNITY_TTL_MS = 60000; // 1 minute default TTL
-        this.perfLogger = (0, src_1.getPerformanceLogger)('coordinator');
+        this.perfLogger = (0, core_1.getPerformanceLogger)('coordinator');
         this.app = (0, express_1.default)();
         this.systemMetrics = this.initializeMetrics();
         // Initialize state manager for lifecycle management (P0 fix: prevents race conditions)
-        this.stateManager = (0, src_1.createServiceState)({
+        this.stateManager = (0, core_1.createServiceState)({
             serviceName: 'coordinator',
             transitionTimeoutMs: 30000
         });
@@ -63,19 +63,19 @@ class CoordinatorService {
         // Define consumer groups for all streams we need to consume
         this.consumerGroups = [
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.HEALTH,
+                streamName: core_1.RedisStreamsClient.STREAMS.HEALTH,
                 groupName: this.config.consumerGroup,
                 consumerName: this.config.consumerId,
                 startId: '$' // Only new messages
             },
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
+                streamName: core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
                 groupName: this.config.consumerGroup,
                 consumerName: this.config.consumerId,
                 startId: '$'
             },
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.WHALE_ALERTS,
+                streamName: core_1.RedisStreamsClient.STREAMS.WHALE_ALERTS,
                 groupName: this.config.consumerGroup,
                 consumerName: this.config.consumerId,
                 startId: '$'
@@ -95,9 +95,9 @@ class CoordinatorService {
                 instanceId: this.config.leaderElection.instanceId
             });
             // Initialize Redis client (for legacy operations)
-            this.redis = await (0, src_1.getRedisClient)();
+            this.redis = await (0, core_1.getRedisClient)();
             // Initialize Redis Streams client
-            this.streamsClient = await (0, src_1.getRedisStreamsClient)();
+            this.streamsClient = await (0, core_1.getRedisStreamsClient)();
             // Create consumer groups for all streams
             await this.createConsumerGroups();
             // Try to acquire leadership
@@ -420,7 +420,7 @@ class CoordinatorService {
     async consumeHealthStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.HEALTH);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.HEALTH);
         if (!config)
             return;
         try {
@@ -444,7 +444,7 @@ class CoordinatorService {
     async consumeOpportunitiesStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES);
         if (!config)
             return;
         try {
@@ -467,7 +467,7 @@ class CoordinatorService {
     async consumeWhaleAlertsStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.WHALE_ALERTS);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.WHALE_ALERTS);
         if (!config)
             return;
         try {
@@ -704,7 +704,7 @@ class CoordinatorService {
                     pendingOpportunities: this.systemMetrics.pendingOpportunities
                 }
             };
-            await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.HEALTH, health);
+            await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.HEALTH, health);
         }
         catch (error) {
             this.logger.error('Failed to report health', { error });
@@ -878,7 +878,7 @@ class CoordinatorService {
     setupRoutes() {
         // Dashboard routes
         this.app.get('/', this.getDashboard.bind(this));
-        this.app.get('/api/health', src_1.ValidationMiddleware.validateHealthCheck, this.getHealth.bind(this));
+        this.app.get('/api/health', core_1.ValidationMiddleware.validateHealthCheck, this.getHealth.bind(this));
         this.app.get('/api/metrics', this.getMetrics.bind(this));
         this.app.get('/api/services', this.getServices.bind(this));
         this.app.get('/api/opportunities', this.getOpportunities.bind(this));

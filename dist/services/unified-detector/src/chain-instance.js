@@ -15,8 +15,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChainDetectorInstance = void 0;
 const events_1 = require("events");
 const ethers_1 = require("ethers");
-const src_1 = require("../../../shared/core/src");
-const src_2 = require("../../../shared/config/src");
+const core_1 = require("@arbitrage/core");
+const config_1 = require("@arbitrage/config");
 // =============================================================================
 // Chain Detector Instance
 // =============================================================================
@@ -45,16 +45,16 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         this.partitionId = config.partitionId;
         this.streamsClient = config.streamsClient;
         this.perfLogger = config.perfLogger;
-        this.logger = (0, src_1.createLogger)(`chain:${config.chainId}`);
+        this.logger = (0, core_1.createLogger)(`chain:${config.chainId}`);
         // Load chain configuration
-        this.chainConfig = src_2.CHAINS[this.chainId];
+        this.chainConfig = config_1.CHAINS[this.chainId];
         if (!this.chainConfig) {
             throw new Error(`Chain configuration not found: ${this.chainId}`);
         }
-        this.detectorConfig = src_2.DETECTOR_CONFIG[this.chainId] || src_2.DETECTOR_CONFIG.ethereum;
-        this.dexes = (0, src_2.getEnabledDexes)(this.chainId);
-        this.tokens = src_2.CORE_TOKENS[this.chainId] || [];
-        this.tokenMetadata = src_2.TOKEN_METADATA[this.chainId] || {};
+        this.detectorConfig = config_1.DETECTOR_CONFIG[this.chainId] || config_1.DETECTOR_CONFIG.ethereum;
+        this.dexes = (0, config_1.getEnabledDexes)(this.chainId);
+        this.tokens = config_1.CORE_TOKENS[this.chainId] || [];
+        this.tokenMetadata = config_1.TOKEN_METADATA[this.chainId] || {};
         // Override URLs if provided
         if (config.wsUrl) {
             this.chainConfig = { ...this.chainConfig, wsUrl: config.wsUrl };
@@ -205,7 +205,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             pingInterval: 30000,
             connectionTimeout: 10000
         };
-        this.wsManager = new src_1.WebSocketManager(wsConfig);
+        this.wsManager = new core_1.WebSocketManager(wsConfig);
         this.logger.info(`WebSocket configured with ${1 + (this.chainConfig.wsFallbackUrls?.length || 0)} URL(s)`);
         // Set up WebSocket event handlers
         this.wsManager.on('message', (message) => {
@@ -255,7 +255,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
                     // Convert fee from basis points to percentage for pair storage
                     // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
                     // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
-                    const feePercentage = (0, src_2.dexFeeToPercentage)(dex.fee ?? 30);
+                    const feePercentage = (0, config_1.dexFeeToPercentage)(dex.fee ?? 30);
                     const pair = {
                         address: pairAddress,
                         dex: dex.name,
@@ -292,17 +292,17 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         // Subscribe to Sync events
         await this.wsManager.subscribe({
             method: 'eth_subscribe',
-            params: ['logs', { topics: [src_2.EVENT_SIGNATURES.SYNC], address: pairAddresses }],
+            params: ['logs', { topics: [config_1.EVENT_SIGNATURES.SYNC], address: pairAddresses }],
             type: 'logs',
-            topics: [src_2.EVENT_SIGNATURES.SYNC],
+            topics: [config_1.EVENT_SIGNATURES.SYNC],
             callback: (log) => this.handleSyncEvent(log)
         });
         // Subscribe to Swap events
         await this.wsManager.subscribe({
             method: 'eth_subscribe',
-            params: ['logs', { topics: [src_2.EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
+            params: ['logs', { topics: [config_1.EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
             type: 'logs',
-            topics: [src_2.EVENT_SIGNATURES.SWAP_V2],
+            topics: [config_1.EVENT_SIGNATURES.SWAP_V2],
             callback: (log) => this.handleSwapEvent(log)
         });
         // Subscribe to new blocks for latency tracking
@@ -327,10 +327,10 @@ class ChainDetectorInstance extends events_1.EventEmitter {
                 if (result && 'topics' in result && result.topics) {
                     // Log event
                     const topic0 = result.topics[0];
-                    if (topic0 === src_2.EVENT_SIGNATURES.SYNC) {
+                    if (topic0 === config_1.EVENT_SIGNATURES.SYNC) {
                         this.handleSyncEvent(result);
                     }
-                    else if (topic0 === src_2.EVENT_SIGNATURES.SWAP_V2) {
+                    else if (topic0 === config_1.EVENT_SIGNATURES.SWAP_V2) {
                         this.handleSwapEvent(result);
                     }
                 }
@@ -453,7 +453,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     }
     async publishPriceUpdate(update) {
         try {
-            await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.PRICE_UPDATES, update);
+            await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.PRICE_UPDATES, update);
         }
         catch (error) {
             this.logger.error('Failed to publish price update', { error });
@@ -551,7 +551,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
      * Uses ARBITRAGE_CONFIG.chainMinProfits for consistency with base-detector.ts.
      */
     getMinProfitThreshold() {
-        const chainMinProfits = src_2.ARBITRAGE_CONFIG.chainMinProfits;
+        const chainMinProfits = config_1.ARBITRAGE_CONFIG.chainMinProfits;
         // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
         return chainMinProfits[this.chainId] ?? 0.003; // Default 0.3%
     }
@@ -611,7 +611,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
     }
     async emitOpportunity(opportunity) {
         try {
-            await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, opportunity);
+            await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, opportunity);
             this.emit('opportunity', opportunity);
             this.perfLogger.logArbitrageOpportunity(opportunity);
         }

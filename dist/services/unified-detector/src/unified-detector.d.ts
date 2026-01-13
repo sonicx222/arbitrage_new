@@ -18,8 +18,8 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 import { EventEmitter } from 'events';
-import { ServiceState } from '../../../shared/core/src';
-import { PartitionHealth } from '../../../shared/config/src';
+import { ServiceState } from '@arbitrage/core';
+import { PartitionHealth } from '@arbitrage/config';
 import { ChainDetectorInstance } from './chain-instance';
 export interface UnifiedDetectorConfig {
     /** Partition ID to run (from env or explicit) */
@@ -89,6 +89,10 @@ export declare class UnifiedChainDetector extends EventEmitter {
     getState(): ServiceState;
     getPartitionId(): string;
     getChains(): string[];
+    /**
+     * Returns list of chain IDs that are currently healthy (connected status)
+     */
+    getHealthyChains(): string[];
     getChainInstance(chainId: string): ChainDetectorInstance | undefined;
     getStats(): UnifiedDetectorStats;
     getPartitionHealth(): Promise<PartitionHealth>;

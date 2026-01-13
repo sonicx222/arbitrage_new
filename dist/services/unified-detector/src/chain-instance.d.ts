@@ -11,7 +11,7 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 import { EventEmitter } from 'events';
-import { PerformanceLogger, RedisStreamsClient } from '../../../shared/core/src';
+import { PerformanceLogger, RedisStreamsClient } from '@arbitrage/core';
 import { ChainStats } from './unified-detector';
 export interface ChainInstanceConfig {
     chainId: string;

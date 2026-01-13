@@ -35,8 +35,8 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CrossChainDetectorService = void 0;
-const src_1 = require("../../../shared/core/src");
-const src_2 = require("../../../shared/config/src");
+const core_1 = require("@arbitrage/core");
+const config_1 = require("@arbitrage/config");
 const bridge_predictor_1 = require("./bridge-predictor");
 // =============================================================================
 // Cross-Chain Detector Service
@@ -46,7 +46,7 @@ class CrossChainDetectorService {
         this.redis = null;
         this.streamsClient = null;
         this.priceOracle = null;
-        this.logger = (0, src_1.createLogger)('cross-chain-detector');
+        this.logger = (0, core_1.createLogger)('cross-chain-detector');
         this.priceData = {};
         this.opportunitiesCache = new Map();
         this.mlPredictor = null;
@@ -58,25 +58,25 @@ class CrossChainDetectorService {
         // Counter for deterministic cleanup (replaces random sampling)
         this.priceUpdateCounter = 0;
         this.CLEANUP_FREQUENCY = 100; // Cleanup every 100 price updates
-        this.perfLogger = (0, src_1.getPerformanceLogger)('cross-chain-detector');
+        this.perfLogger = (0, core_1.getPerformanceLogger)('cross-chain-detector');
         this.bridgePredictor = new bridge_predictor_1.BridgeLatencyPredictor();
         // Generate unique instance ID
         this.instanceId = `cross-chain-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
         // State machine for lifecycle management
-        this.stateManager = (0, src_1.createServiceState)({
+        this.stateManager = (0, core_1.createServiceState)({
             serviceName: 'cross-chain-detector',
             transitionTimeoutMs: 30000
         });
         // Define consumer groups for streams we need to consume
         this.consumerGroups = [
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.PRICE_UPDATES,
+                streamName: core_1.RedisStreamsClient.STREAMS.PRICE_UPDATES,
                 groupName: 'cross-chain-detector-group',
                 consumerName: this.instanceId,
                 startId: '$'
             },
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.WHALE_ALERTS,
+                streamName: core_1.RedisStreamsClient.STREAMS.WHALE_ALERTS,
                 groupName: 'cross-chain-detector-group',
                 consumerName: this.instanceId,
                 startId: '$'
@@ -92,8 +92,8 @@ class CrossChainDetectorService {
                 instanceId: this.instanceId
             });
             // Initialize Redis clients
-            this.redis = await (0, src_1.getRedisClient)();
-            this.streamsClient = await (0, src_1.getRedisStreamsClient)();
+            this.redis = await (0, core_1.getRedisClient)();
+            this.streamsClient = await (0, core_1.getRedisStreamsClient)();
             // P0-6 FIX: Validate Redis clients initialized successfully
             if (!this.redis) {
                 throw new Error('Failed to initialize Redis client - returned null');
@@ -102,7 +102,7 @@ class CrossChainDetectorService {
                 throw new Error('Failed to initialize Redis Streams client - returned null');
             }
             // Initialize price oracle
-            this.priceOracle = await (0, src_1.getPriceOracle)();
+            this.priceOracle = await (0, core_1.getPriceOracle)();
             // P0-6 FIX: Validate price oracle initialized successfully
             if (!this.priceOracle) {
                 throw new Error('Failed to initialize Price Oracle - returned null');
@@ -230,7 +230,7 @@ class CrossChainDetectorService {
     async consumePriceUpdatesStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.PRICE_UPDATES);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.PRICE_UPDATES);
         if (!config)
             return;
         try {
@@ -260,7 +260,7 @@ class CrossChainDetectorService {
     async consumeWhaleAlertsStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.WHALE_ALERTS);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.WHALE_ALERTS);
         if (!config)
             return;
         try {
@@ -558,7 +558,7 @@ class CrossChainDetectorService {
             // Check if profitable after estimated bridge costs
             const bridgeCost = this.estimateBridgeCost(lowestPrice.chain, highestPrice.chain, lowestPrice.update);
             const netProfit = priceDiff - bridgeCost;
-            if (netProfit > src_2.ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
+            if (netProfit > config_1.ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
                 const opportunity = {
                     token: this.extractTokenFromPair(lowestPrice.update.pairKey),
                     sourceChain: lowestPrice.chain,
@@ -611,7 +611,7 @@ class CrossChainDetectorService {
     fallbackBridgeCost(sourceChain, targetChain, tokenUpdate) {
         const DEFAULT_TRADE_SIZE_USD = 1000; // Standard trade size for cost estimation
         // P1-5 FIX: Use centralized bridge cost configuration
-        const bridgeCostResult = (0, src_2.calculateBridgeCostUsd)(sourceChain, targetChain, DEFAULT_TRADE_SIZE_USD);
+        const bridgeCostResult = (0, config_1.calculateBridgeCostUsd)(sourceChain, targetChain, DEFAULT_TRADE_SIZE_USD);
         if (bridgeCostResult) {
             this.logger.debug('Using configured bridge cost', {
                 sourceChain,
@@ -708,7 +708,7 @@ class CrossChainDetectorService {
     filterValidOpportunities(opportunities) {
         return opportunities
             .filter(opp => opp.netProfit > 0)
-            .filter(opp => opp.confidence > src_2.ARBITRAGE_CONFIG.confidenceThreshold)
+            .filter(opp => opp.confidence > config_1.ARBITRAGE_CONFIG.confidenceThreshold)
             .sort((a, b) => b.netProfit - a.netProfit)
             .slice(0, 10); // Top 10 opportunities
     }
@@ -745,7 +745,7 @@ class CrossChainDetectorService {
         };
         try {
             // Publish to Redis Streams (ADR-002 compliant)
-            await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, arbitrageOpp);
+            await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, arbitrageOpp);
             this.perfLogger.logArbitrageOpportunity(arbitrageOpp);
             // Cache opportunity to avoid duplicates
             // P1-NEW-3 FIX: Add createdAt timestamp for reliable cleanup
@@ -777,7 +777,7 @@ class CrossChainDetectorService {
                 };
                 // Publish health to stream
                 if (this.streamsClient) {
-                    await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.HEALTH, health);
+                    await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.HEALTH, health);
                 }
                 // Also update legacy health key
                 if (this.redis) {

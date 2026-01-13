@@ -19,7 +19,7 @@ import {
   RedisStreamsClient,
   WebSocketManager,
   WebSocketConfig
-} from '../../../shared/core/src';
+} from '@arbitrage/core';
 
 import {
   CHAINS,
@@ -30,7 +30,7 @@ import {
   ARBITRAGE_CONFIG,
   getEnabledDexes,
   dexFeeToPercentage
-} from '../../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   Dex,
@@ -39,7 +39,7 @@ import {
   ArbitrageOpportunity,
   SwapEvent,
   Pair
-} from '../../../shared/types/src';
+} from '@arbitrage/types';
 
 import { ChainStats } from './unified-detector';
 

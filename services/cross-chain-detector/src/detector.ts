@@ -47,14 +47,14 @@ import {
   createServiceState,
   getPriceOracle,
   PriceOracle
-} from '../../../shared/core/src';
-import { ARBITRAGE_CONFIG, calculateBridgeCostUsd } from '../../../shared/config/src';
+} from '@arbitrage/core';
+import { ARBITRAGE_CONFIG, calculateBridgeCostUsd } from '@arbitrage/config';
 import {
   PriceUpdate,
   ArbitrageOpportunity,
   WhaleTransaction,
   CrossChainBridge
-} from '../../../shared/types/src';
+} from '@arbitrage/types';
 import { BridgeLatencyPredictor } from './bridge-predictor';
 
 // =============================================================================

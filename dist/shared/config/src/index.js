@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
+exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.PARTITION_IDS = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
 exports.getEnabledDexes = getEnabledDexes;
 exports.dexFeeToPercentage = dexFeeToPercentage;
 exports.percentageToBasisPoints = percentageToBasisPoints;
@@ -399,6 +399,130 @@ exports.DEXES = {
             routerAddress: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F',
             fee: 30
         }
+    ],
+    // =============================================================================
+    // S3.1.2: New Chain DEXs for 4-Partition Architecture
+    // S3.2.1: Expanded Avalanche DEXs (6 total)
+    // =============================================================================
+    // Avalanche: 6 DEXs
+    avalanche: [
+        {
+            name: 'trader_joe_v2', // [C] - Dominant on Avalanche
+            chain: 'avalanche',
+            factoryAddress: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
+            routerAddress: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
+            fee: 30
+        },
+        {
+            name: 'pangolin', // [H] - Native Avalanche DEX
+            chain: 'avalanche',
+            factoryAddress: '0xefa94DE7a4656D787667C749f7E1223D71E9FD88',
+            routerAddress: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
+            fee: 30
+        },
+        {
+            name: 'sushiswap', // [H] - Multi-chain presence
+            chain: 'avalanche',
+            factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
+            routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+            fee: 30
+        },
+        // S3.2.1: New DEXs added
+        // S3.2.1-FIX: GMX uses Vault model (not factory pattern) - DISABLED until adapter implemented
+        // GMX Vault doesn't have getPair/getPool methods, needs custom GMXVaultAdapter
+        {
+            name: 'gmx', // [C] - Perpetuals/Spot, uses vault model
+            chain: 'avalanche',
+            factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (NOT a factory!)
+            routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8', // GMX Router
+            fee: 30, // GMX uses dynamic fees 10-80bp, using 30bp average
+            enabled: false // DISABLED: Vault model not supported by PairDiscoveryService
+        },
+        // S3.2.1-FIX: Platypus uses Pool model (not factory pattern) - DISABLED until adapter implemented
+        // Platypus Main Pool doesn't have getPair/getPool methods, needs custom PlatypusPoolAdapter
+        {
+            name: 'platypus', // [H] - Stablecoin-optimized AMM
+            chain: 'avalanche',
+            factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (NOT a factory!)
+            routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12', // Platypus Router
+            fee: 4, // Platypus: ~1-4bp for stablecoins
+            enabled: false // DISABLED: Pool model not supported by PairDiscoveryService
+        },
+        {
+            name: 'kyberswap', // [H] - KyberSwap Elastic (concentrated liquidity)
+            chain: 'avalanche',
+            factoryAddress: '0x5F1dddbf348aC2fbe22a163e30F99F9ECE3DD50a', // KyberSwap Elastic Factory
+            routerAddress: '0xC1e7dFE73E1598E3910EF4C7845B68A9Ab6F4c83', // KyberSwap Router
+            fee: 10 // KyberSwap: dynamic fees, typically 8-100bp (V3-style getPool)
+        }
+    ],
+    // Fantom: 2 DEXs
+    fantom: [
+        {
+            name: 'spookyswap', // [C] - Dominant on Fantom
+            chain: 'fantom',
+            factoryAddress: '0x152eE697f2E276fA89E96742e9bB9aB1F2E61bE3',
+            routerAddress: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',
+            fee: 30
+        },
+        {
+            name: 'spiritswap', // [H] - Second largest
+            chain: 'fantom',
+            factoryAddress: '0xEF45d134b73241eDa7703fa787148D9C9F4950b0',
+            routerAddress: '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52',
+            fee: 30
+        }
+    ],
+    // zkSync Era: 2 DEXs
+    zksync: [
+        {
+            name: 'syncswap', // [C] - Largest on zkSync
+            chain: 'zksync',
+            factoryAddress: '0xf2DAd89f2788a8CD54625C60b55cD3d2D0ACa7Cb',
+            routerAddress: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',
+            fee: 30
+        },
+        {
+            name: 'mute', // [H] - Native zkSync DEX
+            chain: 'zksync',
+            factoryAddress: '0x40be1cBa6C5B47cDF9da7f963B6F761F4C60627D',
+            routerAddress: '0x8B791913eB07C32779a16750e3868aA8495F5964',
+            fee: 30
+        }
+    ],
+    // Linea: 2 DEXs
+    linea: [
+        {
+            name: 'syncswap', // [C] - Multi-chain presence
+            chain: 'linea',
+            factoryAddress: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
+            routerAddress: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
+            fee: 30
+        },
+        {
+            name: 'velocore', // [H] - Native Linea DEX
+            chain: 'linea',
+            factoryAddress: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',
+            routerAddress: '0x1d0188c4B276A09366D05d6Be06aF61a73bC7535', // Velocore Vault on Linea
+            fee: 30
+        }
+    ],
+    // Solana: 2 DEXs (Non-EVM, uses different program addresses)
+    solana: [
+        {
+            name: 'raydium', // [C] - Largest on Solana
+            chain: 'solana',
+            factoryAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // AMM Program
+            routerAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+            fee: 25
+        },
+        {
+            name: 'orca', // [H] - Second largest
+            chain: 'solana',
+            factoryAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', // Whirlpool Program
+            routerAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP',
+            fee: 30
+        }
     ]
 };
 // =============================================================================
@@ -510,8 +634,9 @@ exports.CORE_TOKENS = {
     ],
     // =============================================================================
     // S3.1.2: New Chain Tokens for 4-Partition Architecture
+    // S3.2.1: Expanded Avalanche Tokens (15 total)
     // =============================================================================
-    // Avalanche: 8 tokens
+    // Avalanche: 15 tokens
     avalanche: [
         // Anchor tokens
         { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX', decimals: 18, chainId: 43114 },
@@ -524,7 +649,15 @@ exports.CORE_TOKENS = {
         { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18, chainId: 43114 },
         // Core DeFi
         { address: '0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd', symbol: 'JOE', decimals: 18, chainId: 43114 },
-        { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 }
+        { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 },
+        // S3.2.1: New tokens added
+        { address: '0x63a72806098Bd3D9520cC43356dD78afe5D386D9', symbol: 'AAVE', decimals: 18, chainId: 43114 },
+        { address: '0x2b2C81e08f1Af8835a78Bb2A90AE924ACE0eA4bE', symbol: 'sAVAX', decimals: 18, chainId: 43114 }, // Staked AVAX (Benqi)
+        { address: '0x8729438EB15e2C8B576fCc6AeCdA6A148776C0F5', symbol: 'QI', decimals: 18, chainId: 43114 }, // BENQI token
+        { address: '0x60781C2586D68229fde47564546784ab3fACA982', symbol: 'PNG', decimals: 18, chainId: 43114 }, // Pangolin token
+        { address: '0x22d4002028f537599bE9f666d1c4Fa138522f9c8', symbol: 'PTP', decimals: 18, chainId: 43114 }, // Platypus token
+        { address: '0x62edc0692BD897D2295872a9FFCac5425011c661', symbol: 'GMX', decimals: 18, chainId: 43114 }, // GMX token
+        { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18, chainId: 43114 } // Frax stablecoin
     ],
     // Fantom: 6 tokens
     fantom: [
@@ -617,13 +750,21 @@ exports.ARBITRAGE_CONFIG = {
     minConfidenceThreshold: 0.7, // Minimum 70% confidence
     feePercentage: 0.003, // 0.3% DEX trading fee
     // Chain-specific minimum profits (due to gas costs)
+    // S3.1.2: Added all 11 chains
     chainMinProfits: {
+        // Original 6 chains
         ethereum: 0.005, // 0.5% - higher due to gas
         arbitrum: 0.002, // 0.2% - low gas
         optimism: 0.002, // 0.2% - low gas
         base: 0.002, // 0.2% - low gas
         polygon: 0.002, // 0.2% - low gas
-        bsc: 0.003 // 0.3% - moderate gas
+        bsc: 0.003, // 0.3% - moderate gas
+        // S3.1.2: New chains
+        avalanche: 0.002, // 0.2% - low gas (C-Chain)
+        fantom: 0.002, // 0.2% - very low gas
+        zksync: 0.002, // 0.2% - L2 gas pricing
+        linea: 0.002, // 0.2% - L2 gas pricing
+        solana: 0.001 // 0.1% - minimal transaction fees
     }
 };
 // =============================================================================
@@ -644,19 +785,36 @@ exports.EVENT_CONFIG = {
 };
 // =============================================================================
 // PARTITION CONFIGURATION
-// Aligns with ADR-003 and ADR-008
+// S3.1.2: 4-Partition Architecture - Aligns with ADR-003 and ADR-008
 // =============================================================================
+/**
+ * Partition IDs - Use these constants instead of magic strings
+ * to prevent typos and enable IDE autocomplete.
+ */
+exports.PARTITION_IDS = {
+    ASIA_FAST: 'asia-fast',
+    L2_TURBO: 'l2-turbo',
+    HIGH_VALUE: 'high-value',
+    SOLANA_NATIVE: 'solana-native'
+};
+/**
+ * Partition chain assignments - S3.1.2 configuration
+ * Use getChainsForPartition() from partitions.ts for runtime access.
+ */
 exports.PARTITION_CONFIG = {
-    P1_ASIA_FAST: ['bsc', 'polygon'], // Phase 1
-    P2_L2_TURBO: ['arbitrum', 'optimism', 'base'], // Phase 1
-    P3_HIGH_VALUE: ['ethereum'], // Phase 1
-    // Future phases
-    P1_ASIA_FAST_PHASE2: ['bsc', 'polygon', 'avalanche', 'fantom'],
-    P3_HIGH_VALUE_PHASE3: ['ethereum', 'zksync', 'linea']
+    // P1: Asia-Fast - EVM high-throughput chains
+    P1_ASIA_FAST: ['bsc', 'polygon', 'avalanche', 'fantom'],
+    // P2: L2-Turbo - Ethereum L2 rollups
+    P2_L2_TURBO: ['arbitrum', 'optimism', 'base'],
+    // P3: High-Value - Ethereum mainnet + ZK rollups
+    P3_HIGH_VALUE: ['ethereum', 'zksync', 'linea'],
+    // P4: Solana-Native - Non-EVM chains
+    P4_SOLANA_NATIVE: ['solana']
 };
 // =============================================================================
 // PHASE METRICS
 // Track progress against targets from ADR-008
+// S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
 // =============================================================================
 exports.PHASE_METRICS = {
     current: {
@@ -664,15 +822,16 @@ exports.PHASE_METRICS = {
         chains: Object.keys(exports.CHAINS).length,
         dexes: Object.values(exports.DEXES).flat().length,
         tokens: Object.values(exports.CORE_TOKENS).flat().length,
-        targetOpportunities: 300
+        targetOpportunities: 500 // Increased with more chains/DEXes
     },
     targets: {
-        // Phase 1 targets updated after S2.2 DEX expansion:
-        // S2.2.1: Arbitrum 6→9 (+3), S2.2.2: Base 5→7 (+2), S2.2.3: BSC 5→8 (+3)
-        // Original 25 + 8 = 33 DEXs when S2.2 completes
-        phase1: { chains: 7, dexes: 33, tokens: 60, opportunities: 300 },
-        phase2: { chains: 9, dexes: 45, tokens: 110, opportunities: 550 },
-        phase3: { chains: 10, dexes: 55, tokens: 150, opportunities: 780 }
+        // S3.1.2: 4-Partition Architecture targets:
+        // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
+        // - 44 DEXes (original 33 + 11 new chain DEXes)
+        // - 94 tokens (original 60 + 34 new chain tokens)
+        phase1: { chains: 11, dexes: 44, tokens: 94, opportunities: 500 },
+        phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
+        phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
     }
 };
 // =============================================================================
@@ -731,6 +890,54 @@ exports.TOKEN_METADATA = {
         stablecoins: [
             { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
             { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 }
+        ]
+    },
+    // =============================================================================
+    // S3.1.2: New Chain Token Metadata
+    // S3.2.1: Updated Avalanche stablecoins (added FRAX)
+    // =============================================================================
+    avalanche: {
+        weth: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', // WETH.e on Avalanche
+        nativeWrapper: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
+        stablecoins: [
+            { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6 },
+            { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
+            { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18 },
+            { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18 } // S3.2.1: Added FRAX
+        ]
+    },
+    fantom: {
+        weth: '0x74b23882a30290451A17c44f4F05243b6b58C76d', // WETH on Fantom
+        nativeWrapper: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', // WFTM
+        stablecoins: [
+            { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6 },
+            { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6 },
+            { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18 }
+        ]
+    },
+    zksync: {
+        weth: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH on zkSync
+        nativeWrapper: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH (native is ETH)
+        stablecoins: [
+            { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6 },
+            { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6 }
+        ]
+    },
+    linea: {
+        weth: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH on Linea
+        nativeWrapper: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH (native is ETH)
+        stablecoins: [
+            { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6 },
+            { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6 },
+            { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18 }
+        ]
+    },
+    solana: {
+        weth: 'So11111111111111111111111111111111111111112', // Wrapped SOL (native equivalent)
+        nativeWrapper: 'So11111111111111111111111111111111111111112', // Wrapped SOL
+        stablecoins: [
+            { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6 },
+            { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6 }
         ]
     }
 };
@@ -841,6 +1048,59 @@ exports.DETECTOR_CONFIG = {
         gasEstimate: 200000,
         whaleThreshold: 50000, // $50K (moderate threshold)
         nativeTokenKey: 'nativeWrapper' // WBNB for USD calc
+    },
+    // =============================================================================
+    // S3.1.2: New Chain Detector Configurations
+    // =============================================================================
+    avalanche: {
+        batchSize: 20,
+        batchTimeout: 30,
+        healthCheckInterval: 30000,
+        confidence: 0.80,
+        expiryMs: 10000, // 10s (2s block time)
+        gasEstimate: 150000, // Moderate gas on C-Chain
+        whaleThreshold: 25000, // $25K
+        nativeTokenKey: 'nativeWrapper' // WAVAX for USD calc
+    },
+    fantom: {
+        batchSize: 25, // Higher batch for 1s blocks
+        batchTimeout: 25, // Faster timeout for quick blocks
+        healthCheckInterval: 20000, // More frequent health checks
+        confidence: 0.82,
+        expiryMs: 8000, // 8s (faster for 1s blocks)
+        gasEstimate: 100000, // Low gas on Fantom
+        whaleThreshold: 25000, // $25K
+        nativeTokenKey: 'nativeWrapper' // WFTM for USD calc
+    },
+    zksync: {
+        batchSize: 25, // Higher batch for fast ZK rollup
+        batchTimeout: 25,
+        healthCheckInterval: 20000,
+        confidence: 0.82,
+        expiryMs: 8000, // 8s
+        gasEstimate: 80000, // Low gas on zkSync (ZK proofs)
+        whaleThreshold: 25000, // $25K
+        nativeTokenKey: 'weth'
+    },
+    linea: {
+        batchSize: 20,
+        batchTimeout: 30,
+        healthCheckInterval: 30000,
+        confidence: 0.80,
+        expiryMs: 10000, // 10s
+        gasEstimate: 100000, // Moderate gas on Linea
+        whaleThreshold: 25000, // $25K
+        nativeTokenKey: 'weth'
+    },
+    solana: {
+        batchSize: 50, // Very high batch for 400ms blocks
+        batchTimeout: 10, // Very fast timeout
+        healthCheckInterval: 10000, // Frequent health checks
+        confidence: 0.85, // High confidence for fast chain
+        expiryMs: 5000, // 5s (very fast blocks)
+        gasEstimate: 5000, // Very low transaction fees
+        whaleThreshold: 50000, // $50K (high activity chain)
+        nativeTokenKey: 'nativeWrapper' // Wrapped SOL for USD calc
     }
 };
 // =============================================================================
