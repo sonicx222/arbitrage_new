@@ -9,6 +9,8 @@ export interface Chain {
     rpcFallbackUrls?: string[];
     blockTime: number;
     nativeToken: string;
+    /** Whether this chain uses EVM (defaults to true) */
+    isEVM?: boolean;
 }
 export interface Dex {
     name: string;

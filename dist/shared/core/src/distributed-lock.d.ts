@@ -134,6 +134,7 @@ export declare class DistributedLockManager {
 export declare function getDistributedLockManager(config?: LockConfig): Promise<DistributedLockManager>;
 /**
  * Reset the singleton instance (for testing).
+ * P2-4 FIX: Wait for pending initialization before resetting
  */
 export declare function resetDistributedLockManager(): Promise<void>;
 //# sourceMappingURL=distributed-lock.d.ts.map

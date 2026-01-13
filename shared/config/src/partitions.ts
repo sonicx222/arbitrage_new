@@ -13,7 +13,7 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
-import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes } from './index';
+import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, PARTITION_IDS } from './index';
 
 // =============================================================================
 // Types
@@ -145,32 +145,64 @@ export interface ChainHealth {
 }
 
 // =============================================================================
+// Chain Utilities
+// =============================================================================
+
+/**
+ * Check if a chain is EVM-compatible.
+ * Non-EVM chains (like Solana) require different connection handling.
+ *
+ * @param chainId - The chain identifier
+ * @returns true if EVM-compatible, false otherwise
+ */
+export function isEvmChain(chainId: string): boolean {
+  const chain = CHAINS[chainId];
+  if (!chain) return true; // Default to EVM for unknown chains (safe default)
+  return chain.isEVM !== false; // Explicitly check for false (undefined = EVM)
+}
+
+/**
+ * Get all non-EVM chain IDs currently configured.
+ */
+export function getNonEvmChains(): string[] {
+  return Object.keys(CHAINS).filter(chainId => !isEvmChain(chainId));
+}
+
+// =============================================================================
 // Partition Definitions (ADR-003)
 // =============================================================================
 
 /**
  * Production partition configurations.
  * Aligned with ARCHITECTURE_V2.md and ADR-003 specifications.
+ *
+ * S3.1.2: 4-Partition Architecture
+ * - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
+ * - P2: L2-Turbo (Arbitrum, Optimism, Base) - Ethereum L2 rollups
+ * - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
+ * - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
  */
 export const PARTITIONS: PartitionConfig[] = [
+  // P1: Asia-Fast - High-throughput Asian chains
   {
-    partitionId: 'asia-fast',
+    partitionId: PARTITION_IDS.ASIA_FAST,
     name: 'Asia Fast Chains',
-    chains: ['bsc', 'polygon'],
+    chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
     region: 'asia-southeast1',
     provider: 'oracle',
     resourceProfile: 'heavy',
     standbyRegion: 'us-west1',
     standbyProvider: 'render',
     priority: 1,
-    maxMemoryMB: 512,
+    maxMemoryMB: 768, // 4 chains need more memory
     enabled: true,
     healthCheckIntervalMs: 15000,
     failoverTimeoutMs: 60000
   },
+  // P2: L2-Turbo - Fast Ethereum L2 rollups
   {
-    partitionId: 'l2-fast',
-    name: 'L2 Fast Chains',
+    partitionId: PARTITION_IDS.L2_TURBO,
+    name: 'L2 Turbo Chains',
     chains: ['arbitrum', 'optimism', 'base'],
     region: 'asia-southeast1',
     provider: 'fly',
@@ -178,25 +210,42 @@ export const PARTITIONS: PartitionConfig[] = [
     standbyRegion: 'us-east1',
     standbyProvider: 'railway',
     priority: 1,
-    maxMemoryMB: 384,
+    maxMemoryMB: 512,
     enabled: true,
-    healthCheckIntervalMs: 10000,
+    healthCheckIntervalMs: 10000, // Faster checks for sub-second blocks
     failoverTimeoutMs: 45000
   },
+  // P3: High-Value - Ethereum mainnet and ZK rollups
   {
-    partitionId: 'high-value',
+    partitionId: PARTITION_IDS.HIGH_VALUE,
     name: 'High Value Chains',
-    chains: ['ethereum'],
+    chains: ['ethereum', 'zksync', 'linea'],
     region: 'us-east1',
     provider: 'oracle',
     resourceProfile: 'heavy',
     standbyRegion: 'eu-west1',
     standbyProvider: 'gcp',
     priority: 2,
-    maxMemoryMB: 512,
+    maxMemoryMB: 768,
     enabled: true,
     healthCheckIntervalMs: 30000,
     failoverTimeoutMs: 60000
+  },
+  // P4: Solana-Native - Non-EVM dedicated partition
+  {
+    partitionId: PARTITION_IDS.SOLANA_NATIVE,
+    name: 'Solana Native',
+    chains: ['solana'],
+    region: 'us-west1', // Solana validator proximity
+    provider: 'fly',
+    resourceProfile: 'heavy', // High-throughput needs resources
+    standbyRegion: 'us-east1',
+    standbyProvider: 'railway',
+    priority: 2,
+    maxMemoryMB: 512,
+    enabled: true,
+    healthCheckIntervalMs: 10000, // 400ms blocks need fast checks
+    failoverTimeoutMs: 45000
   }
 ];
 
@@ -252,12 +301,12 @@ export const FUTURE_PARTITIONS: PartitionConfig[] = [
 /**
  * Assign a chain to the appropriate partition based on ADR-003 rules.
  *
- * Rules (in priority order):
- * 1. Non-EVM chains get dedicated partition
- * 2. Ultra-fast L2s (< 1s blocks) go to L2-Fast
- * 3. High-value chains (Ethereum + ZK rollups) go to High-Value
- * 4. Fast Asian chains (< 5s blocks) go to Asia-Fast
- * 5. Default: High-Value partition
+ * S3.1.2: 4-Partition Assignment Rules (in priority order):
+ * 1. Non-EVM chains (Solana) → solana-native partition
+ * 2. Ethereum L2 rollups (Arbitrum, Optimism, Base) → l2-turbo partition
+ * 3. High-value EVM chains (Ethereum, zkSync, Linea) → high-value partition
+ * 4. Fast Asian chains (BSC, Polygon, Avalanche, Fantom) → asia-fast partition
+ * 5. Default: high-value partition
  */
 export function assignChainToPartition(chainId: string): PartitionConfig | null {
   const chain = CHAINS[chainId];
@@ -265,31 +314,28 @@ export function assignChainToPartition(chainId: string): PartitionConfig | null 
     return null;
   }
 
-  // Rule 1: Non-EVM chains (future)
-  // Currently all chains are EVM, so this is for future Solana support
-
-  // Rule 2: Ultra-fast L2s (< 1s effective block time)
-  if (chain.blockTime < 1 || chainId === 'arbitrum') {
-    return PARTITIONS.find(p => p.partitionId === 'l2-fast') || null;
+  // Rule 1: Non-EVM chains (Solana)
+  if (!isEvmChain(chainId)) {
+    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.SOLANA_NATIVE) || null;
   }
 
-  // Rule 3: High-value chains
-  if (chainId === 'ethereum' || chain.id === 1) {
-    return PARTITIONS.find(p => p.partitionId === 'high-value') || null;
+  // Rule 2: Ethereum L2 rollups
+  if (['arbitrum', 'optimism', 'base'].includes(chainId)) {
+    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.L2_TURBO) || null;
   }
 
-  // Rule 4: L2s with moderate block times
-  if (['optimism', 'base'].includes(chainId)) {
-    return PARTITIONS.find(p => p.partitionId === 'l2-fast') || null;
+  // Rule 3: High-value chains (Ethereum mainnet + ZK rollups)
+  if (['ethereum', 'zksync', 'linea'].includes(chainId)) {
+    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.HIGH_VALUE) || null;
   }
 
-  // Rule 5: Fast Asian chains (< 5s blocks)
-  if (chain.blockTime < 5) {
-    return PARTITIONS.find(p => p.partitionId === 'asia-fast') || null;
+  // Rule 4: Fast Asian chains (high-throughput EVM)
+  if (['bsc', 'polygon', 'avalanche', 'fantom'].includes(chainId)) {
+    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.ASIA_FAST) || null;
   }
 
-  // Default: High-value
-  return PARTITIONS.find(p => p.partitionId === 'high-value') || null;
+  // Default: high-value
+  return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.HIGH_VALUE) || null;
 }
 
 /**
@@ -505,7 +551,7 @@ export function validateAllPartitions(): {
  * Used by unified-detector to determine which partition to run.
  */
 export function getPartitionIdFromEnv(): string {
-  return process.env.PARTITION_ID || 'asia-fast';
+  return process.env.PARTITION_ID || PARTITION_IDS.ASIA_FAST;
 }
 
 /**

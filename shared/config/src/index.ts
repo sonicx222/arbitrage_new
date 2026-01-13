@@ -77,6 +77,53 @@ export const CHAINS: Record<string, Chain> = {
     wsUrl: process.env.ETHEREUM_WS_URL || 'wss://eth.llamarpc.com',
     blockTime: 12,
     nativeToken: 'ETH'
+  },
+  // =============================================================================
+  // S3.1.2: New Chains for 4-Partition Architecture
+  // =============================================================================
+  // Asia-Fast expansion (P1)
+  avalanche: {
+    id: 43114,
+    name: 'Avalanche C-Chain',
+    rpcUrl: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc',
+    wsUrl: process.env.AVALANCHE_WS_URL || 'wss://api.avax.network/ext/bc/C/ws',
+    blockTime: 2,
+    nativeToken: 'AVAX'
+  },
+  fantom: {
+    id: 250,
+    name: 'Fantom Opera',
+    rpcUrl: process.env.FANTOM_RPC_URL || 'https://rpc.ftm.tools',
+    wsUrl: process.env.FANTOM_WS_URL || 'wss://wsapi.fantom.network',
+    blockTime: 1,
+    nativeToken: 'FTM'
+  },
+  // High-Value expansion (P3)
+  zksync: {
+    id: 324,
+    name: 'zkSync Era',
+    rpcUrl: process.env.ZKSYNC_RPC_URL || 'https://mainnet.era.zksync.io',
+    wsUrl: process.env.ZKSYNC_WS_URL || 'wss://mainnet.era.zksync.io/ws',
+    blockTime: 1,
+    nativeToken: 'ETH'
+  },
+  linea: {
+    id: 59144,
+    name: 'Linea',
+    rpcUrl: process.env.LINEA_RPC_URL || 'https://rpc.linea.build',
+    wsUrl: process.env.LINEA_WS_URL || 'wss://rpc.linea.build',
+    blockTime: 2,
+    nativeToken: 'ETH'
+  },
+  // Non-EVM chain (P4)
+  solana: {
+    id: 101, // Convention for Solana mainnet
+    name: 'Solana',
+    rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+    wsUrl: process.env.SOLANA_WS_URL || 'wss://api.mainnet-beta.solana.com',
+    blockTime: 0.4,
+    nativeToken: 'SOL',
+    isEVM: false
   }
 };
 
@@ -336,6 +383,101 @@ export const DEXES: Record<string, Dex[]> = {
       routerAddress: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F',
       fee: 30
     }
+  ],
+  // =============================================================================
+  // S3.1.2: New Chain DEXs for 4-Partition Architecture
+  // =============================================================================
+  // Avalanche: 3 DEXs
+  avalanche: [
+    {
+      name: 'trader_joe_v2',    // [C] - Dominant on Avalanche
+      chain: 'avalanche',
+      factoryAddress: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
+      routerAddress: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
+      fee: 30
+    },
+    {
+      name: 'pangolin',         // [H] - Native Avalanche DEX
+      chain: 'avalanche',
+      factoryAddress: '0xefa94DE7a4656D787667C749f7E1223D71E9FD88',
+      routerAddress: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
+      fee: 30
+    },
+    {
+      name: 'sushiswap',        // [H] - Multi-chain presence
+      chain: 'avalanche',
+      factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
+      routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
+      fee: 30
+    }
+  ],
+  // Fantom: 2 DEXs
+  fantom: [
+    {
+      name: 'spookyswap',       // [C] - Dominant on Fantom
+      chain: 'fantom',
+      factoryAddress: '0x152eE697f2E276fA89E96742e9bB9aB1F2E61bE3',
+      routerAddress: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',
+      fee: 30
+    },
+    {
+      name: 'spiritswap',       // [H] - Second largest
+      chain: 'fantom',
+      factoryAddress: '0xEF45d134b73241eDa7703fa787148D9C9F4950b0',
+      routerAddress: '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52',
+      fee: 30
+    }
+  ],
+  // zkSync Era: 2 DEXs
+  zksync: [
+    {
+      name: 'syncswap',         // [C] - Largest on zkSync
+      chain: 'zksync',
+      factoryAddress: '0xf2DAd89f2788a8CD54625C60b55cD3d2D0ACa7Cb',
+      routerAddress: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',
+      fee: 30
+    },
+    {
+      name: 'mute',             // [H] - Native zkSync DEX
+      chain: 'zksync',
+      factoryAddress: '0x40be1cBa6C5B47cDF9da7f963B6F761F4C60627D',
+      routerAddress: '0x8B791913eB07C32779a16750e3868aA8495F5964',
+      fee: 30
+    }
+  ],
+  // Linea: 2 DEXs
+  linea: [
+    {
+      name: 'syncswap',         // [C] - Multi-chain presence
+      chain: 'linea',
+      factoryAddress: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
+      routerAddress: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
+      fee: 30
+    },
+    {
+      name: 'velocore',         // [H] - Native Linea DEX
+      chain: 'linea',
+      factoryAddress: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',
+      routerAddress: '0x1d0188c4B276A09366D05d6Be06aF61a73bC7535', // Velocore Vault on Linea
+      fee: 30
+    }
+  ],
+  // Solana: 2 DEXs (Non-EVM, uses different program addresses)
+  solana: [
+    {
+      name: 'raydium',          // [C] - Largest on Solana
+      chain: 'solana',
+      factoryAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // AMM Program
+      routerAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
+      fee: 25
+    },
+    {
+      name: 'orca',             // [H] - Second largest
+      chain: 'solana',
+      factoryAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', // Whirlpool Program
+      routerAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP',
+      fee: 30
+    }
   ]
 };
 
@@ -445,6 +587,71 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     // Core DeFi
     { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18, chainId: 1 },
     { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18, chainId: 1 }
+  ],
+  // =============================================================================
+  // S3.1.2: New Chain Tokens for 4-Partition Architecture
+  // =============================================================================
+  // Avalanche: 8 tokens
+  avalanche: [
+    // Anchor tokens
+    { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX', decimals: 18, chainId: 43114 },
+    { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6, chainId: 43114 },
+    { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6, chainId: 43114 },
+    { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18, chainId: 43114 },
+    // Bridged BTC
+    { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e', decimals: 8, chainId: 43114 },
+    // Bridged ETH
+    { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18, chainId: 43114 },
+    // Core DeFi
+    { address: '0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd', symbol: 'JOE', decimals: 18, chainId: 43114 },
+    { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 }
+  ],
+  // Fantom: 6 tokens
+  fantom: [
+    // Anchor tokens
+    { address: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', symbol: 'WFTM', decimals: 18, chainId: 250 },
+    { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6, chainId: 250 },
+    { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6, chainId: 250 },
+    { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18, chainId: 250 },
+    // Core DeFi
+    { address: '0x21Ada0D2aC28C3A5Fa3cD2eE30882dA8812279B6', symbol: 'BOO', decimals: 18, chainId: 250 },
+    { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 }
+  ],
+  // zkSync Era: 6 tokens
+  zksync: [
+    // Anchor tokens
+    { address: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', symbol: 'WETH', decimals: 18, chainId: 324 },
+    { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6, chainId: 324 },
+    { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6, chainId: 324 },
+    // Core DeFi
+    { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8, chainId: 324 },
+    { address: '0x5A7d6b2F92C77FAD6CCaBd7EE0624E64907Eaf3E', symbol: 'ZK', decimals: 18, chainId: 324 },
+    { address: '0x32fd44bB4895705dcA62f5E22ba9e3a6cD3c8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
+  ],
+  // Linea: 6 tokens
+  linea: [
+    // Anchor tokens
+    { address: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', symbol: 'WETH', decimals: 18, chainId: 59144 },
+    { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6, chainId: 59144 },
+    { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6, chainId: 59144 },
+    { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18, chainId: 59144 },
+    // Core DeFi
+    { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8, chainId: 59144 },
+    { address: '0x7d43AABC515C356145049227CeE54B608342c0ad', symbol: 'BUSD', decimals: 18, chainId: 59144 }
+  ],
+  // Solana: 8 tokens (non-EVM - uses different address format)
+  solana: [
+    // Anchor tokens - Solana uses base58 addresses
+    { address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9, chainId: 101 },
+    { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6, chainId: 101 },
+    { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6, chainId: 101 },
+    // Core DeFi
+    { address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', symbol: 'JUP', decimals: 6, chainId: 101 },
+    { address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', symbol: 'RAY', decimals: 6, chainId: 101 },
+    { address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', symbol: 'ORCA', decimals: 6, chainId: 101 },
+    // High-volume meme
+    { address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK', decimals: 5, chainId: 101 },
+    { address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', symbol: 'WIF', decimals: 6, chainId: 101 }
   ]
 };
 
@@ -493,14 +700,22 @@ export const ARBITRAGE_CONFIG = {
   minConfidenceThreshold: 0.7, // Minimum 70% confidence
   feePercentage: 0.003, // 0.3% DEX trading fee
   // Chain-specific minimum profits (due to gas costs)
+  // S3.1.2: Added all 11 chains
   chainMinProfits: {
+    // Original 6 chains
     ethereum: 0.005,   // 0.5% - higher due to gas
     arbitrum: 0.002,   // 0.2% - low gas
     optimism: 0.002,   // 0.2% - low gas
     base: 0.002,       // 0.2% - low gas
     polygon: 0.002,    // 0.2% - low gas
-    bsc: 0.003         // 0.3% - moderate gas
-  }
+    bsc: 0.003,        // 0.3% - moderate gas
+    // S3.1.2: New chains
+    avalanche: 0.002,  // 0.2% - low gas (C-Chain)
+    fantom: 0.002,     // 0.2% - very low gas
+    zksync: 0.002,     // 0.2% - L2 gas pricing
+    linea: 0.002,      // 0.2% - L2 gas pricing
+    solana: 0.001      // 0.1% - minimal transaction fees
+  } as Record<string, number>
 };
 
 // =============================================================================
@@ -522,20 +737,41 @@ export const EVENT_CONFIG = {
 
 // =============================================================================
 // PARTITION CONFIGURATION
-// Aligns with ADR-003 and ADR-008
+// S3.1.2: 4-Partition Architecture - Aligns with ADR-003 and ADR-008
 // =============================================================================
+
+/**
+ * Partition IDs - Use these constants instead of magic strings
+ * to prevent typos and enable IDE autocomplete.
+ */
+export const PARTITION_IDS = {
+  ASIA_FAST: 'asia-fast',
+  L2_TURBO: 'l2-turbo',
+  HIGH_VALUE: 'high-value',
+  SOLANA_NATIVE: 'solana-native'
+} as const;
+
+export type PartitionId = typeof PARTITION_IDS[keyof typeof PARTITION_IDS];
+
+/**
+ * Partition chain assignments - S3.1.2 configuration
+ * Use getChainsForPartition() from partitions.ts for runtime access.
+ */
 export const PARTITION_CONFIG = {
-  P1_ASIA_FAST: ['bsc', 'polygon'],           // Phase 1
-  P2_L2_TURBO: ['arbitrum', 'optimism', 'base'], // Phase 1
-  P3_HIGH_VALUE: ['ethereum'],                 // Phase 1
-  // Future phases
-  P1_ASIA_FAST_PHASE2: ['bsc', 'polygon', 'avalanche', 'fantom'],
-  P3_HIGH_VALUE_PHASE3: ['ethereum', 'zksync', 'linea']
+  // P1: Asia-Fast - EVM high-throughput chains
+  P1_ASIA_FAST: ['bsc', 'polygon', 'avalanche', 'fantom'] as const,
+  // P2: L2-Turbo - Ethereum L2 rollups
+  P2_L2_TURBO: ['arbitrum', 'optimism', 'base'] as const,
+  // P3: High-Value - Ethereum mainnet + ZK rollups
+  P3_HIGH_VALUE: ['ethereum', 'zksync', 'linea'] as const,
+  // P4: Solana-Native - Non-EVM chains
+  P4_SOLANA_NATIVE: ['solana'] as const
 };
 
 // =============================================================================
 // PHASE METRICS
 // Track progress against targets from ADR-008
+// S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
 // =============================================================================
 export const PHASE_METRICS = {
   current: {
@@ -543,15 +779,16 @@ export const PHASE_METRICS = {
     chains: Object.keys(CHAINS).length,
     dexes: Object.values(DEXES).flat().length,
     tokens: Object.values(CORE_TOKENS).flat().length,
-    targetOpportunities: 300
+    targetOpportunities: 500  // Increased with more chains/DEXes
   },
   targets: {
-    // Phase 1 targets updated after S2.2 DEX expansion:
-    // S2.2.1: Arbitrum 6→9 (+3), S2.2.2: Base 5→7 (+2), S2.2.3: BSC 5→8 (+3)
-    // Original 25 + 8 = 33 DEXs when S2.2 completes
-    phase1: { chains: 7, dexes: 33, tokens: 60, opportunities: 300 },
-    phase2: { chains: 9, dexes: 45, tokens: 110, opportunities: 550 },
-    phase3: { chains: 10, dexes: 55, tokens: 150, opportunities: 780 }
+    // S3.1.2: 4-Partition Architecture targets:
+    // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
+    // - 44 DEXes (original 33 + 11 new chain DEXes)
+    // - 94 tokens (original 60 + 34 new chain tokens)
+    phase1: { chains: 11, dexes: 44, tokens: 94, opportunities: 500 },
+    phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
+    phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
   }
 };
 
@@ -615,6 +852,52 @@ export const TOKEN_METADATA: Record<string, {
     stablecoins: [
       { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
       { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 }
+    ]
+  },
+  // =============================================================================
+  // S3.1.2: New Chain Token Metadata
+  // =============================================================================
+  avalanche: {
+    weth: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', // WETH.e on Avalanche
+    nativeWrapper: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
+    stablecoins: [
+      { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6 },
+      { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
+      { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  fantom: {
+    weth: '0x74b23882a30290451A17c44f4F05243b6b58C76d', // WETH on Fantom
+    nativeWrapper: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', // WFTM
+    stablecoins: [
+      { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6 },
+      { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6 },
+      { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  zksync: {
+    weth: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH on zkSync
+    nativeWrapper: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6 },
+      { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6 }
+    ]
+  },
+  linea: {
+    weth: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH on Linea
+    nativeWrapper: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6 },
+      { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6 },
+      { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  solana: {
+    weth: 'So11111111111111111111111111111111111111112', // Wrapped SOL (native equivalent)
+    nativeWrapper: 'So11111111111111111111111111111111111111112', // Wrapped SOL
+    stablecoins: [
+      { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6 },
+      { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6 }
     ]
   }
 };
@@ -749,6 +1032,59 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
     gasEstimate: 200000,
     whaleThreshold: 50000,      // $50K (moderate threshold)
     nativeTokenKey: 'nativeWrapper'  // WBNB for USD calc
+  },
+  // =============================================================================
+  // S3.1.2: New Chain Detector Configurations
+  // =============================================================================
+  avalanche: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s (2s block time)
+    gasEstimate: 150000,        // Moderate gas on C-Chain
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'nativeWrapper'  // WAVAX for USD calc
+  },
+  fantom: {
+    batchSize: 25,              // Higher batch for 1s blocks
+    batchTimeout: 25,           // Faster timeout for quick blocks
+    healthCheckInterval: 20000, // More frequent health checks
+    confidence: 0.82,
+    expiryMs: 8000,             // 8s (faster for 1s blocks)
+    gasEstimate: 100000,        // Low gas on Fantom
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'nativeWrapper'  // WFTM for USD calc
+  },
+  zksync: {
+    batchSize: 25,              // Higher batch for fast ZK rollup
+    batchTimeout: 25,
+    healthCheckInterval: 20000,
+    confidence: 0.82,
+    expiryMs: 8000,             // 8s
+    gasEstimate: 80000,         // Low gas on zkSync (ZK proofs)
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
+  linea: {
+    batchSize: 20,
+    batchTimeout: 30,
+    healthCheckInterval: 30000,
+    confidence: 0.80,
+    expiryMs: 10000,            // 10s
+    gasEstimate: 100000,        // Moderate gas on Linea
+    whaleThreshold: 25000,      // $25K
+    nativeTokenKey: 'weth'
+  },
+  solana: {
+    batchSize: 50,              // Very high batch for 400ms blocks
+    batchTimeout: 10,           // Very fast timeout
+    healthCheckInterval: 10000, // Frequent health checks
+    confidence: 0.85,           // High confidence for fast chain
+    expiryMs: 5000,             // 5s (very fast blocks)
+    gasEstimate: 5000,          // Very low transaction fees
+    whaleThreshold: 50000,      // $50K (high activity chain)
+    nativeTokenKey: 'nativeWrapper'  // Wrapped SOL for USD calc
   }
 };
 

@@ -368,11 +368,14 @@ describe('PHASE_METRICS Alignment', () => {
     expect(totalDexes).toBeGreaterThanOrEqual(28);
   });
 
-  it('should have 6 chains currently configured (Phase 1 target is 7)', () => {
-    // CHAINS has 6 chains: arbitrum, bsc, base, polygon, optimism, ethereum
-    // The 7th chain (avalanche) is planned for later Phase 1 expansion
-    expect(Object.keys(CHAINS).length).toBe(6);
-    expect(PHASE_METRICS.targets.phase1.chains).toBe(7);
+  it('should have 11 chains currently configured (S3.1.2 expansion)', () => {
+    // S3.1.2: 11 chains across 4 partitions
+    // asia-fast: bsc, polygon, avalanche, fantom
+    // l2-turbo: arbitrum, optimism, base
+    // high-value: ethereum, zksync, linea
+    // solana-native: solana
+    expect(Object.keys(CHAINS).length).toBe(11);
+    expect(PHASE_METRICS.targets.phase1.chains).toBe(7); // Original Phase 1 target
   });
 
   it('should have 60 tokens for Phase 1', () => {

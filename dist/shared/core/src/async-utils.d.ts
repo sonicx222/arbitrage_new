@@ -102,6 +102,7 @@ export interface Deferred<T> {
 export declare function createDeferred<T = void>(): Deferred<T>;
 /**
  * Execute promises with concurrency limit.
+ * P1-2 FIX: Uses atomic index generator to prevent race conditions.
  *
  * @param items Items to process
  * @param fn Async function to apply to each item

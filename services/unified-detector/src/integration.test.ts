@@ -160,27 +160,27 @@ describe('Partition Deployment Scenarios', () => {
     });
   });
 
-  describe('l2-fast partition', () => {
+  describe('l2-turbo partition', () => {
     it('should be configured for Fly.io', () => {
-      const partition = getPartition('l2-fast');
+      const partition = getPartition('l2-turbo');
       expect(partition).toBeDefined();
       expect(partition!.provider).toBe('fly');
     });
 
     it('should have standard resource profile', () => {
-      const partition = getPartition('l2-fast');
+      const partition = getPartition('l2-turbo');
       expect(partition!.resourceProfile).toBe('standard');
     });
 
     it('should include all L2 chains', () => {
-      const partition = getPartition('l2-fast');
+      const partition = getPartition('l2-turbo');
       expect(partition!.chains).toContain('arbitrum');
       expect(partition!.chains).toContain('optimism');
       expect(partition!.chains).toContain('base');
     });
 
     it('should have faster health checks for fast L2s', () => {
-      const partition = getPartition('l2-fast');
+      const partition = getPartition('l2-turbo');
       expect(partition!.healthCheckIntervalMs).toBeLessThanOrEqual(15000);
     });
   });
@@ -210,7 +210,7 @@ describe('Failover Configuration Integration', () => {
     const asiaFast = getPartition('asia-fast');
     expect(asiaFast!.standbyRegion).toBeDefined();
 
-    const l2Fast = getPartition('l2-fast');
+    const l2Fast = getPartition('l2-turbo');
     expect(l2Fast!.standbyRegion).toBeDefined();
   });
 
@@ -218,7 +218,7 @@ describe('Failover Configuration Integration', () => {
     const asiaFast = getPartition('asia-fast');
     expect(asiaFast!.standbyProvider).not.toBe(asiaFast!.provider);
 
-    const l2Fast = getPartition('l2-fast');
+    const l2Fast = getPartition('l2-turbo');
     expect(l2Fast!.standbyProvider).not.toBe(l2Fast!.provider);
   });
 
@@ -258,7 +258,7 @@ describe('Service Discovery Integration', () => {
   it('should support environment-based configuration', () => {
     // Simulate environment configuration
     const mockEnv = {
-      PARTITION_ID: 'l2-fast',
+      PARTITION_ID: 'l2-turbo',
       PARTITION_CHAINS: 'arbitrum,optimism',
       REGION_ID: 'asia-southeast1',
       INSTANCE_ID: 'test-instance-1'
@@ -266,7 +266,7 @@ describe('Service Discovery Integration', () => {
 
     // These should be parseable
     expect(mockEnv.PARTITION_CHAINS.split(',')).toHaveLength(2);
-    expect(mockEnv.PARTITION_ID).toBe('l2-fast');
+    expect(mockEnv.PARTITION_ID).toBe('l2-turbo');
   });
 });
 
@@ -284,11 +284,12 @@ describe('Resource Allocation Integration', () => {
     // Log for visibility
     console.log(`Total partitions: ${totalServices}, Total memory: ${totalMemoryMB}MB`);
 
+    // S3.1.2: 4-partition architecture with 11 chains
     // Fly.io free tier: 3 shared-cpu-1x VMs with 256MB each = 768MB total
     // Oracle Cloud free tier: 4 VMs with up to 24GB total
-    // Combined should be within reasonable limits
-    expect(totalServices).toBeLessThanOrEqual(5);
-    expect(totalMemoryMB).toBeLessThanOrEqual(2048); // 2GB total
+    // Combined should be within reasonable limits for 4 partitions
+    expect(totalServices).toBeLessThanOrEqual(5); // 4 partitions
+    expect(totalMemoryMB).toBeLessThanOrEqual(3072); // 3GB total for 4 partitions (768+512+768+512=2560)
   });
 
   it('should have partitions sized appropriately for providers', () => {
@@ -350,11 +351,12 @@ describe('Phase 2: Docker Compose Partition Deployment', () => {
     it('should map asia-fast partition to expected chains', () => {
       const partition = getPartition('asia-fast');
       expect(partition).toBeDefined();
-      expect(partition!.chains).toEqual(['bsc', 'polygon']);
+      // S3.1.2: 4-partition architecture adds Avalanche and Fantom
+      expect(partition!.chains).toEqual(['bsc', 'polygon', 'avalanche', 'fantom']);
     });
 
-    it('should map l2-fast partition to expected chains', () => {
-      const partition = getPartition('l2-fast');
+    it('should map l2-turbo partition to expected chains', () => {
+      const partition = getPartition('l2-turbo');
       expect(partition).toBeDefined();
       expect(partition!.chains).toEqual(['arbitrum', 'optimism', 'base']);
     });
@@ -362,27 +364,35 @@ describe('Phase 2: Docker Compose Partition Deployment', () => {
     it('should map high-value partition to expected chains', () => {
       const partition = getPartition('high-value');
       expect(partition).toBeDefined();
-      expect(partition!.chains).toEqual(['ethereum']);
+      // S3.1.2: 4-partition architecture adds zkSync and Linea
+      expect(partition!.chains).toEqual(['ethereum', 'zksync', 'linea']);
+    });
+
+    it('should map solana-native partition to expected chains', () => {
+      const partition = getPartition('solana-native');
+      expect(partition).toBeDefined();
+      // S3.1.2: Non-EVM dedicated partition
+      expect(partition!.chains).toEqual(['solana']);
     });
   });
 
   describe('partition resource allocation', () => {
-    it('should allocate heavy resources to asia-fast (BSC + Polygon)', () => {
+    it('should allocate heavy resources to asia-fast (BSC, Polygon, Avalanche, Fantom)', () => {
       const partition = getPartition('asia-fast');
       expect(partition!.resourceProfile).toBe('heavy');
-      expect(partition!.maxMemoryMB).toBe(512);
+      expect(partition!.maxMemoryMB).toBe(768); // S3.1.2: 4 chains need more memory
     });
 
-    it('should allocate standard resources to l2-fast (L2 chains)', () => {
-      const partition = getPartition('l2-fast');
+    it('should allocate standard resources to l2-turbo (L2 chains)', () => {
+      const partition = getPartition('l2-turbo');
       expect(partition!.resourceProfile).toBe('standard');
-      expect(partition!.maxMemoryMB).toBe(384);
+      expect(partition!.maxMemoryMB).toBe(512); // S3.1.2: Updated for 3 L2 chains
     });
 
-    it('should allocate heavy resources to high-value (Ethereum)', () => {
+    it('should allocate heavy resources to high-value (Ethereum, zkSync, Linea)', () => {
       const partition = getPartition('high-value');
       expect(partition!.resourceProfile).toBe('heavy');
-      expect(partition!.maxMemoryMB).toBe(512);
+      expect(partition!.maxMemoryMB).toBe(768); // S3.1.2: 3 high-value chains
     });
   });
 
@@ -392,8 +402,8 @@ describe('Phase 2: Docker Compose Partition Deployment', () => {
       expect(partition!.healthCheckIntervalMs).toBe(15000);
     });
 
-    it('should have fastest health checks for l2-fast', () => {
-      const partition = getPartition('l2-fast');
+    it('should have fastest health checks for l2-turbo', () => {
+      const partition = getPartition('l2-turbo');
       expect(partition!.healthCheckIntervalMs).toBe(10000);
     });
 
@@ -407,7 +417,7 @@ describe('Phase 2: Docker Compose Partition Deployment', () => {
     // Port mappings from docker-compose.partition.yml
     const portMappings = {
       'asia-fast': 3011,
-      'l2-fast': 3012,
+      'l2-turbo': 3012,
       'high-value': 3013,
       'cross-chain-detector': 3014,
       'execution-engine': 3015
@@ -437,11 +447,20 @@ describe('Phase 2: Docker Compose Partition Deployment', () => {
 
 describe('Phase 2: Migration Validation', () => {
   describe('legacy detector replacement', () => {
-    const legacyDetectors = ['bsc-detector', 'polygon-detector', 'arbitrum-detector', 'optimism-detector', 'base-detector', 'ethereum-detector'];
+    // S3.1.2: Updated to include all 11 chains in 4-partition architecture
+    const legacyDetectors = [
+      // Original 6 chains
+      'bsc-detector', 'polygon-detector', 'arbitrum-detector',
+      'optimism-detector', 'base-detector', 'ethereum-detector',
+      // S3.1.2: New chains
+      'avalanche-detector', 'fantom-detector', 'zksync-detector',
+      'linea-detector', 'solana-detector'
+    ];
     const partitionMappings: Record<string, string[]> = {
-      'asia-fast': ['bsc-detector', 'polygon-detector'],
-      'l2-fast': ['arbitrum-detector', 'optimism-detector', 'base-detector'],
-      'high-value': ['ethereum-detector']
+      'asia-fast': ['bsc-detector', 'polygon-detector', 'avalanche-detector', 'fantom-detector'],
+      'l2-turbo': ['arbitrum-detector', 'optimism-detector', 'base-detector'],
+      'high-value': ['ethereum-detector', 'zksync-detector', 'linea-detector'],
+      'solana-native': ['solana-detector']
     };
 
     it('should account for all legacy detectors', () => {
@@ -583,8 +602,8 @@ describe('Phase 3: Multi-Region Deployment Configuration', () => {
       expect(partition?.provider).toBe('oracle');
     });
 
-    it('should assign l2-fast to Fly.io', () => {
-      const partition = getPartition('l2-fast');
+    it('should assign l2-turbo to Fly.io', () => {
+      const partition = getPartition('l2-turbo');
       expect(partition?.provider).toBe('fly');
     });
 
@@ -601,8 +620,8 @@ describe('Phase 3: Multi-Region Deployment Configuration', () => {
       expect(partition?.standbyProvider).toBeDefined();
     });
 
-    it('should have standby region for l2-fast', () => {
-      const partition = getPartition('l2-fast');
+    it('should have standby region for l2-turbo', () => {
+      const partition = getPartition('l2-turbo');
       expect(partition?.standbyRegion).toBeDefined();
       expect(partition?.standbyProvider).toBeDefined();
     });
@@ -625,7 +644,7 @@ describe('Phase 3: Multi-Region Deployment Configuration', () => {
   describe('geographic distribution', () => {
     const regionMappings: Record<string, string> = {
       'asia-fast': 'asia-southeast1',
-      'l2-fast': 'asia-southeast1',
+      'l2-turbo': 'asia-southeast1',
       'high-value': 'us-east1'
     };
 
@@ -679,8 +698,8 @@ describe('Phase 3: Multi-Region Deployment Configuration', () => {
 
 describe('Phase 3: Cross-Region Health Configuration', () => {
   describe('health check intervals by region', () => {
-    it('should have fastest health checks for l2-fast (low latency L2s)', () => {
-      const l2Fast = getPartition('l2-fast');
+    it('should have fastest health checks for l2-turbo (low latency L2s)', () => {
+      const l2Fast = getPartition('l2-turbo');
       const asiaFast = getPartition('asia-fast');
       const highValue = getPartition('high-value');
 
@@ -710,7 +729,7 @@ describe('Phase 3: Service Discovery Integration', () => {
     it('should generate unique instance IDs per deployment', () => {
       const instanceIds = [
         `oracle-asia-fast-${Date.now()}`,
-        `fly-l2-fast-${Date.now() + 1}`,
+        `fly-l2-turbo-${Date.now() + 1}`,
         `oracle-high-value-${Date.now() + 2}`
       ];
 
@@ -720,7 +739,7 @@ describe('Phase 3: Service Discovery Integration', () => {
 
     it('should include provider in instance ID', () => {
       const oracleInstance = 'oracle-asia-fast-vm1';
-      const flyInstance = 'fly-l2-fast-app1';
+      const flyInstance = 'fly-l2-turbo-app1';
 
       expect(oracleInstance).toContain('oracle');
       expect(flyInstance).toContain('fly');

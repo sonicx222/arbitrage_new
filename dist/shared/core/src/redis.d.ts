@@ -67,7 +67,36 @@ export declare class RedisClient {
     zrem(key: string, ...members: string[]): Promise<number>;
     zcard(key: string): Promise<number>;
     zscore(key: string, member: string): Promise<string | null>;
+    /**
+     * P0-3 FIX: Remove elements from sorted set by score range.
+     * Used by rate limiter to remove expired entries.
+     */
+    zremrangebyscore(key: string, min: number, max: number): Promise<number>;
+    /**
+     * P0-3 FIX: Create a multi/transaction for atomic operations.
+     * Returns an object that can chain Redis commands and execute atomically.
+     */
+    multi(): {
+        zremrangebyscore: (key: string, min: number, max: number) => any;
+        zadd: (key: string, score: number, member: string) => any;
+        zcard: (key: string) => any;
+        expire: (key: string, seconds: number) => any;
+        zrange: (key: string, start: number, stop: number, withScores?: string) => any;
+        exec: () => Promise<any[]>;
+    };
     keys(pattern: string): Promise<string[]>;
+    /**
+     * P1-3/P1-4 FIX: SCAN iterator for non-blocking key enumeration.
+     * Use this instead of KEYS in production to avoid blocking Redis.
+     *
+     * @param cursor - Cursor position ('0' to start)
+     * @param matchArg - 'MATCH' literal
+     * @param pattern - Pattern to match keys
+     * @param countArg - 'COUNT' literal
+     * @param count - Number of keys to return per iteration
+     * @returns Tuple of [nextCursor, keys[]]
+     */
+    scan(cursor: string, matchArg: 'MATCH', pattern: string, countArg: 'COUNT', count: number): Promise<[string, string[]]>;
     llen(key: string): Promise<number>;
     lpush(key: string, ...values: string[]): Promise<number>;
     rpop(key: string): Promise<string | null>;

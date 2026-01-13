@@ -103,6 +103,12 @@ export interface ChainHealth {
 /**
  * Production partition configurations.
  * Aligned with ARCHITECTURE_V2.md and ADR-003 specifications.
+ *
+ * S3.1.2: 4-Partition Architecture
+ * - P1: Asia-Fast (BSC, Polygon, Avalanche, Fantom) - EVM high-throughput chains
+ * - P2: L2-Turbo (Arbitrum, Optimism, Base) - Ethereum L2 rollups
+ * - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
+ * - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
  */
 export declare const PARTITIONS: PartitionConfig[];
 /**
@@ -112,12 +118,12 @@ export declare const FUTURE_PARTITIONS: PartitionConfig[];
 /**
  * Assign a chain to the appropriate partition based on ADR-003 rules.
  *
- * Rules (in priority order):
- * 1. Non-EVM chains get dedicated partition
- * 2. Ultra-fast L2s (< 1s blocks) go to L2-Fast
- * 3. High-value chains (Ethereum + ZK rollups) go to High-Value
- * 4. Fast Asian chains (< 5s blocks) go to Asia-Fast
- * 5. Default: High-Value partition
+ * S3.1.2: 4-Partition Assignment Rules (in priority order):
+ * 1. Non-EVM chains (Solana) → solana-native partition
+ * 2. Ethereum L2 rollups (Arbitrum, Optimism, Base) → l2-turbo partition
+ * 3. High-value EVM chains (Ethereum, zkSync, Linea) → high-value partition
+ * 4. Fast Asian chains (BSC, Polygon, Avalanche, Fantom) → asia-fast partition
+ * 5. Default: high-value partition
  */
 export declare function assignChainToPartition(chainId: string): PartitionConfig | null;
 /**

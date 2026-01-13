@@ -477,6 +477,63 @@ class RedisClient {
             return null;
         }
     }
+    /**
+     * P0-3 FIX: Remove elements from sorted set by score range.
+     * Used by rate limiter to remove expired entries.
+     */
+    async zremrangebyscore(key, min, max) {
+        try {
+            return await this.client.zremrangebyscore(key, min, max);
+        }
+        catch (error) {
+            this.logger.error('Error zremrangebyscore', { error });
+            return 0;
+        }
+    }
+    /**
+     * P0-3 FIX: Create a multi/transaction for atomic operations.
+     * Returns an object that can chain Redis commands and execute atomically.
+     */
+    multi() {
+        const multi = this.client.multi();
+        return {
+            zremrangebyscore: (key, min, max) => {
+                multi.zremrangebyscore(key, min, max);
+                return multi;
+            },
+            zadd: (key, score, member) => {
+                multi.zadd(key, score, member);
+                return multi;
+            },
+            zcard: (key) => {
+                multi.zcard(key);
+                return multi;
+            },
+            expire: (key, seconds) => {
+                multi.expire(key, seconds);
+                return multi;
+            },
+            zrange: (key, start, stop, withScores) => {
+                if (withScores === 'WITHSCORES') {
+                    multi.zrange(key, start, stop, 'WITHSCORES');
+                }
+                else {
+                    multi.zrange(key, start, stop);
+                }
+                return multi;
+            },
+            exec: async () => {
+                try {
+                    const result = await multi.exec();
+                    return result || [];
+                }
+                catch (error) {
+                    this.logger.error('Error executing multi', { error });
+                    return [];
+                }
+            }
+        };
+    }
     // Key operations
     async keys(pattern) {
         try {
@@ -485,6 +542,28 @@ class RedisClient {
         catch (error) {
             this.logger.error('Error keys', { error });
             return [];
+        }
+    }
+    /**
+     * P1-3/P1-4 FIX: SCAN iterator for non-blocking key enumeration.
+     * Use this instead of KEYS in production to avoid blocking Redis.
+     *
+     * @param cursor - Cursor position ('0' to start)
+     * @param matchArg - 'MATCH' literal
+     * @param pattern - Pattern to match keys
+     * @param countArg - 'COUNT' literal
+     * @param count - Number of keys to return per iteration
+     * @returns Tuple of [nextCursor, keys[]]
+     */
+    async scan(cursor, matchArg, pattern, countArg, count) {
+        try {
+            const result = await this.client.scan(cursor, matchArg, pattern, countArg, count);
+            // Redis returns [cursor, keys[]] - cursor is string, keys is array
+            return [result[0], result[1]];
+        }
+        catch (error) {
+            this.logger.error('Error scan', { error, pattern });
+            return ['0', []]; // Return done cursor with empty results on error
         }
     }
     async llen(key) {

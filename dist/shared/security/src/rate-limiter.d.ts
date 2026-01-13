@@ -13,9 +13,18 @@ export interface RateLimitInfo {
 }
 export declare class RateLimiter {
     private redis;
+    private redisPromise;
     private config;
     private keyPrefix;
     constructor(config: RateLimitConfig);
+    /**
+     * P0-3 FIX: Async Redis initialization
+     */
+    private initializeRedis;
+    /**
+     * P0-3 FIX: Get Redis client, waiting for initialization if needed
+     */
+    private getRedis;
     checkLimit(identifier: string, additionalConfig?: Partial<RateLimitConfig>): Promise<RateLimitInfo>;
     resetLimit(identifier: string): Promise<void>;
     middleware(config?: Partial<RateLimitConfig>): (req: any, res: any, next: any) => Promise<any>;

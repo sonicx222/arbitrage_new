@@ -42,6 +42,8 @@ export * from './domain-models';
 export { RedisArbitrageRepository, RedisExecutionRepository, createArbitrageRepository, createExecutionRepository } from './repositories';
 export { BaseDetector } from './base-detector';
 export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
+export { PartitionedDetector } from './partitioned-detector';
+export type { PartitionedDetectorConfig, ChainHealth as PartitionChainHealth, PartitionHealth, ChainStats as PartitionChainStats, PricePoint, CrossChainDiscrepancy } from './partitioned-detector';
 export { calculatePriceFromReserves, invertPrice, calculatePriceDifferencePercent, isSameTokenPair, isReverseOrder, getMinProfitThreshold, getDefaultFee, calculateIntraChainArbitrage, calculateCrossChainArbitrage, validatePairSnapshot, createPairSnapshot } from './arbitrage-calculator';
 export type { PairSnapshot as ArbitragePairSnapshot, ChainPriceData, PriceComparisonResult, ArbitrageCalcConfig, CrossChainOpportunityResult } from './arbitrage-calculator';
 export { validatePriceUpdate, validateWhaleTransaction, validateSwapEvent, validateReserveUpdate, validateCoordinatorCommand, validateServiceHealthStatus, validateMessage, validateBatch, createPriceUpdate, createWhaleTransaction, createCoordinatorCommand } from './message-validators';

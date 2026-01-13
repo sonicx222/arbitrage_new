@@ -40,9 +40,11 @@ describe('S2.2.4 Token Coverage Verification', () => {
   // ===========================================================================
 
   describe('Total Token Count', () => {
-    it('should have exactly 60 tokens across all chains (Phase 1 target)', () => {
+    it('should have at least 60 tokens across all chains (original Phase 1 target)', () => {
+      // S3.1.2 added 5 new chains: avalanche (8), fantom (6), zksync (6), linea (6), solana (8)
+      // Total is now 60 + 34 = 94 tokens
       const totalTokens = Object.values(CORE_TOKENS).flat().length;
-      expect(totalTokens).toBe(60);
+      expect(totalTokens).toBeGreaterThanOrEqual(60); // Original Phase 1 target
     });
 
     it('should match PHASE_METRICS current token count', () => {
@@ -50,9 +52,10 @@ describe('S2.2.4 Token Coverage Verification', () => {
       expect(PHASE_METRICS.current.tokens).toBe(totalTokens);
     });
 
-    it('should match PHASE_METRICS Phase 1 target', () => {
+    it('should have tokens for all 11 chains after S3.1.2 expansion', () => {
       const totalTokens = Object.values(CORE_TOKENS).flat().length;
-      expect(totalTokens).toBe(PHASE_METRICS.targets.phase1.tokens);
+      // 11 chains with tokens: original 6 + 5 new chains
+      expect(totalTokens).toBe(94);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -71,13 +74,21 @@ describe('S2.2.4 Token Coverage Verification', () => {
   // ===========================================================================
 
   describe('Per-Chain Token Count', () => {
+    // S3.1.2: Added 5 new chains with token configurations
     const expectedCounts: Record<string, number> = {
+      // Original 6 chains
       arbitrum: 12,
       bsc: 10,
       base: 10,
       polygon: 10,
       optimism: 10,
-      ethereum: 8
+      ethereum: 8,
+      // S3.1.2: New chains
+      avalanche: 8,
+      fantom: 6,
+      zksync: 6,
+      linea: 6,
+      solana: 8
     };
 
     Object.entries(expectedCounts).forEach(([chain, expectedCount]) => {
@@ -103,15 +114,30 @@ describe('S2.2.4 Token Coverage Verification', () => {
       return /^0x[a-fA-F0-9]{40}$/.test(address);
     };
 
+    // Solana uses base58-encoded addresses (32-44 chars, alphanumeric)
+    const isValidSolanaAddress = (address: string): boolean => {
+      return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+    };
+
+    // Non-EVM chains that use different address formats
+    const nonEvmChains = ['solana'];
+
     Object.entries(CORE_TOKENS).forEach(([chain, tokens]) => {
       describe(`${chain} token addresses`, () => {
         (tokens as any[]).forEach((token: any, index: number) => {
           it(`should have valid address for ${token.symbol} (index ${index})`, () => {
-            expect(isValidEthereumAddress(token.address)).toBe(true);
+            if (nonEvmChains.includes(chain)) {
+              // Non-EVM chains use different address formats
+              expect(isValidSolanaAddress(token.address)).toBe(true);
+            } else {
+              expect(isValidEthereumAddress(token.address)).toBe(true);
+            }
           });
 
           it(`should not have zero address for ${token.symbol}`, () => {
-            expect(token.address).not.toBe('0x0000000000000000000000000000000000000000');
+            if (!nonEvmChains.includes(chain)) {
+              expect(token.address).not.toBe('0x0000000000000000000000000000000000000000');
+            }
           });
         });
       });
