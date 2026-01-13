@@ -498,16 +498,34 @@ export class UnifiedChainDetector extends EventEmitter {
     return Array.from(this.chainInstances.keys());
   }
 
+  /**
+   * Returns list of chain IDs that are currently healthy (connected status)
+   */
+  getHealthyChains(): string[] {
+    // P9-FIX: Take snapshot to avoid iterator issues during concurrent modification
+    const instancesSnapshot = Array.from(this.chainInstances.entries());
+    const healthyChains: string[] = [];
+    for (const [chainId, instance] of instancesSnapshot) {
+      const stats = instance.getStats();
+      if (stats.status === 'connected') {
+        healthyChains.push(chainId);
+      }
+    }
+    return healthyChains;
+  }
+
   getChainInstance(chainId: string): ChainDetectorInstance | undefined {
     return this.chainInstances.get(chainId);
   }
 
   getStats(): UnifiedDetectorStats {
+    // P10-FIX: Take snapshot to avoid iterator issues during concurrent modification
+    const instancesSnapshot = Array.from(this.chainInstances.entries());
     const chainStats = new Map<string, ChainStats>();
     let totalEvents = 0;
     let totalOpportunities = 0;
 
-    for (const [chainId, instance] of this.chainInstances) {
+    for (const [chainId, instance] of instancesSnapshot) {
       const stats = instance.getStats();
       chainStats.set(chainId, stats);
       totalEvents += stats.eventsProcessed;
@@ -518,7 +536,7 @@ export class UnifiedChainDetector extends EventEmitter {
 
     return {
       partitionId: this.config.partitionId,
-      chains: Array.from(this.chainInstances.keys()),
+      chains: instancesSnapshot.map(([chainId]) => chainId),
       totalEventsProcessed: totalEvents,
       totalOpportunitiesFound: totalOpportunities,
       uptimeSeconds: (Date.now() - this.startTime) / 1000,
