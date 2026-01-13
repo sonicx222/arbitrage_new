@@ -1234,9 +1234,9 @@ describe('S3.1.6.16: P4 Service Structure Verification', () => {
 
       const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
 
-      expect(packageJson.dependencies['@arbitrage/shared-config']).toBeDefined();
-      expect(packageJson.dependencies['@arbitrage/shared-core']).toBeDefined();
-      expect(packageJson.dependencies['@arbitrage/shared-types']).toBeDefined();
+      expect(packageJson.dependencies['@arbitrage/config']).toBeDefined();
+      expect(packageJson.dependencies['@arbitrage/core']).toBeDefined();
+      expect(packageJson.dependencies['@arbitrage/types']).toBeDefined();
       expect(packageJson.dependencies['@arbitrage/unified-detector']).toBeDefined();
     });
 

@@ -1,6 +1,23 @@
 // Test Utilities for Arbitrage System
 // Provides mocks, fixtures, and helpers for comprehensive testing
 
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Load Redis test server config if available (from jest.globalSetup.ts)
+const REDIS_CONFIG_FILE = path.join(__dirname, '../../../.redis-test-config.json');
+if (fs.existsSync(REDIS_CONFIG_FILE)) {
+  try {
+    const config = JSON.parse(fs.readFileSync(REDIS_CONFIG_FILE, 'utf8'));
+    process.env.REDIS_HOST = config.host;
+    process.env.REDIS_PORT = String(config.port);
+    process.env.REDIS_URL = config.url;
+    console.log(`[Test Setup] Using Redis test server at ${config.url}`);
+  } catch (error) {
+    console.warn('[Test Setup] Failed to load Redis config file:', error);
+  }
+}
+
 // Set required environment variables before any imports
 // These are needed by shared/config/src/index.ts which validates at module load time
 process.env.ETHEREUM_RPC_URL = process.env.ETHEREUM_RPC_URL || 'https://mainnet.infura.io/v3/test';
