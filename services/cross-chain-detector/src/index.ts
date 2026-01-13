@@ -1,6 +1,6 @@
 // Cross-Chain Detector Service Entry Point
 import { CrossChainDetectorService } from './detector';
-import { createLogger } from '../../../shared/core/src';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('cross-chain-detector');
 

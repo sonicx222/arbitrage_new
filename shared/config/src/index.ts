@@ -386,8 +386,9 @@ export const DEXES: Record<string, Dex[]> = {
   ],
   // =============================================================================
   // S3.1.2: New Chain DEXs for 4-Partition Architecture
+  // S3.2.1: Expanded Avalanche DEXs (6 total)
   // =============================================================================
-  // Avalanche: 3 DEXs
+  // Avalanche: 6 DEXs
   avalanche: [
     {
       name: 'trader_joe_v2',    // [C] - Dominant on Avalanche
@@ -409,6 +410,34 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
       routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
       fee: 30
+    },
+    // S3.2.1: New DEXs added
+    // S3.2.1-FIX: GMX uses Vault model (not factory pattern) - DISABLED until adapter implemented
+    // GMX Vault doesn't have getPair/getPool methods, needs custom GMXVaultAdapter
+    {
+      name: 'gmx',              // [C] - Perpetuals/Spot, uses vault model
+      chain: 'avalanche',
+      factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (NOT a factory!)
+      routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8',  // GMX Router
+      fee: 30,  // GMX uses dynamic fees 10-80bp, using 30bp average
+      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
+    },
+    // S3.2.1-FIX: Platypus uses Pool model (not factory pattern) - DISABLED until adapter implemented
+    // Platypus Main Pool doesn't have getPair/getPool methods, needs custom PlatypusPoolAdapter
+    {
+      name: 'platypus',         // [H] - Stablecoin-optimized AMM
+      chain: 'avalanche',
+      factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (NOT a factory!)
+      routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12',  // Platypus Router
+      fee: 4,   // Platypus: ~1-4bp for stablecoins
+      enabled: false  // DISABLED: Pool model not supported by PairDiscoveryService
+    },
+    {
+      name: 'kyberswap',        // [H] - KyberSwap Elastic (concentrated liquidity)
+      chain: 'avalanche',
+      factoryAddress: '0x5F1dddbf348aC2fbe22a163e30F99F9ECE3DD50a', // KyberSwap Elastic Factory
+      routerAddress: '0xC1e7dFE73E1598E3910EF4C7845B68A9Ab6F4c83',  // KyberSwap Router
+      fee: 10  // KyberSwap: dynamic fees, typically 8-100bp (V3-style getPool)
     }
   ],
   // Fantom: 2 DEXs
@@ -590,8 +619,9 @@ export const CORE_TOKENS: Record<string, Token[]> = {
   ],
   // =============================================================================
   // S3.1.2: New Chain Tokens for 4-Partition Architecture
+  // S3.2.1: Expanded Avalanche Tokens (15 total)
   // =============================================================================
-  // Avalanche: 8 tokens
+  // Avalanche: 15 tokens
   avalanche: [
     // Anchor tokens
     { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX', decimals: 18, chainId: 43114 },
@@ -604,7 +634,15 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18, chainId: 43114 },
     // Core DeFi
     { address: '0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd', symbol: 'JOE', decimals: 18, chainId: 43114 },
-    { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 }
+    { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 },
+    // S3.2.1: New tokens added
+    { address: '0x63a72806098Bd3D9520cC43356dD78afe5D386D9', symbol: 'AAVE', decimals: 18, chainId: 43114 },
+    { address: '0x2b2C81e08f1Af8835a78Bb2A90AE924ACE0eA4bE', symbol: 'sAVAX', decimals: 18, chainId: 43114 }, // Staked AVAX (Benqi)
+    { address: '0x8729438EB15e2C8B576fCc6AeCdA6A148776C0F5', symbol: 'QI', decimals: 18, chainId: 43114 },    // BENQI token
+    { address: '0x60781C2586D68229fde47564546784ab3fACA982', symbol: 'PNG', decimals: 18, chainId: 43114 },   // Pangolin token
+    { address: '0x22d4002028f537599bE9f666d1c4Fa138522f9c8', symbol: 'PTP', decimals: 18, chainId: 43114 },   // Platypus token
+    { address: '0x62edc0692BD897D2295872a9FFCac5425011c661', symbol: 'GMX', decimals: 18, chainId: 43114 },   // GMX token
+    { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18, chainId: 43114 }   // Frax stablecoin
   ],
   // Fantom: 6 tokens
   fantom: [
@@ -856,6 +894,7 @@ export const TOKEN_METADATA: Record<string, {
   },
   // =============================================================================
   // S3.1.2: New Chain Token Metadata
+  // S3.2.1: Updated Avalanche stablecoins (added FRAX)
   // =============================================================================
   avalanche: {
     weth: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', // WETH.e on Avalanche
@@ -863,7 +902,8 @@ export const TOKEN_METADATA: Record<string, {
     stablecoins: [
       { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6 },
       { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
-      { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18 }
+      { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18 },
+      { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18 } // S3.2.1: Added FRAX
     ]
   },
   fantom: {

@@ -26,8 +26,8 @@ import {
   ServiceStateManager,
   createServiceState,
   ServiceState
-} from '../../../shared/core/src';
-import type { ServiceHealth, ArbitrageOpportunity } from '../../../shared/types/src';
+} from '@arbitrage/core';
+import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================
 // Types

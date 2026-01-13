@@ -29,12 +29,12 @@ import {
   createServiceState,
   DistributedLockManager,
   getDistributedLockManager
-} from '../../../shared/core/src';
-import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS } from '../../../shared/config/src';
+} from '@arbitrage/core';
+import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
 import {
   ArbitrageOpportunity,
   ServiceHealth
-} from '../../../shared/types/src';
+} from '@arbitrage/types';
 
 // =============================================================================
 // Types

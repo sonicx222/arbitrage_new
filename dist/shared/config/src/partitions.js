@@ -15,6 +15,8 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FUTURE_PARTITIONS = exports.PARTITIONS = void 0;
+exports.isEvmChain = isEvmChain;
+exports.getNonEvmChains = getNonEvmChains;
 exports.assignChainToPartition = assignChainToPartition;
 exports.getPartition = getPartition;
 exports.getEnabledPartitions = getEnabledPartitions;
@@ -28,6 +30,28 @@ exports.getPartitionIdFromEnv = getPartitionIdFromEnv;
 exports.getPartitionFromEnv = getPartitionFromEnv;
 exports.getChainsFromEnv = getChainsFromEnv;
 const index_1 = require("./index");
+// =============================================================================
+// Chain Utilities
+// =============================================================================
+/**
+ * Check if a chain is EVM-compatible.
+ * Non-EVM chains (like Solana) require different connection handling.
+ *
+ * @param chainId - The chain identifier
+ * @returns true if EVM-compatible, false otherwise
+ */
+function isEvmChain(chainId) {
+    const chain = index_1.CHAINS[chainId];
+    if (!chain)
+        return true; // Default to EVM for unknown chains (safe default)
+    return chain.isEVM !== false; // Explicitly check for false (undefined = EVM)
+}
+/**
+ * Get all non-EVM chain IDs currently configured.
+ */
+function getNonEvmChains() {
+    return Object.keys(index_1.CHAINS).filter(chainId => !isEvmChain(chainId));
+}
 // =============================================================================
 // Partition Definitions (ADR-003)
 // =============================================================================
@@ -44,7 +68,7 @@ const index_1 = require("./index");
 exports.PARTITIONS = [
     // P1: Asia-Fast - High-throughput Asian chains
     {
-        partitionId: 'asia-fast',
+        partitionId: index_1.PARTITION_IDS.ASIA_FAST,
         name: 'Asia Fast Chains',
         chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
         region: 'asia-southeast1',
@@ -60,7 +84,7 @@ exports.PARTITIONS = [
     },
     // P2: L2-Turbo - Fast Ethereum L2 rollups
     {
-        partitionId: 'l2-turbo',
+        partitionId: index_1.PARTITION_IDS.L2_TURBO,
         name: 'L2 Turbo Chains',
         chains: ['arbitrum', 'optimism', 'base'],
         region: 'asia-southeast1',
@@ -76,7 +100,7 @@ exports.PARTITIONS = [
     },
     // P3: High-Value - Ethereum mainnet and ZK rollups
     {
-        partitionId: 'high-value',
+        partitionId: index_1.PARTITION_IDS.HIGH_VALUE,
         name: 'High Value Chains',
         chains: ['ethereum', 'zksync', 'linea'],
         region: 'us-east1',
@@ -92,7 +116,7 @@ exports.PARTITIONS = [
     },
     // P4: Solana-Native - Non-EVM dedicated partition
     {
-        partitionId: 'solana-native',
+        partitionId: index_1.PARTITION_IDS.SOLANA_NATIVE,
         name: 'Solana Native',
         chains: ['solana'],
         region: 'us-west1', // Solana validator proximity
@@ -170,23 +194,23 @@ function assignChainToPartition(chainId) {
         return null;
     }
     // Rule 1: Non-EVM chains (Solana)
-    if (chain.isEVM === false || chainId === 'solana') {
-        return exports.PARTITIONS.find(p => p.partitionId === 'solana-native') || null;
+    if (!isEvmChain(chainId)) {
+        return exports.PARTITIONS.find(p => p.partitionId === index_1.PARTITION_IDS.SOLANA_NATIVE) || null;
     }
     // Rule 2: Ethereum L2 rollups
     if (['arbitrum', 'optimism', 'base'].includes(chainId)) {
-        return exports.PARTITIONS.find(p => p.partitionId === 'l2-turbo') || null;
+        return exports.PARTITIONS.find(p => p.partitionId === index_1.PARTITION_IDS.L2_TURBO) || null;
     }
     // Rule 3: High-value chains (Ethereum mainnet + ZK rollups)
     if (['ethereum', 'zksync', 'linea'].includes(chainId)) {
-        return exports.PARTITIONS.find(p => p.partitionId === 'high-value') || null;
+        return exports.PARTITIONS.find(p => p.partitionId === index_1.PARTITION_IDS.HIGH_VALUE) || null;
     }
     // Rule 4: Fast Asian chains (high-throughput EVM)
     if (['bsc', 'polygon', 'avalanche', 'fantom'].includes(chainId)) {
-        return exports.PARTITIONS.find(p => p.partitionId === 'asia-fast') || null;
+        return exports.PARTITIONS.find(p => p.partitionId === index_1.PARTITION_IDS.ASIA_FAST) || null;
     }
     // Default: high-value
-    return exports.PARTITIONS.find(p => p.partitionId === 'high-value') || null;
+    return exports.PARTITIONS.find(p => p.partitionId === index_1.PARTITION_IDS.HIGH_VALUE) || null;
 }
 /**
  * Get partition by ID.
@@ -362,7 +386,7 @@ function validateAllPartitions() {
  * Used by unified-detector to determine which partition to run.
  */
 function getPartitionIdFromEnv() {
-    return process.env.PARTITION_ID || 'asia-fast';
+    return process.env.PARTITION_ID || index_1.PARTITION_IDS.ASIA_FAST;
 }
 /**
  * Get partition configuration from environment.

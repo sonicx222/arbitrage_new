@@ -1,4 +1,4 @@
-import { CrossChainBridge } from '../../../shared/types/src';
+import { CrossChainBridge } from '@arbitrage/types';
 export interface BridgePrediction {
     bridgeName: string;
     estimatedLatency: number;

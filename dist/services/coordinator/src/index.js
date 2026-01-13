@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 // Coordinator Service Entry Point
 const coordinator_1 = require("./coordinator");
-const src_1 = require("../../../shared/core/src");
-const logger = (0, src_1.createLogger)('coordinator');
+const core_1 = require("@arbitrage/core");
+const logger = (0, core_1.createLogger)('coordinator');
 async function main() {
     try {
         logger.info('Starting Coordinator Service');

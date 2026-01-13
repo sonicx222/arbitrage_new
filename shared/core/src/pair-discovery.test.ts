@@ -124,6 +124,22 @@ describe('PairDiscoveryService', () => {
       expect(service.detectFactoryType('curve')).toBe('curve');
       expect(service.detectFactoryType('ellipsis')).toBe('curve');
     });
+
+    // S3.2.1-FIX: KyberSwap uses concentrated liquidity (V3-style)
+    it('should detect KyberSwap as V3 (concentrated liquidity)', () => {
+      expect(service.detectFactoryType('kyberswap')).toBe('v3');
+      expect(service.detectFactoryType('kyber')).toBe('v3');
+      expect(service.detectFactoryType('kyberswap_elastic')).toBe('v3');
+    });
+
+    // S3.2.1-FIX: DEXs that don't follow factory patterns
+    it('should detect GMX as unsupported (vault model)', () => {
+      expect(service.detectFactoryType('gmx')).toBe('unsupported');
+    });
+
+    it('should detect Platypus as unsupported (pool model)', () => {
+      expect(service.detectFactoryType('platypus')).toBe('unsupported');
+    });
   });
 
   // ===========================================================================
@@ -492,6 +508,274 @@ describe('PairDiscoveryService', () => {
       const instance2 = getPairDiscoveryService();
 
       expect(instance1).not.toBe(instance2);
+    });
+  });
+
+  // ===========================================================================
+  // S3.2.1-FIX: Avalanche DEX Support Tests
+  // ===========================================================================
+
+  describe('S3.2.1-FIX: Avalanche DEX Support', () => {
+    const avalancheDexTraderJoe = {
+      name: 'trader_joe_v2',
+      chain: 'avalanche',
+      factoryAddress: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
+      routerAddress: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
+      fee: 30,
+      enabled: true
+    };
+
+    const avalancheDexPangolin = {
+      name: 'pangolin',
+      chain: 'avalanche',
+      factoryAddress: '0xefa94DE7a4656D787667C749f7E1223D71E9FD88',
+      routerAddress: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
+      fee: 30,
+      enabled: true
+    };
+
+    const avalancheToken0 = {
+      address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
+      symbol: 'WAVAX',
+      decimals: 18,
+      chainId: 43114
+    };
+
+    const avalancheToken1 = {
+      address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', // USDC
+      symbol: 'USDC',
+      decimals: 6,
+      chainId: 43114
+    };
+
+    it('should compute CREATE2 address for Trader Joe V2', () => {
+      const result = service.computePairAddress(
+        'avalanche',
+        avalancheDexTraderJoe,
+        avalancheToken0,
+        avalancheToken1
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      expect(result!.discoveryMethod).toBe('create2_compute');
+      expect(result!.dex).toBe('trader_joe_v2');
+      expect(result!.chain).toBe('avalanche');
+    });
+
+    it('should compute CREATE2 address for Pangolin', () => {
+      const result = service.computePairAddress(
+        'avalanche',
+        avalancheDexPangolin,
+        avalancheToken0,
+        avalancheToken1
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.address).toMatch(/^0x[a-fA-F0-9]{40}$/);
+      expect(result!.discoveryMethod).toBe('create2_compute');
+      expect(result!.dex).toBe('pangolin');
+    });
+
+    it('should return consistent addresses regardless of token order (Trader Joe)', () => {
+      const result1 = service.computePairAddress(
+        'avalanche',
+        avalancheDexTraderJoe,
+        avalancheToken0,
+        avalancheToken1
+      );
+
+      const result2 = service.computePairAddress(
+        'avalanche',
+        avalancheDexTraderJoe,
+        avalancheToken1,
+        avalancheToken0
+      );
+
+      expect(result1!.address).toBe(result2!.address);
+    });
+
+    it('should return consistent addresses regardless of token order (Pangolin)', () => {
+      const result1 = service.computePairAddress(
+        'avalanche',
+        avalancheDexPangolin,
+        avalancheToken0,
+        avalancheToken1
+      );
+
+      const result2 = service.computePairAddress(
+        'avalanche',
+        avalancheDexPangolin,
+        avalancheToken1,
+        avalancheToken0
+      );
+
+      expect(result1!.address).toBe(result2!.address);
+    });
+
+    it('should return sorted tokens in DiscoveredPair (token0 < token1)', () => {
+      // Pass tokens in "wrong" order
+      const result = service.computePairAddress(
+        'avalanche',
+        avalancheDexTraderJoe,
+        avalancheToken1, // USDC (higher address)
+        avalancheToken0  // WAVAX (lower address)
+      );
+
+      // Result should have sorted order (WAVAX < USDC by address)
+      const token0Lower = result!.token0.toLowerCase();
+      const token1Lower = result!.token1.toLowerCase();
+      expect(token0Lower < token1Lower).toBe(true);
+    });
+  });
+
+  // ===========================================================================
+  // S3.2.1-FIX: Unsupported DEX Type Tests
+  // ===========================================================================
+
+  describe('S3.2.1-FIX: Unsupported DEX Type Handling', () => {
+    const gmxDex = {
+      name: 'gmx',
+      chain: 'avalanche',
+      factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault
+      routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8',
+      fee: 30,
+      enabled: false
+    };
+
+    const platypusDex = {
+      name: 'platypus',
+      chain: 'avalanche',
+      factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool
+      routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12',
+      fee: 4,
+      enabled: false
+    };
+
+    const curveDex = {
+      name: 'curve',
+      chain: 'arbitrum',
+      factoryAddress: '0xb17b674D9c5CB2e441F8e196a2f048A81355d031',
+      routerAddress: '0xF0d4c12A5768D806021F80a262B4d39d26C58b8D',
+      fee: 4,
+      enabled: true
+    };
+
+    it('should detect GMX as unsupported (vault model)', () => {
+      expect(service.detectFactoryType('gmx')).toBe('unsupported');
+    });
+
+    it('should detect Platypus as unsupported (pool model)', () => {
+      expect(service.detectFactoryType('platypus')).toBe('unsupported');
+    });
+
+    it('should detect Curve as curve type', () => {
+      expect(service.detectFactoryType('curve')).toBe('curve');
+      expect(service.detectFactoryType('ellipsis')).toBe('curve');
+    });
+
+    it('should not create factory contract for unsupported DEXs', () => {
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      service.setProvider('avalanche', mockProvider);
+
+      const serviceAny = service as any;
+      const gmxContract = serviceAny.getFactoryContract('avalanche', gmxDex);
+      const platypusContract = serviceAny.getFactoryContract('avalanche', platypusDex);
+
+      expect(gmxContract).toBeNull();
+      expect(platypusContract).toBeNull();
+    });
+
+    it('should not create factory contract for Curve DEXs', () => {
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      service.setProvider('arbitrum', mockProvider);
+
+      const serviceAny = service as any;
+      const curveContract = serviceAny.getFactoryContract('arbitrum', curveDex);
+
+      expect(curveContract).toBeNull();
+    });
+
+    it('should create factory contract for supported V2 DEXs', () => {
+      const mockProvider = {
+        call: jest.fn()
+      } as unknown as ethers.JsonRpcProvider;
+      service.setProvider('ethereum', mockProvider);
+
+      const serviceAny = service as any;
+      const contract = serviceAny.getFactoryContract('ethereum', testDexV2);
+
+      expect(contract).not.toBeNull();
+    });
+
+    it('should create factory contract for supported V3 DEXs', () => {
+      const mockProvider = {
+        call: jest.fn()
+      } as unknown as ethers.JsonRpcProvider;
+      service.setProvider('ethereum', mockProvider);
+
+      const serviceAny = service as any;
+      const contract = serviceAny.getFactoryContract('ethereum', testDex);
+
+      expect(contract).not.toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // S3.2.1-FIX: Token Ordering Consistency Tests
+  // ===========================================================================
+
+  describe('S3.2.1-FIX: Token Ordering Consistency', () => {
+    it('should return tokens in sorted order from computePairAddress', () => {
+      // Token0 has higher address than token1 (will be swapped)
+      const highToken = {
+        address: '0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ'.replace(/Z/g, 'F'),
+        symbol: 'HIGH',
+        decimals: 18,
+        chainId: 1
+      };
+
+      const lowToken = {
+        address: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        symbol: 'LOW',
+        decimals: 18,
+        chainId: 1
+      };
+
+      const result = service.computePairAddress(
+        'ethereum',
+        testDexV2,
+        highToken,
+        lowToken
+      );
+
+      // Result should have LOW as token0, HIGH as token1 (sorted order)
+      const token0Lower = result!.token0.toLowerCase();
+      const token1Lower = result!.token1.toLowerCase();
+      expect(token0Lower < token1Lower).toBe(true);
+      expect(result!.token0).toBe(lowToken.address);
+      expect(result!.token1).toBe(highToken.address);
+    });
+
+    it('should emit pair:discovered event with sorted tokens', () => {
+      const discoveredHandler = jest.fn();
+      service.on('pair:discovered', discoveredHandler);
+
+      // Pass tokens in reverse order
+      service.computePairAddress(
+        'ethereum',
+        testDexV2,
+        testToken1, // USDC (higher address)
+        testToken0  // WETH (lower address)
+      );
+
+      expect(discoveredHandler).toHaveBeenCalled();
+      const emittedPair = discoveredHandler.mock.calls[0][0];
+
+      // Verify tokens are in sorted order
+      const token0Lower = emittedPair.token0.toLowerCase();
+      const token1Lower = emittedPair.token1.toLowerCase();
+      expect(token0Lower < token1Lower).toBe(true);
     });
   });
 });

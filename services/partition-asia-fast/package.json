@@ -12,10 +12,10 @@
     "lint": "eslint src/**/*.ts"
   },
   "dependencies": {
-    "@arbitrage/unified-detector": "workspace:*",
-    "@arbitrage/core": "workspace:*",
-    "@arbitrage/config": "workspace:*",
-    "@arbitrage/types": "workspace:*"
+    "@arbitrage/unified-detector": "*",
+    "@arbitrage/core": "*",
+    "@arbitrage/config": "*",
+    "@arbitrage/types": "*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

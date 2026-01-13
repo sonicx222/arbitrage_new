@@ -101,6 +101,18 @@ export interface ChainHealth {
     errorCount: number;
 }
 /**
+ * Check if a chain is EVM-compatible.
+ * Non-EVM chains (like Solana) require different connection handling.
+ *
+ * @param chainId - The chain identifier
+ * @returns true if EVM-compatible, false otherwise
+ */
+export declare function isEvmChain(chainId: string): boolean;
+/**
+ * Get all non-EVM chain IDs currently configured.
+ */
+export declare function getNonEvmChains(): string[];
+/**
  * Production partition configurations.
  * Aligned with ARCHITECTURE_V2.md and ADR-003 specifications.
  *

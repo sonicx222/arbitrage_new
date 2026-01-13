@@ -74,6 +74,9 @@ export declare class PairDiscoveryService extends EventEmitter {
     setProvider(chain: string, provider: ethers.JsonRpcProvider): void;
     /**
      * Get or create factory contract instance
+     *
+     * S3.2.1-FIX: Returns null for unsupported DEX types (vault/pool models, Curve)
+     * to prevent creating contracts with wrong ABIs that would fail at runtime
      */
     private getFactoryContract;
     /**
@@ -88,6 +91,9 @@ export declare class PairDiscoveryService extends EventEmitter {
     /**
      * Single factory query with proper timeout handling
      * Returns PoolQueryResult with address and optional fee tier for V3 pools
+     *
+     * S3.2.1-FIX: Added explicit handling for Curve-style DEXs
+     * Curve uses a different pool registry pattern that requires custom adapter
      */
     private queryFactoryOnce;
     /**
@@ -112,8 +118,18 @@ export declare class PairDiscoveryService extends EventEmitter {
     }>): Promise<DiscoveredPair[]>;
     /**
      * Detect factory type based on DEX name
+     *
+     * S3.2.1-FIX: Added handling for:
+     * - KyberSwap Elastic (concentrated liquidity, uses getPool like V3)
+     * - GMX and Platypus are NOT supported (vault/pool models, not factory patterns)
+     *   These DEXs should have enabled: false in config until adapters are implemented
+     *
+     * @returns 'v2' for Uniswap V2-style DEXs (getPair method)
+     * @returns 'v3' for Uniswap V3-style DEXs (getPool method with fee tiers)
+     * @returns 'curve' for Curve-style DEXs (multi-asset pools)
+     * @returns 'unsupported' for DEXs that don't follow factory patterns
      */
-    detectFactoryType(dexName: string): 'v2' | 'v3' | 'curve';
+    detectFactoryType(dexName: string): 'v2' | 'v3' | 'curve' | 'unsupported';
     /**
      * Get init code hash for a DEX
      */

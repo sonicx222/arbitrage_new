@@ -17,8 +17,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ExecutionEngineService = void 0;
 const ethers_1 = require("ethers");
-const src_1 = require("../../../shared/core/src");
-const src_2 = require("../../../shared/config/src");
+const core_1 = require("@arbitrage/core");
+const config_1 = require("@arbitrage/config");
 // P0-3 FIX: Execution timeout configuration
 const EXECUTION_TIMEOUT_MS = 55000; // 55 seconds - must be less than lock TTL (60s)
 const TRANSACTION_TIMEOUT_MS = 50000; // 50 seconds for blockchain operations
@@ -30,7 +30,7 @@ class ExecutionEngineService {
         this.redis = null;
         this.streamsClient = null;
         this.lockManager = null;
-        this.logger = (0, src_1.createLogger)('execution-engine');
+        this.logger = (0, core_1.createLogger)('execution-engine');
         this.wallets = new Map();
         this.providers = new Map();
         // P1-2 FIX: Track provider health for each chain
@@ -66,7 +66,7 @@ class ExecutionEngineService {
         this.streamConsumerInterval = null;
         // P1-2/P1-3 FIX: Provider health check interval
         this.providerHealthCheckInterval = null;
-        this.perfLogger = (0, src_1.getPerformanceLogger)('execution-engine');
+        this.perfLogger = (0, core_1.getPerformanceLogger)('execution-engine');
         // Apply custom queue config
         if (queueConfig) {
             this.queueConfig = { ...this.queueConfig, ...queueConfig };
@@ -74,14 +74,14 @@ class ExecutionEngineService {
         // Generate unique instance ID
         this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
         // State machine for lifecycle management
-        this.stateManager = (0, src_1.createServiceState)({
+        this.stateManager = (0, core_1.createServiceState)({
             serviceName: 'execution-engine',
             transitionTimeoutMs: 30000
         });
         // Define consumer groups for streams
         this.consumerGroups = [
             {
-                streamName: src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
+                streamName: core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
                 groupName: 'execution-engine-group',
                 consumerName: this.instanceId,
                 startId: '$'
@@ -98,10 +98,10 @@ class ExecutionEngineService {
                 queueConfig: this.queueConfig
             });
             // Initialize Redis clients
-            this.redis = await (0, src_1.getRedisClient)();
-            this.streamsClient = await (0, src_1.getRedisStreamsClient)();
+            this.redis = await (0, core_1.getRedisClient)();
+            this.streamsClient = await (0, core_1.getRedisStreamsClient)();
             // Initialize distributed lock manager
-            this.lockManager = await (0, src_1.getDistributedLockManager)({
+            this.lockManager = await (0, core_1.getDistributedLockManager)({
                 keyPrefix: 'lock:execution:',
                 defaultTtlMs: 60000 // 60 second lock TTL
             });
@@ -216,7 +216,7 @@ class ExecutionEngineService {
      * P1-2 FIX: Initialize providers with health tracking
      */
     async initializeProviders() {
-        for (const [chainName, chainConfig] of Object.entries(src_2.CHAINS)) {
+        for (const [chainName, chainConfig] of Object.entries(config_1.CHAINS)) {
             try {
                 const provider = new ethers_1.ethers.JsonRpcProvider(chainConfig.rpcUrl);
                 this.providers.set(chainName, provider);
@@ -366,7 +366,7 @@ class ExecutionEngineService {
      * P1-3 FIX: Attempt to reconnect a failed provider
      */
     async attemptProviderReconnection(chainName) {
-        const chainConfig = src_2.CHAINS[chainName];
+        const chainConfig = config_1.CHAINS[chainName];
         if (!chainConfig)
             return;
         try {
@@ -401,7 +401,7 @@ class ExecutionEngineService {
         }
     }
     initializeWallets() {
-        for (const chainName of Object.keys(src_2.CHAINS)) {
+        for (const chainName of Object.keys(config_1.CHAINS)) {
             const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
             // Skip if no private key configured
             if (!privateKey) {
@@ -465,7 +465,7 @@ class ExecutionEngineService {
     async consumeOpportunitiesStream() {
         if (!this.streamsClient)
             return;
-        const config = this.consumerGroups.find(c => c.streamName === src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES);
+        const config = this.consumerGroups.find(c => c.streamName === core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES);
         if (!config)
             return;
         try {
@@ -538,7 +538,7 @@ class ExecutionEngineService {
         try {
             await this.streamsClient.xadd('stream:dead-letter-queue', {
                 originalMessageId: message.id,
-                originalStream: src_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
+                originalStream: core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES,
                 data: message.data,
                 error: error.message,
                 timestamp: Date.now(),
@@ -635,14 +635,14 @@ class ExecutionEngineService {
     }
     validateOpportunity(opportunity) {
         // Basic validation checks
-        if (opportunity.confidence < src_2.ARBITRAGE_CONFIG.confidenceThreshold) {
+        if (opportunity.confidence < config_1.ARBITRAGE_CONFIG.confidenceThreshold) {
             this.logger.debug('Opportunity rejected: low confidence', {
                 id: opportunity.id,
                 confidence: opportunity.confidence
             });
             return false;
         }
-        if ((opportunity.expectedProfit ?? 0) < src_2.ARBITRAGE_CONFIG.minProfitPercentage) {
+        if ((opportunity.expectedProfit ?? 0) < config_1.ARBITRAGE_CONFIG.minProfitPercentage) {
             this.logger.debug('Opportunity rejected: insufficient profit', {
                 id: opportunity.id,
                 profit: opportunity.expectedProfit
@@ -890,7 +890,7 @@ class ExecutionEngineService {
             throw new Error(`No provider for chain: ${chain}`);
         }
         // P1-4 fix: Use centralized config instead of hardcoded addresses
-        const flashLoanConfig = src_2.FLASH_LOAN_PROVIDERS[chain];
+        const flashLoanConfig = config_1.FLASH_LOAN_PROVIDERS[chain];
         if (!flashLoanConfig) {
             throw new Error(`No flash loan provider configured for chain: ${chain}`);
         }
@@ -967,7 +967,7 @@ class ExecutionEngineService {
                 };
                 // Publish health to stream
                 if (this.streamsClient) {
-                    await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.HEALTH, {
+                    await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.HEALTH, {
                         ...health,
                         queueSize: this.executionQueue.length,
                         queuePaused: this.queuePaused,
