@@ -1,0 +1,68 @@
+version: '3.8'
+
+# P3 High-Value Partition Service - Local Development
+#
+# Chains: Ethereum, zkSync, Linea
+# Region: Oracle Cloud US-East (us-east1)
+#
+# Usage:
+#   docker-compose up -d          # Start service
+#   docker-compose logs -f        # View logs
+#   docker-compose down           # Stop service
+
+services:
+  partition-high-value:
+    build:
+      context: ../..
+      dockerfile: services/partition-high-value/Dockerfile
+    container_name: partition-high-value
+    environment:
+      # Partition configuration
+      - PARTITION_ID=high-value
+      - PARTITION_CHAINS=ethereum,zksync,linea
+
+      # Health check
+      - HEALTH_CHECK_PORT=3003
+
+      # Redis connection (use host network for local Redis)
+      - REDIS_URL=${REDIS_URL:-redis://host.docker.internal:6379}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
+      # Region
+      - REGION_ID=us-east1
+
+      # RPC endpoints (provide your own keys)
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:-}
+      - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:-}
+      - ZKSYNC_RPC_URL=${ZKSYNC_RPC_URL:-}
+      - ZKSYNC_WS_URL=${ZKSYNC_WS_URL:-}
+      - LINEA_RPC_URL=${LINEA_RPC_URL:-}
+      - LINEA_WS_URL=${LINEA_WS_URL:-}
+
+      # Alchemy API key (for Ethereum mainnet)
+      - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
+      - ALCHEMY_ETHEREUM_KEY=${ALCHEMY_ETHEREUM_KEY:-}
+
+    ports:
+      - "3003:3003"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3003/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 15s
+    networks:
+      - arbitrage-network
+    labels:
+      - "service=partition-high-value"
+      - "partition.id=high-value"
+      - "partition.chains=ethereum,zksync,linea"
+      - "partition.region=us-east1"
+
+networks:
+  arbitrage-network:
+    external: true
+    name: arbitrage-network
