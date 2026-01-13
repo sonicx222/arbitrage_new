@@ -98,7 +98,7 @@ const detector = new UnifiedChainDetector(config);
 setupDetectorEventHandlers(detector, logger, P2_PARTITION_ID);
 
 // =============================================================================
-// Process Handlers (P15 refactor - Using shared utilities)
+// Process Handlers (P15/P19 refactor - Using shared utilities with shutdown guard)
 // =============================================================================
 
 setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
