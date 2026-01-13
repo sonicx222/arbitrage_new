@@ -255,7 +255,10 @@ export type {
 
 // REF-1/ARCH-1: Shared arbitrage calculation logic
 export {
+  // P0-1 FIX: Precision-safe BigInt utilities
+  safeBigIntDivision,
   calculatePriceFromReserves,
+  calculatePriceFromBigIntReserves,
   invertPrice,
   calculatePriceDifferencePercent,
   isSameTokenPair,
@@ -393,3 +396,23 @@ export {
   PARTITION_SERVICE_NAMES
 } from './partition-router';
 export type { PartitionEndpoint } from './partition-router';
+
+// Simulation Mode for Local Testing
+export {
+  PriceSimulator,
+  getSimulator,
+  isSimulationMode,
+  SIMULATION_CONFIG
+} from './simulation-mode';
+export type {
+  SimulatedPriceUpdate,
+  SimulationConfig
+} from './simulation-mode';
+
+// P0-2 FIX: Nonce Manager for Transaction Sequencing
+export {
+  NonceManager,
+  getNonceManager,
+  resetNonceManager
+} from './nonce-manager';
+export type { NonceManagerConfig } from './nonce-manager';

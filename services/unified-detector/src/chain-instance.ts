@@ -18,7 +18,9 @@ import {
   PerformanceLogger,
   RedisStreamsClient,
   WebSocketManager,
-  WebSocketConfig
+  WebSocketConfig,
+  // P0-1 FIX: Use precision-safe price calculation
+  calculatePriceFromBigIntReserves
 } from '@arbitrage/core';
 
 import {
@@ -620,9 +622,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (reserve0 === 0n || reserve1 === 0n) return;
 
-    // Calculate price (token0/token1) - consistent with base-detector.ts
-    // This gives "price of token1 in terms of token0"
-    const price = Number(reserve0) / Number(reserve1);
+    // P0-1 FIX: Use precision-safe price calculation to prevent precision loss
+    // for large BigInt values (reserves can be > 2^53)
+    const price = calculatePriceFromBigIntReserves(reserve0, reserve1);
+    if (price === null) return;
 
     const priceUpdate: PriceUpdate = {
       chain: this.chainId,

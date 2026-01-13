@@ -57,4 +57,6 @@ export { parsePort, validateAndFilterChains, createPartitionHealthServer, shutdo
 export type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './partition-service-utils';
 export { PartitionRouter, createDeprecationWarning, isDeprecatedPattern, getMigrationRecommendation, warnIfDeprecated, PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './partition-router';
 export type { PartitionEndpoint } from './partition-router';
+export { PriceSimulator, getSimulator, isSimulationMode, SIMULATION_CONFIG } from './simulation-mode';
+export type { SimulatedPriceUpdate, SimulationConfig } from './simulation-mode';
 //# sourceMappingURL=index.d.ts.map
