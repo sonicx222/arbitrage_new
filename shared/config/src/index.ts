@@ -737,6 +737,12 @@ export const ARBITRAGE_CONFIG = {
   minProfitThreshold: 10, // Minimum $10 net profit
   minConfidenceThreshold: 0.7, // Minimum 70% confidence
   feePercentage: 0.003, // 0.3% DEX trading fee
+  // P1-4 FIX: Configurable slippage tolerance (was hardcoded 0.9 = 10%)
+  slippageTolerance: 0.10, // 10% slippage tolerance (minProfit = expectedProfit * (1 - slippageTolerance))
+  // P1-5 FIX: Gas price spike protection - reject transactions if gas exceeds threshold
+  gasPriceSpikeMultiplier: 2.0, // Max 2x above baseline gas price
+  gasPriceBaselineWindowMs: 300000, // 5 minute window for baseline calculation
+  gasPriceSpikeEnabled: true, // Enable/disable gas spike protection
   // Chain-specific minimum profits (due to gas costs)
   // S3.1.2: Added all 11 chains
   chainMinProfits: {

@@ -87,8 +87,9 @@ describe('P0-1: BigInt Precision (safeBigIntDivision)', () => {
 
     const price = safeBigIntDivision(ethReserve, usdcReserve);
 
-    // Price should be 10000 * 10^18 / (30000000 * 10^6) = 10^22 / 3*10^13 ≈ 333333.33
-    expect(price).toBeCloseTo(333333.333, 2);
+    // Price = ethReserve / usdcReserve = 10^22 / (3*10^13) = 10^9 / 3 ≈ 333,333,333
+    // This represents the raw ratio without decimal adjustment
+    expect(price).toBeCloseTo(333333333.333, 0);
   });
 
   it('should handle small ratios accurately', () => {

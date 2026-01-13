@@ -304,8 +304,8 @@ describe('Cross-Chain Detector Architecture Alignment', () => {
 
       const content = await fs.readFile(crossChainFile, 'utf-8');
 
-      // Should import ServiceState from shared/core (any path reference)
-      expect(content).toMatch(/import[\s\S]*ServiceState[\s\S]*from[\s\S]*shared\/core/);
+      // Should import ServiceState from shared/core (accepts both relative path and package alias)
+      expect(content).toMatch(/import[\s\S]*ServiceState[\s\S]*from[\s\S]*(@arbitrage\/core|shared\/core)/);
     });
 
     it('should handle stop promise race condition like BaseDetector', async () => {
@@ -442,8 +442,8 @@ describe('Cross-Chain Detector Code Quality', () => {
 
     const content = await fs.readFile(sourceFile, 'utf-8');
 
-    // Should import shared utilities
-    expect(content).toMatch(/from.*shared\/core/);
+    // Should import shared utilities (accepts both relative path and package alias)
+    expect(content).toMatch(/from.*(@arbitrage\/core|shared\/core)/);
     expect(content).toMatch(/createLogger|getRedisClient|ServiceStateManager/);
   });
 });

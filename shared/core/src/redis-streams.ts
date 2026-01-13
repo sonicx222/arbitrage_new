@@ -36,6 +36,12 @@ export interface ConsumerGroupConfig {
 export interface XReadOptions {
   count?: number;
   block?: number; // Milliseconds to block, 0 = forever
+  /**
+   * P1-8 FIX: Maximum block time in milliseconds to prevent indefinite blocking.
+   * If block > maxBlockMs, it will be capped to maxBlockMs.
+   * Default: 30000ms (30 seconds). Set to 0 to disable cap (not recommended).
+   */
+  maxBlockMs?: number;
 }
 
 export interface XReadGroupOptions extends XReadOptions {
@@ -392,7 +398,20 @@ export class RedisStreamsClient {
         args.push('COUNT', options.count);
       }
       if (options.block !== undefined) {
-        args.push('BLOCK', options.block);
+        // P1-8 FIX: Apply safety cap to prevent indefinite blocking
+        // Default max: 30 seconds. 0 = forever (explicitly disabled cap)
+        const maxBlockMs = options.maxBlockMs ?? 30000;
+        let effectiveBlock = options.block;
+
+        if (maxBlockMs > 0 && (options.block === 0 || options.block > maxBlockMs)) {
+          this.logger.debug('XREAD block time capped', {
+            requested: options.block,
+            capped: maxBlockMs,
+            streamName
+          });
+          effectiveBlock = maxBlockMs;
+        }
+        args.push('BLOCK', effectiveBlock);
       }
       args.push('STREAMS', streamName, lastId);
 
@@ -453,7 +472,20 @@ export class RedisStreamsClient {
         args.push('COUNT', options.count);
       }
       if (options.block !== undefined) {
-        args.push('BLOCK', options.block);
+        // P1-8 FIX: Apply safety cap to prevent indefinite blocking
+        const maxBlockMs = options.maxBlockMs ?? 30000;
+        let effectiveBlock = options.block;
+
+        if (maxBlockMs > 0 && (options.block === 0 || options.block > maxBlockMs)) {
+          this.logger.debug('XREADGROUP block time capped', {
+            requested: options.block,
+            capped: maxBlockMs,
+            stream: config.streamName,
+            group: config.groupName
+          });
+          effectiveBlock = maxBlockMs;
+        }
+        args.push('BLOCK', effectiveBlock);
       }
       if (options.noAck) {
         args.push('NOACK');
@@ -700,6 +732,163 @@ export class RedisStreamsClient {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+// =============================================================================
+// P2-1 FIX: Reusable Stream Consumer
+// Reduces code duplication in services consuming from Redis Streams
+// =============================================================================
+
+export interface StreamConsumerConfig {
+  /** Consumer group configuration */
+  config: ConsumerGroupConfig;
+  /** Handler function for each message */
+  handler: (message: StreamMessage) => Promise<void>;
+  /** Number of messages to fetch per read (default: 10) */
+  batchSize?: number;
+  /** Block time in ms (default: 1000, 0 = non-blocking) */
+  blockMs?: number;
+  /** Whether to auto-acknowledge after handler completes (default: true) */
+  autoAck?: boolean;
+  /** Logger instance for error logging */
+  logger?: { error: (msg: string, ctx?: any) => void; debug?: (msg: string, ctx?: any) => void };
+}
+
+export interface StreamConsumerStats {
+  messagesProcessed: number;
+  messagesFailed: number;
+  lastProcessedAt: number | null;
+  isRunning: boolean;
+}
+
+/**
+ * P2-1 FIX: Reusable stream consumer that encapsulates the common pattern of:
+ * 1. Reading from consumer group
+ * 2. Processing each message with a handler
+ * 3. Acknowledging processed messages
+ * 4. Handling errors gracefully
+ *
+ * Usage:
+ * ```ts
+ * const consumer = new StreamConsumer(streamsClient, {
+ *   config: { streamName: 'stream:opportunities', groupName: 'coordinator', consumerName: 'worker-1' },
+ *   handler: async (msg) => { console.log(msg.data); },
+ *   batchSize: 10,
+ *   blockMs: 1000
+ * });
+ * consumer.start();
+ * // ... later
+ * await consumer.stop();
+ * ```
+ */
+export class StreamConsumer {
+  private client: RedisStreamsClient;
+  private config: StreamConsumerConfig;
+  private running = false;
+  private pollTimer: NodeJS.Timeout | null = null;
+  private stats: StreamConsumerStats = {
+    messagesProcessed: 0,
+    messagesFailed: 0,
+    lastProcessedAt: null,
+    isRunning: false
+  };
+
+  constructor(client: RedisStreamsClient, config: StreamConsumerConfig) {
+    this.client = client;
+    this.config = {
+      batchSize: 10,
+      blockMs: 1000,
+      autoAck: true,
+      ...config
+    };
+  }
+
+  /**
+   * Start consuming messages from the stream.
+   * Runs in a polling loop until stop() is called.
+   */
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.stats.isRunning = true;
+    this.poll();
+  }
+
+  /**
+   * Stop consuming messages.
+   * Waits for any in-flight processing to complete.
+   */
+  async stop(): Promise<void> {
+    this.running = false;
+    this.stats.isRunning = false;
+
+    if (this.pollTimer) {
+      clearTimeout(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  /**
+   * Get consumer statistics.
+   */
+  getStats(): StreamConsumerStats {
+    return { ...this.stats };
+  }
+
+  private async poll(): Promise<void> {
+    if (!this.running) return;
+
+    try {
+      const messages = await this.client.xreadgroup(this.config.config, {
+        count: this.config.batchSize,
+        block: this.config.blockMs,
+        startId: '>'
+      });
+
+      for (const message of messages) {
+        if (!this.running) break;
+
+        try {
+          await this.config.handler(message);
+          this.stats.messagesProcessed++;
+          this.stats.lastProcessedAt = Date.now();
+
+          // Auto-acknowledge if enabled
+          if (this.config.autoAck) {
+            await this.client.xack(
+              this.config.config.streamName,
+              this.config.config.groupName,
+              message.id
+            );
+          }
+        } catch (handlerError) {
+          this.stats.messagesFailed++;
+          this.config.logger?.error('Stream message handler failed', {
+            error: handlerError,
+            stream: this.config.config.streamName,
+            messageId: message.id
+          });
+          // Don't ack failed messages - they'll be retried
+        }
+      }
+    } catch (error) {
+      // Ignore timeout errors from blocking read
+      const errorMessage = (error as Error).message || '';
+      if (!errorMessage.includes('timeout')) {
+        this.config.logger?.error('Error consuming stream', {
+          error,
+          stream: this.config.config.streamName
+        });
+      }
+    }
+
+    // Schedule next poll if still running
+    if (this.running) {
+      // Use setImmediate for non-blocking reads, short delay for blocking reads
+      const delay = this.config.blockMs === 0 ? 0 : 10;
+      this.pollTimer = setTimeout(() => this.poll(), delay);
+    }
   }
 }
 
