@@ -23,7 +23,9 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  globalSetup: '<rootDir>/jest.globalSetup.ts',
+  globalTeardown: '<rootDir>/jest.globalTeardown.ts',
   setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/index.ts'],
-  testTimeout: 10000,
+  testTimeout: 30000,
   maxWorkers: 4
 };
