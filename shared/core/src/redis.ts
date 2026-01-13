@@ -17,16 +17,29 @@ const REDIS_DEFAULTS = {
   maxChannelNameLength: SYSTEM_CONSTANTS?.redis?.maxChannelNameLength ?? 128,
 };
 
+// P1-1 FIX: Define Redis connection options interface
+interface RedisConnectionOptions {
+  host: string;
+  port: number;
+  password?: string;
+  retryDelayOnFailover: number;
+  enableReadyCheck: boolean;
+  maxRetriesPerRequest: number;
+  lazyConnect: boolean;
+}
+
 export class RedisClient {
   private client: Redis;
   private pubClient: Redis;
   private subClient: Redis;
-  private logger: any;
+  // P1-1 FIX: Use proper logger type instead of any
+  private logger: ReturnType<typeof createLogger>;
 
   constructor(url: string, password?: string) {
     this.logger = createLogger('redis-client');
 
-    const options: any = {
+    // P1-1 FIX: Use typed options instead of any
+    const options: RedisConnectionOptions = {
       host: this.parseHost(url),
       port: this.parsePort(url),
       password,
@@ -60,7 +73,8 @@ export class RedisClient {
     this.client.removeAllListeners('ready');
     this.client.removeAllListeners('close');
 
-    this.client.on('error', (err: any) => {
+    // P1-1 FIX: Use Error type instead of any
+    this.client.on('error', (err: Error) => {
       this.logger?.error('Redis main client error', { error: err });
     });
 
@@ -78,14 +92,16 @@ export class RedisClient {
 
     // Setup pubClient event handlers
     this.pubClient.removeAllListeners('error');
-    this.pubClient.on('error', (err: any) => {
+    // P1-1 FIX: Use Error type instead of any
+    this.pubClient.on('error', (err: Error) => {
       this.logger?.error('Redis pub client error', { error: err });
     });
 
     // Setup subClient event handlers
     this.subClient.removeAllListeners('error');
     this.subClient.removeAllListeners('message');
-    this.subClient.on('error', (err: any) => {
+    // P1-1 FIX: Use Error type instead of any
+    this.subClient.on('error', (err: Error) => {
       this.logger?.error('Redis sub client error', { error: err });
     });
   }
@@ -229,7 +245,8 @@ export class RedisClient {
   }
 
   // Caching operations
-  async set(key: string, value: any, ttl?: number): Promise<void> {
+  // P1-1 FIX: Use unknown instead of any for type safety
+  async set(key: string, value: unknown, ttl?: number): Promise<void> {
     try {
       const serializedValue = JSON.stringify(value);
       if (ttl) {
@@ -274,7 +291,13 @@ export class RedisClient {
 
   /**
    * Set key only if it doesn't exist (for leader election)
-   * Returns true if the key was set, false if it already exists
+   *
+   * P0-3 FIX: Now throws on Redis errors instead of returning false.
+   * This prevents silent failures where Redis being unavailable is
+   * indistinguishable from the lock being held by another process.
+   *
+   * @returns true if the key was set, false if it already exists
+   * @throws Error if Redis operation fails (network error, timeout, etc.)
    */
   async setNx(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
     try {
@@ -288,8 +311,10 @@ export class RedisClient {
       }
       return result === 'OK';
     } catch (error) {
+      // P0-3 FIX: Throw instead of returning false to distinguish
+      // "lock held by another" from "Redis unavailable"
       this.logger.error('Error setting NX', { error, key });
-      return false;
+      throw new Error(`Redis setNx failed: ${(error as Error).message}`);
     }
   }
 
@@ -394,7 +419,8 @@ export class RedisClient {
   }
 
   // Hash operations for complex data
-  async hset(key: string, field: string, value: any): Promise<number> {
+  // P1-1 FIX: Use unknown instead of any for type safety
+  async hset(key: string, field: string, value: unknown): Promise<number> {
     try {
       const serializedValue = JSON.stringify(value);
       return await this.client.hset(key, field, serializedValue);

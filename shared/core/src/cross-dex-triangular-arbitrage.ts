@@ -339,15 +339,33 @@ export class CrossDexTriangularArbitrage {
     return { amountOutBigInt, step };
   }
 
-  // Legacy swap simulation (kept for backwards compatibility)
+  /**
+   * @deprecated P1-6 FIX: This legacy float-based swap simulation has precision issues
+   * with large reserve values (> 2^53). Use simulateSwapBigInt() instead which uses
+   * BigInt arithmetic for precise wei calculations.
+   *
+   * This method is kept for backwards compatibility but will be removed in v2.0.
+   * Migration: Replace simulateSwap() calls with simulateSwapBigInt() and use
+   * BigInt for amountIn parameter.
+   *
+   * @see simulateSwapBigInt - The recommended replacement with BigInt precision
+   */
   private simulateSwap(
     fromToken: string,
     toToken: string,
     amountIn: number,
     pool: DexPool
   ): TriangularStep {
+    // P1-6 FIX: Log deprecation warning to help identify usage
+    logger.warn('DEPRECATED: simulateSwap() called - use simulateSwapBigInt() for precision', {
+      fromToken,
+      toToken,
+      dex: pool.dex
+    });
+
     // Use AMM formula: amountOut = (amountIn * reserveOut * 0.997) / (reserveIn + amountIn * 0.997)
     // Simplified constant product formula with fee
+    // WARNING: This uses float arithmetic which loses precision for large values
 
     let reserveIn: number, reserveOut: number;
 

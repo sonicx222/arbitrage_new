@@ -3,9 +3,19 @@ export { RedisClient, getRedisClient, resetRedisInstance } from './redis';
 
 // P1-3-FIX: Standardized singleton pattern utilities
 export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';
+
+// P2-2 FIX: Reusable AsyncMutex utility
+export {
+  AsyncMutex,
+  namedMutex,
+  clearNamedMutex,
+  clearAllNamedMutexes
+} from './async-mutex';
+export type { MutexStats } from './async-mutex';
 export {
   RedisStreamsClient,
   StreamBatcher,
+  StreamConsumer,
   getRedisStreamsClient,
   resetRedisStreamsInstance
 } from './redis-streams';
@@ -60,7 +70,9 @@ export type {
   StreamInfo,
   PendingInfo,
   BatcherConfig,
-  BatcherStats
+  BatcherStats,
+  StreamConsumerConfig,
+  StreamConsumerStats
 } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger } from './logger';
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)

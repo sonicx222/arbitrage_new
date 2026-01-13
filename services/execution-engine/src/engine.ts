@@ -28,7 +28,10 @@ import {
   ServiceState,
   createServiceState,
   DistributedLockManager,
-  getDistributedLockManager
+  getDistributedLockManager,
+  // P0-2 FIX: Import NonceManager for transaction nonce management
+  NonceManager,
+  getNonceManager
 } from '@arbitrage/core';
 import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
 import {
@@ -100,6 +103,8 @@ export class ExecutionEngineService {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
   private lockManager: DistributedLockManager | null = null;
+  // P0-2 FIX: NonceManager for atomic nonce allocation
+  private nonceManager: NonceManager | null = null;
   private logger = createLogger('execution-engine');
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
@@ -108,6 +113,8 @@ export class ExecutionEngineService {
   private providers: Map<string, ethers.JsonRpcProvider> = new Map();
   // P1-2 FIX: Track provider health for each chain
   private providerHealth: Map<string, ProviderHealth> = new Map();
+  // P1-5 FIX: Track baseline gas prices for spike detection
+  private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
   private executionQueue: ArbitrageOpportunity[] = [];
   private activeExecutions: Set<string> = new Set();
 
@@ -197,9 +204,19 @@ export class ExecutionEngineService {
         defaultTtlMs: 60000 // 60 second lock TTL
       });
 
+      // P0-2 FIX: Initialize nonce manager
+      this.nonceManager = getNonceManager({
+        syncIntervalMs: 30000,
+        pendingTimeoutMs: 300000,
+        maxPendingPerChain: 10
+      });
+
       // Initialize blockchain providers and wallets
       await this.initializeProviders();
       this.initializeWallets();
+
+      // P0-2 FIX: Start nonce manager background sync
+      this.nonceManager.start();
 
       // P1-2 FIX: Validate provider connectivity before starting
       await this.validateProviderConnectivity();
@@ -239,6 +256,12 @@ export class ExecutionEngineService {
 
       // Clear all intervals
       this.clearAllIntervals();
+
+      // P0-2 FIX: Stop NonceManager
+      if (this.nonceManager) {
+        this.nonceManager.stop();
+        this.nonceManager = null;
+      }
 
       // Shutdown lock manager with timeout (P0-NEW-6 FIX)
       if (this.lockManager) {
@@ -533,6 +556,12 @@ export class ExecutionEngineService {
       if (privateKey && this.wallets.has(chainName)) {
         const wallet = new ethers.Wallet(privateKey, newProvider);
         this.wallets.set(chainName, wallet);
+
+        // P0-2 FIX: Re-register wallet with NonceManager after provider reconnection
+        if (this.nonceManager) {
+          await this.nonceManager.resetChain(chainName);
+          this.nonceManager.registerWallet(chainName, wallet);
+        }
       }
 
       this.logger.info(`Provider reconnection successful for ${chainName}`);
@@ -558,6 +587,12 @@ export class ExecutionEngineService {
         try {
           const wallet = new ethers.Wallet(privateKey, provider);
           this.wallets.set(chainName, wallet);
+
+          // P0-2 FIX: Register wallet with nonce manager for atomic nonce allocation
+          if (this.nonceManager) {
+            this.nonceManager.registerWallet(chainName, wallet);
+          }
+
           this.logger.info(`Initialized wallet for ${chainName}`, {
             address: wallet.address
           });
@@ -885,6 +920,13 @@ export class ExecutionEngineService {
         this.logger.debug('Opportunity skipped - already being executed by another instance', {
           id: opportunity.id
         });
+      } else if (lockResult.reason === 'redis_error') {
+        // P0-3 FIX: Handle Redis errors explicitly - this is critical
+        this.logger.error('Opportunity skipped - Redis unavailable', {
+          id: opportunity.id,
+          error: lockResult.error?.message
+        });
+        // Don't increment lockConflicts - this is a different failure mode
       } else if (lockResult.reason === 'execution_error') {
         this.logger.error('Opportunity execution failed', {
           id: opportunity.id,
@@ -1009,36 +1051,69 @@ export class ExecutionEngineService {
     // Apply MEV protection
     const protectedTx = await this.applyMEVProtection(flashLoanTx, chain);
 
-    // P0-3 FIX: Execute transaction with timeout
-    const txResponse = await this.withTransactionTimeout(
-      () => wallet.sendTransaction(protectedTx),
-      'sendTransaction'
-    );
-
-    // P0-3 FIX: Wait for receipt with timeout
-    const receipt = await this.withTransactionTimeout(
-      () => txResponse.wait(),
-      'waitForReceipt'
-    );
-
-    if (!receipt) {
-      throw new Error('Transaction receipt not received');
+    // P0-2 FIX: Get nonce from NonceManager for atomic allocation
+    let nonce: number | undefined;
+    if (this.nonceManager) {
+      try {
+        nonce = await this.nonceManager.getNextNonce(chain);
+        protectedTx.nonce = nonce;
+        this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
+      } catch (error) {
+        this.logger.error('Failed to get nonce from NonceManager', {
+          chain,
+          error: (error as Error).message
+        });
+        throw error;
+      }
     }
 
-    // Calculate actual profit
-    const actualProfit = await this.calculateActualProfit(receipt, opportunity);
+    try {
+      // P0-3 FIX: Execute transaction with timeout
+      const txResponse = await this.withTransactionTimeout(
+        () => wallet.sendTransaction(protectedTx),
+        'sendTransaction'
+      );
 
-    return {
-      opportunityId: opportunity.id,
-      success: true,
-      transactionHash: receipt.hash,
-      actualProfit,
-      gasUsed: Number(receipt.gasUsed),
-      gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
-      timestamp: Date.now(),
-      chain,
-      dex: opportunity.buyDex || 'unknown'
-    };
+      // P0-3 FIX: Wait for receipt with timeout
+      const receipt = await this.withTransactionTimeout(
+        () => txResponse.wait(),
+        'waitForReceipt'
+      );
+
+      if (!receipt) {
+        // P0-2 FIX: Mark transaction as failed if no receipt
+        if (this.nonceManager && nonce !== undefined) {
+          this.nonceManager.failTransaction(chain, nonce, 'No receipt received');
+        }
+        throw new Error('Transaction receipt not received');
+      }
+
+      // P0-2 FIX: Confirm transaction with NonceManager
+      if (this.nonceManager && nonce !== undefined) {
+        this.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
+      }
+
+      // Calculate actual profit
+      const actualProfit = await this.calculateActualProfit(receipt, opportunity);
+
+      return {
+        opportunityId: opportunity.id,
+        success: true,
+        transactionHash: receipt.hash,
+        actualProfit,
+        gasUsed: Number(receipt.gasUsed),
+        gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
+        timestamp: Date.now(),
+        chain,
+        dex: opportunity.buyDex || 'unknown'
+      };
+    } catch (error) {
+      // P0-2 FIX: Mark transaction as failed in NonceManager
+      if (this.nonceManager && nonce !== undefined) {
+        this.nonceManager.failTransaction(chain, nonce, (error as Error).message);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1085,7 +1160,8 @@ export class ExecutionEngineService {
       token: opportunity.tokenIn,
       amount: opportunity.amountIn,
       path: this.buildSwapPath(opportunity),
-      minProfit: opportunity.expectedProfit * 0.9 // 10% slippage tolerance
+      // P1-4 FIX: Use configurable slippage tolerance from ARBITRAGE_CONFIG
+      minProfit: opportunity.expectedProfit * (1 - ARBITRAGE_CONFIG.slippageTolerance)
     };
 
     const flashLoanContract = await this.getFlashLoanContract(chain);
@@ -1140,6 +1216,11 @@ export class ExecutionEngineService {
     return tx;
   }
 
+  /**
+   * P1-5 FIX: Get optimal gas price with spike protection.
+   * Tracks baseline gas prices and rejects if current price exceeds threshold.
+   * @throws Error if gas price spike detected and protection is enabled
+   */
   private async getOptimalGasPrice(chain: string): Promise<bigint> {
     const provider = this.providers.get(chain);
     if (!provider) {
@@ -1148,20 +1229,95 @@ export class ExecutionEngineService {
 
     try {
       const feeData = await provider.getFeeData();
+      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || ethers.parseUnits('50', 'gwei');
 
-      if (feeData.maxFeePerGas) {
-        return feeData.maxFeePerGas;
+      // P1-5 FIX: Update baseline and check for spike
+      this.updateGasBaseline(chain, currentPrice);
+
+      if (ARBITRAGE_CONFIG.gasPriceSpikeEnabled) {
+        const baselinePrice = this.getGasBaseline(chain);
+        if (baselinePrice > 0n) {
+          const maxAllowedPrice = baselinePrice * BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100)) / 100n;
+
+          if (currentPrice > maxAllowedPrice) {
+            const currentGwei = Number(currentPrice / BigInt(1e9));
+            const baselineGwei = Number(baselinePrice / BigInt(1e9));
+            const maxGwei = Number(maxAllowedPrice / BigInt(1e9));
+
+            this.logger.warn('Gas price spike detected, aborting transaction', {
+              chain,
+              currentGwei,
+              baselineGwei,
+              maxGwei,
+              multiplier: ARBITRAGE_CONFIG.gasPriceSpikeMultiplier
+            });
+
+            throw new Error(`Gas price spike: ${currentGwei} gwei exceeds ${maxGwei} gwei (${ARBITRAGE_CONFIG.gasPriceSpikeMultiplier}x baseline)`);
+          }
+        }
       }
 
-      const gasPrice = feeData.gasPrice;
-      return gasPrice || ethers.parseUnits('50', 'gwei');
+      return currentPrice;
     } catch (error) {
+      // Re-throw gas spike errors
+      if ((error as Error).message?.includes('Gas price spike')) {
+        throw error;
+      }
       this.logger.warn('Failed to get optimal gas price, using default', {
         chain,
         error
       });
       return ethers.parseUnits('50', 'gwei');
     }
+  }
+
+  /**
+   * P1-5 FIX: Update gas price baseline for spike detection
+   */
+  private updateGasBaseline(chain: string, price: bigint): void {
+    const now = Date.now();
+    const windowMs = ARBITRAGE_CONFIG.gasPriceBaselineWindowMs;
+
+    if (!this.gasBaselines.has(chain)) {
+      this.gasBaselines.set(chain, []);
+    }
+
+    const history = this.gasBaselines.get(chain)!;
+
+    // Add current price
+    history.push({ price, timestamp: now });
+
+    // Remove entries older than window
+    const cutoff = now - windowMs;
+    while (history.length > 0 && history[0].timestamp < cutoff) {
+      history.shift();
+    }
+
+    // Keep maximum 100 entries to prevent memory growth
+    if (history.length > 100) {
+      history.splice(0, history.length - 100);
+    }
+  }
+
+  /**
+   * P1-5 FIX: Calculate baseline gas price from recent history
+   * Uses median to avoid outlier influence
+   */
+  private getGasBaseline(chain: string): bigint {
+    const history = this.gasBaselines.get(chain);
+    if (!history || history.length < 3) {
+      return 0n; // Not enough data for baseline
+    }
+
+    // Sort by price and get median
+    const sorted = [...history].sort((a, b) => {
+      if (a.price < b.price) return -1;
+      if (a.price > b.price) return 1;
+      return 0;
+    });
+
+    const midIndex = Math.floor(sorted.length / 2);
+    return sorted[midIndex].price;
   }
 
   private async calculateActualProfit(

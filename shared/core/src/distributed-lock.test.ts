@@ -584,4 +584,84 @@ describe('DistributedLockManager', () => {
       expect(instance1).not.toBe(instance2);
     });
   });
+
+  // ===========================================================================
+  // P0-3: Redis Error vs Lock Not Acquired (Silent Failure Prevention)
+  // ===========================================================================
+
+  describe('P0-3: Redis error vs lock not acquired distinction', () => {
+    it('should return redis_error reason when Redis throws during acquisition', async () => {
+      // P0-3 FIX: setNx now throws on Redis errors instead of returning false
+      mockRedisClient.setNx.mockRejectedValue(new Error('Redis connection failed'));
+
+      const result = await lockManager.withLock('test-resource', async () => {
+        return 'should not execute';
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toBe('redis_error');
+        expect(result.error?.message).toContain('Redis connection failed');
+      }
+    });
+
+    it('should return lock_not_acquired when lock is held by another (not error)', async () => {
+      // Lock is held by another process - setNx returns false, not throws
+      mockRedisClient.setNx.mockResolvedValue(false);
+
+      const result = await lockManager.withLock('test-resource', async () => {
+        return 'should not execute';
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toBe('lock_not_acquired');
+        // No error object for this case - it's expected behavior
+      }
+    });
+
+    it('should distinguish timeout errors from lock contention', async () => {
+      // Network timeout is a Redis error, not lock contention
+      mockRedisClient.setNx.mockRejectedValue(new Error('ETIMEDOUT: Connection timed out'));
+
+      const result = await lockManager.withLock('test-resource', async () => {
+        return 'should not execute';
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toBe('redis_error');
+        expect(result.error?.message).toContain('ETIMEDOUT');
+      }
+    });
+
+    it('should still return execution_error for function failures', async () => {
+      mockRedisClient.setNx.mockResolvedValue(true);
+      mockRedisClient.eval.mockResolvedValue(1); // For release
+
+      const result = await lockManager.withLock('test-resource', async () => {
+        throw new Error('Business logic failed');
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toBe('execution_error');
+        expect(result.error?.message).toBe('Business logic failed');
+      }
+    });
+
+    it('should propagate Redis errors during retry attempts', async () => {
+      // First attempt: Redis error
+      // Second attempt: Redis error
+      // Both should be treated as errors, not as lock contention
+      mockRedisClient.setNx
+        .mockRejectedValueOnce(new Error('Connection refused'))
+        .mockRejectedValueOnce(new Error('Connection refused'));
+
+      await expect(lockManager.acquireLock('test-resource', {
+        retries: 1,
+        retryDelayMs: 10
+      })).rejects.toThrow('Connection refused');
+    });
+  });
 });

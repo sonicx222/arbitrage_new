@@ -1,0 +1,49 @@
+2026-01-13T23:00:28.812Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.817Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.820Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.821Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.823Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.835Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.837Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.838Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.840Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.841Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.843Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.843Z [nonce-manager] warn: Transaction failed {"chain":"ethereum","nonce":0,"error":"Transaction reverted"}
+2026-01-13T23:00:28.844Z [nonce-manager] info: Nonce state reset due to failed transaction {"chain":"ethereum","nonce":0}
+2026-01-13T23:00:28.844Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.846Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.847Z [nonce-manager] warn: Transaction failed {"chain":"ethereum","nonce":0,"error":"Transaction reverted"}
+2026-01-13T23:00:28.847Z [nonce-manager] info: Nonce state reset due to failed transaction {"chain":"ethereum","nonce":0}
+2026-01-13T23:00:28.847Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.849Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.850Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.851Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.852Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.853Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.854Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.855Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.856Z [nonce-manager] info: Chain nonce state reset {"chain":"ethereum","newNonce":10}
+2026-01-13T23:00:28.856Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.858Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.858Z [nonce-manager] info: Chain nonce state reset {"chain":"ethereum","newNonce":0}
+2026-01-13T23:00:28.865Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.867Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.868Z [nonce-manager] info: Chain nonce state reset {"chain":"ethereum","newNonce":10}
+2026-01-13T23:00:28.868Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.869Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.870Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.871Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.873Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.874Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.875Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.876Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.877Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.878Z [nonce-manager] info: NonceManager started
+2026-01-13T23:00:28.878Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.879Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.879Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.880Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.881Z [nonce-manager] info: NonceManager stopped
+2026-01-13T23:00:28.882Z [nonce-manager] info: Wallet registered for nonce management {"chain":"ethereum","address":"0x12345678..."}
+2026-01-13T23:00:28.883Z [nonce-manager] info: NonceManager stopped

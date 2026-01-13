@@ -1,0 +1,225 @@
+2026-01-13T23:00:19.056Z [ethereum-detector] info: Arbitrage opportunity detected {"id":"0x1111111111111111111111111111111111111111-0x2222222222222222222222222222222222222222-1768345219056","type":"simple","profit":0.24399999999999994,"confidence":0.75,"buyDex":"uniswap_v2","sellDex":"sushiswap"}
+2026-01-13T23:00:18.701Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.727Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.743Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.762Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.775Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.785Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.795Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.811Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.833Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.845Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.819Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.859Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.869Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.882Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.892Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.904Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.912Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.918Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.946Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.923Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.928Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.953Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.964Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.958Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.969Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.979Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.987Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.996Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.007Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.018Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.028Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.037Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.047Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.054Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.065Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.075Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.086Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.093Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.104Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.131Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.143Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.155Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.169Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.184Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.202Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.217Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.227Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.237Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.252Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.259Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.272Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:19.282Z [ethereum-detector] info: Initialized ethereum detector {"dexes":2,"tokens":8,"rpcUrl":"https://test.example.com","wsUrl":"wss://test.example.com"}
+2026-01-13T23:00:18.703Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.067Z [ethereum-detector] info: Arbitrage opportunity detected {"id":"0x1111111111111111111111111111111111111111-0x2222222222222222222222222222222222222222-1768345219067","type":"simple","profit":0.24399999999999994,"confidence":0.75,"buyDex":"uniswap_v2","sellDex":"sushiswap"}
+2026-01-13T23:00:18.705Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.728Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.711Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.729Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.718Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.729Z [ethereum-detector] warn: Service is already running
+2026-01-13T23:00:18.730Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.745Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.734Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.746Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.763Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.747Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.764Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.750Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.764Z [ethereum-detector] warn: Cannot start: service is currently stopping
+2026-01-13T23:00:18.751Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.765Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.776Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.751Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.767Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.776Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.753Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.786Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.777Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.755Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.779Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.786Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.796Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.846Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.787Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.797Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.847Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.788Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.798Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.848Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.800Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.821Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.851Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.860Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.822Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.869Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.861Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.824Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.870Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.826Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.871Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.883Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.875Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.893Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.884Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.970Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.894Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.884Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.971Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.886Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.895Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.971Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.898Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.979Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.973Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.980Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.988Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.997Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.980Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:18.988Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.998Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.982Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:18.989Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.007Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:18.998Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.008Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:18.991Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.010Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.000Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.019Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.029Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.012Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.029Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.019Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.038Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.030Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.020Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.039Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.032Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.022Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.047Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.055Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.066Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.048Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.055Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.066Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.048Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.058Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.067Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.050Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.060Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.069Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.094Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.076Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.105Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.095Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.077Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.106Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.078Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.095Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.106Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.080Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.095Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.108Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.096Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.132Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.108Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.098Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.132Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.108Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.144Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.133Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.109Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.144Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.134Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.110Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.146Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.156Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.170Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.148Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.157Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.203Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.171Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.160Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.172Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.163Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.204Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.176Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.207Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.185Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.218Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.209Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.186Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.219Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.228Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.187Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.219Z [ethereum-detector] warn: Pair services not initialized, returning null {"dex":"uniswap_v2","token0":"WETH","token1":"USDT"}
+2026-01-13T23:00:19.228Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.189Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.220Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.229Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"Redis connection failed","token0":"WETH","token1":"USDT"}
+2026-01-13T23:00:19.223Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.229Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.238Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.253Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.239Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.231Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.254Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.240Z [ethereum-detector] error: Error getting pair address for uniswap_v2 {"error":"RPC timeout","token0":"WETH","token1":"USDT"}
+2026-01-13T23:00:19.265Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.260Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.241Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.267Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.261Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.244Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.262Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.274Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.265Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.282Z [ethereum-detector] info: Starting ethereum detector service
+2026-01-13T23:00:19.275Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.283Z [ethereum-detector] info: ethereum detector service started successfully {"pairs":0,"dexes":2,"tokens":8}
+2026-01-13T23:00:19.285Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.283Z [ethereum-detector] info: Stopping ethereum detector service
+2026-01-13T23:00:19.286Z [ethereum-detector] info: ethereum detector service stopped
+2026-01-13T23:00:19.285Z [ethereum-detector] info: ethereum detector service stopped

@@ -1,0 +1,2 @@
+2026-01-13T23:00:26.415Z [expert-self-healing-manager] error: Failed to publish to pub/sub {"channel":"system:failures","error":"Redis down"}
+2026-01-13T23:00:26.417Z [test-service] error: Recovery action threw exception {"actionId":"recovery_1768345226417_c6w82jh2t","strategy":"restart_service","error":"Recovery failed"}
