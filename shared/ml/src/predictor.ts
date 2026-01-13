@@ -113,7 +113,8 @@ export class LSTMPredictor {
     try {
       // Prepare input data
       const features = this.extractFeatures(priceHistory, context);
-      const inputTensor = tf.tensor3d([features], [1, this.sequenceLength, this.featureCount]);
+      // Reshape flat features array to 3D tensor [batch, timesteps, features]
+      const inputTensor = tf.tensor1d(features).reshape([1, this.sequenceLength, this.featureCount]) as tf.Tensor3D;
 
       // Make prediction
       const prediction = this.model.predict(inputTensor) as tf.Tensor;
@@ -155,7 +156,11 @@ export class LSTMPredictor {
     try {
       logger.info(`Training LSTM model with ${trainingData.inputs.length} samples`);
 
-      const inputs = tf.tensor3d(trainingData.inputs);
+      // Reshape 2D inputs to 3D tensor [samples, timesteps, features]
+      // Each input is a flat feature vector that gets reshaped to [sequenceLength, featureCount]
+      const numSamples = trainingData.inputs.length;
+      const flatInputs = trainingData.inputs.flat();
+      const inputs = tf.tensor1d(flatInputs).reshape([numSamples, this.sequenceLength, this.featureCount]) as tf.Tensor3D;
       const outputs = tf.tensor2d(trainingData.outputs);
 
       await this.model.fit(inputs, outputs, {
@@ -215,8 +220,10 @@ export class LSTMPredictor {
       // Create training data from recent predictions and actuals
       const trainingData = this.createTrainingDataFromHistory();
 
-      // Fine-tune existing model
-      const inputs = tf.tensor3d(trainingData.inputs);
+      // Reshape 2D inputs to 3D tensor [samples, timesteps, features]
+      const numSamples = trainingData.inputs.length;
+      const flatInputs = trainingData.inputs.flat();
+      const inputs = tf.tensor1d(flatInputs).reshape([numSamples, this.sequenceLength, this.featureCount]) as tf.Tensor3D;
       const outputs = tf.tensor2d(trainingData.outputs);
 
       await this.model!.fit(inputs, outputs, {
@@ -307,7 +314,7 @@ export class LSTMPredictor {
   private calculatePriceFeatures(prices: number[]): number[] {
     if (prices.length === 0) return [0, 0, 0, 0];
 
-    const returns = [];
+    const returns: number[] = [];
     for (let i = 1; i < prices.length; i++) {
       returns.push((prices[i] - prices[i-1]) / prices[i-1]);
     }
@@ -333,7 +340,7 @@ export class LSTMPredictor {
   private calculateVolatility(prices: number[]): number {
     if (prices.length < 2) return 0;
 
-    const returns = [];
+    const returns: number[] = [];
     for (let i = 1; i < prices.length; i++) {
       returns.push(Math.log(prices[i] / prices[i-1]));
     }
@@ -481,7 +488,7 @@ export class PatternRecognizer {
   }
 
   private calculateReturns(prices: number[]): number[] {
-    const returns = [];
+    const returns: number[] = [];
     for (let i = 1; i < prices.length; i++) {
       returns.push((prices[i] - prices[i-1]) / prices[i-1]);
     }
@@ -489,7 +496,7 @@ export class PatternRecognizer {
   }
 
   private calculateVolumeChanges(volumes: number[]): number[] {
-    const changes = [];
+    const changes: number[] = [];
     for (let i = 1; i < volumes.length; i++) {
       changes.push((volumes[i] - volumes[i-1]) / volumes[i-1]);
     }

@@ -13,7 +13,7 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy
  */
-import { ServiceState } from '../../../shared/core/src';
+import { ServiceState } from '@arbitrage/core';
 interface QueueConfig {
     maxSize: number;
     highWaterMark: number;

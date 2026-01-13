@@ -34,14 +34,7 @@ export declare const ARBITRAGE_CONFIG: {
     minProfitThreshold: number;
     minConfidenceThreshold: number;
     feePercentage: number;
-    chainMinProfits: {
-        ethereum: number;
-        arbitrum: number;
-        optimism: number;
-        base: number;
-        polygon: number;
-        bsc: number;
-    };
+    chainMinProfits: Record<string, number>;
 };
 export declare const EVENT_CONFIG: {
     syncEvents: {
@@ -56,12 +49,26 @@ export declare const EVENT_CONFIG: {
         samplingRate: number;
     };
 };
+/**
+ * Partition IDs - Use these constants instead of magic strings
+ * to prevent typos and enable IDE autocomplete.
+ */
+export declare const PARTITION_IDS: {
+    readonly ASIA_FAST: "asia-fast";
+    readonly L2_TURBO: "l2-turbo";
+    readonly HIGH_VALUE: "high-value";
+    readonly SOLANA_NATIVE: "solana-native";
+};
+export type PartitionId = typeof PARTITION_IDS[keyof typeof PARTITION_IDS];
+/**
+ * Partition chain assignments - S3.1.2 configuration
+ * Use getChainsForPartition() from partitions.ts for runtime access.
+ */
 export declare const PARTITION_CONFIG: {
-    P1_ASIA_FAST: string[];
-    P2_L2_TURBO: string[];
-    P3_HIGH_VALUE: string[];
-    P1_ASIA_FAST_PHASE2: string[];
-    P3_HIGH_VALUE_PHASE3: string[];
+    P1_ASIA_FAST: readonly ["bsc", "polygon", "avalanche", "fantom"];
+    P2_L2_TURBO: readonly ["arbitrum", "optimism", "base"];
+    P3_HIGH_VALUE: readonly ["ethereum", "zksync", "linea"];
+    P4_SOLANA_NATIVE: readonly ["solana"];
 };
 export declare const PHASE_METRICS: {
     current: {

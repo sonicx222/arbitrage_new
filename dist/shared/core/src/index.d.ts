@@ -53,4 +53,8 @@ export type { Result } from './error-handling';
 export { TimeoutError, withTimeout, withTimeoutDefault, withTimeoutSafe, withRetry as withRetryAsync, sleep, createDeferred, mapConcurrent, mapSequential, debounceAsync, throttleAsync, gracefulShutdown, waitWithTimeouts } from './async-utils';
 export type { RetryConfig, Deferred } from './async-utils';
 export type { Chain, Dex, Token, Pair, PriceUpdate, ArbitrageOpportunity, SwapEvent, WhaleTransaction, MessageEvent, ServiceHealth, PerformanceMetrics, PredictionResult, MLModelMetrics, ServiceConfig, DetectorConfig, ExecutionConfig, ArbitrageError, NetworkError, ValidationError } from '../../types';
+export { parsePort, validateAndFilterChains, createPartitionHealthServer, shutdownPartitionService, setupDetectorEventHandlers, setupProcessHandlers, SHUTDOWN_TIMEOUT_MS } from './partition-service-utils';
+export type { PartitionServiceConfig, HealthServerOptions, PartitionDetectorInterface } from './partition-service-utils';
+export { PartitionRouter, createDeprecationWarning, isDeprecatedPattern, getMigrationRecommendation, warnIfDeprecated, PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './partition-router';
+export type { PartitionEndpoint } from './partition-router';
 //# sourceMappingURL=index.d.ts.map

@@ -1,4 +1,4 @@
-import type { ServiceHealth } from '../../../shared/types/src';
+import type { ServiceHealth } from '@arbitrage/types';
 interface SystemMetrics {
     totalOpportunities: number;
     totalExecutions: number;

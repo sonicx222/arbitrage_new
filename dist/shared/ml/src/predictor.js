@@ -95,7 +95,8 @@ class LSTMPredictor {
         try {
             // Prepare input data
             const features = this.extractFeatures(priceHistory, context);
-            const inputTensor = tf.tensor3d([features], [1, this.sequenceLength, this.featureCount]);
+            // Reshape flat features array to 3D tensor [batch, timesteps, features]
+            const inputTensor = tf.tensor1d(features).reshape([1, this.sequenceLength, this.featureCount]);
             // Make prediction
             const prediction = this.model.predict(inputTensor);
             const result = await prediction.data();
@@ -132,7 +133,11 @@ class LSTMPredictor {
         }
         try {
             logger.info(`Training LSTM model with ${trainingData.inputs.length} samples`);
-            const inputs = tf.tensor3d(trainingData.inputs);
+            // Reshape 2D inputs to 3D tensor [samples, timesteps, features]
+            // Each input is a flat feature vector that gets reshaped to [sequenceLength, featureCount]
+            const numSamples = trainingData.inputs.length;
+            const flatInputs = trainingData.inputs.flat();
+            const inputs = tf.tensor1d(flatInputs).reshape([numSamples, this.sequenceLength, this.featureCount]);
             const outputs = tf.tensor2d(trainingData.outputs);
             await this.model.fit(inputs, outputs, {
                 epochs: 50,
@@ -183,8 +188,10 @@ class LSTMPredictor {
         try {
             // Create training data from recent predictions and actuals
             const trainingData = this.createTrainingDataFromHistory();
-            // Fine-tune existing model
-            const inputs = tf.tensor3d(trainingData.inputs);
+            // Reshape 2D inputs to 3D tensor [samples, timesteps, features]
+            const numSamples = trainingData.inputs.length;
+            const flatInputs = trainingData.inputs.flat();
+            const inputs = tf.tensor1d(flatInputs).reshape([numSamples, this.sequenceLength, this.featureCount]);
             const outputs = tf.tensor2d(trainingData.outputs);
             await this.model.fit(inputs, outputs, {
                 epochs: 10,

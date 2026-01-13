@@ -27,6 +27,7 @@
   },
   "workspaces": [
     "shared/*",
+    "services/*",
     "infrastructure/*"
   ],
   "private": true,

@@ -36,7 +36,10 @@ const INIT_CODE_HASHES = {
     pancakeswap_v3: '0x6ce8eb472fa82df5469c6ab6d485f17c3ad13c8cd7af59b3d4a8026c5ce0f7e2',
     quickswap: '0x96e8ac4277198ff8b6f785478aa9a39f403cb768dd02cbee326c3e7da348845f',
     camelot_v3: '0x6c78ee8add0fa881098d2f46bfc8d6f60ac5b78e5f7f0f6d0a6a6f8c2e8f3c4d',
-    aerodrome: '0x97e8aa7e58d4c17c8aa7b2cf56b0a36bd0e4e3b8e5f7f0f6d0a6a6f8c2e8f3c4e'
+    aerodrome: '0x97e8aa7e58d4c17c8aa7b2cf56b0a36bd0e4e3b8e5f7f0f6d0a6a6f8c2e8f3c4e',
+    // S3.2.1-FIX: Added Avalanche DEX init code hashes
+    trader_joe_v2: '0x0bbca9af0511ad1a1da383135cf3a8d2ac620e549ef9f6ae3a4c33c2fed0af91',
+    pangolin: '0x40231f6b438bce0797c9ada29b718a87ea0a5cea3fe9a771abdd76bd41a3e545'
 };
 // V3 fee tiers (in basis points for pool identification)
 const V3_FEE_TIERS = [100, 500, 3000, 10000];
@@ -91,6 +94,9 @@ class PairDiscoveryService extends events_1.EventEmitter {
     }
     /**
      * Get or create factory contract instance
+     *
+     * S3.2.1-FIX: Returns null for unsupported DEX types (vault/pool models, Curve)
+     * to prevent creating contracts with wrong ABIs that would fail at runtime
      */
     getFactoryContract(chain, dex) {
         const key = `${chain}:${dex.name}`;
@@ -103,6 +109,12 @@ class PairDiscoveryService extends events_1.EventEmitter {
             return null;
         }
         const factoryType = this.detectFactoryType(dex.name);
+        // S3.2.1-FIX: Don't create contracts for unsupported or Curve DEXs
+        // These require custom adapters and would fail with standard ABIs
+        if (factoryType === 'unsupported' || factoryType === 'curve') {
+            this.logger.debug(`DEX ${dex.name} uses ${factoryType} pattern, contract creation skipped`);
+            return null;
+        }
         const abi = factoryType === 'v3' ? UNISWAP_V3_FACTORY_ABI : UNISWAP_V2_FACTORY_ABI;
         const contract = new ethers_1.ethers.Contract(dex.factoryAddress, abi, provider);
         this.factoryContracts.set(key, contract);
@@ -129,10 +141,13 @@ class PairDiscoveryService extends events_1.EventEmitter {
                 this.stats.factoryQueries++;
                 this.recordLatency(Date.now() - startTime);
                 this.resetFailureCount(chain, dex.name);
+                // S3.2.1-FIX: Sort tokens for consistent ordering (matches CREATE2 computation)
+                // This ensures the same pair discovered via factory query or CREATE2 has identical token order
+                const [sortedToken0, sortedToken1] = this.sortTokens(token0.address, token1.address);
                 const pair = {
                     address: queryResult.address,
-                    token0: token0.address,
-                    token1: token1.address,
+                    token0: sortedToken0,
+                    token1: sortedToken1,
                     dex: dex.name,
                     chain,
                     factoryAddress: dex.factoryAddress,
@@ -167,6 +182,11 @@ class PairDiscoveryService extends events_1.EventEmitter {
         if (!contract)
             return null;
         const factoryType = this.detectFactoryType(dex.name);
+        // S3.2.1-FIX: Early return for unsupported DEX types (vault/pool models)
+        if (factoryType === 'unsupported') {
+            this.logger.debug(`DEX ${dex.name} uses unsupported factory pattern (vault/pool model)`);
+            return null;
+        }
         // Retry wrapper
         let lastError = null;
         for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
@@ -191,6 +211,9 @@ class PairDiscoveryService extends events_1.EventEmitter {
     /**
      * Single factory query with proper timeout handling
      * Returns PoolQueryResult with address and optional fee tier for V3 pools
+     *
+     * S3.2.1-FIX: Added explicit handling for Curve-style DEXs
+     * Curve uses a different pool registry pattern that requires custom adapter
      */
     async queryFactoryOnce(contract, factoryType, token0, token1) {
         const timeoutMs = this.config.queryTimeoutMs;
@@ -213,6 +236,13 @@ class PairDiscoveryService extends events_1.EventEmitter {
                     return result;
                 }
             }
+            return null;
+        }
+        else if (factoryType === 'curve') {
+            // S3.2.1-FIX: Curve uses pool registry pattern, not standard getPair/getPool
+            // Curve pools are multi-asset and require custom adapter for proper discovery
+            // Return null to trigger CREATE2 fallback or indicate pair discovery not supported
+            this.logger.debug('Curve-style DEXs require custom pool registry adapter');
             return null;
         }
         else {
@@ -345,13 +375,33 @@ class PairDiscoveryService extends events_1.EventEmitter {
     // ===========================================================================
     /**
      * Detect factory type based on DEX name
+     *
+     * S3.2.1-FIX: Added handling for:
+     * - KyberSwap Elastic (concentrated liquidity, uses getPool like V3)
+     * - GMX and Platypus are NOT supported (vault/pool models, not factory patterns)
+     *   These DEXs should have enabled: false in config until adapters are implemented
+     *
+     * @returns 'v2' for Uniswap V2-style DEXs (getPair method)
+     * @returns 'v3' for Uniswap V3-style DEXs (getPool method with fee tiers)
+     * @returns 'curve' for Curve-style DEXs (multi-asset pools)
+     * @returns 'unsupported' for DEXs that don't follow factory patterns
      */
     detectFactoryType(dexName) {
         const nameLower = dexName.toLowerCase();
+        // V3-style DEXs (concentrated liquidity with fee tiers)
         if (nameLower.includes('v3') || nameLower.includes('_v3'))
             return 'v3';
+        // S3.2.1-FIX: KyberSwap Elastic uses concentrated liquidity (V3-style getPool)
+        if (nameLower.includes('kyberswap') || nameLower.includes('kyber'))
+            return 'v3';
+        // Curve-style DEXs (multi-asset stable pools)
         if (nameLower.includes('curve') || nameLower.includes('ellipsis'))
             return 'curve';
+        // S3.2.1-FIX: DEXs that don't follow factory patterns (vault/pool models)
+        // These cannot use getPair/getPool and need custom adapters
+        if (nameLower.includes('gmx') || nameLower.includes('platypus'))
+            return 'unsupported';
+        // Default: V2-style DEXs (standard getPair method)
         return 'v2';
     }
     /**
