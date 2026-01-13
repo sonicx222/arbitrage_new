@@ -380,3 +380,16 @@ export type {
   HealthServerOptions,
   PartitionDetectorInterface
 } from './partition-service-utils';
+
+// Partition Router (S3.1.7 - Detector Migration)
+export {
+  PartitionRouter,
+  createDeprecationWarning,
+  isDeprecatedPattern,
+  getMigrationRecommendation,
+  warnIfDeprecated,
+  // P1-1/P1-2-FIX: Export constants as single source of truth
+  PARTITION_PORTS,
+  PARTITION_SERVICE_NAMES
+} from './partition-router';
+export type { PartitionEndpoint } from './partition-router';
