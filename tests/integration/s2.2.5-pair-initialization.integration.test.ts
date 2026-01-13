@@ -557,12 +557,19 @@ describe('S2.2.5 Pair Initialization', () => {
 
     it('should configure chain-specific RPC call limits', () => {
       const rpcLimitsPerChain: Record<string, { callsPerSecond: number; batchSize: number }> = {
+        // Original 6 chains
         ethereum: { callsPerSecond: 10, batchSize: 50 },
         arbitrum: { callsPerSecond: 50, batchSize: 100 },
         bsc: { callsPerSecond: 30, batchSize: 100 },
         polygon: { callsPerSecond: 30, batchSize: 100 },
         base: { callsPerSecond: 50, batchSize: 100 },
-        optimism: { callsPerSecond: 50, batchSize: 100 }
+        optimism: { callsPerSecond: 50, batchSize: 100 },
+        // S3.1.2: New chains for 4-partition architecture
+        avalanche: { callsPerSecond: 30, batchSize: 100 },   // C-Chain similar to Polygon
+        fantom: { callsPerSecond: 50, batchSize: 100 },      // Fast chain, good rate limits
+        zksync: { callsPerSecond: 30, batchSize: 100 },      // L2 ZK rollup
+        linea: { callsPerSecond: 30, batchSize: 100 },       // L2 ZK rollup
+        solana: { callsPerSecond: 100, batchSize: 200 }      // Non-EVM, high throughput
       };
 
       // All configured chains should have limits

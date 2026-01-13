@@ -48,8 +48,8 @@ describe('PartitionConfig', () => {
       expect(asiaFast!.chains).toContain('polygon');
     });
 
-    it('should have l2-fast partition with L2 chains', () => {
-      const l2Fast = PARTITIONS.find(p => p.partitionId === 'l2-fast');
+    it('should have l2-turbo partition with L2 chains', () => {
+      const l2Fast = PARTITIONS.find(p => p.partitionId === 'l2-turbo');
       expect(l2Fast).toBeDefined();
       expect(l2Fast!.chains).toContain('arbitrum');
       expect(l2Fast!.chains).toContain('optimism');
@@ -118,22 +118,22 @@ describe('assignChainToPartition', () => {
     expect(partition!.partitionId).toBe('asia-fast');
   });
 
-  it('should assign Arbitrum to l2-fast partition', () => {
+  it('should assign Arbitrum to l2-turbo partition', () => {
     const partition = assignChainToPartition('arbitrum');
     expect(partition).toBeDefined();
-    expect(partition!.partitionId).toBe('l2-fast');
+    expect(partition!.partitionId).toBe('l2-turbo');
   });
 
-  it('should assign Optimism to l2-fast partition', () => {
+  it('should assign Optimism to l2-turbo partition', () => {
     const partition = assignChainToPartition('optimism');
     expect(partition).toBeDefined();
-    expect(partition!.partitionId).toBe('l2-fast');
+    expect(partition!.partitionId).toBe('l2-turbo');
   });
 
-  it('should assign Base to l2-fast partition', () => {
+  it('should assign Base to l2-turbo partition', () => {
     const partition = assignChainToPartition('base');
     expect(partition).toBeDefined();
-    expect(partition!.partitionId).toBe('l2-fast');
+    expect(partition!.partitionId).toBe('l2-turbo');
   });
 
   it('should assign Ethereum to high-value partition', () => {
@@ -186,8 +186,8 @@ describe('getChainsForPartition', () => {
     expect(chains).toContain('polygon');
   });
 
-  it('should return chains for l2-fast partition', () => {
-    const chains = getChainsForPartition('l2-fast');
+  it('should return chains for l2-turbo partition', () => {
+    const chains = getChainsForPartition('l2-turbo');
     expect(chains).toContain('arbitrum');
     expect(chains).toContain('optimism');
     expect(chains).toContain('base');
@@ -246,13 +246,15 @@ describe('createChainInstance', () => {
 describe('createPartitionChainInstances', () => {
   it('should create instances for all chains in partition', () => {
     const instances = createPartitionChainInstances('asia-fast');
-    expect(instances.length).toBe(2); // BSC and Polygon
+    expect(instances.length).toBe(4); // BSC, Polygon, Avalanche, Fantom
     expect(instances.map(i => i.chainId)).toContain('bsc');
     expect(instances.map(i => i.chainId)).toContain('polygon');
+    expect(instances.map(i => i.chainId)).toContain('avalanche');
+    expect(instances.map(i => i.chainId)).toContain('fantom');
   });
 
   it('should create instances for L2 partition', () => {
-    const instances = createPartitionChainInstances('l2-fast');
+    const instances = createPartitionChainInstances('l2-turbo');
     expect(instances.length).toBe(3); // Arbitrum, Optimism, Base
     expect(instances.map(i => i.chainId)).toContain('arbitrum');
     expect(instances.map(i => i.chainId)).toContain('optimism');
@@ -273,8 +275,8 @@ describe('calculatePartitionResources', () => {
     expect(['light', 'standard', 'heavy']).toContain(resources.recommendedProfile);
   });
 
-  it('should calculate resources for l2-fast partition', () => {
-    const resources = calculatePartitionResources('l2-fast');
+  it('should calculate resources for l2-turbo partition', () => {
+    const resources = calculatePartitionResources('l2-turbo');
     expect(resources.estimatedMemoryMB).toBeGreaterThan(0);
     // L2s have faster blocks, should need more CPU
     expect(resources.estimatedCpuCores).toBeGreaterThanOrEqual(0.5);
@@ -388,9 +390,9 @@ describe('Environment Configuration', () => {
     });
 
     it('should return partition ID from env', () => {
-      process.env.PARTITION_ID = 'l2-fast';
+      process.env.PARTITION_ID = 'l2-turbo';
       const partitionId = getPartitionIdFromEnv();
-      expect(partitionId).toBe('l2-fast');
+      expect(partitionId).toBe('l2-turbo');
     });
   });
 

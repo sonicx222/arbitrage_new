@@ -231,9 +231,9 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
       const bscPartition = assignChainToPartition('bsc');
       expect(bscPartition?.partitionId).toBe('asia-fast');
 
-      // Arbitrum should go to l2-fast (ultra-fast L2)
+      // Arbitrum should go to l2-turbo (ultra-fast L2)
       const arbitrumPartition = assignChainToPartition('arbitrum');
-      expect(arbitrumPartition?.partitionId).toBe('l2-fast');
+      expect(arbitrumPartition?.partitionId).toBe('l2-turbo');
 
       // Ethereum should go to high-value
       const ethPartition = assignChainToPartition('ethereum');
@@ -823,15 +823,15 @@ describe('S3.1.1 ADR-003 Compliance', () => {
   it('should support all partition configurations defined in ADR-003', () => {
     const partitions = getEnabledPartitions();
 
-    // Per ADR-003, we should have asia-fast, l2-fast, and high-value partitions
+    // Per ADR-003, we should have asia-fast, l2-turbo, and high-value partitions
     const partitionIds = partitions.map(p => p.partitionId);
     expect(partitionIds).toContain('asia-fast');
-    expect(partitionIds).toContain('l2-fast');
+    expect(partitionIds).toContain('l2-turbo');
     expect(partitionIds).toContain('high-value');
   });
 
   it('should support multi-chain detection within single partition', async () => {
-    const l2Fast = getPartition('l2-fast');
+    const l2Fast = getPartition('l2-turbo');
     expect(l2Fast?.chains.length).toBeGreaterThanOrEqual(2);
 
     detector = new PartitionedDetector({

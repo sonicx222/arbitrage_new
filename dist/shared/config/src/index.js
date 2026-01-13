@@ -94,6 +94,53 @@ exports.CHAINS = {
         wsUrl: process.env.ETHEREUM_WS_URL || 'wss://eth.llamarpc.com',
         blockTime: 12,
         nativeToken: 'ETH'
+    },
+    // =============================================================================
+    // S3.1.2: New Chains for 4-Partition Architecture
+    // =============================================================================
+    // Asia-Fast expansion (P1)
+    avalanche: {
+        id: 43114,
+        name: 'Avalanche C-Chain',
+        rpcUrl: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc',
+        wsUrl: process.env.AVALANCHE_WS_URL || 'wss://api.avax.network/ext/bc/C/ws',
+        blockTime: 2,
+        nativeToken: 'AVAX'
+    },
+    fantom: {
+        id: 250,
+        name: 'Fantom Opera',
+        rpcUrl: process.env.FANTOM_RPC_URL || 'https://rpc.ftm.tools',
+        wsUrl: process.env.FANTOM_WS_URL || 'wss://wsapi.fantom.network',
+        blockTime: 1,
+        nativeToken: 'FTM'
+    },
+    // High-Value expansion (P3)
+    zksync: {
+        id: 324,
+        name: 'zkSync Era',
+        rpcUrl: process.env.ZKSYNC_RPC_URL || 'https://mainnet.era.zksync.io',
+        wsUrl: process.env.ZKSYNC_WS_URL || 'wss://mainnet.era.zksync.io/ws',
+        blockTime: 1,
+        nativeToken: 'ETH'
+    },
+    linea: {
+        id: 59144,
+        name: 'Linea',
+        rpcUrl: process.env.LINEA_RPC_URL || 'https://rpc.linea.build',
+        wsUrl: process.env.LINEA_WS_URL || 'wss://rpc.linea.build',
+        blockTime: 2,
+        nativeToken: 'ETH'
+    },
+    // Non-EVM chain (P4)
+    solana: {
+        id: 101, // Convention for Solana mainnet
+        name: 'Solana',
+        rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
+        wsUrl: process.env.SOLANA_WS_URL || 'wss://api.mainnet-beta.solana.com',
+        blockTime: 0.4,
+        nativeToken: 'SOL',
+        isEVM: false
     }
 };
 // =============================================================================
@@ -460,6 +507,71 @@ exports.CORE_TOKENS = {
         // Core DeFi
         { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18, chainId: 1 },
         { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18, chainId: 1 }
+    ],
+    // =============================================================================
+    // S3.1.2: New Chain Tokens for 4-Partition Architecture
+    // =============================================================================
+    // Avalanche: 8 tokens
+    avalanche: [
+        // Anchor tokens
+        { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX', decimals: 18, chainId: 43114 },
+        { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6, chainId: 43114 },
+        { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6, chainId: 43114 },
+        { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18, chainId: 43114 },
+        // Bridged BTC
+        { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e', decimals: 8, chainId: 43114 },
+        // Bridged ETH
+        { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18, chainId: 43114 },
+        // Core DeFi
+        { address: '0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd', symbol: 'JOE', decimals: 18, chainId: 43114 },
+        { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 }
+    ],
+    // Fantom: 6 tokens
+    fantom: [
+        // Anchor tokens
+        { address: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', symbol: 'WFTM', decimals: 18, chainId: 250 },
+        { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6, chainId: 250 },
+        { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6, chainId: 250 },
+        { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18, chainId: 250 },
+        // Core DeFi
+        { address: '0x21Ada0D2aC28C3A5Fa3cD2eE30882dA8812279B6', symbol: 'BOO', decimals: 18, chainId: 250 },
+        { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 }
+    ],
+    // zkSync Era: 6 tokens
+    zksync: [
+        // Anchor tokens
+        { address: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', symbol: 'WETH', decimals: 18, chainId: 324 },
+        { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6, chainId: 324 },
+        { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6, chainId: 324 },
+        // Core DeFi
+        { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8, chainId: 324 },
+        { address: '0x5A7d6b2F92C77FAD6CCaBd7EE0624E64907Eaf3E', symbol: 'ZK', decimals: 18, chainId: 324 },
+        { address: '0x32fd44bB4895705dcA62f5E22ba9e3a6cD3c8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
+    ],
+    // Linea: 6 tokens
+    linea: [
+        // Anchor tokens
+        { address: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', symbol: 'WETH', decimals: 18, chainId: 59144 },
+        { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6, chainId: 59144 },
+        { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6, chainId: 59144 },
+        { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18, chainId: 59144 },
+        // Core DeFi
+        { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8, chainId: 59144 },
+        { address: '0x7d43AABC515C356145049227CeE54B608342c0ad', symbol: 'BUSD', decimals: 18, chainId: 59144 }
+    ],
+    // Solana: 8 tokens (non-EVM - uses different address format)
+    solana: [
+        // Anchor tokens - Solana uses base58 addresses
+        { address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9, chainId: 101 },
+        { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6, chainId: 101 },
+        { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6, chainId: 101 },
+        // Core DeFi
+        { address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', symbol: 'JUP', decimals: 6, chainId: 101 },
+        { address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', symbol: 'RAY', decimals: 6, chainId: 101 },
+        { address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', symbol: 'ORCA', decimals: 6, chainId: 101 },
+        // High-volume meme
+        { address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK', decimals: 5, chainId: 101 },
+        { address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', symbol: 'WIF', decimals: 6, chainId: 101 }
     ]
 };
 // =============================================================================

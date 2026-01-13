@@ -1,6 +1,9 @@
 "use strict";
 // Input validation middleware using Joi
 // Comprehensive validation for all API endpoints
+//
+// P0-4 FIX: Added 'optimism' to valid chains list
+// P2-1 FIX: Created centralized SUPPORTED_CHAINS constant
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -9,11 +12,15 @@ exports.createRateLimitRule = exports.sanitizeInput = exports.validateWebhookReq
 const joi_1 = __importDefault(require("joi"));
 const logger_1 = require("../../core/src/logger");
 const logger = (0, logger_1.createLogger)('validation');
+// P2-1 FIX: Centralized supported chains list for consistency
+// When adding new chains, only update this array
+const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'optimism'];
 // Arbitrage opportunity validation
 const validateArbitrageRequest = (req, res, next) => {
     const schema = joi_1.default.object({
-        sourceChain: joi_1.default.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon').required(),
-        targetChain: joi_1.default.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon').required(),
+        // P0-4 FIX: Use centralized SUPPORTED_CHAINS
+        sourceChain: joi_1.default.string().valid(...SUPPORTED_CHAINS).required(),
+        targetChain: joi_1.default.string().valid(...SUPPORTED_CHAINS).required(),
         sourceDex: joi_1.default.string().min(1).max(50).required(),
         targetDex: joi_1.default.string().min(1).max(50).required(),
         tokenAddress: joi_1.default.string().pattern(/^0x[a-fA-F0-9]{40}$/).required(),
@@ -84,7 +91,8 @@ const validateConfigUpdate = (req, res, next) => {
             enabled: joi_1.default.boolean().optional(),
             threshold: joi_1.default.number().min(0).max(100).optional(),
             interval: joi_1.default.number().integer().min(1000).max(3600000).optional(), // 1s to 1h
-            chains: joi_1.default.array().items(joi_1.default.string().valid('ethereum', 'bsc', 'arbitrum', 'base', 'polygon')).optional()
+            // P0-4 FIX: Use centralized SUPPORTED_CHAINS
+            chains: joi_1.default.array().items(joi_1.default.string().valid(...SUPPORTED_CHAINS)).optional()
         }).required()
     });
     const { error, value } = schema.validate(req.body);

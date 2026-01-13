@@ -190,7 +190,23 @@ function createDeferred() {
 // Concurrency Utilities
 // =============================================================================
 /**
+ * P1-2 FIX: Thread-safe index generator using closure
+ * Ensures each index is returned exactly once, avoiding race conditions.
+ */
+function createIndexGenerator(length) {
+    let currentIndex = 0;
+    return () => {
+        // This is safe because JS is single-threaded in the event loop
+        // The check and increment happen in the same synchronous block
+        if (currentIndex >= length) {
+            return null;
+        }
+        return currentIndex++;
+    };
+}
+/**
  * Execute promises with concurrency limit.
+ * P1-2 FIX: Uses atomic index generator to prevent race conditions.
  *
  * @param items Items to process
  * @param fn Async function to apply to each item
@@ -199,16 +215,20 @@ function createDeferred() {
  */
 async function mapConcurrent(items, fn, concurrency) {
     const results = new Array(items.length);
-    let currentIndex = 0;
+    // P1-2 FIX: Use atomic index generator instead of shared mutable state
+    const getNextIndex = createIndexGenerator(items.length);
     async function worker() {
-        while (currentIndex < items.length) {
-            const index = currentIndex++;
+        // P1-2 FIX: Get index atomically before any async operation
+        let index;
+        while ((index = getNextIndex()) !== null) {
+            // At this point, we have exclusive ownership of this index
             results[index] = await fn(items[index], index);
         }
     }
     // Create workers up to concurrency limit
     const workers = [];
-    for (let i = 0; i < Math.min(concurrency, items.length); i++) {
+    const workerCount = Math.min(concurrency, items.length);
+    for (let i = 0; i < workerCount; i++) {
         workers.push(worker());
     }
     await Promise.all(workers);

@@ -1,6 +1,9 @@
 "use strict";
 // Rate limiting implementation with Redis backend
 // Protects against abuse and ensures fair resource usage
+//
+// P0-3 FIX: Added proper async initialization for Redis client
+// P1-3 FIX: Replace KEYS with SCAN in cleanup()
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RateLimiter = void 0;
 exports.createApiRateLimiter = createApiRateLimiter;
@@ -12,14 +15,43 @@ const redis_1 = require("../../core/src/redis");
 const logger = (0, logger_1.createLogger)('rate-limiter');
 class RateLimiter {
     constructor(config) {
+        // P0-3 FIX: Properly typed Redis client with async initialization
+        this.redis = null;
+        this.redisPromise = null;
         this.config = {
             skipSuccessfulRequests: false,
             skipFailedRequests: false,
             keyPrefix: 'ratelimit',
             ...config
         };
-        this.redis = (0, redis_1.getRedisClient)();
         this.keyPrefix = this.config.keyPrefix;
+        // P0-3 FIX: Start async initialization (don't block constructor)
+        this.initializeRedis();
+    }
+    /**
+     * P0-3 FIX: Async Redis initialization
+     */
+    async initializeRedis() {
+        if (this.redis) {
+            return this.redis;
+        }
+        if (this.redisPromise) {
+            return this.redisPromise;
+        }
+        this.redisPromise = (0, redis_1.getRedisClient)().then(client => {
+            this.redis = client;
+            return client;
+        });
+        return this.redisPromise;
+    }
+    /**
+     * P0-3 FIX: Get Redis client, waiting for initialization if needed
+     */
+    async getRedis() {
+        if (this.redis) {
+            return this.redis;
+        }
+        return this.initializeRedis();
     }
     async checkLimit(identifier, additionalConfig) {
         const config = { ...this.config, ...additionalConfig };
@@ -27,9 +59,11 @@ class RateLimiter {
         const now = Date.now();
         const windowStart = now - config.windowMs;
         try {
+            // P0-3 FIX: Await Redis client initialization
+            const redis = await this.getRedis();
             // Use Redis sorted set to track requests within the time window
             // Remove old entries and count current ones atomically
-            const multi = this.redis.multi();
+            const multi = redis.multi();
             // Remove entries older than the window
             multi.zremrangebyscore(key, 0, windowStart);
             // Add current request timestamp
@@ -43,7 +77,7 @@ class RateLimiter {
             const remaining = Math.max(0, config.maxRequests - currentCount);
             const exceeded = currentCount >= config.maxRequests;
             // Calculate reset time (when oldest request expires)
-            const oldestRequest = await this.redis.zrange(key, 0, 0, 'WITHSCORES');
+            const oldestRequest = await redis.zrange(key, 0, 0, 'WITHSCORES');
             const resetTime = oldestRequest.length > 0
                 ? parseInt(oldestRequest[1]) + config.windowMs
                 : now + config.windowMs;
@@ -76,7 +110,8 @@ class RateLimiter {
     }
     async resetLimit(identifier) {
         const key = `${this.keyPrefix}:${identifier}`;
-        await this.redis.del(key);
+        const redis = await this.getRedis();
+        await redis.del(key);
         logger.debug('Rate limit reset', { identifier });
     }
     // Middleware for Express
@@ -135,7 +170,8 @@ class RateLimiter {
         const now = Date.now();
         const windowStart = now - this.config.windowMs;
         try {
-            const multi = this.redis.multi();
+            const redis = await this.getRedis();
+            const multi = redis.multi();
             multi.zremrangebyscore(key, 0, windowStart);
             multi.zcard(key);
             multi.zrange(key, 0, 0, 'WITHSCORES');
@@ -158,22 +194,31 @@ class RateLimiter {
         }
     }
     // Clean up old rate limit data (maintenance method)
+    // P1-3 FIX: Use SCAN instead of KEYS to avoid blocking Redis
     async cleanup(maxAge = 24 * 60 * 60 * 1000) {
         try {
+            const redis = await this.getRedis();
             const cutoff = Date.now() - maxAge;
             const pattern = `${this.keyPrefix}:*`;
-            // Find all rate limit keys
-            const keys = await this.redis.keys(pattern);
-            for (const key of keys) {
-                // Remove entries older than cutoff
-                await this.redis.zremrangebyscore(key, 0, cutoff);
-                // If set is empty, delete the key
-                const count = await this.redis.zcard(key);
-                if (count === 0) {
-                    await this.redis.del(key);
+            // P1-3 FIX: Use SCAN iterator instead of KEYS
+            let keysProcessed = 0;
+            let cursor = '0';
+            do {
+                // SCAN returns [cursor, keys[]]
+                const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+                cursor = nextCursor;
+                for (const key of keys) {
+                    // Remove entries older than cutoff
+                    await redis.zremrangebyscore(key, 0, cutoff);
+                    // If set is empty, delete the key
+                    const count = await redis.zcard(key);
+                    if (count === 0) {
+                        await redis.del(key);
+                    }
+                    keysProcessed++;
                 }
-            }
-            logger.info('Rate limiter cleanup completed', { keysProcessed: keys.length });
+            } while (cursor !== '0');
+            logger.info('Rate limiter cleanup completed', { keysProcessed });
         }
         catch (error) {
             logger.error('Rate limiter cleanup failed', { error });
