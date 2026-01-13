@@ -364,3 +364,19 @@ export type {
   NetworkError,
   ValidationError
 } from '../../types';
+
+// Partition service utilities (P12-P16 refactor)
+export {
+  parsePort,
+  validateAndFilterChains,
+  createPartitionHealthServer,
+  shutdownPartitionService,
+  setupDetectorEventHandlers,
+  setupProcessHandlers,
+  SHUTDOWN_TIMEOUT_MS
+} from './partition-service-utils';
+export type {
+  PartitionServiceConfig,
+  HealthServerOptions,
+  PartitionDetectorInterface
+} from './partition-service-utils';

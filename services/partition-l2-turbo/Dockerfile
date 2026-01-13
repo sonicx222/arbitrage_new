@@ -1,6 +1,6 @@
-# P1 Asia-Fast Partition Service Dockerfile
-# Deployment: Oracle Cloud Singapore (asia-southeast1)
-# Chains: BSC, Polygon, Avalanche, Fantom
+# P2 L2-Turbo Partition Service Dockerfile
+# Deployment: Fly.io Singapore (asia-southeast1)
+# Chains: Arbitrum, Optimism, Base
 #
 # Multi-stage build for optimized image size
 
@@ -19,7 +19,7 @@ COPY shared/ ./shared/
 COPY services/unified-detector/ ./services/unified-detector/
 
 # Copy partition service files
-COPY services/partition-asia-fast/ ./services/partition-asia-fast/
+COPY services/partition-l2-turbo/ ./services/partition-l2-turbo/
 
 # Install dependencies
 RUN npm install
@@ -39,7 +39,7 @@ WORKDIR /app/services/unified-detector
 RUN npm run build || true
 
 # Build partition service
-WORKDIR /app/services/partition-asia-fast
+WORKDIR /app/services/partition-l2-turbo
 RUN npm run build
 
 # Production image
@@ -48,8 +48,8 @@ FROM node:20-alpine AS production
 WORKDIR /app
 
 # Copy built files
-COPY --from=builder /app/services/partition-asia-fast/dist ./dist
-COPY --from=builder /app/services/partition-asia-fast/package*.json ./
+COPY --from=builder /app/services/partition-l2-turbo/dist ./dist
+COPY --from=builder /app/services/partition-l2-turbo/package*.json ./
 COPY --from=builder /app/services/unified-detector/dist ./services/unified-detector/dist
 COPY --from=builder /app/services/unified-detector/package*.json ./services/unified-detector/
 COPY --from=builder /app/shared ./shared
@@ -57,38 +57,38 @@ COPY --from=builder /app/shared ./shared
 # Install production dependencies only
 RUN npm install --production
 
-# Set P1 partition environment variables
+# Set P2 partition environment variables
 ENV NODE_ENV=production
 ENV LOG_LEVEL=info
-ENV PARTITION_ID=asia-fast
+ENV PARTITION_ID=l2-turbo
 ENV REGION_ID=asia-southeast1
 
-# P1 partition configuration
-# Chains: BSC (56), Polygon (137), Avalanche (43114), Fantom (250)
-ENV PARTITION_CHAINS=bsc,polygon,avalanche,fantom
+# P2 partition configuration
+# Chains: Arbitrum (42161), Optimism (10), Base (8453)
+ENV PARTITION_CHAINS=arbitrum,optimism,base
 
-# Health check port
-ENV HEALTH_CHECK_PORT=3001
+# Health check port (different from P1)
+ENV HEALTH_CHECK_PORT=3002
 
-# Health check
+# Health check - faster interval for L2 chains
 # P11-FIX: Check for 200 status (both healthy and degraded return 200)
-HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+HEALTHCHECK --interval=10s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
 # Run as non-root user for security
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 USER nodejs
 
 # Expose health check port
-EXPOSE 3001
+EXPOSE 3002
 
 # Labels for deployment
 LABEL maintainer="arbitrage-team"
-LABEL service="partition-asia-fast"
-LABEL partition.id="asia-fast"
-LABEL partition.chains="bsc,polygon,avalanche,fantom"
+LABEL service="partition-l2-turbo"
+LABEL partition.id="l2-turbo"
+LABEL partition.chains="arbitrum,optimism,base"
 LABEL partition.region="asia-southeast1"
-LABEL partition.provider="oracle"
+LABEL partition.provider="fly"
 
-# Start P1 partition service
+# Start P2 partition service
 CMD ["node", "dist/index.js"]
