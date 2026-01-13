@@ -21,8 +21,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UnifiedChainDetector = void 0;
 const events_1 = require("events");
-const src_1 = require("../../../shared/core/src");
-const src_2 = require("../../../shared/config/src");
+const core_1 = require("@arbitrage/core");
+const config_1 = require("@arbitrage/config");
 const chain_instance_1 = require("./chain-instance");
 // =============================================================================
 // Unified Chain Detector
@@ -41,21 +41,21 @@ class UnifiedChainDetector extends events_1.EventEmitter {
         this.metricsInterval = null;
         // Resolve configuration from environment and defaults
         const partition = config.partitionId
-            ? (0, src_2.getPartition)(config.partitionId)
-            : (0, src_2.getPartitionFromEnv)();
+            ? (0, config_1.getPartition)(config.partitionId)
+            : (0, config_1.getPartitionFromEnv)();
         this.config = {
             partitionId: partition?.partitionId || 'asia-fast',
-            chains: config.chains || (0, src_2.getChainsFromEnv)(),
+            chains: config.chains || (0, config_1.getChainsFromEnv)(),
             instanceId: config.instanceId || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
             regionId: config.regionId || partition?.region || 'asia-southeast1',
             enableCrossRegionHealth: config.enableCrossRegionHealth ?? true,
             healthCheckPort: config.healthCheckPort || 3001
         };
         this.partition = partition || null;
-        this.logger = (0, src_1.createLogger)(`unified-detector:${this.config.partitionId}`);
-        this.perfLogger = (0, src_1.getPerformanceLogger)(`unified-detector:${this.config.partitionId}`);
+        this.logger = (0, core_1.createLogger)(`unified-detector:${this.config.partitionId}`);
+        this.perfLogger = (0, core_1.getPerformanceLogger)(`unified-detector:${this.config.partitionId}`);
         // Initialize state manager
-        this.stateManager = (0, src_1.createServiceState)({
+        this.stateManager = (0, core_1.createServiceState)({
             serviceName: `unified-detector-${this.config.partitionId}`,
             transitionTimeoutMs: 60000 // Longer timeout for multi-chain startup
         });
@@ -73,8 +73,8 @@ class UnifiedChainDetector extends events_1.EventEmitter {
                 regionId: this.config.regionId
             });
             // Initialize Redis connections
-            this.redis = await (0, src_1.getRedisClient)();
-            this.streamsClient = await (0, src_1.getRedisStreamsClient)();
+            this.redis = await (0, core_1.getRedisClient)();
+            this.streamsClient = await (0, core_1.getRedisStreamsClient)();
             // P0-7 FIX: Validate all critical dependencies BEFORE continuing with startup
             // If these fail, state transition hasn't committed any resources yet
             if (!this.redis) {
@@ -88,7 +88,7 @@ class UnifiedChainDetector extends events_1.EventEmitter {
                 await this.initializeCrossRegionHealth();
             }
             // Initialize degradation manager
-            this.degradationManager = (0, src_1.getGracefulDegradationManager)();
+            this.degradationManager = (0, core_1.getGracefulDegradationManager)();
             // Start chain instances
             await this.startChainInstances();
             // Start health monitoring
@@ -154,7 +154,7 @@ class UnifiedChainDetector extends events_1.EventEmitter {
         const startPromises = [];
         for (const chainId of this.config.chains) {
             // Validate chain exists in configuration
-            if (!src_2.CHAINS[chainId]) {
+            if (!config_1.CHAINS[chainId]) {
                 this.logger.warn(`Chain ${chainId} not found in configuration, skipping`);
                 continue;
             }
@@ -227,7 +227,7 @@ class UnifiedChainDetector extends events_1.EventEmitter {
     // Health Monitoring
     // ===========================================================================
     async initializeCrossRegionHealth() {
-        this.crossRegionHealth = (0, src_1.getCrossRegionHealthManager)({
+        this.crossRegionHealth = (0, core_1.getCrossRegionHealthManager)({
             instanceId: this.config.instanceId,
             regionId: this.config.regionId,
             serviceName: `unified-detector-${this.config.partitionId}`,
@@ -273,7 +273,7 @@ class UnifiedChainDetector extends events_1.EventEmitter {
         if (!this.streamsClient || !this.stateManager.isRunning())
             return;
         try {
-            await this.streamsClient.xadd(src_1.RedisStreamsClient.STREAMS.HEALTH, {
+            await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.HEALTH, {
                 service: `unified-detector-${this.config.partitionId}`,
                 ...health,
                 chainHealth: Object.fromEntries(health.chainHealth)
@@ -318,14 +318,31 @@ class UnifiedChainDetector extends events_1.EventEmitter {
     getChains() {
         return Array.from(this.chainInstances.keys());
     }
+    /**
+     * Returns list of chain IDs that are currently healthy (connected status)
+     */
+    getHealthyChains() {
+        // P9-FIX: Take snapshot to avoid iterator issues during concurrent modification
+        const instancesSnapshot = Array.from(this.chainInstances.entries());
+        const healthyChains = [];
+        for (const [chainId, instance] of instancesSnapshot) {
+            const stats = instance.getStats();
+            if (stats.status === 'connected') {
+                healthyChains.push(chainId);
+            }
+        }
+        return healthyChains;
+    }
     getChainInstance(chainId) {
         return this.chainInstances.get(chainId);
     }
     getStats() {
+        // P10-FIX: Take snapshot to avoid iterator issues during concurrent modification
+        const instancesSnapshot = Array.from(this.chainInstances.entries());
         const chainStats = new Map();
         let totalEvents = 0;
         let totalOpportunities = 0;
-        for (const [chainId, instance] of this.chainInstances) {
+        for (const [chainId, instance] of instancesSnapshot) {
             const stats = instance.getStats();
             chainStats.set(chainId, stats);
             totalEvents += stats.eventsProcessed;
@@ -334,7 +351,7 @@ class UnifiedChainDetector extends events_1.EventEmitter {
         const memUsage = process.memoryUsage();
         return {
             partitionId: this.config.partitionId,
-            chains: Array.from(this.chainInstances.keys()),
+            chains: instancesSnapshot.map(([chainId]) => chainId),
             totalEventsProcessed: totalEvents,
             totalOpportunitiesFound: totalOpportunities,
             uptimeSeconds: (Date.now() - this.startTime) / 1000,

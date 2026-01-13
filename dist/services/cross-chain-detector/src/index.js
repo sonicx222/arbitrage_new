@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 // Cross-Chain Detector Service Entry Point
 const detector_1 = require("./detector");
-const src_1 = require("../../../shared/core/src");
-const logger = (0, src_1.createLogger)('cross-chain-detector');
+const core_1 = require("@arbitrage/core");
+const logger = (0, core_1.createLogger)('cross-chain-detector');
 async function main() {
     try {
         logger.info('Starting Cross-Chain Detector Service');

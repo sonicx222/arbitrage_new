@@ -34,7 +34,7 @@ import {
   getCrossRegionHealthManager,
   GracefulDegradationManager,
   getGracefulDegradationManager
-} from '../../../shared/core/src';
+} from '@arbitrage/core';
 
 import {
   PartitionConfig,
@@ -48,7 +48,7 @@ import {
   CHAINS,
   DEXES,
   CORE_TOKENS
-} from '../../../shared/config/src';
+} from '@arbitrage/config';
 
 import { ChainDetectorInstance } from './chain-instance';
 

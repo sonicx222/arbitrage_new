@@ -19,11 +19,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChainDetectorInstance = exports.UnifiedChainDetector = void 0;
 const http_1 = require("http");
 const unified_detector_1 = require("./unified-detector");
-const src_1 = require("../../../shared/core/src");
+const core_1 = require("@arbitrage/core");
 // =============================================================================
 // Configuration
 // =============================================================================
-const logger = (0, src_1.createLogger)('unified-detector:main');
+const logger = (0, core_1.createLogger)('unified-detector:main');
 // Store server reference for graceful shutdown
 let healthServer = null;
 const config = {

@@ -32,7 +32,7 @@
  * @see ADR-003: Partitioned Chain Detectors (documents this exception)
  * @see ADR-007: Failover Strategy
  */
-import { ServiceState } from '../../../shared/core/src';
+import { ServiceState } from '@arbitrage/core';
 export declare class CrossChainDetectorService {
     private redis;
     private streamsClient;

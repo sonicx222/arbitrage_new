@@ -1,8 +1,8 @@
 // Bridge Latency Prediction Engine
 // Uses machine learning to predict cross-chain bridge times and costs
 
-import { createLogger } from '../../../shared/core/src';
-import { BridgeLatencyData, CrossChainBridge } from '../../../shared/types/src';
+import { createLogger } from '@arbitrage/core';
+import { BridgeLatencyData, CrossChainBridge } from '@arbitrage/types';
 
 const logger = createLogger('bridge-predictor');
 

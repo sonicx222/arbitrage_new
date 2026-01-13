@@ -1,6 +1,6 @@
 // Execution Engine Service Entry Point
 import { ExecutionEngineService } from './engine';
-import { createLogger } from '../../../shared/core/src';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('execution-engine');
 

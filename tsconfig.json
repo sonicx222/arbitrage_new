@@ -31,7 +31,9 @@
       "@arbitrage/config": ["./shared/config/src"],
       "@arbitrage/config/*": ["./shared/config/src/*"],
       "@arbitrage/core": ["./shared/core/src"],
-      "@arbitrage/core/*": ["./shared/core/src/*"]
+      "@arbitrage/core/*": ["./shared/core/src/*"],
+      "@arbitrage/unified-detector": ["./services/unified-detector/src"],
+      "@arbitrage/unified-detector/*": ["./services/unified-detector/src/*"]
     }
   },
   "include": [

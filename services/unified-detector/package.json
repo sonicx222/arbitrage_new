@@ -13,9 +13,9 @@
     "lint": "eslint src/**/*.ts"
   },
   "dependencies": {
-    "@arbitrage/core": "workspace:*",
-    "@arbitrage/config": "workspace:*",
-    "@arbitrage/types": "workspace:*",
+    "@arbitrage/core": "*",
+    "@arbitrage/config": "*",
+    "@arbitrage/types": "*",
     "ethers": "^6.9.0",
     "ioredis": "^5.3.2"
   },

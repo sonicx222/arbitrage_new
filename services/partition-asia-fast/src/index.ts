@@ -20,7 +20,7 @@
  */
 
 import { Server } from 'http';
-import { UnifiedChainDetector, UnifiedDetectorConfig } from '../../unified-detector/src/unified-detector';
+import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
 import {
   createLogger,
   parsePort,
@@ -29,9 +29,8 @@ import {
   setupDetectorEventHandlers,
   setupProcessHandlers,
   PartitionServiceConfig
-} from '../../../shared/core/src';
-import { getPartition } from '../../../shared/config/src/partitions';
-import { PARTITION_IDS } from '../../../shared/config/src';
+} from '@arbitrage/core';
+import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================
 // P1 Partition Constants

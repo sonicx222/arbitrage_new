@@ -17,7 +17,7 @@
 
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from './unified-detector';
-import { createLogger } from '../../../shared/core/src';
+import { createLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Configuration
