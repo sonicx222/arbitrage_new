@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-13 (S3.1.6 P4 Solana-Native partition service complete)
-> **Tests**: 3012 passing (585 S3.1.x tests: 48 S3.1.1 + 117 S3.1.2 + 87 S3.1.3 + 123 S3.1.4 + 119 S3.1.5 + 115 S3.1.6)
+> **Last Updated**: 2025-01-13 (S3.1.7 P4-x fixes: nullish coalescing consistency, mutation protection)
+> **Tests**: 3199 passing (772 S3.1.x tests: 48 S3.1.1 + 117 S3.1.2 + 87 S3.1.3 + 123 S3.1.4 + 119 S3.1.5 + 109 S3.1.6 + 169 S3.1.7)
 
 ---
 
@@ -479,8 +479,9 @@
 ### Sprint 3 (Days 15-21): Partitioning & Performance
 
 #### S3.1: Partitioned Detector Architecture
-**Status**: `[ ] In Progress`
+**Status**: `[x] Completed`
 **Priority**: P1 | **Effort**: 4 days | **Confidence**: 90%
+**Completed**: 2025-01-13
 
 **Hypothesis**: Partitioned detectors enable 15+ chains within free tier limits.
 
@@ -603,9 +604,41 @@
       * US-West deployment for proximity to Solana validators
       * Heavy resource profile for high-throughput chain
 
-[ ] S3.1.7 Migrate existing detectors
+[x] S3.1.7 Migrate existing detectors
     - Deprecate single-chain detectors
     - Route all traffic through partitions
+    - COMPLETED: 2025-01-13 - TDD implementation with 169 tests (109 integration + 60 unit)
+    - Files Created:
+      * shared/core/src/partition-router.ts (PartitionRouter class)
+      * shared/core/src/partition-router.test.ts (60 unit tests)
+      * tests/integration/s3.1.7-detector-migration.integration.test.ts (109 integration tests)
+    - Test Sections:
+      * S3.1.7.1-S3.1.7.10: Core migration functionality (69 tests)
+      * S3.1.7.11: Code Analysis Fix Verification (17 tests)
+      * S3.1.7.12: Regression Tests (14 tests)
+      * S3.1.7.13: P4-x Fix Verification - Second Pass (9 tests)
+    - Migration Utilities Implemented:
+      * PartitionRouter.getPartitionForChain() - Route chain to partition
+      * PartitionRouter.getServiceEndpoint() - Get partition service details
+      * PartitionRouter.isRoutable() - Validate chain is routable
+      * createDeprecationWarning() - Generate deprecation messages
+      * isDeprecatedPattern() - Detect old single-chain patterns (P2-1-FIX: dynamic detection)
+      * getMigrationRecommendation() - Get migration guidance
+      * PARTITION_PORTS - Single source of truth for ports (P1-1-FIX)
+      * PARTITION_SERVICE_NAMES - Single source of truth for names (P1-2-FIX)
+    - Code Analysis Fixes Applied (First Pass):
+      * P1-1-FIX: Centralized port numbers, exported PARTITION_PORTS
+      * P1-2-FIX: Centralized service names, exported PARTITION_SERVICE_NAMES
+      * P2-1-FIX: Removed redundant DEPRECATED_PATTERNS list (dynamic detection only)
+      * P2-2-FIX: Standardized return types (null instead of undefined)
+      * P3-1-FIX: DRY helper for endpoint creation (createEndpointFromPartition)
+      * P3-2-FIX: Return array copies to prevent mutation
+    - Code Analysis Fixes Applied (Second Pass):
+      * P4-1-FIX: getServiceName uses ?? instead of || (consistent with getPort)
+      * P4-2-FIX: getPartitionId uses ?? instead of || (consistent null handling)
+      * P4-3-FIX: getChainsForPartition returns array copy (mutation protection)
+    - All 11 chains verified routable to 4 partitions
+    - All partition services use UnifiedChainDetector (verified)
 ```
 
 ---
@@ -877,10 +910,10 @@
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 10 | 0 | 0 |
-| Sprint 3 | 18 | 6 | 0 | 0 |
+| Sprint 3 | 18 | 7 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **37** | **0** | **0** |
+| **Total** | **67** | **38** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
 
