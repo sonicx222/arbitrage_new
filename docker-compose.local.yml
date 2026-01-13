@@ -1,0 +1,65 @@
+# =============================================================================
+# Local Development Docker Compose (Optimized for M1 Mac)
+# =============================================================================
+# This compose file is designed for easy local development and testing.
+#
+# Usage:
+#   npm run dev:docker:up     # Start all containers
+#   npm run dev:docker:down   # Stop all containers
+#   npm run dev:docker:logs   # View logs
+#
+# Or directly:
+#   docker-compose -f docker-compose.local.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Redis - Message Broker & Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    platform: linux/arm64  # Optimized for M1 Mac
+    container_name: arbitrage-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - arbitrage-local
+
+  # ---------------------------------------------------------------------------
+  # Redis Commander - Web UI for Redis (Optional, for debugging)
+  # ---------------------------------------------------------------------------
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    platform: linux/arm64
+    container_name: arbitrage-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-local
+    profiles:
+      - debug  # Only starts with: docker-compose --profile debug up
+
+networks:
+  arbitrage-local:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

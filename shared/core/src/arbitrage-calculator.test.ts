@@ -10,7 +10,9 @@
 import {
   PairSnapshot,
   ChainPriceData,
+  safeBigIntDivision,
   calculatePriceFromReserves,
+  calculatePriceFromBigIntReserves,
   invertPrice,
   calculatePriceDifferencePercent,
   isSameTokenPair,
@@ -37,6 +39,108 @@ const createTestPair = (overrides: Partial<PairSnapshot> = {}): PairSnapshot => 
   fee: 0.003, // 0.3%
   blockNumber: 12345678,
   ...overrides
+});
+
+// =============================================================================
+// P0-1 FIX: BigInt Precision Regression Tests
+// =============================================================================
+
+describe('P0-1: BigInt Precision (safeBigIntDivision)', () => {
+  it('should handle simple division correctly', () => {
+    expect(safeBigIntDivision(10n, 2n)).toBe(5);
+    expect(safeBigIntDivision(100n, 4n)).toBe(25);
+  });
+
+  it('should handle division resulting in decimals', () => {
+    expect(safeBigIntDivision(1n, 2n)).toBe(0.5);
+    expect(safeBigIntDivision(1n, 3n)).toBeCloseTo(0.333333, 5);
+    expect(safeBigIntDivision(2n, 3n)).toBeCloseTo(0.666666, 5);
+  });
+
+  it('should return 0 for zero denominator', () => {
+    expect(safeBigIntDivision(100n, 0n)).toBe(0);
+  });
+
+  it('should handle very large BigInt values (> 2^53) without precision loss', () => {
+    // This is the key regression test for P0-1
+    // JavaScript Number can only safely represent integers up to 2^53 - 1 (9007199254740991)
+    // Reserve values in wei can easily exceed this (e.g., 1 billion tokens = 10^27 wei)
+
+    // Test with values that would lose precision if converted to Number directly
+    const reserve0 = BigInt('1000000000000000000000000000'); // 10^27 (1 billion tokens in wei)
+    const reserve1 = BigInt('500000000000000000000000000');  // 5e26
+
+    const result = safeBigIntDivision(reserve0, reserve1);
+
+    // Should be exactly 2, not some imprecise value
+    expect(result).toBe(2);
+  });
+
+  it('should preserve precision for realistic DeFi reserve values', () => {
+    // Uniswap V3 pool reserves can be very large
+    // ETH/USDC pool might have:
+    // - 10,000 ETH (10^22 wei)
+    // - 30,000,000 USDC (3*10^13 with 6 decimals)
+
+    const ethReserve = BigInt('10000000000000000000000'); // 10,000 ETH in wei
+    const usdcReserve = BigInt('30000000000000');         // 30,000,000 USDC (6 decimals)
+
+    const price = safeBigIntDivision(ethReserve, usdcReserve);
+
+    // Price should be 10000 * 10^18 / (30000000 * 10^6) = 10^22 / 3*10^13 ≈ 333333.33
+    expect(price).toBeCloseTo(333333.333, 2);
+  });
+
+  it('should handle small ratios accurately', () => {
+    // Test small price ratios (like stablecoin pairs)
+    const reserve0 = BigInt('1000000000000000000000000'); // 1M tokens
+    const reserve1 = BigInt('1001000000000000000000000'); // 1.001M tokens (0.1% difference)
+
+    const price = safeBigIntDivision(reserve0, reserve1);
+
+    // Should be approximately 0.999001 (very close to 1)
+    expect(price).toBeCloseTo(0.999001, 5);
+  });
+
+  it('should handle extreme ratios without overflow', () => {
+    // Very large ratio
+    const bigReserve = BigInt('1000000000000000000000000000000'); // 10^30
+    const smallReserve = BigInt('1000000000000000000');           // 10^18
+
+    const largeRatio = safeBigIntDivision(bigReserve, smallReserve);
+    expect(largeRatio).toBe(1e12);
+
+    // Very small ratio
+    const smallRatio = safeBigIntDivision(smallReserve, bigReserve);
+    expect(smallRatio).toBe(1e-12);
+  });
+});
+
+describe('P0-1: calculatePriceFromBigIntReserves()', () => {
+  it('should calculate price from BigInt reserves', () => {
+    const result = calculatePriceFromBigIntReserves(
+      BigInt('1000000000000000000000'),
+      BigInt('2000000000000000000000')
+    );
+    expect(result).toBe(0.5);
+  });
+
+  it('should return null for zero reserves', () => {
+    expect(calculatePriceFromBigIntReserves(0n, 100n)).toBeNull();
+    expect(calculatePriceFromBigIntReserves(100n, 0n)).toBeNull();
+    expect(calculatePriceFromBigIntReserves(0n, 0n)).toBeNull();
+  });
+
+  it('should handle large reserves that would overflow Number', () => {
+    // Values larger than Number.MAX_SAFE_INTEGER
+    const reserve0 = BigInt('9007199254740992000000000000'); // > 2^53
+    const reserve1 = BigInt('4503599627370496000000000000'); // > 2^52
+
+    const result = calculatePriceFromBigIntReserves(reserve0, reserve1);
+
+    // Should be exactly 2
+    expect(result).toBe(2);
+  });
 });
 
 // =============================================================================

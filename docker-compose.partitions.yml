@@ -1,0 +1,277 @@
+# =============================================================================
+# Full Partitioned Architecture - Local Development
+# =============================================================================
+# Runs ALL partition services locally, simulating the production distributed
+# architecture on your M1 Mac.
+#
+# Architecture (Production-style ports):
+#   - Coordinator:     Dashboard & orchestration           (Port 3000)
+#   - P1 Asia-Fast:    BSC, Polygon, Avalanche, Fantom     (Port 3001)
+#   - P2 L2-Turbo:     Arbitrum, Optimism, Base            (Port 3002)
+#   - P3 High-Value:   Ethereum, zkSync, Linea             (Port 3003)
+#   - Cross-Chain:     Cross-chain arbitrage detection     (Port 3004)
+#   - Execution:       Trade execution engine              (Port 3005)
+#
+# Usage:
+#   npm run dev:partitions:up      # Start all partitions
+#   npm run dev:partitions:down    # Stop all partitions
+#   npm run dev:partitions:logs    # View all logs
+#
+# Memory estimate: ~2-3GB total (well within 32GB M1 Mac)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # Infrastructure: Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    platform: linux/arm64
+    container_name: arb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+
+  # ---------------------------------------------------------------------------
+  # P1: Asia-Fast Partition (BSC, Polygon, Avalanche, Fantom)
+  # ---------------------------------------------------------------------------
+  partition-asia-fast:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-p1-asia-fast
+    environment:
+      - NODE_ENV=development
+      - PARTITION_ID=asia-fast
+      - PARTITION_CHAINS=bsc,polygon,avalanche,fantom
+      - INSTANCE_ID=p1-local
+      - REGION_ID=local-p1
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      # RPC URLs from .env file
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      - BSC_WS_URL=${BSC_WS_URL}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL}
+      - POLYGON_WS_URL=${POLYGON_WS_URL}
+      - AVALANCHE_RPC_URL=${AVALANCHE_RPC_URL}
+      - AVALANCHE_WS_URL=${AVALANCHE_WS_URL}
+      - FANTOM_RPC_URL=${FANTOM_RPC_URL}
+      - FANTOM_WS_URL=${FANTOM_WS_URL}
+    ports:
+      - "3001:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/partition-asia-fast/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # P2: L2-Turbo Partition (Arbitrum, Optimism, Base)
+  # ---------------------------------------------------------------------------
+  partition-l2-turbo:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-p2-l2-turbo
+    environment:
+      - NODE_ENV=development
+      - PARTITION_ID=l2-turbo
+      - PARTITION_CHAINS=arbitrum,optimism,base
+      - INSTANCE_ID=p2-local
+      - REGION_ID=local-p2
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
+      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL}
+      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL}
+      - BASE_RPC_URL=${BASE_RPC_URL}
+      - BASE_WS_URL=${BASE_WS_URL}
+    ports:
+      - "3002:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/partition-l2-turbo/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # P3: High-Value Partition (Ethereum, zkSync, Linea)
+  # ---------------------------------------------------------------------------
+  partition-high-value:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-p3-high-value
+    environment:
+      - NODE_ENV=development
+      - PARTITION_ID=high-value
+      - PARTITION_CHAINS=ethereum,zksync,linea
+      - INSTANCE_ID=p3-local
+      - REGION_ID=local-p3
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - ETHEREUM_WS_URL=${ETHEREUM_WS_URL}
+      - ZKSYNC_RPC_URL=${ZKSYNC_RPC_URL}
+      - ZKSYNC_WS_URL=${ZKSYNC_WS_URL}
+      - LINEA_RPC_URL=${LINEA_RPC_URL}
+      - LINEA_WS_URL=${LINEA_WS_URL}
+    ports:
+      - "3003:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/partition-high-value/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # Cross-Chain Detector
+  # ---------------------------------------------------------------------------
+  cross-chain-detector:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-cross-chain
+    environment:
+      - NODE_ENV=development
+      - INSTANCE_ID=cross-chain-local
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+    ports:
+      - "3004:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+      partition-asia-fast:
+        condition: service_started
+      partition-l2-turbo:
+        condition: service_started
+      partition-high-value:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/cross-chain-detector/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # Execution Engine
+  # ---------------------------------------------------------------------------
+  execution-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-execution
+    environment:
+      - NODE_ENV=development
+      - INSTANCE_ID=execution-local
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      # Private keys (from .env - leave empty for dry-run mode)
+      - ETHEREUM_PRIVATE_KEY=${ETHEREUM_PRIVATE_KEY:-}
+      - BSC_PRIVATE_KEY=${BSC_PRIVATE_KEY:-}
+      - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY:-}
+      - POLYGON_PRIVATE_KEY=${POLYGON_PRIVATE_KEY:-}
+      - BASE_PRIVATE_KEY=${BASE_PRIVATE_KEY:-}
+      - OPTIMISM_PRIVATE_KEY=${OPTIMISM_PRIVATE_KEY:-}
+      # RPC URLs
+      - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL}
+      - BSC_RPC_URL=${BSC_RPC_URL}
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL}
+      - POLYGON_RPC_URL=${POLYGON_RPC_URL}
+      - BASE_RPC_URL=${BASE_RPC_URL}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL}
+    ports:
+      - "3005:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/execution-engine/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # Coordinator (Dashboard)
+  # ---------------------------------------------------------------------------
+  coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-coordinator
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      # Partition endpoints for health monitoring (internal Docker network uses port 3001)
+      - PARTITION_P1_URL=http://partition-asia-fast:3001
+      - PARTITION_P2_URL=http://partition-l2-turbo:3001
+      - PARTITION_P3_URL=http://partition-high-value:3001
+      - CROSS_CHAIN_URL=http://cross-chain-detector:3001
+      - EXECUTION_URL=http://execution-engine:3001
+      # External ports for dashboard display
+      - P1_EXTERNAL_PORT=3001
+      - P2_EXTERNAL_PORT=3002
+      - P3_EXTERNAL_PORT=3003
+      - CROSS_CHAIN_EXTERNAL_PORT=3004
+      - EXECUTION_EXTERNAL_PORT=3005
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/coordinator/src/index.js"]
+
+  # ---------------------------------------------------------------------------
+  # Redis Commander (Debug UI)
+  # ---------------------------------------------------------------------------
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    platform: linux/arm64
+    container_name: arb-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - arbitrage-net
+    profiles:
+      - debug
+
+networks:
+  arbitrage-net:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local

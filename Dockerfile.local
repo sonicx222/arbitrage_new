@@ -1,0 +1,41 @@
+# =============================================================================
+# Local Development Dockerfile
+# =============================================================================
+# Optimized for M1 Mac local testing of the arbitrage system.
+# Includes all built services in a single image for simplicity.
+#
+# Build: docker build -f Dockerfile.local -t arbitrage-local .
+# =============================================================================
+
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for native modules
+RUN apk add --no-cache python3 make g++ git
+
+# Copy package files
+COPY package*.json ./
+COPY shared/*/package*.json ./shared/
+COPY services/*/package*.json ./services/
+
+# Install dependencies
+RUN npm ci --ignore-scripts
+
+# Copy source code
+COPY . .
+
+# Build TypeScript
+RUN npm run build
+
+# Default command (overridden by docker-compose)
+CMD ["node", "dist/services/coordinator/src/index.js"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# Labels
+LABEL maintainer="arbitrage-system"
+LABEL description="Local development image for arbitrage system"
