@@ -1,0 +1,85 @@
+# P2 L2-Turbo Partition Service - Docker Compose
+# For local development and testing
+#
+# Usage:
+#   docker-compose up -d        # Start service with Redis
+#   docker-compose logs -f      # View logs
+#   docker-compose down         # Stop service
+
+version: '3.8'
+
+services:
+  partition-l2-turbo:
+    build:
+      context: ../..
+      dockerfile: services/partition-l2-turbo/Dockerfile
+    container_name: p2-l2-turbo
+    environment:
+      # Partition configuration
+      - PARTITION_ID=l2-turbo
+      - PARTITION_CHAINS=arbitrum,optimism,base
+      - REGION_ID=asia-southeast1
+
+      # Service configuration
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+      - HEALTH_CHECK_PORT=3002
+
+      # Redis connection
+      - REDIS_URL=redis://redis:6379
+
+      # RPC URLs (override with production endpoints)
+      - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
+      - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:-https://mainnet.optimism.io}
+      - BASE_RPC_URL=${BASE_RPC_URL:-https://mainnet.base.org}
+
+      # WebSocket URLs
+      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:-wss://arb1.arbitrum.io/feed}
+      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-wss://mainnet.optimism.io}
+      - BASE_WS_URL=${BASE_WS_URL:-wss://mainnet.base.org}
+    ports:
+      - "3002:3002"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  redis:
+    image: redis:7-alpine
+    container_name: p2-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+
+networks:
+  arbitrage-net:
+    driver: bridge
+
+volumes:
+  redis-data:

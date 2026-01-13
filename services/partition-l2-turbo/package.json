@@ -1,0 +1,36 @@
+{
+  "name": "@arbitrage/partition-l2-turbo",
+  "version": "1.0.0",
+  "description": "P2 L2-Turbo Partition Service - Ethereum L2 rollups detector",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@arbitrage/unified-detector": "workspace:*",
+    "@arbitrage/core": "workspace:*",
+    "@arbitrage/config": "workspace:*",
+    "@arbitrage/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "arbitrage",
+    "partition",
+    "l2-turbo",
+    "arbitrum",
+    "optimism",
+    "base",
+    "ethereum-l2"
+  ]
+}
