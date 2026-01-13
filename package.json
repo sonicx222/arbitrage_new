@@ -48,7 +48,9 @@
     "dev:partitions:restart": "docker-compose -f docker-compose.partitions.yml restart"
   },
   "workspaces": [
-    "shared/*",
+    "shared/core",
+    "shared/config",
+    "shared/types",
     "services/*",
     "infrastructure/*"
   ],
