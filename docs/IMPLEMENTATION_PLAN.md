@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-13 (S3.1.7 P4-x fixes: nullish coalescing consistency, mutation protection)
-> **Tests**: 3199 passing (772 S3.1.x tests: 48 S3.1.1 + 117 S3.1.2 + 87 S3.1.3 + 123 S3.1.4 + 119 S3.1.5 + 109 S3.1.6 + 169 S3.1.7)
+> **Last Updated**: 2025-01-13 (S3.2.1 code analysis: 4 enabled DEXs, 2 disabled, 15 tokens)
+> **Tests**: 3291 passing (772 S3.1.x tests + 92 S3.2.1 tests)
 
 ---
 
@@ -644,15 +644,31 @@
 ---
 
 #### S3.2: Add Avalanche + Fantom
-**Status**: `[ ] Not Started`
+**Status**: `[~] In Progress` (S3.2.1 completed)
 **Priority**: P1 | **Effort**: 2 days | **Confidence**: 85%
 
 **Tasks**:
 ```
-[ ] S3.2.1 Add Avalanche configuration
-    - Chain config with C-Chain RPC
+[x] S3.2.1 Add Avalanche configuration
+    - Chain config with C-Chain RPC (already configured from S3.1.2)
     - 6 DEXs: Trader Joe V2, Pangolin, SushiSwap, GMX, Platypus, KyberSwap
-    - 15 tokens
+      * 4 enabled (standard factory patterns): Trader Joe V2, Pangolin, SushiSwap, KyberSwap
+      * 2 disabled (non-standard patterns): GMX (vault model), Platypus (pool model)
+    - 15 tokens: WAVAX, USDT, USDC, DAI, WBTC.e, WETH.e, JOE, LINK, AAVE, sAVAX, QI, PNG, PTP, GMX, FRAX
+    - Tests: tests/integration/s3.2.1-avalanche-configuration.integration.test.ts (85 tests)
+    - COMPLETED: 2025-01-13 - TDD implementation
+    - Code Analysis Fixes Applied:
+      * P0-BUG-1 FIX: GMX uses Vault model, not factory pattern - disabled until adapter implemented
+      * P0-BUG-2 FIX: Platypus uses Pool model, not factory pattern - disabled until adapter implemented
+      * P1-BUG-1 FIX: KyberSwap Elastic incorrectly detected as 'v2' instead of 'v3' (concentrated liquidity)
+      * Added 'unsupported' return type to detectFactoryType() for non-standard DEXs
+      * Added early return in queryFactory() for unsupported DEX types
+      * Updated tests to verify 4 enabled DEXs (not 6), with 2 disabled documented
+    - Files Modified:
+      * shared/core/src/pair-discovery.ts - detectFactoryType() + queryFactory() fixes
+      * shared/config/src/index.ts - GMX/Platypus enabled: false
+      * shared/core/src/pair-discovery.test.ts - KyberSwap, GMX, Platypus tests
+      * tests/integration/s3.2.1-avalanche-configuration.integration.test.ts - Updated expectations
 
 [ ] S3.2.2 Add Fantom configuration
     - Chain config with Fantom RPC
@@ -910,12 +926,12 @@
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 10 | 0 | 0 |
-| Sprint 3 | 18 | 7 | 0 | 0 |
+| Sprint 3 | 18 | 8 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **38** | **0** | **0** |
+| **Total** | **67** | **39** | **0** | **0** |
 
-*Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks), S3.3 Solana Integration (7 tasks)*
+*Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks, 1 completed), S3.3 Solana Integration (7 tasks)*
 
 ---
 
