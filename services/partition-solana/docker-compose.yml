@@ -1,0 +1,64 @@
+version: '3.8'
+
+# P4 Solana-Native Partition Service - Local Development
+#
+# Chain: Solana (non-EVM)
+# Region: Fly.io US-West (us-west1)
+#
+# Usage:
+#   docker-compose up -d          # Start service
+#   docker-compose logs -f        # View logs
+#   docker-compose down           # Stop service
+
+services:
+  partition-solana:
+    build:
+      context: ../..
+      dockerfile: services/partition-solana/Dockerfile
+    container_name: partition-solana
+    environment:
+      # Partition configuration
+      - PARTITION_ID=solana-native
+      - PARTITION_CHAINS=solana
+
+      # Health check
+      - HEALTH_CHECK_PORT=3004
+
+      # Redis connection (use host network for local Redis)
+      - REDIS_URL=${REDIS_URL:-redis://host.docker.internal:6379}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+
+      # Region
+      - REGION_ID=us-west1
+
+      # Solana RPC endpoints (provide your own keys/endpoints)
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.mainnet-beta.solana.com}
+      - SOLANA_WS_URL=${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
+
+      # Helius API key (optional, for better rate limits)
+      - HELIUS_API_KEY=${HELIUS_API_KEY:-}
+
+    ports:
+      - "3004:3004"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3004/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - arbitrage-network
+    labels:
+      - "service=partition-solana"
+      - "partition.id=solana-native"
+      - "partition.chains=solana"
+      - "partition.region=us-west1"
+      - "partition.evm=false"
+
+networks:
+  arbitrage-network:
+    external: true
+    name: arbitrage-network
