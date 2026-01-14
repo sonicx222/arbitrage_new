@@ -422,9 +422,11 @@ export type {
 } from './simulation-mode';
 
 // P0-2 FIX: Nonce Manager for Transaction Sequencing
+// CRITICAL-4 FIX: Added getNonceManagerAsync for race-safe initialization
 export {
   NonceManager,
   getNonceManager,
+  getNonceManagerAsync,
   resetNonceManager
 } from './nonce-manager';
 export type { NonceManagerConfig } from './nonce-manager';
