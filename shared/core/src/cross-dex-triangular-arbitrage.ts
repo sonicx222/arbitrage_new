@@ -340,67 +340,19 @@ export class CrossDexTriangularArbitrage {
   }
 
   /**
-   * @deprecated P1-6 FIX: This legacy float-based swap simulation has precision issues
-   * with large reserve values (> 2^53). Use simulateSwapBigInt() instead which uses
-   * BigInt arithmetic for precise wei calculations.
+   * CRITICAL-3 FIX: Removed deprecated simulateSwap() method.
    *
-   * This method is kept for backwards compatibility but will be removed in v2.0.
-   * Migration: Replace simulateSwap() calls with simulateSwapBigInt() and use
-   * BigInt for amountIn parameter.
+   * The legacy float-based swap simulation had precision issues with large
+   * reserve values (> 2^53). All callers should now use simulateSwapBigInt()
+   * which uses BigInt arithmetic for precise wei calculations.
    *
-   * @see simulateSwapBigInt - The recommended replacement with BigInt precision
+   * Migration completed:
+   * - All internal calls now use simulateSwapBigInt()
+   * - External callers should use simulateSwapBigInt() with BigInt amountIn
+   *
+   * @see simulateSwapBigInt - The replacement with BigInt precision
    */
-  private simulateSwap(
-    fromToken: string,
-    toToken: string,
-    amountIn: number,
-    pool: DexPool
-  ): TriangularStep {
-    // P1-6 FIX: Log deprecation warning to help identify usage
-    logger.warn('DEPRECATED: simulateSwap() called - use simulateSwapBigInt() for precision', {
-      fromToken,
-      toToken,
-      dex: pool.dex
-    });
-
-    // Use AMM formula: amountOut = (amountIn * reserveOut * 0.997) / (reserveIn + amountIn * 0.997)
-    // Simplified constant product formula with fee
-    // WARNING: This uses float arithmetic which loses precision for large values
-
-    let reserveIn: number, reserveOut: number;
-
-    if (pool.token0 === fromToken && pool.token1 === toToken) {
-      reserveIn = parseFloat(pool.reserve0);
-      reserveOut = parseFloat(pool.reserve1);
-    } else if (pool.token0 === toToken && pool.token1 === fromToken) {
-      reserveIn = parseFloat(pool.reserve1);
-      reserveOut = parseFloat(pool.reserve0);
-    } else {
-      throw new Error(`Pool does not contain token pair ${fromToken}/${toToken}`);
-    }
-
-    // Apply fee (0.3% = 0.997)
-    const feeMultiplier = 1 - (pool.fee / 10000); // Convert basis points to decimal
-    const amountInWithFee = amountIn * feeMultiplier;
-
-    // Constant product formula
-    const amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee);
-
-    // Calculate slippage
-    const priceImpact = amountIn / (reserveIn + amountIn);
-    const slippage = Math.min(priceImpact, this.maxSlippage);
-
-    return {
-      fromToken,
-      toToken,
-      dex: pool.dex,
-      amountIn,
-      amountOut,
-      price: pool.price,
-      fee: pool.fee / 10000, // Convert to decimal
-      slippage
-    };
-  }
+  // Method removed - use simulateSwapBigInt() instead
 
   // Group pools by token pairs for efficient lookup
   private groupPoolsByPairs(pools: DexPool[]): Map<string, DexPool[]> {

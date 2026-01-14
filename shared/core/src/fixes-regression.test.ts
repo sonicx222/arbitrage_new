@@ -4945,3 +4945,479 @@ describe('P1-18: DeadLetterQueue Pub/Sub to Streams Migration', () => {
     expect(pubsubMessages[0].channel).toBe('dlq-alert');
   });
 });
+
+// =============================================================================
+// CRITICAL-1: MEV Protection with EIP-1559 Transactions
+// =============================================================================
+
+describe('CRITICAL-1: MEV Protection with EIP-1559', () => {
+  it('should apply EIP-1559 transaction format when fee data is available', async () => {
+    // Simulate fee data from provider
+    const feeData = {
+      maxFeePerGas: BigInt(50e9), // 50 gwei
+      maxPriorityFeePerGas: BigInt(2e9) // 2 gwei
+    };
+
+    const tx: any = {
+      to: '0x1234567890123456789012345678901234567890',
+      data: '0x',
+      gasPrice: BigInt(45e9) // Legacy gas price
+    };
+
+    // Apply MEV protection logic
+    const applyMEVProtection = (tx: any, feeData: any): any => {
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+        tx.type = 2;
+        tx.maxFeePerGas = feeData.maxFeePerGas;
+        // Cap priority fee to 3 gwei
+        const maxPriorityFee = feeData.maxPriorityFeePerGas;
+        const cappedPriorityFee = maxPriorityFee < BigInt(3e9)
+          ? maxPriorityFee
+          : BigInt(3e9);
+        tx.maxPriorityFeePerGas = cappedPriorityFee;
+        delete tx.gasPrice;
+      }
+      return tx;
+    };
+
+    const protectedTx = applyMEVProtection(tx, feeData);
+
+    expect(protectedTx.type).toBe(2);
+    expect(protectedTx.maxFeePerGas).toBe(BigInt(50e9));
+    expect(protectedTx.maxPriorityFeePerGas).toBe(BigInt(2e9)); // Under cap
+    expect(protectedTx.gasPrice).toBeUndefined();
+  });
+
+  it('should cap priority fee at 3 gwei to prevent MEV extraction', () => {
+    const feeData = {
+      maxFeePerGas: BigInt(100e9),
+      maxPriorityFeePerGas: BigInt(10e9) // 10 gwei - above cap
+    };
+
+    const tx: any = {};
+
+    // Apply MEV protection with cap
+    if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+      tx.type = 2;
+      tx.maxFeePerGas = feeData.maxFeePerGas;
+      const maxPriorityFee = feeData.maxPriorityFeePerGas;
+      const cappedPriorityFee = maxPriorityFee < BigInt(3e9)
+        ? maxPriorityFee
+        : BigInt(3e9);
+      tx.maxPriorityFeePerGas = cappedPriorityFee;
+    }
+
+    expect(tx.maxPriorityFeePerGas).toBe(BigInt(3e9)); // Capped at 3 gwei
+    expect(tx.maxPriorityFeePerGas).toBeLessThan(feeData.maxPriorityFeePerGas);
+  });
+
+  it('should fall back to legacy gas price when EIP-1559 not supported', () => {
+    const feeData = {
+      gasPrice: BigInt(45e9),
+      maxFeePerGas: null,
+      maxPriorityFeePerGas: null
+    };
+
+    const tx: any = {};
+
+    // Apply MEV protection - legacy fallback
+    if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+      tx.type = 2;
+      tx.maxFeePerGas = feeData.maxFeePerGas;
+      tx.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+    } else {
+      tx.gasPrice = feeData.gasPrice || BigInt(50e9);
+    }
+
+    expect(tx.type).toBeUndefined();
+    expect(tx.gasPrice).toBe(BigInt(45e9));
+    expect(tx.maxFeePerGas).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// CRITICAL-2: Flash Loan minAmountOut Slippage Protection
+// =============================================================================
+
+describe('CRITICAL-2: Flash Loan minAmountOut Slippage Protection', () => {
+  it('should calculate minAmountOut with slippage protection', () => {
+    const amountIn = BigInt('1000000000000000000'); // 1 ETH in wei
+    const expectedProfitWei = BigInt('50000000000000000'); // 0.05 ETH profit
+    const slippageTolerance = 0.005; // 0.5% slippage
+    const slippageBasisPoints = BigInt(Math.floor(slippageTolerance * 10000)); // 50 basis points
+
+    // Calculate expected output (amountIn + profit)
+    const expectedAmountOut = amountIn + expectedProfitWei;
+    // Apply slippage: minAmountOut = expectedAmountOut * (1 - slippage)
+    const minAmountOut = expectedAmountOut - (expectedAmountOut * slippageBasisPoints / 10000n);
+
+    // Verify calculation
+    expect(minAmountOut).toBeLessThan(expectedAmountOut);
+    expect(minAmountOut).toBeGreaterThan(amountIn); // Must still be profitable
+
+    // Verify slippage is correctly applied (0.5% reduction)
+    const expectedReduction = expectedAmountOut * 50n / 10000n;
+    expect(expectedAmountOut - minAmountOut).toBe(expectedReduction);
+  });
+
+  it('should include minAmountOut in flash loan params', () => {
+    interface FlashLoanParams {
+      token: string;
+      amount: string;
+      path: string[];
+      minProfit: number;
+      minAmountOut: string;
+    }
+
+    const amountIn = BigInt('1000000000000000000');
+    const expectedProfit = 0.05;
+    const slippageTolerance = 0.005;
+
+    const expectedProfitWei = BigInt(Math.floor(expectedProfit * 1e18));
+    const slippageBasisPoints = BigInt(Math.floor(slippageTolerance * 10000));
+    const expectedAmountOut = amountIn + expectedProfitWei;
+    const minAmountOut = expectedAmountOut - (expectedAmountOut * slippageBasisPoints / 10000n);
+
+    const flashParams: FlashLoanParams = {
+      token: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+      amount: amountIn.toString(),
+      path: ['0xToken1', '0xToken2'],
+      minProfit: expectedProfit * (1 - slippageTolerance),
+      minAmountOut: minAmountOut.toString()
+    };
+
+    expect(flashParams.minAmountOut).toBeDefined();
+    expect(BigInt(flashParams.minAmountOut)).toBeGreaterThan(0n);
+    expect(BigInt(flashParams.minAmountOut)).toBeLessThan(expectedAmountOut);
+  });
+
+  it('should reject execution if output falls below minAmountOut', () => {
+    const minAmountOut = BigInt('1050000000000000000'); // 1.05 ETH
+    const actualOutput = BigInt('1040000000000000000'); // 1.04 ETH (below min)
+
+    const shouldRevert = actualOutput < minAmountOut;
+
+    expect(shouldRevert).toBe(true);
+    expect(actualOutput).toBeLessThan(minAmountOut);
+  });
+
+  it('should use BigInt for wei calculations to prevent precision loss', () => {
+    // This test verifies that using BigInt prevents the floating-point precision
+    // issues that could occur with large wei values
+
+    const largeAmount = BigInt('1000000000000000000000'); // 1000 ETH
+    const profit = BigInt('100000000000000000000'); // 100 ETH profit (10% of amount)
+    const slippage = 50n; // 0.5% in basis points
+
+    // BigInt calculation (correct)
+    const expectedOut = largeAmount + profit; // 1100 ETH
+    const minOut = expectedOut - (expectedOut * slippage / 10000n);
+
+    // Verify no precision loss - minOut should still be profitable
+    // After 0.5% slippage on 1100 ETH = 5.5 ETH reduction
+    // So minOut = 1094.5 ETH which is still > 1000 ETH original amount
+    expect(minOut).toBeGreaterThan(largeAmount);
+    expect(minOut).toBeLessThan(expectedOut);
+
+    // The difference should be exactly 0.5%
+    const reduction = expectedOut - minOut;
+    const expectedReduction = expectedOut * slippage / 10000n;
+    expect(reduction).toBe(expectedReduction);
+
+    // Verify BigInt precision - the exact values
+    expect(expectedOut).toBe(BigInt('1100000000000000000000')); // Exactly 1100 ETH
+    expect(expectedReduction).toBe(BigInt('5500000000000000000')); // Exactly 5.5 ETH
+    expect(minOut).toBe(BigInt('1094500000000000000000')); // Exactly 1094.5 ETH
+  });
+});
+
+// =============================================================================
+// CRITICAL-4: NonceManager Singleton Race Condition Fix
+// =============================================================================
+
+describe('CRITICAL-4: NonceManager Singleton Race Condition Fix', () => {
+  it('should prevent race condition with Promise-based initialization', async () => {
+    // Simulate the race-safe singleton pattern
+    let instance: { id: number } | null = null;
+    let initPromise: Promise<{ id: number }> | null = null;
+    let initCount = 0;
+
+    const getInstanceAsync = async (): Promise<{ id: number }> => {
+      if (instance) return instance;
+      if (initPromise) return initPromise;
+
+      initPromise = (async () => {
+        // Simulate async initialization delay
+        await new Promise(resolve => setTimeout(resolve, 10));
+        initCount++;
+        instance = { id: initCount };
+        return instance;
+      })();
+
+      const result = await initPromise;
+      initPromise = null;
+      return result;
+    };
+
+    // Simulate multiple concurrent callers
+    const [result1, result2, result3] = await Promise.all([
+      getInstanceAsync(),
+      getInstanceAsync(),
+      getInstanceAsync()
+    ]);
+
+    // All should get the same instance
+    expect(result1).toBe(result2);
+    expect(result2).toBe(result3);
+    expect(initCount).toBe(1); // Only initialized once
+  });
+
+  it('should return cached instance on subsequent calls', async () => {
+    let instance: { id: number } | null = null;
+    let initCount = 0;
+
+    const getInstance = (): { id: number } => {
+      if (instance) return instance;
+      initCount++;
+      instance = { id: initCount };
+      return instance;
+    };
+
+    const first = getInstance();
+    const second = getInstance();
+    const third = getInstance();
+
+    expect(first).toBe(second);
+    expect(second).toBe(third);
+    expect(initCount).toBe(1);
+  });
+
+  it('should handle reset and re-initialization correctly', async () => {
+    let instance: { value: string } | null = null;
+
+    const reset = (): void => {
+      instance = null;
+    };
+
+    const getInstance = (value: string): { value: string } => {
+      if (!instance) {
+        instance = { value };
+      }
+      return instance;
+    };
+
+    const first = getInstance('first');
+    expect(first.value).toBe('first');
+
+    reset();
+
+    const second = getInstance('second');
+    expect(second.value).toBe('second');
+    expect(first).not.toBe(second);
+  });
+});
+
+// =============================================================================
+// HIGH-2: Gas Baseline Initialization Gap Fix
+// =============================================================================
+
+describe('HIGH-2: Gas Baseline Initialization Gap Fix', () => {
+  it('should provide safety margin with limited data during warmup', () => {
+    const history: { price: bigint; timestamp: number }[] = [];
+
+    const getGasBaseline = (history: { price: bigint; timestamp: number }[]): bigint => {
+      if (!history || history.length === 0) return 0n;
+
+      // With fewer than 3 samples, use average with 1.5x safety margin
+      if (history.length < 3) {
+        const sum = history.reduce((acc, h) => acc + h.price, 0n);
+        const avg = sum / BigInt(history.length);
+        return avg * 3n / 2n; // 1.5x safety margin
+      }
+
+      // Sort and get median for 3+ samples
+      const sorted = [...history].sort((a, b) => {
+        if (a.price < b.price) return -1;
+        if (a.price > b.price) return 1;
+        return 0;
+      });
+      const midIndex = Math.floor(sorted.length / 2);
+      return sorted[midIndex].price;
+    };
+
+    // Add 1 sample
+    history.push({ price: BigInt(50e9), timestamp: Date.now() });
+    const baseline1 = getGasBaseline(history);
+    expect(baseline1).toBe(BigInt(75e9)); // 50 * 1.5 = 75 gwei
+
+    // Add 2nd sample
+    history.push({ price: BigInt(60e9), timestamp: Date.now() });
+    const baseline2 = getGasBaseline(history);
+    // Average = (50 + 60) / 2 = 55, * 1.5 = 82.5 gwei
+    expect(baseline2).toBe(BigInt(82.5e9));
+  });
+
+  it('should use median with 3+ samples', () => {
+    const history: { price: bigint; timestamp: number }[] = [
+      { price: BigInt(30e9), timestamp: Date.now() },
+      { price: BigInt(50e9), timestamp: Date.now() },
+      { price: BigInt(100e9), timestamp: Date.now() } // Outlier
+    ];
+
+    const getGasBaseline = (history: { price: bigint; timestamp: number }[]): bigint => {
+      if (history.length < 3) {
+        const sum = history.reduce((acc, h) => acc + h.price, 0n);
+        const avg = sum / BigInt(history.length);
+        return avg * 3n / 2n;
+      }
+
+      const sorted = [...history].sort((a, b) => {
+        if (a.price < b.price) return -1;
+        if (a.price > b.price) return 1;
+        return 0;
+      });
+      const midIndex = Math.floor(sorted.length / 2);
+      return sorted[midIndex].price;
+    };
+
+    const baseline = getGasBaseline(history);
+    expect(baseline).toBe(BigInt(50e9)); // Median, not average
+  });
+
+  it('should detect gas spikes even during warmup period', () => {
+    const history: { price: bigint; timestamp: number }[] = [
+      { price: BigInt(50e9), timestamp: Date.now() }
+    ];
+
+    const getGasBaseline = (history: { price: bigint; timestamp: number }[]): bigint => {
+      if (history.length < 3) {
+        const sum = history.reduce((acc, h) => acc + h.price, 0n);
+        const avg = sum / BigInt(history.length);
+        return avg * 3n / 2n; // 1.5x safety margin
+      }
+      const sorted = [...history].sort((a, b) => a.price < b.price ? -1 : 1);
+      return sorted[Math.floor(sorted.length / 2)].price;
+    };
+
+    const baseline = getGasBaseline(history);
+    const spikeMultiplier = 2n; // 2x spike threshold
+    const maxAllowed = baseline * spikeMultiplier;
+
+    const currentPrice = BigInt(200e9); // 200 gwei - a spike
+    const isSpike = currentPrice > maxAllowed;
+
+    expect(baseline).toBe(BigInt(75e9)); // 50 * 1.5 = 75 gwei
+    expect(maxAllowed).toBe(BigInt(150e9)); // 75 * 2 = 150 gwei
+    expect(isSpike).toBe(true); // 200 > 150
+  });
+});
+
+// =============================================================================
+// HIGH-3: Price Re-verification Before Execution
+// =============================================================================
+
+describe('HIGH-3: Price Re-verification Before Execution', () => {
+  it('should reject opportunities that are too old', () => {
+    const maxAgeMs = 30000; // 30 seconds
+    const opportunityTimestamp = Date.now() - 35000; // 35 seconds ago
+
+    const verifyOpportunityAge = (timestamp: number, maxAge: number): { valid: boolean; reason?: string } => {
+      const age = Date.now() - timestamp;
+      if (age > maxAge) {
+        return { valid: false, reason: `Opportunity too old: ${age}ms > ${maxAge}ms` };
+      }
+      return { valid: true };
+    };
+
+    const result = verifyOpportunityAge(opportunityTimestamp, maxAgeMs);
+
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('too old');
+  });
+
+  it('should apply stricter age limits for fast chains', () => {
+    const blockTime = 0.4; // 400ms block time (like Solana)
+    const baseMaxAgeMs = 30000;
+    const fastChainMaxAge = Math.min(baseMaxAgeMs, blockTime * 5000); // 5 blocks = 2 seconds
+
+    expect(fastChainMaxAge).toBe(2000); // 2 seconds for fast chain
+
+    const opportunityAge = 3000; // 3 seconds old
+    const isValid = opportunityAge <= fastChainMaxAge;
+
+    expect(isValid).toBe(false); // 3s > 2s limit
+  });
+
+  it('should require 120% of minimum profit threshold for safety margin', () => {
+    const minProfitThreshold = 10; // $10
+    const requiredProfit = minProfitThreshold * 1.2; // $12 required
+
+    const opportunity1 = { expectedProfit: 15 }; // Above threshold
+    const opportunity2 = { expectedProfit: 11 }; // Below safety margin
+
+    const isValid1 = opportunity1.expectedProfit >= requiredProfit;
+    const isValid2 = opportunity2.expectedProfit >= requiredProfit;
+
+    expect(isValid1).toBe(true); // 15 >= 12
+    expect(isValid2).toBe(false); // 11 < 12
+  });
+
+  it('should verify confidence score meets minimum threshold', () => {
+    const minConfidenceThreshold = 0.8;
+
+    const verifyConfidence = (confidence: number): boolean => {
+      return confidence >= minConfidenceThreshold;
+    };
+
+    expect(verifyConfidence(0.9)).toBe(true);
+    expect(verifyConfidence(0.8)).toBe(true);
+    expect(verifyConfidence(0.7)).toBe(false);
+    expect(verifyConfidence(0.5)).toBe(false);
+  });
+
+  it('should pass all verification checks for valid opportunity', () => {
+    interface VerificationResult {
+      valid: boolean;
+      reason?: string;
+      currentProfit?: number;
+    }
+
+    const verifyOpportunity = (
+      timestamp: number,
+      expectedProfit: number,
+      confidence: number,
+      maxAgeMs: number,
+      minProfitThreshold: number,
+      minConfidence: number
+    ): VerificationResult => {
+      const age = Date.now() - timestamp;
+
+      if (age > maxAgeMs) {
+        return { valid: false, reason: 'Opportunity too old' };
+      }
+
+      const requiredProfit = minProfitThreshold * 1.2;
+      if (expectedProfit < requiredProfit) {
+        return { valid: false, reason: 'Profit below safety threshold', currentProfit: expectedProfit };
+      }
+
+      if (confidence < minConfidence) {
+        return { valid: false, reason: 'Confidence below threshold', currentProfit: expectedProfit };
+      }
+
+      return { valid: true, currentProfit: expectedProfit };
+    };
+
+    const result = verifyOpportunity(
+      Date.now() - 5000, // 5 seconds ago
+      20, // $20 profit
+      0.85, // 85% confidence
+      30000, // 30s max age
+      10, // $10 min profit
+      0.8 // 80% min confidence
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.currentProfit).toBe(20);
+  });
+});

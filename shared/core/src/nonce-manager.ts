@@ -336,16 +336,65 @@ export class NonceManager {
 }
 
 // =============================================================================
-// Singleton Instance
+// Singleton Instance (CRITICAL-4 FIX: Race-safe initialization)
 // =============================================================================
 
 let nonceManagerInstance: NonceManager | null = null;
+let nonceManagerInitPromise: Promise<NonceManager> | null = null;
 
+/**
+ * CRITICAL-4 FIX: Thread-safe singleton with Promise-based initialization.
+ * Prevents TOCTOU race condition where multiple callers could create
+ * multiple instances due to async gaps between null check and assignment.
+ *
+ * Pattern: First caller creates the Promise, all subsequent callers
+ * await the same Promise until it resolves.
+ */
 export function getNonceManager(config?: Partial<NonceManagerConfig>): NonceManager {
-  if (!nonceManagerInstance) {
-    nonceManagerInstance = new NonceManager(config);
+  // Fast path: instance already exists
+  if (nonceManagerInstance) {
+    return nonceManagerInstance;
   }
+
+  // Slow path: create instance synchronously to avoid async race
+  // This is safe because NonceManager constructor is synchronous
+  nonceManagerInstance = new NonceManager(config);
   return nonceManagerInstance;
+}
+
+/**
+ * Async version for cases where initialization needs to be awaited.
+ * Ensures only one instance is ever created, even under concurrent calls.
+ */
+export async function getNonceManagerAsync(config?: Partial<NonceManagerConfig>): Promise<NonceManager> {
+  // Fast path: instance already exists
+  if (nonceManagerInstance) {
+    return nonceManagerInstance;
+  }
+
+  // Check if initialization is already in progress
+  if (nonceManagerInitPromise) {
+    return nonceManagerInitPromise;
+  }
+
+  // Start initialization - capture the Promise immediately to prevent races
+  nonceManagerInitPromise = (async () => {
+    // Double-check after acquiring the "lock"
+    if (nonceManagerInstance) {
+      return nonceManagerInstance;
+    }
+
+    const instance = new NonceManager(config);
+    nonceManagerInstance = instance;
+    return instance;
+  })();
+
+  try {
+    return await nonceManagerInitPromise;
+  } finally {
+    // Clear the init promise after completion
+    nonceManagerInitPromise = null;
+  }
 }
 
 export function resetNonceManager(): void {
@@ -353,4 +402,5 @@ export function resetNonceManager(): void {
     nonceManagerInstance.stop();
     nonceManagerInstance = null;
   }
+  nonceManagerInitPromise = null;
 }
