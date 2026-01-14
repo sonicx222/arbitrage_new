@@ -17,31 +17,31 @@ export type ResourceProfile = 'light' | 'standard' | 'heavy';
 export type Region = 'asia-southeast1' | 'us-east1' | 'us-west1' | 'eu-west1';
 export interface PartitionConfig {
     /** Unique identifier for the partition */
-    partitionId: string;
+    readonly partitionId: string;
     /** Human-readable name */
-    name: string;
-    /** Chains included in this partition */
-    chains: string[];
+    readonly name: string;
+    /** Chains included in this partition - immutable to prevent accidental mutation */
+    readonly chains: readonly string[];
     /** Primary deployment region */
-    region: Region;
+    readonly region: Region;
     /** Cloud provider for deployment */
-    provider: CloudProvider;
+    readonly provider: CloudProvider;
     /** Resource allocation profile */
-    resourceProfile: ResourceProfile;
+    readonly resourceProfile: ResourceProfile;
     /** Standby region for failover (optional) */
-    standbyRegion?: Region;
+    readonly standbyRegion?: Region;
     /** Standby provider for failover (optional) */
-    standbyProvider?: CloudProvider;
+    readonly standbyProvider?: CloudProvider;
     /** Priority for resource allocation (1 = highest) */
-    priority: number;
+    readonly priority: number;
     /** Maximum memory in MB */
-    maxMemoryMB: number;
+    readonly maxMemoryMB: number;
     /** Whether this partition is enabled */
-    enabled: boolean;
+    readonly enabled: boolean;
     /** Health check interval in ms */
-    healthCheckIntervalMs: number;
+    readonly healthCheckIntervalMs: number;
     /** Failover timeout in ms */
-    failoverTimeoutMs: number;
+    readonly failoverTimeoutMs: number;
 }
 export interface ChainInstance {
     /** Chain identifier */
@@ -101,6 +101,18 @@ export interface ChainHealth {
     errorCount: number;
 }
 /**
+ * Check if a chain is EVM-compatible.
+ * Non-EVM chains (like Solana) require different connection handling.
+ *
+ * @param chainId - The chain identifier
+ * @returns true if EVM-compatible, false otherwise
+ */
+export declare function isEvmChain(chainId: string): boolean;
+/**
+ * Get all non-EVM chain IDs currently configured.
+ */
+export declare function getNonEvmChains(): string[];
+/**
  * Production partition configurations.
  * Aligned with ARCHITECTURE_V2.md and ADR-003 specifications.
  *
@@ -136,6 +148,7 @@ export declare function getPartition(partitionId: string): PartitionConfig | und
 export declare function getEnabledPartitions(): PartitionConfig[];
 /**
  * Get chains for a partition.
+ * Returns a copy of the chains array to prevent mutation of the partition config.
  */
 export declare function getChainsForPartition(partitionId: string): string[];
 /**
@@ -184,6 +197,10 @@ export declare function getPartitionIdFromEnv(): string;
 export declare function getPartitionFromEnv(): PartitionConfig | null;
 /**
  * Get all chain IDs from environment (supports comma-separated override).
+ * Returns a copy of the chains array to prevent mutation of partition config.
+ *
+ * S3.2.3-FIX: Validates that environment-provided chains exist in CHAINS configuration.
+ * Invalid chains are silently filtered out to prevent runtime errors.
  */
 export declare function getChainsFromEnv(): string[];
 //# sourceMappingURL=partitions.d.ts.map
