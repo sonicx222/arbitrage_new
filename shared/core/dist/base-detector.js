@@ -19,6 +19,9 @@ class BaseDetector {
         this.whaleAlertBatcher = null;
         // Smart Swap Event Filter (S1.2)
         this.swapEventFilter = null;
+        // S2.2.5: Pair Discovery and Caching Services
+        this.pairDiscoveryService = null;
+        this.pairCacheService = null;
         this.pairs = new Map();
         this.monitoredPairs = new Set();
         this.isRunning = false;
@@ -129,6 +132,42 @@ class BaseDetector {
             throw new Error('Redis Streams initialization failed - Streams required per ADR-002');
         }
     }
+    /**
+     * S2.2.5: Initialize pair discovery and caching services.
+     * Sets up the provider for factory contract queries and initializes cache.
+     */
+    async initializePairServices() {
+        try {
+            // Initialize pair discovery service (singleton)
+            this.pairDiscoveryService = (0, index_1.getPairDiscoveryService)({
+                maxConcurrentQueries: 10,
+                batchSize: 50,
+                batchDelayMs: 100,
+                retryAttempts: 3,
+                retryDelayMs: 1000,
+                circuitBreakerThreshold: 10,
+                circuitBreakerResetMs: 60000,
+                queryTimeoutMs: 10000
+            });
+            // Set provider for this chain to enable factory queries
+            this.pairDiscoveryService.setProvider(this.chain, this.provider);
+            // Initialize pair cache service (singleton with async init)
+            this.pairCacheService = await (0, index_1.getPairCacheService)({
+                pairAddressTtlSec: 24 * 60 * 60, // 24 hours - pair addresses are static
+                nullResultTtlSec: 60 * 60, // 1 hour for non-existent pairs
+                maxBatchSize: 50,
+                keyPrefix: 'pair:'
+            });
+            this.logger.info('Pair discovery and caching services initialized', {
+                chain: this.chain
+            });
+        }
+        catch (error) {
+            this.logger.error('Failed to initialize pair services', { error });
+            // Non-fatal: fall back to CREATE2 computation if services fail
+            this.logger.warn('Will fall back to CREATE2 address computation');
+        }
+    }
     // ===========================================================================
     // Lifecycle Methods (Concrete with hooks for subclass customization)
     // Uses ServiceStateManager to prevent race conditions
@@ -158,6 +197,8 @@ class BaseDetector {
             this.logger.info(`Starting ${this.chain} detector service`);
             // Initialize Redis client
             await this.initializeRedis();
+            // S2.2.5: Initialize pair discovery and caching services
+            await this.initializePairServices();
             // Initialize pairs from DEX factories
             await this.initializePairs();
             // Connect to WebSocket for real-time events
@@ -695,18 +736,72 @@ class BaseDetector {
         }
         this.logger.info(`Initialized ${this.pairs.size} trading pairs for ${this.chain}`);
     }
+    /**
+     * S2.2.5: Get pair address using cache-first strategy.
+     * 1. Check Redis cache for existing pair address
+     * 2. On miss, query factory contract via PairDiscoveryService
+     * 3. Cache the result for future lookups
+     * 4. Fall back to CREATE2 computation if factory query fails
+     */
     async getPairAddress(dex, token0, token1) {
         try {
-            // This is a placeholder - actual implementation depends on DEX factory contract
-            // Each DEX has different factory contracts and methods
-            if (dex.name === 'uniswap_v3' || dex.name === 'pancakeswap') {
-                // Mock implementation - replace with actual contract calls
-                return `0x${Math.random().toString(16).substr(2, 40)}`; // Mock address
+            // Step 1: Check cache first (fast path)
+            if (this.pairCacheService) {
+                const cacheResult = await this.pairCacheService.get(this.chain, dex.name, token0.address, token1.address);
+                if (cacheResult.status === 'hit') {
+                    // Cache hit - return cached address
+                    if (this.pairDiscoveryService) {
+                        this.pairDiscoveryService.incrementCacheHits();
+                    }
+                    return cacheResult.data.address;
+                }
+                if (cacheResult.status === 'null') {
+                    // Pair was previously checked and doesn't exist
+                    return null;
+                }
+                // Cache miss - proceed to discovery
             }
+            // Step 2: Try factory query via PairDiscoveryService
+            if (this.pairDiscoveryService) {
+                const discoveredPair = await this.pairDiscoveryService.discoverPair(this.chain, dex, token0, token1);
+                if (discoveredPair) {
+                    // Step 3: Cache the discovered pair
+                    if (this.pairCacheService) {
+                        await this.pairCacheService.set(this.chain, dex.name, token0.address, token1.address, {
+                            address: discoveredPair.address,
+                            token0: discoveredPair.token0,
+                            token1: discoveredPair.token1,
+                            dex: dex.name,
+                            chain: this.chain,
+                            factoryAddress: dex.factoryAddress,
+                            discoveredAt: discoveredPair.discoveredAt,
+                            lastVerified: Date.now(),
+                            discoveryMethod: discoveredPair.discoveryMethod
+                        });
+                    }
+                    return discoveredPair.address;
+                }
+                // Pair doesn't exist - cache the null result to avoid repeated queries
+                if (this.pairCacheService) {
+                    await this.pairCacheService.setNull(this.chain, dex.name, token0.address, token1.address);
+                }
+                return null;
+            }
+            // Step 4: Fallback - services not available, return null
+            // Note: This shouldn't happen in production since services are initialized in start()
+            this.logger.warn('Pair services not initialized, returning null', {
+                dex: dex.name,
+                token0: token0.symbol,
+                token1: token1.symbol
+            });
             return null;
         }
         catch (error) {
-            this.logger.error(`Error getting pair address for ${dex.name}`, { error });
+            this.logger.error(`Error getting pair address for ${dex.name}`, {
+                error: error.message,
+                token0: token0.symbol,
+                token1: token1.symbol
+            });
             return null;
         }
     }

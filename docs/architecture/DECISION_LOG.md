@@ -484,6 +484,146 @@ export const DETECTOR_CONFIG: Record<string, DetectorChainConfig> = {
 
 ---
 
+---
+
+## Session: 2026-01-14 - Code Quality Deep Dive & Bug Fixes
+
+### Session Context
+
+**Objective**: Comprehensive code analysis to identify and fix architecture mismatches, bugs, race conditions, inconsistencies, and refactoring opportunities.
+
+**Key Deliverables**:
+- Fixed 7 critical/high-priority issues (P0-P1)
+- Fixed 5 medium-priority issues (P2)
+- Code cleanup and dead code removal (P3)
+
+### Critical Fixes (P0)
+
+| Issue | Location | Fix |
+|-------|----------|-----|
+| Singleton reset race condition | `redis.ts:888-911` | Made `resetRedisInstance()` async to properly await disconnect and handle in-flight initialization |
+
+**Impact**: Prevents test connection leaks and race conditions during test cleanup.
+
+### High-Priority Fixes (P1)
+
+| Issue | Location | Fix |
+|-------|----------|-----|
+| Memory leak in health monitoring | `base-detector.ts:521-563` | Self-clears interval when `isStopping` is true |
+| Blocking KEYS command | `redis.ts:693-721` | Replaced `KEYS health:*` with `SCAN` iterator |
+| Inconsistent error handling | `redis.ts:321-336` | `exists()` now throws on Redis errors |
+
+**Impact**:
+- Prevents wasted CPU cycles during shutdown
+- Eliminates Redis blocking on large datasets
+- Allows callers to distinguish "key doesn't exist" from "Redis unavailable"
+
+### Medium-Priority Fixes (P2)
+
+| Issue | Location | Fix |
+|-------|----------|-----|
+| Logger type export | `logger.ts:9` | Added `export type Logger = winston.Logger` |
+| Logger type usage | Multiple files | Changed `any` to `Logger` type |
+| EventBatcher type | `base-detector.ts:89` | Changed `any` to `EventBatcher \| null` |
+| Unsafe null cast | `base-detector.ts:437` | Removed `as any` with proper nullable type |
+| Null check for eventBatcher | `base-detector.ts:1219` | Added null check before `addEvent()` call |
+
+**Impact**: Improved type safety, better IDE support, reduced runtime errors.
+
+### Low-Priority Cleanup (P3)
+
+| Issue | Location | Fix |
+|-------|----------|-----|
+| Verbose dead comment | `cross-dex-triangular-arbitrage.ts:342` | Removed 15-line comment block |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `shared/core/src/redis.ts` | P0, P1, P2 fixes |
+| `shared/core/src/redis-streams.ts` | P2 Logger type |
+| `shared/core/src/base-detector.ts` | P1, P2 fixes |
+| `shared/core/src/logger.ts` | P2 Logger type export |
+| `shared/core/src/index.ts` | P2 Logger export |
+| `shared/core/src/cross-dex-triangular-arbitrage.ts` | P3 cleanup |
+| Test files | P0 async fix in 3 files |
+
+### Test Results
+
+| Phase | Test Suites | Tests | Status |
+|-------|-------------|-------|--------|
+| P0 | 4 passed | 114 passed | ✅ |
+| P1 | 6 passed | 191 passed | ✅ |
+| P2 | 5 passed | 153 passed | ✅ |
+| P3 | 2 passed | 73 passed | ✅ |
+
+### Best Practices Established
+
+#### Logger Type Usage
+```typescript
+// Before (bad)
+protected logger: any;
+
+// After (good)
+import { Logger } from './logger';
+protected logger: Logger;
+```
+
+#### Nullable Type Handling
+```typescript
+// Before (bad)
+protected eventBatcher: any;
+this.eventBatcher = null as any;
+
+// After (good)
+protected eventBatcher: EventBatcher | null = null;
+this.eventBatcher = null;
+```
+
+#### Async Reset Functions
+```typescript
+// Before (bad)
+export function resetRedisInstance(): void {
+  if (redisInstance) {
+    redisInstance.disconnect().catch(() => {}); // Not awaited!
+  }
+}
+
+// After (good)
+export async function resetRedisInstance(): Promise<void> {
+  if (redisInstancePromise && !redisInstance) {
+    try { await redisInstancePromise; } catch {}
+  }
+  if (redisInstance) {
+    try { await redisInstance.disconnect(); } catch {}
+  }
+}
+```
+
+#### Non-Blocking Redis Key Enumeration
+```typescript
+// Before (bad - blocks Redis)
+const keys = await this.client.keys('health:*');
+
+// After (good - non-blocking)
+let cursor = '0';
+do {
+  const [nextCursor, keys] = await this.scan(cursor, 'MATCH', 'health:*', 'COUNT', 100);
+  cursor = nextCursor;
+  // process keys...
+} while (cursor !== '0');
+```
+
+### Open Questions Resolved
+
+1. **Q**: Should `exists()` return `false` or throw on Redis errors?
+   **A**: Throw - allows callers to distinguish "key doesn't exist" from "Redis unavailable"
+
+2. **Q**: Should we create a new retry utility?
+   **A**: No - existing `retry-mechanism.ts` already provides comprehensive utilities
+
+---
+
 ## Previous Sessions
 
 ### Session 1: 2025-01-10 - Comprehensive Architecture Analysis

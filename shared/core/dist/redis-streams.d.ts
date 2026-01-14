@@ -26,6 +26,12 @@ export interface ConsumerGroupConfig {
 export interface XReadOptions {
     count?: number;
     block?: number;
+    /**
+     * P1-8 FIX: Maximum block time in milliseconds to prevent indefinite blocking.
+     * If block > maxBlockMs, it will be capped to maxBlockMs.
+     * Default: 30000ms (30 seconds). Set to 0 to disable cap (not recommended).
+     */
+    maxBlockMs?: number;
 }
 export interface XReadGroupOptions extends XReadOptions {
     startId?: string;
@@ -132,6 +138,72 @@ export declare class RedisStreamsClient {
     private parseStreamResult;
     private parseStreamInfo;
     private sleep;
+}
+export interface StreamConsumerConfig {
+    /** Consumer group configuration */
+    config: ConsumerGroupConfig;
+    /** Handler function for each message */
+    handler: (message: StreamMessage) => Promise<void>;
+    /** Number of messages to fetch per read (default: 10) */
+    batchSize?: number;
+    /** Block time in ms (default: 1000, 0 = non-blocking) */
+    blockMs?: number;
+    /** Whether to auto-acknowledge after handler completes (default: true) */
+    autoAck?: boolean;
+    /** Logger instance for error logging */
+    logger?: {
+        error: (msg: string, ctx?: any) => void;
+        debug?: (msg: string, ctx?: any) => void;
+    };
+}
+export interface StreamConsumerStats {
+    messagesProcessed: number;
+    messagesFailed: number;
+    lastProcessedAt: number | null;
+    isRunning: boolean;
+}
+/**
+ * P2-1 FIX: Reusable stream consumer that encapsulates the common pattern of:
+ * 1. Reading from consumer group
+ * 2. Processing each message with a handler
+ * 3. Acknowledging processed messages
+ * 4. Handling errors gracefully
+ *
+ * Usage:
+ * ```ts
+ * const consumer = new StreamConsumer(streamsClient, {
+ *   config: { streamName: 'stream:opportunities', groupName: 'coordinator', consumerName: 'worker-1' },
+ *   handler: async (msg) => { console.log(msg.data); },
+ *   batchSize: 10,
+ *   blockMs: 1000
+ * });
+ * consumer.start();
+ * // ... later
+ * await consumer.stop();
+ * ```
+ */
+export declare class StreamConsumer {
+    private client;
+    private config;
+    private running;
+    private pollTimer;
+    private stats;
+    constructor(client: RedisStreamsClient, config: StreamConsumerConfig);
+    /**
+     * Start consuming messages from the stream.
+     * Runs in a polling loop until stop() is called.
+     */
+    start(): void;
+    /**
+     * Stop consuming messages.
+     * Waits for any in-flight processing to complete.
+     */
+    stop(): Promise<void>;
+    /**
+     * Get consumer statistics.
+     */
+    getStats(): StreamConsumerStats;
+    private poll;
 }
 export declare function getRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient>;
 export declare function resetRedisStreamsInstance(): Promise<void>;

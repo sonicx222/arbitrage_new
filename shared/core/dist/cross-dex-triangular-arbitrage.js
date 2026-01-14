@@ -211,41 +211,20 @@ class CrossDexTriangularArbitrage {
         };
         return { amountOutBigInt, step };
     }
-    // Legacy swap simulation (kept for backwards compatibility)
-    simulateSwap(fromToken, toToken, amountIn, pool) {
-        // Use AMM formula: amountOut = (amountIn * reserveOut * 0.997) / (reserveIn + amountIn * 0.997)
-        // Simplified constant product formula with fee
-        let reserveIn, reserveOut;
-        if (pool.token0 === fromToken && pool.token1 === toToken) {
-            reserveIn = parseFloat(pool.reserve0);
-            reserveOut = parseFloat(pool.reserve1);
-        }
-        else if (pool.token0 === toToken && pool.token1 === fromToken) {
-            reserveIn = parseFloat(pool.reserve1);
-            reserveOut = parseFloat(pool.reserve0);
-        }
-        else {
-            throw new Error(`Pool does not contain token pair ${fromToken}/${toToken}`);
-        }
-        // Apply fee (0.3% = 0.997)
-        const feeMultiplier = 1 - (pool.fee / 10000); // Convert basis points to decimal
-        const amountInWithFee = amountIn * feeMultiplier;
-        // Constant product formula
-        const amountOut = (amountInWithFee * reserveOut) / (reserveIn + amountInWithFee);
-        // Calculate slippage
-        const priceImpact = amountIn / (reserveIn + amountIn);
-        const slippage = Math.min(priceImpact, this.maxSlippage);
-        return {
-            fromToken,
-            toToken,
-            dex: pool.dex,
-            amountIn,
-            amountOut,
-            price: pool.price,
-            fee: pool.fee / 10000, // Convert to decimal
-            slippage
-        };
-    }
+    /**
+     * CRITICAL-3 FIX: Removed deprecated simulateSwap() method.
+     *
+     * The legacy float-based swap simulation had precision issues with large
+     * reserve values (> 2^53). All callers should now use simulateSwapBigInt()
+     * which uses BigInt arithmetic for precise wei calculations.
+     *
+     * Migration completed:
+     * - All internal calls now use simulateSwapBigInt()
+     * - External callers should use simulateSwapBigInt() with BigInt amountIn
+     *
+     * @see simulateSwapBigInt - The replacement with BigInt precision
+     */
+    // Method removed - use simulateSwapBigInt() instead
     // Group pools by token pairs for efficient lookup
     groupPoolsByPairs(pools) {
         const pairs = new Map();

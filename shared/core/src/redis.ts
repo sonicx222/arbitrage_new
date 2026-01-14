@@ -1,7 +1,7 @@
 // Redis client for message queue and caching
 import { Redis } from 'ioredis';
 import { MessageEvent, ServiceHealth, PerformanceMetrics } from '../../types';
-import { createLogger } from './logger';
+import { createLogger, Logger } from './logger';
 
 // P2-2-FIX: Import config with fallback for test environment
 let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
@@ -32,8 +32,8 @@ export class RedisClient {
   private client: Redis;
   private pubClient: Redis;
   private subClient: Redis;
-  // P1-1 FIX: Use proper logger type instead of any
-  private logger: ReturnType<typeof createLogger>;
+  // P2-FIX: Use proper Logger type
+  private logger: Logger;
 
   constructor(url: string, password?: string) {
     this.logger = createLogger('redis-client');
@@ -318,13 +318,20 @@ export class RedisClient {
     }
   }
 
+  /**
+   * P1-FIX: Throws on Redis errors to distinguish "key doesn't exist" from "Redis unavailable"
+   * @returns true if key exists, false if key doesn't exist
+   * @throws Error if Redis operation fails
+   */
   async exists(key: string): Promise<boolean> {
     try {
       const result = await this.client.exists(key);
       return result === 1;
     } catch (error) {
-      this.logger.error('Error checking existence', { error });
-      return false;
+      this.logger.error('Error checking existence', { error, key });
+      // P1-FIX: Throw instead of returning false to allow callers to distinguish
+      // between "key doesn't exist" and "Redis unavailable"
+      throw new Error(`Redis exists failed: ${(error as Error).message}`);
     }
   }
 
@@ -690,18 +697,28 @@ export class RedisClient {
     return await this.get<ServiceHealth>(key);
   }
 
+  /**
+   * P1-FIX: Use SCAN instead of KEYS to avoid blocking Redis
+   * KEYS command blocks on large datasets; SCAN is non-blocking and iterative.
+   */
   async getAllServiceHealth(): Promise<Record<string, ServiceHealth>> {
     try {
-      const keys = await this.client.keys('health:*');
       const health: Record<string, ServiceHealth> = {};
+      let cursor = '0';
 
-      for (const key of keys) {
-        const serviceName = key.replace('health:', '');
-        const serviceHealth = await this.get<ServiceHealth>(key);
-        if (serviceHealth) {
-          health[serviceName] = serviceHealth;
+      // P1-FIX: Use SCAN iterator for non-blocking key enumeration
+      do {
+        const [nextCursor, keys] = await this.scan(cursor, 'MATCH', 'health:*', 'COUNT', 100);
+        cursor = nextCursor;
+
+        for (const key of keys) {
+          const serviceName = key.replace('health:', '');
+          const serviceHealth = await this.get<ServiceHealth>(key);
+          if (serviceHealth) {
+            health[serviceName] = serviceHealth;
+          }
         }
-      }
+      } while (cursor !== '0');
 
       return health;
     } catch (error) {
@@ -886,9 +903,24 @@ export async function checkRedisHealth(url?: string, password?: string): Promise
 }
 
 // Reset singleton for testing purposes
-export function resetRedisInstance(): void {
+// P0-FIX: Made async to properly await disconnect and handle in-flight initialization
+export async function resetRedisInstance(): Promise<void> {
+  // P0-FIX: If initialization is in progress, wait for it to complete
+  // This prevents race conditions during test cleanup
+  if (redisInstancePromise && !redisInstance) {
+    try {
+      await redisInstancePromise;
+    } catch {
+      // Ignore init errors - we're resetting anyway
+    }
+  }
+
   if (redisInstance) {
-    redisInstance.disconnect().catch(() => { }); // Best effort cleanup
+    try {
+      await redisInstance.disconnect();
+    } catch {
+      // Best effort cleanup - log but don't throw
+    }
   }
   redisInstance = null;
   redisInstancePromise = null;

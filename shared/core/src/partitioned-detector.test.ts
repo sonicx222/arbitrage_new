@@ -155,7 +155,18 @@ jest.mock('../../config/src', () => ({
     minProfitPercentage: 0.003,
     chainMinProfits: { ethereum: 0.005, bsc: 0.003, polygon: 0.003 }
   },
-  TOKEN_METADATA: {}
+  TOKEN_METADATA: {},
+  // S3.2.4-FIX: Add normalizeTokenForCrossChain to mock for cross-chain detection tests
+  normalizeTokenForCrossChain: jest.fn((symbol: string) => {
+    const upper = symbol.toUpperCase().trim();
+    const aliases: Record<string, string> = {
+      'FUSDT': 'USDT', 'WFTM': 'FTM', 'WAVAX': 'AVAX',
+      'WETH.E': 'WETH', 'WBTC.E': 'WBTC', 'USDT.E': 'USDT',
+      'WBNB': 'BNB', 'BTCB': 'WBTC', 'ETH': 'WETH',
+      'WMATIC': 'MATIC', 'WETH': 'WETH', 'WBTC': 'WBTC'
+    };
+    return aliases[upper] || upper;
+  })
 }));
 
 // Import after mocks

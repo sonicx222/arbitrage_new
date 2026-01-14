@@ -74,7 +74,7 @@ export type {
   StreamConsumerConfig,
   StreamConsumerStats
 } from './redis-streams';
-export { createLogger, PerformanceLogger, getPerformanceLogger } from './logger';
+export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';

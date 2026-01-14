@@ -54,7 +54,19 @@ export declare class CrossDexTriangularArbitrage {
     private evaluateTriangle;
     private simulateTriangle;
     private simulateSwapBigInt;
-    private simulateSwap;
+    /**
+     * CRITICAL-3 FIX: Removed deprecated simulateSwap() method.
+     *
+     * The legacy float-based swap simulation had precision issues with large
+     * reserve values (> 2^53). All callers should now use simulateSwapBigInt()
+     * which uses BigInt arithmetic for precise wei calculations.
+     *
+     * Migration completed:
+     * - All internal calls now use simulateSwapBigInt()
+     * - External callers should use simulateSwapBigInt() with BigInt amountIn
+     *
+     * @see simulateSwapBigInt - The replacement with BigInt precision
+     */
     private groupPoolsByPairs;
     private findReachableTokens;
     private findBestPoolsForPair;

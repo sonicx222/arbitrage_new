@@ -1,7 +1,7 @@
 # ADR-002: Redis Streams over Pub/Sub for Event Backbone
 
 ## Status
-**Implemented** | 2025-01-10 | Updated 2025-01-11
+**Implemented** | 2025-01-10 | Updated 2025-01-11 | Best Practices Updated 2026-01-14
 
 ## Implementation Status
 
@@ -195,6 +195,61 @@ await redis.xadd('stream:price-updates', 'MAXLEN', '~', 10000, '*', data);
 ### Alternative 3: PostgreSQL NOTIFY/LISTEN
 - **Rejected because**: Would need PostgreSQL hosting, different programming model
 - **Would reconsider if**: Already using PostgreSQL for other data
+
+## Redis Best Practices (2026-01-14 Update)
+
+During implementation, additional Redis best practices were established:
+
+### Key Enumeration
+**Never use `KEYS` command in production** - it blocks Redis on large datasets.
+
+```typescript
+// ❌ Bad - blocks Redis
+const keys = await redis.keys('health:*');
+
+// ✅ Good - non-blocking SCAN iterator
+let cursor = '0';
+do {
+  const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'health:*', 'COUNT', 100);
+  cursor = nextCursor;
+  // process keys...
+} while (cursor !== '0');
+```
+
+### Error Handling
+**Throw on Redis errors** to distinguish "key doesn't exist" from "Redis unavailable":
+
+```typescript
+// ❌ Bad - caller can't distinguish error from not-found
+async exists(key: string): Promise<boolean> {
+  try { return (await redis.exists(key)) === 1; }
+  catch { return false; }
+}
+
+// ✅ Good - throws on error
+async exists(key: string): Promise<boolean> {
+  try { return (await redis.exists(key)) === 1; }
+  catch (error) {
+    throw new Error(`Redis exists failed: ${(error as Error).message}`);
+  }
+}
+```
+
+### Singleton Reset
+**Await disconnect operations** in singleton reset functions:
+
+```typescript
+// ✅ Good - properly awaits disconnect
+export async function resetRedisInstance(): Promise<void> {
+  if (redisInstancePromise && !redisInstance) {
+    try { await redisInstancePromise; } catch {}
+  }
+  if (redisInstance) {
+    try { await redisInstance.disconnect(); } catch {}
+  }
+  redisInstance = null;
+}
+```
 
 ## References
 

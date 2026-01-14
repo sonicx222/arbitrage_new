@@ -56,6 +56,8 @@ class ServiceStateManager extends events_1.EventEmitter {
         this.lastTransition = Date.now();
         this.transitionCount = 0;
         this.transitionLock = null;
+        // P2-3 FIX: Set max listeners to prevent memory leak warnings
+        this.setMaxListeners(20);
         this.config = {
             serviceName: config.serviceName,
             transitionTimeoutMs: config.transitionTimeoutMs ?? 30000,

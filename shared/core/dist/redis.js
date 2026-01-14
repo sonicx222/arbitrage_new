@@ -26,6 +26,7 @@ class RedisClient {
         // Message subscription with cleanup tracking
         this.subscriptions = new Map();
         this.logger = (0, logger_1.createLogger)('redis-client');
+        // P1-1 FIX: Use typed options instead of any
         const options = {
             host: this.parseHost(url),
             port: this.parsePort(url),
@@ -54,6 +55,7 @@ class RedisClient {
         this.client.removeAllListeners('connect');
         this.client.removeAllListeners('ready');
         this.client.removeAllListeners('close');
+        // P1-1 FIX: Use Error type instead of any
         this.client.on('error', (err) => {
             this.logger?.error('Redis main client error', { error: err });
         });
@@ -68,12 +70,14 @@ class RedisClient {
         });
         // Setup pubClient event handlers
         this.pubClient.removeAllListeners('error');
+        // P1-1 FIX: Use Error type instead of any
         this.pubClient.on('error', (err) => {
             this.logger?.error('Redis pub client error', { error: err });
         });
         // Setup subClient event handlers
         this.subClient.removeAllListeners('error');
         this.subClient.removeAllListeners('message');
+        // P1-1 FIX: Use Error type instead of any
         this.subClient.on('error', (err) => {
             this.logger?.error('Redis sub client error', { error: err });
         });
@@ -198,6 +202,7 @@ class RedisClient {
         }
     }
     // Caching operations
+    // P1-1 FIX: Use unknown instead of any for type safety
     async set(key, value, ttl) {
         try {
             const serializedValue = JSON.stringify(value);
@@ -245,7 +250,13 @@ class RedisClient {
     }
     /**
      * Set key only if it doesn't exist (for leader election)
-     * Returns true if the key was set, false if it already exists
+     *
+     * P0-3 FIX: Now throws on Redis errors instead of returning false.
+     * This prevents silent failures where Redis being unavailable is
+     * indistinguishable from the lock being held by another process.
+     *
+     * @returns true if the key was set, false if it already exists
+     * @throws Error if Redis operation fails (network error, timeout, etc.)
      */
     async setNx(key, value, ttlSeconds) {
         try {
@@ -261,8 +272,10 @@ class RedisClient {
             return result === 'OK';
         }
         catch (error) {
+            // P0-3 FIX: Throw instead of returning false to distinguish
+            // "lock held by another" from "Redis unavailable"
             this.logger.error('Error setting NX', { error, key });
-            return false;
+            throw new Error(`Redis setNx failed: ${error.message}`);
         }
     }
     async exists(key) {
@@ -294,7 +307,77 @@ class RedisClient {
             throw error;
         }
     }
+    /**
+     * P0-NEW-5 FIX: Atomic lock renewal using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and extends TTL.
+     * This prevents the TOCTOU race condition where another instance could acquire
+     * the lock between the check and the TTL extension.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @param ttlSeconds - New TTL to set if renewal succeeds
+     * @returns true if lock was renewed, false if lock is owned by another instance or doesn't exist
+     */
+    async renewLockIfOwned(key, instanceId, ttlSeconds) {
+        // Lua script for atomic compare-and-extend-TTL
+        // Returns 1 if successful, 0 if lock doesn't exist or is owned by another instance
+        const script = `
+      local key = KEYS[1]
+      local expected_owner = ARGV[1]
+      local ttl_seconds = tonumber(ARGV[2])
+
+      local current_owner = redis.call('GET', key)
+
+      if current_owner == expected_owner then
+        redis.call('EXPIRE', key, ttl_seconds)
+        return 1
+      else
+        return 0
+      end
+    `;
+        try {
+            const result = await this.eval(script, [key], [instanceId, String(ttlSeconds)]);
+            return result === 1;
+        }
+        catch (error) {
+            this.logger.error('Error renewing lock', { error, key, instanceId });
+            return false;
+        }
+    }
+    /**
+     * P0-NEW-5 FIX: Atomic lock release using Lua script.
+     * Atomically checks if the lock is owned by the given instanceId and deletes it.
+     * This prevents releasing a lock that was acquired by another instance.
+     *
+     * @param key - Lock key
+     * @param instanceId - Expected owner of the lock
+     * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
+     */
+    async releaseLockIfOwned(key, instanceId) {
+        const script = `
+      local key = KEYS[1]
+      local expected_owner = ARGV[1]
+
+      local current_owner = redis.call('GET', key)
+
+      if current_owner == expected_owner then
+        redis.call('DEL', key)
+        return 1
+      else
+        return 0
+      end
+    `;
+        try {
+            const result = await this.eval(script, [key], [instanceId]);
+            return result === 1;
+        }
+        catch (error) {
+            this.logger.error('Error releasing lock', { error, key, instanceId });
+            return false;
+        }
+    }
     // Hash operations for complex data
+    // P1-1 FIX: Use unknown instead of any for type safety
     async hset(key, field, value) {
         try {
             const serializedValue = JSON.stringify(value);
@@ -408,6 +491,63 @@ class RedisClient {
             return null;
         }
     }
+    /**
+     * P0-3 FIX: Remove elements from sorted set by score range.
+     * Used by rate limiter to remove expired entries.
+     */
+    async zremrangebyscore(key, min, max) {
+        try {
+            return await this.client.zremrangebyscore(key, min, max);
+        }
+        catch (error) {
+            this.logger.error('Error zremrangebyscore', { error });
+            return 0;
+        }
+    }
+    /**
+     * P0-3 FIX: Create a multi/transaction for atomic operations.
+     * Returns an object that can chain Redis commands and execute atomically.
+     */
+    multi() {
+        const multi = this.client.multi();
+        return {
+            zremrangebyscore: (key, min, max) => {
+                multi.zremrangebyscore(key, min, max);
+                return multi;
+            },
+            zadd: (key, score, member) => {
+                multi.zadd(key, score, member);
+                return multi;
+            },
+            zcard: (key) => {
+                multi.zcard(key);
+                return multi;
+            },
+            expire: (key, seconds) => {
+                multi.expire(key, seconds);
+                return multi;
+            },
+            zrange: (key, start, stop, withScores) => {
+                if (withScores === 'WITHSCORES') {
+                    multi.zrange(key, start, stop, 'WITHSCORES');
+                }
+                else {
+                    multi.zrange(key, start, stop);
+                }
+                return multi;
+            },
+            exec: async () => {
+                try {
+                    const result = await multi.exec();
+                    return result || [];
+                }
+                catch (error) {
+                    this.logger.error('Error executing multi', { error });
+                    return [];
+                }
+            }
+        };
+    }
     // Key operations
     async keys(pattern) {
         try {
@@ -416,6 +556,28 @@ class RedisClient {
         catch (error) {
             this.logger.error('Error keys', { error });
             return [];
+        }
+    }
+    /**
+     * P1-3/P1-4 FIX: SCAN iterator for non-blocking key enumeration.
+     * Use this instead of KEYS in production to avoid blocking Redis.
+     *
+     * @param cursor - Cursor position ('0' to start)
+     * @param matchArg - 'MATCH' literal
+     * @param pattern - Pattern to match keys
+     * @param countArg - 'COUNT' literal
+     * @param count - Number of keys to return per iteration
+     * @returns Tuple of [nextCursor, keys[]]
+     */
+    async scan(cursor, matchArg, pattern, countArg, count) {
+        try {
+            const result = await this.client.scan(cursor, matchArg, pattern, countArg, count);
+            // Redis returns [cursor, keys[]] - cursor is string, keys is array
+            return [result[0], result[1]];
+        }
+        catch (error) {
+            this.logger.error('Error scan', { error, pattern });
+            return ['0', []]; // Return done cursor with empty results on error
         }
     }
     async llen(key) {

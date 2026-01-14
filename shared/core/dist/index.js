@@ -14,9 +14,10 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RetryMechanism = exports.withCircuitBreaker = exports.getCircuitBreakerRegistry = exports.createCircuitBreaker = exports.CircuitBreakerRegistry = exports.CircuitState = exports.CircuitBreakerError = exports.CircuitBreaker = exports.resetCacheCoherencyManager = exports.getCacheCoherencyManager = exports.createCacheCoherencyManager = exports.CacheCoherencyManager = exports.getSharedMemoryCache = exports.createSharedMemoryCache = exports.SharedMemoryCache = exports.getHierarchicalCache = exports.createHierarchicalCache = exports.HierarchicalCache = exports.WebSocketManager = exports.getDefaultEventBatcher = exports.createEventBatcher = exports.EventBatcher = exports.PriorityQueue = exports.getWorkerPool = exports.EventProcessingWorkerPool = exports.getPerformanceLogger = exports.PerformanceLogger = exports.createLogger = exports.hasDefaultPrice = exports.getDefaultPrice = exports.resetPriceOracle = exports.getPriceOracle = exports.PriceOracle = exports.isServiceState = exports.createServiceState = exports.ServiceState = exports.ServiceStateManager = exports.resetDistributedLockManager = exports.getDistributedLockManager = exports.DistributedLockManager = exports.resetRedisStreamsInstance = exports.getRedisStreamsClient = exports.StreamBatcher = exports.RedisStreamsClient = exports.singleton = exports.createSingleton = exports.createAsyncSingleton = exports.resetRedisInstance = exports.getRedisClient = exports.RedisClient = void 0;
-exports.createExecutionRepository = exports.createArbitrageRepository = exports.RedisExecutionRepository = exports.RedisArbitrageRepository = exports.ValidationSchemas = exports.ValidationMiddleware = exports.CrossDexTriangularArbitrage = exports.PerformanceAnalyticsEngine = exports.resetPriceMatrix = exports.getPriceMatrix = exports.PriceIndexMapper = exports.PriceMatrix = exports.resetSwapEventFilter = exports.getSwapEventFilter = exports.SwapEventFilter = exports.resetStreamHealthMonitor = exports.getStreamHealthMonitor = exports.StreamHealthMonitor = exports.getCurrentSystemHealth = exports.recordHealthMetric = exports.getEnhancedHealthMonitor = exports.EnhancedHealthMonitor = exports.withErrorRecovery = exports.recoverFromError = exports.getErrorRecoveryOrchestrator = exports.ErrorRecoveryOrchestrator = exports.getExpertSelfHealingManager = exports.ExpertSelfHealingManager = exports.registerServiceForSelfHealing = exports.getSelfHealingManager = exports.SelfHealingManager = exports.enqueueFailedOperation = exports.getDeadLetterQueue = exports.DeadLetterQueue = exports.DegradationLevel = exports.resetCrossRegionHealthManager = exports.getCrossRegionHealthManager = exports.CrossRegionHealthManager = exports.getCapabilityFallback = exports.isFeatureEnabled = exports.triggerDegradation = exports.getGracefulDegradationManager = exports.GracefulDegradationManager = exports.isRetryableError = exports.classifyError = exports.ErrorCategory = exports.retryAdvanced = exports.retry = exports.withRetry = exports.RetryPresets = void 0;
-exports.BaseDetector = void 0;
+exports.CircuitState = exports.CircuitBreakerError = exports.CircuitBreaker = exports.resetCacheCoherencyManager = exports.getCacheCoherencyManager = exports.createCacheCoherencyManager = exports.CacheCoherencyManager = exports.getSharedMemoryCache = exports.createSharedMemoryCache = exports.SharedMemoryCache = exports.getHierarchicalCache = exports.createHierarchicalCache = exports.HierarchicalCache = exports.WebSocketManager = exports.getDefaultEventBatcher = exports.createEventBatcher = exports.EventBatcher = exports.PriorityQueue = exports.getWorkerPool = exports.EventProcessingWorkerPool = exports.getPerformanceLogger = exports.PerformanceLogger = exports.createLogger = exports.hasDefaultPrice = exports.getDefaultPrice = exports.resetPriceOracle = exports.getPriceOracle = exports.PriceOracle = exports.isServiceState = exports.createServiceState = exports.ServiceState = exports.ServiceStateManager = exports.resetDistributedLockManager = exports.getDistributedLockManager = exports.DistributedLockManager = exports.resetRedisStreamsInstance = exports.getRedisStreamsClient = exports.StreamConsumer = exports.StreamBatcher = exports.RedisStreamsClient = exports.clearAllNamedMutexes = exports.clearNamedMutex = exports.namedMutex = exports.AsyncMutex = exports.singleton = exports.createSingleton = exports.createAsyncSingleton = exports.resetRedisInstance = exports.getRedisClient = exports.RedisClient = void 0;
+exports.resetPairDiscoveryService = exports.getPairDiscoveryService = exports.PairDiscoveryService = exports.resetPriceMatrix = exports.getPriceMatrix = exports.PriceIndexMapper = exports.PriceMatrix = exports.resetSwapEventFilter = exports.getSwapEventFilter = exports.SwapEventFilter = exports.resetStreamHealthMonitor = exports.getStreamHealthMonitor = exports.StreamHealthMonitor = exports.getCurrentSystemHealth = exports.recordHealthMetric = exports.getEnhancedHealthMonitor = exports.EnhancedHealthMonitor = exports.withErrorRecovery = exports.recoverFromError = exports.getErrorRecoveryOrchestrator = exports.ErrorRecoveryOrchestrator = exports.getExpertSelfHealingManager = exports.ExpertSelfHealingManager = exports.registerServiceForSelfHealing = exports.getSelfHealingManager = exports.SelfHealingManager = exports.enqueueFailedOperation = exports.getDeadLetterQueue = exports.DeadLetterQueue = exports.DegradationLevel = exports.resetCrossRegionHealthManager = exports.getCrossRegionHealthManager = exports.CrossRegionHealthManager = exports.getCapabilityFallback = exports.isFeatureEnabled = exports.triggerDegradation = exports.getGracefulDegradationManager = exports.GracefulDegradationManager = exports.isRetryableError = exports.classifyError = exports.ErrorCategory = exports.retryAdvanced = exports.retry = exports.withRetry = exports.RetryPresets = exports.RetryMechanism = exports.withCircuitBreaker = exports.getCircuitBreakerRegistry = exports.createCircuitBreaker = exports.CircuitBreakerRegistry = void 0;
+exports.isCriticalError = exports.isRetryableErrorCheck = exports.tryCatchSync = exports.tryCatch = exports.failure = exports.success = exports.ErrorSeverity = exports.ErrorCode = exports.ExecutionError = exports.LifecycleError = exports.SharedValidationError = exports.ConnectionError = exports.BaseArbitrageError = exports.createCoordinatorCommand = exports.createWhaleTransaction = exports.createPriceUpdate = exports.validateBatch = exports.validateMessage = exports.validateServiceHealthStatus = exports.validateCoordinatorCommand = exports.validateReserveUpdate = exports.validateSwapEvent = exports.validateWhaleTransaction = exports.validatePriceUpdate = exports.createPairSnapshot = exports.validatePairSnapshot = exports.calculateCrossChainArbitrage = exports.calculateIntraChainArbitrage = exports.getDefaultFee = exports.getMinProfitThreshold = exports.isReverseOrder = exports.isSameTokenPair = exports.calculatePriceDifferencePercent = exports.invertPrice = exports.calculatePriceFromBigIntReserves = exports.calculatePriceFromReserves = exports.safeBigIntDivision = exports.PartitionedDetector = exports.BaseDetector = exports.createExecutionRepository = exports.createArbitrageRepository = exports.RedisExecutionRepository = exports.RedisArbitrageRepository = exports.ValidationSchemas = exports.ValidationMiddleware = exports.CrossDexTriangularArbitrage = exports.PerformanceAnalyticsEngine = exports.resetPairCacheService = exports.getPairCacheService = exports.PairCacheService = void 0;
+exports.resetNonceManager = exports.getNonceManagerAsync = exports.getNonceManager = exports.NonceManager = exports.SIMULATION_CONFIG = exports.isSimulationMode = exports.getSimulator = exports.PriceSimulator = exports.PARTITION_SERVICE_NAMES = exports.PARTITION_PORTS = exports.warnIfDeprecated = exports.getMigrationRecommendation = exports.isDeprecatedPattern = exports.createDeprecationWarning = exports.PartitionRouter = exports.SHUTDOWN_TIMEOUT_MS = exports.setupProcessHandlers = exports.setupDetectorEventHandlers = exports.shutdownPartitionService = exports.createPartitionHealthServer = exports.validateAndFilterChains = exports.parsePort = exports.waitWithTimeouts = exports.gracefulShutdown = exports.throttleAsync = exports.debounceAsync = exports.mapSequential = exports.mapConcurrent = exports.createDeferred = exports.sleep = exports.withRetryAsync = exports.withTimeoutSafe = exports.withTimeoutDefault = exports.withTimeout = exports.TimeoutError = exports.ErrorAggregator = exports.formatErrorForResponse = exports.formatErrorForLog = exports.getErrorSeverity = void 0;
 // Core utilities exports
 var redis_1 = require("./redis");
 Object.defineProperty(exports, "RedisClient", { enumerable: true, get: function () { return redis_1.RedisClient; } });
@@ -27,9 +28,16 @@ var async_singleton_1 = require("./async-singleton");
 Object.defineProperty(exports, "createAsyncSingleton", { enumerable: true, get: function () { return async_singleton_1.createAsyncSingleton; } });
 Object.defineProperty(exports, "createSingleton", { enumerable: true, get: function () { return async_singleton_1.createSingleton; } });
 Object.defineProperty(exports, "singleton", { enumerable: true, get: function () { return async_singleton_1.singleton; } });
+// P2-2 FIX: Reusable AsyncMutex utility
+var async_mutex_1 = require("./async-mutex");
+Object.defineProperty(exports, "AsyncMutex", { enumerable: true, get: function () { return async_mutex_1.AsyncMutex; } });
+Object.defineProperty(exports, "namedMutex", { enumerable: true, get: function () { return async_mutex_1.namedMutex; } });
+Object.defineProperty(exports, "clearNamedMutex", { enumerable: true, get: function () { return async_mutex_1.clearNamedMutex; } });
+Object.defineProperty(exports, "clearAllNamedMutexes", { enumerable: true, get: function () { return async_mutex_1.clearAllNamedMutexes; } });
 var redis_streams_1 = require("./redis-streams");
 Object.defineProperty(exports, "RedisStreamsClient", { enumerable: true, get: function () { return redis_streams_1.RedisStreamsClient; } });
 Object.defineProperty(exports, "StreamBatcher", { enumerable: true, get: function () { return redis_streams_1.StreamBatcher; } });
+Object.defineProperty(exports, "StreamConsumer", { enumerable: true, get: function () { return redis_streams_1.StreamConsumer; } });
 Object.defineProperty(exports, "getRedisStreamsClient", { enumerable: true, get: function () { return redis_streams_1.getRedisStreamsClient; } });
 Object.defineProperty(exports, "resetRedisStreamsInstance", { enumerable: true, get: function () { return redis_streams_1.resetRedisStreamsInstance; } });
 // Distributed Lock Manager (ADR-007)
@@ -143,6 +151,15 @@ Object.defineProperty(exports, "PriceMatrix", { enumerable: true, get: function 
 Object.defineProperty(exports, "PriceIndexMapper", { enumerable: true, get: function () { return price_matrix_1.PriceIndexMapper; } });
 Object.defineProperty(exports, "getPriceMatrix", { enumerable: true, get: function () { return price_matrix_1.getPriceMatrix; } });
 Object.defineProperty(exports, "resetPriceMatrix", { enumerable: true, get: function () { return price_matrix_1.resetPriceMatrix; } });
+// Pair Discovery and Caching (S2.2.5)
+var pair_discovery_1 = require("./pair-discovery");
+Object.defineProperty(exports, "PairDiscoveryService", { enumerable: true, get: function () { return pair_discovery_1.PairDiscoveryService; } });
+Object.defineProperty(exports, "getPairDiscoveryService", { enumerable: true, get: function () { return pair_discovery_1.getPairDiscoveryService; } });
+Object.defineProperty(exports, "resetPairDiscoveryService", { enumerable: true, get: function () { return pair_discovery_1.resetPairDiscoveryService; } });
+var pair_cache_1 = require("./pair-cache");
+Object.defineProperty(exports, "PairCacheService", { enumerable: true, get: function () { return pair_cache_1.PairCacheService; } });
+Object.defineProperty(exports, "getPairCacheService", { enumerable: true, get: function () { return pair_cache_1.getPairCacheService; } });
+Object.defineProperty(exports, "resetPairCacheService", { enumerable: true, get: function () { return pair_cache_1.resetPairCacheService; } });
 // REMOVED: Professional-grade modules (unused, cleaned up):
 // - AdvancedStatisticalArbitrage
 // - RiskManagementEngine
@@ -172,4 +189,105 @@ Object.defineProperty(exports, "createExecutionRepository", { enumerable: true, 
 // Base detector for chain-specific implementations
 var base_detector_1 = require("./base-detector");
 Object.defineProperty(exports, "BaseDetector", { enumerable: true, get: function () { return base_detector_1.BaseDetector; } });
+// Partitioned detector for multi-chain management (ADR-003, S3.1)
+var partitioned_detector_1 = require("./partitioned-detector");
+Object.defineProperty(exports, "PartitionedDetector", { enumerable: true, get: function () { return partitioned_detector_1.PartitionedDetector; } });
+// =============================================================================
+// REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
+// =============================================================================
+// REF-1/ARCH-1: Shared arbitrage calculation logic
+var arbitrage_calculator_1 = require("./arbitrage-calculator");
+// P0-1 FIX: Precision-safe BigInt utilities
+Object.defineProperty(exports, "safeBigIntDivision", { enumerable: true, get: function () { return arbitrage_calculator_1.safeBigIntDivision; } });
+Object.defineProperty(exports, "calculatePriceFromReserves", { enumerable: true, get: function () { return arbitrage_calculator_1.calculatePriceFromReserves; } });
+Object.defineProperty(exports, "calculatePriceFromBigIntReserves", { enumerable: true, get: function () { return arbitrage_calculator_1.calculatePriceFromBigIntReserves; } });
+Object.defineProperty(exports, "invertPrice", { enumerable: true, get: function () { return arbitrage_calculator_1.invertPrice; } });
+Object.defineProperty(exports, "calculatePriceDifferencePercent", { enumerable: true, get: function () { return arbitrage_calculator_1.calculatePriceDifferencePercent; } });
+Object.defineProperty(exports, "isSameTokenPair", { enumerable: true, get: function () { return arbitrage_calculator_1.isSameTokenPair; } });
+Object.defineProperty(exports, "isReverseOrder", { enumerable: true, get: function () { return arbitrage_calculator_1.isReverseOrder; } });
+Object.defineProperty(exports, "getMinProfitThreshold", { enumerable: true, get: function () { return arbitrage_calculator_1.getMinProfitThreshold; } });
+Object.defineProperty(exports, "getDefaultFee", { enumerable: true, get: function () { return arbitrage_calculator_1.getDefaultFee; } });
+Object.defineProperty(exports, "calculateIntraChainArbitrage", { enumerable: true, get: function () { return arbitrage_calculator_1.calculateIntraChainArbitrage; } });
+Object.defineProperty(exports, "calculateCrossChainArbitrage", { enumerable: true, get: function () { return arbitrage_calculator_1.calculateCrossChainArbitrage; } });
+Object.defineProperty(exports, "validatePairSnapshot", { enumerable: true, get: function () { return arbitrage_calculator_1.validatePairSnapshot; } });
+Object.defineProperty(exports, "createPairSnapshot", { enumerable: true, get: function () { return arbitrage_calculator_1.createPairSnapshot; } });
+// REF-2: Shared message validation utilities
+var message_validators_1 = require("./message-validators");
+Object.defineProperty(exports, "validatePriceUpdate", { enumerable: true, get: function () { return message_validators_1.validatePriceUpdate; } });
+Object.defineProperty(exports, "validateWhaleTransaction", { enumerable: true, get: function () { return message_validators_1.validateWhaleTransaction; } });
+Object.defineProperty(exports, "validateSwapEvent", { enumerable: true, get: function () { return message_validators_1.validateSwapEvent; } });
+Object.defineProperty(exports, "validateReserveUpdate", { enumerable: true, get: function () { return message_validators_1.validateReserveUpdate; } });
+Object.defineProperty(exports, "validateCoordinatorCommand", { enumerable: true, get: function () { return message_validators_1.validateCoordinatorCommand; } });
+Object.defineProperty(exports, "validateServiceHealthStatus", { enumerable: true, get: function () { return message_validators_1.validateServiceHealthStatus; } });
+Object.defineProperty(exports, "validateMessage", { enumerable: true, get: function () { return message_validators_1.validateMessage; } });
+Object.defineProperty(exports, "validateBatch", { enumerable: true, get: function () { return message_validators_1.validateBatch; } });
+Object.defineProperty(exports, "createPriceUpdate", { enumerable: true, get: function () { return message_validators_1.createPriceUpdate; } });
+Object.defineProperty(exports, "createWhaleTransaction", { enumerable: true, get: function () { return message_validators_1.createWhaleTransaction; } });
+Object.defineProperty(exports, "createCoordinatorCommand", { enumerable: true, get: function () { return message_validators_1.createCoordinatorCommand; } });
+// REF-3/ARCH-2: Standardized error handling
+var error_handling_1 = require("./error-handling");
+Object.defineProperty(exports, "BaseArbitrageError", { enumerable: true, get: function () { return error_handling_1.ArbitrageError; } });
+Object.defineProperty(exports, "ConnectionError", { enumerable: true, get: function () { return error_handling_1.ConnectionError; } });
+Object.defineProperty(exports, "SharedValidationError", { enumerable: true, get: function () { return error_handling_1.ValidationError; } });
+Object.defineProperty(exports, "LifecycleError", { enumerable: true, get: function () { return error_handling_1.LifecycleError; } });
+Object.defineProperty(exports, "ExecutionError", { enumerable: true, get: function () { return error_handling_1.ExecutionError; } });
+Object.defineProperty(exports, "ErrorCode", { enumerable: true, get: function () { return error_handling_1.ErrorCode; } });
+Object.defineProperty(exports, "ErrorSeverity", { enumerable: true, get: function () { return error_handling_1.ErrorSeverity; } });
+Object.defineProperty(exports, "success", { enumerable: true, get: function () { return error_handling_1.success; } });
+Object.defineProperty(exports, "failure", { enumerable: true, get: function () { return error_handling_1.failure; } });
+Object.defineProperty(exports, "tryCatch", { enumerable: true, get: function () { return error_handling_1.tryCatch; } });
+Object.defineProperty(exports, "tryCatchSync", { enumerable: true, get: function () { return error_handling_1.tryCatchSync; } });
+Object.defineProperty(exports, "isRetryableErrorCheck", { enumerable: true, get: function () { return error_handling_1.isRetryableError; } });
+Object.defineProperty(exports, "isCriticalError", { enumerable: true, get: function () { return error_handling_1.isCriticalError; } });
+Object.defineProperty(exports, "getErrorSeverity", { enumerable: true, get: function () { return error_handling_1.getErrorSeverity; } });
+Object.defineProperty(exports, "formatErrorForLog", { enumerable: true, get: function () { return error_handling_1.formatErrorForLog; } });
+Object.defineProperty(exports, "formatErrorForResponse", { enumerable: true, get: function () { return error_handling_1.formatErrorForResponse; } });
+Object.defineProperty(exports, "ErrorAggregator", { enumerable: true, get: function () { return error_handling_1.ErrorAggregator; } });
+// REF-4/ARCH-3: Shared async utilities
+var async_utils_1 = require("./async-utils");
+Object.defineProperty(exports, "TimeoutError", { enumerable: true, get: function () { return async_utils_1.TimeoutError; } });
+Object.defineProperty(exports, "withTimeout", { enumerable: true, get: function () { return async_utils_1.withTimeout; } });
+Object.defineProperty(exports, "withTimeoutDefault", { enumerable: true, get: function () { return async_utils_1.withTimeoutDefault; } });
+Object.defineProperty(exports, "withTimeoutSafe", { enumerable: true, get: function () { return async_utils_1.withTimeoutSafe; } });
+Object.defineProperty(exports, "withRetryAsync", { enumerable: true, get: function () { return async_utils_1.withRetry; } });
+Object.defineProperty(exports, "sleep", { enumerable: true, get: function () { return async_utils_1.sleep; } });
+Object.defineProperty(exports, "createDeferred", { enumerable: true, get: function () { return async_utils_1.createDeferred; } });
+Object.defineProperty(exports, "mapConcurrent", { enumerable: true, get: function () { return async_utils_1.mapConcurrent; } });
+Object.defineProperty(exports, "mapSequential", { enumerable: true, get: function () { return async_utils_1.mapSequential; } });
+Object.defineProperty(exports, "debounceAsync", { enumerable: true, get: function () { return async_utils_1.debounceAsync; } });
+Object.defineProperty(exports, "throttleAsync", { enumerable: true, get: function () { return async_utils_1.throttleAsync; } });
+Object.defineProperty(exports, "gracefulShutdown", { enumerable: true, get: function () { return async_utils_1.gracefulShutdown; } });
+Object.defineProperty(exports, "waitWithTimeouts", { enumerable: true, get: function () { return async_utils_1.waitWithTimeouts; } });
+// Partition service utilities (P12-P16 refactor)
+var partition_service_utils_1 = require("./partition-service-utils");
+Object.defineProperty(exports, "parsePort", { enumerable: true, get: function () { return partition_service_utils_1.parsePort; } });
+Object.defineProperty(exports, "validateAndFilterChains", { enumerable: true, get: function () { return partition_service_utils_1.validateAndFilterChains; } });
+Object.defineProperty(exports, "createPartitionHealthServer", { enumerable: true, get: function () { return partition_service_utils_1.createPartitionHealthServer; } });
+Object.defineProperty(exports, "shutdownPartitionService", { enumerable: true, get: function () { return partition_service_utils_1.shutdownPartitionService; } });
+Object.defineProperty(exports, "setupDetectorEventHandlers", { enumerable: true, get: function () { return partition_service_utils_1.setupDetectorEventHandlers; } });
+Object.defineProperty(exports, "setupProcessHandlers", { enumerable: true, get: function () { return partition_service_utils_1.setupProcessHandlers; } });
+Object.defineProperty(exports, "SHUTDOWN_TIMEOUT_MS", { enumerable: true, get: function () { return partition_service_utils_1.SHUTDOWN_TIMEOUT_MS; } });
+// Partition Router (S3.1.7 - Detector Migration)
+var partition_router_1 = require("./partition-router");
+Object.defineProperty(exports, "PartitionRouter", { enumerable: true, get: function () { return partition_router_1.PartitionRouter; } });
+Object.defineProperty(exports, "createDeprecationWarning", { enumerable: true, get: function () { return partition_router_1.createDeprecationWarning; } });
+Object.defineProperty(exports, "isDeprecatedPattern", { enumerable: true, get: function () { return partition_router_1.isDeprecatedPattern; } });
+Object.defineProperty(exports, "getMigrationRecommendation", { enumerable: true, get: function () { return partition_router_1.getMigrationRecommendation; } });
+Object.defineProperty(exports, "warnIfDeprecated", { enumerable: true, get: function () { return partition_router_1.warnIfDeprecated; } });
+// P1-1/P1-2-FIX: Export constants as single source of truth
+Object.defineProperty(exports, "PARTITION_PORTS", { enumerable: true, get: function () { return partition_router_1.PARTITION_PORTS; } });
+Object.defineProperty(exports, "PARTITION_SERVICE_NAMES", { enumerable: true, get: function () { return partition_router_1.PARTITION_SERVICE_NAMES; } });
+// Simulation Mode for Local Testing
+var simulation_mode_1 = require("./simulation-mode");
+Object.defineProperty(exports, "PriceSimulator", { enumerable: true, get: function () { return simulation_mode_1.PriceSimulator; } });
+Object.defineProperty(exports, "getSimulator", { enumerable: true, get: function () { return simulation_mode_1.getSimulator; } });
+Object.defineProperty(exports, "isSimulationMode", { enumerable: true, get: function () { return simulation_mode_1.isSimulationMode; } });
+Object.defineProperty(exports, "SIMULATION_CONFIG", { enumerable: true, get: function () { return simulation_mode_1.SIMULATION_CONFIG; } });
+// P0-2 FIX: Nonce Manager for Transaction Sequencing
+// CRITICAL-4 FIX: Added getNonceManagerAsync for race-safe initialization
+var nonce_manager_1 = require("./nonce-manager");
+Object.defineProperty(exports, "NonceManager", { enumerable: true, get: function () { return nonce_manager_1.NonceManager; } });
+Object.defineProperty(exports, "getNonceManager", { enumerable: true, get: function () { return nonce_manager_1.getNonceManager; } });
+Object.defineProperty(exports, "getNonceManagerAsync", { enumerable: true, get: function () { return nonce_manager_1.getNonceManagerAsync; } });
+Object.defineProperty(exports, "resetNonceManager", { enumerable: true, get: function () { return nonce_manager_1.resetNonceManager; } });
 //# sourceMappingURL=index.js.map
