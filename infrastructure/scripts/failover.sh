@@ -58,14 +58,24 @@ log_error() { echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 log_debug() { [ "$DEBUG" = "true" ] && echo -e "${BLUE}[DEBUG]${NC} $(date '+%Y-%m-%d %H:%M:%S') $1"; }
 
 # Service endpoints (configure via environment or config file)
+# Helper function to build health endpoint URL safely
+build_health_url() {
+    local base_url="$1"
+    if [ -n "$base_url" ]; then
+        echo "${base_url}/health"
+    else
+        echo ""  # Return empty if no URL configured
+    fi
+}
+
 declare -A SERVICE_ENDPOINTS=(
-    ["coordinator-primary"]="${COORDINATOR_PRIMARY_URL:-http://localhost:3000}/health"
-    ["coordinator-standby"]="${COORDINATOR_STANDBY_URL:-}/health"
-    ["partition-asia-fast"]="${PARTITION_ASIA_FAST_URL:-http://localhost:3011}/health"
-    ["partition-l2-fast"]="${PARTITION_L2_FAST_URL:-http://localhost:3012}/health"
-    ["partition-high-value"]="${PARTITION_HIGH_VALUE_URL:-http://localhost:3013}/health"
-    ["cross-chain-detector"]="${CROSS_CHAIN_URL:-http://localhost:3014}/health"
-    ["execution-engine"]="${EXECUTION_URL:-http://localhost:3015}/health"
+    ["coordinator-primary"]="$(build_health_url "${COORDINATOR_PRIMARY_URL:-http://localhost:3000}")"
+    ["coordinator-standby"]="$(build_health_url "${COORDINATOR_STANDBY_URL:-}")"
+    ["partition-asia-fast"]="$(build_health_url "${PARTITION_ASIA_FAST_URL:-http://localhost:3011}")"
+    ["partition-l2-fast"]="$(build_health_url "${PARTITION_L2_FAST_URL:-http://localhost:3012}")"
+    ["partition-high-value"]="$(build_health_url "${PARTITION_HIGH_VALUE_URL:-http://localhost:3013}")"
+    ["cross-chain-detector"]="$(build_health_url "${CROSS_CHAIN_URL:-http://localhost:3014}")"
+    ["execution-engine"]="$(build_health_url "${EXECUTION_URL:-http://localhost:3015}")"
 )
 
 # Standby service mappings
@@ -125,7 +135,8 @@ check_service_health() {
     local service=$1
     local endpoint=${SERVICE_ENDPOINTS[$service]}
 
-    if [ -z "$endpoint" ] || [ "$endpoint" = "/health" ]; then
+    # Skip if endpoint is empty (not configured)
+    if [ -z "$endpoint" ]; then
         log_debug "Service $service not configured, skipping"
         return 2
     fi
@@ -155,7 +166,8 @@ check_all_health() {
 
     for service in "${!SERVICE_ENDPOINTS[@]}"; do
         local endpoint="${SERVICE_ENDPOINTS[$service]:-}"
-        if [ -z "$endpoint" ] || [ "$endpoint" = "/health" ]; then
+        # Skip if endpoint is empty (not configured)
+        if [ -z "$endpoint" ]; then
             printf "%-25s %-10s %-15s\n" "$service" "SKIPPED" "-"
             continue
         fi

@@ -106,10 +106,11 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
       expect(config.env.NODE_ENV).toBe('production');
     });
 
-    it('should configure correct memory limit', () => {
-      const vm = config.vm?.[0] || config['[[vm]]'];
-      expect(config['[[vm]]'] || config.vm).toBeDefined();
-      // Memory should be 384MB for l2-fast partition
+    it('should configure correct memory limit (384MB for l2-fast)', () => {
+      expect(config.vm).toBeDefined();
+      expect(config.vm.memory_mb).toBe(384);
+      expect(config.vm.cpus).toBe(1);
+      expect(config.vm.cpu_kind).toBe('shared');
     });
 
     it('should enable health checks', () => {
@@ -489,22 +490,20 @@ describe('Phase 3: Configuration Consistency', () => {
 
     it('should use consistent ports in failover script', () => {
       const scriptPath = path.join(SCRIPTS_DIR, 'failover.sh');
-      if (fileExists(scriptPath)) {
-        const content = readFile(scriptPath);
-        expect(content).toContain(':3011');
-        expect(content).toContain(':3012');
-        expect(content).toContain(':3013');
-      }
+      expect(fileExists(scriptPath)).toBe(true);  // Fail fast if file missing
+      const content = readFile(scriptPath);
+      expect(content).toContain(':3011');
+      expect(content).toContain(':3012');
+      expect(content).toContain(':3013');
     });
 
     it('should use consistent ports in health-check script', () => {
       const scriptPath = path.join(SCRIPTS_DIR, 'health-check.sh');
-      if (fileExists(scriptPath)) {
-        const content = readFile(scriptPath);
-        expect(content).toContain(':3011');
-        expect(content).toContain(':3012');
-        expect(content).toContain(':3013');
-      }
+      expect(fileExists(scriptPath)).toBe(true);  // Fail fast if file missing
+      const content = readFile(scriptPath);
+      expect(content).toContain(':3011');
+      expect(content).toContain(':3012');
+      expect(content).toContain(':3013');
     });
   });
 
@@ -512,18 +511,16 @@ describe('Phase 3: Configuration Consistency', () => {
     it('should assign asia-fast to Singapore/Asia-Southeast', () => {
       // Fly.io uses 'sin' for Singapore
       const flyConfig = path.join(FLY_DIR, 'partition-l2-fast.toml');
-      if (fileExists(flyConfig)) {
-        const content = readFile(flyConfig);
-        expect(content).toContain('sin');
-      }
+      expect(fileExists(flyConfig)).toBe(true);  // Fail fast if file missing
+      const content = readFile(flyConfig);
+      expect(content).toContain('sin');
     });
 
     it('should assign high-value to US-East', () => {
       const tfConfig = path.join(ORACLE_DIR, 'variables.tf');
-      if (fileExists(tfConfig)) {
-        const content = readFile(tfConfig);
-        expect(content).toContain('us-ashburn-1');
-      }
+      expect(fileExists(tfConfig)).toBe(true);  // Fail fast if file missing
+      const content = readFile(tfConfig);
+      expect(content).toContain('us-ashburn-1');
     });
   });
 
@@ -532,27 +529,23 @@ describe('Phase 3: Configuration Consistency', () => {
       const flyStandby = path.join(FLY_DIR, 'coordinator-standby.toml');
       const gcpStandby = path.join(GCP_DIR, 'coordinator-standby.yaml');
 
-      if (fileExists(flyStandby)) {
-        const content = readFile(flyStandby);
-        expect(content).toContain('IS_STANDBY');
-        expect(content).toContain('"true"');
-      }
+      expect(fileExists(flyStandby)).toBe(true);  // Fail fast if file missing
+      const flyContent = readFile(flyStandby);
+      expect(flyContent).toContain('IS_STANDBY');
+      expect(flyContent).toContain('"true"');
 
-      if (fileExists(gcpStandby)) {
-        const content = readFile(gcpStandby);
-        expect(content).toContain('IS_STANDBY');
-        expect(content).toContain('true');
-      }
+      expect(fileExists(gcpStandby)).toBe(true);  // Fail fast if file missing
+      const gcpContent = readFile(gcpStandby);
+      expect(gcpContent).toContain('IS_STANDBY');
+      expect(gcpContent).toContain('true');
     });
 
     it('should enable leader election on standby', () => {
       const flyStandby = path.join(FLY_DIR, 'coordinator-standby.toml');
-
-      if (fileExists(flyStandby)) {
-        const content = readFile(flyStandby);
-        expect(content).toContain('CAN_BECOME_LEADER');
-        expect(content).toContain('"true"');
-      }
+      expect(fileExists(flyStandby)).toBe(true);  // Fail fast if file missing
+      const content = readFile(flyStandby);
+      expect(content).toContain('CAN_BECOME_LEADER');
+      expect(content).toContain('"true"');
     });
   });
 });
@@ -569,11 +562,10 @@ describe('Phase 3: ADR Compliance', () => {
 
       // asia-fast and high-value on Oracle Cloud
       const tfMain = path.join(ORACLE_DIR, 'main.tf');
-      if (fileExists(tfMain)) {
-        const content = readFile(tfMain);
-        expect(content).toContain('asia_fast_partition');
-        expect(content).toContain('high_value_partition');
-      }
+      expect(fileExists(tfMain)).toBe(true);  // Fail fast if file missing
+      const content = readFile(tfMain);
+      expect(content).toContain('asia_fast_partition');
+      expect(content).toContain('high_value_partition');
     });
   });
 
@@ -605,17 +597,15 @@ describe('Phase 3: ADR Compliance', () => {
 
     it('should configure health checks in all deployment configs', () => {
       const flyL2Fast = path.join(FLY_DIR, 'partition-l2-fast.toml');
-      if (fileExists(flyL2Fast)) {
-        const content = readFile(flyL2Fast);
-        expect(content).toContain('health');
-      }
+      expect(fileExists(flyL2Fast)).toBe(true);  // Fail fast if file missing
+      const flyContent = readFile(flyL2Fast);
+      expect(flyContent).toContain('health');
 
       const gcpStandby = path.join(GCP_DIR, 'coordinator-standby.yaml');
-      if (fileExists(gcpStandby)) {
-        const content = readFile(gcpStandby);
-        expect(content).toContain('livenessProbe');
-        expect(content).toContain('readinessProbe');
-      }
+      expect(fileExists(gcpStandby)).toBe(true);  // Fail fast if file missing
+      const gcpContent = readFile(gcpStandby);
+      expect(gcpContent).toContain('livenessProbe');
+      expect(gcpContent).toContain('readinessProbe');
     });
   });
 });

@@ -76,15 +76,23 @@ write_files:
     content: |
       [Unit]
       Description=Arbitrage Cross-Chain Detector Service
-      After=docker.service
+      After=docker.service network-online.target
       Requires=docker.service
+      Wants=network-online.target
+      # Wait for Docker to be fully ready
+      ConditionPathExists=/var/run/docker.sock
 
       [Service]
       Type=oneshot
       RemainAfterExit=yes
       WorkingDirectory=/opt/arbitrage
+      # Ensure Docker is ready before starting
+      ExecStartPre=/bin/sleep 5
       ExecStart=/usr/bin/docker-compose up -d
       ExecStop=/usr/bin/docker-compose down
+      # Restart on failure with backoff
+      Restart=on-failure
+      RestartSec=10
 
       [Install]
       WantedBy=multi-user.target
@@ -95,17 +103,89 @@ write_files:
       */5 * * * * root /opt/arbitrage/scripts/health-check.sh || /opt/arbitrage/scripts/restart-service.sh >> /var/log/arbitrage-restart.log 2>&1
 
 runcmd:
+  # ==========================================================================
+  # Validate required template variables before proceeding
+  # ==========================================================================
+  - |
+    set -e
+    LOG_FILE="/var/log/arbitrage-init.log"
+
+    validate_var() {
+      local name="$1"
+      local value="$2"
+      local pattern="$3"
+
+      if [ -z "$value" ]; then
+        echo "$(date): ERROR: Required variable $name is empty" >> "$LOG_FILE"
+        exit 1
+      fi
+
+      if [ -n "$pattern" ]; then
+        if ! echo "$value" | grep -qE "$pattern"; then
+          echo "$(date): ERROR: Variable $name has invalid format: $value" >> "$LOG_FILE"
+          exit 1
+        fi
+      fi
+    }
+
+    echo "$(date): Starting template variable validation..." >> "$LOG_FILE"
+
+    # Validate critical variables with safe patterns
+    validate_var "docker_image" "${docker_image}" "^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$"
+    validate_var "redis_url" "${redis_url}" "^redis(s)?://"
+    validate_var "log_level" "${log_level}" "^(debug|info|warn|error)$"
+
+    echo "$(date): All template variables validated successfully" >> "$LOG_FILE"
+
+  # Start and enable Docker
   - systemctl start docker
   - systemctl enable docker
+
+  # Wait for Docker to be fully operational (prevents race condition)
+  - |
+    echo "$(date): Waiting for Docker to be ready..." >> /var/log/arbitrage-init.log
+    for i in $(seq 1 30); do
+      if docker info >/dev/null 2>&1; then
+        echo "$(date): Docker is ready" >> /var/log/arbitrage-init.log
+        break
+      fi
+      echo "$(date): Waiting for Docker... attempt $i/30" >> /var/log/arbitrage-init.log
+      sleep 2
+    done
+
+  # Add opc user to docker group
   - usermod -aG docker opc
+
+  # Create arbitrage directories
   - mkdir -p /opt/arbitrage/scripts /opt/arbitrage/logs
+
+  # Set ownership
   - chown -R opc:opc /opt/arbitrage
-  - cd /opt/arbitrage && docker-compose pull
-  - cd /opt/arbitrage && docker-compose up -d
+
+  # Pull and start the service with error handling
+  - |
+    cd /opt/arbitrage
+    echo "$(date): Pulling Docker image..." >> /var/log/arbitrage-init.log
+    if ! docker-compose pull 2>> /var/log/arbitrage-init.log; then
+      echo "$(date): ERROR: Failed to pull Docker image" >> /var/log/arbitrage-init.log
+      exit 1
+    fi
+    echo "$(date): Starting service..." >> /var/log/arbitrage-init.log
+    if ! docker-compose up -d 2>> /var/log/arbitrage-init.log; then
+      echo "$(date): ERROR: Failed to start service" >> /var/log/arbitrage-init.log
+      exit 1
+    fi
+    echo "$(date): Service started successfully" >> /var/log/arbitrage-init.log
+
+  # Enable systemd service
   - systemctl daemon-reload
   - systemctl enable arbitrage-cross-chain
+
+  # Open firewall for health port
   - firewall-cmd --permanent --add-port=3014/tcp
   - firewall-cmd --reload
-  - echo "Cross-chain detector initialized at $(date)" >> /var/log/arbitrage-init.log
+
+  # Log completion
+  - echo "$(date): Cross-chain detector initialized successfully" >> /var/log/arbitrage-init.log
 
 final_message: "Cross-chain detector initialized successfully!"
