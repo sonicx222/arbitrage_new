@@ -4,20 +4,25 @@
 # using the UnifiedChainDetector service with partition-based configuration.
 #
 # Partitions:
-# - partition-asia-fast: BSC + Polygon (asia-southeast1, heavy resources)
-# - partition-l2-fast: Arbitrum + Optimism + Base (asia-southeast1, standard resources)
-# - partition-high-value: Ethereum (us-east1, heavy resources)
+# - partition-asia-fast: BSC + Polygon + Avalanche + Fantom (asia-southeast1, heavy resources)
+# - partition-l2-turbo: Arbitrum + Optimism + Base (asia-southeast1, standard resources)
+# - partition-high-value: Ethereum + zkSync + Linea (us-east1, heavy resources)
+# - partition-solana: Solana (us-west1, heavy resources)
 #
 # ============================================================================
 # REQUIRED Environment Variables (create .env file or export before running):
 # ============================================================================
-# Partition asia-fast (BSC + Polygon):
-#   BSC_WS_URL      - WebSocket URL for BSC (e.g., wss://bsc.example.com)
-#   BSC_RPC_URL     - RPC URL for BSC (e.g., https://bsc.example.com)
-#   POLYGON_WS_URL  - WebSocket URL for Polygon
-#   POLYGON_RPC_URL - RPC URL for Polygon
+# Partition asia-fast (BSC + Polygon + Avalanche + Fantom):
+#   BSC_WS_URL        - WebSocket URL for BSC (e.g., wss://bsc.example.com)
+#   BSC_RPC_URL       - RPC URL for BSC (e.g., https://bsc.example.com)
+#   POLYGON_WS_URL    - WebSocket URL for Polygon
+#   POLYGON_RPC_URL   - RPC URL for Polygon
+#   AVALANCHE_WS_URL  - WebSocket URL for Avalanche
+#   AVALANCHE_RPC_URL - RPC URL for Avalanche
+#   FANTOM_WS_URL     - WebSocket URL for Fantom
+#   FANTOM_RPC_URL    - RPC URL for Fantom
 #
-# Partition l2-fast (Arbitrum + Optimism + Base):
+# Partition l2-turbo (Arbitrum + Optimism + Base):
 #   ARBITRUM_WS_URL  - WebSocket URL for Arbitrum
 #   ARBITRUM_RPC_URL - RPC URL for Arbitrum
 #   OPTIMISM_WS_URL  - WebSocket URL for Optimism
@@ -25,9 +30,13 @@
 #   BASE_WS_URL      - WebSocket URL for Base
 #   BASE_RPC_URL     - RPC URL for Base
 #
-# Partition high-value (Ethereum):
+# Partition high-value (Ethereum + zkSync + Linea):
 #   ETHEREUM_WS_URL  - WebSocket URL for Ethereum
 #   ETHEREUM_RPC_URL - RPC URL for Ethereum
+#   ZKSYNC_WS_URL    - WebSocket URL for zkSync Era
+#   ZKSYNC_RPC_URL   - RPC URL for zkSync Era
+#   LINEA_WS_URL     - WebSocket URL for Linea
+#   LINEA_RPC_URL    - RPC URL for Linea
 #
 # Execution Engine (private keys - KEEP SECURE):
 #   ETHEREUM_PRIVATE_KEY - Private key for Ethereum transactions
@@ -71,7 +80,7 @@ services:
   # Partitioned Chain Detectors (ADR-003)
   # =============================================================================
 
-  # Partition: asia-fast (BSC + Polygon)
+  # Partition: asia-fast (BSC + Polygon + Avalanche + Fantom)
   # Region: asia-southeast1, Provider: oracle, Profile: heavy
   partition-asia-fast:
     build:
@@ -80,6 +89,7 @@ services:
     environment:
       - NODE_ENV=production
       - PARTITION_ID=asia-fast
+      - PARTITION_CHAINS=bsc,polygon,avalanche,fantom
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-asia-fast-${HOSTNAME:-local}
       - REDIS_URL=redis://redis:6379
@@ -91,6 +101,10 @@ services:
       - BSC_RPC_URL=${BSC_RPC_URL:?BSC_RPC_URL is required}
       - POLYGON_WS_URL=${POLYGON_WS_URL:?POLYGON_WS_URL is required}
       - POLYGON_RPC_URL=${POLYGON_RPC_URL:?POLYGON_RPC_URL is required}
+      - AVALANCHE_WS_URL=${AVALANCHE_WS_URL:?AVALANCHE_WS_URL is required}
+      - AVALANCHE_RPC_URL=${AVALANCHE_RPC_URL:?AVALANCHE_RPC_URL is required}
+      - FANTOM_WS_URL=${FANTOM_WS_URL:?FANTOM_WS_URL is required}
+      - FANTOM_RPC_URL=${FANTOM_RPC_URL:?FANTOM_RPC_URL is required}
     ports:
       - "3011:3001"
     depends_on:
@@ -99,10 +113,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 768M
           cpus: '1.0'
         reservations:
-          memory: 256M
+          memory: 384M
           cpus: '0.5'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
@@ -115,21 +129,22 @@ services:
     restart: unless-stopped
     labels:
       - "com.arbitrage.partition=asia-fast"
-      - "com.arbitrage.chains=bsc,polygon"
+      - "com.arbitrage.chains=bsc,polygon,avalanche,fantom"
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=heavy"
 
-  # Partition: l2-fast (Arbitrum + Optimism + Base)
+  # Partition: l2-turbo (Arbitrum + Optimism + Base)
   # Region: asia-southeast1, Provider: fly, Profile: standard
-  partition-l2-fast:
+  partition-l2-turbo:
     build:
       context: ../..
       dockerfile: services/unified-detector/Dockerfile
     environment:
       - NODE_ENV=production
-      - PARTITION_ID=l2-fast
+      - PARTITION_ID=l2-turbo
+      - PARTITION_CHAINS=arbitrum,optimism,base
       - REGION_ID=asia-southeast1
-      - INSTANCE_ID=partition-l2-fast-${HOSTNAME:-local}
+      - INSTANCE_ID=partition-l2-turbo-${HOSTNAME:-local}
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
@@ -149,10 +164,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 512M
           cpus: '0.75'
         reservations:
-          memory: 192M
+          memory: 256M
           cpus: '0.25'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
@@ -164,12 +179,12 @@ services:
       - arbitrage-network
     restart: unless-stopped
     labels:
-      - "com.arbitrage.partition=l2-fast"
+      - "com.arbitrage.partition=l2-turbo"
       - "com.arbitrage.chains=arbitrum,optimism,base"
       - "com.arbitrage.region=asia-southeast1"
       - "com.arbitrage.profile=standard"
 
-  # Partition: high-value (Ethereum)
+  # Partition: high-value (Ethereum + zkSync + Linea)
   # Region: us-east1, Provider: oracle, Profile: heavy
   partition-high-value:
     build:
@@ -178,6 +193,7 @@ services:
     environment:
       - NODE_ENV=production
       - PARTITION_ID=high-value
+      - PARTITION_CHAINS=ethereum,zksync,linea
       - REGION_ID=us-east1
       - INSTANCE_ID=partition-high-value-${HOSTNAME:-local}
       - REDIS_URL=redis://redis:6379
@@ -187,8 +203,60 @@ services:
       # Chain-specific RPC URLs (REQUIRED - no defaults, will fail if not set)
       - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:?ETHEREUM_WS_URL is required}
       - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:?ETHEREUM_RPC_URL is required}
+      - ZKSYNC_WS_URL=${ZKSYNC_WS_URL:?ZKSYNC_WS_URL is required}
+      - ZKSYNC_RPC_URL=${ZKSYNC_RPC_URL:?ZKSYNC_RPC_URL is required}
+      - LINEA_WS_URL=${LINEA_WS_URL:?LINEA_WS_URL is required}
+      - LINEA_RPC_URL=${LINEA_RPC_URL:?LINEA_RPC_URL is required}
     ports:
       - "3013:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: '1.0'
+        reservations:
+          memory: 384M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    networks:
+      - arbitrage-network
+    restart: unless-stopped
+    labels:
+      - "com.arbitrage.partition=high-value"
+      - "com.arbitrage.chains=ethereum,zksync,linea"
+      - "com.arbitrage.region=us-east1"
+      - "com.arbitrage.profile=heavy"
+
+  # Partition: solana-native (Solana)
+  # Region: us-west1, Provider: fly, Profile: heavy
+  # NOTE: Solana is non-EVM and requires dedicated connection handling
+  partition-solana:
+    build:
+      context: ../..
+      dockerfile: services/partition-solana/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PARTITION_ID=solana-native
+      - PARTITION_CHAINS=solana
+      - REGION_ID=us-west1
+      - INSTANCE_ID=partition-solana-${HOSTNAME:-local}
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - HEALTH_CHECK_PORT=3001
+      - ENABLE_CROSS_REGION_HEALTH=true
+      # Solana RPC URLs (REQUIRED - no defaults, will fail if not set)
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL:?SOLANA_RPC_URL is required}
+      - SOLANA_WS_URL=${SOLANA_WS_URL:?SOLANA_WS_URL is required}
+    ports:
+      - "3016:3001"
     depends_on:
       redis:
         condition: service_healthy
@@ -202,7 +270,7 @@ services:
           cpus: '0.5'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
-      interval: 30s
+      interval: 10s
       timeout: 10s
       start_period: 30s
       retries: 3
@@ -210,9 +278,9 @@ services:
       - arbitrage-network
     restart: unless-stopped
     labels:
-      - "com.arbitrage.partition=high-value"
-      - "com.arbitrage.chains=ethereum"
-      - "com.arbitrage.region=us-east1"
+      - "com.arbitrage.partition=solana-native"
+      - "com.arbitrage.chains=solana"
+      - "com.arbitrage.region=us-west1"
       - "com.arbitrage.profile=heavy"
 
   # =============================================================================
@@ -237,9 +305,11 @@ services:
         condition: service_healthy
       partition-asia-fast:
         condition: service_healthy
-      partition-l2-fast:
+      partition-l2-turbo:
         condition: service_healthy
       partition-high-value:
+        condition: service_healthy
+      partition-solana:
         condition: service_healthy
     deploy:
       resources:
@@ -321,7 +391,7 @@ services:
         condition: service_healthy
       partition-asia-fast:
         condition: service_healthy
-      partition-l2-fast:
+      partition-l2-turbo:
         condition: service_healthy
       partition-high-value:
         condition: service_healthy
