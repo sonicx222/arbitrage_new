@@ -44,8 +44,9 @@ describe('ExpertSelfHealingManager', () => {
   let selfHealingManager: ExpertSelfHealingManager;
   let mockRedis: any;
 
-  beforeEach(() => {
-    resetRedisInstance();
+  beforeEach(async () => {
+    // P0-FIX: await async reset
+    await resetRedisInstance();
 
     mockRedis = {
       publish: jest.fn(() => Promise.resolve(1)),

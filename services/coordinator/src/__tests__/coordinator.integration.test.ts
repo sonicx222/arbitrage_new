@@ -139,9 +139,10 @@ jest.mock('../../../../shared/core/src', () => ({
 describe('CoordinatorService Integration', () => {
   let coordinator: CoordinatorService;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
-    resetRedisInstance();
+    // P0-FIX: await async reset
+    await resetRedisInstance();
     // P1-8 FIX: Reset mock state for clean tests
     mockIsRunning = false;
 

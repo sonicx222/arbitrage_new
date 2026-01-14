@@ -339,21 +339,6 @@ export class CrossDexTriangularArbitrage {
     return { amountOutBigInt, step };
   }
 
-  /**
-   * CRITICAL-3 FIX: Removed deprecated simulateSwap() method.
-   *
-   * The legacy float-based swap simulation had precision issues with large
-   * reserve values (> 2^53). All callers should now use simulateSwapBigInt()
-   * which uses BigInt arithmetic for precise wei calculations.
-   *
-   * Migration completed:
-   * - All internal calls now use simulateSwapBigInt()
-   * - External callers should use simulateSwapBigInt() with BigInt amountIn
-   *
-   * @see simulateSwapBigInt - The replacement with BigInt precision
-   */
-  // Method removed - use simulateSwapBigInt() instead
-
   // Group pools by token pairs for efficient lookup
   private groupPoolsByPairs(pools: DexPool[]): Map<string, DexPool[]> {
     const pairs = new Map<string, DexPool[]>();

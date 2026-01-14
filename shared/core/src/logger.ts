@@ -5,6 +5,9 @@ import * as path from 'path';
 
 const { combine, timestamp, printf, colorize, errors } = format;
 
+// P2-FIX: Export Logger type for consistent type usage across codebase
+export type Logger = winston.Logger;
+
 // Custom log format
 const logFormat = printf(({ level, message, timestamp, service, ...meta }: any) => {
   const serviceName = service || 'unknown';

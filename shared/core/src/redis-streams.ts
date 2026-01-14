@@ -15,7 +15,7 @@
  */
 
 import Redis from 'ioredis';
-import { createLogger } from './logger';
+import { createLogger, Logger } from './logger';
 
 // =============================================================================
 // Types
@@ -115,11 +115,12 @@ export class StreamBatcher<T = Record<string, unknown>> {
     averageBatchSize: 0
   };
 
+  // P2-FIX: Use proper Logger type
   constructor(
     private client: RedisStreamsClient,
     private streamName: string,
     private config: BatcherConfig,
-    private logger: any
+    private logger: Logger
   ) {}
 
   add(message: T): void {
@@ -246,7 +247,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
 
 export class RedisStreamsClient {
   private client: Redis;
-  private logger: any;
+  // P2-FIX: Use proper Logger type
+  private logger: Logger;
   private batchers: Map<string, StreamBatcher> = new Map();
 
   // Standard stream names for the arbitrage system

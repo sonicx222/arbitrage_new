@@ -42,9 +42,9 @@ describe('RedisClient', () => {
   let mockSubClient: any;
   let mockPubClient: any;
 
-  beforeEach(() => {
-    // Reset singleton state
-    resetRedisInstance();
+  beforeEach(async () => {
+    // Reset singleton state (P0-FIX: now async to properly await disconnect)
+    await resetRedisInstance();
 
     // Create new instance for testing
     redisClient = new RedisClient('redis://localhost:6379', 'password');
@@ -89,8 +89,8 @@ describe('RedisClient', () => {
     });
 
     it('should handle concurrent initialization', async () => {
-      // Reset for clean test
-      resetRedisInstance();
+      // Reset for clean test (P0-FIX: await async reset)
+      await resetRedisInstance();
 
       // Start multiple concurrent initializations
       const promises = [

@@ -10,6 +10,7 @@ import {
   createLogger,
   getPerformanceLogger,
   PerformanceLogger,
+  Logger,  // P2-FIX: Import Logger type
   EventBatcher,
   BatchedEvent,
   createEventBatcher,
@@ -81,9 +82,11 @@ export abstract class BaseDetector {
   protected wsManager: WebSocketManager | null = null;
   protected redis: RedisClient | null = null;
   protected streamsClient: RedisStreamsClient | null = null;
-  protected logger: any;
+  // P2-FIX: Use proper Logger type instead of any
+  protected logger: Logger;
   protected perfLogger: PerformanceLogger;
-  protected eventBatcher: any;
+  // P2-FIX: Use proper EventBatcher type instead of any
+  protected eventBatcher: EventBatcher | null = null;
 
   // Stream batchers for efficient Redis command usage (ADR-002)
   protected priceUpdateBatcher: StreamBatcher<any> | null = null;
@@ -430,7 +433,8 @@ export abstract class BaseDetector {
       } catch (error) {
         this.logger.warn('Error flushing event batcher', { error });
       }
-      this.eventBatcher = null as any;
+      // P2-FIX: No need for 'as any' with proper type
+      this.eventBatcher = null;
     }
 
     // Clean up Redis Streams batchers (ADR-002, S1.1.4)
@@ -520,12 +524,17 @@ export abstract class BaseDetector {
 
   /**
    * Start health monitoring interval
+   * P1-FIX: Self-clears interval when stopping to prevent memory leak
    */
   protected startHealthMonitoring(): void {
     const interval = this.config.healthCheckInterval || 30000;
     this.healthMonitoringInterval = setInterval(async () => {
-      // Guard against running during shutdown (check multiple times to prevent races)
+      // P1-FIX: Self-clear when stopping to prevent wasted cycles and memory leak
       if (this.isStopping || !this.isRunning) {
+        if (this.healthMonitoringInterval) {
+          clearInterval(this.healthMonitoringInterval);
+          this.healthMonitoringInterval = null;
+        }
         return;
       }
 
@@ -1206,8 +1215,10 @@ export abstract class BaseDetector {
     try {
       if (message.method === 'eth_subscription') {
         const { result } = message;
-        // Add event to batcher for optimized processing
-        this.eventBatcher.addEvent(result);
+        // P2-FIX: Add null check for eventBatcher
+        if (this.eventBatcher) {
+          this.eventBatcher.addEvent(result);
+        }
       }
     } catch (error) {
       this.logger.error('Failed to process WebSocket message', { error });

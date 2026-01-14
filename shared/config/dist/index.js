@@ -178,13 +178,13 @@ exports.DEXES = {
             name: 'trader_joe', // [H]
             chain: 'arbitrum',
             factoryAddress: '0x1886D09C9Ade0c5DB822D85D21678Db67B6c2982',
-            routerAddress: '0xbeE5c10Cf6E4F68f831E11C1D9E59B43560B3571',
+            routerAddress: '0xBee5C10cF6E4f68f831E11c1d9e59b43560B3571',
             fee: 30
         },
         {
             name: 'zyberswap', // [M]
             chain: 'arbitrum',
-            factoryAddress: '0xAC2ee06A14c52570Ef3B9812Ed240BCe359772e7',
+            factoryAddress: '0xaC2ee06A14c52570Ef3B9812Ed240BCe359772e7',
             routerAddress: '0x16e71B13fE6079B4312063F7E81F76d165Ad32Ad',
             fee: 30
         },
@@ -216,7 +216,7 @@ exports.DEXES = {
         {
             name: 'chronos', // [M] - ve(3,3) DEX
             chain: 'arbitrum',
-            factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cB98CB5B0722', // Chronos Factory
+            factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cb98CB5B0722', // Chronos Factory
             routerAddress: '0xE708aA9E887980750C040a6A2Cb901c37Aa34f3b', // Chronos Router
             fee: 30
         }
@@ -276,7 +276,7 @@ exports.DEXES = {
         {
             name: 'nomiswap', // [M] - Competitive fees
             chain: 'bsc',
-            factoryAddress: '0xd6715A8be3944ec72738F0BFDC739571659D8010',
+            factoryAddress: '0xD6715A8BE3944Ec72738f0bFdc739571659D8010',
             routerAddress: '0xD654953D746f0b114d1F85332Dc43446ac79413d',
             fee: 10 // 0.1% competitive fee
         }
@@ -286,7 +286,7 @@ exports.DEXES = {
         {
             name: 'uniswap_v3', // [C]
             chain: 'base',
-            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FdFD',
+            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
             routerAddress: '0x2626664c2603336E57B271c5C0b26F421741e481',
             fee: 30
         },
@@ -322,14 +322,14 @@ exports.DEXES = {
         {
             name: 'maverick', // [H] - Dynamic fee AMM
             chain: 'base',
-            factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1E',
-            routerAddress: '0x32AED3Bce901DA12ca8F29D3E95Fc3cc54A85fd9',
+            factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1e',
+            routerAddress: '0x32aed3Bce901Da12ca8F29D3e95fC3cc54a85Fd9',
             fee: 1 // 1 bp base fee (dynamic)
         },
         {
             name: 'alienbase', // [M] - Native Base DEX
             chain: 'base',
-            factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14c0FDe7',
+            factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7',
             routerAddress: '0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7',
             fee: 30
         }
@@ -707,7 +707,7 @@ exports.CORE_TOKENS = {
         // Core DeFi
         { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8, chainId: 324 },
         { address: '0x5A7d6b2F92C77FAD6CCaBd7EE0624E64907Eaf3E', symbol: 'ZK', decimals: 18, chainId: 324 },
-        { address: '0x32fd44bB4895705dcA62f5E22ba9e3a6cD3c8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
+        { address: '0x32fD44Bb4895705dca62f5E22ba9e3A6cd3C8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
     ],
     // Linea: 6 tokens
     linea: [
@@ -1145,7 +1145,7 @@ exports.DETECTOR_CONFIG = {
 exports.FLASH_LOAN_PROVIDERS = {
     // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
     ethereum: {
-        address: '0x87870Bcd2C4c2e84A8c3C3a3FcACC94666c0d6Cf',
+        address: '0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF',
         protocol: 'aave_v3',
         fee: 9 // 0.09% flash loan fee
     },

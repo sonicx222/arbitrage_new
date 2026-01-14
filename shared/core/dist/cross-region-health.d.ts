@@ -161,6 +161,9 @@ export declare class CrossRegionHealthManager extends EventEmitter {
     private performHealthCheck;
     private updateOwnRegionHealth;
     private persistRegionHealth;
+    /**
+     * P1-4 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+     */
     private fetchRemoteRegionHealth;
     private updateOwnRegionStatus;
     private evaluateFailoverConditions;
