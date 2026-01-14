@@ -48,7 +48,12 @@ import {
   getPriceOracle,
   PriceOracle
 } from '@arbitrage/core';
-import { ARBITRAGE_CONFIG, calculateBridgeCostUsd } from '@arbitrage/config';
+import {
+  ARBITRAGE_CONFIG,
+  calculateBridgeCostUsd,
+  // S3.2.4-FIX: Import token normalization for cross-chain matching
+  normalizeTokenForCrossChain
+} from '@arbitrage/config';
 import {
   PriceUpdate,
   ArbitrageOpportunity,
@@ -90,6 +95,30 @@ interface CrossChainOpportunity {
 interface MLPredictor {
   predictPriceMovement: () => Promise<{ direction: number; confidence: number }>;
   predictOpportunity: () => Promise<{ confidence: number; expectedProfit: number }>;
+}
+
+// =============================================================================
+// S3.2.4-FIX: Token Pair Normalization Helper
+// =============================================================================
+
+/**
+ * Normalize a token pair string for cross-chain matching.
+ * Handles different token symbol conventions across chains:
+ * - WETH.e (Avalanche) → WETH
+ * - ETH (BSC) → WETH
+ * - fUSDT (Fantom) → USDT
+ * - BTCB (BSC) → WBTC
+ *
+ * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1"
+ * @returns Normalized token pair string
+ */
+function normalizeTokenPair(tokenPair: string): string {
+  const parts = tokenPair.split('_');
+  if (parts.length < 2) return tokenPair;
+
+  // Normalize each token in the pair
+  const normalizedParts = parts.map(token => normalizeTokenForCrossChain(token));
+  return normalizedParts.join('_');
 }
 
 // =============================================================================
@@ -662,7 +691,9 @@ export class CrossChainDetectorService {
         for (const pairKey of Object.keys(priceData[chain][dex])) {
           // Extract token pair from pairKey (format: DEX_TOKEN1_TOKEN2)
           const tokens = pairKey.split('_').slice(1).join('_');
-          tokenPairs.add(tokens);
+          // S3.2.4-FIX: Normalize token pairs for cross-chain matching
+          // WETH.e_USDT (Avalanche) and ETH_USDT (BSC) both normalize to WETH_USDT
+          tokenPairs.add(normalizeTokenPair(tokens));
         }
       }
     }
@@ -680,7 +711,9 @@ export class CrossChainDetectorService {
       for (const dex of Object.keys(priceData[chain])) {
         for (const pairKey of Object.keys(priceData[chain][dex])) {
           const tokens = pairKey.split('_').slice(1).join('_');
-          if (tokens === tokenPair) {
+          // S3.2.4-FIX: Use normalized comparison for cross-chain matching
+          // tokenPair is already normalized from getAllTokenPairsFromSnapshot
+          if (normalizeTokenPair(tokens) === tokenPair) {
             const update = priceData[chain][dex][pairKey];
             prices.push({
               chain,
@@ -740,9 +773,19 @@ export class CrossChainDetectorService {
   }
 
   private extractTokenFromPair(pairKey: string): string {
-    // Extract token from pair key (e.g., "uniswap_v3_WETH_USDT" -> "WETH/USDT")
+    // S3.2.4-FIX: Extract and normalize tokens from pair key
+    // Handles both formats:
+    // - "traderjoe_WETH.e_USDT" (3 parts) -> "WETH/USDT"
+    // - "uniswap_v3_WETH_USDT" (4 parts) -> "WETH/USDT"
     const parts = pairKey.split('_');
-    return parts.length >= 4 ? `${parts[2]}/${parts[3]}` : pairKey;
+    if (parts.length >= 2) {
+      // Always take last 2 parts as tokens regardless of DEX name format
+      const token0 = parts[parts.length - 2];
+      const token1 = parts[parts.length - 1];
+      // Normalize for consistent canonical names
+      return `${normalizeTokenForCrossChain(token0)}/${normalizeTokenForCrossChain(token1)}`;
+    }
+    return pairKey;
   }
 
   private estimateBridgeCost(sourceChain: string, targetChain: string, tokenUpdate: PriceUpdate): number {
@@ -923,6 +966,27 @@ export class CrossChainDetectorService {
   private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
     if (!this.streamsClient) return;
 
+    // S3.2.4-FIX: Generate deterministic cache key for deduplication BEFORE publishing
+    // Key based on opportunity characteristics, not random ID
+    const dedupeKey = `${opportunity.sourceChain}-${opportunity.targetChain}-${opportunity.token}`;
+
+    // Check if we recently published this opportunity (within 5 seconds)
+    const existingOpp = this.opportunitiesCache.get(dedupeKey);
+    const DEDUPE_WINDOW_MS = 5000; // Don't republish same opportunity within 5 seconds
+
+    if (existingOpp && (Date.now() - existingOpp.createdAt) < DEDUPE_WINDOW_MS) {
+      // Skip duplicate - only publish if profit improved significantly (>10%)
+      const profitImprovement = (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit;
+      if (profitImprovement < 0.1) {
+        this.logger.debug('Skipping duplicate opportunity', {
+          dedupeKey,
+          ageMs: Date.now() - existingOpp.createdAt,
+          profitImprovement: `${(profitImprovement * 100).toFixed(1)}%`
+        });
+        return;
+      }
+    }
+
     const arbitrageOpp: ArbitrageOpportunity = {
       id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type: 'cross-chain',
@@ -952,9 +1016,9 @@ export class CrossChainDetectorService {
 
       this.perfLogger.logArbitrageOpportunity(arbitrageOpp);
 
-      // Cache opportunity to avoid duplicates
+      // S3.2.4-FIX: Cache with deterministic key for proper deduplication
       // P1-NEW-3 FIX: Add createdAt timestamp for reliable cleanup
-      this.opportunitiesCache.set(arbitrageOpp.id, {
+      this.opportunitiesCache.set(dedupeKey, {
         ...opportunity,
         createdAt: Date.now()
       });

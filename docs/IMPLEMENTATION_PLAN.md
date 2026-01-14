@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-14 (S3.2.3 Fantom P1 integration: 63 tests)
-> **Tests**: 3439 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests)
+> **Last Updated**: 2025-01-14 (S3.2.4 Cross-chain detection verification: 48 tests)
+> **Tests**: 3487 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests)
 
 ---
 
@@ -697,9 +697,13 @@
       * Event handling simulation (4 tests): DEX validation, event structure
       * DEX summary (2 tests): P1 total 19 enabled DEXs
 
-[ ] S3.2.4 Verify cross-chain detection
-    - AVAX-BSC arbitrage paths
-    - FTM-Polygon arbitrage paths
+[x] S3.2.4 Verify cross-chain detection (48 tests)
+    - AVAX-BSC arbitrage paths: 5 common tokens (USDT, USDC, WBTC, WETH, LINK)
+    - FTM-Polygon arbitrage paths: 5 common tokens (USDT, USDC, DAI, WETH, WBTC)
+    - Token normalization (fUSDT→USDT, WETH.e→WETH, BTCB→WBTC)
+    - Token metadata consistency across P1 chains
+    - P1 cross-chain summary: 6 routes, 4-8 common tokens per route
+    - File: tests/integration/s3.2.4-cross-chain-detection.integration.test.ts
 ```
 
 ---
