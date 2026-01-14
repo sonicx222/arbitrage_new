@@ -354,10 +354,12 @@ export function getEnabledPartitions(): PartitionConfig[] {
 
 /**
  * Get chains for a partition.
+ * Returns a copy of the chains array to prevent mutation of the partition config.
  */
 export function getChainsForPartition(partitionId: string): string[] {
   const partition = getPartition(partitionId);
-  return partition?.chains || [];
+  // S3.2.2-FIX: Return array copy to prevent mutation of partition config
+  return partition ? [...partition.chains] : [];
 }
 
 // =============================================================================
