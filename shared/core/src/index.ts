@@ -393,7 +393,8 @@ export {
 export type {
   PartitionServiceConfig,
   HealthServerOptions,
-  PartitionDetectorInterface
+  PartitionDetectorInterface,
+  ProcessHandlerCleanup
 } from './partition-service-utils';
 
 // Partition Router (S3.1.7 - Detector Migration)

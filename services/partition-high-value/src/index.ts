@@ -108,11 +108,16 @@ setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceNam
 // =============================================================================
 
 async function main(): Promise<void> {
+  // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
+  if (!partitionConfig) {
+    throw new Error('Partition config unavailable - this should never happen');
+  }
+
   logger.info('Starting P3 High-Value Partition Service', {
     partitionId: P3_PARTITION_ID,
     chains: config.chains,
     region: P3_REGION,
-    provider: partitionConfig!.provider,
+    provider: partitionConfig.provider,
     nodeVersion: process.version,
     pid: process.pid
   });

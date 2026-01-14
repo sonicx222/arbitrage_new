@@ -25,43 +25,43 @@ export type Region = 'asia-southeast1' | 'us-east1' | 'us-west1' | 'eu-west1';
 
 export interface PartitionConfig {
   /** Unique identifier for the partition */
-  partitionId: string;
+  readonly partitionId: string;
 
   /** Human-readable name */
-  name: string;
+  readonly name: string;
 
-  /** Chains included in this partition */
-  chains: string[];
+  /** Chains included in this partition - immutable to prevent accidental mutation */
+  readonly chains: readonly string[];
 
   /** Primary deployment region */
-  region: Region;
+  readonly region: Region;
 
   /** Cloud provider for deployment */
-  provider: CloudProvider;
+  readonly provider: CloudProvider;
 
   /** Resource allocation profile */
-  resourceProfile: ResourceProfile;
+  readonly resourceProfile: ResourceProfile;
 
   /** Standby region for failover (optional) */
-  standbyRegion?: Region;
+  readonly standbyRegion?: Region;
 
   /** Standby provider for failover (optional) */
-  standbyProvider?: CloudProvider;
+  readonly standbyProvider?: CloudProvider;
 
   /** Priority for resource allocation (1 = highest) */
-  priority: number;
+  readonly priority: number;
 
   /** Maximum memory in MB */
-  maxMemoryMB: number;
+  readonly maxMemoryMB: number;
 
   /** Whether this partition is enabled */
-  enabled: boolean;
+  readonly enabled: boolean;
 
   /** Health check interval in ms */
-  healthCheckIntervalMs: number;
+  readonly healthCheckIntervalMs: number;
 
   /** Failover timeout in ms */
-  failoverTimeoutMs: number;
+  readonly failoverTimeoutMs: number;
 }
 
 export interface ChainInstance {
@@ -566,13 +566,21 @@ export function getPartitionFromEnv(): PartitionConfig | null {
 
 /**
  * Get all chain IDs from environment (supports comma-separated override).
+ * Returns a copy of the chains array to prevent mutation of partition config.
+ *
+ * S3.2.3-FIX: Validates that environment-provided chains exist in CHAINS configuration.
+ * Invalid chains are silently filtered out to prevent runtime errors.
  */
 export function getChainsFromEnv(): string[] {
   const envChains = process.env.PARTITION_CHAINS;
   if (envChains) {
-    return envChains.split(',').map(c => c.trim());
+    // S3.2.3-FIX: Validate chains exist in CHAINS configuration
+    const requestedChains = envChains.split(',').map(c => c.trim().toLowerCase());
+    const validChainIds = Object.keys(CHAINS);
+    return requestedChains.filter(chain => validChainIds.includes(chain));
   }
 
   const partition = getPartitionFromEnv();
-  return partition?.chains || [];
+  // S3.2.3-FIX: Return array copy to prevent mutation (consistent with getChainsForPartition)
+  return partition?.chains ? [...partition.chains] : [];
 }

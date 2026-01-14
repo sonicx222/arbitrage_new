@@ -111,11 +111,16 @@ setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceNam
 // =============================================================================
 
 async function main(): Promise<void> {
+  // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
+  if (!partitionConfig) {
+    throw new Error('Partition config unavailable - this should never happen');
+  }
+
   logger.info('Starting P4 Solana-Native Partition Service', {
     partitionId: P4_PARTITION_ID,
     chains: config.chains,
     region: P4_REGION,
-    provider: partitionConfig!.provider,
+    provider: partitionConfig.provider,
     nodeVersion: process.version,
     pid: process.pid,
     nonEvm: true // P4 is the only non-EVM partition
