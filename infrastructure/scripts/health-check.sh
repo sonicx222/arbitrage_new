@@ -149,16 +149,23 @@ check_redis_health() {
             if nc -z -w "$TIMEOUT" "$host" "$port" 2>/dev/null; then
                 tcp_success=true
             fi
-        elif [ -e /dev/tcp ]; then
-            # Fallback to bash built-in (bash-specific)
-            if timeout "$TIMEOUT" bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
-                tcp_success=true
+        else
+            # Fallback to bash built-in /dev/tcp (bash-specific pseudo-device)
+            # NOTE: /dev/tcp doesn't exist as a filesystem entry, it's a bash built-in
+            # We check if bash supports it by checking BASH_VERSION
+            if [ -n "$BASH_VERSION" ]; then
+                # Use exec with file descriptor to test TCP connection
+                if timeout "$TIMEOUT" bash -c "exec 3<>/dev/tcp/$host/$port && exec 3>&-" 2>/dev/null; then
+                    tcp_success=true
+                fi
             fi
         fi
 
         if [ "$tcp_success" = true ]; then
+            local end_time=$(get_timestamp_ms)
+            local duration=$(( end_time - start_time ))
             RESULTS[$service]="healthy"
-            RESPONSE_TIMES[$service]=0
+            RESPONSE_TIMES[$service]=$duration
             return 0
         fi
     fi

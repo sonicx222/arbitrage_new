@@ -45,35 +45,10 @@ primary_region = "sin"
     hard_limit = 25
     soft_limit = 20
 
-[[services]]
-  protocol = "tcp"
-  internal_port = 3001
+# NOTE: Removed legacy [[services]] section - using [http_service] and [checks] (Machines V2 syntax)
+# The [[services]] syntax is for Apps V1 and conflicts with the V2 configuration above
 
-  [[services.ports]]
-    port = 80
-    handlers = ["http"]
-
-  [[services.ports]]
-    port = 443
-    handlers = ["tls", "http"]
-
-  [[services.tcp_checks]]
-    grace_period = "30s"
-    interval = "10s"
-    restart_limit = 3
-    timeout = "5s"
-
-  [[services.http_checks]]
-    grace_period = "30s"
-    interval = "10s"
-    method = "GET"
-    path = "/health"
-    protocol = "http"
-    restart_limit = 3
-    timeout = "5s"
-    tls_skip_verify = false
-
-[[vm]]
+[vm]
   cpu_kind = "shared"
   cpus = 1
   memory_mb = 384

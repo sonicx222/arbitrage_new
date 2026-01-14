@@ -105,7 +105,7 @@ services:
           memory: 256M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       start_period: 30s
@@ -155,7 +155,7 @@ services:
           memory: 192M
           cpus: '0.25'
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 10s
       start_period: 30s
@@ -201,7 +201,7 @@ services:
           memory: 256M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 30s
       timeout: 10s
       start_period: 30s
@@ -247,7 +247,7 @@ services:
           memory: 384M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       start_period: 30s
@@ -287,7 +287,7 @@ services:
           memory: 256M
           cpus: '0.5'
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
       timeout: 10s
       start_period: 30s

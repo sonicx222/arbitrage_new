@@ -61,8 +61,8 @@ data "oci_identity_availability_domains" "us_east" {
   compartment_id = var.compartment_id
 }
 
-# Get Oracle Linux 8 ARM image
-data "oci_core_images" "oracle_linux_arm" {
+# Get Oracle Linux 8 ARM image - Singapore region (default provider)
+data "oci_core_images" "oracle_linux_arm_singapore" {
   compartment_id           = var.compartment_id
   operating_system         = "Oracle Linux"
   operating_system_version = "8"
@@ -71,8 +71,21 @@ data "oci_core_images" "oracle_linux_arm" {
   sort_order               = "DESC"
 }
 
-# Get Oracle Linux 8 AMD image
-data "oci_core_images" "oracle_linux_amd" {
+# Get Oracle Linux 8 ARM image - US-East region
+# CRITICAL: Each region requires its own image lookup as images are region-specific
+data "oci_core_images" "oracle_linux_arm_us_east" {
+  provider                 = oci.us_east
+  compartment_id           = var.compartment_id
+  operating_system         = "Oracle Linux"
+  operating_system_version = "8"
+  shape                    = var.instance_shape_arm
+  sort_by                  = "TIMECREATED"
+  sort_order               = "DESC"
+}
+
+# Get Oracle Linux 8 AMD image - US-East region (for cross-chain detector)
+data "oci_core_images" "oracle_linux_amd_us_east" {
+  provider                 = oci.us_east
   compartment_id           = var.compartment_id
   operating_system         = "Oracle Linux"
   operating_system_version = "8"
@@ -284,7 +297,8 @@ resource "oci_core_instance" "asia_fast_partition" {
 
   source_details {
     source_type = "image"
-    source_id   = data.oci_core_images.oracle_linux_arm.images[0].id
+    # Use Singapore region-specific ARM image
+    source_id   = data.oci_core_images.oracle_linux_arm_singapore.images[0].id
   }
 
   create_vnic_details {
@@ -336,7 +350,8 @@ resource "oci_core_instance" "high_value_partition" {
 
   source_details {
     source_type = "image"
-    source_id   = data.oci_core_images.oracle_linux_arm.images[0].id
+    # CRITICAL: Use US-East region-specific ARM image (not Singapore image)
+    source_id   = data.oci_core_images.oracle_linux_arm_us_east.images[0].id
   }
 
   create_vnic_details {
@@ -383,7 +398,8 @@ resource "oci_core_instance" "cross_chain_detector" {
 
   source_details {
     source_type = "image"
-    source_id   = data.oci_core_images.oracle_linux_amd.images[0].id
+    # Use US-East region-specific AMD image
+    source_id   = data.oci_core_images.oracle_linux_amd_us_east.images[0].id
   }
 
   create_vnic_details {
