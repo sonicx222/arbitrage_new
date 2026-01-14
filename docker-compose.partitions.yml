@@ -9,6 +9,7 @@
 #   - P1 Asia-Fast:    BSC, Polygon, Avalanche, Fantom     (Port 3001)
 #   - P2 L2-Turbo:     Arbitrum, Optimism, Base            (Port 3002)
 #   - P3 High-Value:   Ethereum, zkSync, Linea             (Port 3003)
+#   - P4 Solana:       Solana (non-EVM)                    (Port 3006)
 #   - Cross-Chain:     Cross-chain arbitrage detection     (Port 3004)
 #   - Execution:       Trade execution engine              (Port 3005)
 #
@@ -147,6 +148,36 @@ services:
     command: ["node", "dist/services/partition-high-value/src/index.js"]
 
   # ---------------------------------------------------------------------------
+  # P4: Solana Partition (non-EVM)
+  # ---------------------------------------------------------------------------
+  partition-solana:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    container_name: arb-p4-solana
+    environment:
+      - NODE_ENV=development
+      - PARTITION_ID=solana-native
+      - PARTITION_CHAINS=solana
+      - INSTANCE_ID=p4-local
+      - REGION_ID=local-p4
+      - HEALTH_CHECK_PORT=3001
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+      # RPC URLs from .env file
+      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
+      - SOLANA_WS_URL=${SOLANA_WS_URL}
+    ports:
+      - "3006:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - arbitrage-net
+    command: ["node", "dist/services/partition-solana/src/index.js"]
+
+  # ---------------------------------------------------------------------------
   # Cross-Chain Detector
   # ---------------------------------------------------------------------------
   cross-chain-detector:
@@ -170,6 +201,8 @@ services:
       partition-l2-turbo:
         condition: service_started
       partition-high-value:
+        condition: service_started
+      partition-solana:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -231,12 +264,14 @@ services:
       - PARTITION_P1_URL=http://partition-asia-fast:3001
       - PARTITION_P2_URL=http://partition-l2-turbo:3001
       - PARTITION_P3_URL=http://partition-high-value:3001
+      - PARTITION_P4_URL=http://partition-solana:3001
       - CROSS_CHAIN_URL=http://cross-chain-detector:3001
       - EXECUTION_URL=http://execution-engine:3001
       # External ports for dashboard display
       - P1_EXTERNAL_PORT=3001
       - P2_EXTERNAL_PORT=3002
       - P3_EXTERNAL_PORT=3003
+      - P4_EXTERNAL_PORT=3006
       - CROSS_CHAIN_EXTERNAL_PORT=3004
       - EXECUTION_EXTERNAL_PORT=3005
     ports:
