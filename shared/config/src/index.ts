@@ -177,12 +177,15 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 30
     },
     // === S2.2.1: New DEXs (6 → 9) ===
+    // S3.2.2-FIX: Balancer V2 uses Vault model (not factory pattern) - DISABLED until adapter implemented
+    // Balancer V2 Vault doesn't have getPair/getPool methods, needs custom BalancerVaultAdapter
     {
       name: 'balancer_v2',      // [H] - Major liquidity protocol
       chain: 'arbitrum',
-      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault
+      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault (NOT a factory!)
       routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',  // Vault is also router for swaps
-      fee: 30  // Variable fees per pool, using default
+      fee: 30,  // Variable fees per pool, using default
+      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
     },
     {
       name: 'curve',            // [H] - Major stablecoin DEX
@@ -440,7 +443,7 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 10  // KyberSwap: dynamic fees, typically 8-100bp (V3-style getPool)
     }
   ],
-  // Fantom: 2 DEXs
+  // Fantom: 4 DEXs (S3.2.2)
   fantom: [
     {
       name: 'spookyswap',       // [C] - Dominant on Fantom
@@ -455,6 +458,23 @@ export const DEXES: Record<string, Dex[]> = {
       factoryAddress: '0xEF45d134b73241eDa7703fa787148D9C9F4950b0',
       routerAddress: '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52',
       fee: 30
+    },
+    {
+      name: 'equalizer',        // [H] - Solidly fork with ve(3,3) model
+      chain: 'fantom',
+      factoryAddress: '0xc6366EFD0AF1d09171fe0EBF32c7943BB310832a',  // Equalizer V2 Factory
+      routerAddress: '0x1A05EB736873485655F29a37DEf8a0AA87F5a447',   // Equalizer Router
+      fee: 30  // Default volatile fee (stable pools use 1bp)
+    },
+    // S3.2.2-FIX: Beethoven X uses Balancer V2 Vault model (not factory pattern) - DISABLED until adapter
+    // Like Balancer V2, Beethoven X doesn't have getPair/getPool methods
+    {
+      name: 'beethoven_x',      // [H] - Balancer V2 fork, weighted pools
+      chain: 'fantom',
+      factoryAddress: '0x60467cb225092cE0c989361934311175f437Cf53',  // Beethoven X Vault (NOT a factory!)
+      routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',   // Beethoven X Router
+      fee: 30,  // Variable per pool, 10-200bp typical
+      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
     }
   ],
   // zkSync Era: 2 DEXs
@@ -644,16 +664,21 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x62edc0692BD897D2295872a9FFCac5425011c661', symbol: 'GMX', decimals: 18, chainId: 43114 },   // GMX token
     { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18, chainId: 43114 }   // Frax stablecoin
   ],
-  // Fantom: 6 tokens
+  // Fantom: 10 tokens (S3.2.2)
   fantom: [
     // Anchor tokens
     { address: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', symbol: 'WFTM', decimals: 18, chainId: 250 },
     { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6, chainId: 250 },
     { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6, chainId: 250 },
     { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18, chainId: 250 },
-    // Core DeFi
-    { address: '0x21Ada0D2aC28C3A5Fa3cD2eE30882dA8812279B6', symbol: 'BOO', decimals: 18, chainId: 250 },
-    { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 }
+    // Bridged tokens
+    { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 },
+    { address: '0x321162Cd933E2Be498Cd2267a90534A804051b11', symbol: 'WBTC', decimals: 8, chainId: 250 },
+    // DEX governance tokens (S3.2.2)
+    { address: '0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE', symbol: 'BOO', decimals: 18, chainId: 250 },    // SpookySwap
+    { address: '0x5Cc61A78F164885776AA610fb0FE1257df78E59B', symbol: 'SPIRIT', decimals: 18, chainId: 250 }, // SpiritSwap
+    { address: '0x3Fd3A0c85B70754eFc07aC9Ac0cbBDCe664865A6', symbol: 'EQUAL', decimals: 18, chainId: 250 },  // Equalizer
+    { address: '0xF24Bcf4d1e507740041C9cFd2DddB29585aDCe1e', symbol: 'BEETS', decimals: 18, chainId: 250 }   // Beethoven X
   ],
   // zkSync Era: 6 tokens
   zksync: [
@@ -816,6 +841,7 @@ export const PARTITION_CONFIG = {
 // PHASE METRICS
 // Track progress against targets from ADR-008
 // S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
+// S3.2.2: Updated for Fantom expansion (11 chains, 46 DEXes, 98 tokens)
 // =============================================================================
 export const PHASE_METRICS = {
   current: {
@@ -826,11 +852,11 @@ export const PHASE_METRICS = {
     targetOpportunities: 500  // Increased with more chains/DEXes
   },
   targets: {
-    // S3.1.2: 4-Partition Architecture targets:
+    // S3.2.2: Updated for Fantom expansion:
     // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
-    // - 44 DEXes (original 33 + 11 new chain DEXes)
-    // - 94 tokens (original 60 + 34 new chain tokens)
-    phase1: { chains: 11, dexes: 44, tokens: 94, opportunities: 500 },
+    // - 46 DEXes (S3.1.2: 44 + S3.2.2: 2 Fantom DEXs)
+    // - 98 tokens (S3.1.2: 94 + S3.2.2: 4 Fantom tokens)
+    phase1: { chains: 11, dexes: 46, tokens: 98, opportunities: 500 },
     phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
     phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
   }

@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-13 (S3.2.1 code analysis: 4 enabled DEXs, 2 disabled, 15 tokens)
-> **Tests**: 3291 passing (772 S3.1.x tests + 92 S3.2.1 tests)
+> **Last Updated**: 2025-01-14 (S3.2.2 Fantom: 4 DEXs, 10 tokens)
+> **Tests**: 3376 passing (772 S3.1.x tests + 92 S3.2.1 tests + 85 S3.2.2 tests)
 
 ---
 
@@ -644,7 +644,7 @@
 ---
 
 #### S3.2: Add Avalanche + Fantom
-**Status**: `[~] In Progress` (S3.2.1 completed)
+**Status**: `[~] In Progress` (S3.2.1, S3.2.2 completed)
 **Priority**: P1 | **Effort**: 2 days | **Confidence**: 85%
 
 **Tasks**:
@@ -670,10 +670,13 @@
       * shared/core/src/pair-discovery.test.ts - KyberSwap, GMX, Platypus tests
       * tests/integration/s3.2.1-avalanche-configuration.integration.test.ts - Updated expectations
 
-[ ] S3.2.2 Add Fantom configuration
+[x] S3.2.2 Add Fantom configuration
     - Chain config with Fantom RPC
-    - 4 DEXs: SpookySwap, Equalizer, SpiritSwap, Beethoven X
-    - 10 tokens
+    - 4 DEXs: SpookySwap, SpiritSwap, Equalizer, Beethoven X
+    - 10 tokens: WFTM, fUSDT, USDC, DAI, WETH, WBTC, BOO, SPIRIT, EQUAL, BEETS
+    - Tests: tests/integration/s3.2.2-fantom-configuration.integration.test.ts (85 tests)
+    - COMPLETED: 2025-01-14 - TDD implementation
+    - Note: Beethoven X uses Balancer vault model, detectFactoryType returns 'unsupported'
 
 [ ] S3.2.3 Integrate into P1 partition
     - Update partition-asia-fast service
@@ -926,12 +929,12 @@
 |--------|-------------|-----------|-------------|---------|
 | Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 10 | 0 | 0 |
-| Sprint 3 | 18 | 8 | 0 | 0 |
+| Sprint 3 | 18 | 9 | 0 | 0 |
 | Sprint 4 | 9 | 1 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **39** | **0** | **0** |
+| **Total** | **67** | **40** | **0** | **0** |
 
-*Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks, 1 completed), S3.3 Solana Integration (7 tasks)*
+*Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks, 2 completed), S3.3 Solana Integration (7 tasks)*
 
 ---
 
