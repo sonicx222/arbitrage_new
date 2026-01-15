@@ -26,7 +26,8 @@ import {
   ServiceStateManager,
   createServiceState,
   ServiceState,
-  StreamConsumer
+  StreamConsumer,
+  getStreamHealthMonitor
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 
@@ -214,6 +215,11 @@ export class CoordinatorService {
 
       // Create consumer groups for all streams
       await this.createConsumerGroups();
+
+      // Configure StreamHealthMonitor to use our consumer group
+      // This fixes the XPENDING errors when monitoring stream health
+      const streamHealthMonitor = getStreamHealthMonitor();
+      streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
 
       // Try to acquire leadership
       await this.tryAcquireLeadership();
