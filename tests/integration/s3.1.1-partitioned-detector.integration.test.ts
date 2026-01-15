@@ -130,7 +130,7 @@ import {
   PartitionedDetectorConfig,
   PartitionHealth,
   CrossChainDiscrepancy
-} from '@arbitrage/corepartitioned-detector';
+} from '@arbitrage/core/partitioned-detector';
 
 import {
   PARTITIONS,
@@ -140,7 +140,7 @@ import {
   createChainInstance,
   assignChainToPartition,
   validatePartitionConfig
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 import { CHAINS } from '@arbitrage/config';
 

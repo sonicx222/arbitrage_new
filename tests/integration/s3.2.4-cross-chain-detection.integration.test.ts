@@ -37,7 +37,7 @@ import {
 import {
   getPartition,
   getChainsForPartition
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 // =============================================================================
 // Constants

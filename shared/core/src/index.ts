@@ -137,7 +137,7 @@ export type {
 } from './cross-region-health';
 export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './dead-letter-queue';
 export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './self-healing-manager';
-export { ExpertSelfHealingManager, getExpertSelfHealingManager } from './expert-self-healing-manager';
+export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './expert-self-healing-manager';
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './error-recovery';
 export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './enhanced-health-monitor';
 export {
@@ -262,6 +262,7 @@ export { PartitionedDetector } from './partitioned-detector';
 export type {
   PartitionedDetectorConfig,
   ChainHealth as PartitionChainHealth,
+  ChainHealth,
   PartitionHealth,
   ChainStats as PartitionChainStats,
   PricePoint,

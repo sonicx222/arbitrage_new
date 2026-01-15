@@ -39,7 +39,7 @@ import {
   validatePartitionConfig,
   isEvmChain,
   PARTITIONS
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 // =============================================================================
 // Constants

@@ -129,7 +129,7 @@ jest.mock('@arbitrage/core/websocket-manager', () => ({
 import {
   PartitionedDetector,
   PartitionedDetectorConfig
-} from '@arbitrage/corepartitioned-detector';
+} from '@arbitrage/core/partitioned-detector';
 
 import {
   PARTITIONS,
@@ -139,7 +139,7 @@ import {
   createPartitionChainInstances,
   calculatePartitionResources,
   validatePartitionConfig
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 import { PARTITION_IDS } from '@arbitrage/config';
 

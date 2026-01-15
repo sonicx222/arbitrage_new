@@ -1,6 +1,8 @@
 # Local Development Guide
 
-This guide will help you run the arbitrage system locally on your **M1 Mac** (also works on Intel Macs and Linux).
+This guide will help you run the arbitrage system locally on **Windows**, **macOS** (Intel & Apple Silicon), or **Linux**.
+
+> **Platform Compatibility**: All commands work cross-platform. Tested on Windows 10/11, macOS (Intel & Apple Silicon), and Ubuntu Linux.
 
 ## Table of Contents
 
@@ -21,25 +23,24 @@ This guide will help you run the arbitrage system locally on your **M1 Mac** (al
 # 1. Install dependencies
 npm install
 
-# 2. Copy environment file
+# 2. Copy environment file (creates .env from .env.local)
 npm run dev:setup
 
-# 3. Start Redis
+# 3. Start Redis (requires Docker)
 npm run dev:redis
 
-# 4. Build the project
-npm run build
-
-# 5. Check status
+# 4. Check status
 npm run dev:status
 
-# 6. Start services (in separate terminals)
+# 5. Start services (in separate terminals)
 npm run dev:coordinator      # Terminal 1: Dashboard at http://localhost:3000
 npm run dev:detector         # Terminal 2: Price detection
 npm run dev:cross-chain      # Terminal 3: Cross-chain arbitrage
 ```
 
 That's it! Visit **http://localhost:3000** to see the coordinator dashboard.
+
+> **Note**: The build step (`npm run build`) is optional for development. The dev scripts use ts-node to run TypeScript directly.
 
 ---
 
@@ -49,15 +50,20 @@ That's it! Visit **http://localhost:3000** to see the coordinator dashboard.
 
 | Software | Version | Installation |
 |----------|---------|--------------|
-| Node.js | 18+ | `brew install node` or [nodejs.org](https://nodejs.org) |
+| Node.js | 18+ | [nodejs.org](https://nodejs.org) (download LTS version) |
 | Docker Desktop | Latest | [docker.com/products/docker-desktop](https://docker.com/products/docker-desktop) |
 | npm | 9+ | Comes with Node.js |
 
-### For M1 Mac
+### Platform-Specific Notes
 
-Docker Desktop for Apple Silicon handles everything automatically. Make sure to:
-1. Download the **Apple Silicon** version
-2. Enable **Rosetta for x86/amd64 emulation** in Docker settings (for compatibility)
+#### Windows
+- Use PowerShell or Windows Terminal (not cmd.exe) for best experience
+- Docker Desktop for Windows requires WSL2 (Windows Subsystem for Linux)
+- All npm scripts work natively, no additional setup needed
+
+#### macOS (Apple Silicon / M1/M2/M3)
+- Download the **Apple Silicon** version of Docker Desktop
+- Enable **Rosetta for x86/amd64 emulation** in Docker settings (for compatibility)
 
 ### Verify Installation
 
@@ -351,12 +357,22 @@ npm run dev:redis:logs
 
 ### Port Already in Use
 
+**macOS/Linux:**
 ```bash
 # Find what's using the port (e.g., 3000)
 lsof -i :3000
 
 # Kill the process
 kill -9 <PID>
+```
+
+**Windows (PowerShell):**
+```powershell
+# Find what's using port 3000
+netstat -ano | findstr :3000
+
+# Kill process by PID (replace 12345 with actual PID)
+taskkill /PID 12345 /F
 ```
 
 ### TypeScript Build Errors
@@ -397,9 +413,13 @@ npm run dev:stop
 # Stop and remove Docker containers
 npm run dev:redis:down
 
-# Remove node_modules and reinstall
+# Remove node_modules and reinstall (macOS/Linux)
 rm -rf node_modules
 npm install
+
+# Remove node_modules and reinstall (Windows PowerShell)
+# Remove-Item -Recurse -Force node_modules
+# npm install
 
 # Rebuild
 npm run build:clean

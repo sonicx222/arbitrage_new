@@ -29,7 +29,7 @@ import {
   validatePartitionConfig,
   validateAllPartitions,
   getPartitionIdFromEnv
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 import { CHAINS, DEXES, CORE_TOKENS } from '@arbitrage/config';
 
@@ -650,7 +650,7 @@ describe('S3.1.2.7: Backward Compatibility', () => {
 // =============================================================================
 
 import { getEnabledDexes, PARTITION_IDS } from '@arbitrage/config';
-import { isEvmChain, getNonEvmChains } from '@arbitrage/configpartitions';
+import { isEvmChain, getNonEvmChains } from '@arbitrage/config/partitions';
 
 describe('S3.1.2.8: New Chain DEX Configurations', () => {
   describe('Avalanche DEXes', () => {

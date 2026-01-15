@@ -66,13 +66,13 @@ import {
   PairDiscoveryService,
   getPairDiscoveryService,
   resetPairDiscoveryService
-} from '@arbitrage/corepair-discovery';
+} from '@arbitrage/core/pair-discovery';
 import {
   PairCacheService,
   getPairCacheService,
   resetPairCacheService,
   CachedPairData
-} from '@arbitrage/corepair-cache';
+} from '@arbitrage/core/pair-cache';
 import { Dex, Token } from '../../shared/types';
 
 // =============================================================================
