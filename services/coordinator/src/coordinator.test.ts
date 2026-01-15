@@ -1,8 +1,9 @@
 /**
  * Coordinator Service Unit Tests
  *
- * Tests for the coordinator service that orchestrates
- * all detector services and manages system health.
+ * P1-FIX-2: Tests now properly import and test the CoordinatorService class.
+ * Previously, tests only tested standalone logic (Maps, arrays) without
+ * importing the actual service.
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -23,8 +24,78 @@ process.env.BASE_RPC_URL = 'https://mainnet.base.org';
 process.env.BASE_WS_URL = 'wss://mainnet.base.org';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
+// Mock @arbitrage/core before importing CoordinatorService
+jest.mock('@arbitrage/core', () => ({
+  createLogger: jest.fn(() => ({
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn()
+  })),
+  getPerformanceLogger: jest.fn(() => ({
+    startTimer: jest.fn(() => ({ stop: jest.fn() })),
+    recordMetric: jest.fn()
+  })),
+  getRedisClient: jest.fn(() => Promise.resolve({
+    setex: jest.fn(),
+    get: jest.fn(),
+    del: jest.fn(),
+    set: jest.fn(),
+    setnx: jest.fn(() => Promise.resolve(1)),
+    expire: jest.fn(),
+    quit: jest.fn()
+  })),
+  getRedisStreamsClient: jest.fn(() => Promise.resolve({
+    createConsumerGroup: jest.fn(() => Promise.resolve()),
+    readGroup: jest.fn(() => Promise.resolve([])),
+    ack: jest.fn(() => Promise.resolve()),
+    STREAMS: {
+      HEALTH: 'stream:health',
+      OPPORTUNITIES: 'stream:opportunities',
+      WHALE_ALERTS: 'stream:whale-alerts'
+    }
+  })),
+  RedisStreamsClient: {
+    STREAMS: {
+      HEALTH: 'stream:health',
+      OPPORTUNITIES: 'stream:opportunities',
+      WHALE_ALERTS: 'stream:whale-alerts'
+    }
+  },
+  ValidationMiddleware: {
+    validateRequest: jest.fn(() => (req: any, res: any, next: any) => next()),
+    validateHealthCheck: jest.fn((req: any, res: any, next: any) => next()),
+    validateOpportunity: jest.fn((req: any, res: any, next: any) => next())
+  },
+  createServiceState: jest.fn(() => ({
+    getState: jest.fn(() => 'stopped'),
+    isRunning: jest.fn(() => false),
+    isStopped: jest.fn(() => true),
+    executeStart: jest.fn(async (fn: () => Promise<void>) => {
+      await fn();
+      return { success: true, currentState: 'running' };
+    }),
+    executeStop: jest.fn(async (fn: () => Promise<void>) => {
+      await fn();
+      return { success: true, currentState: 'stopped' };
+    }),
+    on: jest.fn(),
+    removeAllListeners: jest.fn()
+  })),
+  ServiceState: {
+    STOPPED: 'stopped',
+    STARTING: 'starting',
+    RUNNING: 'running',
+    STOPPING: 'stopping',
+    ERROR: 'error'
+  }
+}));
+
 // Import config
 import { CHAINS } from '../../../shared/config/src';
+
+// P1-FIX-2: Import the actual CoordinatorService
+import { CoordinatorService } from './coordinator';
 
 // =============================================================================
 // Configuration Tests
@@ -242,6 +313,58 @@ describe('CoordinatorService Communication', () => {
         .map(([name, _]) => name);
 
       expect(pendingAcks).toEqual(['polygon-detector']);
+    });
+  });
+});
+
+// =============================================================================
+// P1-FIX-2: CoordinatorService Class Tests
+// =============================================================================
+
+describe('CoordinatorService Class', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    // Create fresh instance for each test
+    coordinator = new CoordinatorService({
+      port: 0, // Use random port
+      consumerGroup: 'test-group',
+      consumerId: 'test-consumer'
+    });
+  });
+
+  afterEach(async () => {
+    // Clean up - stop service if running
+    try {
+      await coordinator.stop();
+    } catch {
+      // Ignore errors during cleanup
+    }
+  });
+
+  describe('Instantiation', () => {
+    it('should create a CoordinatorService instance', () => {
+      expect(coordinator).toBeInstanceOf(CoordinatorService);
+    });
+
+    it('should have default configuration', () => {
+      const defaultCoordinator = new CoordinatorService();
+      expect(defaultCoordinator).toBeInstanceOf(CoordinatorService);
+    });
+
+    it('should accept custom port configuration', () => {
+      const customCoordinator = new CoordinatorService({ port: 4000 });
+      expect(customCoordinator).toBeInstanceOf(CoordinatorService);
+    });
+  });
+
+  describe('Public Methods Exist', () => {
+    it('should have start method', () => {
+      expect(typeof coordinator.start).toBe('function');
+    });
+
+    it('should have stop method', () => {
+      expect(typeof coordinator.stop).toBe('function');
     });
   });
 });

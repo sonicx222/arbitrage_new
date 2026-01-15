@@ -285,4 +285,146 @@ describe('P0-2: NonceManager', () => {
       });
     });
   });
+
+  // ===========================================================================
+  // P0-FIX-1: Out-of-Order Confirmation Regression Tests
+  // ===========================================================================
+
+  describe('P0-FIX-1: Out-of-Order Transaction Confirmation', () => {
+    it('should correctly advance confirmedNonce when transactions confirm out of order', async () => {
+      // Allocate nonces 0, 1, 2
+      const nonce0 = await nonceManager.getNextNonce('ethereum');
+      const nonce1 = await nonceManager.getNextNonce('ethereum');
+      const nonce2 = await nonceManager.getNextNonce('ethereum');
+
+      expect(nonce0).toBe(0);
+      expect(nonce1).toBe(1);
+      expect(nonce2).toBe(2);
+
+      // Initial state: confirmedNonce = 0, pendingCount = 3
+      let state = nonceManager.getState('ethereum');
+      expect(state!.confirmed).toBe(0);
+      expect(state!.pendingCount).toBe(3);
+
+      // Confirm out of order: 2, then 1, then 0
+      nonceManager.confirmTransaction('ethereum', 2, '0xhash2');
+      state = nonceManager.getState('ethereum');
+      // Should still be 0, waiting for nonce 0 to confirm
+      expect(state!.confirmed).toBe(0);
+      expect(state!.pendingCount).toBe(2); // 2 removed, 0 and 1 remain
+
+      nonceManager.confirmTransaction('ethereum', 1, '0xhash1');
+      state = nonceManager.getState('ethereum');
+      // Still waiting for nonce 0
+      expect(state!.confirmed).toBe(0);
+      expect(state!.pendingCount).toBe(1); // Only 0 remains
+
+      // Now confirm 0 - should advance past all confirmed (0, 1, 2 -> confirmed = 3)
+      nonceManager.confirmTransaction('ethereum', 0, '0xhash0');
+      state = nonceManager.getState('ethereum');
+      expect(state!.confirmed).toBe(3); // Should advance past all confirmed txs
+      expect(state!.pendingCount).toBe(0); // All confirmed and cleaned up
+    });
+
+    it('should handle partial out-of-order confirmation with gaps', async () => {
+      // Allocate nonces 0, 1, 2, 3
+      await nonceManager.getNextNonce('ethereum'); // 0
+      await nonceManager.getNextNonce('ethereum'); // 1
+      await nonceManager.getNextNonce('ethereum'); // 2
+      await nonceManager.getNextNonce('ethereum'); // 3
+
+      // Confirm 2 and 0 only (1 and 3 still pending)
+      nonceManager.confirmTransaction('ethereum', 2, '0xhash2');
+      nonceManager.confirmTransaction('ethereum', 0, '0xhash0');
+
+      const state = nonceManager.getState('ethereum');
+      // Should advance to 1 (0 confirmed, but 1 still pending)
+      expect(state!.confirmed).toBe(1);
+      expect(state!.pendingCount).toBe(2); // 1 and 3 still pending
+    });
+
+    it('should advance through multiple sequential confirmations after out-of-order', async () => {
+      // Allocate nonces 0, 1, 2, 3, 4
+      await nonceManager.getNextNonce('ethereum'); // 0
+      await nonceManager.getNextNonce('ethereum'); // 1
+      await nonceManager.getNextNonce('ethereum'); // 2
+      await nonceManager.getNextNonce('ethereum'); // 3
+      await nonceManager.getNextNonce('ethereum'); // 4
+
+      // Confirm 4, 3, 2, 1 first (all out of order, waiting for 0)
+      nonceManager.confirmTransaction('ethereum', 4, '0xhash4');
+      nonceManager.confirmTransaction('ethereum', 3, '0xhash3');
+      nonceManager.confirmTransaction('ethereum', 2, '0xhash2');
+      nonceManager.confirmTransaction('ethereum', 1, '0xhash1');
+
+      let state = nonceManager.getState('ethereum');
+      expect(state!.confirmed).toBe(0); // Still waiting for 0
+      expect(state!.pendingCount).toBe(1); // Only 0 pending
+
+      // Now confirm 0 - should cascade advance to 5
+      nonceManager.confirmTransaction('ethereum', 0, '0xhash0');
+      state = nonceManager.getState('ethereum');
+      expect(state!.confirmed).toBe(5); // Advanced past all
+      expect(state!.pendingCount).toBe(0);
+    });
+  });
+
+  // ===========================================================================
+  // P0-FIX-2: Enhanced Concurrent Access Regression Tests
+  // ===========================================================================
+
+  describe('P0-FIX-2: Enhanced Concurrent Nonce Allocation', () => {
+    it('should handle many concurrent nonce requests without collision', async () => {
+      // Use a manager with higher limit for this test
+      const highCapacityManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 300000,
+        maxPendingPerChain: 100
+      });
+      highCapacityManager.registerWallet('ethereum', mockWallet);
+
+      // Request many nonces concurrently
+      const concurrentRequests = 50;
+      const promises = Array.from({ length: concurrentRequests }, () =>
+        highCapacityManager.getNextNonce('ethereum')
+      );
+
+      const nonces = await Promise.all(promises);
+
+      // All nonces should be unique
+      const uniqueNonces = new Set(nonces);
+      expect(uniqueNonces.size).toBe(concurrentRequests);
+
+      // Should be sequential (in any order)
+      const sortedNonces = [...nonces].sort((a, b) => a - b);
+      for (let i = 0; i < concurrentRequests; i++) {
+        expect(sortedNonces[i]).toBe(i);
+      }
+
+      highCapacityManager.stop();
+    });
+
+    it('should handle interleaved allocation and confirmation without race', async () => {
+      // Start allocating several nonces
+      const nonce0Promise = nonceManager.getNextNonce('ethereum');
+      const nonce1Promise = nonceManager.getNextNonce('ethereum');
+      const nonce2Promise = nonceManager.getNextNonce('ethereum');
+
+      const nonce0 = await nonce0Promise;
+      const nonce1 = await nonce1Promise;
+      const nonce2 = await nonce2Promise;
+
+      // Confirm nonce0 while allocating more
+      nonceManager.confirmTransaction('ethereum', nonce0, '0xhash0');
+
+      // Allocate more
+      const nonce3 = await nonceManager.getNextNonce('ethereum');
+      const nonce4 = await nonceManager.getNextNonce('ethereum');
+
+      // All should be unique and sequential
+      const allNonces = [nonce0, nonce1, nonce2, nonce3, nonce4];
+      expect(new Set(allNonces).size).toBe(5);
+      expect(allNonces.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    });
+  });
 });
