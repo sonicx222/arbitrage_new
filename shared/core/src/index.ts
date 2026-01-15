@@ -243,7 +243,9 @@ export {
   DexPool,
   TriangularOpportunity,
   TriangularStep,
-  ArbitragePath
+  ArbitragePath,
+  // T2.6: Quadrilateral arbitrage
+  QuadrilateralOpportunity
 } from './cross-dex-triangular-arbitrage';
 export {
   ValidationMiddleware,

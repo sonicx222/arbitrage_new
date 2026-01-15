@@ -57,22 +57,116 @@ export interface ArbitragePath {
   executionComplexity: number; // 1-10 scale
 }
 
+/**
+ * T2.6: Quadrilateral (4-hop) arbitrage opportunity.
+ * Path: A → B → C → D → A (4 tokens, 4 swaps)
+ */
+export interface QuadrilateralOpportunity {
+  id: string;
+  chain: string;
+  path: [string, string, string, string]; // Four unique tokens in the quadrilateral
+  dexes: [string, string, string, string]; // DEXes for each leg
+  profitPercentage: number;
+  profitUSD: number;
+  gasCost: number;
+  netProfit: number;
+  confidence: number;
+  steps: TriangularStep[]; // Reuse step interface (4 steps)
+  timestamp: number;
+  executionTime: number;
+}
+
+/**
+ * T1.2: Dynamic slippage configuration for liquidity-aware calculations.
+ * Instead of using a static maxSlippage, we calculate slippage dynamically
+ * based on trade size relative to pool reserves.
+ */
+export interface DynamicSlippageConfig {
+  /** Base slippage floor (minimum slippage regardless of liquidity) */
+  baseSlippage: number;
+  /** Scale factor for price impact contribution */
+  priceImpactScale: number;
+  /** Maximum allowed slippage (hard cap) */
+  maxSlippage: number;
+  /** Minimum liquidity (USD) for confident trades */
+  minLiquidityUsd: number;
+  /** Liquidity penalty scale (higher = more penalty for low liquidity) */
+  liquidityPenaltyScale: number;
+}
+
+const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
+  baseSlippage: 0.003,      // 0.3% base slippage floor
+  priceImpactScale: 5.0,    // Price impact multiplied by this factor
+  maxSlippage: 0.10,        // 10% hard cap (was 2%)
+  minLiquidityUsd: 100000,  // $100K minimum for full confidence
+  liquidityPenaltyScale: 2.0 // Penalty factor for low liquidity
+};
+
 export class CrossDexTriangularArbitrage {
   private cache = getHierarchicalCache();
   private minProfitThreshold = 0.005; // 0.5% minimum profit
-  private maxSlippage = 0.02; // 2% maximum slippage
+  private maxSlippage = 0.10; // T1.2: Increased cap to 10% (dynamic calculation handles most cases)
   private maxExecutionTime = 5000; // 5 seconds max execution time
+
+  /** T1.2: Dynamic slippage configuration */
+  private slippageConfig: DynamicSlippageConfig;
 
   constructor(options?: {
     minProfitThreshold?: number;
     maxSlippage?: number;
     maxExecutionTime?: number;
+    slippageConfig?: Partial<DynamicSlippageConfig>;
   }) {
+    // T1.2: Initialize dynamic slippage config with defaults
+    this.slippageConfig = { ...DEFAULT_SLIPPAGE_CONFIG, ...options?.slippageConfig };
+
     if (options) {
-      this.minProfitThreshold = options.minProfitThreshold || this.minProfitThreshold;
-      this.maxSlippage = options.maxSlippage || this.maxSlippage;
-      this.maxExecutionTime = options.maxExecutionTime || this.maxExecutionTime;
+      // BUG FIX: Use ?? instead of || to correctly handle explicit 0 values
+      this.minProfitThreshold = options.minProfitThreshold ?? this.minProfitThreshold;
+      this.maxSlippage = options.maxSlippage ?? this.slippageConfig.maxSlippage;
+      this.maxExecutionTime = options.maxExecutionTime ?? this.maxExecutionTime;
     }
+  }
+
+  /**
+   * T1.2: Calculate dynamic slippage based on trade size, pool reserves, and liquidity.
+   *
+   * Formula: slippage = baseSlippage + (priceImpact * priceImpactScale) + liquidityPenalty
+   *
+   * Where:
+   * - priceImpact = tradeSize / (reserveIn + tradeSize) [standard AMM formula]
+   * - liquidityPenalty = max(0, (minLiquidity - actualLiquidity) / minLiquidity * liquidityPenaltyScale * 0.01)
+   *
+   * @param tradeSize Trade size in pool units
+   * @param reserveIn Reserve of input token
+   * @param liquidityUsd Total pool liquidity in USD
+   * @returns Dynamic slippage value (capped at maxSlippage)
+   */
+  calculateDynamicSlippage(
+    tradeSize: number,
+    reserveIn: number,
+    liquidityUsd: number = 0
+  ): number {
+    const config = this.slippageConfig;
+
+    // Base slippage floor
+    let slippage = config.baseSlippage;
+
+    // Price impact contribution (standard AMM formula)
+    if (reserveIn > 0) {
+      const priceImpact = tradeSize / (reserveIn + tradeSize);
+      slippage += priceImpact * config.priceImpactScale;
+    }
+
+    // Liquidity penalty for low-liquidity pools
+    if (liquidityUsd > 0 && liquidityUsd < config.minLiquidityUsd) {
+      const liquidityRatio = liquidityUsd / config.minLiquidityUsd;
+      const liquidityPenalty = (1 - liquidityRatio) * config.liquidityPenaltyScale * 0.01;
+      slippage += liquidityPenalty;
+    }
+
+    // Cap at maximum slippage
+    return Math.min(slippage, config.maxSlippage);
   }
 
   // Find triangular arbitrage opportunities across DEXes
@@ -113,6 +207,278 @@ export class CrossDexTriangularArbitrage {
     });
 
     return validOpportunities;
+  }
+
+  // ===========================================================================
+  // T2.6: Quadrilateral Arbitrage Detection
+  // ===========================================================================
+
+  /**
+   * T2.6: Find quadrilateral (4-hop) arbitrage opportunities.
+   * Detects A → B → C → D → A paths for potential profit.
+   */
+  async findQuadrilateralOpportunities(
+    chain: string,
+    pools: DexPool[],
+    baseTokens: string[] = ['USDT', 'USDC', 'WETH', 'WBTC']
+  ): Promise<QuadrilateralOpportunity[]> {
+    const startTime = Date.now();
+    const opportunities: QuadrilateralOpportunity[] = [];
+
+    if (pools.length < 4) {
+      // Need at least 4 pools for a quadrilateral
+      return [];
+    }
+
+    // Group pools by token pairs for efficient lookup
+    const tokenPairs = this.groupPoolsByPairs(pools);
+
+    // Find all possible quadrilaterals starting from base tokens
+    for (const baseToken of baseTokens) {
+      const quads = await this.findQuadrilateralsFromBaseToken(
+        baseToken,
+        tokenPairs,
+        pools,
+        chain
+      );
+
+      opportunities.push(...quads);
+    }
+
+    // Filter and rank opportunities
+    const validOpportunities = this.filterAndRankQuadrilaterals(opportunities);
+
+    const processingTime = Date.now() - startTime;
+    logger.info(`Found ${validOpportunities.length} quadrilateral arbitrage opportunities`, {
+      chain,
+      totalPools: pools.length,
+      processingTime,
+      profitRange: validOpportunities.length > 0 ?
+        `${Math.min(...validOpportunities.map(o => o.profitPercentage)).toFixed(3)}% - ${Math.max(...validOpportunities.map(o => o.profitPercentage)).toFixed(3)}%` :
+        'N/A'
+    });
+
+    return validOpportunities;
+  }
+
+  /**
+   * T2.6: Find quadrilaterals starting from a specific base token.
+   */
+  private async findQuadrilateralsFromBaseToken(
+    baseToken: string,
+    tokenPairs: Map<string, DexPool[]>,
+    allPools: DexPool[],
+    chain: string
+  ): Promise<QuadrilateralOpportunity[]> {
+    const opportunities: QuadrilateralOpportunity[] = [];
+
+    // Get all tokens reachable from base token
+    const reachableTokens = this.findReachableTokens(baseToken, tokenPairs);
+
+    // Need at least 4 tokens for a quadrilateral (including base)
+    if (reachableTokens.length < 4) {
+      return [];
+    }
+
+    // Try all possible quadrilaterals: baseToken -> tokenA -> tokenB -> tokenC -> baseToken
+    // Use a limit on combinations to avoid O(n^3) explosion
+    const maxTokensToCheck = Math.min(reachableTokens.length, 20); // Limit search space
+    const tokensToCheck = reachableTokens.slice(0, maxTokensToCheck);
+
+    for (const tokenA of tokensToCheck) {
+      if (tokenA === baseToken) continue;
+
+      for (const tokenB of tokensToCheck) {
+        if (tokenB === baseToken || tokenB === tokenA) continue;
+
+        for (const tokenC of tokensToCheck) {
+          if (tokenC === baseToken || tokenC === tokenA || tokenC === tokenB) continue;
+
+          // Check if we can form a valid quadrilateral
+          const quad = await this.evaluateQuadrilateral(
+            [baseToken, tokenA, tokenB, tokenC, baseToken],
+            tokenPairs,
+            allPools,
+            chain
+          );
+
+          if (quad && quad.netProfit > 0) {
+            opportunities.push(quad);
+          }
+        }
+      }
+    }
+
+    return opportunities;
+  }
+
+  /**
+   * T2.6: Evaluate a potential quadrilateral arbitrage.
+   */
+  private async evaluateQuadrilateral(
+    tokens: [string, string, string, string, string], // [start, A, B, C, end]
+    tokenPairs: Map<string, DexPool[]>,
+    allPools: DexPool[],
+    chain: string
+  ): Promise<QuadrilateralOpportunity | null> {
+    const [token0, token1, token2, token3, token4] = tokens;
+    if (token4 !== token0) return null; // Must close the quadrilateral
+
+    // Find best DEXes for each leg
+    const leg1Pools = this.findBestPoolsForPair(tokenPairs, token0, token1);
+    const leg2Pools = this.findBestPoolsForPair(tokenPairs, token1, token2);
+    const leg3Pools = this.findBestPoolsForPair(tokenPairs, token2, token3);
+    const leg4Pools = this.findBestPoolsForPair(tokenPairs, token3, token0);
+
+    if (leg1Pools.length === 0 || leg2Pools.length === 0 ||
+        leg3Pools.length === 0 || leg4Pools.length === 0) {
+      return null;
+    }
+
+    // Try different combinations of DEXes (top 2 per leg to limit combinations)
+    const opportunities: QuadrilateralOpportunity[] = [];
+
+    for (const pool1 of leg1Pools.slice(0, 2)) {
+      for (const pool2 of leg2Pools.slice(0, 2)) {
+        for (const pool3 of leg3Pools.slice(0, 2)) {
+          for (const pool4 of leg4Pools.slice(0, 2)) {
+            const opportunity = await this.simulateQuadrilateral(
+              [token0, token1, token2, token3, token0],
+              [pool1, pool2, pool3, pool4],
+              chain
+            );
+
+            if (opportunity && opportunity.netProfit > 0) {
+              opportunities.push(opportunity);
+            }
+          }
+        }
+      }
+    }
+
+    // Return the best opportunity
+    return opportunities.sort((a, b) => b.netProfit - a.netProfit)[0] || null;
+  }
+
+  /**
+   * T2.6: Simulate a quadrilateral arbitrage execution.
+   * Uses BigInt for precise wei calculations (same as triangular).
+   */
+  private async simulateQuadrilateral(
+    tokens: [string, string, string, string, string],
+    pools: [DexPool, DexPool, DexPool, DexPool],
+    chain: string
+  ): Promise<QuadrilateralOpportunity | null> {
+    const [token0, token1, token2, token3, token4] = tokens;
+    const [pool1, pool2, pool3, pool4] = pools;
+
+    // Use BigInt for wei amounts to prevent precision loss
+    let amountBigInt = ONE_ETH_WEI;
+    const initialAmountBigInt = ONE_ETH_WEI;
+    const steps: TriangularStep[] = [];
+
+    try {
+      // Leg 1: token0 -> token1
+      const step1 = this.simulateSwapBigInt(token0, token1, amountBigInt, pool1);
+      amountBigInt = step1.amountOutBigInt;
+      steps.push(step1.step);
+
+      // Leg 2: token1 -> token2
+      const step2 = this.simulateSwapBigInt(token1, token2, amountBigInt, pool2);
+      amountBigInt = step2.amountOutBigInt;
+      steps.push(step2.step);
+
+      // Leg 3: token2 -> token3
+      const step3 = this.simulateSwapBigInt(token2, token3, amountBigInt, pool3);
+      amountBigInt = step3.amountOutBigInt;
+      steps.push(step3.step);
+
+      // Leg 4: token3 -> token0 (close quadrilateral)
+      const step4 = this.simulateSwapBigInt(token3, token0, amountBigInt, pool4);
+      amountBigInt = step4.amountOutBigInt;
+      steps.push(step4.step);
+
+      // Calculate profit using BigInt then convert to decimal
+      const profitBigInt = amountBigInt - initialAmountBigInt;
+      const grossProfitScaled = (profitBigInt * PRECISION_MULTIPLIER) / initialAmountBigInt;
+      const grossProfit = Number(grossProfitScaled) / Number(PRECISION_MULTIPLIER);
+
+      // Estimate gas costs (4 swaps = higher gas than triangular)
+      const gasCost = this.estimateGasCost(chain, steps.length);
+
+      // Calculate net profit after fees and gas
+      const totalFees = steps.reduce((sum, step) => sum + step.fee, 0);
+      const netProfit = grossProfit - totalFees - gasCost;
+
+      if (netProfit < this.minProfitThreshold) {
+        return null;
+      }
+
+      // Estimate execution time
+      const executionTime = this.estimateExecutionTime(chain, steps);
+
+      // Calculate confidence based on liquidity and slippage
+      const confidence = this.calculateConfidence(steps, pools);
+
+      const opportunity: QuadrilateralOpportunity = {
+        id: `quad_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+        chain,
+        path: [token0, token1, token2, token3],
+        dexes: [pool1.dex, pool2.dex, pool3.dex, pool4.dex],
+        profitPercentage: netProfit,
+        profitUSD: netProfit * 2000, // Rough ETH to USD conversion
+        gasCost,
+        netProfit,
+        confidence,
+        steps,
+        timestamp: Date.now(),
+        executionTime
+      };
+
+      return opportunity;
+
+    } catch (error: any) {
+      logger.debug('Quadrilateral simulation failed', {
+        tokens,
+        dexes: pools.map(p => p.dex),
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  /**
+   * T2.6: Filter and rank quadrilateral opportunities.
+   */
+  private filterAndRankQuadrilaterals(opportunities: QuadrilateralOpportunity[]): QuadrilateralOpportunity[] {
+    return opportunities
+      .filter(opp => {
+        // Filter by minimum profit
+        if (opp.netProfit < this.minProfitThreshold) return false;
+
+        // Filter by maximum slippage
+        const maxStepSlippage = Math.max(...opp.steps.map(s => s.slippage));
+        if (maxStepSlippage > this.maxSlippage) return false;
+
+        // Filter by execution time
+        if (opp.executionTime > this.maxExecutionTime) return false;
+
+        // Filter by confidence (slightly lower threshold for 4-hop due to complexity)
+        if (opp.confidence < 0.5) return false; // Minimum 50% confidence
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Rank by net profit, then by confidence, then by execution time
+        if (Math.abs(a.netProfit - b.netProfit) > 0.001) {
+          return b.netProfit - a.netProfit;
+        }
+        if (Math.abs(a.confidence - b.confidence) > 0.1) {
+          return b.confidence - a.confidence;
+        }
+        return a.executionTime - b.executionTime;
+      })
+      .slice(0, 10); // Return top 10 opportunities
   }
 
   // Find triangles starting from a specific base token
@@ -250,7 +616,7 @@ export class CrossDexTriangularArbitrage {
       const confidence = this.calculateConfidence(steps, pools);
 
       const opportunity: TriangularOpportunity = {
-        id: `tri_${chain}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: `tri_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
         chain,
         path: [token0, token1, token2],
         dexes: [pool1.dex, pool2.dex, pool3.dex],
@@ -277,6 +643,7 @@ export class CrossDexTriangularArbitrage {
   }
 
   // P0-FIX: BigInt version of swap simulation for precise calculations
+  // T1.2: Updated to use dynamic slippage calculation
   private simulateSwapBigInt(
     fromToken: string,
     toToken: string,
@@ -315,11 +682,17 @@ export class CrossDexTriangularArbitrage {
     const denominator = reserveInBigInt + amountInWithFee;
     const amountOutBigInt = numerator / denominator;
 
-    // Calculate slippage (convert to number for ratio calculation - safe as it's a small ratio)
+    // T1.2: Calculate dynamic slippage based on trade size and pool liquidity
+    // Convert BigInt to number for ratio calculation (safe as it's scaled down)
     const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6; // Scale down for safe number conversion
     const amountInNumber = Number(amountInBigInt / (10n ** 12n)) / 1e6;
-    const priceImpact = amountInNumber / (reserveInNumber + amountInNumber);
-    const slippage = Math.min(priceImpact, this.maxSlippage);
+
+    // Use dynamic slippage calculation instead of static cap
+    const slippage = this.calculateDynamicSlippage(
+      amountInNumber,
+      reserveInNumber,
+      pool.liquidity // USD liquidity from pool
+    );
 
     // Convert BigInt to number for step (for display purposes only)
     const amountInDisplay = Number(amountInBigInt) / 1e18;
@@ -492,15 +865,19 @@ export class CrossDexTriangularArbitrage {
       minProfitThreshold: this.minProfitThreshold,
       maxSlippage: this.maxSlippage,
       maxExecutionTime: this.maxExecutionTime,
-      supportedChains: ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon']
+      supportedChains: ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon'],
+      // T1.2: Include dynamic slippage configuration
+      slippageConfig: { ...this.slippageConfig }
     };
   }
 
   // Update configuration
+  // T1.2: Extended to support dynamic slippage configuration
   updateConfig(config: {
     minProfitThreshold?: number;
     maxSlippage?: number;
     maxExecutionTime?: number;
+    slippageConfig?: Partial<DynamicSlippageConfig>;
   }): void {
     if (config.minProfitThreshold !== undefined) {
       this.minProfitThreshold = config.minProfitThreshold;
@@ -511,7 +888,23 @@ export class CrossDexTriangularArbitrage {
     if (config.maxExecutionTime !== undefined) {
       this.maxExecutionTime = config.maxExecutionTime;
     }
+    // T1.2: Update dynamic slippage config
+    if (config.slippageConfig) {
+      this.slippageConfig = { ...this.slippageConfig, ...config.slippageConfig };
+      // Also update maxSlippage to match config if provided
+      if (config.slippageConfig.maxSlippage !== undefined) {
+        this.maxSlippage = config.slippageConfig.maxSlippage;
+      }
+    }
 
     logger.info('Cross-DEX triangular arbitrage config updated', config);
+  }
+
+  /**
+   * T1.2: Get current slippage configuration.
+   * Useful for debugging and monitoring.
+   */
+  getSlippageConfig(): DynamicSlippageConfig {
+    return { ...this.slippageConfig };
   }
 }

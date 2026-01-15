@@ -1,4 +1,5 @@
 node_modules
 nul
 logs
+dist
 shared/core/dist
