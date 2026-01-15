@@ -301,12 +301,22 @@ export class SelfHealingManager {
         const breaker = this.circuitBreakers.get(service.name);
         if (breaker) {
           breaker.forceOpen();
+          // P6-FIX: Track recovery timer to prevent orphaned timers on shutdown
+          // Clear any existing timer for this service
+          const existingTimer = this.restartTimers.get(`cb-recovery:${service.name}`);
+          if (existingTimer) {
+            clearTimeout(existingTimer);
+          }
           // Schedule automatic recovery after cooldown
           // P2-2-FIX: Use configured constant instead of magic number
-          setTimeout(() => {
-            logger.info(`Testing recovery for ${service.name}`);
-            this.performHealthCheck(service.name);
+          const recoveryTimer = setTimeout(() => {
+            this.restartTimers.delete(`cb-recovery:${service.name}`);
+            if (this.isRunning) {
+              logger.info(`Testing recovery for ${service.name}`);
+              this.performHealthCheck(service.name);
+            }
           }, SELF_HEALING_DEFAULTS.circuitBreakerCooldownMs);
+          this.restartTimers.set(`cb-recovery:${service.name}`, recoveryTimer);
         }
 
         return true;
@@ -363,7 +373,19 @@ export class SelfHealingManager {
         logger.info(`Executing escalated restart for ${service.name} with ${delay}ms delay`);
 
         return new Promise((resolve) => {
-          setTimeout(async () => {
+          // P6-FIX: Track escalated restart timer to prevent orphaned timers on shutdown
+          const timerKey = `escalated-restart:${service.name}`;
+          const existingTimer = this.restartTimers.get(timerKey);
+          if (existingTimer) {
+            clearTimeout(existingTimer);
+          }
+
+          const restartTimer = setTimeout(async () => {
+            this.restartTimers.delete(timerKey);
+            if (!this.isRunning) {
+              resolve(false);
+              return;
+            }
             try {
               await this.restartService(serviceDef);
               resolve(true);
@@ -372,6 +394,7 @@ export class SelfHealingManager {
               resolve(false);
             }
           }, delay);
+          this.restartTimers.set(timerKey, restartTimer);
         });
       }
     });
@@ -423,9 +446,17 @@ export class SelfHealingManager {
 
     // P2-FIX: Wait for any existing health check to complete for this service
     // This prevents TOCTOU race conditions when multiple health checks run concurrently
+    // P6-FIX: Add timeout to prevent deadlock if previous lock never resolves
     const existingLock = this.healthUpdateLocks.get(serviceName);
     if (existingLock) {
-      await existingLock;
+      const LOCK_TIMEOUT_MS = 10000; // 10 second timeout
+      await Promise.race([
+        existingLock,
+        new Promise<void>((resolve) => setTimeout(() => {
+          logger.warn(`Health check lock timeout for ${serviceName}, proceeding anyway`);
+          resolve();
+        }, LOCK_TIMEOUT_MS))
+      ]);
     }
 
     // P2-FIX: Create a lock for this health check
@@ -591,8 +622,9 @@ export class SelfHealingManager {
     // Simulate restart delay
     await new Promise(resolve => setTimeout(resolve, SELF_HEALING_DEFAULTS.simulatedRestartDelayMs));
 
-    // Simulate occasional restart failures
-    if (Math.random() < SELF_HEALING_DEFAULTS.simulatedRestartFailureRate) {
+    // P6-FIX: Only simulate restart failures in test environment
+    // Production code should never randomly fail service restarts
+    if (process.env.NODE_ENV === 'test' && Math.random() < SELF_HEALING_DEFAULTS.simulatedRestartFailureRate) {
       throw new Error('Simulated restart failure');
     }
   }

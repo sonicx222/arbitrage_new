@@ -177,6 +177,8 @@ export class PartitionedDetector extends EventEmitter {
   protected chainPrices: Map<string, Map<string, PricePoint>> = new Map();
 
   // Health tracking
+  // P6-FIX: Add max size constant to prevent unbounded memory growth
+  private static readonly MAX_LATENCY_SAMPLES = 1000;
   protected eventLatencies: number[] = [];
   protected healthMonitoringInterval: NodeJS.Timeout | null = null;
   protected startTime: number = 0;
@@ -664,6 +666,19 @@ export class PartitionedDetector extends EventEmitter {
       }
     }
     return healthy;
+  }
+
+  /**
+   * P6-FIX: Record event latency with bounded array to prevent memory leak.
+   * Keeps only the most recent MAX_LATENCY_SAMPLES entries.
+   * Subclasses should use this method to record latencies safely.
+   */
+  protected recordEventLatency(latencyMs: number): void {
+    this.eventLatencies.push(latencyMs);
+    // Trim array if it exceeds max size - keep only recent samples
+    if (this.eventLatencies.length > PartitionedDetector.MAX_LATENCY_SAMPLES) {
+      this.eventLatencies = this.eventLatencies.slice(-PartitionedDetector.MAX_LATENCY_SAMPLES);
+    }
   }
 
   // ===========================================================================
