@@ -11,57 +11,69 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-// Import from package alias (new pattern per ADR-009)
-import { StreamHealthMonitor } from '@arbitrage/core';
-import type { StreamHealthStatus, StreamLagInfo } from '@arbitrage/core';
+// Import directly from source (DI pattern per ADR-009)
+import {
+  StreamHealthMonitor,
+  RedisStreamsClient
+} from '../../src';
+import type {
+  StreamHealthStatus,
+  StreamLagInfo,
+  StreamHealthMonitorConfig
+} from '../../src';
 
-// Mock Redis Streams Client
-jest.mock('@arbitrage/core', () => {
-  const actual = jest.requireActual('@arbitrage/core') as any;
-  const mockStreamsClient = {
-    xlen: jest.fn<any>().mockResolvedValue(100),
-    xinfo: jest.fn<any>().mockResolvedValue({
-      length: 100,
-      radixTreeKeys: 1,
-      radixTreeNodes: 2,
-      lastGeneratedId: '1234567890-0',
-      groups: 2
-    }),
-    xpending: jest.fn<any>().mockResolvedValue({
-      total: 5,
-      smallestId: '1234-0',
-      largestId: '1234-4',
-      consumers: [
-        { name: 'consumer-1', pending: 3 },
-        { name: 'consumer-2', pending: 2 }
-      ]
-    }),
-    ping: jest.fn<any>().mockResolvedValue(true),
-    disconnect: jest.fn<any>().mockResolvedValue(undefined)
-  };
+// ============================================================================
+// Mock Factories (using dependency injection instead of module mocks)
+// ============================================================================
 
-  return {
-    ...actual,
-    getRedisStreamsClient: jest.fn<any>().mockResolvedValue(mockStreamsClient),
-    RedisStreamsClient: {
-      STREAMS: {
-        PRICE_UPDATES: 'stream:price-updates',
-        SWAP_EVENTS: 'stream:swap-events',
-        OPPORTUNITIES: 'stream:opportunities',
-        WHALE_ALERTS: 'stream:whale-alerts',
-        VOLUME_AGGREGATES: 'stream:volume-aggregates',
-        HEALTH: 'stream:health'
-      }
-    }
-  };
+// Mock logger factory
+const createMockLogger = () => ({
+  info: jest.fn<(msg: string, meta?: object) => void>(),
+  error: jest.fn<(msg: string, meta?: object) => void>(),
+  warn: jest.fn<(msg: string, meta?: object) => void>(),
+  debug: jest.fn<(msg: string, meta?: object) => void>()
+});
+
+// Mock streams client factory
+const createMockStreamsClient = () => ({
+  xlen: jest.fn<() => Promise<number>>().mockResolvedValue(100),
+  xinfo: jest.fn<() => Promise<any>>().mockResolvedValue({
+    length: 100,
+    radixTreeKeys: 1,
+    radixTreeNodes: 2,
+    lastGeneratedId: '1234567890-0',
+    groups: 2
+  }),
+  xpending: jest.fn<() => Promise<any>>().mockResolvedValue({
+    total: 5,
+    smallestId: '1234-0',
+    largestId: '1234-4',
+    consumers: [
+      { name: 'consumer-1', pending: 3 },
+      { name: 'consumer-2', pending: 2 }
+    ]
+  }),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
 });
 
 describe('StreamHealthMonitor', () => {
   let monitor: StreamHealthMonitor;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+
+  // Create test config with injected mocks
+  const createTestConfig = (overrides: Partial<StreamHealthMonitorConfig> = {}): StreamHealthMonitorConfig => ({
+    logger: mockLogger,
+    streamsClient: mockStreamsClient as any,
+    ...overrides
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    monitor = new StreamHealthMonitor();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    monitor = new StreamHealthMonitor(createTestConfig());
   });
 
   afterEach(async () => {
@@ -107,9 +119,7 @@ describe('StreamHealthMonitor', () => {
     });
 
     it('should warn when lag exceeds threshold', async () => {
-      const { getRedisStreamsClient } = require('@arbitrage/core');
-      const client = await getRedisStreamsClient();
-      client.xpending.mockResolvedValueOnce({
+      mockStreamsClient.xpending.mockResolvedValueOnce({
         total: 500, // Warning level: above 100 (warning) but below 1000 (critical)
         smallestId: '1234-0',
         largestId: '1234-499',
@@ -122,9 +132,7 @@ describe('StreamHealthMonitor', () => {
     });
 
     it('should alert when lag is critical', async () => {
-      const { getRedisStreamsClient } = require('@arbitrage/core');
-      const client = await getRedisStreamsClient();
-      client.xpending.mockResolvedValueOnce({
+      mockStreamsClient.xpending.mockResolvedValueOnce({
         total: 10000, // Critical pending count
         smallestId: '1234-0',
         largestId: '1234-9999',
@@ -161,9 +169,7 @@ describe('StreamHealthMonitor', () => {
       const alertHandler = jest.fn();
       monitor.onAlert(alertHandler);
 
-      const { getRedisStreamsClient } = require('@arbitrage/core');
-      const client = await getRedisStreamsClient();
-      client.xpending.mockResolvedValue({
+      mockStreamsClient.xpending.mockResolvedValue({
         total: 5000,
         smallestId: '1234-0',
         largestId: '1234-4999',
@@ -180,9 +186,7 @@ describe('StreamHealthMonitor', () => {
       const alertHandler = jest.fn();
       monitor.onAlert(alertHandler);
 
-      const { getRedisStreamsClient } = require('@arbitrage/core');
-      const client = await getRedisStreamsClient();
-      client.ping.mockResolvedValueOnce(false);
+      mockStreamsClient.ping.mockResolvedValueOnce(false);
 
       await monitor.checkStreamHealth();
 

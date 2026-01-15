@@ -11,9 +11,9 @@ import { describe, it, expect, beforeEach } from '@jest/globals';
 
 // Import from package alias (new pattern per ADR-009)
 import {
-  ArbitrageError,
+  BaseArbitrageError as ArbitrageError,
   ConnectionError,
-  ValidationError,
+  SharedValidationError as ValidationError,
   LifecycleError,
   ExecutionError,
   ErrorCode,
@@ -22,7 +22,7 @@ import {
   failure,
   tryCatch,
   tryCatchSync,
-  isRetryableError,
+  isRetryableErrorCheck as isRetryableError,
   isCriticalError,
   getErrorSeverity,
   formatErrorForLog,

@@ -1,74 +1,60 @@
 // Execution Engine Service Unit Tests
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
-import { ExecutionEngineService } from './engine';
+import { ExecutionEngineService, ExecutionEngineConfig } from './engine';
 
-// Mock config module
-jest.mock('@arbitrage/config', () => ({
-  CHAINS: {},
-  ARBITRAGE_CONFIG: {
-    minProfitPercentage: 0.003, // 0.3%
-    confidenceThreshold: 0.75,
-    maxSlippage: 0.01,
-    maxGasPrice: 100,
-    executionTimeout: 30000
-  },
-  FLASH_LOAN_PROVIDERS: {}
-}));
+// ============================================================================
+// Mock Factories (using dependency injection instead of module mocks)
+// ============================================================================
 
-jest.mock('@arbitrage/core', () => ({
-  getRedisClient: jest.fn(),
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn()
-  })),
-  getPerformanceLogger: jest.fn(() => ({
-    logEventLatency: jest.fn(),
-    logExecutionResult: jest.fn(),
-    logHealthCheck: jest.fn()
-  })),
-  createServiceState: jest.fn(() => ({
-    getState: jest.fn(() => 'idle'),
-    transition: jest.fn(() => Promise.resolve({ success: true })),
-    isTransitioning: jest.fn(() => false),
-    waitForIdle: jest.fn(() => Promise.resolve()),
-    on: jest.fn(),
-    off: jest.fn(),
-    canTransition: jest.fn(() => true)
-  })),
-  ServiceState: {
-    IDLE: 'idle',
-    STARTING: 'starting',
-    RUNNING: 'running',
-    STOPPING: 'stopping',
-    STOPPED: 'stopped',
-    ERROR: 'error'
-  },
-  RedisStreamsClient: {
-    STREAMS: {
-      OPPORTUNITIES: 'opportunities',
-      EXECUTIONS: 'executions',
-      PRICE_UPDATES: 'price-updates',
-      EVENTS: 'events'
-    }
-  }
-}));
+// Mock logger factory
+const createMockLogger = () => ({
+  info: jest.fn<(msg: string, meta?: object) => void>(),
+  error: jest.fn<(msg: string, meta?: object) => void>(),
+  warn: jest.fn<(msg: string, meta?: object) => void>(),
+  debug: jest.fn<(msg: string, meta?: object) => void>()
+});
+
+// Mock perf logger factory
+const createMockPerfLogger = () => ({
+  logEventLatency: jest.fn(),
+  logExecutionResult: jest.fn(),
+  logHealthCheck: jest.fn()
+});
+
+// Mock state manager factory
+const createMockStateManager = () => ({
+  getState: jest.fn(() => 'idle'),
+  executeStart: jest.fn((fn: () => Promise<void>) => fn()),
+  executeStop: jest.fn((fn: () => Promise<void>) => fn()),
+  transition: jest.fn(() => Promise.resolve({ success: true })),
+  isTransitioning: jest.fn(() => false),
+  waitForIdle: jest.fn(() => Promise.resolve()),
+  on: jest.fn(),
+  off: jest.fn(),
+  canTransition: jest.fn(() => true)
+});
 
 describe('ExecutionEngineService', () => {
   let engine: ExecutionEngineService;
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockPerfLogger: ReturnType<typeof createMockPerfLogger>;
+  let mockStateManager: ReturnType<typeof createMockStateManager>;
+
+  // Create test config with injected mocks
+  const createTestConfig = (overrides: Partial<ExecutionEngineConfig> = {}): ExecutionEngineConfig => ({
+    logger: mockLogger,
+    perfLogger: mockPerfLogger as any,
+    stateManager: mockStateManager as any,
+    ...overrides
+  });
 
   beforeEach(() => {
-    const mockRedis = {
-      publish: jest.fn(() => Promise.resolve(1)),
-      subscribe: jest.fn(() => Promise.resolve(undefined)),
-      updateServiceHealth: jest.fn(() => Promise.resolve(undefined)),
-      disconnect: jest.fn(() => Promise.resolve(undefined))
-    };
-    const { getRedisClient } = require('@arbitrage/core');
-    (getRedisClient as jest.Mock).mockReturnValue(mockRedis);
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockPerfLogger = createMockPerfLogger();
+    mockStateManager = createMockStateManager();
 
-    engine = new ExecutionEngineService();
+    engine = new ExecutionEngineService(createTestConfig());
   });
 
   test('should initialize correctly', () => {
@@ -104,6 +90,12 @@ describe('ExecutionEngineService', () => {
 
     const isInvalid = (engine as any).validateOpportunity(invalidOpportunity);
     expect(isInvalid).toBe(false);
+
+    // Verify logger was called for low confidence rejection
+    expect(mockLogger.debug).toHaveBeenCalledWith(
+      'Opportunity rejected: low confidence',
+      expect.objectContaining({ id: invalidOpportunity.id })
+    );
   });
 
   test('should build swap paths correctly', () => {

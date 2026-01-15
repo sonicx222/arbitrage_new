@@ -1053,10 +1053,11 @@ describe('S2.2.5 getPairAddress Integration', () => {
     it('should return cached address on cache hit', async () => {
       // Mock cache service to return hit
       const mockCacheService = {
-        get: jest.fn().mockResolvedValue({
-          status: 'hit',
-          data: { address: testPairAddress }
-        }),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string; data?: { address: string }; reason?: string }>>()
+          .mockResolvedValue({
+            status: 'hit',
+            data: { address: testPairAddress }
+          }),
         set: jest.fn(),
         setNull: jest.fn()
       };
@@ -1083,10 +1084,11 @@ describe('S2.2.5 getPairAddress Integration', () => {
 
     it('should return null for cached null result', async () => {
       const mockCacheService = {
-        get: jest.fn().mockResolvedValue({
-          status: 'null',
-          reason: 'pair_not_exists'
-        }),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string; data?: { address: string }; reason?: string }>>()
+          .mockResolvedValue({
+            status: 'null',
+            reason: 'pair_not_exists'
+          }),
         set: jest.fn(),
         setNull: jest.fn()
       };
@@ -1106,14 +1108,14 @@ describe('S2.2.5 getPairAddress Integration', () => {
 
     it('should discover pair on cache miss', async () => {
       const mockCacheService = {
-        get: jest.fn().mockResolvedValue({ status: 'miss' }),
-        set: jest.fn().mockResolvedValue(true),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string }>>().mockResolvedValue({ status: 'miss' }),
+        set: jest.fn<(...args: any[]) => Promise<boolean>>().mockResolvedValue(true),
         setNull: jest.fn()
       };
 
       const mockDiscoveryService = {
         incrementCacheHits: jest.fn(),
-        discoverPair: jest.fn().mockResolvedValue({
+        discoverPair: jest.fn<(...args: any[]) => Promise<object | null>>().mockResolvedValue({
           address: testPairAddress,
           token0: testToken0.address,
           token1: testToken1.address,
@@ -1141,14 +1143,14 @@ describe('S2.2.5 getPairAddress Integration', () => {
 
     it('should cache null result when pair not found', async () => {
       const mockCacheService = {
-        get: jest.fn().mockResolvedValue({ status: 'miss' }),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string }>>().mockResolvedValue({ status: 'miss' }),
         set: jest.fn(),
-        setNull: jest.fn().mockResolvedValue(true)
+        setNull: jest.fn<(...args: any[]) => Promise<boolean>>().mockResolvedValue(true)
       };
 
       const mockDiscoveryService = {
         incrementCacheHits: jest.fn(),
-        discoverPair: jest.fn().mockResolvedValue(null)
+        discoverPair: jest.fn<(...args: any[]) => Promise<object | null>>().mockResolvedValue(null)
       };
 
       detector.setMockPairServices(mockDiscoveryService, mockCacheService);
@@ -1177,7 +1179,7 @@ describe('S2.2.5 getPairAddress Integration', () => {
 
     it('should handle cache errors gracefully', async () => {
       const mockCacheService = {
-        get: jest.fn().mockRejectedValue(new Error('Redis connection failed')),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string }>>().mockRejectedValue(new Error('Redis connection failed')),
         set: jest.fn(),
         setNull: jest.fn()
       };
@@ -1191,14 +1193,14 @@ describe('S2.2.5 getPairAddress Integration', () => {
 
     it('should handle discovery errors gracefully', async () => {
       const mockCacheService = {
-        get: jest.fn().mockResolvedValue({ status: 'miss' }),
+        get: jest.fn<(...args: any[]) => Promise<{ status: string }>>().mockResolvedValue({ status: 'miss' }),
         set: jest.fn(),
         setNull: jest.fn()
       };
 
       const mockDiscoveryService = {
         incrementCacheHits: jest.fn(),
-        discoverPair: jest.fn().mockRejectedValue(new Error('RPC timeout'))
+        discoverPair: jest.fn<(...args: any[]) => Promise<object | null>>().mockRejectedValue(new Error('RPC timeout'))
       };
 
       detector.setMockPairServices(mockDiscoveryService, mockCacheService);

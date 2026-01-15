@@ -82,6 +82,7 @@ export type {
 export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
+export type { Task, TaskResult } from './worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
 export {
   WebSocketManager,
@@ -154,7 +155,8 @@ export type {
   ConsumerGroupHealth,
   StreamHealthSummary,
   StreamHealthThresholds,
-  StreamAlert
+  StreamAlert,
+  StreamHealthMonitorConfig
 } from './stream-health-monitor';
 export {
   SwapEventFilter,
@@ -253,7 +255,7 @@ export {
 
 // Base detector for chain-specific implementations
 export { BaseDetector } from './base-detector';
-export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
+export type { DetectorConfig as BaseDetectorConfig, PairSnapshot, ExtendedPair } from './base-detector';
 
 // Partitioned detector for multi-chain management (ADR-003, S3.1)
 export { PartitionedDetector } from './partitioned-detector';
