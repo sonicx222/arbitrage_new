@@ -28,24 +28,19 @@ export function createLogger(serviceName: string) {
     defaultMeta: { service: serviceName },
     transports: [
       // Console transport for all logs
-      new winston.transports.Console({
-        handleExceptions: true,
-        handleRejections: true
-      }),
+      // Note: handleExceptions/handleRejections disabled to prevent MaxListenersExceeded warnings
+      // Exception handling is done at the service entry point level
+      new winston.transports.Console(),
 
       // File transport for errors
       new winston.transports.File({
         filename: `logs/${serviceName}-error.log`,
-        level: 'error',
-        handleExceptions: true,
-        handleRejections: true
+        level: 'error'
       }),
 
       // File transport for all logs
       new winston.transports.File({
-        filename: `logs/${serviceName}-combined.log`,
-        handleExceptions: true,
-        handleRejections: true
+        filename: `logs/${serviceName}-combined.log`
       })
     ],
     exitOnError: false
@@ -97,7 +92,7 @@ export class PerformanceLogger {
   }
 
   logEventLatency(operation: string, latency: number, metadata?: any): void {
-    this.logger.info(`Event processed: ${operation}`, {
+    this.logger.debug(`Event processed: ${operation}`, {
       latency,
       ...metadata
     });
