@@ -103,24 +103,24 @@ class MockWebSocketManager extends EventEmitter {
   }
 }
 
-jest.mock('../../shared/core/src/logger', () => ({
+jest.mock('@arbitrage/core/logger', () => ({
   createLogger: jest.fn(() => mockLogger),
   getPerformanceLogger: jest.fn(() => mockPerfLogger)
 }));
 
-jest.mock('../../shared/core/src/redis', () => ({
+jest.mock('@arbitrage/core/redis', () => ({
   getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient)),
   RedisClient: jest.fn()
 }));
 
-jest.mock('../../shared/core/src/redis-streams', () => ({
+jest.mock('@arbitrage/core/redis-streams', () => ({
   getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
   RedisStreamsClient: {
     STREAMS: mockStreamsClient.STREAMS
   }
 }));
 
-jest.mock('../../shared/core/src/websocket-manager', () => ({
+jest.mock('@arbitrage/core/websocket-manager', () => ({
   WebSocketManager: MockWebSocketManager
 }));
 
@@ -130,7 +130,7 @@ import {
   PartitionedDetectorConfig,
   PartitionHealth,
   CrossChainDiscrepancy
-} from '../../shared/core/src/partitioned-detector';
+} from '@arbitrage/corepartitioned-detector';
 
 import {
   PARTITIONS,
@@ -140,9 +140,9 @@ import {
   createChainInstance,
   assignChainToPartition,
   validatePartitionConfig
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
-import { CHAINS } from '../../shared/config/src';
+import { CHAINS } from '@arbitrage/config';
 
 // =============================================================================
 // Test Helpers

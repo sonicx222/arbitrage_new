@@ -17,7 +17,7 @@ import {
   DEXES,
   getEnabledDexes,
   CHAINS
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 // DEX Adapter imports
 import {
@@ -32,7 +32,7 @@ import {
   PLATYPUS_ADDRESSES,
   AdapterConfig,
   DexAdapter
-} from '../../shared/core/src/dex-adapters';
+} from '@arbitrage/coredex-adapters';
 
 // =============================================================================
 // Test Constants

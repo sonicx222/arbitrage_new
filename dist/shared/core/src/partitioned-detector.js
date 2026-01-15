@@ -72,7 +72,6 @@ class PartitionedDetector extends events_1.EventEmitter {
         this.chainConfigs = new Map();
         // Cross-chain price tracking
         this.chainPrices = new Map();
-        // Health tracking
         this.eventLatencies = [];
         this.healthMonitoringInterval = null;
         this.startTime = 0;
@@ -469,6 +468,18 @@ class PartitionedDetector extends events_1.EventEmitter {
         }
         return healthy;
     }
+    /**
+     * P6-FIX: Record event latency with bounded array to prevent memory leak.
+     * Keeps only the most recent MAX_LATENCY_SAMPLES entries.
+     * Subclasses should use this method to record latencies safely.
+     */
+    recordEventLatency(latencyMs) {
+        this.eventLatencies.push(latencyMs);
+        // Trim array if it exceeds max size - keep only recent samples
+        if (this.eventLatencies.length > PartitionedDetector.MAX_LATENCY_SAMPLES) {
+            this.eventLatencies = this.eventLatencies.slice(-PartitionedDetector.MAX_LATENCY_SAMPLES);
+        }
+    }
     // ===========================================================================
     // Message Handling
     // ===========================================================================
@@ -624,5 +635,8 @@ class PartitionedDetector extends events_1.EventEmitter {
     }
 }
 exports.PartitionedDetector = PartitionedDetector;
+// Health tracking
+// P6-FIX: Add max size constant to prevent unbounded memory growth
+PartitionedDetector.MAX_LATENCY_SAMPLES = 1000;
 exports.default = PartitionedDetector;
 //# sourceMappingURL=partitioned-detector.js.map

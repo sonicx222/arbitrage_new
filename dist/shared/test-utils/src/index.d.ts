@@ -1,3 +1,32 @@
+/**
+ * Test Utilities for Arbitrage System
+ *
+ * Provides mocks, fixtures, factories, and helpers for comprehensive testing.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * import {
+ *   // Mocks
+ *   RedisMock, createRedisMock,
+ *
+ *   // Factories (new, preferred)
+ *   swapEvent, createSwapEvent, createSwapBatch,
+ *   priceUpdate, createPriceUpdate,
+ *
+ *   // Setup utilities
+ *   setupTestEnv, resetAllSingletons,
+ *
+ *   // Legacy helpers (still supported)
+ *   delay, generateRandomAddress, measurePerformance
+ * } from '@arbitrage/test-utils';
+ * ```
+ *
+ * @see docs/TEST_ARCHITECTURE.md
+ */
+export * from './mocks';
+export * from './factories';
+export * from './setup';
 export declare class RedisMock {
     private data;
     private pubSubChannels;

@@ -1,4 +1,4 @@
-export { RedisClient, getRedisClient, resetRedisInstance } from './redis';
+export { RedisClient, RedisOperationError, getRedisClient, resetRedisInstance } from './redis';
 export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';
 export { AsyncMutex, namedMutex, clearNamedMutex, clearAllNamedMutexes } from './async-mutex';
 export type { MutexStats } from './async-mutex';

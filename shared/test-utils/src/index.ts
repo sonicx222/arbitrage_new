@@ -1,8 +1,36 @@
-// Test Utilities for Arbitrage System
-// Provides mocks, fixtures, and helpers for comprehensive testing
+/**
+ * Test Utilities for Arbitrage System
+ *
+ * Provides mocks, fixtures, factories, and helpers for comprehensive testing.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * import {
+ *   // Mocks
+ *   RedisMock, createRedisMock,
+ *
+ *   // Factories (new, preferred)
+ *   swapEvent, createSwapEvent, createSwapBatch,
+ *   priceUpdate, createPriceUpdate,
+ *
+ *   // Setup utilities
+ *   setupTestEnv, resetAllSingletons,
+ *
+ *   // Legacy helpers (still supported)
+ *   delay, generateRandomAddress, measurePerformance
+ * } from '@arbitrage/test-utils';
+ * ```
+ *
+ * @see docs/TEST_ARCHITECTURE.md
+ */
 
 import * as fs from 'fs';
 import * as path from 'path';
+
+// =============================================================================
+// Environment Setup (runs at import time for backward compatibility)
+// =============================================================================
 
 // Load Redis test server config if available (from jest.globalSetup.ts)
 const REDIS_CONFIG_FILE = path.join(__dirname, '../../../.redis-test-config.json');
@@ -12,9 +40,13 @@ if (fs.existsSync(REDIS_CONFIG_FILE)) {
     process.env.REDIS_HOST = config.host;
     process.env.REDIS_PORT = String(config.port);
     process.env.REDIS_URL = config.url;
-    console.log(`[Test Setup] Using Redis test server at ${config.url}`);
+    if (process.env.DEBUG_TESTS === 'true') {
+      console.log(`[Test Setup] Using Redis test server at ${config.url}`);
+    }
   } catch (error) {
-    console.warn('[Test Setup] Failed to load Redis config file:', error);
+    if (process.env.DEBUG_TESTS === 'true') {
+      console.warn('[Test Setup] Failed to load Redis config file:', error);
+    }
   }
 }
 
@@ -35,6 +67,23 @@ process.env.BASE_WS_URL = process.env.BASE_WS_URL || 'wss://mainnet.base.org';
 process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'error';
 process.env.REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// =============================================================================
+// Re-exports from New Modular Structure
+// =============================================================================
+
+// Mocks
+export * from './mocks';
+
+// Factories (new, preferred API)
+export * from './factories';
+
+// Setup utilities
+export * from './setup';
+
+// =============================================================================
+// Legacy Exports (kept for backward compatibility)
+// =============================================================================
 
 import { jest } from '@jest/globals';
 

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.RedisClient = void 0;
+exports.RedisClient = exports.RedisOperationError = void 0;
 exports.getRedisClient = getRedisClient;
 exports.getRedisClientSync = getRedisClientSync;
 exports.checkRedisHealth = checkRedisHealth;
@@ -8,6 +8,41 @@ exports.resetRedisInstance = resetRedisInstance;
 // Redis client for message queue and caching
 const ioredis_1 = require("ioredis");
 const logger_1 = require("./logger");
+// =============================================================================
+// P2-FIX-1: Standardized Redis Error Handling
+// =============================================================================
+//
+// Error Handling Pattern:
+// -----------------------
+// 1. WRITE operations (set, hset, sadd, zadd, etc.) - THROW on error
+//    - Data loss is unacceptable; callers must handle write failures
+//    - Returning 0/false masks real errors vs "nothing to write"
+//
+// 2. READ operations (get, hget, smembers, etc.) - Return null/empty on error
+//    - Cache misses are expected; returning null is acceptable
+//    - Callers can't distinguish "no data" from "Redis error" but this is
+//      acceptable for cache scenarios where missing data triggers a refresh
+//
+// 3. CRITICAL operations (setNx, exists, eval) - THROW on error
+//    - Used for distributed locking where silent failures cause race conditions
+//    - Must distinguish "lock held by another" from "Redis unavailable"
+//
+// All methods log errors before throwing or returning defaults.
+// =============================================================================
+/**
+ * P2-FIX-1: Custom error class for Redis operations.
+ * Allows callers to distinguish Redis errors from other errors.
+ */
+class RedisOperationError extends Error {
+    constructor(operation, originalError, key) {
+        super(`Redis ${operation} failed${key ? ` for key '${key}'` : ''}: ${originalError.message}`);
+        this.operation = operation;
+        this.originalError = originalError;
+        this.key = key;
+        this.name = 'RedisOperationError';
+    }
+}
+exports.RedisOperationError = RedisOperationError;
 // P2-2-FIX: Import config with fallback for test environment
 let SYSTEM_CONSTANTS;
 try {
@@ -228,6 +263,9 @@ class RedisClient {
             return null;
         }
     }
+    /**
+     * P2-FIX-1: Delete throws on error - callers must know if deletion failed
+     */
     async del(...keys) {
         try {
             if (keys.length === 0)
@@ -235,17 +273,20 @@ class RedisClient {
             return await this.client.del(...keys);
         }
         catch (error) {
-            this.logger.error('Error deleting cache', { error });
-            return 0;
+            this.logger.error('Error deleting cache', { error, keys });
+            throw new RedisOperationError('del', error, keys.join(', '));
         }
     }
+    /**
+     * P2-FIX-1: Expire throws on error - TTL changes must be reliable
+     */
     async expire(key, seconds) {
         try {
             return await this.client.expire(key, seconds);
         }
         catch (error) {
-            this.logger.error('Error setting expire', { error });
-            return 0;
+            this.logger.error('Error setting expire', { error, key });
+            throw new RedisOperationError('expire', error, key);
         }
     }
     /**
@@ -384,15 +425,17 @@ class RedisClient {
         }
     }
     // Hash operations for complex data
-    // P1-1 FIX: Use unknown instead of any for type safety
+    /**
+     * P2-FIX-1: Hash set throws on error - writes must be reliable
+     */
     async hset(key, field, value) {
         try {
             const serializedValue = JSON.stringify(value);
             return await this.client.hset(key, field, serializedValue);
         }
         catch (error) {
-            this.logger.error('Error setting hash field', { error });
-            return 0;
+            this.logger.error('Error setting hash field', { error, key, field });
+            throw new RedisOperationError('hset', error, key);
         }
     }
     async hget(key, field) {
@@ -422,22 +465,28 @@ class RedisClient {
         }
     }
     // Set operations
+    /**
+     * P2-FIX-1: Set add throws on error - writes must be reliable
+     */
     async sadd(key, ...members) {
         try {
             return await this.client.sadd(key, ...members);
         }
         catch (error) {
-            this.logger.error('Error sadd', { error });
-            return 0;
+            this.logger.error('Error sadd', { error, key });
+            throw new RedisOperationError('sadd', error, key);
         }
     }
+    /**
+     * P2-FIX-1: Set remove throws on error - writes must be reliable
+     */
     async srem(key, ...members) {
         try {
             return await this.client.srem(key, ...members);
         }
         catch (error) {
-            this.logger.error('Error srem', { error });
-            return 0;
+            this.logger.error('Error srem', { error, key });
+            throw new RedisOperationError('srem', error, key);
         }
     }
     async smembers(key) {
@@ -450,13 +499,16 @@ class RedisClient {
         }
     }
     // Sorted Set operations
+    /**
+     * P2-FIX-1: Sorted set add throws on error - writes must be reliable
+     */
     async zadd(key, score, member) {
         try {
             return await this.client.zadd(key, score, member);
         }
         catch (error) {
-            this.logger.error('Error zadd', { error });
-            return 0;
+            this.logger.error('Error zadd', { error, key });
+            throw new RedisOperationError('zadd', error, key);
         }
     }
     async zrange(key, start, stop, withScores = '') {
@@ -471,13 +523,16 @@ class RedisClient {
             return [];
         }
     }
+    /**
+     * P2-FIX-1: Sorted set remove throws on error - writes must be reliable
+     */
     async zrem(key, ...members) {
         try {
             return await this.client.zrem(key, ...members);
         }
         catch (error) {
-            this.logger.error('Error zrem', { error });
-            return 0;
+            this.logger.error('Error zrem', { error, key });
+            throw new RedisOperationError('zrem', error, key);
         }
     }
     async zcard(key) {
@@ -500,6 +555,7 @@ class RedisClient {
     }
     /**
      * P0-3 FIX: Remove elements from sorted set by score range.
+     * P2-FIX-1: Throws on error - writes must be reliable
      * Used by rate limiter to remove expired entries.
      */
     async zremrangebyscore(key, min, max) {
@@ -507,8 +563,8 @@ class RedisClient {
             return await this.client.zremrangebyscore(key, min, max);
         }
         catch (error) {
-            this.logger.error('Error zremrangebyscore', { error });
-            return 0;
+            this.logger.error('Error zremrangebyscore', { error, key });
+            throw new RedisOperationError('zremrangebyscore', error, key);
         }
     }
     /**
@@ -550,7 +606,8 @@ class RedisClient {
                 }
                 catch (error) {
                     this.logger.error('Error executing multi', { error });
-                    return [];
+                    // P2-FIX-1: Transactions should throw - atomic operations must be reliable
+                    throw new RedisOperationError('multi.exec', error);
                 }
             }
         };
@@ -596,13 +653,16 @@ class RedisClient {
             return 0;
         }
     }
+    /**
+     * P2-FIX-1: List push throws on error - writes must be reliable
+     */
     async lpush(key, ...values) {
         try {
             return await this.client.lpush(key, ...values);
         }
         catch (error) {
-            this.logger.error('Error lpush', { error });
-            return 0;
+            this.logger.error('Error lpush', { error, key });
+            throw new RedisOperationError('lpush', error, key);
         }
     }
     async rpop(key) {
@@ -623,13 +683,16 @@ class RedisClient {
             return [];
         }
     }
+    /**
+     * P2-FIX-1: List trim throws on error - writes must be reliable
+     */
     async ltrim(key, start, stop) {
         try {
             return await this.client.ltrim(key, start, stop);
         }
         catch (error) {
-            this.logger.error('Error ltrim', { error });
-            return 'OK';
+            this.logger.error('Error ltrim', { error, key });
+            throw new RedisOperationError('ltrim', error, key);
         }
     }
     // Service health tracking

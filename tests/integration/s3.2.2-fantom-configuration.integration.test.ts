@@ -18,13 +18,13 @@ import {
   CORE_TOKENS,
   TOKEN_METADATA,
   DETECTOR_CONFIG
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   assignChainToPartition
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
-import { PARTITION_IDS } from '../../shared/config/src';
+import { PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================
 // Test Constants
@@ -204,7 +204,7 @@ describe('S3.2.2.2: Fantom DEX Configuration', () => {
 
     it('should have vault-model DEX enabled with adapter', () => {
       // Import DEXES directly to check all configured
-      const { DEXES } = require('../../shared/config/src');
+      const { DEXES } = require('@arbitrage/config');
       const allFantomDexes = DEXES['fantom'] || [];
 
       // Should have 4 total DEXs configured
@@ -716,7 +716,7 @@ describe('S3.2.2.7: Regression Tests', () => {
       expect(enabledDexes.length).toBe(4);
 
       // Verify total configured (all should be enabled now)
-      const { DEXES } = require('../../shared/config/src');
+      const { DEXES } = require('@arbitrage/config');
       const allFantomDexes = DEXES['fantom'] || [];
       expect(allFantomDexes.length).toBe(4);
     });
@@ -963,7 +963,7 @@ describe('S3.2.2.8: PairDiscoveryService Fantom Integration', () => {
 
     it('should be configured and enabled in DEXES (has BalancerV2Adapter)', () => {
       // Verify the DEX is configured and enabled with adapter
-      const { DEXES } = require('../../shared/config/src');
+      const { DEXES } = require('@arbitrage/config');
       const beethovenX = DEXES['fantom']?.find((d: any) => d.name === 'beethoven_x');
 
       expect(beethovenX).toBeDefined();

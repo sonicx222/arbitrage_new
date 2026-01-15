@@ -121,13 +121,13 @@ import {
   StreamBatcher,
   getRedisStreamsClient,
   resetRedisStreamsInstance
-} from '../../shared/core/src/redis-streams';
+} from '@arbitrage/coreredis-streams';
 
 import {
   StreamHealthMonitor,
   getStreamHealthMonitor,
   resetStreamHealthMonitor
-} from '../../shared/core/src/stream-health-monitor';
+} from '@arbitrage/corestream-health-monitor';
 
 import { delay, createMockPriceUpdate, createMockSwapEvent } from '../../shared/test-utils/src';
 

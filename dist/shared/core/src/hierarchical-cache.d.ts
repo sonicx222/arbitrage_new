@@ -18,7 +18,15 @@ export interface CacheEntry {
 }
 export declare class HierarchicalCache {
     private config;
-    private redis;
+    /**
+     * P0-FIX-3: Redis client is stored as a Promise (lazy initialization pattern).
+     * getRedisClient() returns a Promise<RedisClient>, which we store and await
+     * in all L2 operations. This allows the cache to be constructed synchronously
+     * while deferring Redis connection until first use.
+     *
+     * Type is RedisClient | Promise<RedisClient> | null to be explicit about this pattern.
+     */
+    private redisPromise;
     private l1Metadata;
     private l1MaxEntries;
     private l1EvictionQueue;
@@ -37,6 +45,10 @@ export declare class HierarchicalCache {
     private getFromL1;
     private setInL1;
     private invalidateL1;
+    /**
+     * P1-FIX-1: Use proper glob pattern matching instead of includes().
+     * Pattern '*' now correctly matches all keys, not just keys containing '*'.
+     */
     private invalidateL1Pattern;
     private evictL1;
     private getCurrentL1Size;
@@ -58,7 +70,18 @@ export declare class HierarchicalCache {
     private getFromL3;
     private setInL3;
     private invalidateL3;
+    /**
+     * P1-FIX-1: Use proper glob pattern matching instead of includes().
+     */
     private invalidateL3Pattern;
+    /**
+     * P1-FIX-1: Glob-like pattern matching for cache key invalidation.
+     * Supports:
+     * - '*' matches any sequence of characters
+     * - '?' matches any single character
+     * - Other characters match literally
+     */
+    private matchPattern;
     private estimateSize;
     private recordAccessTime;
     cleanup(): Promise<void>;

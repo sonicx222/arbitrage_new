@@ -17,7 +17,7 @@ import {
   PARTITION_IDS,
   getEnabledDexes,
   CORE_TOKENS
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   getPartition,
@@ -27,13 +27,13 @@ import {
   validateAllPartitions,
   isEvmChain,
   getNonEvmChains
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
 // P1-1-FIX: Import PARTITION_PORTS from single source of truth
 import {
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES
-} from '../../shared/core/src';
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Constants

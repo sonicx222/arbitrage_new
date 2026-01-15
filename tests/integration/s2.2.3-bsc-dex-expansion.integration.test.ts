@@ -35,7 +35,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/src');
+} = require('@arbitrage/config');
 
 // =============================================================================
 // S2.2.3 Test Suite: BSC DEX Expansion (5 → 8)

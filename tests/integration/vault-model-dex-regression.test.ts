@@ -21,12 +21,12 @@ import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import {
   getEnabledDexes,
   DEXES
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   PairDiscoveryService,
   resetPairDiscoveryService
-} from '../../shared/core/src';
+} from '@arbitrage/core';
 
 // =============================================================================
 // Vault Model DEXs Registry

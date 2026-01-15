@@ -29,9 +29,9 @@ import {
   validatePartitionConfig,
   validateAllPartitions,
   getPartitionIdFromEnv
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
-import { CHAINS, DEXES, CORE_TOKENS } from '../../shared/config/src';
+import { CHAINS, DEXES, CORE_TOKENS } from '@arbitrage/config';
 
 // =============================================================================
 // S3.1.2.1: Partition Structure Tests (4 Partitions)
@@ -649,8 +649,8 @@ describe('S3.1.2.7: Backward Compatibility', () => {
 // S3.1.2.8: New Chain DEX Configuration Tests
 // =============================================================================
 
-import { getEnabledDexes, PARTITION_IDS } from '../../shared/config/src';
-import { isEvmChain, getNonEvmChains } from '../../shared/config/src/partitions';
+import { getEnabledDexes, PARTITION_IDS } from '@arbitrage/config';
+import { isEvmChain, getNonEvmChains } from '@arbitrage/configpartitions';
 
 describe('S3.1.2.8: New Chain DEX Configurations', () => {
   describe('Avalanche DEXes', () => {

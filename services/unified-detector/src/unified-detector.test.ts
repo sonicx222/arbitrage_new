@@ -16,10 +16,10 @@ import {
   UnifiedDetectorConfig,
   UnifiedDetectorStats
 } from './unified-detector';
-import { ServiceState } from '../../../shared/core/src';
+import { ServiceState } from '@arbitrage/core';
 
-// Mock shared/core modules
-jest.mock('../../../shared/core/src', () => ({
+// Mock @arbitrage/core
+jest.mock('@arbitrage/core', () => ({
   createLogger: jest.fn().mockReturnValue({
     info: jest.fn(),
     warn: jest.fn(),
@@ -83,8 +83,8 @@ jest.mock('../../../shared/core/src', () => ({
   })
 }));
 
-// Mock shared/config modules
-jest.mock('../../../shared/config/src', () => ({
+// Mock @arbitrage/config
+jest.mock('@arbitrage/config', () => ({
   getPartitionFromEnv: jest.fn().mockReturnValue({
     partitionId: 'asia-fast',
     name: 'Asia Fast',

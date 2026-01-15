@@ -39,7 +39,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/src');
+} = require('@arbitrage/config');
 
 // =============================================================================
 // S2.2.1: Arbitrum DEX Expansion Tests (6 → 9)

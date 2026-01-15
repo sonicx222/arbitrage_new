@@ -18,7 +18,7 @@ process.env.OPTIMISM_WS_URL = 'wss://mainnet.optimism.io';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 // Import config modules directly (they don't need mocking for configuration tests)
-import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, TOKEN_METADATA, EVENT_SIGNATURES } from '../../shared/config/src';
+import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, TOKEN_METADATA, EVENT_SIGNATURES } from '@arbitrage/config';
 
 // =============================================================================
 // S2.1.2: DEX Configuration Tests

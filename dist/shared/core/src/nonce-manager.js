@@ -47,12 +47,14 @@ class NonceManager {
         this.providers.set(chain, wallet.provider);
         this.walletAddresses.set(chain, wallet.address);
         // Initialize chain state
+        // P0-FIX-2: Use queue-based mutex instead of simple lock
         this.chainStates.set(chain, {
             confirmedNonce: -1,
             pendingNonce: -1,
             lastSync: 0,
             pendingTxs: new Map(),
-            lock: null
+            lockQueue: [],
+            isLocked: false
         });
         logger.info('Wallet registered for nonce management', {
             chain,
@@ -62,21 +64,18 @@ class NonceManager {
     /**
      * Get the next available nonce for a chain.
      * This is atomic and handles concurrent requests.
+     *
+     * P0-FIX-2: Uses queue-based mutex to prevent race conditions.
+     * The previous implementation had a TOCTOU race where multiple callers
+     * could pass the lock check before any of them set the lock.
      */
     async getNextNonce(chain) {
         const state = this.chainStates.get(chain);
         if (!state) {
             throw new Error(`No wallet registered for chain: ${chain}`);
         }
-        // Wait for any pending lock
-        if (state.lock) {
-            await state.lock;
-        }
-        // Create new lock
-        let resolveLock;
-        state.lock = new Promise((resolve) => {
-            resolveLock = resolve;
-        });
+        // P0-FIX-2: Acquire lock using queue-based mutex
+        await this.acquireLock(state);
         try {
             // Sync if needed
             if (state.confirmedNonce === -1 || Date.now() - state.lastSync > this.config.syncIntervalMs) {
@@ -101,13 +100,49 @@ class NonceManager {
             return nonce;
         }
         finally {
-            // Release lock
-            state.lock = null;
-            resolveLock();
+            // P0-FIX-2: Release lock
+            this.releaseLock(state);
+        }
+    }
+    /**
+     * P0-FIX-2: Acquire lock using queue-based mutex.
+     * Guarantees mutual exclusion even under concurrent access.
+     */
+    async acquireLock(state) {
+        // If lock is free, acquire immediately
+        if (!state.isLocked) {
+            state.isLocked = true;
+            return;
+        }
+        // Otherwise, wait in queue
+        return new Promise((resolve) => {
+            state.lockQueue.push(resolve);
+        });
+    }
+    /**
+     * P0-FIX-2: Release lock and wake up next waiter.
+     */
+    releaseLock(state) {
+        // Wake up next waiter if any
+        const nextWaiter = state.lockQueue.shift();
+        if (nextWaiter) {
+            // Hand off lock directly to next waiter (lock stays held)
+            // Use setImmediate to prevent stack overflow with many waiters
+            setImmediate(() => nextWaiter());
+        }
+        else {
+            // No waiters, release the lock
+            state.isLocked = false;
         }
     }
     /**
      * Confirm a transaction was mined.
+     *
+     * P0-FIX-1: Fixed out-of-order confirmation handling.
+     * Previously, transactions were deleted from pendingTxs before advanceConfirmedNonce
+     * could process them, causing out-of-order confirmations to not cascade properly.
+     * Now we keep confirmed transactions in pendingTxs (with status='confirmed') until
+     * advanceConfirmedNonce processes and removes them in sequence.
      */
     confirmTransaction(chain, nonce, hash) {
         const state = this.chainStates.get(chain);
@@ -117,13 +152,17 @@ class NonceManager {
         if (tx) {
             tx.status = 'confirmed';
             tx.hash = hash;
-            state.pendingTxs.delete(nonce);
-            // Update confirmed nonce if this was the next expected
+            // P0-FIX-1: Only delete and advance if this is the next expected nonce.
+            // If it's a higher nonce (out-of-order), keep it in pendingTxs as 'confirmed'
+            // so advanceConfirmedNonce can clean it up when lower nonces confirm.
             if (nonce === state.confirmedNonce) {
+                state.pendingTxs.delete(nonce);
                 state.confirmedNonce = nonce + 1;
-                // Clean up any sequential confirmed transactions
+                // Clean up any sequential confirmed transactions that were waiting
                 this.advanceConfirmedNonce(chain);
             }
+            // If nonce > confirmedNonce, leave it in pendingTxs with status='confirmed'
+            // It will be cleaned up when advanceConfirmedNonce eventually reaches it
             logger.debug('Transaction confirmed', { chain, nonce, hash: hash.slice(0, 10) + '...' });
         }
     }
@@ -166,15 +205,25 @@ class NonceManager {
     }
     /**
      * Get current state for monitoring.
+     *
+     * P0-FIX-1: pendingCount now only counts transactions with status='pending',
+     * not confirmed ones that are waiting for lower nonces to advance.
      */
     getState(chain) {
         const state = this.chainStates.get(chain);
         if (!state)
             return null;
+        // P0-FIX-1: Count only transactions with 'pending' status
+        let pendingStatusCount = 0;
+        for (const tx of state.pendingTxs.values()) {
+            if (tx.status === 'pending') {
+                pendingStatusCount++;
+            }
+        }
         return {
             confirmed: state.confirmedNonce,
             pending: state.pendingNonce,
-            pendingCount: state.pendingTxs.size
+            pendingCount: pendingStatusCount
         };
     }
     /**

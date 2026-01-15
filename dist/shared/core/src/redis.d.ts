@@ -1,4 +1,14 @@
 import { MessageEvent, ServiceHealth, PerformanceMetrics } from '../../types';
+/**
+ * P2-FIX-1: Custom error class for Redis operations.
+ * Allows callers to distinguish Redis errors from other errors.
+ */
+export declare class RedisOperationError extends Error {
+    readonly operation: string;
+    readonly originalError: Error;
+    readonly key?: string | undefined;
+    constructor(operation: string, originalError: Error, key?: string | undefined);
+}
 export declare class RedisClient {
     private client;
     private pubClient;
@@ -16,7 +26,13 @@ export declare class RedisClient {
     unsubscribe(channel: string): Promise<void>;
     set(key: string, value: unknown, ttl?: number): Promise<void>;
     get<T = any>(key: string): Promise<T | null>;
+    /**
+     * P2-FIX-1: Delete throws on error - callers must know if deletion failed
+     */
     del(...keys: string[]): Promise<number>;
+    /**
+     * P2-FIX-1: Expire throws on error - TTL changes must be reliable
+     */
     expire(key: string, seconds: number): Promise<number>;
     /**
      * Set key only if it doesn't exist (for leader election)
@@ -67,19 +83,35 @@ export declare class RedisClient {
      * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
      */
     releaseLockIfOwned(key: string, instanceId: string): Promise<boolean>;
+    /**
+     * P2-FIX-1: Hash set throws on error - writes must be reliable
+     */
     hset(key: string, field: string, value: unknown): Promise<number>;
     hget<T = any>(key: string, field: string): Promise<T | null>;
     hgetall<T = any>(key: string): Promise<Record<string, T> | null>;
+    /**
+     * P2-FIX-1: Set add throws on error - writes must be reliable
+     */
     sadd(key: string, ...members: string[]): Promise<number>;
+    /**
+     * P2-FIX-1: Set remove throws on error - writes must be reliable
+     */
     srem(key: string, ...members: string[]): Promise<number>;
     smembers(key: string): Promise<string[]>;
+    /**
+     * P2-FIX-1: Sorted set add throws on error - writes must be reliable
+     */
     zadd(key: string, score: number, member: string): Promise<number>;
     zrange(key: string, start: number, stop: number, withScores?: string): Promise<string[]>;
+    /**
+     * P2-FIX-1: Sorted set remove throws on error - writes must be reliable
+     */
     zrem(key: string, ...members: string[]): Promise<number>;
     zcard(key: string): Promise<number>;
     zscore(key: string, member: string): Promise<string | null>;
     /**
      * P0-3 FIX: Remove elements from sorted set by score range.
+     * P2-FIX-1: Throws on error - writes must be reliable
      * Used by rate limiter to remove expired entries.
      */
     zremrangebyscore(key: string, min: number, max: number): Promise<number>;
@@ -109,9 +141,15 @@ export declare class RedisClient {
      */
     scan(cursor: string, matchArg: 'MATCH', pattern: string, countArg: 'COUNT', count: number): Promise<[string, string[]]>;
     llen(key: string): Promise<number>;
+    /**
+     * P2-FIX-1: List push throws on error - writes must be reliable
+     */
     lpush(key: string, ...values: string[]): Promise<number>;
     rpop(key: string): Promise<string | null>;
     lrange(key: string, start: number, stop: number): Promise<string[]>;
+    /**
+     * P2-FIX-1: List trim throws on error - writes must be reliable
+     */
     ltrim(key: string, start: number, stop: number): Promise<'OK'>;
     updateServiceHealth(serviceName: string, health: ServiceHealth): Promise<void>;
     getServiceHealth(serviceName: string): Promise<ServiceHealth | null>;

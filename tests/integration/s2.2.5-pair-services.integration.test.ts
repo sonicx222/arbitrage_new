@@ -35,7 +35,7 @@ const mockRedisClient = {
 };
 
 // Mock Redis module
-jest.mock('../../shared/core/src/redis', () => ({
+jest.mock('@arbitrage/core/redis', () => ({
   getRedisClient: jest.fn().mockResolvedValue(mockRedisClient),
   RedisClient: jest.fn()
 }));
@@ -66,13 +66,13 @@ import {
   PairDiscoveryService,
   getPairDiscoveryService,
   resetPairDiscoveryService
-} from '../../shared/core/src/pair-discovery';
+} from '@arbitrage/corepair-discovery';
 import {
   PairCacheService,
   getPairCacheService,
   resetPairCacheService,
   CachedPairData
-} from '../../shared/core/src/pair-cache';
+} from '@arbitrage/corepair-cache';
 import { Dex, Token } from '../../shared/types';
 
 // =============================================================================

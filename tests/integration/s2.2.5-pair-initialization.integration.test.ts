@@ -29,7 +29,7 @@ const {
   CORE_TOKENS,
   ARBITRAGE_CONFIG,
   dexFeeToPercentage
-} = require('../../shared/config/src');
+} = require('@arbitrage/config');
 
 // =============================================================================
 // S2.2.5 Test Suite: Pair Initialization

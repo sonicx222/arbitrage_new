@@ -28,7 +28,7 @@ import {
   TOKEN_METADATA,
   getEnabledDexes,
   PARTITION_IDS
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   getPartition,
@@ -38,7 +38,7 @@ import {
   createPartitionChainInstances,
   isEvmChain,
   getNonEvmChains
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
 // =============================================================================
 // Test Constants
