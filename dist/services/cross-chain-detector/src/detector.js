@@ -39,6 +39,28 @@ const core_1 = require("@arbitrage/core");
 const config_1 = require("@arbitrage/config");
 const bridge_predictor_1 = require("./bridge-predictor");
 // =============================================================================
+// S3.2.4-FIX: Token Pair Normalization Helper
+// =============================================================================
+/**
+ * Normalize a token pair string for cross-chain matching.
+ * Handles different token symbol conventions across chains:
+ * - WETH.e (Avalanche) → WETH
+ * - ETH (BSC) → WETH
+ * - fUSDT (Fantom) → USDT
+ * - BTCB (BSC) → WBTC
+ *
+ * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1"
+ * @returns Normalized token pair string
+ */
+function normalizeTokenPair(tokenPair) {
+    const parts = tokenPair.split('_');
+    if (parts.length < 2)
+        return tokenPair;
+    // Normalize each token in the pair
+    const normalizedParts = parts.map(token => (0, config_1.normalizeTokenForCrossChain)(token));
+    return normalizedParts.join('_');
+}
+// =============================================================================
 // Cross-Chain Detector Service
 // =============================================================================
 class CrossChainDetectorService {
@@ -520,7 +542,9 @@ class CrossChainDetectorService {
                 for (const pairKey of Object.keys(priceData[chain][dex])) {
                     // Extract token pair from pairKey (format: DEX_TOKEN1_TOKEN2)
                     const tokens = pairKey.split('_').slice(1).join('_');
-                    tokenPairs.add(tokens);
+                    // S3.2.4-FIX: Normalize token pairs for cross-chain matching
+                    // WETH.e_USDT (Avalanche) and ETH_USDT (BSC) both normalize to WETH_USDT
+                    tokenPairs.add(normalizeTokenPair(tokens));
                 }
             }
         }
@@ -532,7 +556,9 @@ class CrossChainDetectorService {
             for (const dex of Object.keys(priceData[chain])) {
                 for (const pairKey of Object.keys(priceData[chain][dex])) {
                     const tokens = pairKey.split('_').slice(1).join('_');
-                    if (tokens === tokenPair) {
+                    // S3.2.4-FIX: Use normalized comparison for cross-chain matching
+                    // tokenPair is already normalized from getAllTokenPairsFromSnapshot
+                    if (normalizeTokenPair(tokens) === tokenPair) {
                         const update = priceData[chain][dex][pairKey];
                         prices.push({
                             chain,
@@ -582,9 +608,19 @@ class CrossChainDetectorService {
         return opportunities;
     }
     extractTokenFromPair(pairKey) {
-        // Extract token from pair key (e.g., "uniswap_v3_WETH_USDT" -> "WETH/USDT")
+        // S3.2.4-FIX: Extract and normalize tokens from pair key
+        // Handles both formats:
+        // - "traderjoe_WETH.e_USDT" (3 parts) -> "WETH/USDT"
+        // - "uniswap_v3_WETH_USDT" (4 parts) -> "WETH/USDT"
         const parts = pairKey.split('_');
-        return parts.length >= 4 ? `${parts[2]}/${parts[3]}` : pairKey;
+        if (parts.length >= 2) {
+            // Always take last 2 parts as tokens regardless of DEX name format
+            const token0 = parts[parts.length - 2];
+            const token1 = parts[parts.length - 1];
+            // Normalize for consistent canonical names
+            return `${(0, config_1.normalizeTokenForCrossChain)(token0)}/${(0, config_1.normalizeTokenForCrossChain)(token1)}`;
+        }
+        return pairKey;
     }
     estimateBridgeCost(sourceChain, targetChain, tokenUpdate) {
         // Use bridge predictor for accurate cost estimation
@@ -724,6 +760,24 @@ class CrossChainDetectorService {
     async publishArbitrageOpportunity(opportunity) {
         if (!this.streamsClient)
             return;
+        // S3.2.4-FIX: Generate deterministic cache key for deduplication BEFORE publishing
+        // Key based on opportunity characteristics, not random ID
+        const dedupeKey = `${opportunity.sourceChain}-${opportunity.targetChain}-${opportunity.token}`;
+        // Check if we recently published this opportunity (within 5 seconds)
+        const existingOpp = this.opportunitiesCache.get(dedupeKey);
+        const DEDUPE_WINDOW_MS = 5000; // Don't republish same opportunity within 5 seconds
+        if (existingOpp && (Date.now() - existingOpp.createdAt) < DEDUPE_WINDOW_MS) {
+            // Skip duplicate - only publish if profit improved significantly (>10%)
+            const profitImprovement = (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit;
+            if (profitImprovement < 0.1) {
+                this.logger.debug('Skipping duplicate opportunity', {
+                    dedupeKey,
+                    ageMs: Date.now() - existingOpp.createdAt,
+                    profitImprovement: `${(profitImprovement * 100).toFixed(1)}%`
+                });
+                return;
+            }
+        }
         const arbitrageOpp = {
             id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             type: 'cross-chain',
@@ -736,7 +790,7 @@ class CrossChainDetectorService {
             amountIn: '1000000000000000000', // 1 token (placeholder)
             expectedProfit: opportunity.netProfit,
             profitPercentage: opportunity.percentageDiff / 100,
-            gasEstimate: 0, // Cross-chain, gas estimated separately
+            gasEstimate: '0', // Cross-chain, gas estimated separately
             confidence: opportunity.confidence,
             timestamp: Date.now(),
             blockNumber: 0, // Cross-chain
@@ -747,9 +801,9 @@ class CrossChainDetectorService {
             // Publish to Redis Streams (ADR-002 compliant)
             await this.streamsClient.xadd(core_1.RedisStreamsClient.STREAMS.OPPORTUNITIES, arbitrageOpp);
             this.perfLogger.logArbitrageOpportunity(arbitrageOpp);
-            // Cache opportunity to avoid duplicates
+            // S3.2.4-FIX: Cache with deterministic key for proper deduplication
             // P1-NEW-3 FIX: Add createdAt timestamp for reliable cleanup
-            this.opportunitiesCache.set(arbitrageOpp.id, {
+            this.opportunitiesCache.set(dedupeKey, {
                 ...opportunity,
                 createdAt: Date.now()
             });
@@ -764,8 +818,9 @@ class CrossChainDetectorService {
     startHealthMonitoring() {
         this.healthMonitoringInterval = setInterval(async () => {
             try {
+                // P3-2 FIX: Use unified ServiceHealth with 'name' field
                 const health = {
-                    service: 'cross-chain-detector',
+                    name: 'cross-chain-detector',
                     status: (this.stateManager.isRunning() ? 'healthy' : 'unhealthy'),
                     uptime: process.uptime(),
                     memoryUsage: process.memoryUsage().heapUsed,

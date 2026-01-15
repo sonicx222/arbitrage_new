@@ -13,6 +13,8 @@ class BaseDetector {
         this.wsManager = null;
         this.redis = null;
         this.streamsClient = null;
+        // P2-FIX: Use proper EventBatcher type instead of any
+        this.eventBatcher = null;
         // Stream batchers for efficient Redis command usage (ADR-002)
         this.priceUpdateBatcher = null;
         this.swapEventBatcher = null;
@@ -276,6 +278,7 @@ class BaseDetector {
             catch (error) {
                 this.logger.warn('Error flushing event batcher', { error });
             }
+            // P2-FIX: No need for 'as any' with proper type
             this.eventBatcher = null;
         }
         // Clean up Redis Streams batchers (ADR-002, S1.1.4)
@@ -357,12 +360,17 @@ class BaseDetector {
     }
     /**
      * Start health monitoring interval
+     * P1-FIX: Self-clears interval when stopping to prevent memory leak
      */
     startHealthMonitoring() {
         const interval = this.config.healthCheckInterval || 30000;
         this.healthMonitoringInterval = setInterval(async () => {
-            // Guard against running during shutdown (check multiple times to prevent races)
+            // P1-FIX: Self-clear when stopping to prevent wasted cycles and memory leak
             if (this.isStopping || !this.isRunning) {
+                if (this.healthMonitoringInterval) {
+                    clearInterval(this.healthMonitoringInterval);
+                    this.healthMonitoringInterval = null;
+                }
                 return;
             }
             try {
@@ -922,8 +930,10 @@ class BaseDetector {
         try {
             if (message.method === 'eth_subscription') {
                 const { result } = message;
-                // Add event to batcher for optimized processing
-                this.eventBatcher.addEvent(result);
+                // P2-FIX: Add null check for eventBatcher
+                if (this.eventBatcher) {
+                    this.eventBatcher.addEvent(result);
+                }
             }
         }
         catch (error) {
@@ -1112,6 +1122,33 @@ class BaseDetector {
         // Streams required per ADR-002 - fail fast if not available
         if (!this.streamsClient) {
             throw new Error('Streams client not initialized - Streams required per ADR-002');
+        }
+        // P2-4 FIX: Redis-based deduplication for multi-instance deployments
+        // Use SET NX with TTL to atomically check if opportunity was already published
+        const dedupKey = `opp:dedup:${opportunity.id}`;
+        const DEDUP_TTL_SECONDS = 30; // 30 second deduplication window
+        try {
+            const redis = await this.redis;
+            if (!redis) {
+                // Redis not initialized, skip deduplication
+                this.logger.debug('Redis not available for dedup check');
+            }
+            else {
+                // setNx returns true if key was set (first to publish), false if exists (duplicate)
+                const isFirstPublisher = await redis.setNx(dedupKey, '1', DEDUP_TTL_SECONDS);
+                if (!isFirstPublisher) {
+                    this.logger.debug('Duplicate opportunity filtered', { id: opportunity.id });
+                    return; // Another instance already published this opportunity
+                }
+            }
+        }
+        catch (error) {
+            // If Redis fails, log warning but still publish to avoid missing opportunities
+            // This degrades to in-process dedup only, which may cause duplicates across instances
+            this.logger.warn('Redis dedup check failed, publishing anyway', {
+                id: opportunity.id,
+                error: error.message
+            });
         }
         const message = {
             type: 'arbitrage-opportunity',

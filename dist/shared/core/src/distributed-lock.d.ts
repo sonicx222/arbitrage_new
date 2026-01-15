@@ -93,17 +93,20 @@ export declare class DistributedLockManager {
      * Execute a function while holding a distributed lock.
      * Automatically acquires and releases the lock.
      *
+     * P0-3 FIX: Now distinguishes between lock_not_acquired (lock held by another)
+     * and redis_error (Redis unavailable). This prevents silent failures.
+     *
      * @param resourceId - Unique identifier for the resource to lock
      * @param fn - Function to execute while holding the lock
      * @param options - Lock acquisition options
-     * @returns Function result, or null if lock could not be acquired
+     * @returns Function result, or failure reason
      */
     withLock<T>(resourceId: string, fn: () => Promise<T>, options?: AcquireOptions): Promise<{
         success: true;
         result: T;
     } | {
         success: false;
-        reason: 'lock_not_acquired' | 'execution_error';
+        reason: 'lock_not_acquired' | 'execution_error' | 'redis_error';
         error?: Error;
     }>;
     /**

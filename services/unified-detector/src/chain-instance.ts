@@ -828,7 +828,7 @@ export class ChainDetectorInstance extends EventEmitter {
       profitPercentage: netProfitPct * 100, // Convert to percentage
       expectedProfit: netProfitPct, // Net profit after fees
       estimatedProfit: 0, // To be calculated by execution engine
-      gasEstimate: this.detectorConfig.gasEstimate,
+      gasEstimate: String(this.detectorConfig.gasEstimate),
       confidence: this.detectorConfig.confidence,
       timestamp: Date.now(),
       expiresAt: Date.now() + this.detectorConfig.expiryMs,

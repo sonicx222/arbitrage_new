@@ -83,7 +83,7 @@ export interface ArbitrageOpportunity {
     expectedProfit?: number;
     estimatedProfit?: number;
     profitPercentage?: number;
-    gasEstimate?: number | string;
+    gasEstimate?: string;
     confidence: number;
     timestamp: number;
     blockNumber?: number;
@@ -138,6 +138,11 @@ export interface MessageEvent {
     source: string;
     correlationId?: string;
 }
+/**
+ * P3-2 FIX: Unified ServiceHealth interface
+ * Consolidates definitions from shared/types and self-healing-manager.
+ * Field naming standardized to 'name' instead of 'service'.
+ */
 export interface ServiceHealth {
     name: string;
     status: 'healthy' | 'degraded' | 'unhealthy' | 'starting' | 'stopping';
@@ -254,4 +259,12 @@ export interface BridgeLatencyData {
     congestionLevel: number;
     gasPrice: number;
 }
+/**
+ * Parse gas estimate from various input types to bigint.
+ * Handles string, number, bigint, and undefined inputs safely.
+ *
+ * @param value - The gas estimate value to parse
+ * @returns The gas estimate as a bigint (0n if undefined or invalid)
+ */
+export declare function parseGasEstimate(value: string | number | bigint | undefined): bigint;
 //# sourceMappingURL=index.d.ts.map

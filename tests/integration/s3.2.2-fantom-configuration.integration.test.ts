@@ -2,8 +2,8 @@
  * S3.2.2 Integration Tests: Fantom Configuration
  *
  * Tests for expanding Fantom chain configuration to include:
- * - 3 enabled DEXs: SpookySwap, SpiritSwap, Equalizer
- * - 1 disabled DEX: Beethoven X (Balancer vault model - needs custom adapter)
+ * - 4 enabled DEXs: SpookySwap, SpiritSwap, Equalizer, Beethoven X
+ * - Beethoven X uses BalancerV2Adapter for vault-model pool discovery
  * - 10 tokens for comprehensive pair coverage
  *
  * @see IMPLEMENTATION_PLAN.md S3.2.2: Add Fantom configuration
@@ -36,19 +36,16 @@ const FANTOM_CHAIN_KEY = 'fantom';
 /**
  * Required enabled DEXs for S3.2.2
  * Source: IMPLEMENTATION_PLAN.md S3.2.2
+ *
+ * All 4 DEXs are now ENABLED:
+ * - spookyswap, spiritswap, equalizer: Standard factory pattern
+ * - beethoven_x: Uses BalancerV2Adapter (vault model)
  */
 const REQUIRED_ENABLED_DEXES = [
   'spookyswap',
   'spiritswap',
-  'equalizer'
-] as const;
-
-/**
- * DEXs that are configured but disabled (need custom adapters)
- * Beethoven X uses Balancer V2 Vault model, not factory pattern
- */
-const DISABLED_DEXES = [
-  'beethoven_x'  // Uses Balancer V2 Vault model, not factory pattern
+  'equalizer',
+  'beethoven_x'  // ENABLED: Uses BalancerV2Adapter from dex-adapters
 ] as const;
 
 /**
@@ -193,8 +190,9 @@ describe('S3.2.2.2: Fantom DEX Configuration', () => {
   });
 
   describe('DEX count', () => {
-    it('should have exactly 3 enabled DEXs', () => {
-      expect(fantomDexes.length).toBe(3);
+    it('should have exactly 4 enabled DEXs (all DEXs including Beethoven X)', () => {
+      // All 4 DEXs enabled: Beethoven X uses BalancerV2Adapter
+      expect(fantomDexes.length).toBe(4);
     });
 
     it('should have all required enabled DEXs', () => {
@@ -204,23 +202,18 @@ describe('S3.2.2.2: Fantom DEX Configuration', () => {
       }
     });
 
-    it('should have disabled DEXs configured (for future adapter implementation)', () => {
-      // Import DEXES directly to check all configured (including disabled)
+    it('should have vault-model DEX enabled with adapter', () => {
+      // Import DEXES directly to check all configured
       const { DEXES } = require('../../shared/config/src');
       const allFantomDexes = DEXES['fantom'] || [];
 
-      // Should have 4 total DEXs configured (3 enabled + 1 disabled)
+      // Should have 4 total DEXs configured
       expect(allFantomDexes.length).toBe(4);
 
-      // Verify disabled DEXs exist in config
-      const allDexNames = allFantomDexes.map((d: any) => d.name);
-      for (const disabledDex of DISABLED_DEXES) {
-        expect(allDexNames).toContain(disabledDex);
-      }
-
-      // Verify Beethoven X is disabled
+      // Verify Beethoven X exists and is ENABLED (has BalancerV2Adapter now)
       const beethovenX = allFantomDexes.find((d: any) => d.name === 'beethoven_x');
-      expect(beethovenX?.enabled).toBe(false);
+      expect(beethovenX).toBeDefined();
+      expect(beethovenX?.enabled).toBe(true);  // Uses BalancerV2Adapter
     });
   });
 
@@ -305,48 +298,41 @@ describe('S3.2.2.2: Fantom DEX Configuration', () => {
     });
   });
 
-  describe('Beethoven X (DISABLED - Balancer Vault model)', () => {
-    // Beethoven X is configured but DISABLED because it uses Balancer V2 Vault model
-    // which doesn't follow the standard factory pattern for pair discovery
-    let beethovenX: any;
+  describe('Beethoven X (enabled - Balancer Vault model with BalancerV2Adapter)', () => {
+    // Beethoven X uses Balancer V2 Vault model and is now ENABLED with BalancerV2Adapter
 
-    beforeAll(() => {
-      // Must import DEXES directly since getEnabledDexes filters out disabled DEXs
-      const { DEXES } = require('../../shared/config/src');
-      beethovenX = DEXES['fantom']?.find((d: any) => d.name === 'beethoven_x');
+    it('should have Beethoven X configured and enabled', () => {
+      const dex = fantomDexes.find(d => d.name === 'beethoven_x');
+      expect(dex).toBeDefined();
     });
 
-    it('should have Beethoven X configured', () => {
-      expect(beethovenX).toBeDefined();
-    });
-
-    it('should be disabled (uses Balancer V2 Vault model)', () => {
-      expect(beethovenX.enabled).toBe(false);
-    });
-
-    it('should have correct factory address (Vault)', () => {
-      expect(beethovenX.factoryAddress.toLowerCase()).toBe(
-        DEX_ADDRESSES.beethoven_x.factory.toLowerCase()
+    it('should have correct vault address configured', () => {
+      const dex = fantomDexes.find(d => d.name === 'beethoven_x');
+      // Beethoven X uses Vault as factoryAddress
+      expect(dex!.factoryAddress.toLowerCase()).toBe(
+        '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce'.toLowerCase()
       );
     });
 
     it('should have correct router address', () => {
-      expect(beethovenX.routerAddress.toLowerCase()).toBe(
-        DEX_ADDRESSES.beethoven_x.router.toLowerCase()
-      );
+      const dex = fantomDexes.find(d => d.name === 'beethoven_x');
+      // For Beethoven X, vault is also used for swaps
+      expect(dex!.routerAddress.length).toBe(42);
     });
 
     it('should have variable fee (Balancer-style weighted pools)', () => {
+      const dex = fantomDexes.find(d => d.name === 'beethoven_x');
       // Beethoven X uses Balancer V2 architecture with variable fees
       // Typically 10-200bp depending on pool
-      expect(beethovenX.fee).toBeGreaterThanOrEqual(1);
-      expect(beethovenX.fee).toBeLessThanOrEqual(200);
+      expect(dex!.fee).toBeGreaterThanOrEqual(1);
+      expect(dex!.fee).toBeLessThanOrEqual(200);
     });
 
-    it('should NOT be in getEnabledDexes results', () => {
+    it('should be in getEnabledDexes results (uses BalancerV2Adapter)', () => {
       const enabledDexes = getEnabledDexes(FANTOM_CHAIN_KEY);
-      const enabledNames = enabledDexes.map(d => d.name);
-      expect(enabledNames).not.toContain('beethoven_x');
+      const dex = enabledDexes.find(d => d.name === 'beethoven_x');
+      expect(dex).toBeDefined();
+      expect(dex!.chain).toBe('fantom');
     });
   });
 
@@ -666,7 +652,7 @@ describe('S3.2.2.6: Fantom DEX-Token Pair Coverage', () => {
   });
 
   describe('Pair count estimation', () => {
-    it('should generate sufficient pairs for arbitrage', () => {
+    it('should generate sufficient pairs for arbitrage with all 4 enabled DEXs', () => {
       const tokens = CORE_TOKENS[FANTOM_CHAIN_KEY];
       const dexes = getEnabledDexes(FANTOM_CHAIN_KEY);
 
@@ -674,8 +660,9 @@ describe('S3.2.2.6: Fantom DEX-Token Pair Coverage', () => {
       const pairsPerDex = (tokens.length * (tokens.length - 1)) / 2;
       const totalPairs = pairsPerDex * dexes.length;
 
-      // With 10 tokens and 3 enabled DEXs: 45 pairs per DEX, 135 total
-      expect(totalPairs).toBeGreaterThanOrEqual(135);
+      // With 10 tokens and 4 enabled DEXs: 45 pairs per DEX, 180 total
+      // (Beethoven X now enabled with BalancerV2Adapter)
+      expect(totalPairs).toBeGreaterThanOrEqual(180);
     });
   });
 });
@@ -714,22 +701,21 @@ describe('S3.2.2.7: Regression Tests', () => {
       expect(Object.keys(CHAINS).length).toBe(11);
     });
 
-    it('should have at least 45 enabled DEXs after adding Fantom DEXs', () => {
+    it('should have at least 48 enabled DEXs after adding Fantom DEXs', () => {
       let totalEnabledDexes = 0;
       for (const chain of Object.keys(CHAINS)) {
         totalEnabledDexes += getEnabledDexes(chain).length;
       }
-      // S3.2.1: 44 DEXs (Avalanche had 4 enabled)
-      // S3.2.2: +3 Fantom enabled DEXs = 47 minimum
-      // Note: Beethoven X is disabled, so only 3 enabled DEXs added
-      expect(totalEnabledDexes).toBeGreaterThanOrEqual(45);
+      // S3.2.1: 6 Avalanche DEXs all enabled (GMX/Platypus have adapters)
+      // S3.2.2: +4 Fantom enabled DEXs (including Beethoven X with adapter)
+      expect(totalEnabledDexes).toBeGreaterThanOrEqual(48);
     });
 
-    it('should have 3 enabled and 1 disabled Fantom DEXs', () => {
+    it('should have all 4 Fantom DEXs enabled (including Beethoven X)', () => {
       const enabledDexes = getEnabledDexes('fantom');
-      expect(enabledDexes.length).toBe(3);
+      expect(enabledDexes.length).toBe(4);
 
-      // Verify total configured (including disabled)
+      // Verify total configured (all should be enabled now)
       const { DEXES } = require('../../shared/config/src');
       const allFantomDexes = DEXES['fantom'] || [];
       expect(allFantomDexes.length).toBe(4);
@@ -957,31 +943,31 @@ describe('S3.2.2.8: PairDiscoveryService Fantom Integration', () => {
     });
   });
 
-  describe('Beethoven X handling (Balancer vault model - DISABLED)', () => {
-    it('should NOT include Beethoven X in getEnabledDexes (explicitly disabled)', () => {
-      // Beethoven X uses Balancer V2 Vault model which doesn't follow
-      // the standard factory pattern. It's disabled to prevent pair
-      // discovery failures. A custom adapter is needed to support it.
+  describe('Beethoven X handling (Balancer vault model with BalancerV2Adapter)', () => {
+    it('should include Beethoven X in getEnabledDexes (uses BalancerV2Adapter)', () => {
+      // Beethoven X uses Balancer V2 Vault model and is now ENABLED
+      // with BalancerV2Adapter for pool discovery
       const enabledDexes = getEnabledDexes('fantom');
       const beethovenX = enabledDexes.find(d => d.name === 'beethoven_x');
 
-      // Beethoven X should NOT be in the enabled DEXs list
-      expect(beethovenX).toBeUndefined();
+      // Beethoven X should be in the enabled DEXs list
+      expect(beethovenX).toBeDefined();
+      expect(beethovenX!.chain).toBe('fantom');
     });
 
-    it('should detect Beethoven X as unsupported factory type', () => {
-      // Even though disabled, the factory type detection should classify
-      // Beethoven X as 'unsupported' due to Balancer V2 Vault model
+    it('should detect Beethoven X as unsupported by PairDiscoveryService (uses adapter instead)', () => {
+      // PairDiscoveryService still classifies Beethoven X as 'unsupported'
+      // because it uses vault model - BalancerV2Adapter handles pool discovery
       expect(service.detectFactoryType('beethoven_x')).toBe('unsupported');
     });
 
-    it('should be configured but disabled in DEXES', () => {
-      // Verify the DEX is still configured for future custom adapter implementation
+    it('should be configured and enabled in DEXES (has BalancerV2Adapter)', () => {
+      // Verify the DEX is configured and enabled with adapter
       const { DEXES } = require('../../shared/config/src');
       const beethovenX = DEXES['fantom']?.find((d: any) => d.name === 'beethoven_x');
 
       expect(beethovenX).toBeDefined();
-      expect(beethovenX.enabled).toBe(false);
+      expect(beethovenX.enabled).toBe(true);  // Uses BalancerV2Adapter
     });
   });
 

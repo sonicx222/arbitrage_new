@@ -301,19 +301,20 @@ function setupDetectorEventHandlers(detector, logger, partitionId) {
         logger.warn('Failover event received', { partition: partitionId, ...event });
     });
 }
-// =============================================================================
-// Process Signal Handlers
-// =============================================================================
 /**
  * Sets up process signal handlers for graceful shutdown.
  *
  * P19-FIX: Uses a shutdown flag to prevent multiple concurrent shutdown attempts
  * when signals arrive close together (e.g., SIGTERM followed by SIGINT).
  *
+ * S3.2.3-FIX: Returns cleanup function to prevent MaxListenersExceeded warnings
+ * when handlers are registered multiple times (e.g., in tests).
+ *
  * @param healthServerRef - Reference to health server (use object to allow mutation)
  * @param detector - Detector instance
  * @param logger - Logger instance
  * @param serviceName - Service name for logging
+ * @returns Cleanup function to remove all registered handlers
  */
 function setupProcessHandlers(healthServerRef, detector, logger, serviceName) {
     // P19-FIX: Guard flag to prevent multiple shutdown calls
@@ -327,16 +328,28 @@ function setupProcessHandlers(healthServerRef, detector, logger, serviceName) {
         isShuttingDown = true;
         await shutdownPartitionService(signal, healthServerRef.current, detector, logger, serviceName);
     };
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('uncaughtException', (error) => {
+    // S3.2.3-FIX: Store handler references for cleanup
+    const sigtermHandler = () => shutdown('SIGTERM');
+    const sigintHandler = () => shutdown('SIGINT');
+    const uncaughtHandler = (error) => {
         logger.error(`Uncaught exception in ${serviceName}`, { error });
         shutdown('uncaughtException').catch(() => {
             process.exit(1);
         });
-    });
-    process.on('unhandledRejection', (reason, promise) => {
+    };
+    const rejectionHandler = (reason, promise) => {
         logger.error(`Unhandled rejection in ${serviceName}`, { reason, promise });
-    });
+    };
+    process.on('SIGTERM', sigtermHandler);
+    process.on('SIGINT', sigintHandler);
+    process.on('uncaughtException', uncaughtHandler);
+    process.on('unhandledRejection', rejectionHandler);
+    // S3.2.3-FIX: Return cleanup function to prevent listener accumulation
+    return () => {
+        process.off('SIGTERM', sigtermHandler);
+        process.off('SIGINT', sigintHandler);
+        process.off('uncaughtException', uncaughtHandler);
+        process.off('unhandledRejection', rejectionHandler);
+    };
 }
 //# sourceMappingURL=partition-service-utils.js.map

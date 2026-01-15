@@ -31,12 +31,15 @@ const src_1 = require("../../config/src");
  *
  * P1-1-FIX: Single source of truth for partition ports.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 exports.PARTITION_PORTS = {
-    [src_1.PARTITION_IDS.ASIA_FAST]: 3001,
-    [src_1.PARTITION_IDS.L2_TURBO]: 3002,
-    [src_1.PARTITION_IDS.HIGH_VALUE]: 3003,
-    [src_1.PARTITION_IDS.SOLANA_NATIVE]: 3004
+    'asia-fast': 3001,
+    'l2-turbo': 3002,
+    'high-value': 3003,
+    'solana-native': 3004
 };
 /**
  * Service names for each partition.
@@ -44,12 +47,15 @@ exports.PARTITION_PORTS = {
  *
  * P1-2-FIX: Single source of truth for partition service names.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 exports.PARTITION_SERVICE_NAMES = {
-    [src_1.PARTITION_IDS.ASIA_FAST]: 'partition-asia-fast',
-    [src_1.PARTITION_IDS.L2_TURBO]: 'partition-l2-turbo',
-    [src_1.PARTITION_IDS.HIGH_VALUE]: 'partition-high-value',
-    [src_1.PARTITION_IDS.SOLANA_NATIVE]: 'partition-solana'
+    'asia-fast': 'partition-asia-fast',
+    'l2-turbo': 'partition-l2-turbo',
+    'high-value': 'partition-high-value',
+    'solana-native': 'partition-solana'
 };
 /**
  * Default port when partition is not found.

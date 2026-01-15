@@ -25,7 +25,7 @@ export declare class ErrorRecoveryOrchestrator {
     private circuitBreakers;
     private dlq;
     private degradationManager;
-    private selfHealingManager;
+    private selfHealingManagerPromise;
     constructor();
     recover(context: RecoveryContext): Promise<RecoveryResult>;
     addStrategy(strategy: RecoveryStrategy): void;

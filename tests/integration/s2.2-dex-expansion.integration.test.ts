@@ -2,7 +2,7 @@
  * S2.2 DEX Expansion Integration Tests
  *
  * End-to-end testing of DEX expansion across chains.
- * S2.2.1: Arbitrum DEXs (6 → 9) - Balancer V2, Curve, Chronos
+ * S2.2.1: Arbitrum DEXs (6 → 9) - Added Balancer V2, Curve, Chronos
  * S2.2.2: Base DEXs (5 → 7) - Future
  * S2.2.3: BSC DEXs (5 → 8) - Future
  *
@@ -39,7 +39,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/dist/index.js');
+} = require('../../shared/config/src');
 
 // =============================================================================
 // S2.2.1: Arbitrum DEX Expansion Tests (6 → 9)
@@ -224,7 +224,7 @@ describe('DEX Helper Functions', () => {
   describe('getEnabledDexes()', () => {
     it('should return all DEXs for arbitrum (all enabled by default)', () => {
       const enabled = getEnabledDexes('arbitrum');
-      expect(enabled.length).toBe(9);
+      expect(enabled.length).toBe(9);  // 6 original + 3 new (Balancer V2, Curve, Chronos)
     });
 
     it('should return all DEXs for bsc', () => {
@@ -358,8 +358,8 @@ describe('PHASE_METRICS Alignment', () => {
     expect(PHASE_METRICS.current.tokens).toBe(totalTokens);
   });
 
-  it('should have Phase 1 DEX target of 33 after S2.2 completes', () => {
-    expect(PHASE_METRICS.targets.phase1.dexes).toBe(33);
+  it('should have Phase 1 DEX target of 49 (with vault-model adapters)', () => {
+    expect(PHASE_METRICS.targets.phase1.dexes).toBe(49);
   });
 
   it('should have current DEXs >= 28 (after S2.2.1)', () => {
@@ -375,11 +375,12 @@ describe('PHASE_METRICS Alignment', () => {
     // high-value: ethereum, zksync, linea
     // solana-native: solana
     expect(Object.keys(CHAINS).length).toBe(11);
-    expect(PHASE_METRICS.targets.phase1.chains).toBe(7); // Original Phase 1 target
+    expect(PHASE_METRICS.targets.phase1.chains).toBe(11); // Updated to include all S3.1.2 chains
   });
 
-  it('should have 60 tokens for Phase 1', () => {
-    expect(PHASE_METRICS.targets.phase1.tokens).toBe(60);
+  it('should have 105 tokens for Phase 1 (S3.2.1/S3.2.2 expansion)', () => {
+    // S3.2.1: 15 Avalanche tokens, S3.2.2: 10 Fantom tokens added
+    expect(PHASE_METRICS.targets.phase1.tokens).toBe(105);
   });
 });
 
@@ -740,8 +741,15 @@ describe('Cross-Chain DEX Configuration Consistency', () => {
       DEXES[chain].forEach(dex => {
         expect(dex.name).toBeDefined();
         expect(dex.chain).toBe(chain);
-        expect(dex.factoryAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
-        expect(dex.routerAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        // Solana uses base58 addresses instead of EVM 0x format
+        if (chain === 'solana') {
+          // Solana program addresses are base58 encoded (32-50 chars alphanumeric)
+          expect(dex.factoryAddress).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,50}$/);
+          expect(dex.routerAddress).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,50}$/);
+        } else {
+          expect(dex.factoryAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+          expect(dex.routerAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+        }
         expect(typeof dex.fee).toBe('number');
       });
     });

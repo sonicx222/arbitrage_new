@@ -88,6 +88,10 @@ exports.detector = detector;
 // Main Entry Point
 // =============================================================================
 async function main() {
+    // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
+    if (!partitionConfig) {
+        throw new Error('Partition config unavailable - this should never happen');
+    }
     logger.info('Starting P2 L2-Turbo Partition Service', {
         partitionId: P2_PARTITION_ID,
         chains: config.chains,

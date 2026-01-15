@@ -37,6 +37,9 @@ export interface PartitionEndpoint {
  *
  * P1-1-FIX: Single source of truth for partition ports.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 export declare const PARTITION_PORTS: Readonly<Record<string, number>>;
 /**
@@ -45,6 +48,9 @@ export declare const PARTITION_PORTS: Readonly<Record<string, number>>;
  *
  * P1-2-FIX: Single source of truth for partition service names.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 export declare const PARTITION_SERVICE_NAMES: Readonly<Record<string, string>>;
 /**

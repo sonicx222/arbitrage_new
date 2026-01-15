@@ -46,8 +46,8 @@ export interface PartitionedDetectorConfig {
   /** Unique partition identifier */
   partitionId: string;
 
-  /** Array of chain IDs to monitor */
-  chains: string[];
+  /** Array of chain IDs to monitor (accepts readonly arrays from PartitionConfig) */
+  chains: readonly string[] | string[];
 
   /** Deployment region */
   region: string;
@@ -60,6 +60,11 @@ export interface PartitionedDetectorConfig {
 
   /** Maximum reconnect attempts per chain (default: 5) */
   maxReconnectAttempts?: number;
+}
+
+/** Internal config type with mutable chains array for runtime modifications */
+interface InternalDetectorConfig extends Omit<Required<PartitionedDetectorConfig>, 'chains'> {
+  chains: string[];
 }
 
 export interface ChainHealth {
@@ -153,7 +158,7 @@ function normalizeTokenPair(pairKey: string): string {
 // =============================================================================
 
 export class PartitionedDetector extends EventEmitter {
-  protected config: Required<PartitionedDetectorConfig>;
+  protected config: InternalDetectorConfig;
   protected logger: ReturnType<typeof createLogger>;
   protected perfLogger: PerformanceLogger;
 

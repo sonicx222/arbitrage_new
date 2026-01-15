@@ -460,7 +460,7 @@ describe('calculateIntraChainArbitrage()', () => {
     expect(result!.buyPrice).toBeDefined();
     expect(result!.sellPrice).toBeDefined();
     expect(result!.buyPrice!).toBeLessThan(result!.sellPrice!);
-    expect(result!.gasEstimate).toBe(200000);
+    expect(result!.gasEstimate).toBe('200000'); // String for BigInt compatibility
     expect(result!.confidence).toBe(0.9);
     expect(result!.timestamp).toBeDefined();
     expect(result!.expiresAt).toBeGreaterThan(result!.timestamp!);
@@ -483,7 +483,7 @@ describe('calculateIntraChainArbitrage()', () => {
     const result = calculateIntraChainArbitrage(pair1, pair2, { chainId: 'arbitrum' });
 
     expect(result).not.toBeNull();
-    expect(result!.gasEstimate).toBe(150000); // Default
+    expect(result!.gasEstimate).toBe('150000'); // Default (string for BigInt compatibility)
     expect(result!.confidence).toBe(0.8); // Default
     expect(result!.expiresAt! - result!.timestamp!).toBe(5000); // Default 5s expiry
   });

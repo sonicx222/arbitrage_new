@@ -83,6 +83,12 @@ exports.detector = detector;
 // Main Entry Point
 // =============================================================================
 async function main() {
+    // S3.2.3-FIX: Explicit guard for TypeScript type narrowing (partitionConfig is guaranteed
+    // non-null by module-level check that calls process.exit(1), but TS can't narrow across
+    // function boundaries at module scope)
+    if (!partitionConfig) {
+        throw new Error('Partition config unavailable - this should never happen');
+    }
     logger.info('Starting P1 Asia-Fast Partition Service', {
         partitionId: P1_PARTITION_ID,
         chains: config.chains,

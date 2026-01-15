@@ -35,7 +35,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/dist/index.js');
+} = require('../../shared/config/src');
 
 // =============================================================================
 // S2.2.2: Coinbase Chain DEX Expansion Tests (5 → 7)
@@ -448,12 +448,12 @@ describe('PHASE_METRICS Alignment after S2.2.2', () => {
     expect(DEXES.base.length).toBe(7);
   });
 
-  it('should still have Arbitrum at 9 DEXs', () => {
+  it('should have Arbitrum at 9 DEXs (including Balancer V2 adapter)', () => {
     expect(DEXES.arbitrum.length).toBe(9);
   });
 
-  it('should maintain Phase 1 DEX target of 33', () => {
-    expect(PHASE_METRICS.targets.phase1.dexes).toBe(33);
+  it('should have Phase 1 DEX target of 49 (with vault-model adapters)', () => {
+    expect(PHASE_METRICS.targets.phase1.dexes).toBe(49);
   });
 });
 
@@ -812,19 +812,21 @@ describe('S2.2.2 Regression Tests', () => {
       expect(metricsCount).toBe(actualDexCount);
     });
 
-    it('should have 33 DEXs after S2.2.3 completion', () => {
+    it('should have 49 DEXs (with vault-model adapters)', () => {
       const totalDexes = Object.values(DEXES).flat().length;
-      // After S2.2.1 (28) + S2.2.2 (2) + S2.2.3 (3) = 33
-      expect(totalDexes).toBe(33);
+      // With adapters: GMX, Platypus (Avalanche), Beethoven X (Fantom), Balancer V2 (Arbitrum)
+      expect(totalDexes).toBe(49);
     });
 
     it('should have correct DEX counts per chain', () => {
-      expect(DEXES.arbitrum.length).toBe(9);   // S2.2.1: 6→9
+      expect(DEXES.arbitrum.length).toBe(9);   // With Balancer V2 adapter
       expect(DEXES.base.length).toBe(7);       // S2.2.2: 5→7
       expect(DEXES.bsc.length).toBe(8);        // S2.2.3: 5→8
       expect(DEXES.polygon.length).toBe(4);
       expect(DEXES.optimism.length).toBe(3);
       expect(DEXES.ethereum.length).toBe(2);
+      expect(DEXES.avalanche.length).toBe(6);  // With GMX, Platypus adapters
+      expect(DEXES.fantom.length).toBe(4);     // With Beethoven X adapter
     });
   });
 

@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
-import { RedisClient, PerformanceLogger, BatchedEvent, WebSocketManager, WebSocketMessage, RedisStreamsClient, StreamBatcher, SwapEventFilter, WhaleAlert, VolumeAggregate, ServiceStateManager, PairDiscoveryService, PairCacheService } from './index';
+import { RedisClient, PerformanceLogger, Logger, // P2-FIX: Import Logger type
+EventBatcher, BatchedEvent, WebSocketManager, WebSocketMessage, RedisStreamsClient, StreamBatcher, SwapEventFilter, WhaleAlert, VolumeAggregate, ServiceStateManager, PairDiscoveryService, PairCacheService } from './index';
 import { Dex, Token, PriceUpdate, ArbitrageOpportunity, SwapEvent, Pair } from '../../types/src';
 export interface DetectorConfig {
     chain: string;
@@ -38,9 +39,9 @@ export declare abstract class BaseDetector {
     protected wsManager: WebSocketManager | null;
     protected redis: RedisClient | null;
     protected streamsClient: RedisStreamsClient | null;
-    protected logger: any;
+    protected logger: Logger;
     protected perfLogger: PerformanceLogger;
-    protected eventBatcher: any;
+    protected eventBatcher: EventBatcher | null;
     protected priceUpdateBatcher: StreamBatcher<any> | null;
     protected swapEventBatcher: StreamBatcher<any> | null;
     protected whaleAlertBatcher: StreamBatcher<any> | null;
@@ -101,6 +102,7 @@ export declare abstract class BaseDetector {
     getHealth(): Promise<any>;
     /**
      * Start health monitoring interval
+     * P1-FIX: Self-clears interval when stopping to prevent memory leak
      */
     protected startHealthMonitoring(): void;
     /**

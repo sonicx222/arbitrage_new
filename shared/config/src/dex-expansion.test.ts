@@ -11,7 +11,7 @@
 
 // Use require to avoid ts-jest transformation caching issues
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { DEXES } = require('../dist/index.js');
+const { DEXES } = require('.');
 import { Dex } from '../../types';
 
 // Helper to validate Ethereum address format

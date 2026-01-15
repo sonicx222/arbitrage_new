@@ -12,7 +12,9 @@
  * @see ARCHITECTURE_V2.md Section 4.3 (Arbitrage Detection)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.safeBigIntDivision = safeBigIntDivision;
 exports.calculatePriceFromReserves = calculatePriceFromReserves;
+exports.calculatePriceFromBigIntReserves = calculatePriceFromBigIntReserves;
 exports.invertPrice = invertPrice;
 exports.calculatePriceDifferencePercent = calculatePriceDifferencePercent;
 exports.isSameTokenPair = isSameTokenPair;
@@ -25,19 +27,73 @@ exports.validatePairSnapshot = validatePairSnapshot;
 exports.createPairSnapshot = createPairSnapshot;
 const src_1 = require("../../config/src");
 // =============================================================================
+// Precision Constants (P0-1 FIX)
+// =============================================================================
+/**
+ * Precision scale for BigInt arithmetic to avoid floating point precision loss.
+ * Using 10^18 (same as ETH wei) provides excellent precision for price calculations.
+ *
+ * The JavaScript Number type can safely represent integers up to 2^53 - 1.
+ * By scaling to 10^18 and then dividing, we preserve precision for reserve
+ * values up to approximately 10^15 tokens (in wei, that's 10^33).
+ */
+const PRICE_PRECISION = 10n ** 18n;
+const PRICE_PRECISION_NUMBER = 1e18;
+// =============================================================================
 // Price Calculation Utilities (ARCH-3)
 // =============================================================================
 /**
- * Calculate price from reserves.
+ * Safely convert BigInt to Number with precision scaling.
+ * This prevents precision loss for large BigInt values.
+ *
+ * P0-1 FIX: Uses scaled division to preserve precision.
+ *
+ * @param value - The BigInt value
+ * @param divisor - The divisor BigInt (must be > 0)
+ * @returns The result as a Number with preserved precision
+ */
+function safeBigIntDivision(numerator, denominator) {
+    if (denominator === 0n) {
+        return 0;
+    }
+    // Scale up the numerator before division to preserve decimal places
+    const scaledResult = (numerator * PRICE_PRECISION) / denominator;
+    // Convert scaled result to number and divide by scale
+    return Number(scaledResult) / PRICE_PRECISION_NUMBER;
+}
+/**
+ * Calculate price from reserves with full BigInt precision.
  * Price = reserve0 / reserve1 (price of token1 in terms of token0)
+ *
+ * P0-1 FIX: Uses scaled BigInt arithmetic to prevent precision loss
+ * that occurs when converting large BigInt values directly to Number.
+ *
+ * Example: For reserves of 1e27 (1 billion tokens in wei), direct Number
+ * conversion would lose precision, but scaled division preserves it.
  */
 function calculatePriceFromReserves(reserve0, reserve1) {
-    const r0 = BigInt(reserve0);
-    const r1 = BigInt(reserve1);
-    if (r0 === 0n || r1 === 0n) {
+    try {
+        const r0 = BigInt(reserve0);
+        const r1 = BigInt(reserve1);
+        if (r0 === 0n || r1 === 0n) {
+            return null;
+        }
+        return safeBigIntDivision(r0, r1);
+    }
+    catch {
+        // Handle invalid BigInt strings gracefully
         return null;
     }
-    return Number(r0) / Number(r1);
+}
+/**
+ * Calculate price from BigInt reserves directly (avoids string parsing overhead).
+ * P0-1 FIX: Optimized version for when reserves are already BigInt.
+ */
+function calculatePriceFromBigIntReserves(reserve0, reserve1) {
+    if (reserve0 === 0n || reserve1 === 0n) {
+        return null;
+    }
+    return safeBigIntDivision(reserve0, reserve1);
 }
 /**
  * Invert price for reverse token order comparison.
@@ -151,7 +207,7 @@ function calculateIntraChainArbitrage(pair1, pair2, config) {
         profitPercentage: comparison.netProfitPct * 100,
         expectedProfit: comparison.netProfitPct,
         estimatedProfit: 0, // Calculated by execution engine
-        gasEstimate: config.gasEstimate ?? 150000,
+        gasEstimate: String(config.gasEstimate ?? 150000),
         confidence: config.confidence ?? 0.8,
         timestamp: Date.now(),
         expiresAt: Date.now() + (config.expiryMs ?? 5000),
