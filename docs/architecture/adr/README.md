@@ -22,6 +22,8 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-006](./ADR-006-free-hosting.md) | Free Hosting Provider Selection | Accepted | 2025-01-10 | 95% |
 | [ADR-007](./ADR-007-failover-strategy.md) | Cross-Region Failover Strategy | Accepted | 2025-01-10 | 90% |
 | [ADR-008](./ADR-008-chain-dex-token-selection.md) | Chain/DEX/Token Selection Strategy | Accepted | 2025-01-10 | 92% |
+| [ADR-009](./ADR-009-test-architecture.md) | Test Architecture | Accepted | 2025-01-12 | 90% |
+| [ADR-010](./ADR-010-websocket-resilience.md) | WebSocket Connection Resilience | Accepted | 2026-01-15 | 95% |
 
 ## Decision Summary
 
@@ -76,6 +78,14 @@ An Architecture Decision Record captures an important architectural decision mad
    - 55 DEXs across all chains
    - 150 tokens creating ~500 pairs
    - 3-phase rollout for risk management
+
+### Connection Resilience
+
+9. **WebSocket Resilience** (ADR-010)
+   - Exponential backoff with jitter
+   - Multi-provider fallback (2-4 per chain)
+   - Health-based provider selection
+   - Proactive staleness detection
 
 ## How to Use These ADRs
 
@@ -135,3 +145,5 @@ XX% - Explanation of confidence factors
 | Date | ADR | Change |
 |------|-----|--------|
 | 2025-01-10 | All | Initial creation from architecture analysis session |
+| 2025-01-12 | ADR-009 | Added Test Architecture decision |
+| 2026-01-15 | ADR-010 | Added WebSocket Connection Resilience decision |

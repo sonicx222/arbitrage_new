@@ -421,6 +421,362 @@ describe('WebSocketManager', () => {
   });
 });
 
+describe('WebSocketManager Exponential Backoff', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+  });
+
+  describe('calculateReconnectDelay()', () => {
+    it('should return base delay for attempt 0', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        backoffMultiplier: 2.0,
+        maxReconnectDelay: 60000,
+        jitterPercent: 0, // Disable jitter for deterministic testing
+      };
+
+      manager = new WebSocketManager(config);
+
+      const delay = manager.calculateReconnectDelay(0);
+      // 1000 * 2^0 = 1000ms (no jitter)
+      expect(delay).toBe(1000);
+    });
+
+    it('should apply exponential multiplier correctly', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        backoffMultiplier: 2.0,
+        maxReconnectDelay: 60000,
+        jitterPercent: 0,
+      };
+
+      manager = new WebSocketManager(config);
+
+      // 1000 * 2^0 = 1000
+      expect(manager.calculateReconnectDelay(0)).toBe(1000);
+      // 1000 * 2^1 = 2000
+      expect(manager.calculateReconnectDelay(1)).toBe(2000);
+      // 1000 * 2^2 = 4000
+      expect(manager.calculateReconnectDelay(2)).toBe(4000);
+      // 1000 * 2^3 = 8000
+      expect(manager.calculateReconnectDelay(3)).toBe(8000);
+      // 1000 * 2^4 = 16000
+      expect(manager.calculateReconnectDelay(4)).toBe(16000);
+    });
+
+    it('should cap delay at maxReconnectDelay', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        backoffMultiplier: 2.0,
+        maxReconnectDelay: 5000,
+        jitterPercent: 0,
+      };
+
+      manager = new WebSocketManager(config);
+
+      // 1000 * 2^3 = 8000, but max is 5000
+      expect(manager.calculateReconnectDelay(3)).toBe(5000);
+      // 1000 * 2^10 = 1024000, but max is 5000
+      expect(manager.calculateReconnectDelay(10)).toBe(5000);
+    });
+
+    it('should add jitter within specified range', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        backoffMultiplier: 2.0,
+        maxReconnectDelay: 60000,
+        jitterPercent: 0.25,
+      };
+
+      manager = new WebSocketManager(config);
+
+      // Run multiple times to verify jitter is applied
+      const delays = new Set<number>();
+      for (let i = 0; i < 20; i++) {
+        delays.add(manager.calculateReconnectDelay(0));
+      }
+
+      // With 25% jitter, delay should be between 1000 and 1250
+      // Multiple runs should produce some variation (unless very unlucky)
+      for (const delay of delays) {
+        expect(delay).toBeGreaterThanOrEqual(1000);
+        expect(delay).toBeLessThanOrEqual(1250);
+      }
+    });
+
+    it('should use default values when config not specified', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+
+      // Default: baseDelay=1000, multiplier=2, maxDelay=60000, jitter=0.25
+      const delay = manager.calculateReconnectDelay(0);
+
+      // Should be between 1000 and 1250 (with 25% jitter)
+      expect(delay).toBeGreaterThanOrEqual(1000);
+      expect(delay).toBeLessThanOrEqual(1250);
+    });
+
+    it('should handle custom multiplier', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        backoffMultiplier: 1.5,
+        maxReconnectDelay: 60000,
+        jitterPercent: 0,
+      };
+
+      manager = new WebSocketManager(config);
+
+      // 1000 * 1.5^0 = 1000
+      expect(manager.calculateReconnectDelay(0)).toBe(1000);
+      // 1000 * 1.5^1 = 1500
+      expect(manager.calculateReconnectDelay(1)).toBe(1500);
+      // 1000 * 1.5^2 = 2250
+      expect(manager.calculateReconnectDelay(2)).toBe(2250);
+    });
+
+    it('should prevent thundering herd with jitter', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        reconnectInterval: 1000,
+        jitterPercent: 0.25,
+      };
+
+      manager = new WebSocketManager(config);
+
+      // Create multiple managers and verify they would reconnect at different times
+      const delays: number[] = [];
+      for (let i = 0; i < 100; i++) {
+        delays.push(manager.calculateReconnectDelay(0));
+      }
+
+      // Calculate standard deviation - should show variation
+      const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
+      const variance = delays.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / delays.length;
+      const stdDev = Math.sqrt(variance);
+
+      // With 25% jitter on 1000ms base, we expect some meaningful spread
+      expect(stdDev).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Exponential Backoff Configuration', () => {
+    it('should accept chainId configuration', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        chainId: 'arbitrum',
+      };
+
+      manager = new WebSocketManager(config);
+      // Should not throw
+      expect(manager).toBeDefined();
+    });
+
+    it('should use default chainId when not specified', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager).toBeDefined();
+    });
+  });
+});
+
+describe('WebSocketManager Rate Limit Handling (S3.3)', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+  });
+
+  describe('isRateLimitError()', () => {
+    beforeEach(() => {
+      manager = new WebSocketManager({
+        url: 'wss://test.example.com',
+      });
+    });
+
+    it('should detect JSON-RPC error code -32005 (Infura/Alchemy rate limit)', () => {
+      const error = { code: -32005, message: 'Limit exceeded' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect JSON-RPC error code -32016 (rate limit)', () => {
+      const error = { code: -32016, message: 'Rate limit' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect WebSocket close code 1008 (policy violation)', () => {
+      const error = { code: 1008, message: 'Policy violation' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect WebSocket close code 1013 (try again later)', () => {
+      const error = { code: 1013, message: 'Try again' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect HTTP status code 429', () => {
+      const error = { code: 429, message: 'Too many requests' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect "rate limit" in error message', () => {
+      const error = { message: 'Request rate limit exceeded' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect "too many requests" in error message', () => {
+      const error = { message: 'Too many requests from your IP' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect "quota exceeded" in error message', () => {
+      const error = { message: 'Daily quota exceeded for this API key' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should detect "throttled" in error message', () => {
+      const error = { message: 'Request throttled' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+
+    it('should not detect normal errors as rate limits', () => {
+      const normalErrors = [
+        { code: -32600, message: 'Invalid Request' },
+        { code: -32601, message: 'Method not found' },
+        { code: 1000, message: 'Normal closure' },
+        { message: 'Connection timeout' },
+        { message: 'Network error' },
+        null,
+        undefined,
+      ];
+
+      for (const error of normalErrors) {
+        expect(manager.isRateLimitError(error)).toBe(false);
+      }
+    });
+
+    it('should handle case-insensitive matching', () => {
+      const error = { message: 'RATE LIMIT EXCEEDED' };
+      expect(manager.isRateLimitError(error)).toBe(true);
+    });
+  });
+
+  describe('Provider Exclusion', () => {
+    beforeEach(() => {
+      manager = new WebSocketManager({
+        url: 'wss://primary.example.com',
+        fallbackUrls: [
+          'wss://fallback1.example.com',
+          'wss://fallback2.example.com',
+        ],
+      });
+    });
+
+    it('should not exclude providers initially', () => {
+      expect(manager.isProviderExcluded('wss://primary.example.com')).toBe(false);
+      expect(manager.isProviderExcluded('wss://fallback1.example.com')).toBe(false);
+    });
+
+    it('should exclude provider after handleRateLimit()', () => {
+      manager.handleRateLimit('wss://primary.example.com');
+      expect(manager.isProviderExcluded('wss://primary.example.com')).toBe(true);
+    });
+
+    it('should apply exponential exclusion duration', () => {
+      // First rate limit: 30s
+      manager.handleRateLimit('wss://primary.example.com');
+      let exclusions = manager.getExcludedProviders();
+      let exclusion = exclusions.get('wss://primary.example.com');
+      expect(exclusion?.count).toBe(1);
+
+      // Second rate limit: 60s
+      manager.handleRateLimit('wss://primary.example.com');
+      exclusions = manager.getExcludedProviders();
+      exclusion = exclusions.get('wss://primary.example.com');
+      expect(exclusion?.count).toBe(2);
+
+      // Third rate limit: 120s
+      manager.handleRateLimit('wss://primary.example.com');
+      exclusions = manager.getExcludedProviders();
+      exclusion = exclusions.get('wss://primary.example.com');
+      expect(exclusion?.count).toBe(3);
+    });
+
+    it('should report correct available provider count', () => {
+      expect(manager.getAvailableProviderCount()).toBe(3);
+
+      manager.handleRateLimit('wss://primary.example.com');
+      expect(manager.getAvailableProviderCount()).toBe(2);
+
+      manager.handleRateLimit('wss://fallback1.example.com');
+      expect(manager.getAvailableProviderCount()).toBe(1);
+    });
+
+    it('should clear all exclusions with clearProviderExclusions()', () => {
+      manager.handleRateLimit('wss://primary.example.com');
+      manager.handleRateLimit('wss://fallback1.example.com');
+
+      expect(manager.getAvailableProviderCount()).toBe(1);
+
+      manager.clearProviderExclusions();
+
+      expect(manager.getAvailableProviderCount()).toBe(3);
+      expect(manager.isProviderExcluded('wss://primary.example.com')).toBe(false);
+    });
+
+    it('should emit rateLimit event when handling rate limit', () => {
+      const handler = jest.fn();
+      manager.on('rateLimit', handler);
+
+      manager.handleRateLimit('wss://primary.example.com');
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: 'wss://primary.example.com',
+          count: 1,
+        })
+      );
+    });
+  });
+
+  describe('URL Switching with Exclusions', () => {
+    it('should report connection stats including URL info', () => {
+      manager = new WebSocketManager({
+        url: 'wss://primary.example.com',
+        fallbackUrls: ['wss://fallback.example.com'],
+      });
+
+      const stats = manager.getConnectionStats();
+      expect(stats.totalUrls).toBe(2);
+      expect(stats.currentUrl).toBe('wss://primary.example.com');
+    });
+  });
+});
+
 describe('WebSocketManager Fallback URL Integration', () => {
   describe('Optimism Chain Configuration', () => {
     it('should match the S2.1.4 Optimism WebSocket configuration', () => {
