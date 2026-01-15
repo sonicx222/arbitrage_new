@@ -1,5 +1,10 @@
 // Core utilities exports
-export { RedisClient, getRedisClient, resetRedisInstance } from './redis';
+export {
+  RedisClient,
+  RedisOperationError,
+  getRedisClient,
+  resetRedisInstance
+} from './redis';
 
 // P1-3-FIX: Standardized singleton pattern utilities
 export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';

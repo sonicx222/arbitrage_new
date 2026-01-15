@@ -34,7 +34,13 @@ import { HierarchicalCache, createHierarchicalCache } from './hierarchical-cache
 const redisInstance = new RedisMock();
 const mockRedis = {
   get: jest.fn((key: string) => redisInstance.get(key)),
-  set: jest.fn((key: string, value: any) => redisInstance.set(key, value)),
+  // P2-FIX-1: RedisClient.set() now handles TTL internally
+  set: jest.fn((key: string, value: any, ttl?: number) => {
+    if (ttl) {
+      return redisInstance.setex(key, ttl, value);
+    }
+    return redisInstance.set(key, value);
+  }),
   setex: jest.fn((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value)),
   del: jest.fn((key: string) => redisInstance.del(key)),
   keys: jest.fn((pattern: string) => redisInstance.keys(pattern)),
@@ -147,8 +153,8 @@ describe('HierarchicalCache', () => {
 
       await cache.set(testKey, testValue);
 
-      // Cache uses setex (with TTL), not set
-      expect(mockRedis.setex).toHaveBeenCalled();
+      // P2-FIX-1: Cache now uses set(key, value, ttl) instead of setex directly
+      expect(mockRedis.set).toHaveBeenCalled();
     });
   });
 

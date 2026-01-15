@@ -48,7 +48,15 @@ export interface CacheEntry {
 
 export class HierarchicalCache {
   private config: CacheConfig;
-  private redis: any;
+  /**
+   * P0-FIX-3: Redis client is stored as a Promise (lazy initialization pattern).
+   * getRedisClient() returns a Promise<RedisClient>, which we store and await
+   * in all L2 operations. This allows the cache to be constructed synchronously
+   * while deferring Redis connection until first use.
+   *
+   * Type is RedisClient | Promise<RedisClient> | null to be explicit about this pattern.
+   */
+  private redisPromise: Promise<import('./redis').RedisClient> | null = null;
 
   // L1 Cache: SharedArrayBuffer for ultra-fast access
   private l1Metadata: Map<string, CacheEntry> = new Map();
@@ -88,8 +96,9 @@ export class HierarchicalCache {
       this.config.l1Size * 1024 * 1024 / CACHE_DEFAULTS.averageEntrySize
     );
 
+    // P0-FIX-3: Store the Promise from getRedisClient() for lazy initialization
     if (this.config.l2Enabled) {
-      this.redis = getRedisClient();
+      this.redisPromise = getRedisClient();
     }
 
     logger.info('Hierarchical cache initialized', {
@@ -346,9 +355,13 @@ export class HierarchicalCache {
     }
   }
 
+  /**
+   * P1-FIX-1: Use proper glob pattern matching instead of includes().
+   * Pattern '*' now correctly matches all keys, not just keys containing '*'.
+   */
   private invalidateL1Pattern(pattern: string): void {
     for (const key of this.l1Metadata.keys()) {
-      if (key.includes(pattern)) {
+      if (this.matchPattern(key, pattern)) {
         this.invalidateL1(key);
       }
     }
@@ -373,9 +386,11 @@ export class HierarchicalCache {
   }
 
   // L2 Cache Implementation (Redis)
+  // P0-FIX-3: All L2 methods now use explicit redisPromise with null check
   private async getFromL2(key: string): Promise<any> {
+    if (!this.redisPromise) return null;
     try {
-      const redis = await this.redis;
+      const redis = await this.redisPromise;
       const data = await redis.get(`${this.l2Prefix}${key}`);
       return data ? JSON.parse(data) : null;
     } catch (error) {
@@ -385,24 +400,21 @@ export class HierarchicalCache {
   }
 
   private async setInL2(key: string, value: any, ttl?: number): Promise<void> {
+    if (!this.redisPromise) return;
     try {
-      const redis = await this.redis;
-      const serialized = JSON.stringify(value);
+      const redis = await this.redisPromise;
       const redisKey = `${this.l2Prefix}${key}`;
-
-      if (ttl) {
-        await redis.setex(redisKey, ttl, serialized);
-      } else {
-        await redis.setex(redisKey, this.config.l2Ttl, serialized);
-      }
+      // P0-FIX-3: Use RedisClient.set() which handles serialization and TTL internally
+      await redis.set(redisKey, value, ttl || this.config.l2Ttl);
     } catch (error) {
       logger.error('L2 cache set error', { error, key });
     }
   }
 
   private async invalidateL2(key: string): Promise<void> {
+    if (!this.redisPromise) return;
     try {
-      const redis = await this.redis;
+      const redis = await this.redisPromise;
       await redis.del(`${this.l2Prefix}${key}`);
     } catch (error) {
       logger.error('L2 cache invalidate error', { error, key });
@@ -416,8 +428,9 @@ export class HierarchicalCache {
    * SCAN iterates incrementally and doesn't block.
    */
   private async invalidateL2Pattern(pattern: string): Promise<void> {
+    if (!this.redisPromise) return;
     try {
-      const redis = await this.redis;
+      const redis = await this.redisPromise;
       const searchPattern = `${this.l2Prefix}*${pattern}*`;
 
       // P0-FIX: Use cursor-based SCAN iteration instead of KEYS
@@ -506,12 +519,37 @@ export class HierarchicalCache {
     this.l3Storage.delete(`${this.l3Prefix}${key}`);
   }
 
+  /**
+   * P1-FIX-1: Use proper glob pattern matching instead of includes().
+   */
   private invalidateL3Pattern(pattern: string): void {
     for (const key of this.l3Storage.keys()) {
-      if (key.includes(pattern)) {
+      if (this.matchPattern(key, pattern)) {
         this.l3Storage.delete(key);
       }
     }
+  }
+
+  /**
+   * P1-FIX-1: Glob-like pattern matching for cache key invalidation.
+   * Supports:
+   * - '*' matches any sequence of characters
+   * - '?' matches any single character
+   * - Other characters match literally
+   */
+  private matchPattern(key: string, pattern: string): boolean {
+    // Special case: '*' matches everything
+    if (pattern === '*') return true;
+
+    // Convert glob pattern to regex
+    // Escape regex special chars except * and ?
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+
+    const regex = new RegExp(`^${escaped}$`);
+    return regex.test(key);
   }
 
   // Utility methods
