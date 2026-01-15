@@ -755,6 +755,8 @@ export interface StreamConsumerConfig {
   autoAck?: boolean;
   /** Logger instance for error logging */
   logger?: { error: (msg: string, ctx?: any) => void; debug?: (msg: string, ctx?: any) => void };
+  /** Callback when pause state changes (for backpressure monitoring) */
+  onPauseStateChange?: (isPaused: boolean) => void;
 }
 
 export interface StreamConsumerStats {
@@ -762,6 +764,8 @@ export interface StreamConsumerStats {
   messagesFailed: number;
   lastProcessedAt: number | null;
   isRunning: boolean;
+  /** Whether consumption is paused due to backpressure */
+  isPaused: boolean;
 }
 
 /**
@@ -788,12 +792,14 @@ export class StreamConsumer {
   private client: RedisStreamsClient;
   private config: StreamConsumerConfig;
   private running = false;
+  private paused = false;
   private pollTimer: NodeJS.Timeout | null = null;
   private stats: StreamConsumerStats = {
     messagesProcessed: 0,
     messagesFailed: 0,
     lastProcessedAt: null,
-    isRunning: false
+    isRunning: false,
+    isPaused: false
   };
 
   constructor(client: RedisStreamsClient, config: StreamConsumerConfig) {
@@ -838,8 +844,47 @@ export class StreamConsumer {
     return { ...this.stats };
   }
 
+  /**
+   * Pause consumption (for backpressure).
+   * Consumer will stop reading new messages until resume() is called.
+   */
+  pause(): void {
+    if (this.paused) return;
+    this.paused = true;
+    this.stats.isPaused = true;
+    this.config.logger?.debug?.('Stream consumer paused', {
+      stream: this.config.config.streamName
+    });
+    this.config.onPauseStateChange?.(true);
+  }
+
+  /**
+   * Resume consumption after pause.
+   * Restarts the polling loop if consumer is still running.
+   */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.stats.isPaused = false;
+    this.config.logger?.debug?.('Stream consumer resumed', {
+      stream: this.config.config.streamName
+    });
+    this.config.onPauseStateChange?.(false);
+    // Restart polling if we were running
+    if (this.running && !this.pollTimer) {
+      this.poll();
+    }
+  }
+
+  /**
+   * Check if consumer is currently paused.
+   */
+  isPaused(): boolean {
+    return this.paused;
+  }
+
   private async poll(): Promise<void> {
-    if (!this.running) return;
+    if (!this.running || this.paused) return;
 
     try {
       const messages = await this.client.xreadgroup(this.config.config, {
@@ -885,8 +930,8 @@ export class StreamConsumer {
       }
     }
 
-    // Schedule next poll if still running
-    if (this.running) {
+    // Schedule next poll if still running and not paused
+    if (this.running && !this.paused) {
       // Use setImmediate for non-blocking reads, short delay for blocking reads
       const delay = this.config.blockMs === 0 ? 0 : 10;
       this.pollTimer = setTimeout(() => this.poll(), delay);
