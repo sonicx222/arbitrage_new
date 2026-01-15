@@ -428,9 +428,11 @@ class ChainDetectorInstance extends events_1.EventEmitter {
         const reserve1 = BigInt(pair.reserve1);
         if (reserve0 === 0n || reserve1 === 0n)
             return;
-        // Calculate price (token0/token1) - consistent with base-detector.ts
-        // This gives "price of token1 in terms of token0"
-        const price = Number(reserve0) / Number(reserve1);
+        // P0-1 FIX: Use precision-safe price calculation to prevent precision loss
+        // for large BigInt values (reserves can be > 2^53)
+        const price = (0, core_1.calculatePriceFromBigIntReserves)(reserve0, reserve1);
+        if (price === null)
+            return;
         const priceUpdate = {
             chain: this.chainId,
             dex: pair.dex,
@@ -600,7 +602,7 @@ class ChainDetectorInstance extends events_1.EventEmitter {
             profitPercentage: netProfitPct * 100, // Convert to percentage
             expectedProfit: netProfitPct, // Net profit after fees
             estimatedProfit: 0, // To be calculated by execution engine
-            gasEstimate: this.detectorConfig.gasEstimate,
+            gasEstimate: String(this.detectorConfig.gasEstimate),
             confidence: this.detectorConfig.confidence,
             timestamp: Date.now(),
             expiresAt: Date.now() + this.detectorConfig.expiryMs,

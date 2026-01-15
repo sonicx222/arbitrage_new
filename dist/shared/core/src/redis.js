@@ -26,6 +26,7 @@ class RedisClient {
         // Message subscription with cleanup tracking
         this.subscriptions = new Map();
         this.logger = (0, logger_1.createLogger)('redis-client');
+        // P1-1 FIX: Use typed options instead of any
         const options = {
             host: this.parseHost(url),
             port: this.parsePort(url),
@@ -54,6 +55,7 @@ class RedisClient {
         this.client.removeAllListeners('connect');
         this.client.removeAllListeners('ready');
         this.client.removeAllListeners('close');
+        // P1-1 FIX: Use Error type instead of any
         this.client.on('error', (err) => {
             this.logger?.error('Redis main client error', { error: err });
         });
@@ -68,12 +70,14 @@ class RedisClient {
         });
         // Setup pubClient event handlers
         this.pubClient.removeAllListeners('error');
+        // P1-1 FIX: Use Error type instead of any
         this.pubClient.on('error', (err) => {
             this.logger?.error('Redis pub client error', { error: err });
         });
         // Setup subClient event handlers
         this.subClient.removeAllListeners('error');
         this.subClient.removeAllListeners('message');
+        // P1-1 FIX: Use Error type instead of any
         this.subClient.on('error', (err) => {
             this.logger?.error('Redis sub client error', { error: err });
         });
@@ -198,6 +202,7 @@ class RedisClient {
         }
     }
     // Caching operations
+    // P1-1 FIX: Use unknown instead of any for type safety
     async set(key, value, ttl) {
         try {
             const serializedValue = JSON.stringify(value);
@@ -245,7 +250,13 @@ class RedisClient {
     }
     /**
      * Set key only if it doesn't exist (for leader election)
-     * Returns true if the key was set, false if it already exists
+     *
+     * P0-3 FIX: Now throws on Redis errors instead of returning false.
+     * This prevents silent failures where Redis being unavailable is
+     * indistinguishable from the lock being held by another process.
+     *
+     * @returns true if the key was set, false if it already exists
+     * @throws Error if Redis operation fails (network error, timeout, etc.)
      */
     async setNx(key, value, ttlSeconds) {
         try {
@@ -261,18 +272,27 @@ class RedisClient {
             return result === 'OK';
         }
         catch (error) {
+            // P0-3 FIX: Throw instead of returning false to distinguish
+            // "lock held by another" from "Redis unavailable"
             this.logger.error('Error setting NX', { error, key });
-            return false;
+            throw new Error(`Redis setNx failed: ${error.message}`);
         }
     }
+    /**
+     * P1-FIX: Throws on Redis errors to distinguish "key doesn't exist" from "Redis unavailable"
+     * @returns true if key exists, false if key doesn't exist
+     * @throws Error if Redis operation fails
+     */
     async exists(key) {
         try {
             const result = await this.client.exists(key);
             return result === 1;
         }
         catch (error) {
-            this.logger.error('Error checking existence', { error });
-            return false;
+            this.logger.error('Error checking existence', { error, key });
+            // P1-FIX: Throw instead of returning false to allow callers to distinguish
+            // between "key doesn't exist" and "Redis unavailable"
+            throw new Error(`Redis exists failed: ${error.message}`);
         }
     }
     /**
@@ -364,6 +384,7 @@ class RedisClient {
         }
     }
     // Hash operations for complex data
+    // P1-1 FIX: Use unknown instead of any for type safety
     async hset(key, field, value) {
         try {
             const serializedValue = JSON.stringify(value);
@@ -620,17 +641,26 @@ class RedisClient {
         const key = `health:${serviceName}`;
         return await this.get(key);
     }
+    /**
+     * P1-FIX: Use SCAN instead of KEYS to avoid blocking Redis
+     * KEYS command blocks on large datasets; SCAN is non-blocking and iterative.
+     */
     async getAllServiceHealth() {
         try {
-            const keys = await this.client.keys('health:*');
             const health = {};
-            for (const key of keys) {
-                const serviceName = key.replace('health:', '');
-                const serviceHealth = await this.get(key);
-                if (serviceHealth) {
-                    health[serviceName] = serviceHealth;
+            let cursor = '0';
+            // P1-FIX: Use SCAN iterator for non-blocking key enumeration
+            do {
+                const [nextCursor, keys] = await this.scan(cursor, 'MATCH', 'health:*', 'COUNT', 100);
+                cursor = nextCursor;
+                for (const key of keys) {
+                    const serviceName = key.replace('health:', '');
+                    const serviceHealth = await this.get(key);
+                    if (serviceHealth) {
+                        health[serviceName] = serviceHealth;
+                    }
                 }
-            }
+            } while (cursor !== '0');
             return health;
         }
         catch (error) {
@@ -797,9 +827,25 @@ async function checkRedisHealth(url, password) {
     }
 }
 // Reset singleton for testing purposes
-function resetRedisInstance() {
+// P0-FIX: Made async to properly await disconnect and handle in-flight initialization
+async function resetRedisInstance() {
+    // P0-FIX: If initialization is in progress, wait for it to complete
+    // This prevents race conditions during test cleanup
+    if (redisInstancePromise && !redisInstance) {
+        try {
+            await redisInstancePromise;
+        }
+        catch {
+            // Ignore init errors - we're resetting anyway
+        }
+    }
     if (redisInstance) {
-        redisInstance.disconnect().catch(() => { }); // Best effort cleanup
+        try {
+            await redisInstance.disconnect();
+        }
+        catch {
+            // Best effort cleanup - log but don't throw
+        }
     }
     redisInstance = null;
     redisInstancePromise = null;

@@ -31,6 +31,31 @@ const redis_streams_1 = require("./redis-streams");
 const websocket_manager_1 = require("./websocket-manager");
 const src_1 = require("../../config/src");
 // =============================================================================
+// S3.2.4-FIX: Token Pair Normalization Helper
+// =============================================================================
+/**
+ * Normalize a token pair string for cross-chain matching.
+ * Handles different token symbol conventions across chains:
+ * - WETH.e_USDT (Avalanche) → WETH_USDT
+ * - ETH_USDT (BSC) → WETH_USDT
+ * - WBTC.e_USDC (Avalanche) → WBTC_USDC
+ *
+ * @param pairKey - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+ * @returns Normalized token pair string
+ */
+function normalizeTokenPair(pairKey) {
+    const parts = pairKey.split('_');
+    if (parts.length < 2)
+        return pairKey;
+    // Take last 2 parts as tokens (handles both formats)
+    const token0 = parts[parts.length - 2];
+    const token1 = parts[parts.length - 1];
+    // Normalize each token in the pair
+    const normalizedToken0 = (0, src_1.normalizeTokenForCrossChain)(token0);
+    const normalizedToken1 = (0, src_1.normalizeTokenForCrossChain)(token1);
+    return `${normalizedToken0}_${normalizedToken1}`;
+}
+// =============================================================================
 // PartitionedDetector Base Class
 // =============================================================================
 class PartitionedDetector extends events_1.EventEmitter {
@@ -376,9 +401,10 @@ class PartitionedDetector extends events_1.EventEmitter {
             try {
                 const health = this.getPartitionHealth();
                 // Persist to Redis - convert to ServiceHealth format
+                // P3-2 FIX: Use unified ServiceHealth with 'name' field
                 if (this.redis) {
                     const serviceHealth = {
-                        service: `partition:${this.config.partitionId}`,
+                        name: `partition:${this.config.partitionId}`,
                         status: health.status,
                         uptime: health.uptimeSeconds,
                         memoryUsage: health.memoryUsage,
@@ -524,7 +550,6 @@ class PartitionedDetector extends events_1.EventEmitter {
     }
     findCrossChainDiscrepancies(minDifferencePercent) {
         const discrepancies = [];
-        const allPairs = new Set();
         // P1-1 FIX: Create a deep snapshot of all chain prices to prevent race conditions
         // during iteration. If updatePrice is called during discrepancy detection,
         // we work with consistent point-in-time data.
@@ -532,25 +557,29 @@ class PartitionedDetector extends events_1.EventEmitter {
         for (const [chainId, chainPriceMap] of this.chainPrices) {
             pricesSnapshot.set(chainId, new Map(chainPriceMap));
         }
-        // Collect all pair keys from snapshot
-        for (const chainPriceMap of pricesSnapshot.values()) {
-            for (const pairKey of chainPriceMap.keys()) {
-                allPairs.add(pairKey);
+        // S3.2.4-FIX: Group prices by NORMALIZED pair key to detect cross-chain discrepancies
+        // Different chains may use different token symbols for the same asset:
+        // - Avalanche: WETH.e_USDT → normalizes to WETH_USDT
+        // - BSC: ETH_USDT → normalizes to WETH_USDT
+        // Without normalization, these would be treated as different pairs!
+        const normalizedPrices = new Map();
+        for (const [chainId, chainPriceMap] of pricesSnapshot) {
+            for (const [pairKey, pricePoint] of chainPriceMap) {
+                const normalizedPair = normalizeTokenPair(pairKey);
+                if (!normalizedPrices.has(normalizedPair)) {
+                    normalizedPrices.set(normalizedPair, new Map());
+                }
+                normalizedPrices.get(normalizedPair).set(chainId, {
+                    price: pricePoint,
+                    originalPairKey: pairKey
+                });
             }
         }
-        // Check each pair for cross-chain discrepancies using snapshot
-        for (const pairKey of allPairs) {
-            // Get prices from snapshot instead of live data
-            const prices = new Map();
-            for (const [chainId, chainPriceMap] of pricesSnapshot) {
-                const pricePoint = chainPriceMap.get(pairKey);
-                if (pricePoint) {
-                    prices.set(chainId, pricePoint);
-                }
-            }
-            if (prices.size < 2)
+        // Check each normalized pair for cross-chain discrepancies
+        for (const [normalizedPair, chainPriceData] of normalizedPrices) {
+            if (chainPriceData.size < 2)
                 continue;
-            const priceValues = Array.from(prices.values()).map(p => p.price);
+            const priceValues = Array.from(chainPriceData.values()).map(p => p.price.price);
             const minPrice = Math.min(...priceValues);
             const maxPrice = Math.max(...priceValues);
             if (minPrice === 0)
@@ -558,12 +587,12 @@ class PartitionedDetector extends events_1.EventEmitter {
             const difference = (maxPrice - minPrice) / minPrice;
             if (difference >= minDifferencePercent) {
                 const priceMap = new Map();
-                for (const [chainId, point] of prices) {
-                    priceMap.set(chainId, point.price);
+                for (const [chainId, data] of chainPriceData) {
+                    priceMap.set(chainId, data.price.price);
                 }
                 discrepancies.push({
-                    pairKey,
-                    chains: Array.from(prices.keys()),
+                    pairKey: normalizedPair, // Use normalized pair key for consistency
+                    chains: Array.from(chainPriceData.keys()),
                     prices: priceMap,
                     maxDifference: difference,
                     timestamp: Date.now()

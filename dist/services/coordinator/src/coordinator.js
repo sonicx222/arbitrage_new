@@ -380,30 +380,29 @@ class CoordinatorService {
             // P1-8 FIX: Use stateManager.isRunning() for consistency
             if (!this.stateManager.isRunning() || !this.streamsClient)
                 return;
-            try {
-                await Promise.all([
-                    this.consumeHealthStream(),
-                    this.consumeOpportunitiesStream(),
-                    this.consumeWhaleAlertsStream()
-                ]);
-                // P1-NEW-2 FIX: Reset error count on successful consumption
-                // This provides immediate recovery signal and prevents false positives
-                if (this.streamConsumerErrors > 0) {
-                    this.logger.debug('Stream consumer recovered', {
-                        previousErrors: this.streamConsumerErrors
+            // P0-4 FIX: Use Promise.allSettled instead of Promise.all
+            // Promise.all fails fast on first error, causing all streams to stop.
+            // Promise.allSettled ensures all streams continue to be consumed even if one fails.
+            const results = await Promise.allSettled([
+                this.consumeHealthStream(),
+                this.consumeOpportunitiesStream(),
+                this.consumeWhaleAlertsStream()
+            ]);
+            // P0-4 FIX: Track individual stream failures for better diagnostics
+            const streamNames = ['health', 'opportunities', 'whale-alerts'];
+            let hasFailure = false;
+            results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                    hasFailure = true;
+                    this.logger.error('Stream consumer failed', {
+                        stream: streamNames[index],
+                        error: result.reason?.message || String(result.reason)
                     });
-                    this.streamConsumerErrors = 0;
-                    this.alertSentForCurrentErrorBurst = false;
                 }
-            }
-            catch (error) {
+            });
+            if (hasFailure) {
                 // P2-1 fix: Track errors and send alert if threshold exceeded
                 this.streamConsumerErrors++;
-                this.logger.error('Stream consumer error', {
-                    error,
-                    errorCount: this.streamConsumerErrors,
-                    maxErrors: this.MAX_STREAM_ERRORS
-                });
                 // P1-NEW-2 FIX: Send critical alert only once per error burst
                 if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS && !this.alertSentForCurrentErrorBurst) {
                     this.sendAlert({
@@ -413,6 +412,17 @@ class CoordinatorService {
                         timestamp: Date.now()
                     });
                     this.alertSentForCurrentErrorBurst = true;
+                }
+            }
+            else {
+                // P1-NEW-2 FIX: Reset error count on successful consumption
+                // This provides immediate recovery signal and prevents false positives
+                if (this.streamConsumerErrors > 0) {
+                    this.logger.debug('Stream consumer recovered', {
+                        previousErrors: this.streamConsumerErrors
+                    });
+                    this.streamConsumerErrors = 0;
+                    this.alertSentForCurrentErrorBurst = false;
                 }
             }
         }, 100);
@@ -494,25 +504,31 @@ class CoordinatorService {
     async handleHealthMessage(message) {
         try {
             const data = message.data;
-            // P2 FIX: Type guard for required service field
-            if (!data || typeof data.service !== 'string')
+            // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
+            const serviceName = data?.name ?? data?.service;
+            if (!serviceName || typeof serviceName !== 'string')
                 return;
-            // P2 FIX: Validate status is a known value, default to 'unknown'
+            // P3-2 FIX: Validate status includes new 'starting' and 'stopping' states
             const statusValue = data.status;
-            const validStatus = statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy'
+            const validStatus = statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
+                statusValue === 'starting' || statusValue === 'stopping'
                 ? statusValue
-                : 'unknown';
+                : 'unhealthy'; // Default to unhealthy for unknown status
+            // P3-2 FIX: Use unified ServiceHealth with 'name' field
             const health = {
-                service: data.service,
+                name: serviceName,
                 status: validStatus,
                 uptime: typeof data.uptime === 'number' ? data.uptime : 0,
                 memoryUsage: typeof data.memoryUsage === 'number' ? data.memoryUsage : 0,
                 cpuUsage: typeof data.cpuUsage === 'number' ? data.cpuUsage : 0,
-                lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now()
+                lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+                // P3-2: Include optional recovery tracking fields if present
+                consecutiveFailures: typeof data.consecutiveFailures === 'number' ? data.consecutiveFailures : undefined,
+                restartCount: typeof data.restartCount === 'number' ? data.restartCount : undefined
             };
-            this.serviceHealth.set(data.service, health);
+            this.serviceHealth.set(serviceName, health);
             this.logger.debug('Health update received', {
-                service: data.service,
+                name: serviceName,
                 status: health.status
             });
         }
@@ -679,6 +695,8 @@ class CoordinatorService {
                         this.serviceHealth.set(serviceName, health);
                     }
                 }
+                // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
+                this.cleanupAlertCooldowns(Date.now());
             }
             catch (error) {
                 this.logger.error('Legacy health polling failed', { error });

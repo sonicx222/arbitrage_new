@@ -59,10 +59,32 @@ export interface ArbitrageCalcConfig {
     expiryMs?: number;
 }
 /**
- * Calculate price from reserves.
+ * Safely convert BigInt to Number with precision scaling.
+ * This prevents precision loss for large BigInt values.
+ *
+ * P0-1 FIX: Uses scaled division to preserve precision.
+ *
+ * @param value - The BigInt value
+ * @param divisor - The divisor BigInt (must be > 0)
+ * @returns The result as a Number with preserved precision
+ */
+export declare function safeBigIntDivision(numerator: bigint, denominator: bigint): number;
+/**
+ * Calculate price from reserves with full BigInt precision.
  * Price = reserve0 / reserve1 (price of token1 in terms of token0)
+ *
+ * P0-1 FIX: Uses scaled BigInt arithmetic to prevent precision loss
+ * that occurs when converting large BigInt values directly to Number.
+ *
+ * Example: For reserves of 1e27 (1 billion tokens in wei), direct Number
+ * conversion would lose precision, but scaled division preserves it.
  */
 export declare function calculatePriceFromReserves(reserve0: string, reserve1: string): number | null;
+/**
+ * Calculate price from BigInt reserves directly (avoids string parsing overhead).
+ * P0-1 FIX: Optimized version for when reserves are already BigInt.
+ */
+export declare function calculatePriceFromBigIntReserves(reserve0: bigint, reserve1: bigint): number | null;
 /**
  * Invert price for reverse token order comparison.
  */

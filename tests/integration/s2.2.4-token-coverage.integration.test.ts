@@ -28,7 +28,7 @@ const {
   CORE_TOKENS,
   TOKEN_METADATA,
   PHASE_METRICS
-} = require('../../shared/config/dist/index.js');
+} = require('../../shared/config/src');
 
 // =============================================================================
 // S2.2.4 Test Suite: Token Coverage Verification
@@ -55,7 +55,8 @@ describe('S2.2.4 Token Coverage Verification', () => {
     it('should have tokens for all 11 chains after S3.1.2 expansion', () => {
       const totalTokens = Object.values(CORE_TOKENS).flat().length;
       // 11 chains with tokens: original 6 + 5 new chains
-      expect(totalTokens).toBe(94);
+      // S3.2.1: Avalanche expanded to 15, Fantom to 10 → Total 105
+      expect(totalTokens).toBe(105);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -75,6 +76,7 @@ describe('S2.2.4 Token Coverage Verification', () => {
 
   describe('Per-Chain Token Count', () => {
     // S3.1.2: Added 5 new chains with token configurations
+    // S3.2.1: Expanded Avalanche to 15, Fantom to 10
     const expectedCounts: Record<string, number> = {
       // Original 6 chains
       arbitrum: 12,
@@ -83,9 +85,9 @@ describe('S2.2.4 Token Coverage Verification', () => {
       polygon: 10,
       optimism: 10,
       ethereum: 8,
-      // S3.1.2: New chains
-      avalanche: 8,
-      fantom: 6,
+      // S3.1.2: New chains (S3.2.1: avalanche expanded to 15, fantom to 10)
+      avalanche: 15,
+      fantom: 10,
       zksync: 6,
       linea: 6,
       solana: 8
@@ -234,18 +236,32 @@ describe('S2.2.4 Token Coverage Verification', () => {
   // ===========================================================================
 
   describe('TOKEN_METADATA Consistency', () => {
+    // Non-EVM chains use different address formats
+    const nonEvmChains = ['solana'];
+    const isValidSolanaAddress = (address: string): boolean => {
+      return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+    };
+
     Object.entries(TOKEN_METADATA).forEach(([chain, metadata]: [string, any]) => {
       if (!metadata) return;
 
       describe(`${chain} metadata`, () => {
         it('should have weth address defined', () => {
           expect(metadata.weth).toBeDefined();
-          expect(/^0x[a-fA-F0-9]{40}$/.test(metadata.weth)).toBe(true);
+          if (nonEvmChains.includes(chain)) {
+            expect(isValidSolanaAddress(metadata.weth)).toBe(true);
+          } else {
+            expect(/^0x[a-fA-F0-9]{40}$/.test(metadata.weth)).toBe(true);
+          }
         });
 
         it('should have nativeWrapper address defined', () => {
           expect(metadata.nativeWrapper).toBeDefined();
-          expect(/^0x[a-fA-F0-9]{40}$/.test(metadata.nativeWrapper)).toBe(true);
+          if (nonEvmChains.includes(chain)) {
+            expect(isValidSolanaAddress(metadata.nativeWrapper)).toBe(true);
+          } else {
+            expect(/^0x[a-fA-F0-9]{40}$/.test(metadata.nativeWrapper)).toBe(true);
+          }
         });
 
         it('should have stablecoins array defined', () => {
@@ -256,7 +272,11 @@ describe('S2.2.4 Token Coverage Verification', () => {
 
         it('should have valid stablecoin configurations', () => {
           metadata.stablecoins.forEach((stable: any) => {
-            expect(/^0x[a-fA-F0-9]{40}$/.test(stable.address)).toBe(true);
+            if (nonEvmChains.includes(chain)) {
+              expect(isValidSolanaAddress(stable.address)).toBe(true);
+            } else {
+              expect(/^0x[a-fA-F0-9]{40}$/.test(stable.address)).toBe(true);
+            }
             expect(stable.symbol).toBeDefined();
             expect(stable.decimals).toBeGreaterThan(0);
           });

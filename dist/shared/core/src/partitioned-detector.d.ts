@@ -30,8 +30,8 @@ import { CHAINS } from '../../config/src';
 export interface PartitionedDetectorConfig {
     /** Unique partition identifier */
     partitionId: string;
-    /** Array of chain IDs to monitor */
-    chains: string[];
+    /** Array of chain IDs to monitor (accepts readonly arrays from PartitionConfig) */
+    chains: readonly string[] | string[];
     /** Deployment region */
     region: string;
     /** Health check interval in ms (default: 15000) */
@@ -40,6 +40,10 @@ export interface PartitionedDetectorConfig {
     failoverTimeoutMs?: number;
     /** Maximum reconnect attempts per chain (default: 5) */
     maxReconnectAttempts?: number;
+}
+/** Internal config type with mutable chains array for runtime modifications */
+interface InternalDetectorConfig extends Omit<Required<PartitionedDetectorConfig>, 'chains'> {
+    chains: string[];
 }
 export interface ChainHealth {
     chainId: string;
@@ -91,7 +95,7 @@ interface EthereumBlockHeader {
     hash?: string;
 }
 export declare class PartitionedDetector extends EventEmitter {
-    protected config: Required<PartitionedDetectorConfig>;
+    protected config: InternalDetectorConfig;
     protected logger: ReturnType<typeof createLogger>;
     protected perfLogger: PerformanceLogger;
     protected redis: RedisClient | null;

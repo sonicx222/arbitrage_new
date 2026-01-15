@@ -556,12 +556,14 @@ describe('S3.1.3 P1 Asia-Fast Partition Service', () => {
       detector = await createStartedP1Detector();
 
       // BNB/USDT price on BSC vs bridged on Polygon
+      // Note: WBNB normalizes to BNB for cross-chain comparisons (S3.2.4 fix)
       detector.updatePrice('bsc', 'WBNB_USDT', 600);
       detector.updatePrice('polygon', 'WBNB_USDT', 615); // 2.5% higher
 
       const discrepancies = detector.findCrossChainDiscrepancies(0.01);
 
-      expect(discrepancies.some(d => d.pairKey === 'WBNB_USDT')).toBe(true);
+      // WBNB normalizes to BNB for cross-chain detection
+      expect(discrepancies.some(d => d.pairKey === 'BNB_USDT')).toBe(true);
     });
   });
 

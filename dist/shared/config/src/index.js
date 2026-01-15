@@ -14,12 +14,15 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITIONS = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.PARTITION_IDS = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
+exports.assignChainToPartition = exports.getPartitionFromEnv = exports.getPartition = exports.PARTITION_IDS = exports.PARTITIONS = exports.CROSS_CHAIN_TOKEN_ALIASES = exports.SYSTEM_CONSTANTS = exports.BRIDGE_COSTS = exports.FLASH_LOAN_PROVIDERS = exports.DETECTOR_CONFIG = exports.EVENT_SIGNATURES = exports.TOKEN_METADATA = exports.PHASE_METRICS = exports.PARTITION_CONFIG = exports.EVENT_CONFIG = exports.ARBITRAGE_CONFIG = exports.PERFORMANCE_THRESHOLDS = exports.SERVICE_CONFIGS = exports.CORE_TOKENS = exports.DEXES = exports.CHAINS = void 0;
 exports.getEnabledDexes = getEnabledDexes;
 exports.dexFeeToPercentage = dexFeeToPercentage;
 exports.percentageToBasisPoints = percentageToBasisPoints;
 exports.getBridgeCost = getBridgeCost;
 exports.calculateBridgeCostUsd = calculateBridgeCostUsd;
+exports.normalizeTokenForCrossChain = normalizeTokenForCrossChain;
+exports.findCommonTokensBetweenChains = findCommonTokensBetweenChains;
+exports.getChainSpecificTokenSymbol = getChainSpecificTokenSymbol;
 // Validate required environment variables at startup (skip in test environment)
 if (process.env.NODE_ENV !== 'test') {
     if (!process.env.ETHEREUM_RPC_URL) {
@@ -175,13 +178,13 @@ exports.DEXES = {
             name: 'trader_joe', // [H]
             chain: 'arbitrum',
             factoryAddress: '0x1886D09C9Ade0c5DB822D85D21678Db67B6c2982',
-            routerAddress: '0xbeE5c10Cf6E4F68f831E11C1D9E59B43560B3571',
+            routerAddress: '0xBee5C10cF6E4f68f831E11c1d9e59b43560B3571',
             fee: 30
         },
         {
             name: 'zyberswap', // [M]
             chain: 'arbitrum',
-            factoryAddress: '0xAC2ee06A14c52570Ef3B9812Ed240BCe359772e7',
+            factoryAddress: '0xaC2ee06A14c52570Ef3B9812Ed240BCe359772e7',
             routerAddress: '0x16e71B13fE6079B4312063F7E81F76d165Ad32Ad',
             fee: 30
         },
@@ -193,12 +196,14 @@ exports.DEXES = {
             fee: 30
         },
         // === S2.2.1: New DEXs (6 → 9) ===
+        // Balancer V2 uses Vault model - uses BalancerV2Adapter for pool discovery
         {
             name: 'balancer_v2', // [H] - Major liquidity protocol
             chain: 'arbitrum',
-            factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault
+            factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault (uses adapter)
             routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Vault is also router for swaps
-            fee: 30 // Variable fees per pool, using default
+            fee: 30, // Variable fees per pool, using default
+            enabled: true // ENABLED: Uses BalancerV2Adapter from dex-adapters
         },
         {
             name: 'curve', // [H] - Major stablecoin DEX
@@ -210,7 +215,7 @@ exports.DEXES = {
         {
             name: 'chronos', // [M] - ve(3,3) DEX
             chain: 'arbitrum',
-            factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cB98CB5B0722', // Chronos Factory
+            factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cb98CB5B0722', // Chronos Factory
             routerAddress: '0xE708aA9E887980750C040a6A2Cb901c37Aa34f3b', // Chronos Router
             fee: 30
         }
@@ -270,7 +275,7 @@ exports.DEXES = {
         {
             name: 'nomiswap', // [M] - Competitive fees
             chain: 'bsc',
-            factoryAddress: '0xd6715A8be3944ec72738F0BFDC739571659D8010',
+            factoryAddress: '0xD6715A8BE3944Ec72738f0bFdc739571659D8010',
             routerAddress: '0xD654953D746f0b114d1F85332Dc43446ac79413d',
             fee: 10 // 0.1% competitive fee
         }
@@ -280,7 +285,7 @@ exports.DEXES = {
         {
             name: 'uniswap_v3', // [C]
             chain: 'base',
-            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FdFD',
+            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
             routerAddress: '0x2626664c2603336E57B271c5C0b26F421741e481',
             fee: 30
         },
@@ -316,14 +321,14 @@ exports.DEXES = {
         {
             name: 'maverick', // [H] - Dynamic fee AMM
             chain: 'base',
-            factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1E',
-            routerAddress: '0x32AED3Bce901DA12ca8F29D3E95Fc3cc54A85fd9',
+            factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1e',
+            routerAddress: '0x32aed3Bce901Da12ca8F29D3e95fC3cc54a85Fd9',
             fee: 1 // 1 bp base fee (dynamic)
         },
         {
             name: 'alienbase', // [M] - Native Base DEX
             chain: 'base',
-            factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14c0FDe7',
+            factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7',
             routerAddress: '0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7',
             fee: 30
         }
@@ -428,25 +433,23 @@ exports.DEXES = {
             fee: 30
         },
         // S3.2.1: New DEXs added
-        // S3.2.1-FIX: GMX uses Vault model (not factory pattern) - DISABLED until adapter implemented
-        // GMX Vault doesn't have getPair/getPool methods, needs custom GMXVaultAdapter
+        // GMX uses Vault model - uses GmxAdapter for pool discovery
         {
             name: 'gmx', // [C] - Perpetuals/Spot, uses vault model
             chain: 'avalanche',
-            factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (NOT a factory!)
+            factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (uses adapter)
             routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8', // GMX Router
             fee: 30, // GMX uses dynamic fees 10-80bp, using 30bp average
-            enabled: false // DISABLED: Vault model not supported by PairDiscoveryService
+            enabled: true // ENABLED: Uses GmxAdapter from dex-adapters
         },
-        // S3.2.1-FIX: Platypus uses Pool model (not factory pattern) - DISABLED until adapter implemented
-        // Platypus Main Pool doesn't have getPair/getPool methods, needs custom PlatypusPoolAdapter
+        // Platypus uses Pool model - uses PlatypusAdapter for pool discovery
         {
             name: 'platypus', // [H] - Stablecoin-optimized AMM
             chain: 'avalanche',
-            factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (NOT a factory!)
+            factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (uses adapter)
             routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12', // Platypus Router
             fee: 4, // Platypus: ~1-4bp for stablecoins
-            enabled: false // DISABLED: Pool model not supported by PairDiscoveryService
+            enabled: true // ENABLED: Uses PlatypusAdapter from dex-adapters
         },
         {
             name: 'kyberswap', // [H] - KyberSwap Elastic (concentrated liquidity)
@@ -456,7 +459,7 @@ exports.DEXES = {
             fee: 10 // KyberSwap: dynamic fees, typically 8-100bp (V3-style getPool)
         }
     ],
-    // Fantom: 2 DEXs
+    // Fantom: 4 DEXs (S3.2.2)
     fantom: [
         {
             name: 'spookyswap', // [C] - Dominant on Fantom
@@ -471,6 +474,22 @@ exports.DEXES = {
             factoryAddress: '0xEF45d134b73241eDa7703fa787148D9C9F4950b0',
             routerAddress: '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52',
             fee: 30
+        },
+        {
+            name: 'equalizer', // [H] - Solidly fork with ve(3,3) model
+            chain: 'fantom',
+            factoryAddress: '0xc6366EFD0AF1d09171fe0EBF32c7943BB310832a', // Equalizer V2 Factory
+            routerAddress: '0x1A05EB736873485655F29a37DEf8a0AA87F5a447', // Equalizer Router
+            fee: 30 // Default volatile fee (stable pools use 1bp)
+        },
+        // Beethoven X uses Balancer V2 Vault model - uses BalancerV2Adapter for pool discovery
+        {
+            name: 'beethoven_x', // [H] - Balancer V2 fork, weighted pools
+            chain: 'fantom',
+            factoryAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', // Beethoven X Vault (uses adapter)
+            routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', // Vault is also router for swaps
+            fee: 30, // Variable per pool, 10-200bp typical
+            enabled: true // ENABLED: Uses BalancerV2Adapter from dex-adapters
         }
     ],
     // zkSync Era: 2 DEXs
@@ -659,16 +678,21 @@ exports.CORE_TOKENS = {
         { address: '0x62edc0692BD897D2295872a9FFCac5425011c661', symbol: 'GMX', decimals: 18, chainId: 43114 }, // GMX token
         { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18, chainId: 43114 } // Frax stablecoin
     ],
-    // Fantom: 6 tokens
+    // Fantom: 10 tokens (S3.2.2)
     fantom: [
         // Anchor tokens
         { address: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', symbol: 'WFTM', decimals: 18, chainId: 250 },
         { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6, chainId: 250 },
         { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6, chainId: 250 },
         { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18, chainId: 250 },
-        // Core DeFi
-        { address: '0x21Ada0D2aC28C3A5Fa3cD2eE30882dA8812279B6', symbol: 'BOO', decimals: 18, chainId: 250 },
-        { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 }
+        // Bridged tokens
+        { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 },
+        { address: '0x321162Cd933E2Be498Cd2267a90534A804051b11', symbol: 'WBTC', decimals: 8, chainId: 250 },
+        // DEX governance tokens (S3.2.2)
+        { address: '0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE', symbol: 'BOO', decimals: 18, chainId: 250 }, // SpookySwap
+        { address: '0x5Cc61A78F164885776AA610fb0FE1257df78E59B', symbol: 'SPIRIT', decimals: 18, chainId: 250 }, // SpiritSwap
+        { address: '0x3Fd3A0c85B70754eFc07aC9Ac0cbBDCe664865A6', symbol: 'EQUAL', decimals: 18, chainId: 250 }, // Equalizer
+        { address: '0xF24Bcf4d1e507740041C9cFd2DddB29585aDCe1e', symbol: 'BEETS', decimals: 18, chainId: 250 } // Beethoven X
     ],
     // zkSync Era: 6 tokens
     zksync: [
@@ -679,7 +703,7 @@ exports.CORE_TOKENS = {
         // Core DeFi
         { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8, chainId: 324 },
         { address: '0x5A7d6b2F92C77FAD6CCaBd7EE0624E64907Eaf3E', symbol: 'ZK', decimals: 18, chainId: 324 },
-        { address: '0x32fd44bB4895705dcA62f5E22ba9e3a6cD3c8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
+        { address: '0x32fD44Bb4895705dca62f5E22ba9e3A6cd3C8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
     ],
     // Linea: 6 tokens
     linea: [
@@ -749,6 +773,12 @@ exports.ARBITRAGE_CONFIG = {
     minProfitThreshold: 10, // Minimum $10 net profit
     minConfidenceThreshold: 0.7, // Minimum 70% confidence
     feePercentage: 0.003, // 0.3% DEX trading fee
+    // P1-4 FIX: Configurable slippage tolerance (was hardcoded 0.9 = 10%)
+    slippageTolerance: 0.10, // 10% slippage tolerance (minProfit = expectedProfit * (1 - slippageTolerance))
+    // P1-5 FIX: Gas price spike protection - reject transactions if gas exceeds threshold
+    gasPriceSpikeMultiplier: 2.0, // Max 2x above baseline gas price
+    gasPriceBaselineWindowMs: 300000, // 5 minute window for baseline calculation
+    gasPriceSpikeEnabled: true, // Enable/disable gas spike protection
     // Chain-specific minimum profits (due to gas costs)
     // S3.1.2: Added all 11 chains
     chainMinProfits: {
@@ -791,12 +821,8 @@ exports.EVENT_CONFIG = {
  * Partition IDs - Use these constants instead of magic strings
  * to prevent typos and enable IDE autocomplete.
  */
-exports.PARTITION_IDS = {
-    ASIA_FAST: 'asia-fast',
-    L2_TURBO: 'l2-turbo',
-    HIGH_VALUE: 'high-value',
-    SOLANA_NATIVE: 'solana-native'
-};
+// PARTITION_IDS is now exported from partitions.ts to avoid circular dependency
+// Re-exported below via named re-exports
 /**
  * Partition chain assignments - S3.1.2 configuration
  * Use getChainsForPartition() from partitions.ts for runtime access.
@@ -815,6 +841,7 @@ exports.PARTITION_CONFIG = {
 // PHASE METRICS
 // Track progress against targets from ADR-008
 // S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
+// S3.2.2: Updated for Fantom expansion (11 chains, 46 DEXes, 98 tokens)
 // =============================================================================
 exports.PHASE_METRICS = {
     current: {
@@ -825,11 +852,11 @@ exports.PHASE_METRICS = {
         targetOpportunities: 500 // Increased with more chains/DEXes
     },
     targets: {
-        // S3.1.2: 4-Partition Architecture targets:
+        // S3.2.2: Updated for Fantom expansion:
         // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
-        // - 44 DEXes (original 33 + 11 new chain DEXes)
-        // - 94 tokens (original 60 + 34 new chain tokens)
-        phase1: { chains: 11, dexes: 44, tokens: 94, opportunities: 500 },
+        // - 46 DEXes (S3.1.2: 44 + S3.2.2: 2 Fantom DEXs)
+        // - 98 tokens (S3.1.2: 94 + S3.2.2: 4 Fantom tokens)
+        phase1: { chains: 11, dexes: 46, tokens: 98, opportunities: 500 },
         phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
         phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
     }
@@ -1110,7 +1137,7 @@ exports.DETECTOR_CONFIG = {
 exports.FLASH_LOAN_PROVIDERS = {
     // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
     ethereum: {
-        address: '0x87870Bcd2C4c2e84A8c3C3a3FcACC94666c0d6Cf',
+        address: '0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF',
         protocol: 'aave_v3',
         fee: 9 // 0.09% flash loan fee
     },
@@ -1271,7 +1298,115 @@ exports.SYSTEM_CONSTANTS = {
         /** Default success threshold for closing */
         defaultSuccessThreshold: 2,
     },
+    // P4-FIX: Centralized timeout constants
+    timeouts: {
+        /** HTTP health check timeout in milliseconds */
+        httpHealthCheck: 5000,
+        /** Redis operation timeout in milliseconds */
+        redisOperation: 5000,
+        /** Graceful shutdown timeout in milliseconds */
+        gracefulShutdown: 30000,
+        /** Opportunity deduplication TTL in seconds (Redis SET NX) */
+        opportunityDedupTtlSeconds: 30,
+        /** Subgraph API request timeout in milliseconds */
+        subgraphRequest: 10000,
+        /** RPC provider request timeout in milliseconds */
+        rpcRequest: 15000,
+    },
 };
+// =============================================================================
+// CROSS-CHAIN TOKEN NORMALIZATION (S3.2.4)
+// =============================================================================
+/**
+ * Cross-chain token aliases for identifying equivalent tokens across chains.
+ * Maps chain-specific token symbols to their canonical form.
+ *
+ * Purpose: Enable cross-chain arbitrage detection by recognizing that
+ * WETH.e (Avalanche), ETH (BSC), and WETH (most chains) are all the same asset.
+ *
+ * Note: This is DIFFERENT from price-oracle's TOKEN_ALIASES which maps
+ * wrapped tokens to native for pricing (WETH→ETH). Here we use WETH as
+ * canonical because it's the actual tradeable asset on DEXes.
+ *
+ * @see services/cross-chain-detector/src/detector.ts
+ * @see shared/core/src/price-oracle.ts (different purpose)
+ */
+exports.CROSS_CHAIN_TOKEN_ALIASES = {
+    // Fantom-specific (keys are UPPERCASE for case-insensitive matching)
+    'FUSDT': 'USDT',
+    'WFTM': 'FTM',
+    // Avalanche-specific (bridged tokens use .e suffix)
+    'WAVAX': 'AVAX',
+    'WETH.E': 'WETH', // Note: .E is uppercase for matching
+    'WBTC.E': 'WBTC',
+    'USDT.E': 'USDT',
+    'USDC.E': 'USDC',
+    'DAI.E': 'DAI',
+    // BSC-specific
+    'WBNB': 'BNB',
+    'BTCB': 'WBTC', // Binance wrapped BTC → canonical WBTC
+    'ETH': 'WETH', // BSC bridged ETH → canonical WETH
+    // Polygon-specific
+    'WMATIC': 'MATIC',
+    // Generic wrappers (if found without chain context)
+    'WETH': 'WETH', // Identity mapping for clarity
+    'WBTC': 'WBTC'
+};
+/**
+ * Normalize a token symbol to its canonical form for cross-chain comparison.
+ * This enables identifying equivalent tokens across different chains.
+ *
+ * Examples:
+ * - normalizeTokenForCrossChain('WETH.e') → 'WETH'  (Avalanche bridged ETH)
+ * - normalizeTokenForCrossChain('ETH') → 'WETH'     (BSC bridged ETH)
+ * - normalizeTokenForCrossChain('fUSDT') → 'USDT'   (Fantom USDT)
+ * - normalizeTokenForCrossChain('BTCB') → 'WBTC'    (BSC wrapped BTC)
+ * - normalizeTokenForCrossChain('USDC') → 'USDC'    (passthrough)
+ *
+ * @param symbol - The token symbol to normalize
+ * @returns The canonical token symbol for cross-chain comparison
+ */
+function normalizeTokenForCrossChain(symbol) {
+    const upper = symbol.toUpperCase().trim();
+    return exports.CROSS_CHAIN_TOKEN_ALIASES[upper] || upper;
+}
+/**
+ * Find common tokens between two chains using normalized comparison.
+ * Returns canonical token symbols that exist on both chains.
+ *
+ * @param chainA - First chain ID
+ * @param chainB - Second chain ID
+ * @returns Array of canonical token symbols common to both chains
+ */
+function findCommonTokensBetweenChains(chainA, chainB) {
+    const tokensA = exports.CORE_TOKENS[chainA] || [];
+    const tokensB = exports.CORE_TOKENS[chainB] || [];
+    const normalizedA = new Set(tokensA.map(t => normalizeTokenForCrossChain(t.symbol)));
+    const normalizedB = new Set(tokensB.map(t => normalizeTokenForCrossChain(t.symbol)));
+    return Array.from(normalizedA).filter(token => normalizedB.has(token));
+}
+/**
+ * Get the chain-specific token symbol for a canonical symbol.
+ * Useful for building pair keys when you know the canonical token.
+ *
+ * @param chainId - The chain ID
+ * @param canonicalSymbol - The canonical token symbol (e.g., 'WETH')
+ * @returns The chain-specific symbol (e.g., 'WETH.e' on Avalanche) or undefined
+ */
+function getChainSpecificTokenSymbol(chainId, canonicalSymbol) {
+    const tokens = exports.CORE_TOKENS[chainId] || [];
+    // First try exact match
+    const exactMatch = tokens.find(t => t.symbol === canonicalSymbol);
+    if (exactMatch)
+        return exactMatch.symbol;
+    // Then try normalized match
+    for (const token of tokens) {
+        if (normalizeTokenForCrossChain(token.symbol) === canonicalSymbol) {
+            return token.symbol;
+        }
+    }
+    return undefined;
+}
 // =============================================================================
 // PARTITION EXPORTS (ADR-003)
 // =============================================================================
@@ -1279,6 +1414,7 @@ __exportStar(require("./partitions"), exports);
 // Named re-exports for ADR-003 compliance tests
 var partitions_1 = require("./partitions");
 Object.defineProperty(exports, "PARTITIONS", { enumerable: true, get: function () { return partitions_1.PARTITIONS; } });
+Object.defineProperty(exports, "PARTITION_IDS", { enumerable: true, get: function () { return partitions_1.PARTITION_IDS; } });
 Object.defineProperty(exports, "getPartition", { enumerable: true, get: function () { return partitions_1.getPartition; } });
 Object.defineProperty(exports, "getPartitionFromEnv", { enumerable: true, get: function () { return partitions_1.getPartitionFromEnv; } });
 Object.defineProperty(exports, "assignChainToPartition", { enumerable: true, get: function () { return partitions_1.assignChainToPartition; } });

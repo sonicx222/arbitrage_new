@@ -55,14 +55,9 @@ const FANTOM_NUMERIC_ID = 250;
 const P1_EXPECTED_CHAINS = ['bsc', 'polygon', 'avalanche', 'fantom'] as const;
 
 /**
- * Fantom enabled DEXs (excluding vault model DEXs)
+ * Fantom enabled DEXs (all DEXs including vault model with adapters)
  */
-const FANTOM_ENABLED_DEXES = ['spookyswap', 'spiritswap', 'equalizer'] as const;
-
-/**
- * Fantom disabled DEXs (vault model)
- */
-const FANTOM_DISABLED_DEXES = ['beethoven_x'] as const;
+const FANTOM_ENABLED_DEXES = ['spookyswap', 'spiritswap', 'equalizer', 'beethoven_x'] as const;
 
 /**
  * Fantom core tokens per S3.2.2
@@ -174,7 +169,7 @@ describe('S3.2.3: Fantom Integration into P1 Partition', () => {
       expect(instance!.eventsProcessed).toBe(0);
     });
 
-    it('should include enabled Fantom DEXs in chain instance', () => {
+    it('should include all enabled Fantom DEXs in chain instance', () => {
       const instance = createChainInstance(FANTOM_CHAIN_ID);
       expect(instance).not.toBeNull();
 
@@ -183,13 +178,10 @@ describe('S3.2.3: Fantom Integration into P1 Partition', () => {
       }
     });
 
-    it('should NOT include disabled Fantom DEXs in chain instance', () => {
+    it('should include Beethoven X in chain instance (now enabled with adapter)', () => {
       const instance = createChainInstance(FANTOM_CHAIN_ID);
       expect(instance).not.toBeNull();
-
-      for (const dexName of FANTOM_DISABLED_DEXES) {
-        expect(instance!.dexes).not.toContain(dexName);
-      }
+      expect(instance!.dexes).toContain('beethoven_x');
     });
 
     it('should include Fantom tokens in chain instance', () => {
@@ -265,9 +257,9 @@ describe('S3.2.3: Fantom Integration into P1 Partition', () => {
       expect(DEXES[FANTOM_CHAIN_ID]).toHaveLength(4);
     });
 
-    it('should have exactly 3 enabled DEXs for Fantom', () => {
+    it('should have exactly 4 enabled DEXs for Fantom (including Beethoven X)', () => {
       const enabledDexes = getEnabledDexes(FANTOM_CHAIN_ID);
-      expect(enabledDexes).toHaveLength(3);
+      expect(enabledDexes).toHaveLength(4);
     });
 
     it('should have all expected enabled DEXs', () => {
@@ -279,10 +271,10 @@ describe('S3.2.3: Fantom Integration into P1 Partition', () => {
       }
     });
 
-    it('should have Beethoven X disabled (vault model)', () => {
+    it('should have Beethoven X enabled (uses BalancerV2Adapter)', () => {
       const beethovenX = DEXES[FANTOM_CHAIN_ID].find(d => d.name === 'beethoven_x');
       expect(beethovenX).toBeDefined();
-      expect(beethovenX!.enabled).toBe(false);
+      expect(beethovenX!.enabled).toBe(true);
     });
 
     it('should have valid factory addresses for enabled DEXs', () => {
@@ -556,18 +548,18 @@ describe('S3.2.3: Fantom Integration into P1 Partition', () => {
       expect(assigned?.partitionId).toBe(P1_PARTITION_ID);
     });
 
-    it('should maintain 3 enabled DEXs on Fantom', () => {
+    it('should maintain 4 enabled DEXs on Fantom (including Beethoven X)', () => {
       const enabledDexes = getEnabledDexes(FANTOM_CHAIN_ID);
-      expect(enabledDexes).toHaveLength(3);
+      expect(enabledDexes).toHaveLength(4);
     });
 
     it('should maintain 10 tokens on Fantom', () => {
       expect(CORE_TOKENS[FANTOM_CHAIN_ID]).toHaveLength(10);
     });
 
-    it('should maintain Beethoven X as disabled', () => {
+    it('should maintain Beethoven X as enabled (uses BalancerV2Adapter)', () => {
       const beethovenX = DEXES[FANTOM_CHAIN_ID].find(d => d.name === 'beethoven_x');
-      expect(beethovenX!.enabled).toBe(false);
+      expect(beethovenX!.enabled).toBe(true);
     });
 
     it('should maintain valid partition configuration', () => {
@@ -659,14 +651,13 @@ describe('S3.2.3.11: Event Handling Simulation', () => {
     }
   });
 
-  it('should reject events from disabled DEXs in event validation', () => {
-    for (const dexName of FANTOM_DISABLED_DEXES) {
-      const event = createSimulatedSwapEvent(dexName);
+  it('should accept events from Beethoven X (now enabled with adapter)', () => {
+    const event = createSimulatedSwapEvent('beethoven_x');
 
-      // Verify DEX is NOT in enabled list
-      const enabledDex = getEnabledDexes(event.chainId).find(d => d.name === event.dexName);
-      expect(enabledDex).toBeUndefined();
-    }
+    // Verify DEX IS in enabled list (has BalancerV2Adapter now)
+    const enabledDex = getEnabledDexes(event.chainId).find(d => d.name === event.dexName);
+    expect(enabledDex).toBeDefined();
+    expect(enabledDex!.chain).toBe(FANTOM_CHAIN_ID);
   });
 
   it('should have consistent event structure across P1 chains', () => {
@@ -701,8 +692,9 @@ describe('S3.2.3.12: P1 Partition DEX Summary', () => {
     }
 
     // Document expected counts for P1 partition
-    // BSC: 8 enabled, Polygon: 4 enabled, Avalanche: 4 enabled, Fantom: 3 enabled
-    expect(totalEnabled).toBeGreaterThanOrEqual(18); // Minimum expected
+    // BSC: 8 enabled, Polygon: 4 enabled, Avalanche: 6 enabled, Fantom: 4 enabled
+    // (GMX, Platypus, Beethoven X now enabled with adapters)
+    expect(totalEnabled).toBeGreaterThanOrEqual(22); // Minimum expected
 
     // Verify logging values
     console.log(`P1 Partition DEX Summary:`);
@@ -720,8 +712,8 @@ describe('S3.2.3.12: P1 Partition DEX Summary', () => {
     const expectedCounts: Record<string, { enabled: number; total: number }> = {
       'bsc': { enabled: 8, total: 8 },
       'polygon': { enabled: 4, total: 4 },
-      'avalanche': { enabled: 4, total: 6 }, // 2 disabled (GMX, Platypus)
-      'fantom': { enabled: 3, total: 4 } // 1 disabled (Beethoven X)
+      'avalanche': { enabled: 6, total: 6 }, // All enabled (GMX, Platypus have adapters)
+      'fantom': { enabled: 4, total: 4 } // All enabled (Beethoven X has adapter)
     };
 
     for (const [chainId, expected] of Object.entries(expectedCounts)) {

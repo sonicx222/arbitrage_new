@@ -123,17 +123,26 @@ export declare function shutdownPartitionService(signal: string, healthServer: S
  */
 export declare function setupDetectorEventHandlers(detector: PartitionDetectorInterface, logger: ReturnType<typeof createLogger>, partitionId: string): void;
 /**
+ * Cleanup function returned by setupProcessHandlers to remove registered listeners.
+ * Call this during testing or when reinitializing handlers.
+ */
+export type ProcessHandlerCleanup = () => void;
+/**
  * Sets up process signal handlers for graceful shutdown.
  *
  * P19-FIX: Uses a shutdown flag to prevent multiple concurrent shutdown attempts
  * when signals arrive close together (e.g., SIGTERM followed by SIGINT).
  *
+ * S3.2.3-FIX: Returns cleanup function to prevent MaxListenersExceeded warnings
+ * when handlers are registered multiple times (e.g., in tests).
+ *
  * @param healthServerRef - Reference to health server (use object to allow mutation)
  * @param detector - Detector instance
  * @param logger - Logger instance
  * @param serviceName - Service name for logging
+ * @returns Cleanup function to remove all registered handlers
  */
 export declare function setupProcessHandlers(healthServerRef: {
     current: Server | null;
-}, detector: PartitionDetectorInterface, logger: ReturnType<typeof createLogger>, serviceName: string): void;
+}, detector: PartitionDetectorInterface, logger: ReturnType<typeof createLogger>, serviceName: string): ProcessHandlerCleanup;
 //# sourceMappingURL=partition-service-utils.d.ts.map

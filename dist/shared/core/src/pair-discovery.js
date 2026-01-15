@@ -39,7 +39,11 @@ const INIT_CODE_HASHES = {
     aerodrome: '0x97e8aa7e58d4c17c8aa7b2cf56b0a36bd0e4e3b8e5f7f0f6d0a6a6f8c2e8f3c4e',
     // S3.2.1-FIX: Added Avalanche DEX init code hashes
     trader_joe_v2: '0x0bbca9af0511ad1a1da383135cf3a8d2ac620e549ef9f6ae3a4c33c2fed0af91',
-    pangolin: '0x40231f6b438bce0797c9ada29b718a87ea0a5cea3fe9a771abdd76bd41a3e545'
+    pangolin: '0x40231f6b438bce0797c9ada29b718a87ea0a5cea3fe9a771abdd76bd41a3e545',
+    // S3.2.2-FIX: Added Fantom DEX init code hashes
+    spookyswap: '0xcdf2deca40a0bd56de8e3ce5c7df6727e5b1bf2ac96f283fa9c4b3e6b42ea9d2',
+    spiritswap: '0xe242e798f6cee26a9cb0bbf24653bf066e5356ffeac160907fe2cc108e238617',
+    equalizer: '0x02ada2a0163cd4f7e0f0c9805f5230716a95b174140e4c84c14883de216cc6a3'
 };
 // V3 fee tiers (in basis points for pool identification)
 const V3_FEE_TIERS = [100, 500, 3000, 10000];
@@ -400,6 +404,12 @@ class PairDiscoveryService extends events_1.EventEmitter {
         // S3.2.1-FIX: DEXs that don't follow factory patterns (vault/pool models)
         // These cannot use getPair/getPool and need custom adapters
         if (nameLower.includes('gmx') || nameLower.includes('platypus'))
+            return 'unsupported';
+        // S3.2.2-FIX: Balancer V2 vault model DEXs - all use Vault pattern, not standard factory
+        // Includes: Balancer V2, Beethoven X (Fantom), and any other Balancer forks
+        if (nameLower.includes('balancer') ||
+            nameLower.includes('beethoven') ||
+            nameLower.includes('beets'))
             return 'unsupported';
         // Default: V2-style DEXs (standard getPair method)
         return 'v2';

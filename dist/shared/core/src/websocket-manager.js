@@ -175,8 +175,11 @@ class WebSocketManager {
             this.ws = null;
         }
         // P0-2 fix: Clear handler sets to prevent memory leaks
+        // P1-2 FIX: Also clear errorHandlers and eventHandlers which were previously missed
         this.messageHandlers.clear();
         this.connectionHandlers.clear();
+        this.errorHandlers.clear();
+        this.eventHandlers.clear();
         this.subscriptions.clear();
         this.isConnected = false;
         this.isConnecting = false;

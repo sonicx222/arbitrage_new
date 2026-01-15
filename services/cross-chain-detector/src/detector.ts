@@ -999,7 +999,7 @@ export class CrossChainDetectorService {
       amountIn: '1000000000000000000', // 1 token (placeholder)
       expectedProfit: opportunity.netProfit,
       profitPercentage: opportunity.percentageDiff / 100,
-      gasEstimate: 0, // Cross-chain, gas estimated separately
+      gasEstimate: '0', // Cross-chain, gas estimated separately
       confidence: opportunity.confidence,
       timestamp: Date.now(),
       blockNumber: 0, // Cross-chain

@@ -54,7 +54,6 @@ export declare class CrossDexTriangularArbitrage {
     private evaluateTriangle;
     private simulateTriangle;
     private simulateSwapBigInt;
-    private simulateSwap;
     private groupPoolsByPairs;
     private findReachableTokens;
     private findBestPoolsForPair;

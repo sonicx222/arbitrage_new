@@ -1,3 +1,4 @@
+import type { ServiceHealth } from '../../types';
 export interface ServiceDefinition {
     name: string;
     startCommand: string;
@@ -8,17 +9,7 @@ export interface ServiceDefinition {
     environment: Record<string, string>;
     dependencies?: string[];
 }
-export interface ServiceHealth {
-    name: string;
-    status: 'healthy' | 'unhealthy' | 'starting' | 'stopping';
-    lastHealthCheck: number;
-    consecutiveFailures: number;
-    restartCount: number;
-    uptime: number;
-    memoryUsage?: number;
-    cpuUsage?: number;
-    errorMessage?: string;
-}
+export type { ServiceHealth } from '../../types';
 export interface RecoveryStrategy {
     name: string;
     priority: number;
@@ -37,6 +28,8 @@ export declare class SelfHealingManager {
     private isRunning;
     private healthUpdateLocks;
     private initializationPromise;
+    private recoveryRateLimiter;
+    private readonly RECOVERY_COOLDOWN_MS;
     constructor();
     /**
      * P1-2-FIX: Ensure the manager is fully initialized before operations.
@@ -71,6 +64,22 @@ export declare class SelfHealingManager {
     private updateHealthInRedis;
     private notifyServiceDegradation;
 }
-export declare function getSelfHealingManager(): SelfHealingManager;
-export declare function registerServiceForSelfHealing(serviceDef: ServiceDefinition): void;
+/**
+ * Get the singleton SelfHealingManager instance.
+ * P3-1 FIX: Uses promise guard to prevent race conditions during initialization.
+ * The returned manager is guaranteed to be fully initialized.
+ */
+export declare function getSelfHealingManager(): Promise<SelfHealingManager>;
+/**
+ * Get the singleton synchronously (without waiting for initialization).
+ * Use this only when you know the manager is already initialized.
+ * Returns null if not yet initialized.
+ */
+export declare function getSelfHealingManagerSync(): SelfHealingManager | null;
+/**
+ * Reset the singleton (for testing).
+ * P3-1 FIX: Properly cleans up both instance and promise guard.
+ */
+export declare function resetSelfHealingManager(): Promise<void>;
+export declare function registerServiceForSelfHealing(serviceDef: ServiceDefinition): Promise<void>;
 //# sourceMappingURL=self-healing-manager.d.ts.map

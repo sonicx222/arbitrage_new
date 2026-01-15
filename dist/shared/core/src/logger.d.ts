@@ -1,4 +1,5 @@
 import winston from 'winston';
+export type Logger = winston.Logger;
 export declare function createLogger(serviceName: string): winston.Logger;
 export declare class PerformanceLogger {
     private logger;

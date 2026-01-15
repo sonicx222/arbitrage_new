@@ -21,7 +21,7 @@ import {
   getChainsForPartition
 } from '../../config/src/partitions';
 
-import { PARTITION_IDS, CHAINS } from '../../config/src';
+import { CHAINS } from '../../config/src';
 
 // =============================================================================
 // Types
@@ -60,12 +60,15 @@ export interface PartitionEndpoint {
  *
  * P1-1-FIX: Single source of truth for partition ports.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 export const PARTITION_PORTS: Readonly<Record<string, number>> = {
-  [PARTITION_IDS.ASIA_FAST]: 3001,
-  [PARTITION_IDS.L2_TURBO]: 3002,
-  [PARTITION_IDS.HIGH_VALUE]: 3003,
-  [PARTITION_IDS.SOLANA_NATIVE]: 3004
+  'asia-fast': 3001,
+  'l2-turbo': 3002,
+  'high-value': 3003,
+  'solana-native': 3004
 } as const;
 
 /**
@@ -74,12 +77,15 @@ export const PARTITION_PORTS: Readonly<Record<string, number>> = {
  *
  * P1-2-FIX: Single source of truth for partition service names.
  * All partition services should import and use these constants.
+ *
+ * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
+ * issues during module initialization. Values match those in partition-ids.ts.
  */
 export const PARTITION_SERVICE_NAMES: Readonly<Record<string, string>> = {
-  [PARTITION_IDS.ASIA_FAST]: 'partition-asia-fast',
-  [PARTITION_IDS.L2_TURBO]: 'partition-l2-turbo',
-  [PARTITION_IDS.HIGH_VALUE]: 'partition-high-value',
-  [PARTITION_IDS.SOLANA_NATIVE]: 'partition-solana'
+  'asia-fast': 'partition-asia-fast',
+  'l2-turbo': 'partition-l2-turbo',
+  'high-value': 'partition-high-value',
+  'solana-native': 'partition-solana'
 } as const;
 
 /**

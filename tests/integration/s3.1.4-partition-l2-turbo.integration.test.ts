@@ -545,12 +545,14 @@ describe('S3.1.4 P2 L2-Turbo Partition Service', () => {
       detector = await createStartedP2Detector();
 
       // ETH price difference between L2s
+      // Note: ETH is normalized to WETH in cross-chain comparisons (S3.2.4 fix)
       detector.updatePrice('arbitrum', 'ETH_USDT', 2500);
       detector.updatePrice('base', 'ETH_USDT', 2575); // 3% higher
 
       const discrepancies = detector.findCrossChainDiscrepancies(0.01);
 
-      expect(discrepancies.some(d => d.pairKey === 'ETH_USDT')).toBe(true);
+      // ETH normalizes to WETH for cross-chain detection
+      expect(discrepancies.some(d => d.pairKey === 'WETH_USDT')).toBe(true);
     });
 
     it('should detect L2 to L2 arbitrage paths', async () => {

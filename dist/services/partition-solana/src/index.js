@@ -92,6 +92,10 @@ exports.detector = detector;
 // Main Entry Point
 // =============================================================================
 async function main() {
+    // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
+    if (!partitionConfig) {
+        throw new Error('Partition config unavailable - this should never happen');
+    }
     logger.info('Starting P4 Solana-Native Partition Service', {
         partitionId: P4_PARTITION_ID,
         chains: config.chains,

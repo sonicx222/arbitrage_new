@@ -14,15 +14,26 @@ export declare class RedisClient {
     private subscriptions;
     subscribe(channel: string, callback: (message: MessageEvent) => void): Promise<void>;
     unsubscribe(channel: string): Promise<void>;
-    set(key: string, value: any, ttl?: number): Promise<void>;
+    set(key: string, value: unknown, ttl?: number): Promise<void>;
     get<T = any>(key: string): Promise<T | null>;
     del(...keys: string[]): Promise<number>;
     expire(key: string, seconds: number): Promise<number>;
     /**
      * Set key only if it doesn't exist (for leader election)
-     * Returns true if the key was set, false if it already exists
+     *
+     * P0-3 FIX: Now throws on Redis errors instead of returning false.
+     * This prevents silent failures where Redis being unavailable is
+     * indistinguishable from the lock being held by another process.
+     *
+     * @returns true if the key was set, false if it already exists
+     * @throws Error if Redis operation fails (network error, timeout, etc.)
      */
     setNx(key: string, value: string, ttlSeconds?: number): Promise<boolean>;
+    /**
+     * P1-FIX: Throws on Redis errors to distinguish "key doesn't exist" from "Redis unavailable"
+     * @returns true if key exists, false if key doesn't exist
+     * @throws Error if Redis operation fails
+     */
     exists(key: string): Promise<boolean>;
     /**
      * Execute a Lua script atomically.
@@ -56,7 +67,7 @@ export declare class RedisClient {
      * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
      */
     releaseLockIfOwned(key: string, instanceId: string): Promise<boolean>;
-    hset(key: string, field: string, value: any): Promise<number>;
+    hset(key: string, field: string, value: unknown): Promise<number>;
     hget<T = any>(key: string, field: string): Promise<T | null>;
     hgetall<T = any>(key: string): Promise<Record<string, T> | null>;
     sadd(key: string, ...members: string[]): Promise<number>;
@@ -104,6 +115,10 @@ export declare class RedisClient {
     ltrim(key: string, start: number, stop: number): Promise<'OK'>;
     updateServiceHealth(serviceName: string, health: ServiceHealth): Promise<void>;
     getServiceHealth(serviceName: string): Promise<ServiceHealth | null>;
+    /**
+     * P1-FIX: Use SCAN instead of KEYS to avoid blocking Redis
+     * KEYS command blocks on large datasets; SCAN is non-blocking and iterative.
+     */
     getAllServiceHealth(): Promise<Record<string, ServiceHealth>>;
     recordMetrics(serviceName: string, metrics: PerformanceMetrics): Promise<void>;
     getRecentMetrics(serviceName: string, count?: number): Promise<PerformanceMetrics[]>;
@@ -113,5 +128,5 @@ export declare class RedisClient {
 export declare function getRedisClient(url?: string, password?: string): Promise<RedisClient>;
 export declare function getRedisClientSync(): RedisClient | null;
 export declare function checkRedisHealth(url?: string, password?: string): Promise<boolean>;
-export declare function resetRedisInstance(): void;
+export declare function resetRedisInstance(): Promise<void>;
 //# sourceMappingURL=redis.d.ts.map

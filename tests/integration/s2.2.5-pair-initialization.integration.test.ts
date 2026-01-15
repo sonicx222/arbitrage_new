@@ -29,7 +29,7 @@ const {
   CORE_TOKENS,
   ARBITRAGE_CONFIG,
   dexFeeToPercentage
-} = require('../../shared/config/dist/index.js');
+} = require('../../shared/config/src');
 
 // =============================================================================
 // S2.2.5 Test Suite: Pair Initialization
@@ -84,11 +84,16 @@ describe('S2.2.5 Pair Initialization', () => {
       });
 
       it('should validate factory addresses from config', () => {
-        // All DEX factory addresses should be valid Ethereum addresses
+        // All DEX factory addresses should be valid addresses for their chain type
         Object.entries(DEXES).forEach(([chain, dexes]) => {
           (dexes as any[]).forEach(dex => {
-            expect(dex.factoryAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
-            expect(dex.factoryAddress).not.toBe('0x0000000000000000000000000000000000000000');
+            // Solana uses base58 program addresses instead of EVM 0x format
+            if (chain === 'solana') {
+              expect(dex.factoryAddress).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,50}$/);
+            } else {
+              expect(dex.factoryAddress).toMatch(/^0x[a-fA-F0-9]{40}$/);
+              expect(dex.factoryAddress).not.toBe('0x0000000000000000000000000000000000000000');
+            }
           });
         });
       });

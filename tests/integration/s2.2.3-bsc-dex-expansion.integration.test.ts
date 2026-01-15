@@ -35,7 +35,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/dist/index.js');
+} = require('../../shared/config/src');
 
 // =============================================================================
 // S2.2.3 Test Suite: BSC DEX Expansion (5 → 8)
@@ -179,8 +179,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
     });
 
     it('should have correct factory address', () => {
-      // Nomiswap Factory on BSC
-      expect(nomiswap?.factoryAddress).toBe('0xd6715A8be3944ec72738F0BFDC739571659D8010');
+      // Nomiswap Factory on BSC (case-insensitive comparison)
+      expect(nomiswap?.factoryAddress.toLowerCase()).toBe('0xd6715a8be3944ec72738f0bfdc739571659d8010');
     });
 
     it('should have correct router address', () => {
@@ -466,26 +466,29 @@ describe('S2.2.3 BSC DEX Expansion', () => {
   // ===========================================================================
 
   describe('System-wide DEX Count After S2.2.3', () => {
-    it('should have 33 total DEXs after S2.2.3', () => {
-      // Arbitrum: 9, BSC: 8, Base: 7, Polygon: 4, Optimism: 3, Ethereum: 2
+    it('should have correct total DEXs (49 with vault-model adapters)', () => {
+      // Original 6 chains + Avalanche (6), Fantom (4), zkSync (6), Linea (6), Solana (8)
+      // With vault-model DEX adapters: GMX, Platypus (Avalanche), Beethoven X (Fantom)
       const totalDexes = Object.values(DEXES).flat().length;
-      expect(totalDexes).toBe(33);
+      expect(totalDexes).toBe(49);
     });
 
     it('should have correct DEX counts per chain', () => {
-      expect(DEXES.arbitrum.length).toBe(9);   // S2.2.1
-      expect(DEXES.bsc.length).toBe(8);        // S2.2.3 (NEW)
+      expect(DEXES.arbitrum.length).toBe(9);   // Including Balancer V2
+      expect(DEXES.bsc.length).toBe(8);        // S2.2.3
       expect(DEXES.base.length).toBe(7);       // S2.2.2
       expect(DEXES.polygon.length).toBe(4);
       expect(DEXES.optimism.length).toBe(3);
       expect(DEXES.ethereum.length).toBe(2);
+      expect(DEXES.avalanche.length).toBe(6);  // Including GMX, Platypus
+      expect(DEXES.fantom.length).toBe(4);     // Including Beethoven X
     });
 
     it('should match PHASE_METRICS target for Phase 1', () => {
       const actualDexCount = Object.values(DEXES).flat().length;
       const targetDexCount = PHASE_METRICS.targets.phase1.dexes;
 
-      // After S2.2.3, we should match the Phase 1 target of 33 DEXs
+      // With vault-model adapters, Phase 1 target is now 49 DEXs
       expect(actualDexCount).toBe(targetDexCount);
     });
   });

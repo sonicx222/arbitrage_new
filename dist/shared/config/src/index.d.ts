@@ -34,6 +34,10 @@ export declare const ARBITRAGE_CONFIG: {
     minProfitThreshold: number;
     minConfidenceThreshold: number;
     feePercentage: number;
+    slippageTolerance: number;
+    gasPriceSpikeMultiplier: number;
+    gasPriceBaselineWindowMs: number;
+    gasPriceSpikeEnabled: boolean;
     chainMinProfits: Record<string, number>;
 };
 export declare const EVENT_CONFIG: {
@@ -53,13 +57,6 @@ export declare const EVENT_CONFIG: {
  * Partition IDs - Use these constants instead of magic strings
  * to prevent typos and enable IDE autocomplete.
  */
-export declare const PARTITION_IDS: {
-    readonly ASIA_FAST: "asia-fast";
-    readonly L2_TURBO: "l2-turbo";
-    readonly HIGH_VALUE: "high-value";
-    readonly SOLANA_NATIVE: "solana-native";
-};
-export type PartitionId = typeof PARTITION_IDS[keyof typeof PARTITION_IDS];
 /**
  * Partition chain assignments - S3.1.2 configuration
  * Use getChainsForPartition() from partitions.ts for runtime access.
@@ -251,7 +248,69 @@ export declare const SYSTEM_CONSTANTS: {
         /** Default success threshold for closing */
         defaultSuccessThreshold: number;
     };
+    timeouts: {
+        /** HTTP health check timeout in milliseconds */
+        httpHealthCheck: number;
+        /** Redis operation timeout in milliseconds */
+        redisOperation: number;
+        /** Graceful shutdown timeout in milliseconds */
+        gracefulShutdown: number;
+        /** Opportunity deduplication TTL in seconds (Redis SET NX) */
+        opportunityDedupTtlSeconds: number;
+        /** Subgraph API request timeout in milliseconds */
+        subgraphRequest: number;
+        /** RPC provider request timeout in milliseconds */
+        rpcRequest: number;
+    };
 };
+/**
+ * Cross-chain token aliases for identifying equivalent tokens across chains.
+ * Maps chain-specific token symbols to their canonical form.
+ *
+ * Purpose: Enable cross-chain arbitrage detection by recognizing that
+ * WETH.e (Avalanche), ETH (BSC), and WETH (most chains) are all the same asset.
+ *
+ * Note: This is DIFFERENT from price-oracle's TOKEN_ALIASES which maps
+ * wrapped tokens to native for pricing (WETH→ETH). Here we use WETH as
+ * canonical because it's the actual tradeable asset on DEXes.
+ *
+ * @see services/cross-chain-detector/src/detector.ts
+ * @see shared/core/src/price-oracle.ts (different purpose)
+ */
+export declare const CROSS_CHAIN_TOKEN_ALIASES: Readonly<Record<string, string>>;
+/**
+ * Normalize a token symbol to its canonical form for cross-chain comparison.
+ * This enables identifying equivalent tokens across different chains.
+ *
+ * Examples:
+ * - normalizeTokenForCrossChain('WETH.e') → 'WETH'  (Avalanche bridged ETH)
+ * - normalizeTokenForCrossChain('ETH') → 'WETH'     (BSC bridged ETH)
+ * - normalizeTokenForCrossChain('fUSDT') → 'USDT'   (Fantom USDT)
+ * - normalizeTokenForCrossChain('BTCB') → 'WBTC'    (BSC wrapped BTC)
+ * - normalizeTokenForCrossChain('USDC') → 'USDC'    (passthrough)
+ *
+ * @param symbol - The token symbol to normalize
+ * @returns The canonical token symbol for cross-chain comparison
+ */
+export declare function normalizeTokenForCrossChain(symbol: string): string;
+/**
+ * Find common tokens between two chains using normalized comparison.
+ * Returns canonical token symbols that exist on both chains.
+ *
+ * @param chainA - First chain ID
+ * @param chainB - Second chain ID
+ * @returns Array of canonical token symbols common to both chains
+ */
+export declare function findCommonTokensBetweenChains(chainA: string, chainB: string): string[];
+/**
+ * Get the chain-specific token symbol for a canonical symbol.
+ * Useful for building pair keys when you know the canonical token.
+ *
+ * @param chainId - The chain ID
+ * @param canonicalSymbol - The canonical token symbol (e.g., 'WETH')
+ * @returns The chain-specific symbol (e.g., 'WETH.e' on Avalanche) or undefined
+ */
+export declare function getChainSpecificTokenSymbol(chainId: string, canonicalSymbol: string): string | undefined;
 export * from './partitions';
-export { PARTITIONS, PartitionConfig, getPartition, getPartitionFromEnv, assignChainToPartition } from './partitions';
+export { PARTITIONS, PartitionConfig, PARTITION_IDS, PartitionId, getPartition, getPartitionFromEnv, assignChainToPartition } from './partitions';
 //# sourceMappingURL=index.d.ts.map

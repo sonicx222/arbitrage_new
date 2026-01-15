@@ -36,23 +36,18 @@ const AVALANCHE_CHAIN_KEY = 'avalanche';
  * Required DEXs for S3.2.1
  * Source: IMPLEMENTATION_PLAN.md S3.2.1
  *
- * S3.2.1-FIX: GMX and Platypus are configured but DISABLED (enabled: false)
- * because they use non-standard factory patterns (Vault and Pool models)
- * that aren't supported by PairDiscoveryService. Custom adapters needed.
+ * All 6 DEXs are now ENABLED:
+ * - trader_joe_v2, pangolin, sushiswap, kyberswap: Standard factory pattern
+ * - gmx: Uses GmxAdapter (vault model)
+ * - platypus: Uses PlatypusAdapter (pool model)
  */
 const REQUIRED_DEXES = [
   'trader_joe_v2',
   'pangolin',
   'sushiswap',
-  'kyberswap'
-] as const;
-
-/**
- * DEXs that are configured but disabled (need custom adapters)
- */
-const DISABLED_DEXES = [
-  'gmx',       // Uses Vault model, not factory pattern
-  'platypus'   // Uses Pool model, not factory pattern
+  'kyberswap',
+  'gmx',       // ENABLED: Uses GmxAdapter from dex-adapters
+  'platypus'   // ENABLED: Uses PlatypusAdapter from dex-adapters
 ] as const;
 
 /**
@@ -217,9 +212,9 @@ describe('S3.2.1.2: Avalanche DEX Configuration', () => {
   });
 
   describe('DEX count', () => {
-    it('should have exactly 4 enabled DEXs (GMX and Platypus disabled)', () => {
-      // S3.2.1-FIX: Only 4 DEXs enabled (GMX and Platypus use unsupported factory patterns)
-      expect(avalancheDexes.length).toBe(4);
+    it('should have exactly 6 enabled DEXs (all DEXs including GMX and Platypus)', () => {
+      // All 6 DEXs enabled: GMX uses GmxAdapter, Platypus uses PlatypusAdapter
+      expect(avalancheDexes.length).toBe(6);
     });
 
     it('should have all required enabled DEXs', () => {
@@ -229,25 +224,21 @@ describe('S3.2.1.2: Avalanche DEX Configuration', () => {
       }
     });
 
-    it('should have disabled DEXs configured (for future adapter implementation)', () => {
-      // Import DEXES directly to check all configured (including disabled)
+    it('should have vault-model DEXs enabled with adapters', () => {
+      // Import DEXES directly to check all configured
       const { DEXES } = require('../../shared/config/src');
       const allAvalancheDexes = DEXES['avalanche'] || [];
 
       // Should have 6 total DEXs configured
       expect(allAvalancheDexes.length).toBe(6);
 
-      // Verify disabled DEXs exist in config
-      const allDexNames = allAvalancheDexes.map((d: any) => d.name);
-      for (const disabledDex of DISABLED_DEXES) {
-        expect(allDexNames).toContain(disabledDex);
-      }
-
-      // Verify they are disabled
+      // Verify GMX and Platypus exist and are ENABLED (they have adapters now)
       const gmx = allAvalancheDexes.find((d: any) => d.name === 'gmx');
       const platypus = allAvalancheDexes.find((d: any) => d.name === 'platypus');
-      expect(gmx?.enabled).toBe(false);
-      expect(platypus?.enabled).toBe(false);
+      expect(gmx).toBeDefined();
+      expect(platypus).toBeDefined();
+      expect(gmx?.enabled).toBe(true);  // Uses GmxAdapter
+      expect(platypus?.enabled).toBe(true);  // Uses PlatypusAdapter
     });
   });
 
@@ -329,74 +320,56 @@ describe('S3.2.1.2: Avalanche DEX Configuration', () => {
     });
   });
 
-  // S3.2.1-FIX: GMX and Platypus are DISABLED because they use non-standard factory patterns
-  // Tests verify they're configured but disabled (for future adapter implementation)
+  // GMX and Platypus now have adapters and are ENABLED
+  // Tests verify they're configured and enabled with proper adapter support
 
-  describe('GMX (disabled - vault model)', () => {
-    it('should have GMX configured but disabled', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'gmx');
-
+  describe('GMX (enabled - vault model with GmxAdapter)', () => {
+    it('should have GMX configured and enabled', () => {
+      const dex = avalancheDexes.find(d => d.name === 'gmx');
       expect(dex).toBeDefined();
-      expect(dex.enabled).toBe(false);
     });
 
     it('should have correct vault address configured', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'gmx');
-
-      expect(dex.factoryAddress).toBe('0x9ab2De34A33fB459b538c43f251eB825645e8595'); // GMX Vault
-      expect(dex.routerAddress.length).toBe(42); // Valid Ethereum address
+      const dex = avalancheDexes.find(d => d.name === 'gmx');
+      expect(dex!.factoryAddress).toBe('0x9ab2De34A33fB459b538c43f251eB825645e8595'); // GMX Vault
+      expect(dex!.routerAddress.length).toBe(42); // Valid Ethereum address
     });
 
     it('should have fee configured (GMX uses dynamic fees, ~10-80bp)', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'gmx');
-
-      expect(dex.fee).toBeGreaterThanOrEqual(10);
-      expect(dex.fee).toBeLessThanOrEqual(80);
+      const dex = avalancheDexes.find(d => d.name === 'gmx');
+      expect(dex!.fee).toBeGreaterThanOrEqual(10);
+      expect(dex!.fee).toBeLessThanOrEqual(80);
     });
 
-    it('should NOT be in enabled DEXs list', () => {
+    it('should be in enabled DEXs list (uses GmxAdapter)', () => {
       const dex = avalancheDexes.find(d => d.name === 'gmx');
-      expect(dex).toBeUndefined();
+      expect(dex).toBeDefined();
+      expect(dex!.chain).toBe('avalanche');
     });
   });
 
-  describe('Platypus (disabled - pool model)', () => {
-    it('should have Platypus configured but disabled', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'platypus');
-
+  describe('Platypus (enabled - pool model with PlatypusAdapter)', () => {
+    it('should have Platypus configured and enabled', () => {
+      const dex = avalancheDexes.find(d => d.name === 'platypus');
       expect(dex).toBeDefined();
-      expect(dex.enabled).toBe(false);
     });
 
     it('should have correct pool address configured', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'platypus');
-
-      expect(dex.factoryAddress).toBe('0x66357dCaCe80431aee0A7507e2E361B7e2402370'); // Main Pool
-      expect(dex.routerAddress.length).toBe(42);
+      const dex = avalancheDexes.find(d => d.name === 'platypus');
+      expect(dex!.factoryAddress).toBe('0x66357dCaCe80431aee0A7507e2E361B7e2402370'); // Main Pool
+      expect(dex!.routerAddress.length).toBe(42);
     });
 
     it('should have low fee (Platypus is optimized for stablecoins, ~1-4bp)', () => {
-      const { DEXES } = require('../../shared/config/src');
-      const allAvalancheDexes = DEXES['avalanche'] || [];
-      const dex = allAvalancheDexes.find((d: any) => d.name === 'platypus');
-
-      expect(dex.fee).toBeGreaterThanOrEqual(1);
-      expect(dex.fee).toBeLessThanOrEqual(10);
+      const dex = avalancheDexes.find(d => d.name === 'platypus');
+      expect(dex!.fee).toBeGreaterThanOrEqual(1);
+      expect(dex!.fee).toBeLessThanOrEqual(10);
     });
 
-    it('should NOT be in enabled DEXs list', () => {
+    it('should be in enabled DEXs list (uses PlatypusAdapter)', () => {
       const dex = avalancheDexes.find(d => d.name === 'platypus');
-      expect(dex).toBeUndefined();
+      expect(dex).toBeDefined();
+      expect(dex!.chain).toBe('avalanche');
     });
   });
 
@@ -760,8 +733,8 @@ describe('S3.2.1.6: Avalanche DEX-Token Pair Coverage', () => {
       expect(usdt).toBeDefined();
     });
 
-    it('should have stablecoin tokens for future Platypus integration', () => {
-      // S3.2.1-FIX: Platypus is disabled but stablecoins are ready for when adapter is implemented
+    it('should have stablecoin tokens for Platypus arbitrage', () => {
+      // Platypus is now enabled with PlatypusAdapter for stablecoin swaps
       const stablecoins = CORE_TOKENS[AVALANCHE_CHAIN_KEY].filter(t =>
         ['USDC', 'USDT', 'DAI', 'FRAX'].includes(t.symbol)
       );
@@ -771,7 +744,7 @@ describe('S3.2.1.6: Avalanche DEX-Token Pair Coverage', () => {
   });
 
   describe('Pair count estimation', () => {
-    it('should generate sufficient pairs for arbitrage with enabled DEXs', () => {
+    it('should generate sufficient pairs for arbitrage with all 6 enabled DEXs', () => {
       const tokens = CORE_TOKENS[AVALANCHE_CHAIN_KEY];
       const dexes = getEnabledDexes(AVALANCHE_CHAIN_KEY);
 
@@ -779,9 +752,9 @@ describe('S3.2.1.6: Avalanche DEX-Token Pair Coverage', () => {
       const pairsPerDex = (tokens.length * (tokens.length - 1)) / 2;
       const totalPairs = pairsPerDex * dexes.length;
 
-      // S3.2.1-FIX: With 15 tokens and 4 enabled DEXs: 105 pairs per DEX, 420 total
-      // (GMX and Platypus disabled, so 4 DEXs not 6)
-      expect(totalPairs).toBeGreaterThanOrEqual(400);
+      // With 15 tokens and 6 enabled DEXs: 105 pairs per DEX, 630 total
+      // (GMX and Platypus now enabled with adapters)
+      expect(totalPairs).toBeGreaterThanOrEqual(600);
     });
   });
 });
@@ -817,23 +790,23 @@ describe('S3.2.1.7: Regression Tests', () => {
       expect(Object.keys(CHAINS).length).toBe(11);
     });
 
-    it('should have at least 45 enabled DEXs', () => {
+    it('should have at least 47 enabled DEXs', () => {
       let totalEnabledDexes = 0;
       for (const chain of Object.keys(CHAINS)) {
         totalEnabledDexes += getEnabledDexes(chain).length;
       }
-      // S3.2.1-FIX: Added 3 Avalanche DEXs but 2 disabled (GMX, Platypus)
-      // Net +1 enabled DEX: 44 + 1 = 45 minimum
-      expect(totalEnabledDexes).toBeGreaterThanOrEqual(45);
+      // S3.2.1: 6 Avalanche DEXs all enabled (GMX/Platypus have adapters)
+      // S3.2.2: 4 Fantom DEXs all enabled (Beethoven X has adapter)
+      expect(totalEnabledDexes).toBeGreaterThanOrEqual(47);
     });
 
-    it('should have 6 total Avalanche DEXs configured (4 enabled, 2 disabled)', () => {
+    it('should have 6 total Avalanche DEXs configured (all enabled with adapters)', () => {
       const { DEXES } = require('../../shared/config/src');
       const allAvalancheDexes = DEXES['avalanche'] || [];
       const enabledAvalancheDexes = getEnabledDexes('avalanche');
 
       expect(allAvalancheDexes.length).toBe(6);  // Total configured
-      expect(enabledAvalancheDexes.length).toBe(4);  // Only enabled
+      expect(enabledAvalancheDexes.length).toBe(6);  // All enabled (GMX/Platypus have adapters)
     });
 
     it('should increase total token count (was 94, now should be higher)', () => {
@@ -971,28 +944,32 @@ describe('S3.2.1.8: PairDiscoveryService Avalanche Integration', () => {
     });
   });
 
-  describe('Disabled DEX handling', () => {
-    it('should NOT return GMX from getEnabledDexes', () => {
+  describe('Vault-model DEX handling (with adapters)', () => {
+    it('should return GMX from getEnabledDexes (uses GmxAdapter)', () => {
       const enabledDexes = getEnabledDexes('avalanche');
       const gmx = enabledDexes.find(d => d.name === 'gmx');
-      expect(gmx).toBeUndefined();
+      expect(gmx).toBeDefined();
+      expect(gmx!.chain).toBe('avalanche');
     });
 
-    it('should NOT return Platypus from getEnabledDexes', () => {
+    it('should return Platypus from getEnabledDexes (uses PlatypusAdapter)', () => {
       const enabledDexes = getEnabledDexes('avalanche');
       const platypus = enabledDexes.find(d => d.name === 'platypus');
-      expect(platypus).toBeUndefined();
+      expect(platypus).toBeDefined();
+      expect(platypus!.chain).toBe('avalanche');
     });
 
-    it('should only return 4 enabled DEXs for Avalanche', () => {
+    it('should return all 6 enabled DEXs for Avalanche', () => {
       const enabledDexes = getEnabledDexes('avalanche');
-      expect(enabledDexes.length).toBe(4);
+      expect(enabledDexes.length).toBe(6);
 
       const names = enabledDexes.map(d => d.name);
       expect(names).toContain('trader_joe_v2');
       expect(names).toContain('pangolin');
       expect(names).toContain('sushiswap');
       expect(names).toContain('kyberswap');
+      expect(names).toContain('gmx');
+      expect(names).toContain('platypus');
     });
   });
 

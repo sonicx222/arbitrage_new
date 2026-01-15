@@ -42,12 +42,14 @@ export declare class ExecutionEngineService {
     private redis;
     private streamsClient;
     private lockManager;
+    private nonceManager;
     private logger;
     private perfLogger;
     private stateManager;
     private wallets;
     private providers;
     private providerHealth;
+    private gasBaselines;
     private executionQueue;
     private activeExecutions;
     private readonly consumerGroups;
@@ -133,11 +135,58 @@ export declare class ExecutionEngineService {
      */
     private withTransactionTimeout;
     private executeCrossChainArbitrage;
+    /**
+     * CRITICAL-2 FIX: Prepare flash loan transaction with proper slippage protection.
+     * Includes minAmountOut calculation to prevent partial fills from causing losses.
+     */
     private prepareFlashLoanTransaction;
     private buildSwapPath;
     private getFlashLoanContract;
+    /**
+     * HIGH-3 FIX: Verify opportunity prices are still valid before execution.
+     *
+     * This prevents executing stale opportunities where prices have moved
+     * between detection and execution. Critical for fast chains where
+     * block times are < 1 second.
+     *
+     * @param opportunity - The opportunity to verify
+     * @param chain - Target chain
+     * @returns Verification result with validity and reason
+     */
+    private verifyOpportunityPrices;
+    /**
+     * CRITICAL-1 FIX: Apply MEV protection to prevent sandwich attacks.
+     *
+     * Strategies applied:
+     * 1. Use private transaction pools (Flashbots on supported chains)
+     * 2. Set strict maxPriorityFeePerGas to avoid overpaying
+     * 3. Use EIP-1559 transactions where supported for predictable fees
+     * 4. Add deadline parameter to prevent stale transactions
+     *
+     * @param tx - Transaction to protect
+     * @param chain - Target chain
+     * @returns Protected transaction request
+     */
     private applyMEVProtection;
+    /**
+     * P1-5 FIX: Get optimal gas price with spike protection.
+     * Tracks baseline gas prices and rejects if current price exceeds threshold.
+     * @throws Error if gas price spike detected and protection is enabled
+     */
     private getOptimalGasPrice;
+    /**
+     * P1-5 FIX: Update gas price baseline for spike detection
+     */
+    private updateGasBaseline;
+    /**
+     * P1-5 FIX: Calculate baseline gas price from recent history
+     * Uses median to avoid outlier influence
+     *
+     * HIGH-2 FIX: When not enough history exists, use the average of available
+     * samples multiplied by a safety factor, rather than returning 0n which
+     * disables spike protection entirely during the warmup period.
+     */
+    private getGasBaseline;
     private calculateActualProfit;
     private publishExecutionResult;
     private startHealthMonitoring;

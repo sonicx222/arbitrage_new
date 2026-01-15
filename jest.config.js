@@ -13,6 +13,16 @@ module.exports = {
       tsconfig: 'tsconfig.json'
     }],
   },
+  moduleNameMapper: {
+    '^@arbitrage/core$': '<rootDir>/shared/core/src',
+    '^@arbitrage/core/(.*)$': '<rootDir>/shared/core/src/$1',
+    '^@arbitrage/config$': '<rootDir>/shared/config/src',
+    '^@arbitrage/config/(.*)$': '<rootDir>/shared/config/src/$1',
+    '^@arbitrage/types$': '<rootDir>/shared/types',
+    '^@arbitrage/types/(.*)$': '<rootDir>/shared/types/$1',
+    '^@arbitrage/unified-detector$': '<rootDir>/services/unified-detector/src',
+    '^@arbitrage/unified-detector/(.*)$': '<rootDir>/services/unified-detector/src/$1'
+  },
   collectCoverageFrom: [
     'shared/**/*.ts',
     'services/**/*.ts',

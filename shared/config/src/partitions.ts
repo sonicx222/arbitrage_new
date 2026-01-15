@@ -13,7 +13,12 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 
-import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, PARTITION_IDS } from './index';
+// Import partition IDs from standalone file FIRST to avoid circular dependency
+// This file has no dependencies, so it can be safely imported before index.ts
+import { PARTITION_IDS, PartitionId } from './partition-ids';
+export { PARTITION_IDS, PartitionId } from './partition-ids';
+
+import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes } from './index';
 
 // =============================================================================
 // Types
@@ -182,10 +187,12 @@ export function getNonEvmChains(): string[] {
  * - P3: High-Value (Ethereum, zkSync, Linea) - High-value EVM chains
  * - P4: Solana-Native (Solana) - Non-EVM, dedicated partition
  */
+// Note: Using string literals for partitionId to avoid circular dependency issues
+// during module initialization. Values match those in partition-ids.ts.
 export const PARTITIONS: PartitionConfig[] = [
   // P1: Asia-Fast - High-throughput Asian chains
   {
-    partitionId: PARTITION_IDS.ASIA_FAST,
+    partitionId: 'asia-fast',
     name: 'Asia Fast Chains',
     chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
     region: 'asia-southeast1',
@@ -201,7 +208,7 @@ export const PARTITIONS: PartitionConfig[] = [
   },
   // P2: L2-Turbo - Fast Ethereum L2 rollups
   {
-    partitionId: PARTITION_IDS.L2_TURBO,
+    partitionId: 'l2-turbo',
     name: 'L2 Turbo Chains',
     chains: ['arbitrum', 'optimism', 'base'],
     region: 'asia-southeast1',
@@ -217,7 +224,7 @@ export const PARTITIONS: PartitionConfig[] = [
   },
   // P3: High-Value - Ethereum mainnet and ZK rollups
   {
-    partitionId: PARTITION_IDS.HIGH_VALUE,
+    partitionId: 'high-value',
     name: 'High Value Chains',
     chains: ['ethereum', 'zksync', 'linea'],
     region: 'us-east1',
@@ -233,7 +240,7 @@ export const PARTITIONS: PartitionConfig[] = [
   },
   // P4: Solana-Native - Non-EVM dedicated partition
   {
-    partitionId: PARTITION_IDS.SOLANA_NATIVE,
+    partitionId: 'solana-native',
     name: 'Solana Native',
     chains: ['solana'],
     region: 'us-west1', // Solana validator proximity

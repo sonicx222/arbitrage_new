@@ -244,13 +244,27 @@ class DistributedLockManager {
      * Execute a function while holding a distributed lock.
      * Automatically acquires and releases the lock.
      *
+     * P0-3 FIX: Now distinguishes between lock_not_acquired (lock held by another)
+     * and redis_error (Redis unavailable). This prevents silent failures.
+     *
      * @param resourceId - Unique identifier for the resource to lock
      * @param fn - Function to execute while holding the lock
      * @param options - Lock acquisition options
-     * @returns Function result, or null if lock could not be acquired
+     * @returns Function result, or failure reason
      */
     async withLock(resourceId, fn, options = {}) {
-        const handle = await this.acquireLock(resourceId, options);
+        let handle;
+        try {
+            handle = await this.acquireLock(resourceId, options);
+        }
+        catch (error) {
+            // P0-3 FIX: Redis errors are now thrown, not swallowed
+            this.logger.error('Redis error during lock acquisition', {
+                resourceId,
+                error: error.message
+            });
+            return { success: false, reason: 'redis_error', error: error };
+        }
         if (!handle.acquired) {
             return { success: false, reason: 'lock_not_acquired' };
         }
