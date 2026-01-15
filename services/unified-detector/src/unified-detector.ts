@@ -56,7 +56,16 @@ import { ChainDetectorInstance } from './chain-instance';
 // Types
 // =============================================================================
 
-export interface UnifiedDetectorConfig {
+/** Logger interface for dependency injection */
+interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/** Base config options (without DI) */
+interface BaseDetectorConfig {
   /** Partition ID to run (from env or explicit) */
   partitionId?: string;
 
@@ -74,6 +83,34 @@ export interface UnifiedDetectorConfig {
 
   /** Health check port for HTTP endpoint */
   healthCheckPort?: number;
+}
+
+/** Factory type for creating chain detector instances */
+export type ChainInstanceFactory = (config: {
+  chainId: string;
+  partitionId: string;
+  streamsClient: RedisStreamsClient;
+  perfLogger: PerformanceLogger;
+}) => ChainDetectorInstance;
+
+export interface UnifiedDetectorConfig extends BaseDetectorConfig {
+  /** Optional logger for testing (defaults to createLogger) */
+  logger?: Logger;
+
+  /** Optional perf logger for testing */
+  perfLogger?: PerformanceLogger;
+
+  /** Optional state manager for testing */
+  stateManager?: ServiceStateManager;
+
+  /** Optional Redis client for testing */
+  redisClient?: RedisClient;
+
+  /** Optional Redis Streams client for testing */
+  streamsClient?: RedisStreamsClient;
+
+  /** Optional chain instance factory for testing */
+  chainInstanceFactory?: ChainInstanceFactory;
 }
 
 export interface UnifiedDetectorStats {
@@ -114,22 +151,25 @@ export interface ChainStats {
 // =============================================================================
 
 export class UnifiedChainDetector extends EventEmitter {
-  private logger: ReturnType<typeof createLogger>;
+  private logger: Logger;
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
 
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
+  private injectedRedis: RedisClient | null = null;
+  private injectedStreamsClient: RedisStreamsClient | null = null;
   private crossRegionHealth: CrossRegionHealthManager | null = null;
   private degradationManager: GracefulDegradationManager | null = null;
 
-  private config: Required<UnifiedDetectorConfig>;
+  private config: Required<BaseDetectorConfig>;
   private partition: PartitionConfig | null = null;
   private chainInstances: Map<string, ChainDetectorInstance> = new Map();
 
   private startTime: number = 0;
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
+  private chainInstanceFactory: ChainInstanceFactory;
 
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
@@ -150,14 +190,23 @@ export class UnifiedChainDetector extends EventEmitter {
 
     this.partition = partition || null;
 
-    this.logger = createLogger(`unified-detector:${this.config.partitionId}`);
-    this.perfLogger = getPerformanceLogger(`unified-detector:${this.config.partitionId}`);
+    // Use injected dependencies or defaults
+    this.logger = config.logger ?? createLogger(`unified-detector:${this.config.partitionId}`);
+    this.perfLogger = config.perfLogger ?? getPerformanceLogger(`unified-detector:${this.config.partitionId}`);
 
     // Initialize state manager
-    this.stateManager = createServiceState({
+    this.stateManager = config.stateManager ?? createServiceState({
       serviceName: `unified-detector-${this.config.partitionId}`,
       transitionTimeoutMs: 60000 // Longer timeout for multi-chain startup
     });
+
+    // Save injected Redis clients for testing
+    this.injectedRedis = config.redisClient ?? null;
+    this.injectedStreamsClient = config.streamsClient ?? null;
+
+    // Chain instance factory (defaults to real ChainDetectorInstance)
+    this.chainInstanceFactory = config.chainInstanceFactory ??
+      ((cfg) => new ChainDetectorInstance(cfg));
   }
 
   // ===========================================================================
@@ -175,9 +224,9 @@ export class UnifiedChainDetector extends EventEmitter {
         regionId: this.config.regionId
       });
 
-      // Initialize Redis connections
-      this.redis = await getRedisClient();
-      this.streamsClient = await getRedisStreamsClient();
+      // Initialize Redis connections (use injected clients if provided)
+      this.redis = this.injectedRedis ?? await getRedisClient();
+      this.streamsClient = this.injectedStreamsClient ?? await getRedisStreamsClient();
 
       // P0-7 FIX: Validate all critical dependencies BEFORE continuing with startup
       // If these fail, state transition hasn't committed any resources yet
@@ -283,7 +332,7 @@ export class UnifiedChainDetector extends EventEmitter {
         continue;
       }
 
-      const instance = new ChainDetectorInstance({
+      const instance = this.chainInstanceFactory({
         chainId,
         partitionId: this.config.partitionId,
         streamsClient: this.streamsClient,

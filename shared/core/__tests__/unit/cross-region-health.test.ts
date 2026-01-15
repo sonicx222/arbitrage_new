@@ -11,6 +11,8 @@
  */
 
 import { EventEmitter } from 'events';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import type { Mock } from 'jest-mock';
 import {
   CrossRegionHealthManager,
   CrossRegionHealthConfig,
@@ -20,58 +22,77 @@ import {
   FailoverEvent,
   getCrossRegionHealthManager,
   resetCrossRegionHealthManager
-} from '@arbitrage/core';
+} from '../../src/cross-region-health';
 
-// Mock Redis client
-jest.mock('../../src/redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue({
-    set: jest.fn().mockResolvedValue('OK'),
-    get: jest.fn().mockResolvedValue(null),
-    keys: jest.fn().mockResolvedValue([]),
-    del: jest.fn().mockResolvedValue(1),
-    publish: jest.fn().mockResolvedValue(1),
-    subscribe: jest.fn().mockResolvedValue(undefined),
-    ping: jest.fn().mockResolvedValue(true),
-    disconnect: jest.fn().mockResolvedValue(undefined)
+// ============================================================================
+// Mock Factories (using dependency injection instead of module mocks)
+// ============================================================================
+
+// Mock logger factory
+const createMockLogger = () => ({
+  info: jest.fn<(msg: string, meta?: object) => void>(),
+  error: jest.fn<(msg: string, meta?: object) => void>(),
+  warn: jest.fn<(msg: string, meta?: object) => void>(),
+  debug: jest.fn<(msg: string, meta?: object) => void>()
+});
+
+// Mock Redis client factory
+const createMockRedisClient = () => ({
+  set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
+  get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
+  keys: jest.fn<() => Promise<string[]>>().mockResolvedValue([]),
+  del: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  publish: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  subscribe: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
+});
+
+// Mock Redis Streams client factory
+const createMockStreamsClient = () => ({
+  xadd: jest.fn<() => Promise<string>>().mockResolvedValue('1234-0'),
+  xread: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+  xreadgroup: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
+  xack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
+  createConsumerGroup: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  createBatcher: jest.fn().mockReturnValue({
+    add: jest.fn(),
+    flush: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    destroy: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
   })
-}));
+});
 
-// Mock Redis Streams client
-jest.mock('../../src/redis-streams', () => ({
-  getRedisStreamsClient: jest.fn().mockResolvedValue({
-    xadd: jest.fn().mockResolvedValue('1234-0'),
-    xread: jest.fn().mockResolvedValue([]),
-    xreadgroup: jest.fn().mockResolvedValue([]),
-    xack: jest.fn().mockResolvedValue(1),
-    createConsumerGroup: jest.fn().mockResolvedValue(undefined),
-    ping: jest.fn().mockResolvedValue(true),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-    createBatcher: jest.fn().mockReturnValue({
-      add: jest.fn(),
-      flush: jest.fn().mockResolvedValue(undefined),
-      destroy: jest.fn().mockResolvedValue(undefined)
-    })
+// Mock lock handle type
+interface MockLockHandle {
+  acquired: boolean;
+  key: string;
+  release: () => Promise<void>;
+  extend: () => Promise<boolean>;
+}
+
+// Mock lock manager factory
+const createMockLockManager = () => ({
+  acquireLock: jest.fn<() => Promise<MockLockHandle>>().mockResolvedValue({
+    acquired: true,
+    key: 'test-lock-key',
+    release: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    extend: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
   }),
-  RedisStreamsClient: jest.fn()
-}));
-
-// Mock distributed lock manager
-jest.mock('../../src/distributed-lock', () => ({
-  getDistributedLockManager: jest.fn().mockReturnValue({
-    acquireLock: jest.fn().mockResolvedValue({
-      acquired: true,
-      key: 'test-lock-key',
-      release: jest.fn().mockResolvedValue(undefined),
-      extend: jest.fn().mockResolvedValue(true)
-    }),
-    extendLock: jest.fn().mockResolvedValue(true),
-    releaseLock: jest.fn().mockResolvedValue(undefined)
-  })
-}));
+  extendLock: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+  releaseLock: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
+});
 
 describe('CrossRegionHealthManager', () => {
   let manager: CrossRegionHealthManager;
-  const defaultConfig: CrossRegionHealthConfig = {
+  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockRedis: ReturnType<typeof createMockRedisClient>;
+  let mockStreams: ReturnType<typeof createMockStreamsClient>;
+  let mockLockManager: ReturnType<typeof createMockLockManager>;
+
+  // Base config without injected dependencies
+  const baseConfig = {
     instanceId: 'test-instance-1',
     regionId: 'us-east1',
     serviceName: 'test-service',
@@ -83,9 +104,25 @@ describe('CrossRegionHealthManager', () => {
     isStandby: false
   };
 
+  // Create config with injected mocks
+  const createTestConfig = (overrides: Partial<CrossRegionHealthConfig> = {}): CrossRegionHealthConfig => ({
+    ...baseConfig,
+    ...overrides,
+    logger: mockLogger,
+    redisClient: mockRedis as any,
+    streamsClient: mockStreams as any,
+    lockManager: mockLockManager as any
+  });
+
   beforeEach(async () => {
     jest.clearAllMocks();
     await resetCrossRegionHealthManager();
+
+    // Create fresh mocks for each test
+    mockLogger = createMockLogger();
+    mockRedis = createMockRedisClient();
+    mockStreams = createMockStreamsClient();
+    mockLockManager = createMockLockManager();
   });
 
   afterEach(async () => {
@@ -99,7 +136,8 @@ describe('CrossRegionHealthManager', () => {
       const minConfig: CrossRegionHealthConfig = {
         instanceId: 'test-1',
         regionId: 'us-east1',
-        serviceName: 'test'
+        serviceName: 'test',
+        logger: mockLogger
       };
 
       manager = new CrossRegionHealthManager(minConfig);
@@ -108,40 +146,40 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should create instance with full config', () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       expect(manager).toBeDefined();
       expect(manager.getOwnRegionId()).toBe('us-east1');
     });
 
     it('should inherit from EventEmitter', () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       expect(manager).toBeInstanceOf(EventEmitter);
     });
   });
 
   describe('lifecycle', () => {
     it('should start successfully', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       expect(manager.isActive()).toBe(true);
     });
 
     it('should not double start', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       await manager.start(); // Should not throw
       expect(manager.isActive()).toBe(true);
     });
 
     it('should stop successfully', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       await manager.stop();
       expect(manager.isActive()).toBe(false);
     });
 
     it('should handle stop when not started', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.stop(); // Should not throw
       expect(manager.isActive()).toBe(false);
     });
@@ -149,11 +187,7 @@ describe('CrossRegionHealthManager', () => {
 
   describe('leader election', () => {
     it('should attempt leader election on start when eligible', async () => {
-      const config = { ...defaultConfig, canBecomeLeader: true };
-      manager = new CrossRegionHealthManager(config);
-
-      const { getDistributedLockManager } = require('../../src/distributed-lock');
-      const mockLockManager = getDistributedLockManager();
+      manager = new CrossRegionHealthManager(createTestConfig({ canBecomeLeader: true }));
 
       await manager.start();
 
@@ -161,11 +195,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should not attempt leader election when standby', async () => {
-      const config = { ...defaultConfig, isStandby: true };
-      manager = new CrossRegionHealthManager(config);
-
-      const { getDistributedLockManager } = require('../../src/distributed-lock');
-      const mockLockManager = getDistributedLockManager();
+      manager = new CrossRegionHealthManager(createTestConfig({ isStandby: true }));
 
       await manager.start();
 
@@ -174,11 +204,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should not attempt leader election when canBecomeLeader is false', async () => {
-      const config = { ...defaultConfig, canBecomeLeader: false };
-      manager = new CrossRegionHealthManager(config);
-
-      const { getDistributedLockManager } = require('../../src/distributed-lock');
-      const mockLockManager = getDistributedLockManager();
+      manager = new CrossRegionHealthManager(createTestConfig({ canBecomeLeader: false }));
 
       await manager.start();
 
@@ -186,7 +212,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should become leader when lock acquired', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       // Check if leader (mock returns successful lock)
@@ -194,7 +220,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should emit leaderChange event when becoming leader', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
 
       const leaderChangeHandler = jest.fn();
       manager.on('leaderChange', leaderChangeHandler);
@@ -202,7 +228,7 @@ describe('CrossRegionHealthManager', () => {
       await manager.start();
 
       expect(leaderChangeHandler).toHaveBeenCalled();
-      const event = leaderChangeHandler.mock.calls[0][0];
+      const event = leaderChangeHandler.mock.calls[0][0] as FailoverEvent;
       expect(event.type).toBe('leader_changed');
       expect(event.targetRegion).toBe('us-east1');
     });
@@ -210,7 +236,7 @@ describe('CrossRegionHealthManager', () => {
 
   describe('health monitoring', () => {
     it('should initialize own region health', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       const regionHealth = manager.getRegionHealth('us-east1');
@@ -220,7 +246,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should track service health in region', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       const regionHealth = manager.getRegionHealth('us-east1');
@@ -229,7 +255,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should return all regions health', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       const allHealth = manager.getAllRegionsHealth();
@@ -240,7 +266,7 @@ describe('CrossRegionHealthManager', () => {
 
   describe('global health evaluation', () => {
     it('should evaluate global health status', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       const globalHealth = manager.evaluateGlobalHealth();
@@ -251,7 +277,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should return READ_ONLY degradation when no detectors', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       const globalHealth = manager.evaluateGlobalHealth();
@@ -295,7 +321,7 @@ describe('CrossRegionHealthManager', () => {
     };
 
     it('should emit failover events', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       setupRemoteRegion(manager, 'asia-southeast1');
 
@@ -309,10 +335,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should publish failover event to Redis', async () => {
-      const { getRedisClient } = require('../../src/redis');
-      const mockRedis = await getRedisClient();
-
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       setupRemoteRegion(manager, 'asia-southeast1');
 
@@ -322,7 +345,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should emit failoverCompleted on successful failover', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
       setupRemoteRegion(manager, 'asia-southeast1');
 
@@ -342,7 +365,7 @@ describe('CrossRegionHealthManager', () => {
     it('should return same instance from getCrossRegionHealthManager', async () => {
       await resetCrossRegionHealthManager();
 
-      const instance1 = getCrossRegionHealthManager(defaultConfig);
+      const instance1 = getCrossRegionHealthManager(createTestConfig());
       const instance2 = getCrossRegionHealthManager();
 
       expect(instance1).toBe(instance2);
@@ -355,7 +378,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should reset singleton with resetCrossRegionHealthManager', async () => {
-      const instance1 = getCrossRegionHealthManager(defaultConfig);
+      const instance1 = getCrossRegionHealthManager(createTestConfig());
       await instance1.start();
 
       await resetCrossRegionHealthManager();
@@ -366,13 +389,9 @@ describe('CrossRegionHealthManager', () => {
 
   describe('event emission', () => {
     it('should emit leadershipLost event when lock extension fails', async () => {
-      const { getDistributedLockManager } = require('../../src/distributed-lock');
-      const mockLockManager = getDistributedLockManager();
-
-      manager = new CrossRegionHealthManager({
-        ...defaultConfig,
+      manager = new CrossRegionHealthManager(createTestConfig({
         leaderHeartbeatIntervalMs: 100
-      });
+      }));
 
       await manager.start();
 
@@ -380,7 +399,7 @@ describe('CrossRegionHealthManager', () => {
       manager.on('leadershipLost', lostHandler);
 
       // Simulate lock extension failure
-      mockLockManager.extendLock.mockResolvedValueOnce(false);
+      (mockLockManager.extendLock as Mock<() => Promise<boolean>>).mockResolvedValueOnce(false);
 
       // Wait for heartbeat interval
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -390,7 +409,7 @@ describe('CrossRegionHealthManager', () => {
     });
 
     it('should emit activateStandby on failover', async () => {
-      manager = new CrossRegionHealthManager(defaultConfig);
+      manager = new CrossRegionHealthManager(createTestConfig());
       await manager.start();
 
       // Set up remote region for failover

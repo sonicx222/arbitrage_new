@@ -89,6 +89,25 @@ interface ExecutionStats {
   providerHealthCheckFailures: number;
 }
 
+/** Logger interface for dependency injection */
+interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/** Configuration options for ExecutionEngineService */
+export interface ExecutionEngineConfig {
+  queueConfig?: Partial<QueueConfig>;
+  /** Optional logger for testing (defaults to createLogger) */
+  logger?: Logger;
+  /** Optional perf logger for testing */
+  perfLogger?: PerformanceLogger;
+  /** Optional state manager for testing */
+  stateManager?: ServiceStateManager;
+}
+
 // P1-2 FIX: Provider health tracking
 interface ProviderHealth {
   healthy: boolean;
@@ -111,7 +130,7 @@ export class ExecutionEngineService {
   private lockManager: DistributedLockManager | null = null;
   // P0-2 FIX: NonceManager for atomic nonce allocation
   private nonceManager: NonceManager | null = null;
-  private logger = createLogger('execution-engine');
+  private logger: Logger;
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
 
@@ -161,19 +180,21 @@ export class ExecutionEngineService {
   // P1-2/P1-3 FIX: Provider health check interval
   private providerHealthCheckInterval: NodeJS.Timeout | null = null;
 
-  constructor(queueConfig?: Partial<QueueConfig>) {
-    this.perfLogger = getPerformanceLogger('execution-engine');
+  constructor(config: ExecutionEngineConfig = {}) {
+    // Use injected dependencies or defaults
+    this.logger = config.logger ?? createLogger('execution-engine');
+    this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
 
     // Apply custom queue config
-    if (queueConfig) {
-      this.queueConfig = { ...this.queueConfig, ...queueConfig };
+    if (config.queueConfig) {
+      this.queueConfig = { ...this.queueConfig, ...config.queueConfig };
     }
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
 
     // State machine for lifecycle management
-    this.stateManager = createServiceState({
+    this.stateManager = config.stateManager ?? createServiceState({
       serviceName: 'execution-engine',
       transitionTimeoutMs: 30000
     });

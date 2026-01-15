@@ -10,7 +10,23 @@
 import { createLogger } from './logger';
 import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 
-const logger = createLogger('stream-health-monitor');
+/** Logger interface for dependency injection */
+interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/** Configuration options for StreamHealthMonitor */
+export interface StreamHealthMonitorConfig {
+  /** Optional logger for testing (defaults to createLogger) */
+  logger?: Logger;
+  /** Optional streams client for testing (defaults to getRedisStreamsClient) */
+  streamsClient?: RedisStreamsClient;
+}
+
+const defaultLogger = createLogger('stream-health-monitor');
 
 // Types
 export type StreamHealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
@@ -98,6 +114,8 @@ type AlertHandler = (alert: StreamAlert) => void;
  */
 export class StreamHealthMonitor {
   private streamsClient: RedisStreamsClient | null = null;
+  private injectedStreamsClient: RedisStreamsClient | null = null;
+  private logger: Logger;
   private monitoredStreams: Set<string> = new Set();
   private thresholds: StreamHealthThresholds;
   private alertHandlers: AlertHandler[] = [];
@@ -111,7 +129,10 @@ export class StreamHealthMonitor {
   private maxAlertAge = 3600000; // Remove alerts older than 1 hour
   private maxMetricsAge = 600000; // Remove metrics older than 10 minutes
 
-  constructor() {
+  constructor(config: StreamHealthMonitorConfig = {}) {
+    // Use injected dependencies or defaults
+    this.logger = config.logger ?? defaultLogger;
+    this.injectedStreamsClient = config.streamsClient ?? null;
     // Default thresholds
     this.thresholds = {
       lagWarning: 100,
@@ -137,6 +158,13 @@ export class StreamHealthMonitor {
       return;
     }
 
+    // Use injected client if provided
+    if (this.injectedStreamsClient) {
+      this.streamsClient = this.injectedStreamsClient;
+      this.initialized = true;
+      return;
+    }
+
     // Prevent concurrent initialization (race condition fix)
     if (this.initializingPromise) {
       return this.initializingPromise;
@@ -147,7 +175,7 @@ export class StreamHealthMonitor {
         this.streamsClient = await getRedisStreamsClient();
         this.initialized = true;
       } catch (error) {
-        logger.error('Failed to initialize streams client', { error });
+        this.logger.error('Failed to initialize streams client', { error });
         this.initializingPromise = null; // Allow retry on failure
         throw error;
       }
@@ -161,7 +189,7 @@ export class StreamHealthMonitor {
    */
   setConsumerGroup(groupName: string): void {
     this.defaultConsumerGroup = groupName;
-    logger.info('Default consumer group updated', { groupName });
+    this.logger.info('Default consumer group updated', { groupName });
   }
 
   /**
@@ -183,11 +211,11 @@ export class StreamHealthMonitor {
         // Periodically cleanup old entries to prevent memory leaks
         this.cleanupOldEntries();
       } catch (error) {
-        logger.error('Stream health check failed', { error });
+        this.logger.error('Stream health check failed', { error });
       }
     }, intervalMs);
 
-    logger.info('Stream health monitoring started', {
+    this.logger.info('Stream health monitoring started', {
       streams: Array.from(this.monitoredStreams),
       intervalMs
     });
@@ -227,7 +255,7 @@ export class StreamHealthMonitor {
     this.lastAlerts.clear();
     this.lastMetrics.clear();
 
-    logger.info('Stream health monitoring stopped');
+    this.logger.info('Stream health monitoring stopped');
   }
 
   /**
@@ -288,7 +316,7 @@ export class StreamHealthMonitor {
           });
         }
       } catch (error) {
-        logger.warn(`Failed to get health for stream: ${streamName}`, { error });
+        this.logger.warn(`Failed to get health for stream: ${streamName}`, { error });
         streams[streamName] = {
           name: streamName,
           length: 0,
@@ -385,7 +413,7 @@ export class StreamHealthMonitor {
         timestamp: Date.now()
       };
     } catch (error) {
-      logger.warn(`Failed to get lag for ${streamName}:${groupName}`, { error });
+      this.logger.warn(`Failed to get lag for ${streamName}:${groupName}`, { error });
       return {
         streamName,
         groupName,
@@ -562,20 +590,20 @@ export class StreamHealthMonitor {
 
     // Skip if same alert was triggered within cooldown period
     if (lastAlertTime && (now - lastAlertTime) < this.alertCooldownMs) {
-      logger.debug('Alert suppressed (cooldown)', { alertKey, cooldownRemaining: this.alertCooldownMs - (now - lastAlertTime) });
+      this.logger.debug('Alert suppressed (cooldown)', { alertKey, cooldownRemaining: this.alertCooldownMs - (now - lastAlertTime) });
       return;
     }
 
     // Update last alert time
     this.lastAlerts.set(alertKey, now);
 
-    logger.warn('Stream alert triggered', alert);
+    this.logger.warn('Stream alert triggered', alert);
 
     for (const handler of this.alertHandlers) {
       try {
         handler(alert);
       } catch (error) {
-        logger.error('Alert handler error', { error });
+        this.logger.error('Alert handler error', { error });
       }
     }
   }
@@ -585,7 +613,7 @@ export class StreamHealthMonitor {
    */
   setThresholds(thresholds: Partial<StreamHealthThresholds>): void {
     this.thresholds = { ...this.thresholds, ...thresholds };
-    logger.info('Stream health thresholds updated', this.thresholds);
+    this.logger.info('Stream health thresholds updated', this.thresholds);
   }
 
   /**
@@ -600,7 +628,7 @@ export class StreamHealthMonitor {
    */
   addStream(streamName: string): void {
     this.monitoredStreams.add(streamName);
-    logger.info('Added stream to monitoring', { streamName });
+    this.logger.info('Added stream to monitoring', { streamName });
   }
 
   /**
@@ -608,7 +636,7 @@ export class StreamHealthMonitor {
    */
   removeStream(streamName: string): void {
     this.monitoredStreams.delete(streamName);
-    logger.info('Removed stream from monitoring', { streamName });
+    this.logger.info('Removed stream from monitoring', { streamName });
   }
 
   /**

@@ -105,6 +105,14 @@ export interface FailoverEvent {
   error?: string;
 }
 
+/** Logger interface for dependency injection */
+interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
 export interface CrossRegionHealthConfig {
   /** Unique instance ID */
   instanceId: string;
@@ -135,6 +143,16 @@ export interface CrossRegionHealthConfig {
 
   /** Whether this instance is a standby (default: false) */
   isStandby?: boolean;
+
+  // Optional dependency injection for testing
+  /** Optional logger for testing (defaults to createLogger) */
+  logger?: Logger;
+  /** Optional Redis client for testing */
+  redisClient?: RedisClient;
+  /** Optional Redis Streams client for testing */
+  streamsClient?: RedisStreamsClient;
+  /** Optional lock manager for testing */
+  lockManager?: DistributedLockManager;
 }
 
 export interface GlobalHealthStatus {
@@ -170,8 +188,13 @@ export class CrossRegionHealthManager extends EventEmitter {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null; // P0-11 FIX: Add streams client
   private lockManager: DistributedLockManager | null = null;
-  private logger: ReturnType<typeof createLogger>;
-  private config: Required<CrossRegionHealthConfig>;
+  private logger: Logger;
+  private config: Required<Omit<CrossRegionHealthConfig, 'logger' | 'redisClient' | 'streamsClient' | 'lockManager'>>;
+
+  // Store injected dependencies
+  private injectedRedis: RedisClient | null = null;
+  private injectedStreamsClient: RedisStreamsClient | null = null;
+  private injectedLockManager: DistributedLockManager | null = null;
 
   private regions: Map<string, RegionHealth> = new Map();
   private isLeader: boolean = false;
@@ -200,7 +223,11 @@ export class CrossRegionHealthManager extends EventEmitter {
       isStandby: config.isStandby ?? false
     };
 
-    this.logger = createLogger(`cross-region:${config.regionId}`);
+    // Use injected dependencies or defaults
+    this.logger = config.logger ?? createLogger(`cross-region:${config.regionId}`);
+    this.injectedRedis = config.redisClient ?? null;
+    this.injectedStreamsClient = config.streamsClient ?? null;
+    this.injectedLockManager = config.lockManager ?? null;
   }
 
   // ===========================================================================
@@ -219,12 +246,12 @@ export class CrossRegionHealthManager extends EventEmitter {
       canBecomeLeader: this.config.canBecomeLeader
     });
 
-    // Initialize Redis and lock manager
-    this.redis = await getRedisClient();
-    this.lockManager = await getDistributedLockManager();
+    // Initialize Redis and lock manager (use injected or default)
+    this.redis = this.injectedRedis ?? await getRedisClient();
+    this.lockManager = this.injectedLockManager ?? await getDistributedLockManager();
 
     // P0-11 FIX: Initialize streams client for ADR-002 compliant failover messaging
-    this.streamsClient = await getRedisStreamsClient();
+    this.streamsClient = this.injectedStreamsClient ?? await getRedisStreamsClient();
 
     // Initialize own region
     this.initializeOwnRegion();

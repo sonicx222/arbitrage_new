@@ -12,7 +12,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import {
-  PairSnapshot,
+  ArbitragePairSnapshot as PairSnapshot,
   ChainPriceData,
   safeBigIntDivision,
   calculatePriceFromReserves,

@@ -15,7 +15,7 @@ import {
   withTimeout,
   withTimeoutDefault,
   withTimeoutSafe,
-  withRetry as withRetryAsync,
+  withRetryAsync,
   sleep,
   createDeferred,
   mapConcurrent,
