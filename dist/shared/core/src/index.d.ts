@@ -12,6 +12,7 @@ export type { TokenPrice, PriceOracleConfig, PriceBatchRequest } from './price-o
 export type { StreamMessage, ConsumerGroupConfig, XReadOptions, XReadGroupOptions, XTrimOptions, XAddOptions, StreamInfo, PendingInfo, BatcherConfig, BatcherStats, StreamConsumerConfig, StreamConsumerStats } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
+export type { Task, TaskResult } from './worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
 export { WebSocketManager, WebSocketConfig, WebSocketSubscription, WebSocketMessage, WebSocketEventHandler, ConnectionStateHandler } from './websocket-manager';
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './hierarchical-cache';
@@ -28,7 +29,7 @@ export { ExpertSelfHealingManager, getExpertSelfHealingManager } from './expert-
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './error-recovery';
 export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './enhanced-health-monitor';
 export { StreamHealthMonitor, getStreamHealthMonitor, resetStreamHealthMonitor } from './stream-health-monitor';
-export type { StreamHealthStatus, StreamLagInfo, ConsumerLagInfo, MonitoredStreamInfo, StreamHealth, StreamMetrics, ConsumerGroupHealth, StreamHealthSummary, StreamHealthThresholds, StreamAlert } from './stream-health-monitor';
+export type { StreamHealthStatus, StreamLagInfo, ConsumerLagInfo, MonitoredStreamInfo, StreamHealth, StreamMetrics, ConsumerGroupHealth, StreamHealthSummary, StreamHealthThresholds, StreamAlert, StreamHealthMonitorConfig } from './stream-health-monitor';
 export { SwapEventFilter, getSwapEventFilter, resetSwapEventFilter } from './swap-event-filter';
 export type { SwapEventFilterConfig, FilterResult, FilterReason, VolumeAggregate, WhaleAlert, FilterStats, BatchResult } from './swap-event-filter';
 export { PriceMatrix, PriceIndexMapper, getPriceMatrix, resetPriceMatrix } from './price-matrix';
@@ -43,7 +44,7 @@ export { ValidationMiddleware, ValidationSchemas } from './validation';
 export * from './domain-models';
 export { RedisArbitrageRepository, RedisExecutionRepository, createArbitrageRepository, createExecutionRepository } from './repositories';
 export { BaseDetector } from './base-detector';
-export type { DetectorConfig as BaseDetectorConfig, PairSnapshot } from './base-detector';
+export type { DetectorConfig as BaseDetectorConfig, PairSnapshot, ExtendedPair } from './base-detector';
 export { PartitionedDetector } from './partitioned-detector';
 export type { PartitionedDetectorConfig, ChainHealth as PartitionChainHealth, PartitionHealth, ChainStats as PartitionChainStats, PricePoint, CrossChainDiscrepancy } from './partitioned-detector';
 export { safeBigIntDivision, calculatePriceFromReserves, calculatePriceFromBigIntReserves, invertPrice, calculatePriceDifferencePercent, isSameTokenPair, isReverseOrder, getMinProfitThreshold, getDefaultFee, calculateIntraChainArbitrage, calculateCrossChainArbitrage, validatePairSnapshot, createPairSnapshot } from './arbitrage-calculator';

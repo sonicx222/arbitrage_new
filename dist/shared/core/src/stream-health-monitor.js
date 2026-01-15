@@ -13,14 +13,15 @@ exports.getStreamHealthMonitor = getStreamHealthMonitor;
 exports.resetStreamHealthMonitor = resetStreamHealthMonitor;
 const logger_1 = require("./logger");
 const redis_streams_1 = require("./redis-streams");
-const logger = (0, logger_1.createLogger)('stream-health-monitor');
+const defaultLogger = (0, logger_1.createLogger)('stream-health-monitor');
 /**
  * Redis Streams Health Monitor
  * Provides comprehensive monitoring for Redis Streams
  */
 class StreamHealthMonitor {
-    constructor() {
+    constructor(config = {}) {
         this.streamsClient = null;
+        this.injectedStreamsClient = null;
         this.monitoredStreams = new Set();
         this.alertHandlers = [];
         this.monitoringInterval = null;
@@ -32,6 +33,9 @@ class StreamHealthMonitor {
         this.defaultConsumerGroup = 'arbitrage-group'; // Configurable group name
         this.maxAlertAge = 3600000; // Remove alerts older than 1 hour
         this.maxMetricsAge = 600000; // Remove metrics older than 10 minutes
+        // Use injected dependencies or defaults
+        this.logger = config.logger ?? defaultLogger;
+        this.injectedStreamsClient = config.streamsClient ?? null;
         // Default thresholds
         this.thresholds = {
             lagWarning: 100,
@@ -54,6 +58,12 @@ class StreamHealthMonitor {
         if (this.initialized) {
             return;
         }
+        // Use injected client if provided
+        if (this.injectedStreamsClient) {
+            this.streamsClient = this.injectedStreamsClient;
+            this.initialized = true;
+            return;
+        }
         // Prevent concurrent initialization (race condition fix)
         if (this.initializingPromise) {
             return this.initializingPromise;
@@ -64,7 +74,7 @@ class StreamHealthMonitor {
                 this.initialized = true;
             }
             catch (error) {
-                logger.error('Failed to initialize streams client', { error });
+                this.logger.error('Failed to initialize streams client', { error });
                 this.initializingPromise = null; // Allow retry on failure
                 throw error;
             }
@@ -76,7 +86,7 @@ class StreamHealthMonitor {
      */
     setConsumerGroup(groupName) {
         this.defaultConsumerGroup = groupName;
-        logger.info('Default consumer group updated', { groupName });
+        this.logger.info('Default consumer group updated', { groupName });
     }
     /**
      * Set alert cooldown period
@@ -96,10 +106,10 @@ class StreamHealthMonitor {
                 this.cleanupOldEntries();
             }
             catch (error) {
-                logger.error('Stream health check failed', { error });
+                this.logger.error('Stream health check failed', { error });
             }
         }, intervalMs);
-        logger.info('Stream health monitoring started', {
+        this.logger.info('Stream health monitoring started', {
             streams: Array.from(this.monitoredStreams),
             intervalMs
         });
@@ -133,7 +143,7 @@ class StreamHealthMonitor {
         // Clear maps to free memory
         this.lastAlerts.clear();
         this.lastMetrics.clear();
-        logger.info('Stream health monitoring stopped');
+        this.logger.info('Stream health monitoring stopped');
     }
     /**
      * Check health of all monitored streams
@@ -190,7 +200,7 @@ class StreamHealthMonitor {
                 }
             }
             catch (error) {
-                logger.warn(`Failed to get health for stream: ${streamName}`, { error });
+                this.logger.warn(`Failed to get health for stream: ${streamName}`, { error });
                 streams[streamName] = {
                     name: streamName,
                     length: 0,
@@ -279,7 +289,7 @@ class StreamHealthMonitor {
             };
         }
         catch (error) {
-            logger.warn(`Failed to get lag for ${streamName}:${groupName}`, { error });
+            this.logger.warn(`Failed to get lag for ${streamName}:${groupName}`, { error });
             return {
                 streamName,
                 groupName,
@@ -435,18 +445,18 @@ class StreamHealthMonitor {
         const now = Date.now();
         // Skip if same alert was triggered within cooldown period
         if (lastAlertTime && (now - lastAlertTime) < this.alertCooldownMs) {
-            logger.debug('Alert suppressed (cooldown)', { alertKey, cooldownRemaining: this.alertCooldownMs - (now - lastAlertTime) });
+            this.logger.debug('Alert suppressed (cooldown)', { alertKey, cooldownRemaining: this.alertCooldownMs - (now - lastAlertTime) });
             return;
         }
         // Update last alert time
         this.lastAlerts.set(alertKey, now);
-        logger.warn('Stream alert triggered', alert);
+        this.logger.warn('Stream alert triggered', alert);
         for (const handler of this.alertHandlers) {
             try {
                 handler(alert);
             }
             catch (error) {
-                logger.error('Alert handler error', { error });
+                this.logger.error('Alert handler error', { error });
             }
         }
     }
@@ -455,7 +465,7 @@ class StreamHealthMonitor {
      */
     setThresholds(thresholds) {
         this.thresholds = { ...this.thresholds, ...thresholds };
-        logger.info('Stream health thresholds updated', this.thresholds);
+        this.logger.info('Stream health thresholds updated', this.thresholds);
     }
     /**
      * Get current configuration
@@ -468,14 +478,14 @@ class StreamHealthMonitor {
      */
     addStream(streamName) {
         this.monitoredStreams.add(streamName);
-        logger.info('Added stream to monitoring', { streamName });
+        this.logger.info('Added stream to monitoring', { streamName });
     }
     /**
      * Remove a stream from monitoring
      */
     removeStream(streamName) {
         this.monitoredStreams.delete(streamName);
-        logger.info('Removed stream from monitoring', { streamName });
+        this.logger.info('Removed stream from monitoring', { streamName });
     }
     /**
      * Get list of monitored streams

@@ -26,13 +26,12 @@ const TRANSACTION_TIMEOUT_MS = 50000; // 50 seconds for blockchain operations
 // Execution Engine Service
 // =============================================================================
 class ExecutionEngineService {
-    constructor(queueConfig) {
+    constructor(config = {}) {
         this.redis = null;
         this.streamsClient = null;
         this.lockManager = null;
         // P0-2 FIX: NonceManager for atomic nonce allocation
         this.nonceManager = null;
-        this.logger = (0, core_1.createLogger)('execution-engine');
         this.wallets = new Map();
         this.providers = new Map();
         // P1-2 FIX: Track provider health for each chain
@@ -70,15 +69,17 @@ class ExecutionEngineService {
         this.streamConsumerInterval = null;
         // P1-2/P1-3 FIX: Provider health check interval
         this.providerHealthCheckInterval = null;
-        this.perfLogger = (0, core_1.getPerformanceLogger)('execution-engine');
+        // Use injected dependencies or defaults
+        this.logger = config.logger ?? (0, core_1.createLogger)('execution-engine');
+        this.perfLogger = config.perfLogger ?? (0, core_1.getPerformanceLogger)('execution-engine');
         // Apply custom queue config
-        if (queueConfig) {
-            this.queueConfig = { ...this.queueConfig, ...queueConfig };
+        if (config.queueConfig) {
+            this.queueConfig = { ...this.queueConfig, ...config.queueConfig };
         }
         // Generate unique instance ID
         this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
         // State machine for lifecycle management
-        this.stateManager = (0, core_1.createServiceState)({
+        this.stateManager = config.stateManager ?? (0, core_1.createServiceState)({
             serviceName: 'execution-engine',
             transitionTimeoutMs: 30000
         });

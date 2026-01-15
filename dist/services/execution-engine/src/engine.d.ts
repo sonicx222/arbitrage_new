@@ -13,7 +13,7 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy
  */
-import { ServiceState } from '@arbitrage/core';
+import { PerformanceLogger, ServiceStateManager, ServiceState } from '@arbitrage/core';
 interface QueueConfig {
     maxSize: number;
     highWaterMark: number;
@@ -31,6 +31,23 @@ interface ExecutionStats {
     messageProcessingErrors: number;
     providerReconnections: number;
     providerHealthCheckFailures: number;
+}
+/** Logger interface for dependency injection */
+interface Logger {
+    info: (message: string, meta?: object) => void;
+    error: (message: string, meta?: object) => void;
+    warn: (message: string, meta?: object) => void;
+    debug: (message: string, meta?: object) => void;
+}
+/** Configuration options for ExecutionEngineService */
+export interface ExecutionEngineConfig {
+    queueConfig?: Partial<QueueConfig>;
+    /** Optional logger for testing (defaults to createLogger) */
+    logger?: Logger;
+    /** Optional perf logger for testing */
+    perfLogger?: PerformanceLogger;
+    /** Optional state manager for testing */
+    stateManager?: ServiceStateManager;
 }
 interface ProviderHealth {
     healthy: boolean;
@@ -62,7 +79,7 @@ export declare class ExecutionEngineService {
     private healthMonitoringInterval;
     private streamConsumerInterval;
     private providerHealthCheckInterval;
-    constructor(queueConfig?: Partial<QueueConfig>);
+    constructor(config?: ExecutionEngineConfig);
     start(): Promise<void>;
     private static readonly SHUTDOWN_TIMEOUT_MS;
     stop(): Promise<void>;

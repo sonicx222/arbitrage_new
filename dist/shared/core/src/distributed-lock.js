@@ -56,7 +56,6 @@ end
 class DistributedLockManager {
     constructor(config = {}) {
         this.redis = null;
-        this.logger = (0, logger_1.createLogger)('distributed-lock');
         this.heldLocks = new Map();
         this.stats = {
             acquisitionAttempts: 0,
@@ -66,6 +65,8 @@ class DistributedLockManager {
             extensions: 0,
             currentlyHeld: 0
         };
+        // Use injected logger or create default
+        this.logger = config.logger ?? (0, logger_1.createLogger)('distributed-lock');
         // Generate unique instance ID for lock ownership
         this.instanceId = `lock-owner-${process.env.HOSTNAME || 'local'}-${process.pid}-${Date.now()}`;
         this.config = {

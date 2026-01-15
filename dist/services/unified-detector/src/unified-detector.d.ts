@@ -18,10 +18,18 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 import { EventEmitter } from 'events';
-import { ServiceState } from '@arbitrage/core';
+import { PerformanceLogger, ServiceStateManager, ServiceState, RedisClient, RedisStreamsClient } from '@arbitrage/core';
 import { PartitionHealth } from '@arbitrage/config';
 import { ChainDetectorInstance } from './chain-instance';
-export interface UnifiedDetectorConfig {
+/** Logger interface for dependency injection */
+interface Logger {
+    info: (message: string, meta?: object) => void;
+    error: (message: string, meta?: object) => void;
+    warn: (message: string, meta?: object) => void;
+    debug: (message: string, meta?: object) => void;
+}
+/** Base config options (without DI) */
+interface BaseDetectorConfig {
     /** Partition ID to run (from env or explicit) */
     partitionId?: string;
     /** Override chains to monitor (comma-separated or array) */
@@ -34,6 +42,27 @@ export interface UnifiedDetectorConfig {
     enableCrossRegionHealth?: boolean;
     /** Health check port for HTTP endpoint */
     healthCheckPort?: number;
+}
+/** Factory type for creating chain detector instances */
+export type ChainInstanceFactory = (config: {
+    chainId: string;
+    partitionId: string;
+    streamsClient: RedisStreamsClient;
+    perfLogger: PerformanceLogger;
+}) => ChainDetectorInstance;
+export interface UnifiedDetectorConfig extends BaseDetectorConfig {
+    /** Optional logger for testing (defaults to createLogger) */
+    logger?: Logger;
+    /** Optional perf logger for testing */
+    perfLogger?: PerformanceLogger;
+    /** Optional state manager for testing */
+    stateManager?: ServiceStateManager;
+    /** Optional Redis client for testing */
+    redisClient?: RedisClient;
+    /** Optional Redis Streams client for testing */
+    streamsClient?: RedisStreamsClient;
+    /** Optional chain instance factory for testing */
+    chainInstanceFactory?: ChainInstanceFactory;
 }
 export interface UnifiedDetectorStats {
     /** Partition being monitored */
@@ -66,6 +95,8 @@ export declare class UnifiedChainDetector extends EventEmitter {
     private stateManager;
     private redis;
     private streamsClient;
+    private injectedRedis;
+    private injectedStreamsClient;
     private crossRegionHealth;
     private degradationManager;
     private config;
@@ -74,6 +105,7 @@ export declare class UnifiedChainDetector extends EventEmitter {
     private startTime;
     private healthCheckInterval;
     private metricsInterval;
+    private chainInstanceFactory;
     constructor(config?: UnifiedDetectorConfig);
     start(): Promise<void>;
     stop(): Promise<void>;
@@ -97,4 +129,5 @@ export declare class UnifiedChainDetector extends EventEmitter {
     getStats(): UnifiedDetectorStats;
     getPartitionHealth(): Promise<PartitionHealth>;
 }
+export {};
 //# sourceMappingURL=unified-detector.d.ts.map
