@@ -40,7 +40,8 @@ export class ErrorRecoveryOrchestrator {
   private circuitBreakers = getCircuitBreakerRegistry();
   private dlq = getDeadLetterQueue();
   private degradationManager = getGracefulDegradationManager();
-  private selfHealingManager = getSelfHealingManager();
+  // P3-1 FIX: Store promise since getSelfHealingManager is now async
+  private selfHealingManagerPromise = getSelfHealingManager();
 
   constructor() {
     this.initializeDefaultStrategies();
@@ -220,7 +221,9 @@ export class ErrorRecoveryOrchestrator {
         return (context.attemptCount || 0) >= 5;
       },
       execute: async (context) => {
-        const healed = await this.selfHealingManager.triggerRecovery(context.service, context.error);
+        // P3-1 FIX: Await the promise to get the manager instance
+        const manager = await this.selfHealingManagerPromise;
+        const healed = await manager.triggerRecovery(context.service, context.error);
 
         if (healed) {
           return {
@@ -269,7 +272,9 @@ export class ErrorRecoveryOrchestrator {
     // Final escalation measures
     try {
       // Force service restart as last resort
-      await this.selfHealingManager.triggerRecovery(context.service, context.error);
+      // P3-1 FIX: Await the promise to get the manager instance
+      const manager = await this.selfHealingManagerPromise;
+      await manager.triggerRecovery(context.service, context.error);
 
       return {
         success: false,

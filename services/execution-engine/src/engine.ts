@@ -1561,8 +1561,9 @@ export class ExecutionEngineService {
   private startHealthMonitoring(): void {
     this.healthMonitoringInterval = setInterval(async () => {
       try {
+        // P3-2 FIX: Use unified ServiceHealth with 'name' field
         const health: ServiceHealth = {
-          service: 'execution-engine',
+          name: 'execution-engine',
           status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,

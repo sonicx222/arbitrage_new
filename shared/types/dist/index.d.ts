@@ -139,14 +139,16 @@ export interface MessageEvent {
     correlationId?: string;
 }
 export interface ServiceHealth {
-    service: string;
-    status: 'healthy' | 'degraded' | 'unhealthy';
+    name: string;
+    status: 'healthy' | 'degraded' | 'unhealthy' | 'starting' | 'stopping';
     uptime: number;
     memoryUsage: number;
     cpuUsage: number;
     lastHeartbeat: number;
     latency?: number;
     error?: string;
+    consecutiveFailures?: number;
+    restartCount?: number;
 }
 export interface PerformanceMetrics {
     eventLatency: number;

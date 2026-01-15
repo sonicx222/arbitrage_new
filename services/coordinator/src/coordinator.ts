@@ -675,29 +675,35 @@ export class CoordinatorService {
   private async handleHealthMessage(message: StreamMessage): Promise<void> {
     try {
       const data = message.data;
-      // P2 FIX: Type guard for required service field
-      if (!data || typeof data.service !== 'string') return;
+      // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
+      const serviceName = data?.name ?? data?.service;
+      if (!serviceName || typeof serviceName !== 'string') return;
 
-      // P2 FIX: Validate status is a known value, default to 'unknown'
+      // P3-2 FIX: Validate status includes new 'starting' and 'stopping' states
       const statusValue = data.status;
       const validStatus: ServiceHealth['status'] =
-        statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy'
+        statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
+        statusValue === 'starting' || statusValue === 'stopping'
           ? statusValue
-          : 'unknown' as ServiceHealth['status'];
+          : 'unhealthy'; // Default to unhealthy for unknown status
 
+      // P3-2 FIX: Use unified ServiceHealth with 'name' field
       const health: ServiceHealth = {
-        service: data.service,
+        name: serviceName,
         status: validStatus,
         uptime: typeof data.uptime === 'number' ? data.uptime : 0,
         memoryUsage: typeof data.memoryUsage === 'number' ? data.memoryUsage : 0,
         cpuUsage: typeof data.cpuUsage === 'number' ? data.cpuUsage : 0,
-        lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now()
+        lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+        // P3-2: Include optional recovery tracking fields if present
+        consecutiveFailures: typeof data.consecutiveFailures === 'number' ? data.consecutiveFailures : undefined,
+        restartCount: typeof data.restartCount === 'number' ? data.restartCount : undefined
       };
 
-      this.serviceHealth.set(data.service, health);
+      this.serviceHealth.set(serviceName, health);
 
       this.logger.debug('Health update received', {
-        service: data.service,
+        name: serviceName,
         status: health.status
       });
 
@@ -889,6 +895,9 @@ export class CoordinatorService {
             this.serviceHealth.set(serviceName, health as ServiceHealth);
           }
         }
+
+        // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
+        this.cleanupAlertCooldowns(Date.now());
       } catch (error) {
         this.logger.error('Legacy health polling failed', { error });
       }

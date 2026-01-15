@@ -93,7 +93,7 @@ export interface ArbitrageOpportunity {
   expectedProfit?: number;
   estimatedProfit?: number;
   profitPercentage?: number;
-  gasEstimate?: number | string; // Support both number and string (wei)
+  gasEstimate?: string; // Wei as string for BigInt compatibility. Use parseGasEstimate() helper.
   confidence: number;
   timestamp: number;
   blockNumber?: number;
@@ -153,15 +153,23 @@ export interface MessageEvent {
   correlationId?: string;
 }
 
+/**
+ * P3-2 FIX: Unified ServiceHealth interface
+ * Consolidates definitions from shared/types and self-healing-manager.
+ * Field naming standardized to 'name' instead of 'service'.
+ */
 export interface ServiceHealth {
-  service: string;
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  name: string;  // P3-2: Standardized field name (was 'service')
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'starting' | 'stopping';
   uptime: number;
   memoryUsage: number;
   cpuUsage: number;
   lastHeartbeat: number;
   latency?: number;  // P0-5 fix: Optional latency measurement in ms
   error?: string;
+  // P3-2: Added from self-healing-manager for recovery tracking
+  consecutiveFailures?: number;
+  restartCount?: number;
 }
 
 export interface PerformanceMetrics {
@@ -290,4 +298,33 @@ export interface BridgeLatencyData {
   timestamp: number;
   congestionLevel: number;
   gasPrice: number;
+}
+
+// =============================================================================
+// Utility Functions
+// =============================================================================
+
+/**
+ * Parse gas estimate from various input types to bigint.
+ * Handles string, number, bigint, and undefined inputs safely.
+ *
+ * @param value - The gas estimate value to parse
+ * @returns The gas estimate as a bigint (0n if undefined or invalid)
+ */
+export function parseGasEstimate(value: string | number | bigint | undefined): bigint {
+  if (value === undefined || value === null) {
+    return 0n;
+  }
+  if (typeof value === 'bigint') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return BigInt(Math.floor(value));
+  }
+  // string case
+  try {
+    return BigInt(value);
+  } catch {
+    return 0n;
+  }
 }
