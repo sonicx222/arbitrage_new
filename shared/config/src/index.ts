@@ -23,6 +23,17 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Arbitrum',
     rpcUrl: process.env.ARBITRUM_RPC_URL || 'https://arb1.arbitrum.io/rpc',
     wsUrl: process.env.ARBITRUM_WS_URL || 'wss://arb1.arbitrum.io/feed',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://arbitrum.publicnode.com',
+      'wss://arbitrum-mainnet.public.blastapi.io',
+      'wss://arb-mainnet.g.alchemy.com/v2/demo'
+    ],
+    rpcFallbackUrls: [
+      'https://arbitrum.publicnode.com',
+      'https://arbitrum-mainnet.public.blastapi.io',
+      'https://arb1.croswap.com/rpc'
+    ],
     blockTime: 0.25,
     nativeToken: 'ETH'
   },
@@ -31,6 +42,17 @@ export const CHAINS: Record<string, Chain> = {
     name: 'BSC',
     rpcUrl: process.env.BSC_RPC_URL || 'https://bsc-dataseed1.binance.org',
     wsUrl: process.env.BSC_WS_URL || 'wss://bsc-ws-node.nariox.org:443',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://bsc.publicnode.com',
+      'wss://bsc-mainnet.public.blastapi.io',
+      'wss://bsc-rpc.publicnode.com'
+    ],
+    rpcFallbackUrls: [
+      'https://bsc-dataseed2.binance.org',
+      'https://bsc-dataseed3.binance.org',
+      'https://bsc.publicnode.com'
+    ],
     blockTime: 3,
     nativeToken: 'BNB'
   },
@@ -39,6 +61,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Base',
     rpcUrl: process.env.BASE_RPC_URL || 'https://mainnet.base.org',
     wsUrl: process.env.BASE_WS_URL || 'wss://mainnet.base.org',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://base.publicnode.com',
+      'wss://base-mainnet.public.blastapi.io'
+    ],
+    rpcFallbackUrls: [
+      'https://base.publicnode.com',
+      'https://base-mainnet.public.blastapi.io',
+      'https://1rpc.io/base'
+    ],
     blockTime: 2,
     nativeToken: 'ETH'
   },
@@ -48,6 +80,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Polygon',
     rpcUrl: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
     wsUrl: process.env.POLYGON_WS_URL || 'wss://polygon-rpc.com',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://polygon-bor-rpc.publicnode.com',
+      'wss://polygon-mainnet.public.blastapi.io'
+    ],
+    rpcFallbackUrls: [
+      'https://polygon-bor-rpc.publicnode.com',
+      'https://polygon-mainnet.public.blastapi.io',
+      'https://polygon.llamarpc.com'
+    ],
     blockTime: 2,
     nativeToken: 'MATIC'
   },
@@ -75,6 +117,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Ethereum',
     rpcUrl: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
     wsUrl: process.env.ETHEREUM_WS_URL || 'wss://eth.llamarpc.com',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://ethereum.publicnode.com',
+      'wss://eth-mainnet.public.blastapi.io'
+    ],
+    rpcFallbackUrls: [
+      'https://ethereum.publicnode.com',
+      'https://eth-mainnet.public.blastapi.io',
+      'https://1rpc.io/eth'
+    ],
     blockTime: 12,
     nativeToken: 'ETH'
   },
@@ -87,6 +139,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Avalanche C-Chain',
     rpcUrl: process.env.AVALANCHE_RPC_URL || 'https://api.avax.network/ext/bc/C/rpc',
     wsUrl: process.env.AVALANCHE_WS_URL || 'wss://api.avax.network/ext/bc/C/ws',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://avalanche-c-chain.publicnode.com',
+      'wss://avax-mainnet.public.blastapi.io/ext/bc/C/ws'
+    ],
+    rpcFallbackUrls: [
+      'https://avalanche-c-chain.publicnode.com',
+      'https://avax-mainnet.public.blastapi.io/ext/bc/C/rpc',
+      'https://1rpc.io/avax/c'
+    ],
     blockTime: 2,
     nativeToken: 'AVAX'
   },
@@ -95,6 +157,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Fantom Opera',
     rpcUrl: process.env.FANTOM_RPC_URL || 'https://rpc.ftm.tools',
     wsUrl: process.env.FANTOM_WS_URL || 'wss://wsapi.fantom.network',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://fantom.publicnode.com',
+      'wss://fantom-mainnet.public.blastapi.io'
+    ],
+    rpcFallbackUrls: [
+      'https://fantom.publicnode.com',
+      'https://fantom-mainnet.public.blastapi.io',
+      'https://1rpc.io/ftm'
+    ],
     blockTime: 1,
     nativeToken: 'FTM'
   },
@@ -104,6 +176,16 @@ export const CHAINS: Record<string, Chain> = {
     name: 'zkSync Era',
     rpcUrl: process.env.ZKSYNC_RPC_URL || 'https://mainnet.era.zksync.io',
     wsUrl: process.env.ZKSYNC_WS_URL || 'wss://mainnet.era.zksync.io/ws',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://zksync.drpc.org',
+      'wss://zksync-era.publicnode.com'
+    ],
+    rpcFallbackUrls: [
+      'https://zksync.drpc.org',
+      'https://zksync-era.publicnode.com',
+      'https://1rpc.io/zksync2-era'
+    ],
     blockTime: 1,
     nativeToken: 'ETH'
   },
@@ -112,6 +194,15 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Linea',
     rpcUrl: process.env.LINEA_RPC_URL || 'https://rpc.linea.build',
     wsUrl: process.env.LINEA_WS_URL || 'wss://rpc.linea.build',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://linea.drpc.org'
+    ],
+    rpcFallbackUrls: [
+      'https://linea.drpc.org',
+      'https://1rpc.io/linea',
+      'https://linea-mainnet.public.blastapi.io'
+    ],
     blockTime: 2,
     nativeToken: 'ETH'
   },
@@ -121,6 +212,14 @@ export const CHAINS: Record<string, Chain> = {
     name: 'Solana',
     rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
     wsUrl: process.env.SOLANA_WS_URL || 'wss://api.mainnet-beta.solana.com',
+    // S3.3: WebSocket fallback URLs for resilience
+    wsFallbackUrls: [
+      'wss://solana.publicnode.com'
+    ],
+    rpcFallbackUrls: [
+      'https://solana.publicnode.com',
+      'https://solana-mainnet.g.alchemy.com/v2/demo'
+    ],
     blockTime: 0.4,
     nativeToken: 'SOL',
     isEVM: false

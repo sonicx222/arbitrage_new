@@ -90,8 +90,22 @@ export {
   WebSocketSubscription,
   WebSocketMessage,
   WebSocketEventHandler,
-  ConnectionStateHandler
+  ConnectionStateHandler,
+  ErrorEventHandler,
+  GenericEventHandler
 } from './websocket-manager';
+
+// S3.3: Provider Health Scoring for intelligent fallback selection
+export {
+  ProviderHealthScorer,
+  getProviderHealthScorer,
+  resetProviderHealthScorer
+} from './provider-health-scorer';
+export type {
+  ProviderHealthMetrics,
+  ProviderHealthScorerConfig
+} from './provider-health-scorer';
+
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './hierarchical-cache';
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './shared-memory-cache';
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './cache-coherency-manager';
