@@ -21,12 +21,12 @@ import {
   createPartitionChainInstances,
   validateAllPartitions,
   assignChainToPartition
-} from '../../../shared/config/src/partitions';
+} from '@arbitrage/config';
 
 import {
   DegradationLevel,
   CrossRegionHealthConfig
-} from '../../../shared/core/src/cross-region-health';
+} from '@arbitrage/core';
 
 // Integration tests don't mock - they test real interactions
 // But we still need to handle missing Redis/network connections
@@ -94,7 +94,7 @@ describe('Partition Configuration Integration', () => {
         failoverTimeoutMs: 60000
       };
 
-      const validation = require('../../../shared/config/src/partitions').validatePartitionConfig(testPartition);
+      const validation = require('@arbitrage/config').validatePartitionConfig(testPartition);
 
       // Should have warnings about resources
       expect(validation.warnings.length).toBeGreaterThan(0);

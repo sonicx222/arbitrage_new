@@ -29,6 +29,15 @@ const CACHE_DEFAULTS = {
 const logger = (0, logger_1.createLogger)('hierarchical-cache');
 class HierarchicalCache {
     constructor(config = {}) {
+        /**
+         * P0-FIX-3: Redis client is stored as a Promise (lazy initialization pattern).
+         * getRedisClient() returns a Promise<RedisClient>, which we store and await
+         * in all L2 operations. This allows the cache to be constructed synchronously
+         * while deferring Redis connection until first use.
+         *
+         * Type is RedisClient | Promise<RedisClient> | null to be explicit about this pattern.
+         */
+        this.redisPromise = null;
         // L1 Cache: SharedArrayBuffer for ultra-fast access
         this.l1Metadata = new Map();
         this.l1EvictionQueue = []; // LRU eviction
@@ -57,8 +66,9 @@ class HierarchicalCache {
         };
         // P2-2-FIX: Use configured average entry size for capacity calculation
         this.l1MaxEntries = Math.floor(this.config.l1Size * 1024 * 1024 / CACHE_DEFAULTS.averageEntrySize);
+        // P0-FIX-3: Store the Promise from getRedisClient() for lazy initialization
         if (this.config.l2Enabled) {
-            this.redis = (0, redis_1.getRedisClient)();
+            this.redisPromise = (0, redis_1.getRedisClient)();
         }
         logger.info('Hierarchical cache initialized', {
             l1Enabled: this.config.l1Enabled,
@@ -293,9 +303,13 @@ class HierarchicalCache {
             this.l1EvictionQueue.splice(index, 1);
         }
     }
+    /**
+     * P1-FIX-1: Use proper glob pattern matching instead of includes().
+     * Pattern '*' now correctly matches all keys, not just keys containing '*'.
+     */
     invalidateL1Pattern(pattern) {
         for (const key of this.l1Metadata.keys()) {
-            if (key.includes(pattern)) {
+            if (this.matchPattern(key, pattern)) {
                 this.invalidateL1(key);
             }
         }
@@ -317,9 +331,12 @@ class HierarchicalCache {
         return total;
     }
     // L2 Cache Implementation (Redis)
+    // P0-FIX-3: All L2 methods now use explicit redisPromise with null check
     async getFromL2(key) {
+        if (!this.redisPromise)
+            return null;
         try {
-            const redis = await this.redis;
+            const redis = await this.redisPromise;
             const data = await redis.get(`${this.l2Prefix}${key}`);
             return data ? JSON.parse(data) : null;
         }
@@ -329,24 +346,23 @@ class HierarchicalCache {
         }
     }
     async setInL2(key, value, ttl) {
+        if (!this.redisPromise)
+            return;
         try {
-            const redis = await this.redis;
-            const serialized = JSON.stringify(value);
+            const redis = await this.redisPromise;
             const redisKey = `${this.l2Prefix}${key}`;
-            if (ttl) {
-                await redis.setex(redisKey, ttl, serialized);
-            }
-            else {
-                await redis.setex(redisKey, this.config.l2Ttl, serialized);
-            }
+            // P0-FIX-3: Use RedisClient.set() which handles serialization and TTL internally
+            await redis.set(redisKey, value, ttl || this.config.l2Ttl);
         }
         catch (error) {
             logger.error('L2 cache set error', { error, key });
         }
     }
     async invalidateL2(key) {
+        if (!this.redisPromise)
+            return;
         try {
-            const redis = await this.redis;
+            const redis = await this.redisPromise;
             await redis.del(`${this.l2Prefix}${key}`);
         }
         catch (error) {
@@ -360,8 +376,10 @@ class HierarchicalCache {
      * SCAN iterates incrementally and doesn't block.
      */
     async invalidateL2Pattern(pattern) {
+        if (!this.redisPromise)
+            return;
         try {
-            const redis = await this.redis;
+            const redis = await this.redisPromise;
             const searchPattern = `${this.l2Prefix}*${pattern}*`;
             // P0-FIX: Use cursor-based SCAN iteration instead of KEYS
             let cursor = '0';
@@ -434,12 +452,35 @@ class HierarchicalCache {
     invalidateL3(key) {
         this.l3Storage.delete(`${this.l3Prefix}${key}`);
     }
+    /**
+     * P1-FIX-1: Use proper glob pattern matching instead of includes().
+     */
     invalidateL3Pattern(pattern) {
         for (const key of this.l3Storage.keys()) {
-            if (key.includes(pattern)) {
+            if (this.matchPattern(key, pattern)) {
                 this.l3Storage.delete(key);
             }
         }
+    }
+    /**
+     * P1-FIX-1: Glob-like pattern matching for cache key invalidation.
+     * Supports:
+     * - '*' matches any sequence of characters
+     * - '?' matches any single character
+     * - Other characters match literally
+     */
+    matchPattern(key, pattern) {
+        // Special case: '*' matches everything
+        if (pattern === '*')
+            return true;
+        // Convert glob pattern to regex
+        // Escape regex special chars except * and ?
+        const escaped = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+        const regex = new RegExp(`^${escaped}$`);
+        return regex.test(key);
     }
     // Utility methods
     estimateSize(obj) {

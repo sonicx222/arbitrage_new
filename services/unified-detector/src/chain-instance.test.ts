@@ -14,8 +14,8 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 // Mock the config module BEFORE importing anything else
-jest.mock('../../../shared/config/src', () => {
-  const originalModule = jest.requireActual('../../../shared/config/src') as any;
+jest.mock('@arbitrage/config', () => {
+  const originalModule = jest.requireActual('@arbitrage/config') as any;
   return {
     ...originalModule,
     getEnabledDexes: (chainId: string) => {
@@ -27,7 +27,7 @@ jest.mock('../../../shared/config/src', () => {
 });
 
 // Mock the core module to avoid Redis connection
-jest.mock('../../../shared/core/src', () => ({
+jest.mock('@arbitrage/core', () => ({
   createLogger: () => ({
     info: jest.fn(),
     warn: jest.fn(),
@@ -52,7 +52,7 @@ jest.mock('../../../shared/core/src', () => ({
 }));
 
 // Import AFTER mocks are set up
-import { ARBITRAGE_CONFIG } from '../../../shared/config/src';
+import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 
 // =============================================================================
 // Test Types (matching chain-instance.ts internal types)

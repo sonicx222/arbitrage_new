@@ -32,12 +32,12 @@ import {
   normalizeTokenForCrossChain,
   findCommonTokensBetweenChains,
   getChainSpecificTokenSymbol
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   getPartition,
   getChainsForPartition
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
 // =============================================================================
 // Constants

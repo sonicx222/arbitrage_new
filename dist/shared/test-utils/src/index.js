@@ -1,6 +1,30 @@
 "use strict";
-// Test Utilities for Arbitrage System
-// Provides mocks, fixtures, and helpers for comprehensive testing
+/**
+ * Test Utilities for Arbitrage System
+ *
+ * Provides mocks, fixtures, factories, and helpers for comprehensive testing.
+ *
+ * ## Usage
+ *
+ * ```typescript
+ * import {
+ *   // Mocks
+ *   RedisMock, createRedisMock,
+ *
+ *   // Factories (new, preferred)
+ *   swapEvent, createSwapEvent, createSwapBatch,
+ *   priceUpdate, createPriceUpdate,
+ *
+ *   // Setup utilities
+ *   setupTestEnv, resetAllSingletons,
+ *
+ *   // Legacy helpers (still supported)
+ *   delay, generateRandomAddress, measurePerformance
+ * } from '@arbitrage/test-utils';
+ * ```
+ *
+ * @see docs/TEST_ARCHITECTURE.md
+ */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -34,6 +58,9 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TestEnvironment = exports.mockSwapEvent = exports.mockArbitrageOpportunity = exports.mockPriceUpdate = exports.mockDexes = exports.mockTokens = exports.WebSocketMock = exports.BlockchainMock = exports.RedisMock = void 0;
 exports.createMockPriceUpdate = createMockPriceUpdate;
@@ -47,6 +74,9 @@ exports.getMemoryUsage = getMemoryUsage;
 exports.formatBytes = formatBytes;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+// =============================================================================
+// Environment Setup (runs at import time for backward compatibility)
+// =============================================================================
 // Load Redis test server config if available (from jest.globalSetup.ts)
 const REDIS_CONFIG_FILE = path.join(__dirname, '../../../.redis-test-config.json');
 if (fs.existsSync(REDIS_CONFIG_FILE)) {
@@ -55,10 +85,14 @@ if (fs.existsSync(REDIS_CONFIG_FILE)) {
         process.env.REDIS_HOST = config.host;
         process.env.REDIS_PORT = String(config.port);
         process.env.REDIS_URL = config.url;
-        console.log(`[Test Setup] Using Redis test server at ${config.url}`);
+        if (process.env.DEBUG_TESTS === 'true') {
+            console.log(`[Test Setup] Using Redis test server at ${config.url}`);
+        }
     }
     catch (error) {
-        console.warn('[Test Setup] Failed to load Redis config file:', error);
+        if (process.env.DEBUG_TESTS === 'true') {
+            console.warn('[Test Setup] Failed to load Redis config file:', error);
+        }
     }
 }
 // Set required environment variables before any imports
@@ -78,6 +112,15 @@ process.env.BASE_WS_URL = process.env.BASE_WS_URL || 'wss://mainnet.base.org';
 process.env.NODE_ENV = 'test';
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'error';
 process.env.REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+// =============================================================================
+// Re-exports from New Modular Structure
+// =============================================================================
+// Mocks
+__exportStar(require("./mocks"), exports);
+// Factories (new, preferred API)
+__exportStar(require("./factories"), exports);
+// Setup utilities
+__exportStar(require("./setup"), exports);
 // Mock implementations
 class RedisMock {
     constructor() {

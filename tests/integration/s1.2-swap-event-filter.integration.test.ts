@@ -85,7 +85,7 @@ import {
   SwapEventFilter,
   getSwapEventFilter,
   resetSwapEventFilter
-} from '../../shared/core/src/swap-event-filter';
+} from '@arbitrage/coreswap-event-filter';
 
 import type {
   SwapEventFilterConfig,
@@ -93,11 +93,11 @@ import type {
   VolumeAggregate,
   WhaleAlert,
   FilterStats
-} from '../../shared/core/src/swap-event-filter';
+} from '@arbitrage/coreswap-event-filter';
 
 import {
   resetRedisStreamsInstance
-} from '../../shared/core/src/redis-streams';
+} from '@arbitrage/coreredis-streams';
 
 import { delay, measurePerformance, generateRandomHash, generateRandomAddress } from '../../shared/test-utils/src';
 

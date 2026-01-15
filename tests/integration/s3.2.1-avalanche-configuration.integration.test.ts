@@ -17,13 +17,13 @@ import {
   CORE_TOKENS,
   TOKEN_METADATA,
   DETECTOR_CONFIG
-} from '../../shared/config/src';
+} from '@arbitrage/config';
 
 import {
   assignChainToPartition
-} from '../../shared/config/src/partitions';
+} from '@arbitrage/configpartitions';
 
-import { PARTITION_IDS } from '../../shared/config/src';
+import { PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================
 // Test Constants
@@ -226,7 +226,7 @@ describe('S3.2.1.2: Avalanche DEX Configuration', () => {
 
     it('should have vault-model DEXs enabled with adapters', () => {
       // Import DEXES directly to check all configured
-      const { DEXES } = require('../../shared/config/src');
+      const { DEXES } = require('@arbitrage/config');
       const allAvalancheDexes = DEXES['avalanche'] || [];
 
       // Should have 6 total DEXs configured
@@ -801,7 +801,7 @@ describe('S3.2.1.7: Regression Tests', () => {
     });
 
     it('should have 6 total Avalanche DEXs configured (all enabled with adapters)', () => {
-      const { DEXES } = require('../../shared/config/src');
+      const { DEXES } = require('@arbitrage/config');
       const allAvalancheDexes = DEXES['avalanche'] || [];
       const enabledAvalancheDexes = getEnabledDexes('avalanche');
 

@@ -3,7 +3,7 @@ import { jest, describe, test, expect, beforeEach } from '@jest/globals';
 import { ExecutionEngineService } from './engine';
 
 // Mock config module
-jest.mock('../../../shared/config/src', () => ({
+jest.mock('@arbitrage/config', () => ({
   CHAINS: {},
   ARBITRAGE_CONFIG: {
     minProfitPercentage: 0.003, // 0.3%
@@ -15,7 +15,7 @@ jest.mock('../../../shared/config/src', () => ({
   FLASH_LOAN_PROVIDERS: {}
 }));
 
-jest.mock('../../../shared/core/src', () => ({
+jest.mock('@arbitrage/core', () => ({
   getRedisClient: jest.fn(),
   createLogger: jest.fn(() => ({
     info: jest.fn(),
@@ -65,7 +65,7 @@ describe('ExecutionEngineService', () => {
       updateServiceHealth: jest.fn(() => Promise.resolve(undefined)),
       disconnect: jest.fn(() => Promise.resolve(undefined))
     };
-    const { getRedisClient } = require('../../../shared/core/src');
+    const { getRedisClient } = require('@arbitrage/core');
     (getRedisClient as jest.Mock).mockReturnValue(mockRedis);
 
     engine = new ExecutionEngineService();

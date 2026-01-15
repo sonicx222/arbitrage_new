@@ -28,7 +28,7 @@ const {
   CORE_TOKENS,
   TOKEN_METADATA,
   PHASE_METRICS
-} = require('../../shared/config/src');
+} = require('@arbitrage/config');
 
 // =============================================================================
 // S2.2.4 Test Suite: Token Coverage Verification

@@ -35,7 +35,7 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('../../shared/config/src');
+} = require('@arbitrage/config');
 
 // =============================================================================
 // S2.2.2: Coinbase Chain DEX Expansion Tests (5 → 7)

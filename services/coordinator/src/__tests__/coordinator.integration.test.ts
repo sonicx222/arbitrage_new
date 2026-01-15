@@ -11,7 +11,7 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import type { Mock } from 'jest-mock';
 import { CoordinatorService } from '../coordinator';
-import { getRedisClient, resetRedisInstance, getRedisStreamsClient, resetRedisStreamsInstance, RedisStreamsClient } from '../../../../shared/core/src';
+import { getRedisClient, resetRedisInstance, getRedisStreamsClient, resetRedisStreamsInstance, RedisStreamsClient } from '@arbitrage/core';
 
 // Type for mock Redis client
 interface MockRedisClient {
@@ -98,7 +98,7 @@ const mockStateManager = {
   setState: jest.fn()
 };
 
-jest.mock('../../../../shared/core/src', () => ({
+jest.mock('@arbitrage/core', () => ({
   getRedisClient: jest.fn(),
   resetRedisInstance: jest.fn(),
   getRedisStreamsClient: jest.fn(),

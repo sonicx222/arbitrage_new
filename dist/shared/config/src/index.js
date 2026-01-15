@@ -842,6 +842,7 @@ exports.PARTITION_CONFIG = {
 // Track progress against targets from ADR-008
 // S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
 // S3.2.2: Updated for Fantom expansion (11 chains, 46 DEXes, 98 tokens)
+// Phase 1 Adapters: Added vault-model DEX adapters (GMX, Platypus, Beethoven X)
 // =============================================================================
 exports.PHASE_METRICS = {
     current: {
@@ -852,11 +853,11 @@ exports.PHASE_METRICS = {
         targetOpportunities: 500 // Increased with more chains/DEXes
     },
     targets: {
-        // S3.2.2: Updated for Fantom expansion:
+        // Phase 1 with vault-model adapters:
         // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
-        // - 46 DEXes (S3.1.2: 44 + S3.2.2: 2 Fantom DEXs)
-        // - 98 tokens (S3.1.2: 94 + S3.2.2: 4 Fantom tokens)
-        phase1: { chains: 11, dexes: 46, tokens: 98, opportunities: 500 },
+        // - 49 DEXes (46 + 3 newly enabled: GMX, Platypus, Beethoven X with adapters)
+        // - 105 tokens (S3.2.1: 15 Avalanche + S3.2.2: 10 Fantom)
+        phase1: { chains: 11, dexes: 49, tokens: 105, opportunities: 500 },
         phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
         phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
     }

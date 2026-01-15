@@ -106,6 +106,7 @@ export declare class PartitionedDetector extends EventEmitter {
     protected chainStats: Map<string, ChainStats>;
     protected chainConfigs: Map<string, typeof CHAINS[keyof typeof CHAINS]>;
     protected chainPrices: Map<string, Map<string, PricePoint>>;
+    private static readonly MAX_LATENCY_SAMPLES;
     protected eventLatencies: number[];
     protected healthMonitoringInterval: NodeJS.Timeout | null;
     protected startTime: number;
@@ -131,6 +132,12 @@ export declare class PartitionedDetector extends EventEmitter {
     private startHealthMonitoring;
     getPartitionHealth(): PartitionHealth;
     getHealthyChains(): string[];
+    /**
+     * P6-FIX: Record event latency with bounded array to prevent memory leak.
+     * Keeps only the most recent MAX_LATENCY_SAMPLES entries.
+     * Subclasses should use this method to record latencies safely.
+     */
+    protected recordEventLatency(latencyMs: number): void;
     protected handleChainMessage(chainId: string, message: WebSocketMessage): void;
     protected handleLogEvent(chainId: string, log: EthereumLog): void;
     protected handleSyncEvent(chainId: string, log: EthereumLog): void;

@@ -36,10 +36,29 @@ export declare class NonceManager {
     /**
      * Get the next available nonce for a chain.
      * This is atomic and handles concurrent requests.
+     *
+     * P0-FIX-2: Uses queue-based mutex to prevent race conditions.
+     * The previous implementation had a TOCTOU race where multiple callers
+     * could pass the lock check before any of them set the lock.
      */
     getNextNonce(chain: string): Promise<number>;
     /**
+     * P0-FIX-2: Acquire lock using queue-based mutex.
+     * Guarantees mutual exclusion even under concurrent access.
+     */
+    private acquireLock;
+    /**
+     * P0-FIX-2: Release lock and wake up next waiter.
+     */
+    private releaseLock;
+    /**
      * Confirm a transaction was mined.
+     *
+     * P0-FIX-1: Fixed out-of-order confirmation handling.
+     * Previously, transactions were deleted from pendingTxs before advanceConfirmedNonce
+     * could process them, causing out-of-order confirmations to not cascade properly.
+     * Now we keep confirmed transactions in pendingTxs (with status='confirmed') until
+     * advanceConfirmedNonce processes and removes them in sequence.
      */
     confirmTransaction(chain: string, nonce: number, hash: string): void;
     /**
@@ -52,6 +71,9 @@ export declare class NonceManager {
     resetChain(chain: string): Promise<void>;
     /**
      * Get current state for monitoring.
+     *
+     * P0-FIX-1: pendingCount now only counts transactions with status='pending',
+     * not confirmed ones that are waiting for lower nonces to advance.
      */
     getState(chain: string): {
         confirmed: number;

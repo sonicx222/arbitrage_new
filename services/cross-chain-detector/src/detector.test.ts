@@ -28,7 +28,7 @@ process.env.BASE_WS_URL = 'wss://mainnet.base.org';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 // Import config directly to test configuration
-import { CHAINS, ARBITRAGE_CONFIG } from '../../../shared/config/src';
+import { CHAINS, ARBITRAGE_CONFIG } from '@arbitrage/config';
 
 // =============================================================================
 // Configuration Tests (No mocking required)

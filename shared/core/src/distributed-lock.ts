@@ -21,6 +21,14 @@ import { createLogger } from './logger';
 // Types
 // =============================================================================
 
+/** Logger interface for dependency injection */
+interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
 export interface LockConfig {
   /** Lock key prefix (default: 'lock:') */
   keyPrefix?: string;
@@ -30,6 +38,8 @@ export interface LockConfig {
   autoExtend?: boolean;
   /** Auto-extend interval in ms (should be < TTL/2) */
   autoExtendIntervalMs?: number;
+  /** Optional logger for testing (defaults to createLogger) */
+  logger?: Logger;
 }
 
 export interface AcquireOptions {
@@ -110,9 +120,9 @@ end
 
 export class DistributedLockManager {
   private redis: RedisClient | null = null;
-  private logger = createLogger('distributed-lock');
+  private logger: Logger;
   private instanceId: string;
-  private config: Required<LockConfig>;
+  private config: Required<Omit<LockConfig, 'logger'>>;
   private heldLocks: Map<string, { value: string; extendInterval?: NodeJS.Timeout }> = new Map();
   private stats: LockStats = {
     acquisitionAttempts: 0,
@@ -124,6 +134,9 @@ export class DistributedLockManager {
   };
 
   constructor(config: LockConfig = {}) {
+    // Use injected logger or create default
+    this.logger = config.logger ?? createLogger('distributed-lock');
+
     // Generate unique instance ID for lock ownership
     this.instanceId = `lock-owner-${process.env.HOSTNAME || 'local'}-${process.pid}-${Date.now()}`;
 
