@@ -109,6 +109,14 @@ export abstract class BaseDetector {
   // O(1) pair lookup by address (performance optimization)
   protected pairsByAddress: Map<string, Pair> = new Map();
 
+  /**
+   * T1.1: Token Pair Index for O(1) arbitrage detection.
+   * Maps normalized token pair key to array of pairs with those tokens.
+   * Key format: "tokenA_tokenB" where tokenA < tokenB (alphabetically sorted, lowercase)
+   * This enables O(1) lookup instead of O(n) scan when checking for arbitrage.
+   */
+  protected pairsByTokens: Map<string, Pair[]> = new Map();
+
   // Stop/start synchronization (race condition fix)
   // stopPromise ensures start() waits for stop() to fully complete
   protected stopPromise: Promise<void> | null = null;
@@ -161,7 +169,8 @@ export abstract class BaseDetector {
     this.eventBatcher = createEventBatcher(
       {
         maxBatchSize: config.batchSize || 20,
-        maxWaitTime: config.batchTimeout || 30,
+        // T1.3: Reduced from 30ms to 5ms for ultra-low latency detection
+        maxWaitTime: config.batchTimeout || 5,
         enableDeduplication: true,
         enablePrioritization: true
       },
@@ -472,6 +481,8 @@ export abstract class BaseDetector {
     // Clear collections to prevent memory leaks
     this.pairs.clear();
     this.pairsByAddress.clear();
+    // T1.1: Clear token pair index
+    this.pairsByTokens.clear();
     this.monitoredPairs.clear();
 
     // P0-2 fix: Clean up state manager event listeners
@@ -719,6 +730,7 @@ export abstract class BaseDetector {
 
   /**
    * Check for intra-DEX arbitrage opportunities.
+   * T1.1 OPTIMIZED: Uses token pair index for O(1) lookup instead of O(n) iteration.
    * Default implementation using pair snapshots for thread safety.
    */
   protected async checkIntraDexArbitrage(pair: Pair): Promise<void> {
@@ -733,70 +745,72 @@ export abstract class BaseDetector {
     const currentSnapshot = this.createPairSnapshot(pair);
     if (!currentSnapshot) return;
 
-    const [token0, token1] = [currentSnapshot.token0.toLowerCase(), currentSnapshot.token1.toLowerCase()];
     const currentPrice = this.calculatePriceFromSnapshot(currentSnapshot);
-
     if (currentPrice === 0) return;
 
-    // Create snapshots of ALL pairs atomically
-    const pairsSnapshots = this.createPairsSnapshot();
+    // T1.1: O(1) lookup - Get only pairs with matching tokens instead of scanning all pairs
+    // This is the key optimization: from O(n) to O(k) where k is number of DEXs trading this pair
+    const matchingPairs = this.getPairsForTokens(currentSnapshot.token0, currentSnapshot.token1);
 
-    for (const [key, otherSnapshot] of pairsSnapshots) {
-      if (otherSnapshot.address === currentSnapshot.address) continue;
-      if (otherSnapshot.dex === currentSnapshot.dex) continue;
+    // Skip if no other pairs to compare with (need at least 2 pairs for arbitrage)
+    if (matchingPairs.length < 2) return;
 
-      const otherToken0 = otherSnapshot.token0.toLowerCase();
-      const otherToken1 = otherSnapshot.token1.toLowerCase();
+    for (const otherPair of matchingPairs) {
+      // Skip self-comparison and same-DEX comparison
+      if (otherPair.address.toLowerCase() === currentSnapshot.address.toLowerCase()) continue;
+      if (otherPair.dex === currentSnapshot.dex) continue;
 
-      // Check if same token pair (in either order)
-      const sameOrder = otherToken0 === token0 && otherToken1 === token1;
-      const reverseOrder = otherToken0 === token1 && otherToken1 === token0;
+      // Create snapshot of other pair for thread-safe comparison
+      const otherSnapshot = this.createPairSnapshot(otherPair);
+      if (!otherSnapshot) continue;
 
-      if (sameOrder || reverseOrder) {
-        let otherPrice = this.calculatePriceFromSnapshot(otherSnapshot);
-        if (otherPrice === 0) continue;
+      let otherPrice = this.calculatePriceFromSnapshot(otherSnapshot);
+      if (otherPrice === 0) continue;
 
-        // Adjust price for reverse order pairs
-        if (reverseOrder && otherPrice !== 0) {
-          otherPrice = 1 / otherPrice;
-        }
+      // Check if token order is reversed and adjust price accordingly
+      const currentToken0Lower = currentSnapshot.token0.toLowerCase();
+      const otherToken0Lower = otherSnapshot.token0.toLowerCase();
+      const isReverseOrder = currentToken0Lower !== otherToken0Lower;
 
-        // Calculate price difference percentage (gross spread)
-        const priceDiff = Math.abs(currentPrice - otherPrice) / Math.min(currentPrice, otherPrice);
+      if (isReverseOrder && otherPrice !== 0) {
+        otherPrice = 1 / otherPrice;
+      }
 
-        // Calculate fee-adjusted net profit (S2.2.2 fix: use pair-specific fees)
-        const currentFee = currentSnapshot.fee ?? 0.003;
-        const otherFee = otherSnapshot.fee ?? 0.003;
-        const totalFees = currentFee + otherFee;
-        const netProfitPct = priceDiff - totalFees;
+      // Calculate price difference percentage (gross spread)
+      const priceDiff = Math.abs(currentPrice - otherPrice) / Math.min(currentPrice, otherPrice);
 
-        // Check against threshold using NET profit (not gross)
-        if (netProfitPct >= this.getMinProfitThreshold()) {
-          const chainConfig = this.getChainDetectorConfig();
-          const opportunity: ArbitrageOpportunity = {
-            id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
-            type: 'simple',
-            chain: this.chain,
-            buyDex: currentPrice < otherPrice ? currentSnapshot.dex : otherSnapshot.dex,
-            sellDex: currentPrice < otherPrice ? otherSnapshot.dex : currentSnapshot.dex,
-            buyPair: currentPrice < otherPrice ? currentSnapshot.address : otherSnapshot.address,
-            sellPair: currentPrice < otherPrice ? otherSnapshot.address : currentSnapshot.address,
-            token0: currentSnapshot.token0,
-            token1: currentSnapshot.token1,
-            buyPrice: Math.min(currentPrice, otherPrice),
-            sellPrice: Math.max(currentPrice, otherPrice),
-            profitPercentage: netProfitPct * 100, // Report NET profit percentage
-            expectedProfit: netProfitPct, // Net profit as decimal
-            estimatedProfit: 0,
-            confidence: chainConfig.confidence,
-            timestamp: Date.now(),
-            expiresAt: Date.now() + chainConfig.expiryMs,
-            gasEstimate: chainConfig.gasEstimate,
-            status: 'pending'
-          };
+      // Calculate fee-adjusted net profit (S2.2.2 fix: use pair-specific fees)
+      const currentFee = currentSnapshot.fee ?? 0.003;
+      const otherFee = otherSnapshot.fee ?? 0.003;
+      const totalFees = currentFee + otherFee;
+      const netProfitPct = priceDiff - totalFees;
 
-          opportunities.push(opportunity);
-        }
+      // Check against threshold using NET profit (not gross)
+      if (netProfitPct >= this.getMinProfitThreshold()) {
+        const chainConfig = this.getChainDetectorConfig();
+        const opportunity: ArbitrageOpportunity = {
+          id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
+          type: 'simple',
+          chain: this.chain,
+          buyDex: currentPrice < otherPrice ? currentSnapshot.dex : otherSnapshot.dex,
+          sellDex: currentPrice < otherPrice ? otherSnapshot.dex : currentSnapshot.dex,
+          buyPair: currentPrice < otherPrice ? currentSnapshot.address : otherSnapshot.address,
+          sellPair: currentPrice < otherPrice ? otherSnapshot.address : currentSnapshot.address,
+          token0: currentSnapshot.token0,
+          token1: currentSnapshot.token1,
+          buyPrice: Math.min(currentPrice, otherPrice),
+          sellPrice: Math.max(currentPrice, otherPrice),
+          profitPercentage: netProfitPct * 100, // Report NET profit percentage
+          expectedProfit: netProfitPct, // Net profit as decimal
+          estimatedProfit: 0,
+          confidence: chainConfig.confidence,
+          timestamp: Date.now(),
+          expiresAt: Date.now() + chainConfig.expiryMs,
+          gasEstimate: chainConfig.gasEstimate,
+          status: 'pending'
+        };
+
+        opportunities.push(opportunity);
       }
     }
 
@@ -965,6 +979,8 @@ export abstract class BaseDetector {
               this.pairs.set(fullPairKey, pair);
               // O(1) lookup by address (used in processLogEvent, calculatePriceImpact)
               this.pairsByAddress.set(pairAddress.toLowerCase(), pair);
+              // T1.1: Add to token pair index for O(1) arbitrage detection
+              this.addPairToTokenIndex(pair);
               this.monitoredPairs.add(pairAddress.toLowerCase());
               pairsProcessed.add(pairKey);
 
@@ -1662,5 +1678,70 @@ export abstract class BaseDetector {
 
   protected normalizeAddress(address: string): string {
     return ethers.getAddress(address);
+  }
+
+  // ===========================================================================
+  // T1.1: Token Pair Indexing Utilities
+  // ===========================================================================
+
+  /**
+   * T1.1: Generate normalized token pair key for O(1) index lookup.
+   * Tokens are sorted alphabetically (lowercase) to ensure consistent key
+   * regardless of token order in the pair.
+   * @param token0 First token address
+   * @param token1 Second token address
+   * @returns Normalized key "tokenA_tokenB" where tokenA < tokenB
+   */
+  protected getTokenPairKey(token0: string, token1: string): string {
+    const t0 = token0.toLowerCase();
+    const t1 = token1.toLowerCase();
+    // Sort alphabetically for consistent key
+    return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+  }
+
+  /**
+   * T1.1: Add a pair to the token pair index.
+   * Called during pair initialization to build the index.
+   */
+  protected addPairToTokenIndex(pair: Pair): void {
+    const key = this.getTokenPairKey(pair.token0, pair.token1);
+    let pairsForKey = this.pairsByTokens.get(key);
+    if (!pairsForKey) {
+      pairsForKey = [];
+      this.pairsByTokens.set(key, pairsForKey);
+    }
+    // Avoid duplicates
+    if (!pairsForKey.some(p => p.address.toLowerCase() === pair.address.toLowerCase())) {
+      pairsForKey.push(pair);
+    }
+  }
+
+  /**
+   * T1.1: Remove a pair from the token pair index.
+   */
+  protected removePairFromTokenIndex(pair: Pair): void {
+    const key = this.getTokenPairKey(pair.token0, pair.token1);
+    const pairsForKey = this.pairsByTokens.get(key);
+    if (pairsForKey) {
+      const index = pairsForKey.findIndex(p => p.address.toLowerCase() === pair.address.toLowerCase());
+      if (index !== -1) {
+        pairsForKey.splice(index, 1);
+      }
+      if (pairsForKey.length === 0) {
+        this.pairsByTokens.delete(key);
+      }
+    }
+  }
+
+  /**
+   * T1.1: Get all pairs for a given token combination.
+   * Returns pairs on different DEXs that trade the same tokens.
+   * @param token0 First token address
+   * @param token1 Second token address
+   * @returns Array of pairs trading these tokens (may be empty)
+   */
+  protected getPairsForTokens(token0: string, token1: string): Pair[] {
+    const key = this.getTokenPairKey(token0, token1);
+    return this.pairsByTokens.get(key) || [];
   }
 }

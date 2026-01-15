@@ -36,15 +36,13 @@ jest.mock('@arbitrage/core', () => {
   };
 });
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn()
-  }))
-}));
+// Create mock logger for DI injection
+const createMockLogger = () => ({
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn()
+});
 
 // Import after mocks are set up
 import {
@@ -57,21 +55,25 @@ import {
 
 describe('PriceOracle', () => {
   let oracle: PriceOracle;
+  let mockLogger: ReturnType<typeof createMockLogger>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     resetPriceOracle();
 
-    // Create fresh mock for each test
+    // Create fresh mocks for each test
     mockRedisClient = createMockRedisClient();
+    mockLogger = createMockLogger();
 
     // Default mock implementations
     mockRedisClient.get.mockResolvedValue(null);
     mockRedisClient.set.mockResolvedValue('OK');
 
+    // Use DI to inject mock logger
     oracle = new PriceOracle({
       cacheTtlSeconds: 60,
-      stalenessThresholdMs: 300000
+      stalenessThresholdMs: 300000,
+      logger: mockLogger as any
     });
     await oracle.initialize(mockRedisClient as any);
   });
@@ -412,7 +414,8 @@ describe('PriceOracle', () => {
   describe('custom configuration', () => {
     it('should use custom cache key prefix', async () => {
       const customOracle = new PriceOracle({
-        cacheKeyPrefix: 'myapp:prices:'
+        cacheKeyPrefix: 'myapp:prices:',
+        logger: mockLogger as any
       });
       await customOracle.initialize(mockRedisClient as any);
 
@@ -427,7 +430,8 @@ describe('PriceOracle', () => {
 
     it('should use custom TTL', async () => {
       const customOracle = new PriceOracle({
-        cacheTtlSeconds: 300
+        cacheTtlSeconds: 300,
+        logger: mockLogger as any
       });
       await customOracle.initialize(mockRedisClient as any);
 
@@ -445,7 +449,8 @@ describe('PriceOracle', () => {
         customFallbackPrices: {
           CUSTOM_TOKEN: 999,
           ETH: 5000 // Override default
-        }
+        },
+        logger: mockLogger as any
       });
       await customOracle.initialize(mockRedisClient as any);
 
@@ -455,7 +460,8 @@ describe('PriceOracle', () => {
 
     it('should disable fallback when configured', async () => {
       const customOracle = new PriceOracle({
-        useFallback: false
+        useFallback: false,
+        logger: mockLogger as any
       });
       await customOracle.initialize(mockRedisClient as any);
       mockRedisClient.get.mockResolvedValue(null);
@@ -554,6 +560,159 @@ describe('PriceOracle', () => {
 
       expect(result.source).toBe('cache');
       expect(mockRedisClient.get).toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // T2.9: Dynamic Fallback Prices
+  // ===========================================================================
+
+  describe('T2.9: Dynamic Fallback Prices', () => {
+    describe('Last Known Good Price Tracking', () => {
+      it('should track last known good price from cache hits', async () => {
+        // Simulate a successful price from Redis cache
+        const cachedData = { price: 3500, timestamp: Date.now() };
+        mockRedisClient.get.mockResolvedValue(cachedData);
+
+        await oracle.getPrice('ETH');
+
+        // The last known good price should be tracked
+        const lastKnownGood = oracle.getLastKnownGoodPrice('ETH');
+        expect(lastKnownGood).toBe(3500);
+      });
+
+      it('should not update last known good price from static fallback', async () => {
+        // No cache, using fallback
+        mockRedisClient.get.mockResolvedValue(null);
+
+        // Clear any existing last known good
+        oracle.clearLocalCache();
+
+        await oracle.getPrice('UNKNOWN_TOKEN_XYZ');
+
+        // Last known good should not be set for tokens with no cache history
+        const lastKnownGood = oracle.getLastKnownGoodPrice('UNKNOWN_TOKEN_XYZ');
+        expect(lastKnownGood).toBe(0);
+      });
+
+      it('should prefer last known good over static fallback when cache misses', async () => {
+        // First call: get price from cache, establishing last known good
+        const cachedData = { price: 3500, timestamp: Date.now() };
+        mockRedisClient.get.mockResolvedValueOnce(cachedData);
+        await oracle.getPrice('ETH');
+
+        // Clear local cache to force fallback path
+        oracle.clearLocalCache();
+
+        // Second call: cache miss, Redis miss
+        mockRedisClient.get.mockResolvedValueOnce(null);
+        const result = await oracle.getPrice('ETH');
+
+        // Should use last known good (3500) instead of static fallback (2500)
+        expect(result.price).toBe(3500);
+        expect(result.source).toBe('lastKnownGood');
+      });
+
+      it('should handle wrapped token aliases for last known good', async () => {
+        const cachedData = { price: 3500, timestamp: Date.now() };
+        mockRedisClient.get.mockResolvedValue(cachedData);
+
+        await oracle.getPrice('WETH');
+
+        // WETH should track ETH's last known good
+        const lastKnownGood = oracle.getLastKnownGoodPrice('ETH');
+        expect(lastKnownGood).toBe(3500);
+      });
+    });
+
+    describe('Bulk Fallback Price Updates', () => {
+      it('should update multiple fallback prices at once', () => {
+        oracle.updateFallbackPrices({
+          ETH: 3000,
+          BTC: 95000,
+          BNB: 350
+        });
+
+        expect(oracle.getFallbackPrice('ETH')).toBe(3000);
+        expect(oracle.getFallbackPrice('BTC')).toBe(95000);
+        expect(oracle.getFallbackPrice('BNB')).toBe(350);
+      });
+
+      it('should preserve existing fallbacks not in update', () => {
+        const originalUsdt = oracle.getFallbackPrice('USDT');
+
+        oracle.updateFallbackPrices({
+          ETH: 3000
+        });
+
+        // USDT should not be changed
+        expect(oracle.getFallbackPrice('USDT')).toBe(originalUsdt);
+      });
+
+      it('should ignore invalid prices in bulk update', () => {
+        const originalEth = oracle.getFallbackPrice('ETH');
+        const originalBtc = oracle.getFallbackPrice('BTC');
+
+        oracle.updateFallbackPrices({
+          ETH: -100,
+          BTC: 0,
+          BNB: 350
+        });
+
+        // Invalid prices should be ignored
+        expect(oracle.getFallbackPrice('ETH')).toBe(originalEth);
+        expect(oracle.getFallbackPrice('BTC')).toBe(originalBtc);
+        expect(oracle.getFallbackPrice('BNB')).toBe(350); // Valid update
+      });
+
+      it('should handle wrapped token normalization in bulk update', () => {
+        oracle.updateFallbackPrices({
+          WETH: 3000,
+          WBTC: 95000
+        });
+
+        // Should be normalized to native tokens
+        expect(oracle.getFallbackPrice('ETH')).toBe(3000);
+        expect(oracle.getFallbackPrice('BTC')).toBe(95000);
+      });
+    });
+
+    describe('Price Staleness Metrics', () => {
+      beforeEach(() => {
+        oracle.resetPriceMetrics();
+      });
+
+      it('should track fallback price usage count', async () => {
+        mockRedisClient.get.mockResolvedValue(null);
+        oracle.clearLocalCache();
+
+        await oracle.getPrice('ETH');
+        await oracle.getPrice('BTC');
+
+        const metrics = oracle.getPriceMetrics();
+        expect(metrics.fallbackUsageCount).toBeGreaterThanOrEqual(2);
+      });
+
+      it('should track cache hit count', async () => {
+        const cachedData = { price: 3500, timestamp: Date.now() };
+        mockRedisClient.get.mockResolvedValue(cachedData);
+        oracle.clearLocalCache();
+
+        await oracle.getPrice('ETH');
+
+        const metrics = oracle.getPriceMetrics();
+        expect(metrics.cacheHitCount).toBeGreaterThanOrEqual(1);
+      });
+
+      it('should report stale fallback warnings', async () => {
+        mockRedisClient.get.mockResolvedValue(null);
+        oracle.clearLocalCache();
+
+        await oracle.getPrice('ETH');
+
+        const metrics = oracle.getPriceMetrics();
+        expect(metrics.staleFallbackWarnings).toContain('ETH');
+      });
     });
   });
 });

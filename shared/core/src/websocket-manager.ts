@@ -25,6 +25,48 @@ export interface WebSocketConfig {
   maxReconnectDelay?: number;
   /** Jitter percentage to add randomness (default: 0.25 = 25%) */
   jitterPercent?: number;
+  /**
+   * T1.5: Staleness threshold in ms before rotating to fallback provider.
+   * If not specified, uses chain-based defaults:
+   * - Fast chains (arbitrum, solana): 5000ms
+   * - Medium chains (polygon, bsc, optimism, base, avalanche, fantom): 10000ms
+   * - Slow chains (ethereum, zksync, linea): 15000ms
+   */
+  stalenessThresholdMs?: number;
+}
+
+/**
+ * T1.5: Chain-specific staleness thresholds based on block times.
+ * Fast chains need aggressive staleness detection to avoid missing opportunities.
+ */
+const CHAIN_STALENESS_THRESHOLDS: Record<string, number> = {
+  // Fast chains (sub-1s block times) - 5 seconds
+  arbitrum: 5000,
+  solana: 5000,
+
+  // Medium chains (1-3s block times) - 10 seconds
+  polygon: 10000,
+  bsc: 10000,
+  optimism: 10000,
+  base: 10000,
+  avalanche: 10000,
+  fantom: 10000,
+
+  // Slow chains (10+ second block times) - 15 seconds
+  ethereum: 15000,
+  zksync: 15000,
+  linea: 15000,
+
+  // Default for unknown chains
+  default: 15000
+};
+
+/**
+ * T1.5: Get staleness threshold for a specific chain.
+ */
+function getChainStalenessThreshold(chainId: string): number {
+  const normalizedChain = chainId.toLowerCase();
+  return CHAIN_STALENESS_THRESHOLDS[normalizedChain] ?? CHAIN_STALENESS_THRESHOLDS.default;
 }
 
 export interface WebSocketSubscription {
@@ -112,8 +154,12 @@ export class WebSocketManager {
 
   /** Proactive health check interval timer */
   private healthCheckTimer: NodeJS.Timeout | null = null;
-  /** Staleness threshold in ms (default 30 seconds with no messages) */
-  private stalenessThresholdMs = 30000;
+  /**
+   * T1.5: Staleness threshold in ms - now chain-specific.
+   * Previous: Fixed 30 seconds for all chains.
+   * New: 5s (fast chains) / 10s (medium) / 15s (slow) based on block times.
+   */
+  private stalenessThresholdMs: number;
 
   /** S3.3: Provider health scorer for intelligent fallback selection */
   private healthScorer: ProviderHealthScorer;
@@ -133,6 +179,18 @@ export class WebSocketManager {
       ...config
     };
     this.chainId = config.chainId || 'unknown';
+
+    // T1.5: Set staleness threshold based on chain type or explicit config
+    // Fast chains (arbitrum, solana): 5s
+    // Medium chains (polygon, bsc, optimism, base): 10s
+    // Slow chains (ethereum): 15s
+    this.stalenessThresholdMs = config.stalenessThresholdMs ??
+      getChainStalenessThreshold(this.chainId);
+
+    this.logger.debug('Staleness threshold configured', {
+      chainId: this.chainId,
+      stalenessThresholdMs: this.stalenessThresholdMs
+    });
 
     // S3.3: Initialize health scorer for intelligent fallback selection
     this.healthScorer = getProviderHealthScorer();

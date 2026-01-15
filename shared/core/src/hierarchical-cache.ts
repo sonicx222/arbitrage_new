@@ -26,12 +26,186 @@ const CACHE_DEFAULTS = {
 
 const logger = createLogger('hierarchical-cache');
 
+// ===========================================================================
+// T1.4: O(1) LRU Queue Implementation using Doubly-Linked List
+// ===========================================================================
+
+/**
+ * T1.4: Node in the doubly-linked list for LRU tracking.
+ * Each node holds a key and pointers to prev/next nodes.
+ */
+interface LRUNode {
+  key: string;
+  prev: LRUNode | null;
+  next: LRUNode | null;
+}
+
+/**
+ * T1.4: O(1) LRU Queue using doubly-linked list + Map.
+ *
+ * Operations:
+ * - touch(key): Move key to end (most recently used) - O(1)
+ * - add(key): Add new key to end - O(1)
+ * - evictOldest(): Remove and return oldest key - O(1)
+ * - remove(key): Remove specific key - O(1)
+ * - has(key): Check if key exists - O(1)
+ * - size: Get current size - O(1)
+ *
+ * Previous array-based implementation:
+ * - indexOf: O(n)
+ * - splice: O(n)
+ *
+ * This implementation eliminates the O(n) overhead.
+ */
+export class LRUQueue {
+  /** Map from key to node for O(1) lookup */
+  private nodeMap: Map<string, LRUNode> = new Map();
+  /** Sentinel head node (oldest) */
+  private head: LRUNode;
+  /** Sentinel tail node (newest) */
+  private tail: LRUNode;
+
+  constructor() {
+    // Initialize sentinel nodes (simplifies edge case handling)
+    this.head = { key: '__HEAD__', prev: null, next: null };
+    this.tail = { key: '__TAIL__', prev: null, next: null };
+    this.head.next = this.tail;
+    this.tail.prev = this.head;
+  }
+
+  /**
+   * Get current queue size.
+   */
+  get size(): number {
+    return this.nodeMap.size;
+  }
+
+  /**
+   * Check if key exists in queue.
+   */
+  has(key: string): boolean {
+    return this.nodeMap.has(key);
+  }
+
+  /**
+   * Add new key to end of queue (most recently used).
+   * If key already exists, moves it to end.
+   */
+  add(key: string): void {
+    if (this.nodeMap.has(key)) {
+      // Key exists, just touch it
+      this.touch(key);
+      return;
+    }
+
+    // Create new node
+    const node: LRUNode = { key, prev: null, next: null };
+
+    // Insert before tail (at the end)
+    this.insertBeforeTail(node);
+
+    // Add to map
+    this.nodeMap.set(key, node);
+  }
+
+  /**
+   * Move existing key to end of queue (most recently used).
+   * O(1) operation.
+   */
+  touch(key: string): void {
+    const node = this.nodeMap.get(key);
+    if (!node) return;
+
+    // Remove from current position
+    this.removeNode(node);
+
+    // Insert at end
+    this.insertBeforeTail(node);
+  }
+
+  /**
+   * Remove and return the oldest key (from head).
+   * Returns null if queue is empty.
+   */
+  evictOldest(): string | null {
+    // Oldest is the node after head sentinel
+    const oldest = this.head.next;
+    if (!oldest || oldest === this.tail) {
+      return null; // Queue is empty
+    }
+
+    // Remove from list
+    this.removeNode(oldest);
+
+    // Remove from map
+    this.nodeMap.delete(oldest.key);
+
+    return oldest.key;
+  }
+
+  /**
+   * Remove a specific key from queue.
+   */
+  remove(key: string): boolean {
+    const node = this.nodeMap.get(key);
+    if (!node) return false;
+
+    this.removeNode(node);
+    this.nodeMap.delete(key);
+    return true;
+  }
+
+  /**
+   * Clear all entries.
+   */
+  clear(): void {
+    this.nodeMap.clear();
+    this.head.next = this.tail;
+    this.tail.prev = this.head;
+  }
+
+  /**
+   * Get all keys in order (oldest first).
+   * Mainly for debugging/testing.
+   */
+  keys(): string[] {
+    const result: string[] = [];
+    let current = this.head.next;
+    while (current && current !== this.tail) {
+      result.push(current.key);
+      current = current.next;
+    }
+    return result;
+  }
+
+  // Private helper: Remove node from its current position
+  private removeNode(node: LRUNode): void {
+    const prev = node.prev;
+    const next = node.next;
+    if (prev) prev.next = next;
+    if (next) next.prev = prev;
+    node.prev = null;
+    node.next = null;
+  }
+
+  // Private helper: Insert node before tail (at the "newest" end)
+  private insertBeforeTail(node: LRUNode): void {
+    const prev = this.tail.prev;
+    node.prev = prev;
+    node.next = this.tail;
+    if (prev) prev.next = node;
+    this.tail.prev = node;
+  }
+}
+
 export interface CacheConfig {
   l1Enabled: boolean;
   l1Size: number; // Size in MB for SharedArrayBuffer
   l2Enabled: boolean;
   l2Ttl: number; // TTL in seconds
   l3Enabled: boolean;
+  /** T2.10: Maximum entries for L3 cache (0 = unlimited for backwards compatibility) */
+  l3MaxSize: number;
   enablePromotion: boolean; // Auto-promote frequently accessed data
   enableDemotion: boolean; // Auto-demote rarely accessed data
 }
@@ -61,7 +235,10 @@ export class HierarchicalCache {
   // L1 Cache: SharedArrayBuffer for ultra-fast access
   private l1Metadata: Map<string, CacheEntry> = new Map();
   private l1MaxEntries: number;
-  private l1EvictionQueue: string[] = []; // LRU eviction
+  // T1.4: Replaced array-based LRU queue with O(1) LRU queue
+  // Previous: private l1EvictionQueue: string[] = []; // O(n) indexOf/splice
+  // New: O(1) operations for all LRU operations
+  private l1EvictionQueue: LRUQueue = new LRUQueue();
 
   // L2 Cache: Redis
   private l2Prefix = 'cache:l2:';
@@ -69,6 +246,9 @@ export class HierarchicalCache {
   // L3 Cache: Persistent storage simulation (would be DB in production)
   private l3Storage: Map<string, CacheEntry> = new Map();
   private l3Prefix = 'cache:l3:';
+  // T2.10: L3 LRU eviction queue and max size
+  private l3EvictionQueue: LRUQueue = new LRUQueue();
+  private l3MaxSize: number = 0; // 0 = unlimited
 
   // Cache statistics
   private stats = {
@@ -87,6 +267,8 @@ export class HierarchicalCache {
       l2Enabled: config.l2Enabled !== false,
       l2Ttl: config.l2Ttl || CACHE_DEFAULTS.defaultL2TtlSeconds,
       l3Enabled: config.l3Enabled !== false,
+      // T2.10: L3 max size defaults to 10000 (0 = unlimited for backwards compat)
+      l3MaxSize: config.l3MaxSize ?? 10000,
       enablePromotion: config.enablePromotion !== false,
       enableDemotion: config.enableDemotion !== false
     };
@@ -95,6 +277,9 @@ export class HierarchicalCache {
     this.l1MaxEntries = Math.floor(
       this.config.l1Size * 1024 * 1024 / CACHE_DEFAULTS.averageEntrySize
     );
+
+    // T2.10: Initialize L3 max size
+    this.l3MaxSize = this.config.l3MaxSize;
 
     // P0-FIX-3: Store the Promise from getRedisClient() for lazy initialization
     if (this.config.l2Enabled) {
@@ -252,13 +437,16 @@ export class HierarchicalCache {
   async clear(): Promise<void> {
     if (this.config.l1Enabled) {
       this.l1Metadata.clear();
-      this.l1EvictionQueue = [];
+      // T1.4: Use LRUQueue.clear() instead of reassigning to empty array
+      this.l1EvictionQueue.clear();
     }
     if (this.config.l2Enabled) {
       await this.invalidateL2Pattern('*');
     }
     if (this.config.l3Enabled) {
       this.l3Storage.clear();
+      // T2.10: Clear L3 eviction queue
+      this.l3EvictionQueue.clear();
     }
   }
 
@@ -289,7 +477,12 @@ export class HierarchicalCache {
       },
       l3: {
         ...this.stats.l3,
-        entries: this.l3Storage.size
+        entries: this.l3Storage.size,
+        // T2.10: Include L3 max size and utilization
+        maxSize: this.l3MaxSize,
+        utilization: this.l3MaxSize > 0
+          ? this.l3Storage.size / this.l3MaxSize
+          : 0 // 0 utilization for unlimited cache
       }
     };
   }
@@ -308,12 +501,10 @@ export class HierarchicalCache {
     entry.accessCount++;
     entry.lastAccess = Date.now();
 
-    // Move to end of LRU queue (most recently used)
-    const index = this.l1EvictionQueue.indexOf(key);
-    if (index > -1) {
-      this.l1EvictionQueue.splice(index, 1);
-    }
-    this.l1EvictionQueue.push(key);
+    // T1.4: Move to end of LRU queue using O(1) touch operation
+    // Previous: O(n) indexOf + O(n) splice + O(1) push
+    // New: O(1) touch
+    this.l1EvictionQueue.touch(key);
 
     return entry.value;
   }
@@ -339,20 +530,16 @@ export class HierarchicalCache {
 
     this.l1Metadata.set(key, entry);
 
-    // Add to LRU queue
-    const index = this.l1EvictionQueue.indexOf(key);
-    if (index > -1) {
-      this.l1EvictionQueue.splice(index, 1);
-    }
-    this.l1EvictionQueue.push(key);
+    // T1.4: Add to LRU queue using O(1) add operation
+    // Previous: O(n) indexOf + O(n) splice + O(1) push
+    // New: O(1) add (handles both new keys and existing keys)
+    this.l1EvictionQueue.add(key);
   }
 
   private invalidateL1(key: string): void {
     this.l1Metadata.delete(key);
-    const index = this.l1EvictionQueue.indexOf(key);
-    if (index > -1) {
-      this.l1EvictionQueue.splice(index, 1);
-    }
+    // T1.4: O(1) remove instead of O(n) indexOf + O(n) splice
+    this.l1EvictionQueue.remove(key);
   }
 
   /**
@@ -368,9 +555,10 @@ export class HierarchicalCache {
   }
 
   private evictL1(): void {
-    if (this.l1EvictionQueue.length === 0) return;
-
-    const key = this.l1EvictionQueue.shift();
+    // T1.4: O(1) eviction using evictOldest()
+    // Previous: O(1) shift but required array reindexing
+    // New: O(1) doubly-linked list removal
+    const key = this.l1EvictionQueue.evictOldest();
     if (key) {
       this.l1Metadata.delete(key);
       this.stats.l1.evictions++;
@@ -431,7 +619,11 @@ export class HierarchicalCache {
     if (!this.redisPromise) return;
     try {
       const redis = await this.redisPromise;
-      const searchPattern = `${this.l2Prefix}*${pattern}*`;
+      // BUG FIX: Don't wrap pattern with extra wildcards - use pattern as-is with prefix
+      // Pattern '*' should become 'cache:l2:*', not 'cache:l2:**'
+      const searchPattern = pattern === '*'
+        ? `${this.l2Prefix}*`
+        : `${this.l2Prefix}${pattern}`;
 
       // P0-FIX: Use cursor-based SCAN iteration instead of KEYS
       let cursor = '0';
@@ -496,7 +688,8 @@ export class HierarchicalCache {
 
   // L3 Cache Implementation (Persistent Storage)
   private getFromL3(key: string): any {
-    const entry = this.l3Storage.get(`${this.l3Prefix}${key}`);
+    const l3Key = `${this.l3Prefix}${key}`;
+    const entry = this.l3Storage.get(l3Key);
     if (!entry) return null;
 
     // Check TTL
@@ -508,24 +701,63 @@ export class HierarchicalCache {
     entry.accessCount++;
     entry.lastAccess = Date.now();
 
+    // T2.10: Touch LRU queue to mark as recently used
+    this.l3EvictionQueue.touch(l3Key);
+
     return entry.value;
   }
 
+  /**
+   * T2.10: Set value in L3 with LRU eviction support.
+   * Evicts oldest entries when cache exceeds max size.
+   */
   private setInL3(key: string, entry: CacheEntry): void {
-    this.l3Storage.set(`${this.l3Prefix}${key}`, entry);
+    const l3Key = `${this.l3Prefix}${key}`;
+
+    // Check if key already exists (update case)
+    const existing = this.l3Storage.has(l3Key);
+
+    // T2.10: Evict if necessary (only if max size > 0 and new entry)
+    if (!existing && this.l3MaxSize > 0) {
+      while (this.l3Storage.size >= this.l3MaxSize) {
+        this.evictL3();
+      }
+    }
+
+    this.l3Storage.set(l3Key, entry);
+
+    // T2.10: Add to or touch LRU queue
+    this.l3EvictionQueue.add(l3Key);
+  }
+
+  /**
+   * T2.10: Evict the oldest L3 entry.
+   */
+  private evictL3(): void {
+    const key = this.l3EvictionQueue.evictOldest();
+    if (key) {
+      this.l3Storage.delete(key);
+      this.stats.l3.evictions++;
+    }
   }
 
   private invalidateL3(key: string): void {
-    this.l3Storage.delete(`${this.l3Prefix}${key}`);
+    const l3Key = `${this.l3Prefix}${key}`;
+    this.l3Storage.delete(l3Key);
+    // T2.10: Remove from LRU queue
+    this.l3EvictionQueue.remove(l3Key);
   }
 
   /**
    * P1-FIX-1: Use proper glob pattern matching instead of includes().
+   * T2.10: Also removes entries from LRU queue.
    */
   private invalidateL3Pattern(pattern: string): void {
     for (const key of this.l3Storage.keys()) {
       if (this.matchPattern(key, pattern)) {
         this.l3Storage.delete(key);
+        // T2.10: Remove from LRU queue
+        this.l3EvictionQueue.remove(key);
       }
     }
   }
@@ -579,10 +811,12 @@ export class HierarchicalCache {
     }
 
     // L3 cleanup
+    // BUG FIX: Also remove expired entries from LRU queue to prevent stale references
     if (this.config.l3Enabled) {
       for (const [key, entry] of this.l3Storage.entries()) {
         if (entry.ttl && now - entry.timestamp > entry.ttl * 1000) {
           this.l3Storage.delete(key);
+          this.l3EvictionQueue.remove(key);
         }
       }
     }

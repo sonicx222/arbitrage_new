@@ -20,7 +20,7 @@
  */
 
 import { RedisClient, getRedisClient } from './redis';
-import { createLogger } from './logger';
+import { createLogger, Logger } from './logger';
 
 // =============================================================================
 // Types
@@ -29,7 +29,8 @@ import { createLogger } from './logger';
 export interface TokenPrice {
   symbol: string;
   price: number;
-  source: 'cache' | 'fallback' | 'external';
+  /** T2.9: Added 'lastKnownGood' source for dynamic fallback prices */
+  source: 'cache' | 'fallback' | 'external' | 'lastKnownGood';
   timestamp: number;
   isStale: boolean;
 }
@@ -47,6 +48,8 @@ export interface PriceOracleConfig {
   customFallbackPrices?: Record<string, number>;
   /** Maximum local cache size to prevent unbounded memory growth (default: 10000) */
   maxCacheSize?: number;
+  /** Optional logger for dependency injection (useful for testing) */
+  logger?: Logger;
 }
 
 export interface PriceBatchRequest {
@@ -130,18 +133,47 @@ const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
 // Cache size limit to prevent unbounded memory growth
 const DEFAULT_MAX_CACHE_SIZE = 10000;
 
+// T2.9: Max size for lastKnownGoodPrices Map to prevent unbounded growth
+const DEFAULT_MAX_LAST_KNOWN_GOOD_SIZE = 1000;
+
+// T2.9: Max size for staleFallbackWarnings Set to prevent unbounded growth
+const DEFAULT_MAX_STALE_WARNINGS_SIZE = 100;
+
 // =============================================================================
 // Price Oracle
 // =============================================================================
 
 export class PriceOracle {
   private redis: RedisClient | null = null;
-  private logger = createLogger('price-oracle');
-  private config: Required<PriceOracleConfig>;
+  private logger: Logger;
+  private config: Required<Omit<PriceOracleConfig, 'logger'>>;
   private fallbackPrices: Record<string, number>;
   private localCache: Map<string, TokenPrice> = new Map();
 
+  // ===========================================================================
+  // T2.9: Dynamic Fallback Price Tracking
+  // ===========================================================================
+
+  /**
+   * T2.9: Last known good prices - tracks the most recent successful cache hit
+   * for each token. Used as fallback when cache misses and static fallback is stale.
+   */
+  private lastKnownGoodPrices: Map<string, { price: number; timestamp: number }> = new Map();
+
+  /**
+   * T2.9: Price metrics for monitoring and debugging.
+   */
+  private priceMetrics = {
+    fallbackUsageCount: 0,
+    lastKnownGoodUsageCount: 0,
+    cacheHitCount: 0,
+    staleFallbackWarnings: new Set<string>()
+  };
+
   constructor(config: PriceOracleConfig = {}) {
+    // DI: Use provided logger or create default
+    this.logger = config.logger ?? createLogger('price-oracle');
+
     this.config = {
       cacheKeyPrefix: config.cacheKeyPrefix ?? 'price:',
       cacheTtlSeconds: config.cacheTtlSeconds ?? 60,
@@ -176,6 +208,12 @@ export class PriceOracle {
   /**
    * Get price for a single token.
    *
+   * T2.9: Enhanced with last known good price tracking and fallback hierarchy:
+   * 1. Local cache (L1)
+   * 2. Redis cache (L2)
+   * 3. Last known good price (if available and more recent than static fallback)
+   * 4. Static fallback price
+   *
    * @param symbol - Token symbol (e.g., 'ETH', 'USDT')
    * @param chain - Optional chain identifier for chain-specific prices
    * @returns Token price data
@@ -187,6 +225,9 @@ export class PriceOracle {
     // Try local cache first (L1)
     const localCached = this.localCache.get(cacheKey);
     if (localCached && !this.isStale(localCached.timestamp)) {
+      this.priceMetrics.cacheHitCount++;
+      // T2.9: Track last known good from local cache hit
+      this.updateLastKnownGoodPrice(normalizedSymbol, localCached.price);
       return localCached;
     }
 
@@ -208,11 +249,39 @@ export class PriceOracle {
           this.localCache.set(cacheKey, tokenPrice);
           this.pruneCache();
 
+          this.priceMetrics.cacheHitCount++;
+          // T2.9: Track last known good from Redis cache hit
+          this.updateLastKnownGoodPrice(normalizedSymbol, cached.price);
+
           return tokenPrice;
         }
       } catch (error) {
         this.logger.warn('Redis cache read failed', { error, symbol });
       }
+    }
+
+    // T2.9: Try last known good price before static fallback
+    const lastKnownGood = this.lastKnownGoodPrices.get(normalizedSymbol);
+    if (lastKnownGood && lastKnownGood.price > 0) {
+      const tokenPrice: TokenPrice = {
+        symbol: normalizedSymbol,
+        price: lastKnownGood.price,
+        source: 'lastKnownGood',
+        timestamp: lastKnownGood.timestamp,
+        isStale: this.isStale(lastKnownGood.timestamp)
+      };
+
+      // Cache last known good in local cache
+      this.localCache.set(cacheKey, tokenPrice);
+      this.pruneCache();
+
+      this.priceMetrics.lastKnownGoodUsageCount++;
+      this.logger.debug('Using last known good price', {
+        symbol,
+        price: lastKnownGood.price,
+        age: Date.now() - lastKnownGood.timestamp
+      });
+      return tokenPrice;
     }
 
     // Fallback to default prices
@@ -231,6 +300,12 @@ export class PriceOracle {
         this.localCache.set(cacheKey, tokenPrice);
         this.pruneCache();
 
+        // T2.9: Track fallback usage and stale warnings (with size limit)
+        this.priceMetrics.fallbackUsageCount++;
+        if (this.priceMetrics.staleFallbackWarnings.size < DEFAULT_MAX_STALE_WARNINGS_SIZE) {
+          this.priceMetrics.staleFallbackWarnings.add(normalizedSymbol);
+        }
+
         this.logger.debug('Using fallback price', { symbol, price: fallbackPrice });
         return tokenPrice;
       }
@@ -245,6 +320,30 @@ export class PriceOracle {
       timestamp: 0,
       isStale: true
     };
+  }
+
+  /**
+   * T2.9: Update last known good price for a token.
+   * Called when we receive a successful price from cache.
+   * Prunes oldest entries when Map exceeds max size to prevent unbounded growth.
+   */
+  private updateLastKnownGoodPrice(symbol: string, price: number): void {
+    if (price > 0) {
+      this.lastKnownGoodPrices.set(symbol, {
+        price,
+        timestamp: Date.now()
+      });
+
+      // Prune if exceeds max size (remove oldest entries)
+      if (this.lastKnownGoodPrices.size > DEFAULT_MAX_LAST_KNOWN_GOOD_SIZE) {
+        const entries = [...this.lastKnownGoodPrices.entries()];
+        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toRemove = entries.length - DEFAULT_MAX_LAST_KNOWN_GOOD_SIZE;
+        for (let i = 0; i < toRemove; i++) {
+          this.lastKnownGoodPrices.delete(entries[i][0]);
+        }
+      }
+    }
   }
 
   /**
@@ -396,6 +495,94 @@ export class PriceOracle {
    */
   getAllFallbackPrices(): Record<string, number> {
     return { ...this.fallbackPrices };
+  }
+
+  // ===========================================================================
+  // T2.9: Dynamic Fallback Price Management
+  // ===========================================================================
+
+  /**
+   * T2.9: Get last known good price for a token.
+   * Returns 0 if no last known good price is available.
+   *
+   * @param symbol - Token symbol
+   * @returns Last known good price or 0
+   */
+  getLastKnownGoodPrice(symbol: string): number {
+    const normalizedSymbol = this.normalizeSymbol(symbol);
+    const lastKnownGood = this.lastKnownGoodPrices.get(normalizedSymbol);
+    return lastKnownGood?.price ?? 0;
+  }
+
+  /**
+   * T2.9: Bulk update fallback prices.
+   * Useful for hourly updates from external price APIs.
+   * Invalid prices (0 or negative) are ignored.
+   *
+   * @param prices - Map of symbol to price
+   */
+  updateFallbackPrices(prices: Record<string, number>): void {
+    let updateCount = 0;
+    let skipCount = 0;
+
+    for (const [symbol, price] of Object.entries(prices)) {
+      const normalizedSymbol = this.normalizeSymbol(symbol);
+
+      // Validate price - must be positive
+      if (price <= 0) {
+        this.logger.warn('Invalid price in bulk update ignored', {
+          symbol: normalizedSymbol,
+          price
+        });
+        skipCount++;
+        continue;
+      }
+
+      this.fallbackPrices[normalizedSymbol] = price;
+      updateCount++;
+    }
+
+    this.logger.info('Bulk fallback price update complete', {
+      updated: updateCount,
+      skipped: skipCount
+    });
+  }
+
+  /**
+   * T2.9: Get price metrics for monitoring.
+   * Provides insights into fallback usage, stale data, etc.
+   */
+  getPriceMetrics(): {
+    fallbackUsageCount: number;
+    lastKnownGoodUsageCount: number;
+    cacheHitCount: number;
+    staleFallbackWarnings: string[];
+    lastKnownGoodAges: Record<string, number>;
+  } {
+    // Calculate ages for all last known good prices
+    const now = Date.now();
+    const lastKnownGoodAges: Record<string, number> = {};
+    for (const [symbol, data] of this.lastKnownGoodPrices.entries()) {
+      lastKnownGoodAges[symbol] = now - data.timestamp;
+    }
+
+    return {
+      fallbackUsageCount: this.priceMetrics.fallbackUsageCount,
+      lastKnownGoodUsageCount: this.priceMetrics.lastKnownGoodUsageCount,
+      cacheHitCount: this.priceMetrics.cacheHitCount,
+      staleFallbackWarnings: Array.from(this.priceMetrics.staleFallbackWarnings),
+      lastKnownGoodAges
+    };
+  }
+
+  /**
+   * T2.9: Reset price metrics (useful for testing).
+   */
+  resetPriceMetrics(): void {
+    this.priceMetrics.fallbackUsageCount = 0;
+    this.priceMetrics.lastKnownGoodUsageCount = 0;
+    this.priceMetrics.cacheHitCount = 0;
+    this.priceMetrics.staleFallbackWarnings.clear();
   }
 
   // ===========================================================================
