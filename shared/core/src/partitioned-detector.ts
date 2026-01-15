@@ -582,9 +582,10 @@ export class PartitionedDetector extends EventEmitter {
         const health = this.getPartitionHealth();
 
         // Persist to Redis - convert to ServiceHealth format
+        // P3-2 FIX: Use unified ServiceHealth with 'name' field
         if (this.redis) {
           const serviceHealth = {
-            service: `partition:${this.config.partitionId}`,
+            name: `partition:${this.config.partitionId}`,
             status: health.status,
             uptime: health.uptimeSeconds,
             memoryUsage: health.memoryUsage,

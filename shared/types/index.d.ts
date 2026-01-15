@@ -136,15 +136,22 @@ export interface MessageEvent {
     source: string;
     correlationId?: string;
 }
+/**
+ * P3-2 FIX: Unified ServiceHealth interface
+ * Consolidates definitions from shared/types and self-healing-manager.
+ * Field naming standardized to 'name' instead of 'service'.
+ */
 export interface ServiceHealth {
-    service: string;
-    status: 'healthy' | 'degraded' | 'unhealthy';
+    name: string;
+    status: 'healthy' | 'degraded' | 'unhealthy' | 'starting' | 'stopping';
     uptime: number;
     memoryUsage: number;
     cpuUsage: number;
     lastHeartbeat: number;
     latency?: number;
     error?: string;
+    consecutiveFailures?: number;
+    restartCount?: number;
 }
 export interface PerformanceMetrics {
     eventLatency: number;

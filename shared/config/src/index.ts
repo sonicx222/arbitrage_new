@@ -177,15 +177,14 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 30
     },
     // === S2.2.1: New DEXs (6 → 9) ===
-    // S3.2.2-FIX: Balancer V2 uses Vault model (not factory pattern) - DISABLED until adapter implemented
-    // Balancer V2 Vault doesn't have getPair/getPool methods, needs custom BalancerVaultAdapter
+    // Balancer V2 uses Vault model - uses BalancerV2Adapter for pool discovery
     {
       name: 'balancer_v2',      // [H] - Major liquidity protocol
       chain: 'arbitrum',
-      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault (NOT a factory!)
+      factoryAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8', // Balancer V2 Vault (uses adapter)
       routerAddress: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',  // Vault is also router for swaps
       fee: 30,  // Variable fees per pool, using default
-      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
+      enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
     },
     {
       name: 'curve',            // [H] - Major stablecoin DEX
@@ -415,25 +414,23 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 30
     },
     // S3.2.1: New DEXs added
-    // S3.2.1-FIX: GMX uses Vault model (not factory pattern) - DISABLED until adapter implemented
-    // GMX Vault doesn't have getPair/getPool methods, needs custom GMXVaultAdapter
+    // GMX uses Vault model - uses GmxAdapter for pool discovery
     {
       name: 'gmx',              // [C] - Perpetuals/Spot, uses vault model
       chain: 'avalanche',
-      factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (NOT a factory!)
+      factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (uses adapter)
       routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8',  // GMX Router
       fee: 30,  // GMX uses dynamic fees 10-80bp, using 30bp average
-      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
+      enabled: true  // ENABLED: Uses GmxAdapter from dex-adapters
     },
-    // S3.2.1-FIX: Platypus uses Pool model (not factory pattern) - DISABLED until adapter implemented
-    // Platypus Main Pool doesn't have getPair/getPool methods, needs custom PlatypusPoolAdapter
+    // Platypus uses Pool model - uses PlatypusAdapter for pool discovery
     {
       name: 'platypus',         // [H] - Stablecoin-optimized AMM
       chain: 'avalanche',
-      factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (NOT a factory!)
+      factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (uses adapter)
       routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12',  // Platypus Router
       fee: 4,   // Platypus: ~1-4bp for stablecoins
-      enabled: false  // DISABLED: Pool model not supported by PairDiscoveryService
+      enabled: true  // ENABLED: Uses PlatypusAdapter from dex-adapters
     },
     {
       name: 'kyberswap',        // [H] - KyberSwap Elastic (concentrated liquidity)
@@ -466,15 +463,14 @@ export const DEXES: Record<string, Dex[]> = {
       routerAddress: '0x1A05EB736873485655F29a37DEf8a0AA87F5a447',   // Equalizer Router
       fee: 30  // Default volatile fee (stable pools use 1bp)
     },
-    // S3.2.2-FIX: Beethoven X uses Balancer V2 Vault model (not factory pattern) - DISABLED until adapter
-    // Like Balancer V2, Beethoven X doesn't have getPair/getPool methods
+    // Beethoven X uses Balancer V2 Vault model - uses BalancerV2Adapter for pool discovery
     {
       name: 'beethoven_x',      // [H] - Balancer V2 fork, weighted pools
       chain: 'fantom',
-      factoryAddress: '0x60467cb225092cE0c989361934311175f437Cf53',  // Beethoven X Vault (NOT a factory!)
-      routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',   // Beethoven X Router
+      factoryAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',  // Beethoven X Vault (uses adapter)
+      routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',   // Vault is also router for swaps
       fee: 30,  // Variable per pool, 10-200bp typical
-      enabled: false  // DISABLED: Vault model not supported by PairDiscoveryService
+      enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
     }
   ],
   // zkSync Era: 2 DEXs
@@ -1385,6 +1381,22 @@ export const SYSTEM_CONSTANTS = {
     defaultMonitoringPeriodMs: 60000,
     /** Default success threshold for closing */
     defaultSuccessThreshold: 2,
+  },
+
+  // P4-FIX: Centralized timeout constants
+  timeouts: {
+    /** HTTP health check timeout in milliseconds */
+    httpHealthCheck: 5000,
+    /** Redis operation timeout in milliseconds */
+    redisOperation: 5000,
+    /** Graceful shutdown timeout in milliseconds */
+    gracefulShutdown: 30000,
+    /** Opportunity deduplication TTL in seconds (Redis SET NX) */
+    opportunityDedupTtlSeconds: 30,
+    /** Subgraph API request timeout in milliseconds */
+    subgraphRequest: 10000,
+    /** RPC provider request timeout in milliseconds */
+    rpcRequest: 15000,
   },
 };
 

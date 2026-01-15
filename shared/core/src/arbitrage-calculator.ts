@@ -285,7 +285,7 @@ export function calculateIntraChainArbitrage(
     profitPercentage: comparison.netProfitPct * 100,
     expectedProfit: comparison.netProfitPct,
     estimatedProfit: 0, // Calculated by execution engine
-    gasEstimate: config.gasEstimate ?? 150000,
+    gasEstimate: String(config.gasEstimate ?? 150000),
     confidence: config.confidence ?? 0.8,
     timestamp: Date.now(),
     expiresAt: Date.now() + (config.expiryMs ?? 5000),

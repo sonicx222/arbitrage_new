@@ -1034,8 +1034,9 @@ export class CrossChainDetectorService {
   private startHealthMonitoring(): void {
     this.healthMonitoringInterval = setInterval(async () => {
       try {
+        // P3-2 FIX: Use unified ServiceHealth with 'name' field
         const health = {
-          service: 'cross-chain-detector',
+          name: 'cross-chain-detector',
           status: (this.stateManager.isRunning() ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,

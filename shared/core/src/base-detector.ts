@@ -1435,6 +1435,34 @@ export abstract class BaseDetector {
       throw new Error('Streams client not initialized - Streams required per ADR-002');
     }
 
+    // P2-4 FIX: Redis-based deduplication for multi-instance deployments
+    // Use SET NX with TTL to atomically check if opportunity was already published
+    const dedupKey = `opp:dedup:${opportunity.id}`;
+    const DEDUP_TTL_SECONDS = 30; // 30 second deduplication window
+
+    try {
+      const redis = await this.redis;
+      if (!redis) {
+        // Redis not initialized, skip deduplication
+        this.logger.debug('Redis not available for dedup check');
+      } else {
+        // setNx returns true if key was set (first to publish), false if exists (duplicate)
+        const isFirstPublisher = await redis.setNx(dedupKey, '1', DEDUP_TTL_SECONDS);
+
+        if (!isFirstPublisher) {
+          this.logger.debug('Duplicate opportunity filtered', { id: opportunity.id });
+          return; // Another instance already published this opportunity
+        }
+      }
+    } catch (error) {
+      // If Redis fails, log warning but still publish to avoid missing opportunities
+      // This degrades to in-process dedup only, which may cause duplicates across instances
+      this.logger.warn('Redis dedup check failed, publishing anyway', {
+        id: opportunity.id,
+        error: (error as Error).message
+      });
+    }
+
     const message: MessageEvent = {
       type: 'arbitrage-opportunity',
       data: opportunity,

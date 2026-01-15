@@ -5,6 +5,8 @@ import { createLogger } from './logger';
 import { getRedisClient } from './redis';
 import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
+// P3-2 FIX: Import unified ServiceHealth from shared types
+import type { ServiceHealth } from '../../types';
 
 // P2-2-FIX: Import config with fallback for test environment
 let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
@@ -22,6 +24,7 @@ const SELF_HEALING_DEFAULTS = {
   maxRestartDelayMs: SYSTEM_CONSTANTS?.selfHealing?.maxRestartDelayMs ?? 300000,
   simulatedRestartDelayMs: SYSTEM_CONSTANTS?.selfHealing?.simulatedRestartDelayMs ?? 2000,
   simulatedRestartFailureRate: SYSTEM_CONSTANTS?.selfHealing?.simulatedRestartFailureRate ?? 0.2,
+  httpHealthCheckTimeoutMs: 5000, // 5 second timeout for HTTP health checks
 };
 
 const CIRCUIT_BREAKER_DEFAULTS = {
@@ -44,17 +47,9 @@ export interface ServiceDefinition {
   dependencies?: string[];
 }
 
-export interface ServiceHealth {
-  name: string;
-  status: 'healthy' | 'unhealthy' | 'starting' | 'stopping';
-  lastHealthCheck: number;
-  consecutiveFailures: number;
-  restartCount: number;
-  uptime: number;
-  memoryUsage?: number;
-  cpuUsage?: number;
-  errorMessage?: string;
-}
+// P3-2 FIX: ServiceHealth interface now imported from @arbitrage/types
+// Re-export for backwards compatibility
+export type { ServiceHealth } from '../../types';
 
 export interface RecoveryStrategy {
   name: string;
@@ -78,6 +73,9 @@ export class SelfHealingManager {
   private healthUpdateLocks = new Map<string, Promise<void>>();
   // P1-2-FIX: Store initialization promise to ensure streams client is ready before use
   private initializationPromise: Promise<void>;
+  // P5-FIX: Rate limiter to prevent recovery spam attacks
+  private recoveryRateLimiter = new Map<string, number>();
+  private readonly RECOVERY_COOLDOWN_MS = SELF_HEALING_DEFAULTS.circuitBreakerCooldownMs;
 
   constructor() {
     this.initializeRecoveryStrategies();
@@ -136,13 +134,16 @@ export class SelfHealingManager {
     this.services.set(serviceDef.name, serviceDef);
 
     // Initialize health tracking
+    // P3-2 FIX: Use unified ServiceHealth with correct field names
     this.serviceHealth.set(serviceDef.name, {
       name: serviceDef.name,
       status: 'stopping',
-      lastHealthCheck: 0,
+      lastHeartbeat: 0,
       consecutiveFailures: 0,
       restartCount: 0,
-      uptime: 0
+      uptime: 0,
+      memoryUsage: 0,
+      cpuUsage: 0
     });
 
     // Create circuit breaker for health checks
@@ -206,6 +207,9 @@ export class SelfHealingManager {
     }
     this.healthUpdateLocks.clear();
 
+    // P5-FIX: Clear rate limiter to prevent memory leaks
+    this.recoveryRateLimiter.clear();
+
     // Circuit breakers don't need explicit destruction in this version
 
     const redis = await this.redis;
@@ -224,6 +228,17 @@ export class SelfHealingManager {
 
   // Manually trigger recovery for a service
   async triggerRecovery(serviceName: string, error?: Error): Promise<boolean> {
+    // P5-FIX: Rate limit recovery triggers to prevent spam/abuse
+    const lastRecovery = this.recoveryRateLimiter.get(serviceName) || 0;
+    const now = Date.now();
+    if (now - lastRecovery < this.RECOVERY_COOLDOWN_MS) {
+      logger.warn(`Recovery rate limited for ${serviceName}`, {
+        cooldownMs: this.RECOVERY_COOLDOWN_MS,
+        timeSinceLastMs: now - lastRecovery
+      });
+      return false;
+    }
+
     const service = this.services.get(serviceName);
     const health = this.serviceHealth.get(serviceName);
 
@@ -231,6 +246,9 @@ export class SelfHealingManager {
       logger.error(`Service not found: ${serviceName}`);
       return false;
     }
+
+    // P5-FIX: Record this recovery attempt
+    this.recoveryRateLimiter.set(serviceName, now);
 
     logger.info(`Manually triggering recovery for ${serviceName}`, { error: error?.message });
 
@@ -249,7 +267,8 @@ export class SelfHealingManager {
       name: 'simple_restart',
       priority: 100,
       canHandle: (service, error) => {
-        return service.consecutiveFailures > 0 && service.restartCount < (this.services.get(service.name)?.maxRestarts || 3);
+        // P3-2 FIX: Add default values for optional fields
+        return (service.consecutiveFailures ?? 0) > 0 && (service.restartCount ?? 0) < (this.services.get(service.name)?.maxRestarts || 3);
       },
       execute: async (service) => {
         const serviceDef = this.services.get(service.name);
@@ -272,8 +291,9 @@ export class SelfHealingManager {
       name: 'circuit_breaker',
       priority: 90,
       canHandle: (service, error) => {
+        // P3-2 FIX: Add default values for optional fields
         return error instanceof CircuitBreakerError ||
-          service.consecutiveFailures >= 5;
+          (service.consecutiveFailures ?? 0) >= 5;
       },
       execute: async (service) => {
         logger.info(`Activating circuit breaker for ${service.name}`);
@@ -326,15 +346,17 @@ export class SelfHealingManager {
       name: 'escalated_restart',
       priority: 70,
       canHandle: (service, error) => {
-        return service.restartCount >= 3;
+        // P3-2 FIX: Add default values for optional fields
+        return (service.restartCount ?? 0) >= 3;
       },
       execute: async (service) => {
         const serviceDef = this.services.get(service.name);
         if (!serviceDef) return false;
 
         // P2-2-FIX: Use configured constant instead of magic number
+        // P3-2 FIX: Add default values for optional fields
         const delay = Math.min(
-          serviceDef.restartDelay * Math.pow(2, service.restartCount),
+          serviceDef.restartDelay * Math.pow(2, service.restartCount ?? 0),
           SELF_HEALING_DEFAULTS.maxRestartDelayMs
         );
 
@@ -360,7 +382,8 @@ export class SelfHealingManager {
       priority: 50,
       canHandle: (service, error) => {
         // P2-2-FIX: Use configured constant instead of magic number
-        return service.consecutiveFailures >= SELF_HEALING_DEFAULTS.gracefulDegradationThreshold;
+        // P3-2 FIX: Add default values for optional fields
+        return (service.consecutiveFailures ?? 0) >= SELF_HEALING_DEFAULTS.gracefulDegradationThreshold;
       },
       execute: async (service) => {
         logger.warn(`Activating graceful degradation for ${service.name}`);
@@ -369,7 +392,7 @@ export class SelfHealingManager {
         const health = this.serviceHealth.get(service.name);
         if (health) {
           health.status = 'unhealthy';
-          health.errorMessage = 'Service in graceful degradation mode';
+          health.error = 'Service in graceful degradation mode';
 
           // Notify other services of degradation
           await this.notifyServiceDegradation(service.name);
@@ -431,20 +454,21 @@ export class SelfHealingManager {
           // Atomic update of all fields at once
           Object.assign(health, {
             status: 'healthy' as const,
-            lastHealthCheck: now,
+            lastHeartbeat: now,
             consecutiveFailures: 0,
             uptime: now,
-            errorMessage: undefined
+            error: undefined
           });
         } else {
-          health.lastHealthCheck = now;
+          health.lastHeartbeat = now;
         }
       } else {
         // P2-FIX: Capture failure count before increment for recovery decision
-        const newFailureCount = health.consecutiveFailures + 1;
+        // P3-2 FIX: Add default values for optional fields
+        const newFailureCount = (health.consecutiveFailures ?? 0) + 1;
         Object.assign(health, {
           status: 'unhealthy' as const,
-          lastHealthCheck: now,
+          lastHeartbeat: now,
           consecutiveFailures: newFailureCount
         });
 
@@ -460,19 +484,20 @@ export class SelfHealingManager {
 
     } catch (error: any) {
       // P2-FIX: Atomic error state update
-      const newFailureCount = health.consecutiveFailures + 1;
+      // P3-2 FIX: Add default values for optional fields
+      const newFailureCount = (health.consecutiveFailures ?? 0) + 1;
       if (error instanceof CircuitBreakerError) {
         logger.warn(`Health check circuit breaker open for ${serviceName}`);
         Object.assign(health, {
           status: 'unhealthy' as const,
-          errorMessage: 'Health check circuit breaker open'
+          error: 'Health check circuit breaker open'
         });
       } else {
         logger.error(`Health check failed for ${serviceName}`, { error });
         Object.assign(health, {
           status: 'unhealthy' as const,
           consecutiveFailures: newFailureCount,
-          errorMessage: error.message
+          error: error.message
         });
       }
     } finally {
@@ -510,7 +535,8 @@ export class SelfHealingManager {
     if (!health) return;
 
     health.status = 'starting';
-    health.restartCount++;
+    // P3-2 FIX: Handle optional field
+    health.restartCount = (health.restartCount ?? 0) + 1;
 
     logger.info(`Restarting service ${serviceDef.name} (attempt ${health.restartCount})`);
 
@@ -522,7 +548,7 @@ export class SelfHealingManager {
       health.status = 'healthy';
       health.consecutiveFailures = 0;
       health.uptime = Date.now();
-      health.errorMessage = undefined;
+      health.error = undefined;
 
       logger.info(`Service ${serviceDef.name} restarted successfully`);
 
@@ -534,9 +560,24 @@ export class SelfHealingManager {
   }
 
   private async checkHttpHealth(url: string): Promise<boolean> {
-    // Simplified HTTP health check
-    // In production, this would make actual HTTP requests
-    return Math.random() > 0.1; // 90% success rate for simulation
+    // Real HTTP health check with timeout
+    const timeoutMs = SELF_HEALING_DEFAULTS.httpHealthCheckTimeoutMs || 5000;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      return response.ok;
+    } catch (error) {
+      // Log but don't throw - unhealthy is not an error condition
+      logger.debug('HTTP health check failed', { url, error: (error as Error).message });
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async checkProcessHealth(serviceName: string): Promise<boolean> {
@@ -569,7 +610,9 @@ export class SelfHealingManager {
   }
 
   private handleHealthUpdate(update: any): void {
-    const existingHealth = this.serviceHealth.get(update.service);
+    // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
+    const serviceName = update?.name ?? update?.service;
+    const existingHealth = this.serviceHealth.get(serviceName);
     if (existingHealth) {
       Object.assign(existingHealth, update);
     }
@@ -600,17 +643,61 @@ export class SelfHealingManager {
   }
 }
 
-// Global self-healing manager instance
+// P3-1 FIX: Global self-healing manager instance with promise guard
+// Prevents race conditions when multiple callers request the singleton concurrently
 let globalSelfHealingManager: SelfHealingManager | null = null;
+let initializingPromise: Promise<SelfHealingManager> | null = null;
 
-export function getSelfHealingManager(): SelfHealingManager {
-  if (!globalSelfHealingManager) {
-    globalSelfHealingManager = new SelfHealingManager();
+/**
+ * Get the singleton SelfHealingManager instance.
+ * P3-1 FIX: Uses promise guard to prevent race conditions during initialization.
+ * The returned manager is guaranteed to be fully initialized.
+ */
+export async function getSelfHealingManager(): Promise<SelfHealingManager> {
+  // Return existing instance if already initialized
+  if (globalSelfHealingManager) {
+    return globalSelfHealingManager;
   }
+
+  // If initialization is in progress, await the existing promise
+  if (initializingPromise) {
+    return initializingPromise;
+  }
+
+  // Start initialization with promise guard
+  initializingPromise = (async () => {
+    const manager = new SelfHealingManager();
+    await manager.ensureInitialized();
+    globalSelfHealingManager = manager;
+    return manager;
+  })();
+
+  return initializingPromise;
+}
+
+/**
+ * Get the singleton synchronously (without waiting for initialization).
+ * Use this only when you know the manager is already initialized.
+ * Returns null if not yet initialized.
+ */
+export function getSelfHealingManagerSync(): SelfHealingManager | null {
   return globalSelfHealingManager;
 }
 
+/**
+ * Reset the singleton (for testing).
+ * P3-1 FIX: Properly cleans up both instance and promise guard.
+ */
+export async function resetSelfHealingManager(): Promise<void> {
+  if (globalSelfHealingManager) {
+    await globalSelfHealingManager.stop();
+  }
+  globalSelfHealingManager = null;
+  initializingPromise = null;
+}
+
 // Convenience function to register a service
-export function registerServiceForSelfHealing(serviceDef: ServiceDefinition): void {
-  getSelfHealingManager().registerService(serviceDef);
+export async function registerServiceForSelfHealing(serviceDef: ServiceDefinition): Promise<void> {
+  const manager = await getSelfHealingManager();
+  manager.registerService(serviceDef);
 }
