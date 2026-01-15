@@ -15,14 +15,14 @@ import {
   PriceIndexMapper,
   getPriceMatrix,
   resetPriceMatrix
-} from '@arbitrage/coreprice-matrix';
+} from '@arbitrage/core/price-matrix';
 
 import type {
   PriceMatrixConfig,
   PriceEntry,
   MemoryUsage,
   BatchUpdate
-} from '@arbitrage/coreprice-matrix';
+} from '@arbitrage/core/price-matrix';
 
 // =============================================================================
 // Test Helpers

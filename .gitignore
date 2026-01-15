@@ -1,3 +1,4 @@
 node_modules
 nul
-logs/*
+logs
+shared/core/dist

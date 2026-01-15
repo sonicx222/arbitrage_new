@@ -38,7 +38,7 @@ import {
   createPartitionChainInstances,
   isEvmChain,
   getNonEvmChains
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 // =============================================================================
 // Test Constants

@@ -32,7 +32,7 @@ import {
   PLATYPUS_ADDRESSES,
   AdapterConfig,
   DexAdapter
-} from '@arbitrage/coredex-adapters';
+} from '@arbitrage/core/dex-adapters';
 
 // =============================================================================
 // Test Constants

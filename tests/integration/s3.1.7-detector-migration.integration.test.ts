@@ -27,7 +27,7 @@ import {
   validateAllPartitions,
   isEvmChain,
   getNonEvmChains
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 // P1-1-FIX: Import PARTITION_PORTS from single source of truth
 import {

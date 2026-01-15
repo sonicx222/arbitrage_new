@@ -35,7 +35,7 @@ import {
   calculatePartitionResources,
   createChainInstance,
   createPartitionChainInstances
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 // =============================================================================
 // Test Constants

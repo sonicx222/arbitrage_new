@@ -136,7 +136,7 @@ describe('Cross-Chain Detector Architecture Alignment', () => {
       // Note: This import path is for the service, not shared/core
       try {
         const crossChainModule = await import(
-          '../../../services/cross-chain-detector/src/detector'
+          '../../../../services/cross-chain-detector/src/detector'
         );
         const CrossChainDetectorService = crossChainModule.CrossChainDetectorService;
 

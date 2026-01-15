@@ -22,7 +22,7 @@ import {
 
 import {
   assignChainToPartition
-} from '@arbitrage/configpartitions';
+} from '@arbitrage/config/partitions';
 
 import { PARTITION_IDS } from '@arbitrage/config';
 
