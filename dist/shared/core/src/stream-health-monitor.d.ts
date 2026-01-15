@@ -6,6 +6,21 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see S1.1.5: Add Stream health monitoring
  */
+import { RedisStreamsClient } from './redis-streams';
+/** Logger interface for dependency injection */
+interface Logger {
+    info: (message: string, meta?: object) => void;
+    error: (message: string, meta?: object) => void;
+    warn: (message: string, meta?: object) => void;
+    debug: (message: string, meta?: object) => void;
+}
+/** Configuration options for StreamHealthMonitor */
+export interface StreamHealthMonitorConfig {
+    /** Optional logger for testing (defaults to createLogger) */
+    logger?: Logger;
+    /** Optional streams client for testing (defaults to getRedisStreamsClient) */
+    streamsClient?: RedisStreamsClient;
+}
 export type StreamHealthStatus = 'healthy' | 'warning' | 'critical' | 'unknown';
 export interface StreamLagInfo {
     streamName: string;
@@ -79,6 +94,8 @@ type AlertHandler = (alert: StreamAlert) => void;
  */
 export declare class StreamHealthMonitor {
     private streamsClient;
+    private injectedStreamsClient;
+    private logger;
     private monitoredStreams;
     private thresholds;
     private alertHandlers;
@@ -91,7 +108,7 @@ export declare class StreamHealthMonitor {
     private defaultConsumerGroup;
     private maxAlertAge;
     private maxMetricsAge;
-    constructor();
+    constructor(config?: StreamHealthMonitorConfig);
     /**
      * Initialize the streams client (with race condition protection)
      */

@@ -18,6 +18,9 @@
  * @see ADR-007: Cross-Region Failover Strategy
  */
 import { EventEmitter } from 'events';
+import { RedisClient } from './redis';
+import { RedisStreamsClient } from './redis-streams';
+import { DistributedLockManager } from './distributed-lock';
 export type RegionStatus = 'healthy' | 'degraded' | 'unhealthy' | 'failed' | 'unknown';
 export interface RegionHealth {
     /** Region identifier */
@@ -69,6 +72,13 @@ export interface FailoverEvent {
     /** Error message (for failed events) */
     error?: string;
 }
+/** Logger interface for dependency injection */
+interface Logger {
+    info: (message: string, meta?: object) => void;
+    error: (message: string, meta?: object) => void;
+    warn: (message: string, meta?: object) => void;
+    debug: (message: string, meta?: object) => void;
+}
 export interface CrossRegionHealthConfig {
     /** Unique instance ID */
     instanceId: string;
@@ -90,6 +100,14 @@ export interface CrossRegionHealthConfig {
     canBecomeLeader?: boolean;
     /** Whether this instance is a standby (default: false) */
     isStandby?: boolean;
+    /** Optional logger for testing (defaults to createLogger) */
+    logger?: Logger;
+    /** Optional Redis client for testing */
+    redisClient?: RedisClient;
+    /** Optional Redis Streams client for testing */
+    streamsClient?: RedisStreamsClient;
+    /** Optional lock manager for testing */
+    lockManager?: DistributedLockManager;
 }
 export interface GlobalHealthStatus {
     /** Redis connection health */
@@ -126,6 +144,9 @@ export declare class CrossRegionHealthManager extends EventEmitter {
     private lockManager;
     private logger;
     private config;
+    private injectedRedis;
+    private injectedStreamsClient;
+    private injectedLockManager;
     private regions;
     private isLeader;
     private leaderLock;
@@ -193,4 +214,5 @@ export declare class CrossRegionHealthManager extends EventEmitter {
 }
 export declare function getCrossRegionHealthManager(config?: CrossRegionHealthConfig): CrossRegionHealthManager;
 export declare function resetCrossRegionHealthManager(): Promise<void>;
+export {};
 //# sourceMappingURL=cross-region-health.d.ts.map

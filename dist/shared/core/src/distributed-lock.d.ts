@@ -14,6 +14,13 @@
  * @see ADR-007: Failover Strategy (uses same pattern as leader election)
  */
 import { RedisClient } from './redis';
+/** Logger interface for dependency injection */
+interface Logger {
+    info: (message: string, meta?: object) => void;
+    error: (message: string, meta?: object) => void;
+    warn: (message: string, meta?: object) => void;
+    debug: (message: string, meta?: object) => void;
+}
 export interface LockConfig {
     /** Lock key prefix (default: 'lock:') */
     keyPrefix?: string;
@@ -23,6 +30,8 @@ export interface LockConfig {
     autoExtend?: boolean;
     /** Auto-extend interval in ms (should be < TTL/2) */
     autoExtendIntervalMs?: number;
+    /** Optional logger for testing (defaults to createLogger) */
+    logger?: Logger;
 }
 export interface AcquireOptions {
     /** TTL for this specific lock acquisition (overrides default) */
@@ -140,4 +149,5 @@ export declare function getDistributedLockManager(config?: LockConfig): Promise<
  * P2-4 FIX: Wait for pending initialization before resetting
  */
 export declare function resetDistributedLockManager(): Promise<void>;
+export {};
 //# sourceMappingURL=distributed-lock.d.ts.map

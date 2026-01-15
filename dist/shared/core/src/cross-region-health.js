@@ -46,6 +46,10 @@ class CrossRegionHealthManager extends events_1.EventEmitter {
         this.redis = null;
         this.streamsClient = null; // P0-11 FIX: Add streams client
         this.lockManager = null;
+        // Store injected dependencies
+        this.injectedRedis = null;
+        this.injectedStreamsClient = null;
+        this.injectedLockManager = null;
         this.regions = new Map();
         this.isLeader = false;
         this.leaderLock = null;
@@ -67,7 +71,11 @@ class CrossRegionHealthManager extends events_1.EventEmitter {
             canBecomeLeader: config.canBecomeLeader ?? true,
             isStandby: config.isStandby ?? false
         };
-        this.logger = (0, logger_1.createLogger)(`cross-region:${config.regionId}`);
+        // Use injected dependencies or defaults
+        this.logger = config.logger ?? (0, logger_1.createLogger)(`cross-region:${config.regionId}`);
+        this.injectedRedis = config.redisClient ?? null;
+        this.injectedStreamsClient = config.streamsClient ?? null;
+        this.injectedLockManager = config.lockManager ?? null;
     }
     // ===========================================================================
     // Lifecycle
@@ -82,11 +90,11 @@ class CrossRegionHealthManager extends events_1.EventEmitter {
             regionId: this.config.regionId,
             canBecomeLeader: this.config.canBecomeLeader
         });
-        // Initialize Redis and lock manager
-        this.redis = await (0, redis_1.getRedisClient)();
-        this.lockManager = await (0, distributed_lock_1.getDistributedLockManager)();
+        // Initialize Redis and lock manager (use injected or default)
+        this.redis = this.injectedRedis ?? await (0, redis_1.getRedisClient)();
+        this.lockManager = this.injectedLockManager ?? await (0, distributed_lock_1.getDistributedLockManager)();
         // P0-11 FIX: Initialize streams client for ADR-002 compliant failover messaging
-        this.streamsClient = await (0, redis_streams_1.getRedisStreamsClient)();
+        this.streamsClient = this.injectedStreamsClient ?? await (0, redis_streams_1.getRedisStreamsClient)();
         // Initialize own region
         this.initializeOwnRegion();
         // Start health monitoring
