@@ -19,6 +19,71 @@ Identifying opportunities between assets on different blockchains (e.g., Ethereu
 - **Risk**: Bridge latency and security.
 - **Optimization**: Uses ML to predict bridge confirmation times and cost fluctuations.
 
+### 4. Quadrilateral Arbitrage (T2.6)
+Four-token cyclic paths exploiting price imbalances across DEXs (e.g., WETH -> USDT -> WBTC -> DAI -> WETH).
+- **Benefit**: Captures 20-40% more opportunities than triangular alone.
+- **Complexity**: O(n^4) search space, optimized with token pair indexing.
+
+### 5. Multi-Leg Path Finding (T3.11)
+Discovery of 5-7 token arbitrage cycles using depth-first search with pruning.
+- **Algorithm**: DFS with liquidity-based candidate prioritization.
+- **Features**:
+  - Dynamic slippage based on pool reserves
+  - ExecutionContext for concurrent safety
+  - Configurable timeout and profit thresholds
+- **Module**: `shared/core/src/multi-leg-path-finder.ts`
+
+---
+
+## Whale Activity Detection (T3.12)
+
+Professional-grade whale tracking for early opportunity detection.
+
+### Wallet Pattern Analysis
+- **Accumulator**: Wallets consistently buying (>70% buy transactions)
+- **Distributor**: Wallets consistently selling (>70% sell transactions)
+- **Swing Trader**: Mixed buy/sell activity (30-70% ratio)
+- **Arbitrageur**: Rapid buy/sell cycles (<60s average time between trades)
+
+### Signal Generation
+- **Follow**: Trade in same direction as whale with established pattern
+- **Front-run**: Position before anticipated large trade
+- **Fade**: Counter-trade when pattern breaks (e.g., accumulator starts selling)
+
+### Confidence Scoring
+- Base confidence from pattern consistency (0.5-0.7)
+- Super whale bonus (+0.15 for trades >$500K)
+- Historical accuracy adjustment based on past performance
+
+**Module**: `shared/core/src/whale-activity-tracker.ts`
+
+---
+
+## Liquidity Depth Analysis (T3.15)
+
+AMM pool depth analysis for optimal trade execution.
+
+### Depth Simulation
+Simulates order book depth using constant product formula (x * y = k):
+- Multiple price levels from $1K to $1M trade sizes
+- Slippage prediction at each level
+- Price impact calculation
+
+### Key Metrics
+| Metric | Description |
+|--------|-------------|
+| Optimal Trade Size | Knee of slippage curve where marginal cost equals gain |
+| Max Size 1% Slippage | Largest trade with <1% slippage |
+| Max Size 5% Slippage | Largest trade with <5% slippage |
+| Liquidity Score | 0-1 based on depth, symmetry, and fees |
+
+### Best Pool Selection
+Automatically finds the pool with lowest slippage for a given trade:
+- Compares all pools with matching token pairs
+- Returns pool address and expected slippage
+
+**Module**: `shared/core/src/liquidity-depth-analyzer.ts`
+
 ---
 
 ## 💎 Token Selection Methodology

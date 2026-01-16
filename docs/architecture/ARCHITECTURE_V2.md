@@ -173,7 +173,10 @@ The architecture combines two patterns:
 │  LAYER 2: ANALYSIS                                                               │
 │  ├── Cross-Chain Analyzer (Multi-chain opportunity detection)                   │
 │  ├── ML Predictor (Price movement prediction)                                   │
-│  └── Volume Aggregator (Swap event intelligence)                                │
+│  ├── Volume Aggregator (Swap event intelligence)                                │
+│  ├── Multi-Leg Path Finder (T3.11: 5-7 token cycle detection)                   │
+│  ├── Whale Activity Tracker (T3.12: Pattern detection & signals)                │
+│  └── Liquidity Depth Analyzer (T3.15: Slippage prediction)                      │
 │                                                                                  │
 │  LAYER 3: DECISION                                                               │
 │  ├── Opportunity Scorer (Profit/risk evaluation)                                │
