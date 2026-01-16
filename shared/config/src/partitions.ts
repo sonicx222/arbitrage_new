@@ -111,8 +111,14 @@ export interface PartitionHealth {
   /** Partition ID */
   partitionId: string;
 
-  /** Overall health status */
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  /**
+   * Overall health status
+   * - 'starting': No chains initialized yet (during startup)
+   * - 'healthy': All chains are healthy
+   * - 'degraded': Some chains are healthy
+   * - 'unhealthy': No chains are healthy
+   */
+  status: 'healthy' | 'degraded' | 'unhealthy' | 'starting';
 
   /** Individual chain health */
   chainHealth: Map<string, ChainHealth>;

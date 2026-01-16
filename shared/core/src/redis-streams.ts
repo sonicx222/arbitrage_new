@@ -552,16 +552,36 @@ export class RedisStreamsClient {
     }
   }
 
+  /**
+   * Get stream information. Returns default values if stream doesn't exist.
+   * This is resilient to startup conditions where streams may not be created yet.
+   */
   async xinfo(streamName: string): Promise<StreamInfo> {
     try {
       const result = await this.client.xinfo('STREAM', streamName);
       return this.parseStreamInfo(result as any[]);
-    } catch (error) {
+    } catch (error: any) {
+      // ERR no such key - stream doesn't exist yet (common during startup)
+      if (error.message?.includes('no such key') || error.message?.includes('ERR')) {
+        this.logger.debug('Stream does not exist yet', { streamName });
+        return {
+          length: 0,
+          radixTreeKeys: 0,
+          radixTreeNodes: 0,
+          lastGeneratedId: '0-0',
+          groups: 0
+        };
+      }
       this.logger.error('XINFO error', { error, streamName });
       throw error;
     }
   }
 
+  /**
+   * Get pending messages info for a consumer group.
+   * Returns default values if stream or consumer group doesn't exist.
+   * This is resilient to startup conditions where groups may not be created yet.
+   */
   async xpending(streamName: string, groupName: string): Promise<PendingInfo> {
     try {
       const result = await this.client.xpending(streamName, groupName) as any[];
@@ -579,7 +599,18 @@ export class RedisStreamsClient {
         largestId: result[2] as string,
         consumers
       };
-    } catch (error) {
+    } catch (error: any) {
+      // NOGROUP - consumer group doesn't exist yet (common during startup)
+      // ERR no such key - stream doesn't exist yet
+      if (error.message?.includes('NOGROUP') || error.message?.includes('no such key')) {
+        this.logger.debug('Consumer group or stream does not exist yet', { streamName, groupName });
+        return {
+          total: 0,
+          smallestId: '',
+          largestId: '',
+          consumers: []
+        };
+      }
       this.logger.error('XPENDING error', { error, streamName, groupName });
       throw error;
     }
