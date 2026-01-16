@@ -372,6 +372,7 @@ export function calculateCrossChainArbitrage(
 
 /**
  * Calculate confidence for cross-chain opportunity.
+ * Phase 3: Uses consistent freshness scoring across all detectors.
  */
 function calculateCrossChainConfidence(
   lowPrice: ChainPriceData,
@@ -380,9 +381,12 @@ function calculateCrossChainConfidence(
   // Base confidence on price difference
   let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2;
 
-  // Reduce confidence for stale data (1 minute = 1.0 penalty)
-  const agePenalty = Math.max(0, (Date.now() - lowPrice.timestamp) / 60000);
-  confidence *= Math.max(0.1, 1 - agePenalty * 0.1);
+  // Phase 3: Freshness scoring - maxAgeMs = 10000 (10 seconds)
+  // Formula: freshnessScore = max(0.5, 1.0 - (ageMs / maxAgeMs))
+  const maxAgeMs = 10000;
+  const ageMs = Date.now() - lowPrice.timestamp;
+  const freshnessScore = Math.max(0.5, 1.0 - (ageMs / maxAgeMs));
+  confidence *= freshnessScore;
 
   // Cap at 95%
   return Math.min(confidence, 0.95);

@@ -4,6 +4,12 @@
 
 import { createLogger } from './logger';
 import { getHierarchicalCache } from './hierarchical-cache';
+import {
+  getGasPriceCache,
+  GAS_UNITS,
+  FALLBACK_GAS_COSTS_ETH,
+  FALLBACK_GAS_SCALING_PER_STEP
+} from './gas-price-cache';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
 
@@ -802,19 +808,23 @@ export class CrossDexTriangularArbitrage {
   }
 
   // Estimate gas cost for triangular arbitrage
+  // Phase 2: Uses dynamic gas pricing from GasPriceCache
+  // Returns gas cost as a ratio of trade amount (to match grossProfit units)
   private estimateGasCost(chain: string, steps: number): number {
-    // Base gas costs for different chains (in ETH)
-    const baseGasCosts: { [chain: string]: number } = {
-      ethereum: 0.005, // ~$10 at $2000/ETH
-      bsc: 0.0001,     // ~$0.02 at $200/BNB
-      arbitrum: 0.00005, // Very low L2 fees
-      base: 0.00001,   // Coinbase L2
-      polygon: 0.0001  // Polygon fees
-    };
+    try {
+      const gasCache = getGasPriceCache();
+      // Use appropriate operation type based on step count
+      const operationType: 'triangular' | 'quadrilateral' | 'multiLeg' =
+        steps === 3 ? 'triangular' :
+        steps === 4 ? 'quadrilateral' : 'multiLeg';
 
-    const baseCost = baseGasCosts[chain] || 0.001;
-    // Each step adds complexity
-    return baseCost * (1 + steps * 0.2);
+      return gasCache.estimateGasCostRatio(chain, operationType, steps);
+    } catch {
+      // Fallback to static estimates if cache fails
+      // Uses shared constants for consistency across detectors
+      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] || 0.001;
+      return baseCost * (1 + steps * FALLBACK_GAS_SCALING_PER_STEP);
+    }
   }
 
   // Estimate execution time

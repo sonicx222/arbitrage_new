@@ -151,6 +151,38 @@ async function processStatisticalAnalysis(data: any): Promise<any> {
   };
 }
 
+/**
+ * Process multi-leg path finding task.
+ * Offloads CPU-intensive DFS from main event loop.
+ */
+async function processMultiLegPathFinding(data: any): Promise<any> {
+  const { chain, pools, baseTokens, targetPathLength, config } = data;
+
+  // Dynamic import to avoid circular dependencies
+  const { MultiLegPathFinder } = await import('./multi-leg-path-finder');
+
+  const pathFinder = new MultiLegPathFinder(config || {});
+
+  const startTime = Date.now();
+  const opportunities = await pathFinder.findMultiLegOpportunities(
+    chain,
+    pools,
+    baseTokens,
+    targetPathLength
+  );
+  const processingTimeMs = Date.now() - startTime;
+
+  const stats = pathFinder.getStats();
+
+  return {
+    opportunities,
+    stats: {
+      pathsExplored: stats.totalPathsExplored,
+      processingTimeMs
+    }
+  };
+}
+
 // Message handler
 parentPort?.on('message', async (message: TaskMessage) => {
   const startTime = Date.now();
@@ -180,6 +212,10 @@ parentPort?.on('message', async (message: TaskMessage) => {
 
       case 'statistical_analysis':
         result = await processStatisticalAnalysis(taskData);
+        break;
+
+      case 'multi_leg_path_finding':
+        result = await processMultiLegPathFinding(taskData);
         break;
 
       default:

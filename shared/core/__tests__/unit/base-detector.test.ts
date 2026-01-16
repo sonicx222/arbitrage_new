@@ -33,6 +33,29 @@ jest.mock('@arbitrage/config', () => {
   };
 });
 
+// Mock gas-price-cache to return consistent test values
+// This ensures arbitrage calculations don't change based on gas cache state
+jest.mock('../../src/gas-price-cache', () => ({
+  getGasPriceCache: () => ({
+    estimateGasCostUsd: () => ({
+      costUsd: 5, // Match original ARBITRAGE_CONFIG.estimatedGasCost for test consistency
+      gasPriceGwei: 30,
+      gasUnits: 150000,
+      nativeTokenPriceUsd: 2500,
+      usesFallback: true,
+      chain: 'ethereum'
+    })
+  }),
+  GAS_UNITS: {
+    simpleSwap: 150000,
+    complexSwap: 200000,
+    triangularArbitrage: 450000,
+    quadrilateralArbitrage: 600000,
+    multiLegPerHop: 150000,
+    multiLegBase: 100000
+  }
+}));
+
 // Import after mocks are set up
 import { BaseDetector } from '@arbitrage/core';
 import type { DetectorConfig, ExtendedPair, PairSnapshot, BaseDetectorDeps } from '@arbitrage/core';
@@ -218,6 +241,8 @@ class TestDetector extends BaseDetector {
     this.pairs.set(key, pair);
     this.pairsByAddress.set(pair.address.toLowerCase(), pair);
     this.monitoredPairs.add(pair.address.toLowerCase());
+    // T1.1: Also add to token index for getPairsForTokens() lookups
+    this.addPairToTokenIndex(pair);
   }
 
   // Set running state for testing

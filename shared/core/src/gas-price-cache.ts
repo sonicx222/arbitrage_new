@@ -1,0 +1,616 @@
+/**
+ * Gas Price Cache
+ *
+ * Provides dynamic gas price caching with periodic refresh for accurate
+ * arbitrage profit calculations. Replaces static gas estimates with
+ * real-time data from RPC providers.
+ *
+ * Features:
+ * - Per-chain gas price storage with 60-second refresh
+ * - Graceful fallback to static estimates on RPC failure
+ * - Native token price integration for USD conversion
+ * - Thread-safe singleton pattern
+ *
+ * @see ADR-012-worker-thread-path-finding.md - Gas optimization phase
+ * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Phase 2 recommendations
+ */
+
+import { createLogger } from './logger';
+import { CHAINS } from '@arbitrage/config';
+
+const logger = createLogger('gas-price-cache');
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Cached gas price data for a single chain.
+ */
+export interface GasPriceData {
+  /** Gas price in wei */
+  gasPriceWei: bigint;
+  /** Gas price in gwei (for display) */
+  gasPriceGwei: number;
+  /** Max fee per gas (EIP-1559) in wei, if available */
+  maxFeePerGasWei?: bigint;
+  /** Priority fee (EIP-1559) in wei, if available */
+  maxPriorityFeePerGasWei?: bigint;
+  /** Last update timestamp */
+  lastUpdated: number;
+  /** Whether this is a fallback value */
+  isFallback: boolean;
+  /** Error message if fetch failed */
+  error?: string;
+}
+
+/**
+ * Native token price data.
+ */
+export interface NativeTokenPrice {
+  /** Price in USD */
+  priceUsd: number;
+  /** Last update timestamp */
+  lastUpdated: number;
+  /** Whether this is a fallback value */
+  isFallback: boolean;
+}
+
+/**
+ * Gas cost estimate in USD.
+ */
+export interface GasCostEstimate {
+  /** Estimated gas cost in USD */
+  costUsd: number;
+  /** Gas price used (gwei) */
+  gasPriceGwei: number;
+  /** Gas units estimated */
+  gasUnits: number;
+  /** Native token price used */
+  nativeTokenPriceUsd: number;
+  /** Whether any fallback values were used */
+  usesFallback: boolean;
+  /** Chain name */
+  chain: string;
+}
+
+/**
+ * Configuration for GasPriceCache.
+ */
+export interface GasPriceCacheConfig {
+  /** Refresh interval in milliseconds (default: 60000 = 60s) */
+  refreshIntervalMs: number;
+  /** Stale threshold - consider data stale after this duration (default: 120000 = 2min) */
+  staleThresholdMs: number;
+  /** Enable automatic refresh (default: true) */
+  autoRefresh: boolean;
+  /** Chains to monitor (default: all configured chains) */
+  chains?: string[];
+}
+
+// =============================================================================
+// Default Configuration
+// =============================================================================
+
+const DEFAULT_CONFIG: GasPriceCacheConfig = {
+  refreshIntervalMs: 60000, // 60 seconds
+  staleThresholdMs: 120000, // 2 minutes
+  autoRefresh: true
+};
+
+/**
+ * Static fallback gas prices (in gwei) per chain.
+ * Used when RPC fails or before first fetch.
+ */
+const FALLBACK_GAS_PRICES: Record<string, number> = {
+  ethereum: 30,    // ~30 gwei average
+  arbitrum: 0.1,   // Very low L2 fees
+  optimism: 0.01,  // Low L2 fees
+  base: 0.01,      // Low L2 fees
+  polygon: 50,     // ~50 gwei average
+  bsc: 3,          // ~3 gwei average
+  avalanche: 25,   // ~25 nAVAX
+  fantom: 50,      // ~50 gwei
+  zksync: 0.25,    // L2 fees
+  linea: 0.5       // L2 fees
+};
+
+/**
+ * Static fallback native token prices (USD) per chain.
+ * Used when price oracle is unavailable.
+ */
+const FALLBACK_NATIVE_PRICES: Record<string, number> = {
+  ethereum: 2500,
+  arbitrum: 2500,  // ETH
+  optimism: 2500,  // ETH
+  base: 2500,      // ETH
+  polygon: 0.5,    // MATIC
+  bsc: 300,        // BNB
+  avalanche: 25,   // AVAX
+  fantom: 0.3,     // FTM
+  zksync: 2500,    // ETH
+  linea: 2500      // ETH
+};
+
+/**
+ * Default gas units per operation type.
+ */
+export const GAS_UNITS = {
+  /** Simple swap (Uniswap V2 style) */
+  simpleSwap: 150000,
+  /** Complex swap (Uniswap V3, Curve, etc.) */
+  complexSwap: 200000,
+  /** Triangular arbitrage (3 swaps) */
+  triangularArbitrage: 450000,
+  /** Quadrilateral arbitrage (4 swaps) */
+  quadrilateralArbitrage: 600000,
+  /** Multi-leg arbitrage per additional hop */
+  multiLegPerHop: 150000,
+  /** Base gas for multi-leg (overhead) */
+  multiLegBase: 100000
+};
+
+/**
+ * Default trade amount for gas cost ratio calculations.
+ * Used to convert USD gas costs to profit ratios.
+ */
+export const DEFAULT_TRADE_AMOUNT_USD = 2000;
+
+/**
+ * Static fallback gas costs per chain (in ETH/native token).
+ * Used when gas cache is unavailable.
+ */
+export const FALLBACK_GAS_COSTS_ETH: Record<string, number> = {
+  ethereum: 0.005,     // ~$10 at $2000/ETH
+  bsc: 0.0001,         // ~$0.03 at $300/BNB
+  arbitrum: 0.00005,   // Very low L2 fees
+  base: 0.00001,       // Coinbase L2
+  polygon: 0.0001,     // Polygon fees
+  optimism: 0.00005,   // Optimism L2
+  avalanche: 0.001,    // Avalanche fees
+  fantom: 0.0001,      // Fantom fees
+  zksync: 0.00005,     // zkSync L2
+  linea: 0.0001        // Linea L2
+};
+
+/**
+ * Consistent fallback scaling factor per step.
+ * Each additional step adds 25% to base gas cost.
+ */
+export const FALLBACK_GAS_SCALING_PER_STEP = 0.25;
+
+// =============================================================================
+// GasPriceCache Class
+// =============================================================================
+
+/**
+ * Singleton cache for gas prices across all chains.
+ * Provides real-time gas price data with automatic refresh.
+ */
+export class GasPriceCache {
+  private config: GasPriceCacheConfig;
+  private gasPrices: Map<string, GasPriceData> = new Map();
+  private nativePrices: Map<string, NativeTokenPrice> = new Map();
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private isRunning = false;
+  private isRefreshing = false; // Mutex to prevent concurrent refresh
+  private providers: Map<string, any> = new Map(); // ethers providers
+
+  constructor(config: Partial<GasPriceCacheConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+
+    // Initialize with fallback values immediately so cache works without start()
+    // This ensures getGasPrice() and getNativeTokenPrice() return valid data
+    // even if start() is never called (graceful degradation per ADR-013)
+    this.initializeFallbacks();
+
+    logger.info('GasPriceCache initialized', {
+      refreshIntervalMs: this.config.refreshIntervalMs,
+      staleThresholdMs: this.config.staleThresholdMs,
+      autoRefresh: this.config.autoRefresh
+    });
+  }
+
+  /**
+   * Start the gas price cache with automatic refresh.
+   */
+  async start(): Promise<void> {
+    if (this.isRunning) {
+      logger.warn('GasPriceCache already running');
+      return;
+    }
+
+    this.isRunning = true;
+
+    // Fallbacks already initialized in constructor
+    // Perform initial fetch to get real gas prices
+    await this.refreshAll();
+
+    // Start auto-refresh if enabled
+    if (this.config.autoRefresh) {
+      this.startRefreshTimer();
+    }
+
+    logger.info('GasPriceCache started');
+  }
+
+  /**
+   * Stop the gas price cache and clear timers.
+   */
+  async stop(): Promise<void> {
+    if (!this.isRunning) return;
+
+    this.isRunning = false;
+
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+
+    // Clear providers
+    this.providers.clear();
+
+    logger.info('GasPriceCache stopped');
+  }
+
+  /**
+   * Get gas price for a specific chain.
+   *
+   * @param chain - Chain name (e.g., 'ethereum', 'arbitrum')
+   * @returns Gas price data or fallback
+   */
+  getGasPrice(chain: string): GasPriceData {
+    const cached = this.gasPrices.get(chain.toLowerCase());
+
+    if (cached) {
+      // Check if data is stale
+      const age = Date.now() - cached.lastUpdated;
+      if (age > this.config.staleThresholdMs) {
+        logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        // Return stale data but mark as potentially unreliable
+        return { ...cached, isFallback: true };
+      }
+      return cached;
+    }
+
+    // Return fallback
+    return this.createFallbackGasPrice(chain);
+  }
+
+  /**
+   * Get native token price for a chain.
+   *
+   * @param chain - Chain name
+   * @returns Native token price data
+   */
+  getNativeTokenPrice(chain: string): NativeTokenPrice {
+    const cached = this.nativePrices.get(chain.toLowerCase());
+
+    if (cached) {
+      const age = Date.now() - cached.lastUpdated;
+      if (age > this.config.staleThresholdMs) {
+        return { ...cached, isFallback: true };
+      }
+      return cached;
+    }
+
+    // Return fallback
+    return {
+      priceUsd: FALLBACK_NATIVE_PRICES[chain.toLowerCase()] || 1000,
+      lastUpdated: Date.now(),
+      isFallback: true
+    };
+  }
+
+  /**
+   * Estimate gas cost in USD for an operation.
+   *
+   * @param chain - Chain name
+   * @param gasUnits - Number of gas units (use GAS_UNITS constants)
+   * @returns Gas cost estimate with metadata
+   */
+  estimateGasCostUsd(chain: string, gasUnits: number): GasCostEstimate {
+    const chainLower = chain.toLowerCase();
+    const gasPrice = this.getGasPrice(chainLower);
+    const nativePrice = this.getNativeTokenPrice(chainLower);
+
+    // Calculate cost: gasUnits * gasPrice (in ETH) * nativeTokenPrice (USD)
+    const gasPriceEth = gasPrice.gasPriceGwei / 1e9; // gwei to ETH
+    const costUsd = gasUnits * gasPriceEth * nativePrice.priceUsd;
+
+    return {
+      costUsd,
+      gasPriceGwei: gasPrice.gasPriceGwei,
+      gasUnits,
+      nativeTokenPriceUsd: nativePrice.priceUsd,
+      usesFallback: gasPrice.isFallback || nativePrice.isFallback,
+      chain: chainLower
+    };
+  }
+
+  /**
+   * Estimate gas cost for multi-leg arbitrage.
+   *
+   * @param chain - Chain name
+   * @param numHops - Number of swaps in the path
+   * @returns Gas cost in USD
+   */
+  estimateMultiLegGasCost(chain: string, numHops: number): number {
+    const gasUnits = GAS_UNITS.multiLegBase + (numHops * GAS_UNITS.multiLegPerHop);
+    const estimate = this.estimateGasCostUsd(chain, gasUnits);
+    return estimate.costUsd;
+  }
+
+  /**
+   * Estimate gas cost for triangular arbitrage.
+   *
+   * @param chain - Chain name
+   * @returns Gas cost in USD
+   */
+  estimateTriangularGasCost(chain: string): number {
+    const estimate = this.estimateGasCostUsd(chain, GAS_UNITS.triangularArbitrage);
+    return estimate.costUsd;
+  }
+
+  /**
+   * Estimate gas cost as a ratio of trade amount.
+   * This is the recommended method for profit calculations as it keeps units consistent.
+   *
+   * @param chain - Chain name
+   * @param operationType - Type of operation ('simple', 'triangular', 'quadrilateral', 'multiLeg')
+   * @param numSteps - Number of steps (only used for 'multiLeg')
+   * @param tradeAmountUsd - Trade amount in USD (default: DEFAULT_TRADE_AMOUNT_USD)
+   * @returns Gas cost as a ratio (e.g., 0.005 = 0.5% of trade amount)
+   */
+  estimateGasCostRatio(
+    chain: string,
+    operationType: 'simple' | 'triangular' | 'quadrilateral' | 'multiLeg',
+    numSteps: number = 3,
+    tradeAmountUsd: number = DEFAULT_TRADE_AMOUNT_USD
+  ): number {
+    // Determine gas units based on operation type
+    let gasUnits: number;
+    switch (operationType) {
+      case 'simple':
+        gasUnits = GAS_UNITS.simpleSwap;
+        break;
+      case 'triangular':
+        gasUnits = GAS_UNITS.triangularArbitrage;
+        break;
+      case 'quadrilateral':
+        gasUnits = GAS_UNITS.quadrilateralArbitrage;
+        break;
+      case 'multiLeg':
+        gasUnits = GAS_UNITS.multiLegBase + (numSteps * GAS_UNITS.multiLegPerHop);
+        break;
+      default:
+        gasUnits = GAS_UNITS.simpleSwap;
+    }
+
+    const estimate = this.estimateGasCostUsd(chain, gasUnits);
+    return estimate.costUsd / tradeAmountUsd;
+  }
+
+  /**
+   * Get cache statistics.
+   */
+  getStats(): {
+    chainsMonitored: number;
+    freshPrices: number;
+    stalePrices: number;
+    fallbackPrices: number;
+    lastRefresh: number;
+  } {
+    const now = Date.now();
+    let fresh = 0;
+    let stale = 0;
+    let fallback = 0;
+
+    for (const data of this.gasPrices.values()) {
+      if (data.isFallback) {
+        fallback++;
+      } else if (now - data.lastUpdated > this.config.staleThresholdMs) {
+        stale++;
+      } else {
+        fresh++;
+      }
+    }
+
+    return {
+      chainsMonitored: this.gasPrices.size,
+      freshPrices: fresh,
+      stalePrices: stale,
+      fallbackPrices: fallback,
+      lastRefresh: Math.max(...Array.from(this.gasPrices.values()).map(d => d.lastUpdated), 0)
+    };
+  }
+
+  /**
+   * Manually refresh gas prices for all chains.
+   * Protected by mutex to prevent concurrent refresh operations.
+   */
+  async refreshAll(): Promise<void> {
+    // Prevent concurrent refresh operations (race condition protection)
+    if (this.isRefreshing) {
+      logger.debug('Refresh already in progress, skipping');
+      return;
+    }
+
+    this.isRefreshing = true;
+    try {
+      const chains = this.config.chains || Object.keys(CHAINS);
+
+      const results = await Promise.allSettled(
+        chains.map(chain => this.refreshChain(chain))
+      );
+
+      const succeeded = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
+      logger.info('Gas price refresh completed', { succeeded, failed, total: chains.length });
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * Refresh gas price for a specific chain.
+   */
+  async refreshChain(chain: string): Promise<void> {
+    const chainLower = chain.toLowerCase();
+
+    try {
+      // Try to fetch real gas price via RPC
+      const chainConfig = CHAINS[chainLower];
+      if (!chainConfig) {
+        logger.warn(`Unknown chain: ${chain}`);
+        return;
+      }
+
+      // Use dynamic import for ethers to avoid issues in worker threads
+      const { ethers } = await import('ethers');
+
+      // Get or create provider
+      let provider = this.providers.get(chainLower);
+      if (!provider) {
+        provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+        this.providers.set(chainLower, provider);
+      }
+
+      // Fetch fee data (EIP-1559 compatible)
+      const feeData = await provider.getFeeData();
+
+      const gasPriceWei = feeData.gasPrice || BigInt(0);
+      const maxFeePerGasWei = feeData.maxFeePerGas || undefined;
+      const maxPriorityFeePerGasWei = feeData.maxPriorityFeePerGas || undefined;
+
+      // Convert to gwei for display
+      const gasPriceGwei = Number(gasPriceWei) / 1e9;
+
+      this.gasPrices.set(chainLower, {
+        gasPriceWei,
+        gasPriceGwei,
+        maxFeePerGasWei,
+        maxPriorityFeePerGasWei,
+        lastUpdated: Date.now(),
+        isFallback: false
+      });
+
+      logger.debug(`Gas price updated for ${chain}`, { gasPriceGwei });
+
+    } catch (error) {
+      logger.warn(`Failed to fetch gas price for ${chain}`, { error });
+
+      // Keep existing value if available, otherwise use fallback
+      if (!this.gasPrices.has(chainLower)) {
+        this.gasPrices.set(chainLower, this.createFallbackGasPrice(chainLower));
+      } else {
+        // Mark existing as potentially stale
+        const existing = this.gasPrices.get(chainLower)!;
+        existing.error = String(error);
+      }
+    }
+  }
+
+  /**
+   * Update native token price manually.
+   * In production, integrate with price oracle.
+   */
+  setNativeTokenPrice(chain: string, priceUsd: number): void {
+    this.nativePrices.set(chain.toLowerCase(), {
+      priceUsd,
+      lastUpdated: Date.now(),
+      isFallback: false
+    });
+  }
+
+  // ===========================================================================
+  // Private Methods
+  // ===========================================================================
+
+  private initializeFallbacks(): void {
+    const chains = this.config.chains || Object.keys(CHAINS);
+
+    for (const chain of chains) {
+      const chainLower = chain.toLowerCase();
+
+      // Initialize gas prices with fallbacks
+      if (!this.gasPrices.has(chainLower)) {
+        this.gasPrices.set(chainLower, this.createFallbackGasPrice(chainLower));
+      }
+
+      // Initialize native prices with fallbacks
+      if (!this.nativePrices.has(chainLower)) {
+        this.nativePrices.set(chainLower, {
+          priceUsd: FALLBACK_NATIVE_PRICES[chainLower] || 1000,
+          lastUpdated: Date.now(),
+          isFallback: true
+        });
+      }
+    }
+  }
+
+  private createFallbackGasPrice(chain: string): GasPriceData {
+    const fallbackGwei = FALLBACK_GAS_PRICES[chain.toLowerCase()] || 50;
+    const gasPriceWei = BigInt(Math.floor(fallbackGwei * 1e9));
+
+    return {
+      gasPriceWei,
+      gasPriceGwei: fallbackGwei,
+      lastUpdated: Date.now(),
+      isFallback: true
+    };
+  }
+
+  private startRefreshTimer(): void {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+    }
+
+    this.refreshTimer = setInterval(async () => {
+      if (!this.isRunning) {
+        if (this.refreshTimer) {
+          clearInterval(this.refreshTimer);
+          this.refreshTimer = null;
+        }
+        return;
+      }
+
+      try {
+        await this.refreshAll();
+      } catch (error) {
+        logger.error('Error in gas price refresh timer', { error });
+      }
+    }, this.config.refreshIntervalMs);
+  }
+}
+
+// =============================================================================
+// Singleton Factory
+// =============================================================================
+
+let gasPriceCacheInstance: GasPriceCache | null = null;
+
+/**
+ * Get the singleton GasPriceCache instance.
+ *
+ * @param config - Optional configuration (only used on first initialization)
+ * @returns The singleton GasPriceCache instance
+ */
+export function getGasPriceCache(config?: Partial<GasPriceCacheConfig>): GasPriceCache {
+  if (!gasPriceCacheInstance) {
+    gasPriceCacheInstance = new GasPriceCache(config);
+  }
+  return gasPriceCacheInstance;
+}
+
+/**
+ * Reset the singleton instance.
+ * Use for testing or when reconfiguration is needed.
+ */
+export async function resetGasPriceCache(): Promise<void> {
+  if (gasPriceCacheInstance) {
+    await gasPriceCacheInstance.stop();
+  }
+  gasPriceCacheInstance = null;
+}

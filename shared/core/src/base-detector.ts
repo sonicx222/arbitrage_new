@@ -29,7 +29,10 @@ import {
   PairDiscoveryService,
   getPairDiscoveryService,
   PairCacheService,
-  getPairCacheService
+  getPairCacheService,
+  // Phase 2: Dynamic gas pricing
+  getGasPriceCache,
+  GAS_UNITS
 } from './index';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, dexFeeToPercentage } from '../../config/src';
 import {
@@ -1150,9 +1153,19 @@ export abstract class BaseDetector {
         return null;
       }
 
-      // Calculate confidence based on data freshness and volume
-      const agePenalty = Math.max(0, (Date.now() - sourceUpdate.timestamp) / 60000); // 1 minute penalty
-      const confidence = Math.max(0.1, Math.min(1.0, 1.0 - (agePenalty * 0.1)));
+      // Phase 3: Calculate confidence based on data freshness
+      // Formula: freshnessScore = max(0.5, 1.0 - (ageMs / maxAgeMs))
+      // maxAgeMs = 10000 (10 seconds) per ADR-013 plan
+      const maxAgeMs = 10000;
+      const ageMs = Date.now() - sourceUpdate.timestamp;
+      const freshnessScore = Math.max(0.5, 1.0 - (ageMs / maxAgeMs));
+      // Confidence combines freshness with other factors (floor at 0.1)
+      const confidence = Math.max(0.1, Math.min(1.0, freshnessScore));
+
+      // Phase 2: Use dynamic gas pricing from GasPriceCache
+      const gasCache = getGasPriceCache();
+      const gasCostEstimate = gasCache.estimateGasCostUsd(this.chain, GAS_UNITS.simpleSwap);
+      const dynamicGasCost = gasCostEstimate.costUsd || ARBITRAGE_CONFIG.estimatedGasCost;
 
       const opportunity: ArbitrageOpportunity = {
         id: `arb_${this.chain}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
@@ -1166,8 +1179,8 @@ export abstract class BaseDetector {
         percentageDifference: percentageDiff,
         // BUG FIX: No division by 100 needed since percentageDiff is already in decimal form
         estimatedProfit: ARBITRAGE_CONFIG.defaultAmount * netPercentage,
-        gasCost: ARBITRAGE_CONFIG.estimatedGasCost,
-        netProfit: (ARBITRAGE_CONFIG.defaultAmount * netPercentage) - ARBITRAGE_CONFIG.estimatedGasCost,
+        gasCost: dynamicGasCost,
+        netProfit: (ARBITRAGE_CONFIG.defaultAmount * netPercentage) - dynamicGasCost,
         confidence,
         timestamp: Date.now(),
         expiresAt: Date.now() + ARBITRAGE_CONFIG.opportunityTimeoutMs
