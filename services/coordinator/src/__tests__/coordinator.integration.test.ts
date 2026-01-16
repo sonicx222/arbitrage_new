@@ -619,6 +619,86 @@ describe('CoordinatorService Integration', () => {
       // Pair should be removed
       expect(activePairs.size).toBe(0);
     });
+
+    it('should guard against negative usdValue in swap events', async () => {
+      await coordinator.start(0);
+
+      const handler = (coordinator as any).handleSwapEventMessage.bind(coordinator);
+
+      // Malformed message with negative usdValue should not corrupt metrics
+      const malformedMessage = {
+        id: '1234-0',
+        data: {
+          pairAddress: '0x1234567890123456789012345678901234567890',
+          chain: 'ethereum',
+          dex: 'uniswap',
+          usdValue: -50000, // Negative value - should be treated as 0
+          transactionHash: '0xabc123'
+        }
+      };
+
+      await expect(handler(malformedMessage)).resolves.not.toThrow();
+
+      // Metrics should NOT be decremented by negative value
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.totalSwapEvents).toBe(1); // Event was processed
+      expect(metrics.totalVolumeUsd).toBe(0);  // But volume should be 0, not -50000
+      expect(metrics.activePairsTracked).toBe(1); // Pair was still tracked
+    });
+
+    it('should guard against negative totalUsdVolume in volume aggregates', async () => {
+      await coordinator.start(0);
+
+      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+
+      // Malformed message with negative totalUsdVolume
+      const malformedMessage = {
+        id: '1234-0',
+        data: {
+          pairAddress: '0xabcdef1234567890123456789012345678901234',
+          chain: 'bsc',
+          dex: 'pancakeswap',
+          swapCount: 10,
+          totalUsdVolume: -100000 // Negative value - should be treated as 0
+        }
+      };
+
+      await expect(handler(malformedMessage)).resolves.not.toThrow();
+
+      // Metrics should be updated correctly
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.volumeAggregatesProcessed).toBe(1);
+      expect(metrics.activePairsTracked).toBe(1);
+    });
+
+    it('should track pairs as active even with swapCount=0', async () => {
+      await coordinator.start(0);
+
+      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+
+      // Volume aggregate with zero swaps (quiet window for monitored pair)
+      const quietWindowMessage = {
+        id: '1234-0',
+        data: {
+          pairAddress: '0x9999999999999999999999999999999999999999',
+          chain: 'polygon',
+          dex: 'quickswap',
+          swapCount: 0, // No swaps in this 5-second window
+          totalUsdVolume: 0
+        }
+      };
+
+      await expect(handler(quietWindowMessage)).resolves.not.toThrow();
+
+      // Pair should still be tracked as active (producing aggregates means it's monitored)
+      const activePairs = (coordinator as any).activePairs;
+      expect(activePairs.has('0x9999999999999999999999999999999999999999')).toBe(true);
+
+      // Metrics should be updated
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.volumeAggregatesProcessed).toBe(1);
+      expect(metrics.activePairsTracked).toBe(1);
+    });
   });
 
   // ===========================================================================

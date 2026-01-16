@@ -970,7 +970,9 @@ export class CoordinatorService {
       const pairAddress = typeof rawEvent.pairAddress === 'string' ? rawEvent.pairAddress : '';
       const chain = typeof rawEvent.chain === 'string' ? rawEvent.chain : 'unknown';
       const dex = typeof rawEvent.dex === 'string' ? rawEvent.dex : 'unknown';
-      const usdValue = typeof rawEvent.usdValue === 'number' ? rawEvent.usdValue : 0;
+      // Guard against negative values from malformed data
+      const rawUsdValue = typeof rawEvent.usdValue === 'number' ? rawEvent.usdValue : 0;
+      const usdValue = rawUsdValue >= 0 ? rawUsdValue : 0;
 
       if (!pairAddress) return;
 
@@ -1027,20 +1029,29 @@ export class CoordinatorService {
       const chain = typeof rawAggregate.chain === 'string' ? rawAggregate.chain : 'unknown';
       const dex = typeof rawAggregate.dex === 'string' ? rawAggregate.dex : 'unknown';
       const swapCount = typeof rawAggregate.swapCount === 'number' ? rawAggregate.swapCount : 0;
-      const totalUsdVolume = typeof rawAggregate.totalUsdVolume === 'number' ? rawAggregate.totalUsdVolume : 0;
+      // Guard against negative values from malformed data
+      const rawVolume = typeof rawAggregate.totalUsdVolume === 'number' ? rawAggregate.totalUsdVolume : 0;
+      const totalUsdVolume = rawVolume >= 0 ? rawVolume : 0;
 
-      if (!pairAddress || swapCount === 0) return;
+      if (!pairAddress) return;
 
-      // Update metrics
+      // Update metrics - always track aggregates, even if swapCount is 0
+      // (swapCount=0 aggregates indicate monitored but quiet pairs)
       this.systemMetrics.volumeAggregatesProcessed++;
 
-      // Track active pairs
+      // Track active pairs - any pair producing aggregates is active
       this.activePairs.set(pairAddress, {
         lastSeen: Date.now(),
         chain,
         dex
       });
       this.systemMetrics.activePairsTracked = this.activePairs.size;
+
+      // Skip detailed logging for empty windows (no swaps in this 5s period)
+      if (swapCount === 0) {
+        this.resetStreamErrors();
+        return;
+      }
 
       // Log high-volume periods (potential trading opportunities)
       if (totalUsdVolume >= 50000) {
