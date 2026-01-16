@@ -583,3 +583,20 @@ export {
   resetNonceManager
 } from './nonce-manager';
 export type { NonceManagerConfig } from './nonce-manager';
+
+// Phase 2: Gas Price Cache (ADR-012, ADR-013)
+export {
+  GasPriceCache,
+  getGasPriceCache,
+  resetGasPriceCache,
+  GAS_UNITS,
+  DEFAULT_TRADE_AMOUNT_USD,
+  FALLBACK_GAS_COSTS_ETH,
+  FALLBACK_GAS_SCALING_PER_STEP
+} from './gas-price-cache';
+export type {
+  GasPriceData,
+  NativeTokenPrice,
+  GasCostEstimate,
+  GasPriceCacheConfig
+} from './gas-price-cache';

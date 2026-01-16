@@ -1,7 +1,7 @@
 // Worker Thread Pool for Parallel Event Processing
 // High-performance parallel processing of arbitrage detection events
 
-import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import { createLogger } from './logger';
@@ -487,110 +487,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
   }
 }
 
-// Worker thread implementation
-if (!isMainThread) {
-  const { workerId } = workerData;
-
-  parentPort?.on('message', async (message) => {
-    const { taskId, taskType, taskData } = message;
-    const startTime = Date.now();
-
-    try {
-      let result: any;
-
-      // Process task based on type
-      switch (taskType) {
-        case 'arbitrage_detection':
-          result = await processArbitrageDetection(taskData);
-          break;
-        case 'price_calculation':
-          result = await processPriceCalculation(taskData);
-          break;
-        case 'correlation_analysis':
-          result = await processCorrelationAnalysis(taskData);
-          break;
-        default:
-          throw new Error(`Unknown task type: ${taskType}`);
-      }
-
-      const processingTime = Date.now() - startTime;
-
-      parentPort?.postMessage({
-        taskId,
-        success: true,
-        result,
-        processingTime
-      });
-
-    } catch (error: any) {
-      const processingTime = Date.now() - startTime;
-
-      parentPort?.postMessage({
-        taskId,
-        success: false,
-        error: error.message,
-        processingTime
-      });
-    }
-  });
-}
-
-// Task processing functions (run in worker threads)
-async function processArbitrageDetection(data: any): Promise<any> {
-  // Implement arbitrage detection logic
-  // This would use the WebAssembly engine for calculations
-
-  const { prices, minProfit } = data;
-
-  // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 1));
-
-  // Return mock result
-  return {
-    opportunities: [
-      {
-        pairKey: 'WETH/USDT',
-        profit: 0.025,
-        buyPrice: 2500,
-        sellPrice: 2562.5
-      }
-    ],
-    processingTime: 1
-  };
-}
-
-async function processPriceCalculation(data: any): Promise<any> {
-  // Implement price calculation logic
-
-  const { reserves, fee } = data;
-
-  // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 0.5));
-
-  const price = reserves.reserve1 / reserves.reserve0;
-
-  return {
-    price,
-    processingTime: 0.5
-  };
-}
-
-async function processCorrelationAnalysis(data: any): Promise<any> {
-  // Implement correlation analysis logic
-
-  const { priceHistory1, priceHistory2 } = data;
-
-  // Simulate processing time
-  await new Promise(resolve => setTimeout(resolve, 2));
-
-  // Simple correlation calculation
-  const correlation = 0.75;
-
-  return {
-    correlation,
-    processingTime: 2
-  };
-}
+// =============================================================================
+// Architecture Note:
+// Worker thread processing is implemented in event-processor-worker.ts
+// This file only contains the pool manager (main thread) implementation.
+// See: shared/core/src/event-processor-worker.ts for task handlers.
+// =============================================================================
 
 // Singleton instance
 let workerPool: EventProcessingWorkerPool | null = null;

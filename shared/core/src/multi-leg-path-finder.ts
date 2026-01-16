@@ -15,6 +15,12 @@
  */
 
 import { createLogger } from './logger';
+import {
+  getGasPriceCache,
+  GAS_UNITS,
+  FALLBACK_GAS_COSTS_ETH,
+  FALLBACK_GAS_SCALING_PER_STEP
+} from './gas-price-cache';
 import type { DexPool, TriangularStep, DynamicSlippageConfig } from './cross-dex-triangular-arbitrage';
 
 const logger = createLogger('multi-leg-path-finder');
@@ -709,19 +715,20 @@ export class MultiLegPathFinder {
 
   /**
    * Estimate gas cost for execution.
+   * Phase 2: Uses dynamic gas pricing from GasPriceCache.
+   * Returns gas cost as a ratio of trade amount (to match grossProfit units).
    */
   private estimateGasCost(chain: string, numSteps: number): number {
-    const baseGasCosts: { [chain: string]: number } = {
-      ethereum: 0.005,
-      bsc: 0.0001,
-      arbitrum: 0.00005,
-      base: 0.00001,
-      polygon: 0.0001
-    };
-
-    const baseCost = baseGasCosts[chain] || 0.001;
-    // Each step adds complexity
-    return baseCost * (1 + numSteps * 0.25);
+    try {
+      const gasCache = getGasPriceCache();
+      // Use consolidated method for consistent gas cost ratio calculation
+      return gasCache.estimateGasCostRatio(chain, 'multiLeg', numSteps);
+    } catch {
+      // Fallback to static estimates if cache fails
+      // Uses shared constants for consistency across detectors
+      const baseCost = FALLBACK_GAS_COSTS_ETH[chain] || 0.001;
+      return baseCost * (1 + numSteps * FALLBACK_GAS_SCALING_PER_STEP);
+    }
   }
 
   /**
@@ -840,6 +847,73 @@ export class MultiLegPathFinder {
       timeouts: 0,
       totalProcessingTimeMs: 0
     };
+  }
+
+  /**
+   * Find multi-leg arbitrage opportunities using worker thread.
+   * Offloads CPU-intensive DFS from main event loop to prevent blocking.
+   *
+   * @param chain - Blockchain name
+   * @param pools - Available DEX pools
+   * @param baseTokens - Starting tokens to explore from
+   * @param targetPathLength - Exact path length to find (5, 6, or 7 tokens)
+   * @param workerPool - Optional worker pool instance (lazy loaded if not provided)
+   * @returns Promise of array of profitable opportunities
+   */
+  async findMultiLegOpportunitiesAsync(
+    chain: string,
+    pools: DexPool[],
+    baseTokens: string[],
+    targetPathLength: number,
+    workerPool?: any
+  ): Promise<MultiLegOpportunity[]> {
+    // Lazy import worker pool to avoid circular dependencies
+    const pool = workerPool || (await import('./worker-pool')).getWorkerPool();
+
+    // Check if pool is running
+    const health = pool.getHealthStatus?.();
+    if (!health?.healthy) {
+      // Fallback to synchronous execution if worker pool not available
+      logger.warn('Worker pool not healthy, falling back to synchronous execution');
+      return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+    }
+
+    const taskId = `multi_leg_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    try {
+      const result = await pool.submitTask({
+        id: taskId,
+        type: 'multi_leg_path_finding',
+        data: {
+          chain,
+          pools,
+          baseTokens,
+          targetPathLength,
+          config: this.config
+        },
+        priority: 5, // Medium-high priority for path finding
+        timeout: this.config.timeoutMs + 1000 // Allow extra buffer
+      });
+
+      if (result.success && result.result) {
+        // Update local stats from worker result
+        if (result.result.stats) {
+          this.stats.totalCalls++;
+          this.stats.totalPathsExplored += result.result.stats.pathsExplored || 0;
+          this.stats.totalOpportunitiesFound += result.result.opportunities?.length || 0;
+          this.stats.totalProcessingTimeMs += result.result.stats.processingTimeMs || 0;
+        }
+
+        return result.result.opportunities || [];
+      }
+
+      logger.warn('Worker task failed, falling back to sync', { taskId, error: result.error });
+      return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+
+    } catch (error) {
+      logger.error('Worker task threw exception, falling back to sync', { taskId, error });
+      return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+    }
   }
 }
 
