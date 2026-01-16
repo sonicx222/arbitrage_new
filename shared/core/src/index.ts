@@ -186,6 +186,38 @@ export type {
   FilterStats,
   BatchResult
 } from './swap-event-filter';
+
+// T3.12: Enhanced Whale Activity Detection
+export {
+  WhaleActivityTracker,
+  getWhaleActivityTracker,
+  resetWhaleActivityTracker
+} from './whale-activity-tracker';
+export type {
+  WhaleTrackerConfig,
+  TrackedWhaleTransaction,
+  WalletProfile,
+  WalletPattern,
+  WhaleSignal,
+  WhaleActivitySummary,
+  WhaleTrackerStats
+} from './whale-activity-tracker';
+
+// T3.15: Liquidity Depth Analysis
+export {
+  LiquidityDepthAnalyzer,
+  getLiquidityDepthAnalyzer,
+  resetLiquidityDepthAnalyzer
+} from './liquidity-depth-analyzer';
+export type {
+  LiquidityDepthConfig,
+  PoolLiquidity,
+  LiquidityLevel,
+  DepthAnalysis,
+  SlippageEstimate,
+  LiquidityAnalyzerStats
+} from './liquidity-depth-analyzer';
+
 export {
   PriceMatrix,
   PriceIndexMapper,
@@ -247,10 +279,47 @@ export {
   // T2.6: Quadrilateral arbitrage
   QuadrilateralOpportunity
 } from './cross-dex-triangular-arbitrage';
+
+// T3.11: Multi-Leg Path Finding (5+ tokens)
+export {
+  MultiLegPathFinder,
+  getMultiLegPathFinder,
+  resetMultiLegPathFinder
+} from './multi-leg-path-finder';
+export type {
+  MultiLegPathConfig,
+  MultiLegOpportunity,
+  PathFinderStats
+} from './multi-leg-path-finder';
+
 export {
   ValidationMiddleware,
   ValidationSchemas
 } from './validation';
+// T2.7: Price Momentum Detection
+export {
+  PriceMomentumTracker,
+  MomentumSignal,
+  MomentumConfig,
+  PairStats,
+  getPriceMomentumTracker,
+  resetPriceMomentumTracker
+} from './price-momentum';
+
+// T2.8: ML Opportunity Scorer
+export {
+  MLOpportunityScorer,
+  getMLOpportunityScorer,
+  resetMLOpportunityScorer
+} from './ml-opportunity-scorer';
+export type {
+  MLPrediction,
+  MLScorerConfig,
+  OpportunityScoreInput,
+  OpportunityWithMomentum,
+  EnhancedScore,
+  ScorerStats
+} from './ml-opportunity-scorer';
 
 // Domain models and core interfaces
 export * from './domain-models';

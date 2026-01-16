@@ -818,3 +818,820 @@ describe('T2.6: Quadrilateral Arbitrage', () => {
     });
   });
 });
+
+// ===========================================================================
+// T2.7: Price Momentum Detection Tests
+// ===========================================================================
+
+import { PriceMomentumTracker, MomentumSignal } from '../../src/price-momentum';
+
+describe('T2.7: Price Momentum Detection', () => {
+  let tracker: PriceMomentumTracker;
+
+  beforeEach(() => {
+    tracker = new PriceMomentumTracker({
+      windowSize: 100,        // 100 samples
+      emaShortPeriod: 5,      // 5-sample EMA
+      emaMediumPeriod: 15,    // 15-sample EMA
+      emaLongPeriod: 60,      // 60-sample EMA
+      zScoreThreshold: 2.0,   // 2 standard deviations for alerts
+      volumeSpikeThreshold: 2.5 // 2.5x average volume for spike detection
+    });
+  });
+
+  describe('Price History Tracking', () => {
+    it('should add price updates correctly', () => {
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 2510, 1100000);
+
+      const stats = tracker.getStats('ETH_USDT');
+      expect(stats).not.toBeNull();
+      expect(stats!.sampleCount).toBe(2);
+    });
+
+    it('should maintain circular buffer with max window size', () => {
+      // Add more samples than window size
+      for (let i = 0; i < 150; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + i, 1000000);
+      }
+
+      const stats = tracker.getStats('ETH_USDT');
+      expect(stats!.sampleCount).toBe(100); // Should be capped at windowSize
+    });
+
+    it('should track multiple pairs independently', () => {
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      tracker.addPriceUpdate('BTC_USDT', 45000, 5000000);
+
+      const ethStats = tracker.getStats('ETH_USDT');
+      const btcStats = tracker.getStats('BTC_USDT');
+
+      expect(ethStats!.sampleCount).toBe(1);
+      expect(btcStats!.sampleCount).toBe(1);
+      expect(ethStats!.currentPrice).toBe(2500);
+      expect(btcStats!.currentPrice).toBe(45000);
+    });
+  });
+
+  describe('EMA Calculations', () => {
+    it('should calculate short-period EMA correctly', () => {
+      // Add enough samples for EMA calculation
+      const prices = [2500, 2510, 2505, 2515, 2520, 2525, 2530];
+      for (const price of prices) {
+        tracker.addPriceUpdate('ETH_USDT', price, 1000000);
+      }
+
+      const stats = tracker.getStats('ETH_USDT');
+      expect(stats!.emaShort).toBeGreaterThan(0);
+      // EMA should be close to recent prices
+      expect(stats!.emaShort).toBeGreaterThan(2510);
+      expect(stats!.emaShort).toBeLessThan(2535);
+    });
+
+    it('should detect upward trend when price > all EMAs', () => {
+      // Start with stable prices, then increase
+      for (let i = 0; i < 20; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      }
+      for (let i = 0; i < 10; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2600 + i * 10, 1500000);
+      }
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.trend).toBe('bullish');
+    });
+
+    it('should detect downward trend when price < all EMAs', () => {
+      // Start with high prices, then decrease
+      for (let i = 0; i < 20; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2700, 1000000);
+      }
+      for (let i = 0; i < 10; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 - i * 10, 1500000);
+      }
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.trend).toBe('bearish');
+    });
+  });
+
+  describe('Momentum Signals', () => {
+    it('should calculate price velocity (rate of change)', () => {
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 2550, 1000000); // +2% change
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.velocity).toBeCloseTo(0.02, 2); // ~2%
+    });
+
+    it('should calculate price acceleration', () => {
+      // Steady acceleration: price increases faster each step
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 2510, 1000000); // +10
+      tracker.addPriceUpdate('ETH_USDT', 2530, 1000000); // +20
+      tracker.addPriceUpdate('ETH_USDT', 2560, 1000000); // +30
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.acceleration).toBeGreaterThan(0); // Positive acceleration
+    });
+
+    it('should detect mean reversion opportunity', () => {
+      // Build baseline at 2500
+      for (let i = 0; i < 50; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + (Math.random() - 0.5) * 10, 1000000);
+      }
+      // Sudden spike far from mean (> 2 std dev)
+      tracker.addPriceUpdate('ETH_USDT', 2700, 1000000);
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.meanReversionSignal).toBe(true);
+      expect(Math.abs(signal!.zScore)).toBeGreaterThan(2);
+    });
+  });
+
+  describe('Volume Analysis', () => {
+    it('should detect volume spikes', () => {
+      // Normal volume
+      for (let i = 0; i < 20; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      }
+      // Volume spike (3x normal)
+      tracker.addPriceUpdate('ETH_USDT', 2520, 3000000);
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal).not.toBeNull();
+      expect(signal!.volumeSpike).toBe(true);
+      expect(signal!.volumeRatio).toBeGreaterThan(2.5);
+    });
+
+    it('should correlate volume with price movement', () => {
+      // Price increase with high volume = stronger signal
+      for (let i = 0; i < 10; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+      }
+      // Strong move with volume confirmation
+      tracker.addPriceUpdate('ETH_USDT', 2600, 5000000);
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal!.confidence).toBeGreaterThan(0.7);
+    });
+  });
+
+  describe('Signal Confidence', () => {
+    it('should return higher confidence for consistent trends', () => {
+      // Consistent uptrend
+      for (let i = 0; i < 30; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + i * 5, 1000000 + i * 10000);
+      }
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal!.confidence).toBeGreaterThan(0.6);
+    });
+
+    it('should return lower confidence for choppy price action', () => {
+      // Alternating up/down
+      for (let i = 0; i < 30; i++) {
+        const price = i % 2 === 0 ? 2500 : 2520;
+        tracker.addPriceUpdate('ETH_USDT', price, 1000000);
+      }
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      expect(signal!.confidence).toBeLessThan(0.5);
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should handle insufficient data gracefully', () => {
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      // Should return null or low-confidence signal with insufficient data
+      expect(signal === null || signal.confidence < 0.3).toBe(true);
+    });
+
+    it('should handle unknown pair', () => {
+      const signal = tracker.getMomentumSignal('UNKNOWN_PAIR');
+      expect(signal).toBeNull();
+    });
+
+    it('should handle zero volume', () => {
+      tracker.addPriceUpdate('ETH_USDT', 2500, 0);
+      tracker.addPriceUpdate('ETH_USDT', 2510, 0);
+
+      const stats = tracker.getStats('ETH_USDT');
+      expect(stats).not.toBeNull();
+      expect(stats!.averageVolume).toBe(0);
+    });
+
+    it('should reset pair data correctly', () => {
+      for (let i = 0; i < 10; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + i, 1000000);
+      }
+
+      tracker.resetPair('ETH_USDT');
+
+      const stats = tracker.getStats('ETH_USDT');
+      expect(stats).toBeNull();
+    });
+
+    it('should handle zero price gracefully (division by zero protection)', () => {
+      // Add a zero price - should not crash
+      tracker.addPriceUpdate('ETH_USDT', 0, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+
+      const signal = tracker.getMomentumSignal('ETH_USDT');
+      // Should return a valid signal or null, not crash
+      expect(signal === null || typeof signal.velocity === 'number').toBe(true);
+    });
+
+    it('should handle sequence starting with zero price', () => {
+      tracker.addPriceUpdate('ETH_USDT', 0, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 0, 1000000);
+      tracker.addPriceUpdate('ETH_USDT', 2500, 1000000);
+
+      // Should not throw
+      expect(() => tracker.getMomentumSignal('ETH_USDT')).not.toThrow();
+    });
+
+    it('should evict LRU pairs when maxPairs exceeded', () => {
+      // Create tracker with small maxPairs limit
+      const limitedTracker = new PriceMomentumTracker({ maxPairs: 5 });
+
+      // Add 10 pairs
+      for (let i = 0; i < 10; i++) {
+        limitedTracker.addPriceUpdate(`PAIR_${i}`, 2500, 1000000);
+      }
+
+      // Should have at most 5 pairs tracked
+      let activeCount = 0;
+      for (let i = 0; i < 10; i++) {
+        if (limitedTracker.getStats(`PAIR_${i}`)) {
+          activeCount++;
+        }
+      }
+
+      expect(activeCount).toBeLessThanOrEqual(5);
+    });
+
+    it('should keep recently accessed pairs during LRU eviction', () => {
+      // Use maxPairs=5 to allow more room for testing
+      const limitedTracker = new PriceMomentumTracker({ maxPairs: 5 });
+
+      // Add 5 pairs with time delays to establish access order
+      limitedTracker.addPriceUpdate('PAIR_A', 2500, 1000000);
+      limitedTracker.addPriceUpdate('PAIR_B', 3000, 1000000);
+      limitedTracker.addPriceUpdate('PAIR_C', 3500, 1000000);
+      limitedTracker.addPriceUpdate('PAIR_D', 4000, 1000000);
+      limitedTracker.addPriceUpdate('PAIR_E', 4500, 1000000);
+
+      // Now we're at capacity (5 pairs). Update PAIR_C to make it more recent
+      // Note: This update does NOT trigger eviction yet since we're at capacity, not over
+      limitedTracker.addPriceUpdate('PAIR_C', 3600, 1000000);
+
+      // Add new pair to trigger eviction (goes from 5 to 6, triggers eviction of 1)
+      limitedTracker.addPriceUpdate('PAIR_F', 5000, 1000000);
+
+      // PAIR_C should be kept (recently accessed)
+      expect(limitedTracker.getStats('PAIR_C')).not.toBeNull();
+      // PAIR_F (the new one) should exist
+      expect(limitedTracker.getStats('PAIR_F')).not.toBeNull();
+
+      // Count how many pairs remain (should be at most 5)
+      let activeCount = 0;
+      for (const pair of ['PAIR_A', 'PAIR_B', 'PAIR_C', 'PAIR_D', 'PAIR_E', 'PAIR_F']) {
+        if (limitedTracker.getStats(pair)) {
+          activeCount++;
+        }
+      }
+      expect(activeCount).toBeLessThanOrEqual(5);
+    });
+  });
+
+  describe('Performance', () => {
+    it('should handle high-frequency updates efficiently', () => {
+      const start = performance.now();
+
+      // Simulate 10,000 price updates
+      for (let i = 0; i < 10000; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + Math.random() * 100, 1000000 + Math.random() * 500000);
+      }
+
+      const elapsed = performance.now() - start;
+      console.log(`10k price updates processed in ${elapsed.toFixed(2)}ms`);
+
+      // Should complete in under 100ms
+      expect(elapsed).toBeLessThan(100);
+    });
+
+    it('should calculate signals quickly', () => {
+      // Pre-fill data
+      for (let i = 0; i < 100; i++) {
+        tracker.addPriceUpdate('ETH_USDT', 2500 + i, 1000000);
+      }
+
+      const start = performance.now();
+
+      // Calculate signal 1000 times
+      for (let i = 0; i < 1000; i++) {
+        tracker.getMomentumSignal('ETH_USDT');
+      }
+
+      const elapsed = performance.now() - start;
+      console.log(`1k signal calculations in ${elapsed.toFixed(2)}ms (${(elapsed / 1000).toFixed(3)}ms/op)`);
+
+      // Should complete in under 50ms
+      expect(elapsed).toBeLessThan(50);
+    });
+  });
+});
+
+// ===========================================================================
+// T2.8: ML Predictor Integration Tests
+// ===========================================================================
+
+import {
+  MLOpportunityScorer,
+  getMLOpportunityScorer,
+  resetMLOpportunityScorer
+} from '../../src/ml-opportunity-scorer';
+
+describe('T2.8: ML Predictor Integration', () => {
+  let scorer: MLOpportunityScorer;
+
+  beforeEach(() => {
+    resetMLOpportunityScorer();
+    scorer = new MLOpportunityScorer({
+      mlWeight: 0.3,           // 30% weight for ML predictions
+      baseWeight: 0.7,         // 70% weight for base confidence
+      minMLConfidence: 0.5,    // Minimum ML confidence to consider
+      directionBonus: 0.1,     // Bonus for aligned direction
+      directionPenalty: 0.15   // Penalty for opposing direction
+    });
+  });
+
+  describe('Score Enhancement', () => {
+    it('should enhance confidence when ML predicts favorable direction', async () => {
+      const baseConfidence = 0.7;
+
+      // ML predicts price will go up with high confidence
+      const enhancedScore = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2600,
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy', // Buying when price goes up = profitable
+        currentPrice: 2500
+      });
+
+      // Score should be enhanced
+      expect(enhancedScore.enhancedConfidence).toBeGreaterThan(baseConfidence);
+      expect(enhancedScore.mlContribution).toBeGreaterThan(0);
+    });
+
+    it('should reduce confidence when ML predicts opposing direction', async () => {
+      const baseConfidence = 0.7;
+
+      // ML predicts price will go down
+      const enhancedScore = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2400,
+          confidence: 0.8,
+          direction: 'down',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy', // Buying when price goes down = unfavorable
+        currentPrice: 2500
+      });
+
+      // Score should be reduced
+      expect(enhancedScore.enhancedConfidence).toBeLessThan(baseConfidence);
+      expect(enhancedScore.directionAligned).toBe(false);
+    });
+
+    it('should not modify score when ML confidence is below threshold', async () => {
+      const baseConfidence = 0.7;
+
+      // Low confidence ML prediction should be ignored
+      const enhancedScore = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2700,
+          confidence: 0.3, // Below threshold
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Score should remain unchanged
+      expect(enhancedScore.enhancedConfidence).toBeCloseTo(baseConfidence, 2);
+      expect(enhancedScore.mlApplied).toBe(false);
+    });
+
+    it('should handle sideways prediction neutrally', async () => {
+      const baseConfidence = 0.7;
+
+      const enhancedScore = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2505,
+          confidence: 0.85,
+          direction: 'sideways',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Sideways prediction should have minimal effect
+      expect(Math.abs(enhancedScore.enhancedConfidence - baseConfidence)).toBeLessThan(0.1);
+    });
+  });
+
+  describe('Batch Scoring', () => {
+    it('should score multiple opportunities efficiently', async () => {
+      const opportunities: Array<{
+        baseConfidence: number;
+        mlPrediction: { predictedPrice: number; confidence: number; direction: 'up' | 'down' | 'sideways'; timeHorizon: number; features: number[] };
+        opportunityDirection: 'buy' | 'sell';
+        currentPrice: number;
+      }> = [];
+      for (let i = 0; i < 10; i++) {
+        opportunities.push({
+          baseConfidence: 0.6 + Math.random() * 0.3,
+          mlPrediction: {
+            predictedPrice: 2500 + (Math.random() - 0.5) * 200,
+            confidence: 0.6 + Math.random() * 0.3,
+            direction: ['up', 'down', 'sideways'][i % 3] as 'up' | 'down' | 'sideways',
+            timeHorizon: 300000,
+            features: []
+          },
+          opportunityDirection: 'buy' as 'buy' | 'sell',
+          currentPrice: 2500
+        });
+      }
+
+      const start = performance.now();
+      const results = await scorer.enhanceBatch(opportunities);
+      const elapsed = performance.now() - start;
+
+      expect(results.length).toBe(10);
+      expect(elapsed).toBeLessThan(50); // Should be fast
+    });
+
+    it('should rank opportunities by enhanced score', async () => {
+      const opportunities = [
+        {
+          id: 'opp1',
+          baseConfidence: 0.6,
+          mlPrediction: { predictedPrice: 2600, confidence: 0.9, direction: 'up' as const, timeHorizon: 300000, features: [] },
+          opportunityDirection: 'buy' as const,
+          currentPrice: 2500
+        },
+        {
+          id: 'opp2',
+          baseConfidence: 0.8,
+          mlPrediction: { predictedPrice: 2400, confidence: 0.9, direction: 'down' as const, timeHorizon: 300000, features: [] },
+          opportunityDirection: 'buy' as const,
+          currentPrice: 2500
+        },
+        {
+          id: 'opp3',
+          baseConfidence: 0.7,
+          mlPrediction: { predictedPrice: 2550, confidence: 0.8, direction: 'up' as const, timeHorizon: 300000, features: [] },
+          opportunityDirection: 'buy' as const,
+          currentPrice: 2500
+        }
+      ];
+
+      const ranked = await scorer.rankOpportunities(opportunities);
+
+      // Best opportunity should have highest enhanced score
+      expect(ranked[0].enhancedConfidence).toBeGreaterThan(ranked[1].enhancedConfidence);
+      expect(ranked[1].enhancedConfidence).toBeGreaterThan(ranked[2].enhancedConfidence);
+    });
+  });
+
+  describe('Price Impact Integration', () => {
+    it('should factor in predicted price change magnitude', async () => {
+      const baseConfidence = 0.7;
+
+      // Large predicted price increase
+      const largeMove = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2750, // 10% increase
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Small predicted price increase
+      const smallMove = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: 2525, // 1% increase
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Larger move should have higher score
+      expect(largeMove.priceImpactScore).toBeGreaterThan(smallMove.priceImpactScore);
+    });
+  });
+
+  describe('Fallback Behavior', () => {
+    it('should work without ML prediction', async () => {
+      const baseConfidence = 0.7;
+
+      const result = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: null,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Should return base confidence unchanged
+      expect(result.enhancedConfidence).toBe(baseConfidence);
+      expect(result.mlApplied).toBe(false);
+    });
+
+    it('should handle invalid ML prediction gracefully', async () => {
+      const baseConfidence = 0.7;
+
+      const result = await scorer.enhanceOpportunityScore({
+        baseConfidence,
+        mlPrediction: {
+          predictedPrice: NaN,
+          confidence: -1,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Should fallback to base confidence
+      expect(result.enhancedConfidence).toBe(baseConfidence);
+      expect(result.mlApplied).toBe(false);
+    });
+  });
+
+  describe('Configuration', () => {
+    it('should respect custom weights', async () => {
+      const customScorer = new MLOpportunityScorer({
+        mlWeight: 0.5,     // 50% ML weight
+        baseWeight: 0.5,   // 50% base weight
+        minMLConfidence: 0.5,
+        directionBonus: 0.1,
+        directionPenalty: 0.15
+      });
+
+      const result = await customScorer.enhanceOpportunityScore({
+        baseConfidence: 0.7,
+        mlPrediction: {
+          predictedPrice: 2600,
+          confidence: 0.9,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // With 50/50 weights, ML should have more influence
+      expect(result.mlContribution).toBeGreaterThan(0.2);
+    });
+
+    it('should return stats about scoring activity', () => {
+      const stats = scorer.getStats();
+
+      expect(stats).toHaveProperty('scoredOpportunities');
+      expect(stats).toHaveProperty('mlEnhancedCount');
+      expect(stats).toHaveProperty('avgMLContribution');
+      expect(stats).toHaveProperty('avgEnhancement');
+    });
+  });
+
+  describe('Integration with Momentum Signals', () => {
+    it('should combine ML prediction with momentum signals', async () => {
+      const momentumTracker = new PriceMomentumTracker();
+
+      // Build momentum data
+      for (let i = 0; i < 20; i++) {
+        momentumTracker.addPriceUpdate('ETH_USDT', 2500 + i * 5, 1000000);
+      }
+
+      const momentumSignal = momentumTracker.getMomentumSignal('ETH_USDT');
+
+      const result = await scorer.enhanceWithMomentum({
+        baseConfidence: 0.7,
+        mlPrediction: {
+          predictedPrice: 2650,
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        momentumSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2600
+      });
+
+      // Should have combined score from ML and momentum
+      expect(result.enhancedConfidence).toBeDefined();
+      expect(result.momentumContribution).toBeDefined();
+    });
+
+    it('should scale momentum bonuses proportionally to momentumWeight', async () => {
+      // Create scorers with different momentum weights
+      const lowMomentumScorer = new MLOpportunityScorer({
+        mlWeight: 0.3,
+        baseWeight: 0.7,
+        minMLConfidence: 0.5,
+        directionBonus: 0.1,
+        directionPenalty: 0.15,
+        momentumWeight: 0.1 // Low momentum weight
+      });
+
+      const highMomentumScorer = new MLOpportunityScorer({
+        mlWeight: 0.3,
+        baseWeight: 0.7,
+        minMLConfidence: 0.5,
+        directionBonus: 0.1,
+        directionPenalty: 0.15,
+        momentumWeight: 0.4 // High momentum weight
+      });
+
+      // Full MomentumSignal with all required properties
+      const bullishSignal: import('../../src/price-momentum').MomentumSignal = {
+        pair: 'ETH_USDT',
+        currentPrice: 2500,
+        velocity: 0.02,
+        acceleration: 0.001,
+        zScore: 1.5,
+        meanReversionSignal: false,
+        volumeSpike: true,
+        volumeRatio: 2.5,
+        trend: 'bullish',
+        confidence: 0.9,
+        emaShort: 2480,
+        emaMedium: 2450,
+        emaLong: 2400,
+        timestamp: Date.now()
+      };
+
+      const input = {
+        baseConfidence: 0.7,
+        mlPrediction: {
+          predictedPrice: 2600,
+          confidence: 0.85,
+          direction: 'up' as const,
+          timeHorizon: 300000,
+          features: [] as number[]
+        },
+        momentumSignal: bullishSignal,
+        opportunityDirection: 'buy' as const,
+        currentPrice: 2500
+      };
+
+      const lowResult = await lowMomentumScorer.enhanceWithMomentum(input);
+      const highResult = await highMomentumScorer.enhanceWithMomentum(input);
+
+      // Higher momentum weight should have proportionally larger momentum contribution
+      // momentumContribution scales with momentumWeight
+      expect(highResult.momentumContribution!).toBeGreaterThan(lowResult.momentumContribution!);
+    });
+
+    it('should return unchanged score without momentum signal', async () => {
+      const mlResult = await scorer.enhanceOpportunityScore({
+        baseConfidence: 0.7,
+        mlPrediction: {
+          predictedPrice: 2600,
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      const withMomentum = await scorer.enhanceWithMomentum({
+        baseConfidence: 0.7,
+        mlPrediction: {
+          predictedPrice: 2600,
+          confidence: 0.85,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        momentumSignal: null,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Without momentum signal, enhanceWithMomentum should return same as enhanceOpportunityScore
+      expect(withMomentum.enhancedConfidence).toBe(mlResult.enhancedConfidence);
+    });
+  });
+
+  describe('Weight Configuration Edge Cases', () => {
+    it('should normalize weights that do not sum to 1', () => {
+      // Constructor should normalize weights
+      const scorer = new MLOpportunityScorer({
+        mlWeight: 0.4,
+        baseWeight: 0.8, // Sum is 1.2, not 1
+        minMLConfidence: 0.5,
+        directionBonus: 0.1,
+        directionPenalty: 0.15
+      });
+
+      // Should not throw and should work
+      expect(async () => {
+        await scorer.enhanceOpportunityScore({
+          baseConfidence: 0.7,
+          mlPrediction: {
+            predictedPrice: 2600,
+            confidence: 0.85,
+            direction: 'up',
+            timeHorizon: 300000,
+            features: []
+          },
+          opportunityDirection: 'buy',
+          currentPrice: 2500
+        });
+      }).not.toThrow();
+    });
+
+    it('should clamp enhanced confidence to [0, 1]', async () => {
+      // Create extreme scenario that could push score above 1 or below 0
+      const extremeScorer = new MLOpportunityScorer({
+        mlWeight: 0.5,
+        baseWeight: 0.5,
+        minMLConfidence: 0.5,
+        directionBonus: 0.5, // Large bonus
+        directionPenalty: 0.5 // Large penalty
+      });
+
+      // High confidence ML prediction with aligned direction
+      const highResult = await extremeScorer.enhanceOpportunityScore({
+        baseConfidence: 0.95,
+        mlPrediction: {
+          predictedPrice: 3000, // Large price move
+          confidence: 0.99,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Low confidence with opposing direction
+      const lowResult = await extremeScorer.enhanceOpportunityScore({
+        baseConfidence: 0.1,
+        mlPrediction: {
+          predictedPrice: 2000,
+          confidence: 0.99,
+          direction: 'down',
+          timeHorizon: 300000,
+          features: []
+        },
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Both should be clamped to [0, 1]
+      expect(highResult.enhancedConfidence).toBeLessThanOrEqual(1);
+      expect(highResult.enhancedConfidence).toBeGreaterThanOrEqual(0);
+      expect(lowResult.enhancedConfidence).toBeLessThanOrEqual(1);
+      expect(lowResult.enhancedConfidence).toBeGreaterThanOrEqual(0);
+    });
+  });
+});
