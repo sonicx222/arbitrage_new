@@ -640,6 +640,11 @@ export abstract class BaseDetector {
   /**
    * Process Sync event (reserve update).
    * Default implementation - can be overridden for chain-specific behavior.
+   *
+   * P0-1 FIX (2026-01-16): True atomic updates via immutable replacement.
+   * Object.assign is NOT atomic in JavaScript - it iterates properties sequentially.
+   * A concurrent reader could observe partial updates (new reserve0, old reserve1).
+   * Fix: Create new immutable pair object and atomically swap references in maps.
    */
   protected async processSyncEvent(log: any, pair: Pair): Promise<void> {
     try {
@@ -655,19 +660,37 @@ export abstract class BaseDetector {
         ? parseInt(log.blockNumber, 16)
         : log.blockNumber;
 
-      // Update pair data atomically (P0-1 fix: prevents race conditions)
-      // Using Object.assign ensures all properties are updated in a single operation,
-      // so readers either see all old values or all new values, never a mix
-      const extendedPair = pair as ExtendedPair;
-      Object.assign(extendedPair, {
+      // P0-1 FIX: Create NEW immutable pair object instead of mutating existing
+      // This ensures readers see either ALL old values or ALL new values, never a mix
+      const updatedPair: ExtendedPair = {
+        // Copy all existing properties
+        name: pair.name,
+        address: pair.address,
+        token0: pair.token0,
+        token1: pair.token1,
+        dex: pair.dex,
+        fee: pair.fee,
+        // Update with new values
         reserve0,
         reserve1,
         blockNumber,
         lastUpdate: Date.now()
-      });
+      };
 
-      // Calculate price
-      const price = this.calculatePrice(extendedPair);
+      // P0-1 FIX: Atomic pointer swap - Map.set() is atomic in V8
+      // All readers will see either the old pair or the new pair, never partial state
+      const pairKey = `${pair.dex}_${pair.token0}_${pair.token1}`;
+      const fullPairKey = this.findPairKey(pair);
+      if (fullPairKey) {
+        this.pairs.set(fullPairKey, updatedPair);
+      }
+      this.pairsByAddress.set(pair.address.toLowerCase(), updatedPair);
+
+      // P0-1 FIX: Update token index with new pair reference
+      this.updatePairInTokenIndex(pair, updatedPair);
+
+      // Calculate price using the updated pair
+      const price = this.calculatePrice(updatedPair);
 
       // Create price update
       const priceUpdate: PriceUpdate = {
@@ -689,8 +712,8 @@ export abstract class BaseDetector {
       // Publish price update (uses Redis Streams batching)
       await this.publishPriceUpdate(priceUpdate);
 
-      // Check for intra-DEX arbitrage
-      await this.checkIntraDexArbitrage(pair);
+      // Check for intra-DEX arbitrage using the updated pair with new reserves
+      await this.checkIntraDexArbitrage(updatedPair);
 
     } catch (error) {
       this.logger.error('Failed to process sync event', { error, pair: pair.address });
@@ -1782,5 +1805,44 @@ export abstract class BaseDetector {
   protected getPairsForTokens(token0: string, token1: string): Pair[] {
     const key = this.getTokenPairKey(token0, token1);
     return this.pairsByTokens.get(key) || [];
+  }
+
+  /**
+   * P0-1 FIX: Update a pair reference in the token index atomically.
+   * Replaces the old pair reference with the new one in-place.
+   * @param oldPair The old pair reference to replace
+   * @param newPair The new pair reference
+   */
+  protected updatePairInTokenIndex(oldPair: Pair, newPair: Pair): void {
+    const key = this.getTokenPairKey(oldPair.token0, oldPair.token1);
+    const pairsForKey = this.pairsByTokens.get(key);
+    if (pairsForKey) {
+      const index = pairsForKey.findIndex(p => p.address.toLowerCase() === oldPair.address.toLowerCase());
+      if (index !== -1) {
+        // Atomic array element replacement
+        pairsForKey[index] = newPair;
+      }
+    }
+  }
+
+  /**
+   * P0-1 FIX: Find the key for a pair in the pairs map.
+   * @param pair The pair to find
+   * @returns The key if found, null otherwise
+   */
+  protected findPairKey(pair: Pair): string | null {
+    // First try the expected key format
+    const expectedKey = `${pair.dex}_${pair.name || `${pair.token0}_${pair.token1}`}`;
+    if (this.pairs.has(expectedKey)) {
+      return expectedKey;
+    }
+
+    // Fallback: search by address (slower but guaranteed to work)
+    for (const [key, p] of this.pairs.entries()) {
+      if (p.address.toLowerCase() === pair.address.toLowerCase()) {
+        return key;
+      }
+    }
+    return null;
   }
 }

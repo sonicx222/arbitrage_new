@@ -1,32 +1,56 @@
 // Domain Models - Clean Architecture Foundation
 // Extracted from monolithic services for better maintainability
+//
+// P1-3 FIX (2026-01-16): Type Consolidation
+// IMPORTANT: These types are intentionally prefixed with "Rich" to distinguish them
+// from the simpler types in shared/types/index.ts:
+// - shared/types/index.ts: Used by detectors, publishers, and message passing (simple, flat)
+// - domain-models.ts: Used by repositories and execution engine (rich, nested objects)
+//
+// The "Rich" prefix indicates these types have full object references (Token, Dex, Chain)
+// rather than string identifiers. Use the appropriate type for your context:
+// - For Redis Streams messages: import from @arbitrage/types
+// - For database operations: import from ./domain-models
 
-export interface TradingPair {
+/**
+ * Rich trading pair with full object references.
+ * Use Pair from @arbitrage/types for message passing.
+ */
+export interface RichTradingPair {
   id: string;
-  baseToken: Token;
-  quoteToken: Token;
-  dex: Dex;
+  baseToken: RichToken;
+  quoteToken: RichToken;
+  dex: RichDex;
   address: string;
   liquidity: string;
   fee: number; // in basis points
 }
 
-export interface ArbitrageOpportunity {
+/**
+ * @deprecated Use ArbitrageOpportunity from @arbitrage/types for new code.
+ * This type is kept for backward compatibility with repositories.
+ */
+export interface RichArbitrageOpportunity {
   id: string;
-  pair: TradingPair;
+  pair: RichTradingPair;
   profitPercentage: number;
   buyPrice: number;
   sellPrice: number;
-  buyDex: Dex;
-  sellDex: Dex;
+  buyDex: RichDex;
+  sellDex: RichDex;
   gasEstimate: number;
   estimatedProfit: string; // in wei/ether
   confidence: number;
   timestamp: Date;
-  chain: Chain;
+  chain: RichChain;
   route: ArbitrageRoute;
   metadata: OpportunityMetadata;
 }
+
+// Legacy aliases for backward compatibility with repositories.ts
+// TODO: Migrate repositories.ts to use RichArbitrageOpportunity directly
+export type TradingPair = RichTradingPair;
+export type ArbitrageOpportunity = RichArbitrageOpportunity;
 
 export interface ArbitrageRoute {
   steps: ArbitrageStep[];
@@ -100,7 +124,12 @@ export interface ExecutionMetadata {
 }
 
 // Value Objects
-export interface Token {
+// P1-3 FIX: Prefixed with "Rich" to avoid conflicts with shared/types
+/**
+ * Rich token with extended metadata.
+ * Use Token from @arbitrage/types for message passing.
+ */
+export interface RichToken {
   address: string;
   symbol: string;
   decimals: number;
@@ -109,25 +138,38 @@ export interface Token {
   coingeckoId?: string;
 }
 
-export interface Dex {
+/**
+ * Rich DEX with chain reference and version.
+ * Use Dex from @arbitrage/types for message passing.
+ */
+export interface RichDex {
   id: string;
   name: string;
   factory: string;
   router: string;
   fee: number; // in basis points
   version: 'v2' | 'v3';
-  chain: Chain;
+  chain: RichChain;
 }
 
-export interface Chain {
+/**
+ * Rich chain with explorer configuration.
+ * Use Chain from @arbitrage/types for message passing.
+ */
+export interface RichChain {
   id: number;
   name: string;
   rpcUrl: string;
   wsUrl?: string;
   blockTime: number;
-  nativeToken: Token;
+  nativeToken: RichToken;
   explorers: ChainExplorer[];
 }
+
+// Legacy aliases for backward compatibility
+export type Token = RichToken;
+export type Dex = RichDex;
+export type Chain = RichChain;
 
 export interface ChainExplorer {
   name: string;

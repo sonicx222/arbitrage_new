@@ -10,15 +10,37 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { RedisMock } from '@arbitrage/test-utils';
 
-// Mock logger first
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn().mockReturnValue({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
+// Make this file a module to avoid TS2451 redeclaration errors
+export {};
+
+// Create mock objects BEFORE jest.mock to ensure they're captured
+const redisInstance = new RedisMock();
+const mockRedis = {
+  get: jest.fn<any>((key: string) => redisInstance.get(key)),
+  set: jest.fn<any>((key: string, value: any, ttl?: number) => {
+    if (ttl) {
+      return redisInstance.setex(key, ttl, value);
+    }
+    return redisInstance.set(key, value);
   }),
-  getPerformanceLogger: jest.fn().mockReturnValue({
+  setex: jest.fn<any>((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value)),
+  del: jest.fn<any>((key: string) => redisInstance.del(key)),
+  keys: jest.fn<any>((pattern: string) => redisInstance.keys(pattern)),
+  clear: jest.fn<any>(() => redisInstance.clear()),
+  ping: jest.fn<any>(() => Promise.resolve('PONG'))
+};
+
+const mockLogger = {
+  info: jest.fn<any>(),
+  warn: jest.fn<any>(),
+  error: jest.fn<any>(),
+  debug: jest.fn<any>()
+};
+
+// Mock logger - use function that returns mockLogger
+jest.mock('../../src/logger', () => ({
+  createLogger: () => mockLogger,
+  getPerformanceLogger: () => ({
     startTimer: jest.fn(),
     endTimer: jest.fn(),
     logEventLatency: jest.fn(),
@@ -30,35 +52,12 @@ jest.mock('../../src/logger', () => ({
   })
 }));
 
-// Mock redis module (where hierarchical-cache imports from)
+// Mock redis module - return mockRedis directly
 jest.mock('../../src/redis', () => ({
-  getRedisClient: jest.fn()
+  getRedisClient: () => Promise.resolve(mockRedis)
 }));
 
-import { getRedisClient } from '@arbitrage/core';
-import { createLogger } from '@arbitrage/core';
 import { HierarchicalCache, createHierarchicalCache } from '@arbitrage/core';
-
-const redisInstance = new RedisMock();
-const mockRedis = {
-  get: jest.fn((key: string) => redisInstance.get(key)),
-  // P2-FIX-1: RedisClient.set() now handles TTL internally
-  set: jest.fn((key: string, value: any, ttl?: number) => {
-    if (ttl) {
-      return redisInstance.setex(key, ttl, value);
-    }
-    return redisInstance.set(key, value);
-  }),
-  setex: jest.fn((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value)),
-  del: jest.fn((key: string) => redisInstance.del(key)),
-  keys: jest.fn((pattern: string) => redisInstance.keys(pattern)),
-  clear: jest.fn(() => redisInstance.clear()),
-  ping: jest.fn(() => Promise.resolve('PONG'))
-};
-
-(getRedisClient as jest.Mock).mockReturnValue(Promise.resolve(mockRedis));
-
-const mockLogger = (createLogger as jest.Mock)();
 
 describe('HierarchicalCache', () => {
   let cache: HierarchicalCache;

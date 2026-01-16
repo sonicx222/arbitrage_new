@@ -10,110 +10,189 @@
 
 import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 
-// Mock ioredis before importing modules that use it
-const mockRedisData = new Map<string, any>();
-const mockStreams = new Map<string, any[]>();
-const mockConsumerGroups = new Map<string, Map<string, any>>();
+// Make this file a module to avoid TS2451 redeclaration errors
+export {};
 
-const mockRedis = {
-  xadd: jest.fn<any>().mockImplementation(async (stream: string, id: string, ...args: string[]) => {
-    const streamData = mockStreams.get(stream) || [];
-    const messageId = id === '*' ? `${Date.now()}-${streamData.length}` : id;
-    const fields: Record<string, string> = {};
-    for (let i = 0; i < args.length; i += 2) {
-      fields[args[i]] = args[i + 1];
-    }
-    streamData.push({ id: messageId, fields });
-    mockStreams.set(stream, streamData);
-    return messageId;
-  }),
-  xread: jest.fn<any>().mockImplementation(async (...args: any[]) => {
-    const streamsIdx = args.indexOf('STREAMS');
-    if (streamsIdx === -1) return null;
-    const streamName = args[streamsIdx + 1];
-    const lastId = args[streamsIdx + 2];
-    const streamData = mockStreams.get(streamName) || [];
-    if (streamData.length === 0) return null;
+// =============================================================================
+// P1-3 FIX: Self-contained mock using jest.mock with inline factory
+// All mock data and functions are defined inside the factory to avoid hoisting issues
+// =============================================================================
 
-    const messages = streamData.filter(m => {
-      if (lastId === '0' || lastId === '$') return true;
-      return m.id > lastId;
-    });
-
-    if (messages.length === 0) return null;
-    return [[streamName, messages.map(m => [m.id, Object.entries(m.fields).flat()])]];
-  }),
-  xreadgroup: jest.fn<any>().mockImplementation(async (...args: any[]) => {
-    const groupIdx = args.indexOf('GROUP');
-    const streamsIdx = args.indexOf('STREAMS');
-    if (groupIdx === -1 || streamsIdx === -1) return null;
-
-    const groupName = args[groupIdx + 1];
-    const consumerName = args[groupIdx + 2];
-    const streamName = args[streamsIdx + 1];
-
-    const streamData = mockStreams.get(streamName) || [];
-    if (streamData.length === 0) return null;
-
-    // Return unacknowledged messages
-    const messages = streamData.slice(0, 5);
-    if (messages.length === 0) return null;
-    return [[streamName, messages.map(m => [m.id, Object.entries(m.fields).flat()])]];
-  }),
-  xack: jest.fn<any>().mockResolvedValue(1),
-  xgroup: jest.fn<any>().mockImplementation(async (command: string, stream: string, group: string) => {
-    if (command === 'CREATE') {
-      const groups = mockConsumerGroups.get(stream) || new Map();
-      if (groups.has(group)) {
-        throw new Error('BUSYGROUP Consumer Group name already exists');
-      }
-      groups.set(group, { lastDeliveredId: '0-0', consumers: new Map() });
-      mockConsumerGroups.set(stream, groups);
-    }
-    return 'OK';
-  }),
-  xinfo: jest.fn<any>().mockImplementation(async (command: string, stream: string) => {
-    const streamData = mockStreams.get(stream) || [];
-    return [
-      'length', streamData.length,
-      'radix-tree-keys', 1,
-      'radix-tree-nodes', 2,
-      'last-generated-id', streamData.length > 0 ? streamData[streamData.length - 1].id : '0-0',
-      'groups', mockConsumerGroups.get(stream)?.size || 0
-    ];
-  }),
-  xlen: jest.fn<any>().mockImplementation(async (stream: string) => {
-    return (mockStreams.get(stream) || []).length;
-  }),
-  xpending: jest.fn<any>().mockImplementation(async (stream: string, group: string) => {
-    const streamData = mockStreams.get(stream) || [];
-    return [
-      Math.min(5, streamData.length), // total pending
-      streamData.length > 0 ? streamData[0].id : null, // smallest ID
-      streamData.length > 0 ? streamData[streamData.length - 1].id : null, // largest ID
-      [['consumer-1', '3'], ['consumer-2', '2']] // consumer pending counts
-    ];
-  }),
-  xtrim: jest.fn<any>().mockImplementation(async (stream: string, ...args: any[]) => {
-    const maxLenIdx = args.indexOf('MAXLEN');
-    if (maxLenIdx !== -1) {
-      const maxLen = parseInt(args[maxLenIdx + 2] || args[maxLenIdx + 1], 10);
-      const streamData = mockStreams.get(stream) || [];
-      const trimmed = streamData.length - maxLen;
-      mockStreams.set(stream, streamData.slice(-maxLen));
-      return Math.max(0, trimmed);
-    }
-    return 0;
-  }),
-  ping: jest.fn<any>().mockResolvedValue('PONG'),
-  disconnect: jest.fn<any>().mockResolvedValue(undefined),
-  on: jest.fn<any>(),
-  removeAllListeners: jest.fn<any>()
-};
+// Shared mock instance - will be populated by the mock factory
+let mockRedisInstance: any = null;
+let mockStreamsData: Map<string, any[]>;
+let mockConsumerGroupsData: Map<string, Map<string, any>>;
 
 jest.mock('ioredis', () => {
-  return jest.fn(() => mockRedis);
+  // Define all mock data inside the factory (avoids hoisting issues)
+  const _mockStreams = new Map();
+  const _mockConsumerGroups = new Map();
+
+  // Create mock functions that track calls properly for Jest matchers
+  const createMockFn = () => {
+    const fn: any = (...args: any[]) => {
+      fn.mock.calls.push(args);
+      fn.mock.lastCall = args;
+      fn.mock.invocationCallOrder.push(fn.mock.invocationCallOrder.length + 1);
+      try {
+        // Check once queue first
+        if (fn._onceQueue && fn._onceQueue.length > 0) {
+          const once = fn._onceQueue.shift();
+          if (once.type === 'return') {
+            fn.mock.results.push({ type: 'return', value: once.value });
+            return once.value;
+          } else if (once.type === 'resolve') {
+            const result = Promise.resolve(once.value);
+            fn.mock.results.push({ type: 'return', value: result });
+            return result;
+          } else if (once.type === 'reject') {
+            fn.mock.results.push({ type: 'throw', value: once.value });
+            return Promise.reject(once.value);
+          } else if (once.type === 'impl') {
+            const result = once.value(...args);
+            fn.mock.results.push({ type: 'return', value: result });
+            return result;
+          }
+        }
+        const result = fn._impl ? fn._impl(...args) : fn._returnValue;
+        fn.mock.results.push({ type: 'return', value: result });
+        return result;
+      } catch (err) {
+        fn.mock.results.push({ type: 'throw', value: err });
+        throw err;
+      }
+    };
+    // Jest mock properties needed for matchers
+    fn._isMockFunction = true;
+    fn.getMockName = () => 'mockFn';
+    fn.getMockImplementation = () => fn._impl;
+    fn.mock = { calls: [] as any[], results: [] as any[], instances: [] as any[], contexts: [] as any[], invocationCallOrder: [] as number[], lastCall: undefined as any };
+    fn._returnValue = undefined;
+    fn._impl = null;
+    fn._onceQueue = [] as any[];
+    fn.mockReturnThis = () => { fn._returnValue = fn; return fn; };
+    fn.mockReturnValue = (val: any) => { fn._returnValue = val; return fn; };
+    fn.mockResolvedValue = (val: any) => { fn._impl = async () => val; return fn; };
+    fn.mockRejectedValue = (err: any) => { fn._impl = async () => { throw err; }; return fn; };
+    fn.mockImplementation = (impl: any) => { fn._impl = impl; return fn; };
+    fn.mockReturnValueOnce = (val: any) => { fn._onceQueue.push({ type: 'return', value: val }); return fn; };
+    fn.mockResolvedValueOnce = (val: any) => { fn._onceQueue.push({ type: 'resolve', value: val }); return fn; };
+    fn.mockRejectedValueOnce = (err: any) => { fn._onceQueue.push({ type: 'reject', value: err }); return fn; };
+    fn.mockImplementationOnce = (impl: any) => { fn._onceQueue.push({ type: 'impl', value: impl }); return fn; };
+    fn.mockClear = () => { fn.mock.calls = []; fn.mock.results = []; fn.mock.instances = []; fn.mock.contexts = []; fn.mock.invocationCallOrder = []; fn.mock.lastCall = undefined; };
+    fn.mockReset = () => { fn.mockClear(); fn._impl = null; fn._returnValue = undefined; fn._onceQueue = []; };
+    fn.mockRestore = fn.mockReset;
+    fn.mockName = () => fn;
+    return fn;
+  };
+
+  const instance = {
+    xadd: createMockFn().mockImplementation(async (stream: any, id: any, ...args: any[]) => {
+      const streamData = _mockStreams.get(stream) || [];
+      const messageId = id === '*' ? `${Date.now()}-${streamData.length}` : id;
+      const fields: Record<string, any> = {};
+      for (let i = 0; i < args.length; i += 2) {
+        fields[args[i]] = args[i + 1];
+      }
+      streamData.push({ id: messageId, fields });
+      _mockStreams.set(stream, streamData);
+      return messageId;
+    }),
+    xread: createMockFn().mockImplementation(async (...args: any[]) => {
+      const streamsIdx = args.indexOf('STREAMS');
+      if (streamsIdx === -1) return null;
+      const streamName = args[streamsIdx + 1];
+      const lastId = args[streamsIdx + 2];
+      const streamData = _mockStreams.get(streamName) || [];
+      if (streamData.length === 0) return null;
+      const messages = streamData.filter((m: any) => lastId === '0' || lastId === '$' || m.id > lastId);
+      if (messages.length === 0) return null;
+      return [[streamName, messages.map((m: any) => [m.id, Object.entries(m.fields).flat()])]];
+    }),
+    xreadgroup: createMockFn().mockImplementation(async (...args: any[]) => {
+      const streamsIdx = args.indexOf('STREAMS');
+      if (streamsIdx === -1) return null;
+      const streamName = args[streamsIdx + 1];
+      const streamData = _mockStreams.get(streamName) || [];
+      if (streamData.length === 0) return null;
+      const messages = streamData.slice(0, 5);
+      if (messages.length === 0) return null;
+      return [[streamName, messages.map((m: any) => [m.id, Object.entries(m.fields).flat()])]];
+    }),
+    xack: createMockFn().mockResolvedValue(1),
+    xgroup: createMockFn().mockImplementation(async (command: any, stream: any, group: any) => {
+      if (command === 'CREATE') {
+        const groups = _mockConsumerGroups.get(stream) || new Map();
+        if (groups.has(group)) {
+          throw new Error('BUSYGROUP Consumer Group name already exists');
+        }
+        groups.set(group, { lastDeliveredId: '0-0', consumers: new Map() });
+        _mockConsumerGroups.set(stream, groups);
+      }
+      return 'OK';
+    }),
+    xinfo: createMockFn().mockImplementation(async (_cmd: any, stream: any) => {
+      const streamData = _mockStreams.get(stream) || [];
+      return [
+        'length', streamData.length,
+        'radix-tree-keys', 1,
+        'radix-tree-nodes', 2,
+        'last-generated-id', streamData.length > 0 ? streamData[streamData.length - 1].id : '0-0',
+        'groups', _mockConsumerGroups.get(stream)?.size || 0
+      ];
+    }),
+    xlen: createMockFn().mockImplementation(async (stream: any) => (_mockStreams.get(stream) || []).length),
+    xpending: createMockFn().mockImplementation(async (stream: any) => {
+      const streamData = _mockStreams.get(stream) || [];
+      return [
+        Math.min(5, streamData.length),
+        streamData.length > 0 ? streamData[0].id : null,
+        streamData.length > 0 ? streamData[streamData.length - 1].id : null,
+        [['consumer-1', '3'], ['consumer-2', '2']]
+      ];
+    }),
+    xtrim: createMockFn().mockImplementation(async (stream: any, ...args: any[]) => {
+      const maxLenIdx = args.indexOf('MAXLEN');
+      if (maxLenIdx !== -1) {
+        const maxLen = parseInt(args[maxLenIdx + 2] || args[maxLenIdx + 1], 10);
+        const streamData = _mockStreams.get(stream) || [];
+        const trimmed = streamData.length - maxLen;
+        _mockStreams.set(stream, streamData.slice(-maxLen));
+        return Math.max(0, trimmed);
+      }
+      return 0;
+    }),
+    ping: createMockFn().mockResolvedValue('PONG'),
+    disconnect: createMockFn().mockResolvedValue(undefined),
+    on: createMockFn().mockReturnThis(),
+    off: createMockFn().mockReturnThis(),
+    removeAllListeners: createMockFn().mockReturnThis(),
+    connect: createMockFn().mockResolvedValue(undefined),
+    quit: createMockFn().mockResolvedValue('OK'),
+    status: 'ready',
+    // Expose internal data for test assertions
+    __mockStreams: _mockStreams,
+    __mockConsumerGroups: _mockConsumerGroups
+  };
+
+  // Store reference for tests to access
+  (globalThis as any).__mockRedisInstance = instance;
+  (globalThis as any).__mockStreams = _mockStreams;
+  (globalThis as any).__mockConsumerGroups = _mockConsumerGroups;
+
+  // Create constructor that returns the instance
+  const MockRedis = function() { return instance; };
+  // Support both default and named imports
+  MockRedis.default = MockRedis;
+  MockRedis.Redis = MockRedis;
+
+  return MockRedis;
 });
+
+// Helper to get the mock instance after module loading
+const getMockRedis = () => (globalThis as any).__mockRedisInstance;
+const getMockStreams = () => (globalThis as any).__mockStreams as Map<string, any[]>;
+const getMockConsumerGroups = () => (globalThis as any).__mockConsumerGroups as Map<string, Map<string, any>>;
 
 // Now import the modules
 import {
@@ -133,12 +212,15 @@ import { delay, createMockPriceUpdate, createMockSwapEvent } from '../../shared/
 
 describe('S1.1 Redis Streams Migration Integration Tests', () => {
   let streamsClient: RedisStreamsClient;
+  // Local references to mock objects (populated after module load)
+  let mockRedis: ReturnType<typeof getMockRedis>;
 
   beforeAll(async () => {
+    // Get mock references after module loading
+    mockRedis = getMockRedis();
     // Clear any previous state
-    mockStreams.clear();
-    mockConsumerGroups.clear();
-    mockRedisData.clear();
+    getMockStreams()?.clear();
+    getMockConsumerGroups()?.clear();
     resetRedisStreamsInstance();
     resetStreamHealthMonitor();
   });
@@ -150,8 +232,9 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockStreams.clear();
-    mockConsumerGroups.clear();
+    mockRedis = getMockRedis();
+    getMockStreams()?.clear();
+    getMockConsumerGroups()?.clear();
   });
 
   // =========================================================================

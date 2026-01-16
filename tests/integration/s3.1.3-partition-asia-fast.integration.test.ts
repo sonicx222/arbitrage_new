@@ -103,18 +103,19 @@ class MockWebSocketManager extends EventEmitter {
   }
 }
 
+// Use simple functions instead of jest.fn() to survive resetMocks: true
 jest.mock('@arbitrage/core/logger', () => ({
-  createLogger: jest.fn(() => mockLogger),
-  getPerformanceLogger: jest.fn(() => mockPerfLogger)
+  createLogger: () => mockLogger,
+  getPerformanceLogger: () => mockPerfLogger
 }));
 
 jest.mock('@arbitrage/core/redis', () => ({
-  getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient)),
+  getRedisClient: () => Promise.resolve(mockRedisClient),
   RedisClient: jest.fn()
 }));
 
 jest.mock('@arbitrage/core/redis-streams', () => ({
-  getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
+  getRedisStreamsClient: () => Promise.resolve(mockStreamsClient),
   RedisStreamsClient: {
     STREAMS: mockStreamsClient.STREAMS
   }

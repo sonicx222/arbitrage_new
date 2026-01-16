@@ -6,16 +6,20 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import Joi from 'joi';
 
+// Make this file a module to avoid TS2451 redeclaration errors
+export {};
+
 const mockLogger = {
-  warn: jest.fn(),
-  error: jest.fn(),
-  info: jest.fn(),
-  debug: jest.fn()
+  warn: jest.fn<any>(),
+  error: jest.fn<any>(),
+  info: jest.fn<any>(),
+  debug: jest.fn<any>()
 };
 
 // Mock logger before importing validation module
-jest.mock('@arbitrage/core', () => ({
-  createLogger: jest.fn(() => mockLogger)
+// Use the actual import path from validation.ts: '../../core/src/logger'
+jest.mock('../../../core/src/logger', () => ({
+  createLogger: () => mockLogger
 }));
 
 import { validateArbitrageRequest, validateHealthRequest, validateMetricsRequest, validateLoginRequest, validateRegisterRequest, sanitizeInput } from '../../src/validation';

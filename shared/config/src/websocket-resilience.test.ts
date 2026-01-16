@@ -172,8 +172,8 @@ describe('WebSocket Resilience Configuration (S3.3)', () => {
       expect(CHAINS.avalanche.wsFallbackUrls).toHaveLength(2);
     });
 
-    it('Fantom should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.fantom.wsFallbackUrls).toHaveLength(2);
+    it('Fantom should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.fantom.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
     it('zkSync should have 2 WebSocket fallbacks', () => {

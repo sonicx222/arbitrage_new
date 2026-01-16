@@ -12,6 +12,9 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
+// Make this file a module
+export {};
+
 // Define STREAMS constant for tests
 const STREAMS = {
   PRICE_UPDATES: 'stream:price-updates',
@@ -22,50 +25,62 @@ const STREAMS = {
   HEALTH: 'stream:health'
 };
 
-// Mock Redis Streams Client
+// Mock Redis Streams Client - define BEFORE jest.mock
 const mockBatcher = {
-  add: jest.fn(),
-  flush: jest.fn(() => Promise.resolve()),
-  getStats: jest.fn().mockReturnValue({
+  add: jest.fn<any>(),
+  flush: jest.fn<any>(() => Promise.resolve()),
+  getStats: jest.fn<any>(() => ({
     currentQueueSize: 0,
     totalMessagesQueued: 0,
     batchesSent: 0,
     totalMessagesSent: 0,
     compressionRatio: 1,
     averageBatchSize: 0
-  }),
-  destroy: jest.fn()
+  })),
+  destroy: jest.fn<any>()
 };
 
 const mockStreamsClient = {
-  xadd: jest.fn(() => Promise.resolve('1234-0')),
-  createBatcher: jest.fn().mockReturnValue(mockBatcher),
-  disconnect: jest.fn(() => Promise.resolve()),
-  ping: jest.fn(() => Promise.resolve(true))
+  xadd: jest.fn<any>(() => Promise.resolve('1234-0')),
+  createBatcher: jest.fn<any>(() => mockBatcher),
+  disconnect: jest.fn<any>(() => Promise.resolve()),
+  ping: jest.fn<any>(() => Promise.resolve(true))
 };
-
-const MockRedisStreamsClient = Object.assign(
-  jest.fn(() => mockStreamsClient),
-  { STREAMS }
-);
-
-jest.mock('../../src/redis-streams', () => ({
-  RedisStreamsClient: MockRedisStreamsClient,
-  getRedisStreamsClient: jest.fn(() => Promise.resolve(mockStreamsClient)),
-  StreamBatcher: jest.fn(() => mockBatcher)
-}));
 
 // Mock the regular Redis client (for backward compatibility)
 const mockRedisClient = {
-  publish: jest.fn(() => Promise.resolve(1)),
-  disconnect: jest.fn(() => Promise.resolve(undefined))
+  publish: jest.fn<any>(() => Promise.resolve(1)),
+  disconnect: jest.fn<any>(() => Promise.resolve(undefined))
 };
 
-jest.mock('../../src/redis', () => ({
-  getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient))
+// Mock @arbitrage/core - this is what the tests import from
+jest.mock('@arbitrage/core', () => ({
+  getRedisStreamsClient: () => Promise.resolve(mockStreamsClient),
+  getRedisClient: () => Promise.resolve(mockRedisClient),
+  RedisStreamsClient: Object.assign(
+    jest.fn(() => mockStreamsClient),
+    { STREAMS }
+  ),
+  StreamBatcher: jest.fn(() => mockBatcher)
 }));
 
 describe('BaseDetector Streams Migration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // Restore mock implementations after clearing
+    mockStreamsClient.createBatcher.mockReturnValue(mockBatcher);
+    mockStreamsClient.xadd.mockResolvedValue('1234-0');
+    mockBatcher.flush.mockResolvedValue(undefined);
+    mockBatcher.getStats.mockReturnValue({
+      currentQueueSize: 0,
+      totalMessagesQueued: 0,
+      batchesSent: 0,
+      totalMessagesSent: 0,
+      compressionRatio: 1,
+      averageBatchSize: 0
+    });
+  });
+
   describe('Stream Publishing', () => {
     it('should publish price updates to Redis Stream instead of Pub/Sub', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
