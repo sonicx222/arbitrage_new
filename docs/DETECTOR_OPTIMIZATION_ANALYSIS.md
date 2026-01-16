@@ -511,13 +511,70 @@ const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6;
 
 ### Tier 3: Medium Priority (1-2 weeks each)
 
-| # | Enhancement | Expected Impact | Confidence | Effort |
-|---|-------------|-----------------|------------|--------|
-| 11 | **Multi-Leg Path Finding (5+ tokens)** | +30% opportunities | 80% | 2 weeks |
-| 12 | **Whale Activity Detection** | +15% early warning | 72% | 1 week |
-| 13 | **Cross-Chain Multi-Hop** | +50% cross-chain ROI | 75% | 2 weeks |
-| 14 | **Flashbots Integration** | -10% MEV losses | 80% | 1 week |
-| 15 | **Liquidity Depth Analysis** | +20% execution accuracy | 78% | 1 week |
+| # | Enhancement | Expected Impact | Confidence | Effort | Status |
+|---|-------------|-----------------|------------|--------|--------|
+| 11 | **Multi-Leg Path Finding (5+ tokens)** | +30% opportunities | 80% | 2 weeks | ✅ **IMPLEMENTED** |
+| 12 | **Whale Activity Detection** | +15% early warning | 72% | 1 week | ✅ **IMPLEMENTED** |
+| 13 | **Cross-Chain Multi-Hop** | +50% cross-chain ROI | 75% | 2 weeks | Pending |
+| 14 | **Flashbots Integration** | -10% MEV losses | 80% | 1 week | Pending |
+| 15 | **Liquidity Depth Analysis** | +20% execution accuracy | 78% | 1 week | ✅ **IMPLEMENTED** |
+
+#### T3.11 Multi-Leg Path Finding - Implementation Details
+
+**Location**: `shared/core/src/multi-leg-path-finder.ts`
+
+**Features Implemented**:
+- Depth-first search for 5-7 token cyclic arbitrage paths
+- Dynamic slippage calculation based on pool liquidity
+- ExecutionContext pattern for thread-safe concurrent calls
+- Configurable path length, timeout, and profit thresholds
+- Statistics tracking (calls, opportunities, paths explored, timeouts)
+
+**Key Algorithms**:
+- Token pair grouping for O(1) pool lookups
+- Pruning based on liquidity and path depth
+- BigInt precision for swap calculations
+
+**Test Coverage**: 30+ tests in `tier3-optimizations.test.ts`
+
+---
+
+#### T3.12 Whale Activity Detection - Implementation Details
+
+**Location**: `shared/core/src/whale-activity-tracker.ts`
+
+**Features Implemented**:
+- Wallet tracking with activity history (up to 100 transactions per wallet)
+- Pattern detection: accumulator, distributor, swing_trader, arbitrageur
+- Follow-the-whale signals with confidence scoring
+- Super whale detection (10x threshold = $500K+)
+- LRU eviction for memory management (max 5000 wallets)
+
+**Bug Fixes Applied**:
+- Exact pairKey matching (prevents "USDT" matching "USDT2")
+- Timestamp sorting for accurate time-based pattern analysis
+- Out-of-order transaction handling with `Math.max()` for lastSeen
+
+**Test Coverage**: 17 tests in `tier3-advanced.test.ts`
+
+---
+
+#### T3.15 Liquidity Depth Analysis - Implementation Details
+
+**Location**: `shared/core/src/liquidity-depth-analyzer.ts`
+
+**Features Implemented**:
+- AMM pool depth simulation using constant product formula (x * y = k)
+- Multi-level slippage prediction based on trade size
+- Optimal trade size recommendation
+- Best pool selection for token pairs
+- Liquidity scoring (0-1 scale based on depth, symmetry, fees)
+
+**Bug Fixes Applied**:
+- Input validation for pool data (reserves, price, liquidityUsd)
+- Removed unused `maxCachedLevels` config
+
+**Test Coverage**: 20+ tests in `tier3-advanced.test.ts`
 
 ---
 
