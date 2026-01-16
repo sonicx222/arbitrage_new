@@ -349,13 +349,19 @@ export class ChainDetectorInstance extends EventEmitter {
     // Use wsUrl, fallback to rpcUrl if not available
     const primaryWsUrl = this.chainConfig.wsUrl || this.chainConfig.rpcUrl;
 
+    // FIX: Pass chainId for proper staleness thresholds and health tracking
+    // Use extended timeout for known unstable chains (BSC, Fantom)
+    const unstableChains = ['bsc', 'fantom'];
+    const connectionTimeout = unstableChains.includes(this.chainId.toLowerCase()) ? 15000 : 10000;
+
     const wsConfig: WebSocketConfig = {
       url: primaryWsUrl,
       fallbackUrls: this.chainConfig.wsFallbackUrls,
       reconnectInterval: 5000,
       maxReconnectAttempts: this.MAX_RECONNECT_ATTEMPTS,
       pingInterval: 30000,
-      connectionTimeout: 10000
+      connectionTimeout,
+      chainId: this.chainId  // FIX: Enable chain-specific staleness detection
     };
 
     this.wsManager = new WebSocketManager(wsConfig);

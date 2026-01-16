@@ -245,6 +245,10 @@ export class UnifiedChainDetector extends EventEmitter {
       // Initialize degradation manager
       this.degradationManager = getGracefulDegradationManager();
 
+      // FIX: Register capabilities for graceful degradation
+      // This prevents "No capabilities registered" warnings when chain failures occur
+      this.registerChainCapabilities();
+
       // Start chain instances
       await this.startChainInstances();
 
@@ -451,6 +455,31 @@ export class UnifiedChainDetector extends EventEmitter {
     this.crossRegionHealth.on('failoverEvent', (event) => {
       this.logger.info('Received failover event', event);
       this.emit('failoverEvent', event);
+    });
+  }
+
+  /**
+   * FIX: Register chain capabilities for graceful degradation.
+   * This prevents "No capabilities registered" warnings when individual chains fail.
+   * Each chain is a non-required capability - the service can continue with partial chain coverage.
+   */
+  private registerChainCapabilities(): void {
+    if (!this.degradationManager || !this.config.chains) {
+      return;
+    }
+
+    const serviceName = `unified-detector-${this.config.partitionId}`;
+    const capabilities = this.config.chains.map(chainId => ({
+      name: `chain_${chainId}_failure`,
+      required: false,  // Individual chain failures don't require service shutdown
+      degradationLevel: 'partial'  // Service continues with reduced chain coverage
+    }));
+
+    this.degradationManager.registerCapabilities(serviceName, capabilities);
+    this.logger.info('Registered chain capabilities for graceful degradation', {
+      serviceName,
+      chainCount: capabilities.length,
+      chains: this.config.chains
     });
   }
 
