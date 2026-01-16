@@ -291,29 +291,34 @@ export class StreamHealthMonitor {
         const info = await this.getStreamInfo(streamName);
         streams[streamName] = info;
 
+        // Only count initialized streams for health status
+        // 'unknown' means stream not initialized yet - not an error
         if (info.status === 'critical') {
           hasCritical = true;
         } else if (info.status === 'warning') {
           hasWarning = true;
         }
+        // 'unknown' status is ignored for overall health - it's a startup condition
 
-        // Check for lag alerts
-        if (info.pendingCount >= this.thresholds.lagCritical) {
-          this.triggerAlert({
-            type: 'high_lag',
-            severity: 'critical',
-            stream: streamName,
-            message: `Critical lag detected: ${info.pendingCount} pending messages`,
-            timestamp: Date.now()
-          });
-        } else if (info.pendingCount >= this.thresholds.lagWarning) {
-          this.triggerAlert({
-            type: 'high_lag',
-            severity: 'warning',
-            stream: streamName,
-            message: `Warning: ${info.pendingCount} pending messages`,
-            timestamp: Date.now()
-          });
+        // Only trigger lag alerts for initialized streams with actual lag
+        if (info.status !== 'unknown') {
+          if (info.pendingCount >= this.thresholds.lagCritical) {
+            this.triggerAlert({
+              type: 'high_lag',
+              severity: 'critical',
+              stream: streamName,
+              message: `Critical lag detected: ${info.pendingCount} pending messages`,
+              timestamp: Date.now()
+            });
+          } else if (info.pendingCount >= this.thresholds.lagWarning) {
+            this.triggerAlert({
+              type: 'high_lag',
+              severity: 'warning',
+              stream: streamName,
+              message: `Warning: ${info.pendingCount} pending messages`,
+              timestamp: Date.now()
+            });
+          }
         }
       } catch (error) {
         this.logger.warn(`Failed to get health for stream: ${streamName}`, { error });
@@ -343,27 +348,32 @@ export class StreamHealthMonitor {
   }
 
   /**
-   * Get detailed info for a specific stream
+   * Get detailed info for a specific stream.
+   * Handles streams that don't exist yet (common during startup).
    */
   private async getStreamInfo(streamName: string): Promise<MonitoredStreamInfo> {
     const length = await this.streamsClient!.xlen(streamName);
     const info = await this.streamsClient!.xinfo(streamName);
 
     // Calculate pending count by checking consumer groups
-    let pendingCount = 0;
-    try {
-      const pendingInfo = await this.streamsClient!.xpending(streamName, this.defaultConsumerGroup);
-      pendingCount = pendingInfo.total;
-    } catch {
-      // Group may not exist, that's OK
-    }
+    // xpending now returns defaults if group doesn't exist (no throw)
+    const pendingInfo = await this.streamsClient!.xpending(streamName, this.defaultConsumerGroup);
+    const pendingCount = pendingInfo.total;
 
-    // Determine status
-    let status: StreamHealthStatus = 'healthy';
-    if (pendingCount >= this.thresholds.lagCritical || length >= this.thresholds.lengthCritical) {
+    // Determine status based on stream state
+    let status: StreamHealthStatus;
+
+    // Stream doesn't exist yet (length=0 and no lastGeneratedId)
+    const streamNotInitialized = info.length === 0 && info.lastGeneratedId === '0-0';
+    if (streamNotInitialized) {
+      // Not an error - stream just hasn't received data yet
+      status = 'unknown';
+    } else if (pendingCount >= this.thresholds.lagCritical || length >= this.thresholds.lengthCritical) {
       status = 'critical';
     } else if (pendingCount >= this.thresholds.lagWarning || length >= this.thresholds.lengthWarning) {
       status = 'warning';
+    } else {
+      status = 'healthy';
     }
 
     return {

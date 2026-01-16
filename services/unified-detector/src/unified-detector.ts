@@ -486,11 +486,15 @@ export class UnifiedChainDetector extends EventEmitter {
     // P1-NEW-4 FIX: Also check state at publish time
     if (!this.streamsClient || !this.stateManager.isRunning()) return;
 
+    const serviceName = `unified-detector-${this.config.partitionId}`;
+
     try {
       await this.streamsClient.xadd(
         RedisStreamsClient.STREAMS.HEALTH,
         {
-          service: `unified-detector-${this.config.partitionId}`,
+          // Use both 'name' (preferred) and 'service' (legacy) for compatibility
+          name: serviceName,
+          service: serviceName,
           ...health,
           chainHealth: Object.fromEntries(health.chainHealth)
         }
@@ -624,8 +628,13 @@ export class UnifiedChainDetector extends EventEmitter {
     const healthyChains = Array.from(chainHealth.values()).filter(h => h.status === 'healthy').length;
     const totalChains = chainHealth.size;
 
-    let status: 'healthy' | 'degraded' | 'unhealthy';
-    if (healthyChains === totalChains) {
+    // Determine overall partition status
+    // 'starting' is used when no chains are initialized yet (common during startup)
+    let status: 'healthy' | 'degraded' | 'unhealthy' | 'starting';
+    if (totalChains === 0) {
+      // No chains started yet - report as 'starting' instead of misleading 'healthy'
+      status = 'starting';
+    } else if (healthyChains === totalChains) {
       status = 'healthy';
     } else if (healthyChains > 0) {
       status = 'degraded';

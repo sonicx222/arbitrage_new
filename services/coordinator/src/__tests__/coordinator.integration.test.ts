@@ -467,6 +467,10 @@ describe('CoordinatorService Integration', () => {
       // Set low system health
       (coordinator as any).systemMetrics.systemHealth = 50;
 
+      // Simulate being past the startup grace period (60 seconds)
+      // During grace period, alerts are suppressed if no services have reported
+      (coordinator as any).startTime = Date.now() - 70000; // 70 seconds ago
+
       // Trigger alert check
       (coordinator as any).checkForAlerts();
 

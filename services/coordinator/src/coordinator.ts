@@ -176,6 +176,11 @@ export class CoordinatorService {
   private alertCooldowns: Map<string, number> = new Map();
   private opportunities: Map<string, ArbitrageOpportunity> = new Map();
 
+  // Startup grace period: Don't report critical alerts during initial startup
+  // This prevents false alerts when services haven't reported health yet
+  private static readonly STARTUP_GRACE_PERIOD_MS = 60000; // 60 seconds
+  private startTime: number = 0;
+
   // Intervals
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private metricsUpdateInterval: NodeJS.Timeout | null = null;
@@ -272,6 +277,9 @@ export class CoordinatorService {
 
     // Use state manager to prevent concurrent starts (P0 fix)
     const result = await this.stateManager.executeStart(async () => {
+      // Track start time for startup grace period
+      this.startTime = Date.now();
+
       this.logger.info('Starting Coordinator Service', {
         instanceId: this.config.leaderElection.instanceId
       });
@@ -1051,30 +1059,45 @@ export class CoordinatorService {
     this.systemMetrics.pendingOpportunities = this.opportunities.size;
   }
 
+  /**
+   * Check for alerts and trigger notifications.
+   * Respects startup grace period to avoid false alerts during initialization.
+   */
   private checkForAlerts(): void {
     // P2 FIX: Use Alert type instead of any
     const alerts: Alert[] = [];
+    const now = Date.now();
+
+    // Check if we're still in the startup grace period
+    const inGracePeriod = (now - this.startTime) < CoordinatorService.STARTUP_GRACE_PERIOD_MS;
 
     // Check service health
     for (const [serviceName, health] of this.serviceHealth) {
-      if (health.status !== 'healthy') {
+      // Skip 'starting' and 'stopping' status - these are transient states
+      if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
         alerts.push({
           type: 'SERVICE_UNHEALTHY',
           service: serviceName,
           message: `${serviceName} is ${health.status}`,
           severity: 'high',
-          timestamp: Date.now()
+          timestamp: now
         });
       }
     }
 
     // Check system metrics
-    if (this.systemMetrics.systemHealth < 80) {
+    // During grace period: only alert if there are services AND health is low
+    // After grace period: alert on any low health
+    const shouldAlertLowHealth = inGracePeriod
+      ? this.serviceHealth.size > 0 && this.systemMetrics.systemHealth < 80
+      : this.systemMetrics.systemHealth < 80;
+
+    if (shouldAlertLowHealth) {
       alerts.push({
         type: 'SYSTEM_HEALTH_LOW',
         message: `System health is ${this.systemMetrics.systemHealth.toFixed(1)}%`,
         severity: 'critical',
-        timestamp: Date.now()
+        timestamp: now
       });
     }
 
