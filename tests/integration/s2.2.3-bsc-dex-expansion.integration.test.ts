@@ -22,9 +22,10 @@ process.env.BSC_RPC_URL = 'https://bsc-dataseed1.binance.org';
 process.env.BSC_WS_URL = 'wss://bsc-ws-node.nariox.org:443';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
-// Use require to avoid ts-jest transformation caching issues
+// P1-3 FIX: Use require to avoid ts-jest transformation caching issues
 // This ensures we use the compiled dist output with all exports
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const bscExpansionConfig = require('@arbitrage/config');
 const {
   DEXES,
   CHAINS,
@@ -35,7 +36,10 @@ const {
   getEnabledDexes,
   dexFeeToPercentage,
   percentageToBasisPoints
-} = require('@arbitrage/config');
+} = bscExpansionConfig;
+
+// Make this file a module to avoid TS2451 redeclaration errors
+export {};
 
 // =============================================================================
 // S2.2.3 Test Suite: BSC DEX Expansion (5 → 8)

@@ -21,15 +21,26 @@ process.env.ETHEREUM_RPC_URL = 'https://mainnet.infura.io/v3/test';
 process.env.ETHEREUM_WS_URL = 'wss://mainnet.infura.io/ws/v3/test';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
-// Use require to avoid ts-jest transformation caching issues
+// P1-3 FIX: Import config module and alias to avoid TS2451 redeclaration
 // eslint-disable-next-line @typescript-eslint/no-var-requires
+const pairInitConfig = require('@arbitrage/config');
 const {
-  DEXES,
-  CHAINS,
-  CORE_TOKENS,
-  ARBITRAGE_CONFIG,
-  dexFeeToPercentage
-} = require('@arbitrage/config');
+  DEXES: pairInitDEXES,
+  CHAINS: pairInitCHAINS,
+  CORE_TOKENS: pairInitCORE_TOKENS,
+  ARBITRAGE_CONFIG: pairInitARBITRAGE_CONFIG,
+  dexFeeToPercentage: pairInitDexFeeToPercentage
+} = pairInitConfig;
+
+// Re-export with standard names for test usage
+const DEXES = pairInitDEXES;
+const CHAINS = pairInitCHAINS;
+const CORE_TOKENS = pairInitCORE_TOKENS;
+const ARBITRAGE_CONFIG = pairInitARBITRAGE_CONFIG;
+const dexFeeToPercentage = pairInitDexFeeToPercentage;
+
+// Make this file a module to avoid global scope issues
+export {};
 
 // =============================================================================
 // S2.2.5 Test Suite: Pair Initialization

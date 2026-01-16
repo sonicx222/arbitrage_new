@@ -209,9 +209,27 @@ export class DistributedLockManager {
           if (this.config.autoExtend) {
             lockInfo.extendInterval = setInterval(async () => {
               try {
-                await this.extendLock(key, lockValue, ttlMs);
+                const extended = await this.extendLock(key, lockValue, ttlMs);
+                // P1-2 FIX (2026-01-16): Stop interval if extension fails
+                // This means lock was stolen/expired - continuing is wasteful
+                if (!extended) {
+                  this.logger.warn('Auto-extend failed: lock lost, stopping interval', { key });
+                  if (lockInfo.extendInterval) {
+                    clearInterval(lockInfo.extendInterval);
+                    lockInfo.extendInterval = undefined;
+                  }
+                  // Clean up tracking since we no longer own the lock
+                  this.heldLocks.delete(key);
+                  this.stats.currentlyHeld = Math.max(0, this.stats.currentlyHeld - 1);
+                }
               } catch (error) {
-                this.logger.error('Auto-extend failed', { key, error });
+                this.logger.error('Auto-extend failed with error', { key, error });
+                // P1-2 FIX: Also stop interval on error - lock state is unknown
+                if (lockInfo.extendInterval) {
+                  clearInterval(lockInfo.extendInterval);
+                  lockInfo.extendInterval = undefined;
+                }
+                // Don't clean up tracking on error - let TTL expire naturally
               }
             }, this.config.autoExtendIntervalMs);
           }

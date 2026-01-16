@@ -443,6 +443,8 @@ export class WebSocketManager {
     this.isDisconnected = true;
     // P1-FIX: Clear connection mutex on disconnect
     this.connectMutex = null;
+    // P0-2 FIX: Clear resubscribe mutex
+    this.resubscribeMutex = null;
 
     // Clear timers
     this.clearReconnectionTimer();
@@ -455,6 +457,21 @@ export class WebSocketManager {
       this.ws.removeAllListeners();
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
+    }
+
+    // P1-1 FIX (2026-01-16): Clean up pending confirmations to prevent memory leak
+    // If confirmations are mid-flight when disconnect() is called, reject them
+    // and clear the map to prevent orphaned resolve/reject functions
+    if (this.pendingConfirmations) {
+      for (const [id, handlers] of this.pendingConfirmations) {
+        try {
+          handlers.reject(new Error('WebSocket disconnected'));
+        } catch {
+          // Ignore errors during cleanup
+        }
+      }
+      this.pendingConfirmations.clear();
+      this.pendingConfirmations = null;
     }
 
     // P0-2 fix: Clear handler sets to prevent memory leaks
@@ -677,43 +694,63 @@ export class WebSocketManager {
    * Emits 'subscriptionRecoveryPartial' event if some subscriptions fail.
    *
    * @param timeoutMs - Timeout for each subscription confirmation (default 5000ms)
+   * P0-2 FIX (2026-01-16): Added mutex protection to prevent concurrent resubscriptions.
+   * Without mutex, concurrent calls could cause duplicate subscriptions and ID collisions
+   * in the pendingConfirmations map, leading to orphaned timeout handlers.
    */
   async resubscribeWithValidation(timeoutMs = 5000): Promise<{ success: number; failed: number }> {
+    // P0-2 FIX: If resubscription is already in progress, return its result
+    // This prevents duplicate subscriptions and ID collisions
+    if (this.resubscribeMutex) {
+      this.logger.debug('Resubscription already in progress, waiting for existing operation');
+      return this.resubscribeMutex;
+    }
+
     const results = { success: 0, failed: 0 };
 
     if (this.subscriptions.size === 0) {
       return results;
     }
 
+    // P0-2 FIX: Create mutex promise BEFORE starting work
+    let resolveMutex: (value: { success: number; failed: number }) => void;
+    this.resubscribeMutex = new Promise(resolve => { resolveMutex = resolve; });
+
     this.logger.info('Starting subscription recovery with validation', {
       chainId: this.chainId,
       subscriptionCount: this.subscriptions.size
     });
 
-    for (const subscription of this.subscriptions.values()) {
-      try {
-        await this.sendSubscriptionWithTimeout(subscription, timeoutMs);
-        results.success++;
-      } catch (error) {
-        results.failed++;
-        this.logger.error('Subscription recovery failed', {
-          id: subscription.id,
-          method: subscription.method,
-          error
-        });
+    try {
+      for (const subscription of this.subscriptions.values()) {
+        try {
+          await this.sendSubscriptionWithTimeout(subscription, timeoutMs);
+          results.success++;
+        } catch (error) {
+          results.failed++;
+          this.logger.error('Subscription recovery failed', {
+            id: subscription.id,
+            method: subscription.method,
+            error
+          });
+        }
       }
+
+      this.logger.info('Subscription recovery completed', {
+        chainId: this.chainId,
+        ...results
+      });
+
+      if (results.failed > 0) {
+        this.emit('subscriptionRecoveryPartial', results);
+      }
+
+      return results;
+    } finally {
+      // P0-2 FIX: Always clear mutex and resolve waiters
+      this.resubscribeMutex = null;
+      resolveMutex!(results);
     }
-
-    this.logger.info('Subscription recovery completed', {
-      chainId: this.chainId,
-      ...results
-    });
-
-    if (results.failed > 0) {
-      this.emit('subscriptionRecoveryPartial', results);
-    }
-
-    return results;
   }
 
   /**
@@ -769,6 +806,12 @@ export class WebSocketManager {
     resolve: () => void;
     reject: (error: Error) => void;
   }> | null = null;
+
+  /**
+   * P0-2 FIX: Mutex for resubscribeWithValidation to prevent concurrent executions.
+   * Multiple concurrent calls could cause duplicate subscriptions and ID collisions.
+   */
+  private resubscribeMutex: Promise<{ success: number; failed: number }> | null = null;
 
   /**
    * S3.3: Detect data gaps after reconnection.
