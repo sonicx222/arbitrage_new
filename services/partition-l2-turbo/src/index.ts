@@ -145,11 +145,18 @@ async function main(): Promise<void> {
   }
 }
 
-// Run
-main().catch((error) => {
-  logger.error('Fatal error in P2 L2-Turbo partition main', { error });
-  process.exit(1);
-});
+// Run - only when this is the main entry point (not when imported by tests)
+// Check for Jest worker to prevent auto-start during test imports
+if (!process.env.JEST_WORKER_ID) {
+  main().catch((error) => {
+    if (logger) {
+      logger.error('Fatal error in P2 L2-Turbo partition main', { error });
+    } else {
+      console.error('Fatal error in P2 L2-Turbo partition main (logger unavailable):', error);
+    }
+    process.exit(1);
+  });
+}
 
 // =============================================================================
 // Exports

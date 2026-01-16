@@ -7,6 +7,8 @@
  * - Event emission
  * - Lifecycle helpers (executeStart, executeStop)
  *
+ * Uses DI pattern (P16) for testability instead of Jest mock hoisting.
+ *
  * @migrated from shared/core/src/service-state.test.ts
  * @see ADR-009: Test Architecture
  */
@@ -18,26 +20,37 @@ import {
   createServiceState,
   isServiceState
 } from '@arbitrage/core';
+import type { ServiceStateManagerDeps } from '@arbitrage/core';
 
-// Mock logger
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    error: jest.fn(),
-    warn: jest.fn(),
-    debug: jest.fn()
-  }))
-}));
+// =============================================================================
+// DI Mock Logger (P16 pattern)
+// =============================================================================
+
+const mockLogger = {
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn()
+};
+
+/**
+ * Creates mock dependencies for ServiceStateManager tests.
+ */
+const createMockStateDeps = (): ServiceStateManagerDeps => ({
+  logger: mockLogger
+});
 
 describe('ServiceStateManager', () => {
   let stateManager: ServiceStateManager;
 
   beforeEach(() => {
+    jest.clearAllMocks();
+
     stateManager = createServiceState({
       serviceName: 'test-service',
       transitionTimeoutMs: 1000,
       emitEvents: true
-    });
+    }, createMockStateDeps());
     // Add error listener to prevent unhandled 'error' events from crashing tests
     // The ServiceStateManager emits state name as event, including 'error' state
     stateManager.on('error', () => {

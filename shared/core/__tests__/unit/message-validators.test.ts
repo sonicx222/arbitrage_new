@@ -24,10 +24,12 @@ import {
   createCoordinatorCommand
 } from '@arbitrage/core';
 
+// Import validated types from message-validators (different from shared/types)
+// These are the types the validators actually check against
 import type {
-  PriceUpdate,
-  WhaleTransaction,
-  SwapEvent,
+  ValidatedPriceUpdate as PriceUpdate,
+  ValidatedWhaleTransaction as WhaleTransaction,
+  ValidatedSwapEvent as SwapEvent,
   ReserveUpdate,
   CoordinatorCommand,
   ServiceHealthStatus

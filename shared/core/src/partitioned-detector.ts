@@ -109,6 +109,35 @@ export interface CrossChainDiscrepancy {
   timestamp: number;
 }
 
+/**
+ * Logger interface for PartitionedDetector.
+ * Allows injecting mock loggers for testing.
+ */
+export interface PartitionedDetectorLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Function signature for token normalization (for cross-chain matching).
+ */
+export type TokenNormalizeFn = (symbol: string) => string;
+
+/**
+ * Dependencies that can be injected into PartitionedDetector.
+ * This enables proper testing without Jest mock hoisting issues.
+ */
+export interface PartitionedDetectorDeps {
+  /** Logger instance - if provided, used instead of createLogger() */
+  logger?: PartitionedDetectorLogger;
+  /** Performance logger instance - if provided, used instead of getPerformanceLogger() */
+  perfLogger?: PerformanceLogger;
+  /** Token normalizer function - if provided, used for cross-chain token matching */
+  normalizeToken?: TokenNormalizeFn;
+}
+
 // P0-1 FIX: Proper types for Ethereum RPC events (consistent with chain-instance.ts)
 interface EthereumLog {
   address: string;
@@ -126,32 +155,8 @@ interface EthereumBlockHeader {
 
 // =============================================================================
 // S3.2.4-FIX: Token Pair Normalization Helper
+// Moved to PartitionedDetector.normalizeTokenPair() method for DI support
 // =============================================================================
-
-/**
- * Normalize a token pair string for cross-chain matching.
- * Handles different token symbol conventions across chains:
- * - WETH.e_USDT (Avalanche) → WETH_USDT
- * - ETH_USDT (BSC) → WETH_USDT
- * - WBTC.e_USDC (Avalanche) → WBTC_USDC
- *
- * @param pairKey - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
- * @returns Normalized token pair string
- */
-function normalizeTokenPair(pairKey: string): string {
-  const parts = pairKey.split('_');
-  if (parts.length < 2) return pairKey;
-
-  // Take last 2 parts as tokens (handles both formats)
-  const token0 = parts[parts.length - 2];
-  const token1 = parts[parts.length - 1];
-
-  // Normalize each token in the pair
-  const normalizedToken0 = normalizeTokenForCrossChain(token0);
-  const normalizedToken1 = normalizeTokenForCrossChain(token1);
-
-  return `${normalizedToken0}_${normalizedToken1}`;
-}
 
 // =============================================================================
 // PartitionedDetector Base Class
@@ -159,8 +164,9 @@ function normalizeTokenPair(pairKey: string): string {
 
 export class PartitionedDetector extends EventEmitter {
   protected config: InternalDetectorConfig;
-  protected logger: ReturnType<typeof createLogger>;
+  protected logger: PartitionedDetectorLogger;
   protected perfLogger: PerformanceLogger;
+  protected normalizeToken: TokenNormalizeFn;
 
   // Clients
   protected redis: RedisClient | null = null;
@@ -189,7 +195,7 @@ export class PartitionedDetector extends EventEmitter {
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
 
-  constructor(config: PartitionedDetectorConfig) {
+  constructor(config: PartitionedDetectorConfig, deps?: PartitionedDetectorDeps) {
     super();
 
     // Validate chains
@@ -213,14 +219,46 @@ export class PartitionedDetector extends EventEmitter {
       maxReconnectAttempts: config.maxReconnectAttempts ?? 5
     };
 
-    this.logger = createLogger(`partition:${config.partitionId}`);
-    this.perfLogger = getPerformanceLogger(`partition:${config.partitionId}`);
+    // Use injected dependencies if provided, otherwise create defaults
+    this.logger = deps?.logger ?? createLogger(`partition:${config.partitionId}`);
+    this.perfLogger = deps?.perfLogger ?? getPerformanceLogger(`partition:${config.partitionId}`);
+    this.normalizeToken = deps?.normalizeToken ?? normalizeTokenForCrossChain;
 
     // Initialize chain configs
     for (const chainId of this.config.chains) {
       this.chainConfigs.set(chainId, CHAINS[chainId as keyof typeof CHAINS]);
       this.initializeChainHealth(chainId);
     }
+  }
+
+  // ===========================================================================
+  // Token Pair Normalization (S3.2.4-FIX)
+  // ===========================================================================
+
+  /**
+   * Normalize a token pair string for cross-chain matching.
+   * Uses the injected normalizeToken function (or default) for DI support.
+   * Handles different token symbol conventions across chains:
+   * - WETH.e_USDT (Avalanche) → WETH_USDT
+   * - ETH_USDT (BSC) → WETH_USDT
+   * - WBTC.e_USDC (Avalanche) → WBTC_USDC
+   *
+   * @param pairKey - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+   * @returns Normalized token pair string
+   */
+  protected normalizeTokenPair(pairKey: string): string {
+    const parts = pairKey.split('_');
+    if (parts.length < 2) return pairKey;
+
+    // Take last 2 parts as tokens (handles both formats)
+    const token0 = parts[parts.length - 2];
+    const token1 = parts[parts.length - 1];
+
+    // Normalize each token in the pair using injected function
+    const normalizedToken0 = this.normalizeToken(token0);
+    const normalizedToken1 = this.normalizeToken(token1);
+
+    return `${normalizedToken0}_${normalizedToken1}`;
   }
 
   // ===========================================================================
@@ -792,7 +830,7 @@ export class PartitionedDetector extends EventEmitter {
 
     for (const [chainId, chainPriceMap] of pricesSnapshot) {
       for (const [pairKey, pricePoint] of chainPriceMap) {
-        const normalizedPair = normalizeTokenPair(pairKey);
+        const normalizedPair = this.normalizeTokenPair(pairKey);
 
         if (!normalizedPrices.has(normalizedPair)) {
           normalizedPrices.set(normalizedPair, new Map());

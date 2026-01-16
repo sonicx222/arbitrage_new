@@ -128,8 +128,32 @@ jest.mock('@arbitrage/core/websocket-manager', () => ({
 // Import after mocks
 import {
   PartitionedDetector,
-  PartitionedDetectorConfig
+  PartitionedDetectorConfig,
+  PartitionedDetectorDeps,
+  TokenNormalizeFn
 } from '@arbitrage/core/partitioned-detector';
+
+/**
+ * Mock token normalizer for cross-chain matching tests.
+ */
+const mockNormalizeToken: TokenNormalizeFn = (symbol: string) => {
+  const upper = symbol.toUpperCase().trim();
+  const aliases: Record<string, string> = {
+    'FUSDT': 'USDT', 'WFTM': 'FTM', 'WAVAX': 'AVAX',
+    'WETH.E': 'WETH', 'WBTC.E': 'WBTC', 'USDT.E': 'USDT',
+    'WBNB': 'BNB', 'BTCB': 'WBTC', 'ETH': 'WETH',
+    'WMATIC': 'MATIC', 'WETH': 'WETH', 'WBTC': 'WBTC',
+    'USDC': 'USDC', 'USDT': 'USDT', 'DAI': 'DAI'
+  };
+  return aliases[upper] || upper;
+};
+
+// Helper to create mock deps for PartitionedDetector
+const createMockDetectorDeps = (): PartitionedDetectorDeps => ({
+  logger: mockLogger,
+  perfLogger: mockPerfLogger as any,
+  normalizeToken: mockNormalizeToken
+});
 
 import {
   PARTITIONS,
@@ -176,7 +200,8 @@ function createP2Config(overrides: Partial<PartitionedDetectorConfig> = {}): Par
 }
 
 async function createStartedP2Detector(config?: PartitionedDetectorConfig): Promise<PartitionedDetector> {
-  const detector = new PartitionedDetector(config || createP2Config());
+  // Use DI to inject mock logger/perfLogger
+  const detector = new PartitionedDetector(config || createP2Config(), createMockDetectorDeps());
   await detector.start();
   return detector;
 }
@@ -398,7 +423,7 @@ describe('S3.1.4 P2 L2-Turbo Partition Service', () => {
     });
 
     it('should emit started event with all P2 chains', async () => {
-      detector = new PartitionedDetector(createP2Config());
+      detector = new PartitionedDetector(createP2Config(), createMockDetectorDeps());
       const startedHandler = jest.fn();
       detector.on('started', startedHandler);
 
@@ -411,7 +436,7 @@ describe('S3.1.4 P2 L2-Turbo Partition Service', () => {
     });
 
     it('should emit chainConnected for each P2 chain', async () => {
-      detector = new PartitionedDetector(createP2Config());
+      detector = new PartitionedDetector(createP2Config(), createMockDetectorDeps());
       const connectedHandler = jest.fn();
       detector.on('chainConnected', connectedHandler);
 
@@ -424,7 +449,7 @@ describe('S3.1.4 P2 L2-Turbo Partition Service', () => {
     });
 
     it('should start within 5 seconds', async () => {
-      detector = new PartitionedDetector(createP2Config());
+      detector = new PartitionedDetector(createP2Config(), createMockDetectorDeps());
 
       const startTime = Date.now();
       await detector.start();

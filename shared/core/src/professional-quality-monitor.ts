@@ -3,9 +3,32 @@
 // This is the single most important metric for measuring system professionalism
 
 import { createLogger } from './logger';
-import { getRedisClient } from './redis';
+import { getRedisClient, RedisClient } from './redis';
 
 const logger = createLogger('professional-quality-monitor');
+
+// =============================================================================
+// Dependency Injection Interface
+// =============================================================================
+
+/**
+ * Interface for Redis-like operations needed by ProfessionalQualityMonitor.
+ * Allows injecting mock Redis for testing.
+ */
+export interface QualityMonitorRedis {
+  setex(key: string, seconds: number, value: string): Promise<string>;
+  get(key: string): Promise<string | null>;
+  keys(pattern: string): Promise<string[]>;
+}
+
+/**
+ * Dependencies that can be injected into ProfessionalQualityMonitor.
+ * This enables proper testing without Jest mock hoisting issues.
+ */
+export interface QualityMonitorDeps {
+  /** Redis client instance - if provided, used directly (no async init needed) */
+  redis?: QualityMonitorRedis;
+}
 
 export interface QualityMetrics {
   // Core detection performance
@@ -62,11 +85,13 @@ export interface ProfessionalQualityScore {
 }
 
 export class ProfessionalQualityMonitor {
-  private redis: any;
+  private redis: QualityMonitorRedis | null = null;
+  private redisPromise: Promise<QualityMonitorRedis> | null = null;
   private metricsBuffer: QualityMetrics[] = [];
   private scoreHistory: ProfessionalQualityScore[] = [];
   private readonly METRICS_RETENTION_PERIOD = 24 * 60 * 60 * 1000; // 24 hours
   private readonly ASSESSMENT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+  private assessmentInterval: NodeJS.Timeout | null = null;
 
   // Professional quality thresholds
   private readonly THRESHOLDS = {
@@ -95,10 +120,62 @@ export class ProfessionalQualityMonitor {
     }
   };
 
-  constructor() {
-    this.redis = getRedisClient();
+  /**
+   * Create a ProfessionalQualityMonitor.
+   * @param deps - Optional dependencies for testing. If redis is provided, it's used directly.
+   */
+  constructor(deps?: QualityMonitorDeps) {
+    if (deps?.redis) {
+      // Direct injection for testing - no async needed
+      this.redis = deps.redis;
+    }
+    // Note: if no redis injected, lazy initialization via getRedis() is used
     this.startPeriodicAssessment();
     logger.info('Professional Quality Monitor initialized');
+  }
+
+  /**
+   * Get the Redis client, initializing lazily if needed.
+   * Uses singleton pattern for production, direct injection for tests.
+   * Creates an adapter around RedisClient that implements QualityMonitorRedis.
+   */
+  private async getRedis(): Promise<QualityMonitorRedis> {
+    // If already initialized, return directly
+    if (this.redis) {
+      return this.redis;
+    }
+
+    // If initialization is in progress, wait for it
+    if (this.redisPromise) {
+      return this.redisPromise;
+    }
+
+    // Start initialization - create an adapter around RedisClient
+    this.redisPromise = (async () => {
+      const client = await getRedisClient();
+      // Create adapter that implements QualityMonitorRedis
+      // Note: RedisClient.get does JSON parsing, but we need raw strings,
+      // so we use getRaw for the QualityMonitorRedis.get method
+      const adapter: QualityMonitorRedis = {
+        setex: (key, seconds, value) => client.setex(key, seconds, value),
+        get: (key) => client.getRaw(key),
+        keys: (pattern) => client.keys(pattern)
+      };
+      this.redis = adapter;
+      return adapter;
+    })();
+
+    return this.redisPromise;
+  }
+
+  /**
+   * Stop the periodic assessment (for cleanup in tests).
+   */
+  stopPeriodicAssessment(): void {
+    if (this.assessmentInterval) {
+      clearInterval(this.assessmentInterval);
+      this.assessmentInterval = null;
+    }
   }
 
   // Record a detection operation result
@@ -111,8 +188,9 @@ export class ProfessionalQualityMonitor {
     operationId: string;
   }): Promise<void> {
     try {
+      const redis = await this.getRedis();
       const key = `quality:detection:${Date.now()}`;
-      await this.redis.setex(key, 3600, JSON.stringify(result)); // 1 hour TTL
+      await redis.setex(key, 3600, JSON.stringify(result)); // 1 hour TTL
 
       // Update rolling metrics
       await this.updateRollingMetrics(result);
@@ -136,8 +214,9 @@ export class ProfessionalQualityMonitor {
     timestamp: number;
   }): Promise<void> {
     try {
+      const redis = await this.getRedis();
       const key = `quality:system:${Date.now()}`;
-      await this.redis.setex(key, 3600, JSON.stringify(health));
+      await redis.setex(key, 3600, JSON.stringify(health));
 
       logger.debug('System health recorded', health);
     } catch (error) {
@@ -154,8 +233,9 @@ export class ProfessionalQualityMonitor {
     timestamp: number;
   }): Promise<void> {
     try {
+      const redis = await this.getRedis();
       const key = `quality:operational:${Date.now()}`;
-      await this.redis.setex(key, 3600, JSON.stringify(metrics));
+      await redis.setex(key, 3600, JSON.stringify(metrics));
 
       logger.debug('Operational metrics recorded', metrics);
     } catch (error) {
@@ -217,7 +297,8 @@ export class ProfessionalQualityMonitor {
       }
 
       // Cache the score
-      await this.redis.setex(
+      const redis = await this.getRedis();
+      await redis.setex(
         `quality:score:current`,
         300, // 5 minutes
         JSON.stringify(score)
@@ -240,7 +321,8 @@ export class ProfessionalQualityMonitor {
   // Get current quality score
   async getCurrentQualityScore(): Promise<ProfessionalQualityScore | null> {
     try {
-      const cached = await this.redis.get('quality:score:current');
+      const redis = await this.getRedis();
+      const cached = await redis.get('quality:score:current');
       if (cached) {
         return JSON.parse(cached);
       }
@@ -551,11 +633,12 @@ export class ProfessionalQualityMonitor {
   // Data gathering methods (simplified implementations)
   private async getDetectionLatenciesForPeriod(period: { start: number; end: number }): Promise<number[]> {
     try {
-      const keys = await this.redis.keys('quality:detection:*');
+      const redis = await this.getRedis();
+      const keys = await redis.keys('quality:detection:*');
       const latencies: number[] = [];
 
       for (const key of keys) {
-        const data = await this.redis.get(key);
+        const data = await redis.get(key);
         if (data) {
           const result = JSON.parse(data);
           if (result.timestamp >= period.start && result.timestamp <= period.end) {
@@ -607,7 +690,7 @@ export class ProfessionalQualityMonitor {
   }
 
   private startPeriodicAssessment(): void {
-    setInterval(async () => {
+    this.assessmentInterval = setInterval(async () => {
       try {
         await this.calculateQualityScore();
       } catch (error) {

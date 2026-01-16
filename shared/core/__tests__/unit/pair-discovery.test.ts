@@ -774,7 +774,7 @@ describe('PairDiscoveryService', () => {
       );
 
       expect(discoveredHandler).toHaveBeenCalled();
-      const emittedPair = discoveredHandler.mock.calls[0][0];
+      const emittedPair = discoveredHandler.mock.calls[0][0] as DiscoveredPair;
 
       // Verify tokens are in sorted order
       const token0Lower = emittedPair.token0.toLowerCase();
