@@ -35,8 +35,34 @@ jest.mock('@arbitrage/config', () => {
 
 // Import after mocks are set up
 import { BaseDetector } from '@arbitrage/core';
-import type { DetectorConfig, ExtendedPair, PairSnapshot } from '@arbitrage/core';
+import type { DetectorConfig, ExtendedPair, PairSnapshot, BaseDetectorDeps } from '@arbitrage/core';
 import type { Pair, PriceUpdate, SwapEvent, ArbitrageOpportunity } from '@arbitrage/types';
+
+// =============================================================================
+// DI Helper (P16 pattern - uses DI instead of Jest mock hoisting)
+// =============================================================================
+
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn()
+};
+
+const mockPerfLogger = {
+  logEventLatency: jest.fn(),
+  logHealthCheck: jest.fn(),
+  logArbitrageOpportunity: jest.fn()
+};
+
+/**
+ * Creates mock dependencies for BaseDetector tests.
+ * This uses the DI pattern to inject mocks instead of relying on Jest mock hoisting.
+ */
+const createMockDetectorDeps = (): BaseDetectorDeps => ({
+  logger: mockLogger,
+  perfLogger: mockPerfLogger as any
+});
 
 // =============================================================================
 // Mock Implementations
@@ -49,7 +75,7 @@ class TestDetector extends BaseDetector {
   public mockArbitrageOpportunities: ArbitrageOpportunity[] = [];
   public mockWhaleTransactions: any[] = [];
 
-  constructor(config?: Partial<DetectorConfig>) {
+  constructor(config?: Partial<DetectorConfig>, deps?: BaseDetectorDeps) {
     super({
       chain: 'ethereum',
       enabled: true,
@@ -59,7 +85,7 @@ class TestDetector extends BaseDetector {
       batchTimeout: 30,
       healthCheckInterval: 30000,
       ...config
-    });
+    }, deps ?? createMockDetectorDeps());
   }
 
   // Expose protected methods for testing

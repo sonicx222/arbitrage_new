@@ -5,6 +5,7 @@ export {
   getRedisClient,
   resetRedisInstance
 } from './redis';
+export type { RedisClientDeps, RedisConstructor } from './redis';
 
 // P1-3-FIX: Standardized singleton pattern utilities
 export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';
@@ -49,7 +50,9 @@ export type {
   StateTransitionResult,
   StateChangeEvent,
   ServiceStateConfig,
-  ServiceStateSnapshot
+  ServiceStateSnapshot,
+  ServiceStateLogger,
+  ServiceStateManagerDeps
 } from './service-state';
 
 // Price Oracle (replaces hardcoded prices)
@@ -77,7 +80,9 @@ export type {
   BatcherConfig,
   BatcherStats,
   StreamConsumerConfig,
-  StreamConsumerStats
+  StreamConsumerStats,
+  RedisStreamsConstructor,
+  RedisStreamsClientDeps
 } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
@@ -252,10 +257,55 @@ export type {
   PairCacheConfig,
   CachedPairData,
   PairCacheStats,
-  CacheLookupResult
+  CacheLookupResult,
+  PairCacheServiceDeps
 } from './pair-cache';
 
-// REMOVED: Professional-grade modules (unused, cleaned up):
+// Professional Quality Monitor (AD-PQS scoring)
+export {
+  ProfessionalQualityMonitor
+} from './professional-quality-monitor';
+export type {
+  ProfessionalQualityScore,
+  QualityMetrics,
+  QualityMonitorDeps,
+  QualityMonitorRedis
+} from './professional-quality-monitor';
+
+// DEX Adapters for non-factory DEXes (Balancer V2, GMX, Platypus)
+export {
+  BalancerV2Adapter,
+  GmxAdapter,
+  PlatypusAdapter,
+  AdapterRegistry,
+  getAdapterRegistry,
+  resetAdapterRegistry,
+  BALANCER_VAULT_ADDRESSES,
+  BALANCER_VAULT_ABI,
+  GMX_ADDRESSES,
+  GMX_VAULT_ABI,
+  GMX_READER_ABI,
+  PLATYPUS_ADDRESSES,
+  PLATYPUS_POOL_ABI,
+  SUBGRAPH_URLS,
+  success as adapterSuccess,
+  failure as adapterFailure
+} from './dex-adapters';
+export type {
+  AdapterConfig,
+  AdapterType,
+  PoolType,
+  DiscoveredPool,
+  PoolReserves,
+  SwapQuote,
+  DexAdapter,
+  AdapterKey,
+  AdapterFactory,
+  AdapterRegistryEntry,
+  AdapterResult
+} from './dex-adapters';
+
+// REMOVED: Other professional-grade modules (unused, cleaned up):
 // - AdvancedStatisticalArbitrage
 // - RiskManagementEngine
 // - EnterpriseTestingFramework
@@ -340,12 +390,21 @@ export {
 
 // Base detector for chain-specific implementations
 export { BaseDetector } from './base-detector';
-export type { DetectorConfig as BaseDetectorConfig, PairSnapshot, ExtendedPair } from './base-detector';
+export type {
+  DetectorConfig as BaseDetectorConfig,
+  PairSnapshot,
+  ExtendedPair,
+  BaseDetectorDeps,
+  BaseDetectorLogger
+} from './base-detector';
 
 // Partitioned detector for multi-chain management (ADR-003, S3.1)
 export { PartitionedDetector } from './partitioned-detector';
 export type {
   PartitionedDetectorConfig,
+  PartitionedDetectorDeps,
+  PartitionedDetectorLogger,
+  TokenNormalizeFn,
   ChainHealth as PartitionChainHealth,
   ChainHealth,
   PartitionHealth,

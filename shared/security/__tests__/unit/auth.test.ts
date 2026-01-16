@@ -2,15 +2,14 @@
  * Authentication Service Tests
  * @migrated from shared/security/src/auth.test.ts
  * @see ADR-009: Test Architecture
+ *
+ * Uses DI pattern (P16) to inject mock dependencies instead of Jest mock hoisting.
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
+// =============================================================================
+// Mock Setup
+// =============================================================================
 
 // Mock dependencies with factory functions
 jest.mock('jsonwebtoken', () => ({
@@ -23,23 +22,36 @@ jest.mock('bcrypt', () => ({
   compare: jest.fn()
 }));
 
-jest.mock('@arbitrage/core', () => ({
-  createLogger: jest.fn(() => mockLogger),
-  getRedisClient: jest.fn(() => Promise.resolve(mockRedis))
-}));
+// =============================================================================
+// DI Mock Instances (P16 pattern)
+// =============================================================================
+
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn()
+};
 
 const mockRedis = {
   get: jest.fn(() => Promise.resolve(null)),
-  set: jest.fn(() => Promise.resolve('OK')),
   setex: jest.fn(() => Promise.resolve('OK')),
-  del: jest.fn(() => Promise.resolve(1)),
+  del: jest.fn((..._keys: string[]) => Promise.resolve(1)),
   incr: jest.fn(() => Promise.resolve(1)),
   expire: jest.fn(() => Promise.resolve(1))
 };
 
+/**
+ * Creates mock dependencies for AuthService tests using DI pattern.
+ */
+const createMockAuthDeps = () => ({
+  logger: mockLogger,
+  redis: mockRedis
+});
+
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
-import { AuthService, User } from '../../src/auth';
+import { AuthService, User, AuthServiceDeps } from '../../src/auth';
 
 describe('AuthService', () => {
   let authService: AuthService;
@@ -53,11 +65,8 @@ describe('AuthService', () => {
     process.env.JWT_EXPIRES_IN = '1h';
     process.env.BCRYPT_ROUNDS = '8';
 
-    authService = new AuthService();
-    // Wait for Redis initialization
-    await new Promise(resolve => setTimeout(resolve, 10));
-    // Ensure Redis mock is set (in case async init didn't complete)
-    (authService as any).redis = mockRedis;
+    // Use DI pattern to inject mock dependencies
+    authService = new AuthService(createMockAuthDeps());
 
     mockUser = {
       id: 'user_123',

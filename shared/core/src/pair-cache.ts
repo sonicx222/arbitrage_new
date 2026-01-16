@@ -78,6 +78,19 @@ const NULL_PAIR_MARKER = 'NULL_PAIR';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 // =============================================================================
+// Dependency Injection Interface
+// =============================================================================
+
+/**
+ * Dependencies that can be injected into PairCacheService.
+ * This enables proper testing without Jest mock hoisting issues.
+ */
+export interface PairCacheServiceDeps {
+  /** Factory function to get Redis client */
+  getRedisClient?: () => Promise<RedisClient>;
+}
+
+// =============================================================================
 // Pair Cache Service
 // =============================================================================
 
@@ -86,6 +99,7 @@ export class PairCacheService extends EventEmitter {
   private config: PairCacheConfig;
   private redis: RedisClient | null = null;
   private initialized = false;
+  private readonly deps: Required<PairCacheServiceDeps>;
 
   // Statistics
   private stats: PairCacheStats = {
@@ -99,8 +113,13 @@ export class PairCacheService extends EventEmitter {
     errors: 0
   };
 
-  constructor(config?: Partial<PairCacheConfig>) {
+  constructor(config?: Partial<PairCacheConfig>, deps?: PairCacheServiceDeps) {
     super();
+
+    // Initialize dependencies with defaults or injected values
+    this.deps = {
+      getRedisClient: deps?.getRedisClient ?? getRedisClient
+    };
 
     this.config = {
       pairAddressTtlSec: 24 * 60 * 60, // 24 hours
@@ -119,12 +138,13 @@ export class PairCacheService extends EventEmitter {
 
   /**
    * Initialize Redis connection
+   * Uses injected getRedisClient for testability
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
-      this.redis = await getRedisClient();
+      this.redis = await this.deps.getRedisClient();
       this.initialized = true;
       this.logger.info('PairCacheService initialized');
     } catch (error) {

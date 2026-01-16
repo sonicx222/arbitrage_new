@@ -4,52 +4,108 @@
  * TDD Test Suite for Redis Streams implementation
  * Tests: XADD, XREAD, XREADGROUP, XACK, Consumer Groups, Batching
  *
+ * Uses DI pattern (P16) to inject mock Redis instead of Jest mock hoisting.
+ *
  * @migrated from shared/core/src/redis-streams.test.ts
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-009: Test Architecture
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { EventEmitter } from 'events';
 
 // Import from package alias (new pattern per ADR-009)
 import { RedisStreamsClient } from '@arbitrage/core';
-import type { StreamMessage, ConsumerGroupConfig } from '@arbitrage/core';
+import type { StreamMessage, ConsumerGroupConfig, RedisStreamsConstructor } from '@arbitrage/core';
 
-// Mock ioredis
-jest.mock('ioredis', () => {
-  const mockRedis = {
-    xadd: jest.fn<any>(),
-    xread: jest.fn<any>(),
-    xreadgroup: jest.fn<any>(),
-    xack: jest.fn<any>(),
-    xgroup: jest.fn<any>(),
-    xinfo: jest.fn<any>(),
-    xlen: jest.fn<any>(),
-    xtrim: jest.fn<any>(),
-    xpending: jest.fn<any>(),
-    xclaim: jest.fn<any>(),
-    ping: jest.fn<any>().mockResolvedValue('PONG'),
-    disconnect: jest.fn<any>().mockResolvedValue(undefined),
-    on: jest.fn<any>(),
-    removeAllListeners: jest.fn<any>(),
-  };
-  return jest.fn<any>(() => mockRedis);
-});
+// =============================================================================
+// DI Mock Redis Implementation (P16 pattern)
+// =============================================================================
+
+/**
+ * Creates a mock Redis instance with all required methods for RedisStreamsClient.
+ */
+function createMockRedisInstance() {
+  const emitter = new EventEmitter();
+  const instance: any = {};
+
+  // Event methods
+  instance.on = jest.fn((event: string, handler: (...args: any[]) => void) => {
+    emitter.on(event, handler);
+    return instance;
+  });
+  instance.removeAllListeners = jest.fn((event?: string) => {
+    if (event) {
+      emitter.removeAllListeners(event);
+    } else {
+      emitter.removeAllListeners();
+    }
+    return instance;
+  });
+  instance.emit = jest.fn((event: string, ...args: any[]) => {
+    return emitter.emit(event, ...args);
+  });
+
+  // Stream operations
+  instance.xadd = jest.fn();
+  instance.xread = jest.fn();
+  instance.xreadgroup = jest.fn();
+  instance.xack = jest.fn();
+  instance.xgroup = jest.fn();
+  instance.xinfo = jest.fn();
+  instance.xlen = jest.fn();
+  instance.xtrim = jest.fn();
+  instance.xpending = jest.fn();
+  instance.xclaim = jest.fn();
+  instance.ping = jest.fn(() => Promise.resolve('PONG'));
+  instance.disconnect = jest.fn(() => Promise.resolve(undefined));
+  instance.connect = jest.fn(() => Promise.resolve());
+
+  return instance;
+}
+
+/**
+ * Creates a mock Redis constructor for DI.
+ */
+function createMockRedisConstructor() {
+  let mockInstance: any = null;
+
+  const MockRedis = jest.fn(() => {
+    mockInstance = createMockRedisInstance();
+    return mockInstance;
+  }) as unknown as RedisStreamsConstructor;
+
+  return { MockRedis, getMockInstance: () => mockInstance };
+}
 
 describe('RedisStreamsClient', () => {
   let client: RedisStreamsClient;
   let mockRedis: any;
+  let MockRedis: RedisStreamsConstructor;
+  let getMockInstance: () => any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    client = new RedisStreamsClient('redis://localhost:6379');
-    // Get the mock instance
-    const Redis = require('ioredis');
-    mockRedis = new Redis();
+
+    // Create mock Redis constructor
+    const mocks = createMockRedisConstructor();
+    MockRedis = mocks.MockRedis;
+    getMockInstance = mocks.getMockInstance;
+
+    // Create client with injected mock
+    client = new RedisStreamsClient('redis://localhost:6379', undefined, {
+      RedisImpl: MockRedis
+    });
+
+    // Get the mock instance for assertions
+    mockRedis = getMockInstance();
   });
 
   afterEach(async () => {
-    await client.disconnect();
+    if (client && mockRedis) {
+      mockRedis.disconnect.mockResolvedValue(undefined);
+      await client.disconnect();
+    }
   });
 
   describe('XADD - Adding messages to stream', () => {

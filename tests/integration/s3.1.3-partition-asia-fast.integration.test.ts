@@ -127,7 +127,9 @@ jest.mock('@arbitrage/core/websocket-manager', () => ({
 // Import after mocks
 import {
   PartitionedDetector,
-  PartitionedDetectorConfig
+  PartitionedDetectorConfig,
+  PartitionedDetectorDeps,
+  TokenNormalizeFn
 } from '@arbitrage/core/partitioned-detector';
 
 import {
@@ -163,6 +165,32 @@ const P1_REGION = 'asia-southeast1';
 // Test Helpers
 // =============================================================================
 
+/**
+ * Mock token normalizer for cross-chain matching tests.
+ * Maps chain-specific token symbols to their canonical form.
+ */
+const mockNormalizeToken: TokenNormalizeFn = (symbol: string) => {
+  const upper = symbol.toUpperCase().trim();
+  const aliases: Record<string, string> = {
+    'FUSDT': 'USDT', 'WFTM': 'FTM', 'WAVAX': 'AVAX',
+    'WETH.E': 'WETH', 'WBTC.E': 'WBTC', 'USDT.E': 'USDT',
+    'WBNB': 'BNB', 'BTCB': 'WBTC', 'ETH': 'WETH',
+    'WMATIC': 'MATIC', 'WETH': 'WETH', 'WBTC': 'WBTC',
+    'USDC': 'USDC', 'USDT': 'USDT', 'DAI': 'DAI'
+  };
+  return aliases[upper] || upper;
+};
+
+/**
+ * Creates mock dependencies for PartitionedDetector tests.
+ * This uses the DI pattern to inject mocks instead of relying on Jest mock hoisting.
+ */
+const createMockDetectorDeps = (): PartitionedDetectorDeps => ({
+  logger: mockLogger,
+  perfLogger: mockPerfLogger as any,
+  normalizeToken: mockNormalizeToken
+});
+
 function createP1Config(overrides: Partial<PartitionedDetectorConfig> = {}): PartitionedDetectorConfig {
   return {
     partitionId: P1_PARTITION_ID,
@@ -175,7 +203,7 @@ function createP1Config(overrides: Partial<PartitionedDetectorConfig> = {}): Par
 }
 
 async function createStartedP1Detector(config?: PartitionedDetectorConfig): Promise<PartitionedDetector> {
-  const detector = new PartitionedDetector(config || createP1Config());
+  const detector = new PartitionedDetector(config || createP1Config(), createMockDetectorDeps());
   await detector.start();
   return detector;
 }
@@ -403,7 +431,7 @@ describe('S3.1.3 P1 Asia-Fast Partition Service', () => {
     });
 
     it('should emit started event with all P1 chains', async () => {
-      detector = new PartitionedDetector(createP1Config());
+      detector = new PartitionedDetector(createP1Config(), createMockDetectorDeps());
       const startedHandler = jest.fn();
       detector.on('started', startedHandler);
 
@@ -416,7 +444,7 @@ describe('S3.1.3 P1 Asia-Fast Partition Service', () => {
     });
 
     it('should emit chainConnected for each P1 chain', async () => {
-      detector = new PartitionedDetector(createP1Config());
+      detector = new PartitionedDetector(createP1Config(), createMockDetectorDeps());
       const connectedHandler = jest.fn();
       detector.on('chainConnected', connectedHandler);
 
@@ -430,7 +458,7 @@ describe('S3.1.3 P1 Asia-Fast Partition Service', () => {
     });
 
     it('should start within 5 seconds', async () => {
-      detector = new PartitionedDetector(createP1Config());
+      detector = new PartitionedDetector(createP1Config(), createMockDetectorDeps());
 
       const startTime = Date.now();
       await detector.start();
@@ -945,7 +973,7 @@ describe('S3.1.3.13: P1 Shutdown Timeout (P2-FIX)', () => {
 
   it('should handle rapid start/stop cycles', async () => {
     for (let i = 0; i < 3; i++) {
-      detector = new PartitionedDetector(createP1Config());
+      detector = new PartitionedDetector(createP1Config(), createMockDetectorDeps());
       await detector.start();
       expect(detector.isRunning()).toBe(true);
 

@@ -15,6 +15,22 @@
  */
 
 import Redis from 'ioredis';
+
+// =============================================================================
+// DI Types (P16 pattern - enables testability without Jest mock hoisting)
+// =============================================================================
+
+/**
+ * Redis constructor type for DI
+ */
+export type RedisStreamsConstructor = new (url: string, options: object) => Redis;
+
+/**
+ * Dependencies for RedisStreamsClient
+ */
+export interface RedisStreamsClientDeps {
+  RedisImpl?: RedisStreamsConstructor;
+}
 import { createLogger, Logger } from './logger';
 
 // =============================================================================
@@ -274,7 +290,7 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.HEALTH]: 1000              // Health checks, short history
   };
 
-  constructor(url: string, password?: string) {
+  constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
     this.logger = createLogger('redis-streams');
 
     const options: any = {
@@ -290,7 +306,9 @@ export class RedisStreamsClient {
       lazyConnect: true
     };
 
-    this.client = new Redis(url, options);
+    // DI: Use injected Redis constructor or default
+    const RedisImpl = deps?.RedisImpl ?? Redis;
+    this.client = new RedisImpl(url, options);
     this.setupEventHandlers();
   }
 

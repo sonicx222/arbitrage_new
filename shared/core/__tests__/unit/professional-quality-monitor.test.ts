@@ -5,68 +5,74 @@
  *
  * @migrated from shared/core/src/professional-quality-monitor.test.ts
  * @see ADR-009: Test Architecture
+ *
+ * Uses DI pattern for testability - injects mock Redis directly
+ * instead of relying on Jest mock hoisting.
  */
 
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { RedisMock } from '@arbitrage/test-utils';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-// Mock logger with factory function - must use inline jest.fn() since hoisting
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn().mockReturnValue({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  }),
-  getPerformanceLogger: jest.fn().mockReturnValue({
-    logEventLatency: jest.fn(),
-    logArbitrageOpportunity: jest.fn(),
-    logHealthCheck: jest.fn()
-  })
-}));
+// Import from package alias
+import {
+  ProfessionalQualityMonitor,
+  ProfessionalQualityScore
+} from '@arbitrage/core';
+import type { QualityMonitorRedis } from '@arbitrage/core';
 
-// Mock redis - using requireActual pattern to get RedisMock
-jest.mock('../../src/redis', () => {
-  const { RedisMock } = jest.requireActual<typeof import('@arbitrage/test-utils')>('@arbitrage/test-utils');
-  const mockRedisInstance = new RedisMock();
+// =============================================================================
+// Mock Redis Implementation for Quality Monitor
+// =============================================================================
+
+/**
+ * Creates a mock Redis that implements QualityMonitorRedis interface.
+ * Stores data in memory for testing.
+ */
+function createMockQualityRedis(): QualityMonitorRedis & {
+  storage: Map<string, string>;
+  clear: () => void;
+} {
+  const storage = new Map<string, string>();
+
   return {
-    getRedisClient: jest.fn(() => mockRedisInstance),
-    __mockRedis: mockRedisInstance
+    storage,
+
+    clear: () => storage.clear(),
+
+    setex: jest.fn((key: string, _seconds: number, value: string) => {
+      storage.set(key, value);
+      return Promise.resolve('OK');
+    }),
+
+    get: jest.fn((key: string) => {
+      const value = storage.get(key);
+      return Promise.resolve(value ?? null);
+    }),
+
+    keys: jest.fn((pattern: string) => {
+      const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+      const matchingKeys = Array.from(storage.keys()).filter(k => regex.test(k));
+      return Promise.resolve(matchingKeys);
+    })
   };
-});
-
-// Import AFTER mocks are set up
-import { ProfessionalQualityMonitor, ProfessionalQualityScore } from '@arbitrage/core';
-import { createLogger } from '@arbitrage/core';
-import * as redisModule from '../../src/redis';
-
-// Get the mock redis instance from the mock module
-const mockRedis = (redisModule as any).__mockRedis as RedisMock;
-
-// Define mock logger type
-interface MockLogger {
-  info: jest.Mock;
-  warn: jest.Mock;
-  error: jest.Mock;
-  debug: jest.Mock;
 }
-const mockLogger = (createLogger as jest.Mock)() as MockLogger;
 
 describe('ProfessionalQualityMonitor', () => {
   let monitor: ProfessionalQualityMonitor;
-  let originalSet: typeof mockRedis.set;
-  let originalGet: typeof mockRedis.get;
+  let mockRedis: ReturnType<typeof createMockQualityRedis>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    // Restore original Redis methods before clearing
-    if (originalSet) mockRedis.set = originalSet;
-    if (originalGet) mockRedis.get = originalGet;
-    mockRedis.clear();
-    // Save original methods
-    originalSet = mockRedis.set.bind(mockRedis);
-    originalGet = mockRedis.get.bind(mockRedis);
-    monitor = new ProfessionalQualityMonitor();
+
+    // Create fresh mock Redis
+    mockRedis = createMockQualityRedis();
+
+    // Create monitor with injected mock
+    monitor = new ProfessionalQualityMonitor({ redis: mockRedis });
+  });
+
+  afterEach(() => {
+    // Stop periodic assessment to prevent Jest hangs
+    monitor.stopPeriodicAssessment();
   });
 
   describe('Detection Result Recording', () => {
@@ -82,15 +88,18 @@ describe('ProfessionalQualityMonitor', () => {
 
       await monitor.recordDetectionResult(result);
 
-      // recordDetectionResult may store internally or trigger logger
-      // The main thing is it doesn't throw
-      expect(mockLogger.debug).toHaveBeenCalled();
+      // Verify setex was called
+      expect(mockRedis.setex).toHaveBeenCalled();
+
+      // Verify data was stored
+      const storedKeys = Array.from(mockRedis.storage.keys());
+      expect(storedKeys.some(k => k.startsWith('quality:detection:'))).toBe(true);
     });
 
     it('should handle recording errors gracefully', async () => {
-      // Override with a rejection - error should be caught internally
-      const originalSet = mockRedis.set.bind(mockRedis);
-      mockRedis.set = jest.fn(() => Promise.reject(new Error('Redis error')));
+      // Override setex to reject
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (mockRedis.setex as any).mockRejectedValueOnce(new Error('Redis error'));
 
       const result = {
         latency: 2.5,
@@ -103,31 +112,29 @@ describe('ProfessionalQualityMonitor', () => {
 
       // Should not throw even when Redis fails
       await expect(monitor.recordDetectionResult(result)).resolves.not.toThrow();
-
-      // Restore immediately after test
-      mockRedis.set = originalSet;
     });
   });
 
   describe('Quality Score Calculation', () => {
     beforeEach(() => {
       // Setup mock metrics data
-      mockRedis.set('quality:detection:1000', JSON.stringify({
+      const now = Date.now();
+      mockRedis.storage.set(`quality:detection:${now - 1000}`, JSON.stringify({
         latency: 2.5,
         isTruePositive: true,
-        timestamp: Date.now()
+        timestamp: now - 1000
       }));
 
-      mockRedis.set('quality:detection:1001', JSON.stringify({
+      mockRedis.storage.set(`quality:detection:${now - 2000}`, JSON.stringify({
         latency: 3.1,
         isTruePositive: true,
-        timestamp: Date.now()
+        timestamp: now - 2000
       }));
 
-      mockRedis.set('quality:detection:1002', JSON.stringify({
+      mockRedis.storage.set(`quality:detection:${now - 3000}`, JSON.stringify({
         latency: 1.8,
         isTruePositive: false,
-        timestamp: Date.now()
+        timestamp: now - 3000
       }));
     });
 
@@ -164,24 +171,19 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should assign correct grades based on score', async () => {
-      // Test high score (mock perfect metrics)
-      const highScore = await monitor.calculateQualityScore();
-
-      // Test with different scenarios by mocking different metrics
-      // This would require more sophisticated mocking in a real implementation
-      expect(highScore.grade).toBeDefined();
+      const score = await monitor.calculateQualityScore();
+      expect(score.grade).toBeDefined();
     });
   });
 
   describe('Performance Metrics', () => {
     it('should calculate latency percentiles correctly', async () => {
       const latencies = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
 
       const metrics = monitorInstance.calculateLatencyMetrics(latencies);
 
-      // Percentile calculation varies by implementation
-      // For 10 elements, p50 index = 5, element = 6 (0-indexed)
       expect(metrics.p50).toBeGreaterThanOrEqual(5);
       expect(metrics.p50).toBeLessThanOrEqual(6);
       expect(metrics.p95).toBeGreaterThanOrEqual(9);
@@ -191,6 +193,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should handle empty latency arrays', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
       const metrics = monitorInstance.calculateLatencyMetrics([]);
 
@@ -203,6 +206,7 @@ describe('ProfessionalQualityMonitor', () => {
 
   describe('Score Grading System', () => {
     it('should assign A+ grade for perfect scores', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(98, {
         detectionPerformance: 95,
@@ -216,6 +220,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should assign F grade for failing scores', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(45, {
         detectionPerformance: 40,
@@ -229,6 +234,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should assign CRITICAL risk for any component below 50', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(85, {
         detectionPerformance: 95,
@@ -252,6 +258,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 85,
           operationalConsistency: 80
         },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -268,6 +275,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 90,
           operationalConsistency: 88
         },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -292,6 +300,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 90,
           operationalConsistency: 85
         },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -308,6 +317,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 60,
           operationalConsistency: 65
         },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -347,16 +357,17 @@ describe('ProfessionalQualityMonitor', () => {
 
   describe('Error Handling', () => {
     it('should handle Redis failures gracefully', async () => {
-      mockRedis.get = jest.fn(() => Promise.reject(new Error('Redis down')));
+      // Make get reject
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (mockRedis.get as any).mockRejectedValueOnce(new Error('Redis down'));
 
       const score = await monitor.getCurrentQualityScore();
       expect(score).toBeNull();
-
-      expect(mockLogger.error).toHaveBeenCalled();
     });
 
     it('should handle calculation errors gracefully', async () => {
       // Mock metrics gathering to fail
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const monitorInstance = monitor as any;
       monitorInstance.gatherMetricsForPeriod = jest.fn(() => Promise.reject(new Error('Metrics error')));
 

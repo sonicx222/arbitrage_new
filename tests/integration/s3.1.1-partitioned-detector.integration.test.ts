@@ -128,6 +128,8 @@ jest.mock('@arbitrage/core/websocket-manager', () => ({
 import {
   PartitionedDetector,
   PartitionedDetectorConfig,
+  PartitionedDetectorDeps,
+  TokenNormalizeFn,
   PartitionHealth,
   CrossChainDiscrepancy
 } from '@arbitrage/core/partitioned-detector';
@@ -148,6 +150,32 @@ import { CHAINS } from '@arbitrage/config';
 // Test Helpers
 // =============================================================================
 
+/**
+ * Mock token normalizer for cross-chain matching tests.
+ * Maps chain-specific token symbols to their canonical form.
+ */
+const mockNormalizeToken: TokenNormalizeFn = (symbol: string) => {
+  const upper = symbol.toUpperCase().trim();
+  const aliases: Record<string, string> = {
+    'FUSDT': 'USDT', 'WFTM': 'FTM', 'WAVAX': 'AVAX',
+    'WETH.E': 'WETH', 'WBTC.E': 'WBTC', 'USDT.E': 'USDT',
+    'WBNB': 'BNB', 'BTCB': 'WBTC', 'ETH': 'WETH',
+    'WMATIC': 'MATIC', 'WETH': 'WETH', 'WBTC': 'WBTC',
+    'USDC': 'USDC', 'USDT': 'USDT', 'DAI': 'DAI'
+  };
+  return aliases[upper] || upper;
+};
+
+/**
+ * Creates mock dependencies for PartitionedDetector tests.
+ * This uses the DI pattern to inject mocks instead of relying on Jest mock hoisting.
+ */
+const createMockDetectorDeps = (): PartitionedDetectorDeps => ({
+  logger: mockLogger,
+  perfLogger: mockPerfLogger as any,
+  normalizeToken: mockNormalizeToken
+});
+
 function createTestConfig(overrides: Partial<PartitionedDetectorConfig> = {}): PartitionedDetectorConfig {
   return {
     partitionId: 'test-partition',
@@ -160,7 +188,7 @@ function createTestConfig(overrides: Partial<PartitionedDetectorConfig> = {}): P
 }
 
 async function createStartedDetector(config?: PartitionedDetectorConfig): Promise<PartitionedDetector> {
-  const detector = new PartitionedDetector(config || createTestConfig());
+  const detector = new PartitionedDetector(config || createTestConfig(), createMockDetectorDeps());
   await detector.start();
   return detector;
 }
@@ -204,7 +232,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
         region: asiaFast!.region,
         healthCheckIntervalMs: asiaFast!.healthCheckIntervalMs,
         failoverTimeoutMs: asiaFast!.failoverTimeoutMs
-      });
+      }, createMockDetectorDeps());
 
       expect(detector.getPartitionId()).toBe('asia-fast');
       expect(detector.getChains()).toEqual(asiaFast!.chains);
@@ -219,7 +247,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
           partitionId: partition.partitionId,
           chains: partition.chains,
           region: partition.region
-        });
+        }, createMockDetectorDeps());
 
         expect(det.getPartitionId()).toBe(partition.partitionId);
         expect(det.getChains()).toEqual(partition.chains);
@@ -273,7 +301,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     });
 
     it('should handle rapid start/stop cycles gracefully', async () => {
-      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }));
+      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }), createMockDetectorDeps());
 
       for (let i = 0; i < 3; i++) {
         await detector.start();
@@ -284,7 +312,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     });
 
     it('should handle concurrent start calls', async () => {
-      detector = new PartitionedDetector(createTestConfig());
+      detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
 
       const results = await Promise.all([
         detector.start(),
@@ -493,7 +521,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
   // ===========================================================================
   describe('S3.1.1.5: Dynamic Chain Management', () => {
     it('should add chains at runtime', async () => {
-      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }));
+      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }), createMockDetectorDeps());
       await detector.start();
 
       expect(detector.getChains()).toHaveLength(1);
@@ -518,7 +546,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     });
 
     it('should not allow removing the last chain', async () => {
-      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }));
+      detector = new PartitionedDetector(createTestConfig({ chains: ['bsc'] }), createMockDetectorDeps());
       await detector.start();
 
       await expect(detector.removeChain('bsc'))
@@ -550,7 +578,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
   // ===========================================================================
   describe('S3.1.1.6: Event Handling', () => {
     it('should emit started event with partition info', async () => {
-      detector = new PartitionedDetector(createTestConfig());
+      detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
       const startedHandler = jest.fn();
       detector.on('started', startedHandler);
 
@@ -575,7 +603,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     });
 
     it('should emit chainConnected for each chain', async () => {
-      detector = new PartitionedDetector(createTestConfig());
+      detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
       const connectedHandler = jest.fn();
       detector.on('chainConnected', connectedHandler);
 
@@ -718,7 +746,7 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     });
 
     it('should handle interleaved start/stop operations', async () => {
-      detector = new PartitionedDetector(createTestConfig());
+      detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
 
       // Interleaved operations
       const start1 = detector.start();
@@ -764,7 +792,7 @@ describe('S3.1.1 Performance Tests', () => {
 
   it('should start all chains within 5 seconds', async () => {
     const config = createTestConfig({ chains: ['bsc', 'polygon'] });
-    detector = new PartitionedDetector(config);
+    detector = new PartitionedDetector(config, createMockDetectorDeps());
 
     const startTime = Date.now();
     await detector.start();
@@ -774,7 +802,7 @@ describe('S3.1.1 Performance Tests', () => {
   });
 
   it('should handle 1000 price updates efficiently', async () => {
-    detector = new PartitionedDetector(createTestConfig());
+    detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
     await detector.start();
 
     const startTime = Date.now();
@@ -788,7 +816,7 @@ describe('S3.1.1 Performance Tests', () => {
   });
 
   it('should find discrepancies efficiently with many pairs', async () => {
-    detector = new PartitionedDetector(createTestConfig());
+    detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
     await detector.start();
 
     // Create 100 pairs with discrepancies
@@ -838,7 +866,7 @@ describe('S3.1.1 ADR-003 Compliance', () => {
       partitionId: l2Fast!.partitionId,
       chains: l2Fast!.chains,
       region: l2Fast!.region
-    });
+    }, createMockDetectorDeps());
     await detector.start();
 
     expect(detector.getChains().length).toBeGreaterThanOrEqual(2);
@@ -846,7 +874,7 @@ describe('S3.1.1 ADR-003 Compliance', () => {
   });
 
   it('should support graceful degradation per ADR-003', async () => {
-    detector = new PartitionedDetector(createTestConfig());
+    detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
     await detector.start();
 
     // ADR-003 requires partition to continue with partial failures
@@ -862,7 +890,7 @@ describe('S3.1.1 ADR-003 Compliance', () => {
   });
 
   it('should provide health aggregation per ADR-003', async () => {
-    detector = new PartitionedDetector(createTestConfig());
+    detector = new PartitionedDetector(createTestConfig(), createMockDetectorDeps());
     await detector.start();
 
     const health = detector.getPartitionHealth();

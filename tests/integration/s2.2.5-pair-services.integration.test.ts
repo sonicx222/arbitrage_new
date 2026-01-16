@@ -34,11 +34,16 @@ const mockRedisClient = {
   isConnected: jest.fn().mockReturnValue(true)
 };
 
-// Mock Redis module
+// Mock Redis module (kept for backwards compatibility, but DI is preferred)
 jest.mock('@arbitrage/core/redis', () => ({
   getRedisClient: jest.fn().mockResolvedValue(mockRedisClient),
   RedisClient: jest.fn()
 }));
+
+// Helper function to create mock deps for PairCacheService
+const createMockCacheDeps = () => ({
+  getRedisClient: jest.fn().mockResolvedValue(mockRedisClient) as any
+});
 
 // Mock ethers provider and contract
 const mockProvider = {
@@ -334,14 +339,21 @@ describe('S2.2.5 PairCacheService', () => {
     mockRedisClient.del.mockReset();
     mockRedisClient.keys.mockReset();
 
-    service = new PairCacheService({
-      pairAddressTtlSec: 3600,
-      pairMetadataTtlSec: 600,
-      nullResultTtlSec: 300,
-      maxBatchSize: 50,
-      usePipeline: true,
-      keyPrefix: 'test:pair:'
-    });
+    // REFACTOR: Use dependency injection to inject mock Redis client
+    // This avoids Jest mock hoisting issues with @arbitrage/core/redis
+    service = new PairCacheService(
+      {
+        pairAddressTtlSec: 3600,
+        pairMetadataTtlSec: 600,
+        nullResultTtlSec: 300,
+        maxBatchSize: 50,
+        usePipeline: true,
+        keyPrefix: 'test:pair:'
+      },
+      {
+        getRedisClient: jest.fn().mockResolvedValue(mockRedisClient) as any
+      }
+    );
 
     await service.initialize();
   });
@@ -728,7 +740,8 @@ describe('S2.2.5 Service Integration', () => {
       queryTimeoutMs: 100
     });
 
-    cacheService = new PairCacheService();
+    // Use DI to inject mock Redis
+    cacheService = new PairCacheService({}, createMockCacheDeps());
     await cacheService.initialize();
   });
 
@@ -791,7 +804,8 @@ describe('S2.2.5 Regression Tests', () => {
       resetPairCacheService();
       mockRedisClient.get.mockReset();
 
-      const service = new PairCacheService();
+      // Use DI to inject mock Redis
+      const service = new PairCacheService({}, createMockCacheDeps());
       await service.initialize();
 
       // Mock returns already-parsed object (as RedisClient.get() does)
@@ -838,7 +852,8 @@ describe('S2.2.5 Regression Tests', () => {
     it('should delete in parallel batches not sequentially', async () => {
       resetPairCacheService();
 
-      const service = new PairCacheService({ maxBatchSize: 10 });
+      // Use DI to inject mock Redis
+      const service = new PairCacheService({ maxBatchSize: 10 }, createMockCacheDeps());
       await service.initialize();
 
       const keys = Array.from({ length: 25 }, (_, i) => `key${i}`);
@@ -924,7 +939,8 @@ describe('S2.2.5 Error Handling', () => {
       mockRedisClient.get.mockReset();
       mockRedisClient.set.mockReset();
 
-      service = new PairCacheService();
+      // Use DI to inject mock Redis
+      service = new PairCacheService({}, createMockCacheDeps());
       await service.initialize();
     });
 

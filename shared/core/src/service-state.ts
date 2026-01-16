@@ -25,6 +25,27 @@ import { EventEmitter } from 'events';
 import { createLogger } from './logger';
 
 // =============================================================================
+// DI Types (P16 pattern - enables testability without Jest mock hoisting)
+// =============================================================================
+
+/**
+ * Logger interface for DI
+ */
+export interface ServiceStateLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Dependencies for ServiceStateManager
+ */
+export interface ServiceStateManagerDeps {
+  logger?: ServiceStateLogger;
+}
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -82,14 +103,14 @@ const VALID_TRANSITIONS: Record<ServiceState, ServiceState[]> = {
 
 export class ServiceStateManager extends EventEmitter {
   private state: ServiceState = ServiceState.STOPPED;
-  private logger: any;
+  private logger: ServiceStateLogger;
   private config: Required<ServiceStateConfig>;
   private lastTransition: number = Date.now();
   private transitionCount: number = 0;
   private transitionLock: Promise<void> | null = null;
   private errorMessage?: string;
 
-  constructor(config: ServiceStateConfig) {
+  constructor(config: ServiceStateConfig, deps?: ServiceStateManagerDeps) {
     super();
 
     // P2-3 FIX: Set max listeners to prevent memory leak warnings
@@ -101,7 +122,8 @@ export class ServiceStateManager extends EventEmitter {
       emitEvents: config.emitEvents ?? true
     };
 
-    this.logger = createLogger(`state:${this.config.serviceName}`);
+    // DI: Use injected logger or create default
+    this.logger = deps?.logger ?? createLogger(`state:${this.config.serviceName}`);
 
     // Add default error listener to prevent Node.js from crashing
     // when emitting 'error' state events with no listeners
@@ -553,8 +575,11 @@ export class ServiceStateManager extends EventEmitter {
 /**
  * Create a new ServiceStateManager instance.
  */
-export function createServiceState(config: ServiceStateConfig): ServiceStateManager {
-  return new ServiceStateManager(config);
+export function createServiceState(
+  config: ServiceStateConfig,
+  deps?: ServiceStateManagerDeps
+): ServiceStateManager {
+  return new ServiceStateManager(config, deps);
 }
 
 // =============================================================================

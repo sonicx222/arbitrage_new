@@ -65,15 +65,40 @@ interface RedisConnectionOptions {
   lazyConnect: boolean;
 }
 
+// =============================================================================
+// Dependency Injection Interface
+// =============================================================================
+
+/**
+ * Redis constructor type for dependency injection.
+ * Allows injecting mock Redis constructors in tests.
+ */
+export type RedisConstructor = new (url: string, options: RedisConnectionOptions) => Redis;
+
+/**
+ * Dependencies that can be injected into RedisClient.
+ * This enables proper testing without Jest mock hoisting issues.
+ */
+export interface RedisClientDeps {
+  /** Redis constructor - defaults to ioredis Redis */
+  RedisImpl?: RedisConstructor;
+}
+
 export class RedisClient {
   private client: Redis;
   private pubClient: Redis;
   private subClient: Redis;
   // P2-FIX: Use proper Logger type
   private logger: Logger;
+  private readonly deps: Required<RedisClientDeps>;
 
-  constructor(url: string, password?: string) {
+  constructor(url: string, password?: string, deps?: RedisClientDeps) {
     this.logger = createLogger('redis-client');
+
+    // Initialize dependencies with defaults or injected values
+    this.deps = {
+      RedisImpl: deps?.RedisImpl ?? Redis
+    };
 
     // P1-1 FIX: Use typed options instead of any
     const options: RedisConnectionOptions = {
@@ -86,9 +111,10 @@ export class RedisClient {
       lazyConnect: true
     };
 
-    this.client = new Redis(url, options);
-    this.pubClient = new Redis(url, options);
-    this.subClient = new Redis(url, options);
+    const RedisImpl = this.deps.RedisImpl;
+    this.client = new RedisImpl(url, options);
+    this.pubClient = new RedisImpl(url, options);
+    this.subClient = new RedisImpl(url, options);
 
     this.setupEventHandlers();
   }
@@ -308,6 +334,32 @@ export class RedisClient {
   }
 
   /**
+   * Raw setex - sets a key with expiration, no JSON serialization.
+   * Used by QualityMonitor and other components that manage their own serialization.
+   */
+  async setex(key: string, seconds: number, value: string): Promise<string> {
+    try {
+      return await this.client.setex(key, seconds, value);
+    } catch (error) {
+      this.logger.error('Error in setex', { error, key });
+      throw error;
+    }
+  }
+
+  /**
+   * Raw get - returns the raw string value without JSON parsing.
+   * Used by QualityMonitor and other components that manage their own serialization.
+   */
+  async getRaw(key: string): Promise<string | null> {
+    try {
+      return await this.client.get(key);
+    } catch (error) {
+      this.logger.error('Error in getRaw', { error, key });
+      return null;
+    }
+  }
+
+  /**
    * P2-FIX-1: Delete throws on error - callers must know if deletion failed
    */
   async del(...keys: string[]): Promise<number> {
@@ -329,6 +381,22 @@ export class RedisClient {
     } catch (error) {
       this.logger.error('Error setting expire', { error, key });
       throw new RedisOperationError('expire', error as Error, key);
+    }
+  }
+
+  /**
+   * Increment a key's integer value.
+   * Used for rate limiting and attempt counters.
+   *
+   * @returns The new value after incrementing
+   * @throws RedisOperationError on failure
+   */
+  async incr(key: string): Promise<number> {
+    try {
+      return await this.client.incr(key);
+    } catch (error) {
+      this.logger.error('Error incrementing key', { error, key });
+      throw new RedisOperationError('incr', error as Error, key);
     }
   }
 

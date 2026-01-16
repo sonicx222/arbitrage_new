@@ -77,13 +77,38 @@ export interface PairSnapshot {
   fee: number;
 }
 
+// =============================================================================
+// DI Types (P16 pattern - enables testability without Jest mock hoisting)
+// =============================================================================
+
+/**
+ * Logger interface for BaseDetector DI.
+ */
+export interface BaseDetectorLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Dependencies that can be injected into BaseDetector.
+ * This enables proper testing without Jest mock hoisting issues.
+ */
+export interface BaseDetectorDeps {
+  /** Logger instance - if provided, used instead of createLogger() */
+  logger?: BaseDetectorLogger;
+  /** Performance logger instance - if provided, used instead of getPerformanceLogger() */
+  perfLogger?: PerformanceLogger;
+}
+
 export abstract class BaseDetector {
   protected provider: ethers.JsonRpcProvider;
   protected wsManager: WebSocketManager | null = null;
   protected redis: RedisClient | null = null;
   protected streamsClient: RedisStreamsClient | null = null;
-  // P2-FIX: Use proper Logger type instead of any
-  protected logger: Logger;
+  // P2-FIX: Use proper Logger type (changed to interface for DI support)
+  protected logger: BaseDetectorLogger;
   protected perfLogger: PerformanceLogger;
   // P2-FIX: Use proper EventBatcher type instead of any
   protected eventBatcher: EventBatcher | null = null;
@@ -137,12 +162,13 @@ export abstract class BaseDetector {
   // Token metadata for USD estimation (chain-specific)
   protected tokenMetadata: any;
 
-  constructor(config: DetectorConfig) {
+  constructor(config: DetectorConfig, deps?: BaseDetectorDeps) {
     this.config = config;
     this.chain = config.chain;
 
-    this.logger = createLogger(`${this.chain}-detector`);
-    this.perfLogger = getPerformanceLogger(`${this.chain}-detector`);
+    // DI: Use injected logger/perfLogger if provided, otherwise create defaults
+    this.logger = deps?.logger ?? createLogger(`${this.chain}-detector`);
+    this.perfLogger = deps?.perfLogger ?? getPerformanceLogger(`${this.chain}-detector`);
 
     // Initialize state manager for lifecycle control
     this.stateManager = createServiceState({

@@ -6,7 +6,42 @@ import bcrypt from 'bcrypt';
 import { createLogger } from '../../core/src/logger';
 import { getRedisClient } from '../../core/src/redis';
 
-const logger = createLogger('auth-service');
+// =============================================================================
+// DI Types (P16 pattern - enables testability without Jest mock hoisting)
+// =============================================================================
+
+/**
+ * Logger interface for DI
+ */
+export interface AuthServiceLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Redis interface for DI
+ * Types match RedisClient methods used by AuthService
+ */
+export interface AuthServiceRedis {
+  get: (key: string) => Promise<string | null>;
+  setex: (key: string, seconds: number, value: string) => Promise<string>;
+  del: (...keys: string[]) => Promise<number>;
+  incr: (key: string) => Promise<number>;
+  expire: (key: string, seconds: number) => Promise<number>;
+}
+
+/**
+ * Dependencies for AuthService
+ */
+export interface AuthServiceDeps {
+  logger?: AuthServiceLogger;
+  redis?: AuthServiceRedis;
+}
+
+// Module-level logger for middleware functions (not DI-injectable)
+const moduleLogger = createLogger('auth-service');
 
 export interface User {
   id: string;
@@ -42,11 +77,12 @@ export class AuthService {
   private jwtSecret: string;
   private jwtExpiresIn: string;
   private bcryptRounds: number;
-  private redis: any;
+  private redis: AuthServiceRedis | null = null;
   private maxLoginAttempts: number = 5;
   private lockoutDuration: number = 15 * 60 * 1000; // 15 minutes
+  private logger: AuthServiceLogger;
 
-  constructor() {
+  constructor(deps?: AuthServiceDeps) {
     // CRITICAL SECURITY: No fallback secrets allowed
     if (!process.env.JWT_SECRET) {
       throw new Error('CRITICAL SECURITY ERROR: JWT_SECRET environment variable is required. Never use fallback secrets in production!');
@@ -56,15 +92,23 @@ export class AuthService {
     this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '1h'; // Reduced from 24h for security
     this.bcryptRounds = parseInt(process.env.BCRYPT_ROUNDS || '12');
 
-    // Initialize Redis for account lockout tracking
-    this.initializeRedis();
+    // DI: Use injected logger or create default
+    this.logger = deps?.logger ?? createLogger('auth-service');
+
+    // DI: Use injected redis or initialize asynchronously
+    if (deps?.redis) {
+      this.redis = deps.redis;
+    } else {
+      // Initialize Redis for account lockout tracking
+      this.initializeRedis();
+    }
   }
 
   private async initializeRedis(): Promise<void> {
     try {
       this.redis = await getRedisClient();
     } catch (error) {
-      logger.error('Failed to initialize Redis for authentication', { error });
+      this.logger.error('Failed to initialize Redis for authentication', { error });
       throw new Error('Authentication service requires Redis for security features');
     }
   }
@@ -100,7 +144,7 @@ export class AuthService {
     // Save user (would integrate with database in production)
     await this.saveUser(user, passwordHash);
 
-    logger.info('User registered successfully', { userId: user.id, username: user.username });
+    this.logger.info('User registered successfully', { userId: user.id, username: user.username });
 
     return user;
   }
@@ -118,7 +162,7 @@ export class AuthService {
       // Record failed attempt and constant-time delay to prevent timing attacks
       await this.recordFailedAttempt(request.username);
       await new Promise(resolve => setTimeout(resolve, Math.random() * 100 + 50));
-      logger.warn('Failed login attempt - user not found or inactive', { username: request.username });
+      this.logger.warn('Failed login attempt - user not found or inactive', { username: request.username });
       throw new Error('Invalid username or password');
     }
 
@@ -130,7 +174,7 @@ export class AuthService {
       // Record failed attempt and constant-time delay to prevent timing attacks
       await this.recordFailedAttempt(request.username);
       await new Promise(resolve => setTimeout(resolve, Math.random() * 100 + 50));
-      logger.warn('Failed login attempt - invalid password', { userId: user.id, username: request.username });
+      this.logger.warn('Failed login attempt - invalid password', { userId: user.id, username: request.username });
       throw new Error('Invalid username or password');
     }
 
@@ -144,7 +188,7 @@ export class AuthService {
     // Generate JWT token
     const token = this.generateToken(user);
 
-    logger.info('User logged in successfully', { userId: user.id, username: request.username });
+    this.logger.info('User logged in successfully', { userId: user.id, username: request.username });
 
     return { user, token };
   }
@@ -152,9 +196,9 @@ export class AuthService {
   async validateToken(token: string): Promise<User | null> {
     try {
       // Check if token is blacklisted
-      const blacklisted = await this.redis.get(`auth:blacklist:${token}`);
+      const blacklisted = await this.redis?.get(`auth:blacklist:${token}`);
       if (blacklisted) {
-        logger.debug('Token validation failed - token blacklisted');
+        this.logger.debug('Token validation failed - token blacklisted');
         return null;
       }
 
@@ -162,20 +206,20 @@ export class AuthService {
 
       // Check if token is expired
       if (decoded.exp * 1000 < Date.now()) {
-        logger.debug('Token validation failed - token expired');
+        this.logger.debug('Token validation failed - token expired');
         return null;
       }
 
       // Get user and verify they still exist and are active
       const user = await this.findUserById(decoded.userId);
       if (!user || !user.isActive) {
-        logger.debug('Token validation failed - user not found or inactive');
+        this.logger.debug('Token validation failed - user not found or inactive');
         return null;
       }
 
       return user;
     } catch (error) {
-      logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
+      this.logger.debug('Token validation failed', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -222,16 +266,16 @@ export class AuthService {
         // Add token to blacklist with remaining TTL
         const ttl = Math.max(0, decoded.exp - Math.floor(Date.now() / 1000));
         if (ttl > 0) {
-          await this.redis.setex(`auth:blacklist:${token}`, ttl, 'revoked');
-          logger.info('Token blacklisted on logout', { userId: decoded.userId, ttl });
+          await this.redis?.setex(`auth:blacklist:${token}`, ttl, 'revoked');
+          this.logger.info('Token blacklisted on logout', { userId: decoded.userId, ttl });
         }
       }
     } catch (error) {
-      logger.error('Error blacklisting token on logout', { error });
+      this.logger.error('Error blacklisting token on logout', { error });
       // Don't throw - logout should succeed even if blacklisting fails
     }
 
-    logger.info('User logged out successfully');
+    this.logger.info('User logged out successfully');
   }
 
   private generateToken(user: User): string {
@@ -297,36 +341,36 @@ export class AuthService {
   // Database operations (mock implementations - replace with real database)
   private async findUserByUsername(username: string): Promise<User | null> {
     // Mock implementation - replace with database query
-    logger.debug('Finding user by username', { username });
+    this.logger.debug('Finding user by username', { username });
     return null;
   }
 
   private async findUserByEmail(email: string): Promise<User | null> {
     // Mock implementation - replace with database query
-    logger.debug('Finding user by email', { email });
+    this.logger.debug('Finding user by email', { email });
     return null;
   }
 
   private async findUserById(userId: string): Promise<User | null> {
     // Mock implementation - replace with database query
-    logger.debug('Finding user by ID', { userId });
+    this.logger.debug('Finding user by ID', { userId });
     return null;
   }
 
   private async getUserPasswordHash(userId: string): Promise<string> {
     // Mock implementation - replace with database query
-    logger.debug('Getting user password hash', { userId });
+    this.logger.debug('Getting user password hash', { userId });
     return '';
   }
 
   private async saveUser(user: User, passwordHash: string): Promise<void> {
     // Mock implementation - replace with database save
-    logger.info('Saving user', { userId: user.id, username: user.username });
+    this.logger.info('Saving user', { userId: user.id, username: user.username });
   }
 
   private async updateUser(user: User): Promise<void> {
     // Mock implementation - replace with database update
-    logger.debug('Updating user', { userId: user.id });
+    this.logger.debug('Updating user', { userId: user.id });
   }
 
   private async getRolePermissions(role: string): Promise<string[]> {
@@ -350,7 +394,7 @@ export class AuthService {
     const lockoutKey = `auth:lockout:${username}`;
     const attemptsKey = `auth:attempts:${username}`;
 
-    const lockoutUntil = await this.redis.get(lockoutKey);
+    const lockoutUntil = await this.redis?.get(lockoutKey);
     if (lockoutUntil) {
       const lockoutTime = parseInt(lockoutUntil);
       if (Date.now() < lockoutTime) {
@@ -358,32 +402,32 @@ export class AuthService {
         throw new Error(`Account locked due to too many failed attempts. Try again in ${remainingMinutes} minutes.`);
       } else {
         // Lockout expired, clear it
-        await this.redis.del(lockoutKey);
-        await this.redis.del(attemptsKey);
+        await this.redis?.del(lockoutKey);
+        await this.redis?.del(attemptsKey);
       }
     }
   }
 
   private async recordFailedAttempt(username: string): Promise<void> {
     const attemptsKey = `auth:attempts:${username}`;
-    const attempts = await this.redis.incr(attemptsKey);
+    const attempts = await this.redis?.incr(attemptsKey) ?? 0;
 
     // Set expiry on attempts counter
-    await this.redis.expire(attemptsKey, 15 * 60); // 15 minutes
+    await this.redis?.expire(attemptsKey, 15 * 60); // 15 minutes
 
     if (attempts >= this.maxLoginAttempts) {
       // Lock account
       const lockoutKey = `auth:lockout:${username}`;
       const lockoutUntil = Date.now() + this.lockoutDuration;
-      await this.redis.setex(lockoutKey, Math.ceil(this.lockoutDuration / 1000), lockoutUntil.toString());
+      await this.redis?.setex(lockoutKey, Math.ceil(this.lockoutDuration / 1000), lockoutUntil.toString());
 
-      logger.warn('Account locked due to too many failed attempts', { username, attempts });
+      this.logger.warn('Account locked due to too many failed attempts', { username, attempts });
     }
   }
 
   private async clearFailedAttempts(username: string): Promise<void> {
     const attemptsKey = `auth:attempts:${username}`;
-    await this.redis.del(attemptsKey);
+    await this.redis?.del(attemptsKey);
   }
 
   // Administrative method to unlock account
@@ -391,10 +435,10 @@ export class AuthService {
     const lockoutKey = `auth:lockout:${username}`;
     const attemptsKey = `auth:attempts:${username}`;
 
-    await this.redis.del(lockoutKey);
-    await this.redis.del(attemptsKey);
+    await this.redis?.del(lockoutKey);
+    await this.redis?.del(attemptsKey);
 
-    logger.info('Account unlocked by administrator', { username });
+    this.logger.info('Account unlocked by administrator', { username });
   }
 }
 
@@ -424,7 +468,7 @@ export function authenticate(required: boolean = true) {
       req.user = user;
       next();
     } catch (error) {
-      logger.error('Authentication middleware error', { error });
+      moduleLogger.error('Authentication middleware error', { error });
       return res.status(500).json({ error: 'Authentication failed' });
     }
   };
@@ -447,7 +491,7 @@ export function authorize(resource: string, action: string) {
 
       next();
     } catch (error) {
-      logger.error('Authorization middleware error', { error });
+      moduleLogger.error('Authorization middleware error', { error });
       return res.status(500).json({ error: 'Authorization failed' });
     }
   };

@@ -109,8 +109,9 @@ jest.mock('../../src/websocket-manager', () => ({
   WebSocketManager: MockWebSocketManager
 }));
 
-// Mock chain config
-jest.mock('@arbitrage/config', () => ({
+// Mock chain config - mock both package alias and relative path
+// Since PartitionedDetector imports from '../../config/src', we need to mock that path too
+const mockConfig = {
   CHAINS: {
     ethereum: {
       id: 1,
@@ -170,10 +171,44 @@ jest.mock('@arbitrage/config', () => ({
     };
     return aliases[upper] || upper;
   })
-}));
+};
+
+// Mock both package alias and relative path used by PartitionedDetector
+jest.mock('@arbitrage/config', () => mockConfig);
+jest.mock('../../../config/src', () => mockConfig);
 
 // Import after mocks
-import { PartitionedDetector, PartitionedDetectorConfig, ChainHealth, PartitionHealth } from '@arbitrage/core';
+import { PartitionedDetector, PartitionedDetectorConfig, ChainHealth, PartitionHealth, PartitionedDetectorDeps, TokenNormalizeFn } from '@arbitrage/core';
+
+// =============================================================================
+// DI Helper (P16 pattern - uses DI instead of Jest mock hoisting)
+// =============================================================================
+
+/**
+ * Mock token normalizer for cross-chain matching tests.
+ * Maps chain-specific token symbols to their canonical form.
+ */
+const mockNormalizeToken: TokenNormalizeFn = (symbol: string) => {
+  const upper = symbol.toUpperCase().trim();
+  const aliases: Record<string, string> = {
+    'FUSDT': 'USDT', 'WFTM': 'FTM', 'WAVAX': 'AVAX',
+    'WETH.E': 'WETH', 'WBTC.E': 'WBTC', 'USDT.E': 'USDT',
+    'WBNB': 'BNB', 'BTCB': 'WBTC', 'ETH': 'WETH',
+    'WMATIC': 'MATIC', 'WETH': 'WETH', 'WBTC': 'WBTC',
+    'USDC': 'USDC', 'USDT': 'USDT', 'DAI': 'DAI'
+  };
+  return aliases[upper] || upper;
+};
+
+/**
+ * Creates mock dependencies for PartitionedDetector tests.
+ * This uses the DI pattern to inject mocks instead of relying on Jest mock hoisting.
+ */
+const createMockDetectorDeps = (): PartitionedDetectorDeps => ({
+  logger: mockLogger,
+  perfLogger: mockPerfLogger as any,
+  normalizeToken: mockNormalizeToken
+});
 
 describe('PartitionedDetector', () => {
   let detector: PartitionedDetector;
@@ -190,7 +225,7 @@ describe('PartitionedDetector', () => {
       failoverTimeoutMs: 30000
     };
 
-    detector = new PartitionedDetector(defaultConfig);
+    detector = new PartitionedDetector(defaultConfig, createMockDetectorDeps());
   });
 
   afterEach(async () => {
@@ -214,27 +249,27 @@ describe('PartitionedDetector', () => {
       expect(() => new PartitionedDetector({
         ...defaultConfig,
         chains: []
-      })).toThrow('At least one chain must be specified');
+      }, createMockDetectorDeps())).toThrow('At least one chain must be specified');
     });
 
     it('should throw if invalid chain provided', () => {
       expect(() => new PartitionedDetector({
         ...defaultConfig,
         chains: ['ethereum', 'invalid-chain']
-      })).toThrow('Invalid chain: invalid-chain');
+      }, createMockDetectorDeps())).toThrow('Invalid chain: invalid-chain');
     });
 
     it('should set default health check interval if not provided', () => {
       const config = { ...defaultConfig };
       delete config.healthCheckIntervalMs;
-      const det = new PartitionedDetector(config);
+      const det = new PartitionedDetector(config, createMockDetectorDeps());
       expect(det['config'].healthCheckIntervalMs).toBe(15000);
     });
 
     it('should set default failover timeout if not provided', () => {
       const config = { ...defaultConfig };
       delete config.failoverTimeoutMs;
-      const det = new PartitionedDetector(config);
+      const det = new PartitionedDetector(config, createMockDetectorDeps());
       expect(det['config'].failoverTimeoutMs).toBe(60000);
     });
   });
@@ -444,7 +479,7 @@ describe('PartitionedDetector', () => {
       const singleChainDetector = new PartitionedDetector({
         ...defaultConfig,
         chains: ['ethereum']
-      });
+      }, createMockDetectorDeps());
 
       await singleChainDetector.start();
 
@@ -700,7 +735,7 @@ describe('PartitionedDetector - Edge Cases', () => {
       partitionId: 'test',
       chains: ['ethereum'],
       region: 'asia-southeast1'
-    });
+    }, createMockDetectorDeps());
 
     // Rapid cycles
     for (let i = 0; i < 5; i++) {
@@ -716,7 +751,7 @@ describe('PartitionedDetector - Edge Cases', () => {
       partitionId: 'test',
       chains: ['ethereum'],
       region: 'asia-southeast1'
-    });
+    }, createMockDetectorDeps());
 
     // Concurrent starts
     const starts = await Promise.all([
@@ -733,7 +768,7 @@ describe('PartitionedDetector - Edge Cases', () => {
       partitionId: 'test',
       chains: ['ethereum'],
       region: 'asia-southeast1'
-    });
+    }, createMockDetectorDeps());
 
     await detector.start();
 
@@ -755,7 +790,7 @@ describe('PartitionedDetector - Edge Cases', () => {
       partitionId: 'test',
       chains: ['ethereum'],
       region: 'asia-southeast1'
-    });
+    }, createMockDetectorDeps());
 
     await expect(detector.start()).rejects.toThrow('Redis connection failed');
     expect(detector.isRunning()).toBe(false);
