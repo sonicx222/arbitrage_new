@@ -6,6 +6,12 @@ module.exports = {
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
+  // FIX: Add moduleNameMapper for workspace packages
+  moduleNameMapper: {
+    '^@arbitrage/core$': '<rootDir>/../../shared/core/src/index.ts',
+    '^@arbitrage/types$': '<rootDir>/../../shared/types/index.ts',
+    '^@arbitrage/config$': '<rootDir>/../../shared/config/index.ts',
+  },
   setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
   testTimeout: 10000,
 };
