@@ -47,6 +47,11 @@ interface SystemMetrics {
   lastUpdate: number;
   whaleAlerts: number;
   pendingOpportunities: number;
+  // Volume and swap event metrics (S1.2 - Swap Event Filter)
+  totalSwapEvents: number;
+  totalVolumeUsd: number;
+  volumeAggregatesProcessed: number;
+  activePairsTracked: number;
 }
 
 interface LeaderElectionConfig {
@@ -243,6 +248,7 @@ export class CoordinatorService {
     };
 
     // Define consumer groups for all streams we need to consume
+    // Includes swap-events and volume-aggregates for analytics and monitoring
     this.consumerGroups = [
       {
         streamName: RedisStreamsClient.STREAMS.HEALTH,
@@ -258,6 +264,18 @@ export class CoordinatorService {
       },
       {
         streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$'
+      },
+      {
+        streamName: RedisStreamsClient.STREAMS.SWAP_EVENTS,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$'
+      },
+      {
+        streamName: RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
         startId: '$'
@@ -641,7 +659,9 @@ export class CoordinatorService {
     const handlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
       [RedisStreamsClient.STREAMS.HEALTH]: (msg) => this.handleHealthMessage(msg),
       [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
-      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg)
+      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg),
+      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg)
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -928,6 +948,148 @@ export class CoordinatorService {
     }
   }
 
+  // Track active pairs for volume monitoring (rolling window)
+  private activePairs: Map<string, { lastSeen: number; chain: string; dex: string }> = new Map();
+  private static readonly PAIR_TTL_MS = 300000; // 5 minutes - pairs inactive longer are removed
+
+  /**
+   * Handle swap event messages from stream:swap-events.
+   * Tracks swap activity for analytics and market monitoring.
+   *
+   * Note: Raw swap events are filtered by SwapEventFilter in detectors before publishing.
+   * Only significant swaps (>$10 USD, deduplicated) reach this handler.
+   */
+  private async handleSwapEventMessage(message: StreamMessage): Promise<void> {
+    try {
+      const data = message.data as Record<string, unknown>;
+      if (!data) return;
+
+      // Extract swap event data with type checking
+      // Handle wrapped MessageEvent (type='swap-event', data={...}) or direct SwapEvent
+      const rawEvent = (data.data ?? data) as Record<string, unknown>;
+      const pairAddress = typeof rawEvent.pairAddress === 'string' ? rawEvent.pairAddress : '';
+      const chain = typeof rawEvent.chain === 'string' ? rawEvent.chain : 'unknown';
+      const dex = typeof rawEvent.dex === 'string' ? rawEvent.dex : 'unknown';
+      const usdValue = typeof rawEvent.usdValue === 'number' ? rawEvent.usdValue : 0;
+
+      if (!pairAddress) return;
+
+      // Update metrics
+      this.systemMetrics.totalSwapEvents++;
+      this.systemMetrics.totalVolumeUsd += usdValue;
+
+      // Track active pairs
+      this.activePairs.set(pairAddress, {
+        lastSeen: Date.now(),
+        chain,
+        dex
+      });
+      this.systemMetrics.activePairsTracked = this.activePairs.size;
+
+      // Log significant swaps (whales are handled separately, this is for analytics)
+      if (usdValue >= 10000) {
+        this.logger.debug('Large swap event received', {
+          pairAddress,
+          chain,
+          dex,
+          usdValue,
+          txHash: rawEvent.transactionHash
+        });
+      }
+
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
+
+    } catch (error) {
+      this.logger.error('Failed to handle swap event message', { error, message });
+    }
+  }
+
+  /**
+   * Handle volume aggregate messages from stream:volume-aggregates.
+   * Processes 5-second aggregated volume data per pair for market monitoring.
+   *
+   * VolumeAggregate provides:
+   * - swapCount: Number of swaps in window
+   * - totalUsdVolume: Total USD value traded
+   * - minPrice, maxPrice, avgPrice: Price statistics
+   * - windowStartMs, windowEndMs: Time window boundaries
+   */
+  private async handleVolumeAggregateMessage(message: StreamMessage): Promise<void> {
+    try {
+      const data = message.data as Record<string, unknown>;
+      if (!data) return;
+
+      // Extract volume aggregate data with type checking
+      // Handle wrapped MessageEvent (type='volume-aggregate', data={...}) or direct VolumeAggregate
+      const rawAggregate = (data.data ?? data) as Record<string, unknown>;
+      const pairAddress = typeof rawAggregate.pairAddress === 'string' ? rawAggregate.pairAddress : '';
+      const chain = typeof rawAggregate.chain === 'string' ? rawAggregate.chain : 'unknown';
+      const dex = typeof rawAggregate.dex === 'string' ? rawAggregate.dex : 'unknown';
+      const swapCount = typeof rawAggregate.swapCount === 'number' ? rawAggregate.swapCount : 0;
+      const totalUsdVolume = typeof rawAggregate.totalUsdVolume === 'number' ? rawAggregate.totalUsdVolume : 0;
+
+      if (!pairAddress || swapCount === 0) return;
+
+      // Update metrics
+      this.systemMetrics.volumeAggregatesProcessed++;
+
+      // Track active pairs
+      this.activePairs.set(pairAddress, {
+        lastSeen: Date.now(),
+        chain,
+        dex
+      });
+      this.systemMetrics.activePairsTracked = this.activePairs.size;
+
+      // Log high-volume periods (potential trading opportunities)
+      if (totalUsdVolume >= 50000) {
+        this.logger.info('High volume aggregate detected', {
+          pairAddress,
+          chain,
+          dex,
+          swapCount,
+          totalUsdVolume,
+          avgPrice: rawAggregate.avgPrice
+        });
+      }
+
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
+
+    } catch (error) {
+      this.logger.error('Failed to handle volume aggregate message', { error, message });
+    }
+  }
+
+  /**
+   * Cleanup stale entries from activePairs map.
+   * Called periodically to prevent unbounded memory growth.
+   */
+  private cleanupActivePairs(): void {
+    const now = Date.now();
+    const toDelete: string[] = [];
+
+    for (const [pairAddress, info] of this.activePairs) {
+      if (now - info.lastSeen > CoordinatorService.PAIR_TTL_MS) {
+        toDelete.push(pairAddress);
+      }
+    }
+
+    for (const pairAddress of toDelete) {
+      this.activePairs.delete(pairAddress);
+    }
+
+    this.systemMetrics.activePairsTracked = this.activePairs.size;
+
+    if (toDelete.length > 0) {
+      this.logger.debug('Cleaned up stale active pairs', {
+        removed: toDelete.length,
+        remaining: this.activePairs.size
+      });
+    }
+  }
+
   private async forwardToExecutionEngine(opportunity: ArbitrageOpportunity): Promise<void> {
     // In production, this would forward to the execution engine via streams
     // For now, just log the intent
@@ -955,7 +1117,12 @@ export class CoordinatorService {
       activeServices: 0,
       lastUpdate: Date.now(),
       whaleAlerts: 0,
-      pendingOpportunities: 0
+      pendingOpportunities: 0,
+      // Volume and swap event metrics (S1.2)
+      totalSwapEvents: 0,
+      totalVolumeUsd: 0,
+      volumeAggregatesProcessed: 0,
+      activePairsTracked: 0
     };
   }
 
@@ -994,6 +1161,9 @@ export class CoordinatorService {
 
         // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
         this.cleanupAlertCooldowns(Date.now());
+
+        // Cleanup stale active pairs to prevent unbounded memory growth
+        this.cleanupActivePairs();
       } catch (error) {
         this.logger.error('Legacy health polling failed', { error });
       }
