@@ -1,7 +1,7 @@
 # ADR-002: Redis Streams over Pub/Sub for Event Backbone
 
 ## Status
-**Implemented** | 2025-01-10 | Updated 2025-01-11 | Best Practices Updated 2026-01-14 | Blocking Reads 2026-01-15
+**Implemented** | 2025-01-10 | Updated 2025-01-11 | Best Practices Updated 2026-01-14 | Blocking Reads 2026-01-15 | Volume Analytics 2026-01-16
 
 ## Implementation Status
 
@@ -84,6 +84,70 @@
 - Latency reduced from ~50ms to <1ms (meets <50ms architecture target)
 - 90% reduction in Redis commands during idle periods (preserves Upstash free tier)
 - Backpressure prevents message waste when queue is saturated
+
+### Phase 6: Swap Events & Volume Aggregates Consumers (2026-01-16)
+
+**Objective**: Complete the data flow for swap events and volume aggregates streams by implementing consumers in the Coordinator.
+
+| Stream | Producer | Consumer | Status |
+|--------|----------|----------|--------|
+| `stream:swap-events` | BaseDetector (SwapEventFilter) | Coordinator | ✅ Implemented |
+| `stream:volume-aggregates` | BaseDetector (VolumeAggregate flush) | Coordinator | ✅ Implemented |
+
+**Problem Statement**:
+The S1.2 Smart Swap Event Filter was publishing filtered swap events and volume aggregates to Redis Streams, but no service was consuming them. This created a data flow gap where:
+- Swap events accumulated in Redis until MAXLEN trimmed them
+- Volume aggregates were lost without analytics processing
+- No visibility into trading volume or active pairs
+
+**Solution**:
+
+1. **Added Consumer Groups** to Coordinator:
+   ```typescript
+   // coordinator.ts - Consumer groups now include:
+   this.consumerGroups = [
+     { streamName: STREAMS.HEALTH, ... },
+     { streamName: STREAMS.OPPORTUNITIES, ... },
+     { streamName: STREAMS.WHALE_ALERTS, ... },
+     { streamName: STREAMS.SWAP_EVENTS, ... },      // NEW
+     { streamName: STREAMS.VOLUME_AGGREGATES, ... } // NEW
+   ];
+   ```
+
+2. **Implemented Stream Handlers**:
+   - `handleSwapEventMessage()`: Tracks swap activity, updates volume metrics
+   - `handleVolumeAggregateMessage()`: Processes 5-second aggregated volume data
+
+3. **Added Analytics Metrics** to SystemMetrics:
+   ```typescript
+   interface SystemMetrics {
+     // ... existing fields
+     totalSwapEvents: number;        // Count of processed swap events
+     totalVolumeUsd: number;         // Total USD volume observed
+     volumeAggregatesProcessed: number;
+     activePairsTracked: number;     // Rolling window of active pairs
+   }
+   ```
+
+4. **Active Pairs Tracking**:
+   - Maintains a Map of recently active trading pairs
+   - 5-minute TTL for pair inactivity
+   - Automatic cleanup via periodic interval
+
+**Data Flow (Complete)**:
+```
+Chain Detectors → SwapEventFilter → stream:swap-events → Coordinator
+                                 ↓
+                     stream:volume-aggregates → Coordinator
+                                 ↓
+                     stream:whale-alerts → Coordinator (existing)
+```
+
+**Benefits**:
+- Complete visibility into trading activity
+- Volume analytics for market monitoring
+- Active pairs tracking for dashboard
+- No more orphaned stream data
 
 ## Context
 

@@ -1171,6 +1171,167 @@ These implementations directly support the architecture vision:
 
 ---
 
+## Session: 2026-01-16 (Continued) - Swap Events & Volume Aggregates Consumer Implementation
+
+### Session Context
+
+**Objective**: Complete the data flow for swap events and volume aggregates streams by implementing consumers in the Coordinator, fixing the XINFO/XPENDING errors, and adding startup resilience.
+
+**Problem Statement**:
+When starting the Coordinator, several errors were observed:
+- `XPENDING error` on `stream:price-updates` with `coordinator-group`
+- `XINFO error` on `stream:swap-events` and `stream:volume-aggregates`
+- `System health is 0.0%` immediately on startup
+- `unified-detector-asia-fast is degraded` during startup
+- `snapshot is undefined` during initialization
+
+### Root Cause Analysis
+
+1. **XINFO/XPENDING Errors**: Redis commands fail when streams/consumer groups don't exist yet (common during startup)
+2. **System Health 0.0%**: Health checks run before any services report, producing false alarms
+3. **Service Degraded**: The unified-detector reports `degraded` status when no chains are initialized (should be `starting`)
+4. **Orphaned Streams**: `stream:swap-events` and `stream:volume-aggregates` were published to but never consumed
+
+### Implementation Summary
+
+#### 1. Resilient Redis Stream Operations
+
+**Files Modified**: `shared/core/src/redis-streams.ts`
+
+Made `xinfo()` and `xpending()` return default values instead of throwing when streams/groups don't exist:
+
+```typescript
+// xinfo() returns defaults for non-existent streams
+async xinfo(streamName: string): Promise<StreamInfo> {
+  try { ... }
+  catch (error) {
+    if (error.message?.includes('no such key')) {
+      return { length: 0, lastGeneratedId: '0-0', ... };
+    }
+    throw error;
+  }
+}
+```
+
+#### 2. Startup Grace Period
+
+**Files Modified**: `services/coordinator/src/coordinator.ts`
+
+Added 60-second startup grace period to prevent false health alerts:
+
+```typescript
+private static readonly STARTUP_GRACE_PERIOD_MS = 60000;
+private startTime: number = 0;
+
+private checkForAlerts(): void {
+  const inGracePeriod = (Date.now() - this.startTime) < STARTUP_GRACE_PERIOD_MS;
+  // Skip low-health alerts during grace period if no services have reported
+}
+```
+
+#### 3. 'Starting' Status for Unified Detector
+
+**Files Modified**:
+- `services/unified-detector/src/unified-detector.ts`
+- `shared/config/src/partitions.ts`
+
+Added `'starting'` status for when no chains are initialized:
+
+```typescript
+if (totalChains === 0) {
+  status = 'starting';  // Not 'healthy' or 'degraded'
+}
+```
+
+#### 4. Swap Events & Volume Aggregates Consumers
+
+**Files Modified**: `services/coordinator/src/coordinator.ts`
+
+Added consumer groups and handlers:
+
+```typescript
+this.consumerGroups = [
+  // ... existing
+  { streamName: STREAMS.SWAP_EVENTS, ... },
+  { streamName: STREAMS.VOLUME_AGGREGATES, ... }
+];
+
+const handlers = {
+  // ... existing
+  [STREAMS.SWAP_EVENTS]: handleSwapEventMessage,
+  [STREAMS.VOLUME_AGGREGATES]: handleVolumeAggregateMessage
+};
+```
+
+**New Metrics**:
+```typescript
+interface SystemMetrics {
+  totalSwapEvents: number;
+  totalVolumeUsd: number;
+  volumeAggregatesProcessed: number;
+  activePairsTracked: number;
+}
+```
+
+**Active Pairs Tracking**:
+- Map of recently active trading pairs
+- 5-minute TTL with automatic cleanup
+- Provides market activity visibility
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `shared/core/src/redis-streams.ts` | Resilient xinfo/xpending |
+| `shared/core/src/stream-health-monitor.ts` | Handle 'unknown' stream status |
+| `services/coordinator/src/coordinator.ts` | Startup grace period, swap/volume consumers |
+| `services/unified-detector/src/unified-detector.ts` | 'starting' status |
+| `shared/config/src/partitions.ts` | Added 'starting' to PartitionHealth |
+| `docs/architecture/adr/ADR-002-redis-streams.md` | Phase 6 documentation |
+
+### Test Results
+
+| Test Suite | Tests | Status |
+|------------|-------|--------|
+| coordinator.integration.test.ts | 34 | PASS |
+| redis-streams.test.ts | 24 | PASS |
+| stream-health-monitor.test.ts | 24 | PASS |
+| TypeScript typecheck | - | PASS |
+
+### Data Flow (Complete)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PRODUCERS: Chain Detectors                                      │
+├─────────────────────────────────────────────────────────────────┤
+│ WebSocket → SwapEventFilter → stream:swap-events                │
+│                             → stream:volume-aggregates          │
+│                             → stream:whale-alerts               │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ COORDINATOR SERVICE (Consumer)                                  │
+├─────────────────────────────────────────────────────────────────┤
+│ handleSwapEventMessage → totalSwapEvents, totalVolumeUsd        │
+│ handleVolumeAggregateMessage → volumeAggregatesProcessed        │
+│ handleWhaleAlertMessage → whaleAlerts (existing)                │
+│                                                                 │
+│ activePairs → Rolling window of trading activity                │
+│ SystemMetrics → Dashboard visibility                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Architecture Impact
+
+| Area | Before | After | Notes |
+|------|--------|-------|-------|
+| Stream Consumer Coverage | 60% | 100% | All streams now consumed |
+| Startup Resilience | LOW | HIGH | Grace period, resilient Redis ops |
+| Volume Analytics | NONE | FULL | swap/volume metrics tracked |
+| False Positive Alerts | HIGH | LOW | Grace period eliminates startup noise |
+
+---
+
 ## References
 
 - [Architecture v2.0](./ARCHITECTURE_V2.md)

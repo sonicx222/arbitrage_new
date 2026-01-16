@@ -349,7 +349,8 @@ describe('CoordinatorService Integration', () => {
       await coordinator.start(0);
 
       // Verify StreamConsumer was instantiated for each stream
-      expect(mockDeps.StreamConsumer).toHaveBeenCalledTimes(3);
+      // 5 streams: health, opportunities, whale-alerts, swap-events, volume-aggregates
+      expect(mockDeps.StreamConsumer).toHaveBeenCalledTimes(5);
     });
   });
 
@@ -525,6 +526,98 @@ describe('CoordinatorService Integration', () => {
 
       // Verify coordinator is still operational
       expect(coordinator.getIsRunning()).toBe(true);
+    });
+
+    it('should handle swap event messages correctly', async () => {
+      await coordinator.start(0);
+
+      const handler = (coordinator as any).handleSwapEventMessage.bind(coordinator);
+
+      // Valid swap event message (wrapped in MessageEvent format)
+      const validMessage = {
+        id: '1234-0',
+        data: {
+          type: 'swap-event',
+          data: {
+            pairAddress: '0x1234567890123456789012345678901234567890',
+            chain: 'ethereum',
+            dex: 'uniswap',
+            usdValue: 15000,
+            transactionHash: '0xabc123'
+          },
+          timestamp: Date.now(),
+          source: 'ethereum-detector'
+        }
+      };
+
+      await expect(handler(validMessage)).resolves.not.toThrow();
+
+      // Check metrics were updated
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.totalSwapEvents).toBe(1);
+      expect(metrics.totalVolumeUsd).toBe(15000);
+      expect(metrics.activePairsTracked).toBe(1);
+
+      // Handle malformed message without crashing
+      await expect(handler({ id: '1234-1', data: null })).resolves.not.toThrow();
+      await expect(handler({ id: '1234-2', data: {} })).resolves.not.toThrow();
+    });
+
+    it('should handle volume aggregate messages correctly', async () => {
+      await coordinator.start(0);
+
+      const handler = (coordinator as any).handleVolumeAggregateMessage.bind(coordinator);
+
+      // Valid volume aggregate message (wrapped in MessageEvent format)
+      const validMessage = {
+        id: '1234-0',
+        data: {
+          type: 'volume-aggregate',
+          data: {
+            pairAddress: '0xabcdef1234567890123456789012345678901234',
+            chain: 'bsc',
+            dex: 'pancakeswap',
+            swapCount: 25,
+            totalUsdVolume: 75000,
+            minPrice: 1.05,
+            maxPrice: 1.08,
+            avgPrice: 1.065,
+            windowStartMs: Date.now() - 5000,
+            windowEndMs: Date.now()
+          },
+          timestamp: Date.now(),
+          source: 'bsc-detector'
+        }
+      };
+
+      await expect(handler(validMessage)).resolves.not.toThrow();
+
+      // Check metrics were updated
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.volumeAggregatesProcessed).toBe(1);
+      expect(metrics.activePairsTracked).toBeGreaterThanOrEqual(1);
+
+      // Handle malformed message without crashing
+      await expect(handler({ id: '1234-1', data: null })).resolves.not.toThrow();
+      await expect(handler({ id: '1234-2', data: { swapCount: 0 } })).resolves.not.toThrow();
+    });
+
+    it('should cleanup stale active pairs', async () => {
+      await coordinator.start(0);
+
+      // Add a pair to track
+      const activePairs = (coordinator as any).activePairs;
+      activePairs.set('0xtest', {
+        lastSeen: Date.now() - 400000, // 6+ minutes ago (past TTL)
+        chain: 'test',
+        dex: 'test'
+      });
+
+      // Run cleanup
+      (coordinator as any).cleanupActivePairs();
+
+      // Pair should be removed
+      expect(activePairs.size).toBe(0);
     });
   });
 
