@@ -41,12 +41,13 @@ export const CHAINS: Record<string, Chain> = {
     id: 56,
     name: 'BSC',
     rpcUrl: process.env.BSC_RPC_URL || 'https://bsc-dataseed1.binance.org',
-    wsUrl: process.env.BSC_WS_URL || 'wss://bsc-ws-node.nariox.org:443',
+    // FIX: Use more reliable publicnode.com as primary (nariox.org times out frequently)
+    wsUrl: process.env.BSC_WS_URL || 'wss://bsc.publicnode.com',
     // S3.3: WebSocket fallback URLs for resilience
     wsFallbackUrls: [
-      'wss://bsc.publicnode.com',
       'wss://bsc-mainnet.public.blastapi.io',
-      'wss://bsc-rpc.publicnode.com'
+      'wss://bsc-rpc.publicnode.com',
+      'wss://bsc-ws-node.nariox.org:443'  // Moved to fallback - known to be unreliable
     ],
     rpcFallbackUrls: [
       'https://bsc-dataseed2.binance.org',
@@ -156,15 +157,18 @@ export const CHAINS: Record<string, Chain> = {
     id: 250,
     name: 'Fantom Opera',
     rpcUrl: process.env.FANTOM_RPC_URL || 'https://rpc.ftm.tools',
-    wsUrl: process.env.FANTOM_WS_URL || 'wss://wsapi.fantom.network',
-    // S3.3: WebSocket fallback URLs for resilience
+    // FIX: Use more reliable publicnode.com as primary (wsapi.fantom.network is unstable)
+    wsUrl: process.env.FANTOM_WS_URL || 'wss://fantom.publicnode.com',
+    // S3.3: WebSocket fallback URLs for resilience - expanded with more reliable providers
     wsFallbackUrls: [
-      'wss://fantom.publicnode.com',
-      'wss://fantom-mainnet.public.blastapi.io'
+      'wss://fantom-mainnet.public.blastapi.io',
+      'wss://fantom.drpc.org',
+      'wss://wsapi.fantom.network'  // Moved to fallback - known to be unreliable
     ],
     rpcFallbackUrls: [
       'https://fantom.publicnode.com',
       'https://fantom-mainnet.public.blastapi.io',
+      'https://fantom.drpc.org',
       'https://1rpc.io/ftm'
     ],
     blockTime: 1,

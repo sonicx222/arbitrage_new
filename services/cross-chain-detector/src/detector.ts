@@ -1035,13 +1035,16 @@ export class CrossChainDetectorService {
     this.healthMonitoringInterval = setInterval(async () => {
       try {
         // P3-2 FIX: Use unified ServiceHealth with 'name' field
+        // FIX: Add 'timestamp' field - coordinator maps data.timestamp to lastHeartbeat
+        const now = Date.now();
         const health = {
           name: 'cross-chain-detector',
           status: (this.stateManager.isRunning() ? 'healthy' : 'unhealthy') as 'healthy' | 'degraded' | 'unhealthy',
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,
           cpuUsage: 0,
-          lastHeartbeat: Date.now(),
+          timestamp: now,        // FIX: Coordinator expects 'timestamp' for health tracking
+          lastHeartbeat: now,    // Keep for backwards compatibility
           chainsMonitored: Object.keys(this.priceData).length,
           opportunitiesCache: this.opportunitiesCache.size,
           mlPredictorActive: !!this.mlPredictor
