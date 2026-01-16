@@ -413,6 +413,24 @@ export type {
   CrossChainDiscrepancy
 } from './partitioned-detector';
 
+// Solana detector for non-EVM chain support (S3.3.1)
+export { SolanaDetector, SOLANA_DEX_PROGRAMS } from './solana-detector';
+export type {
+  SolanaDetectorConfig,
+  SolanaDetectorDeps,
+  SolanaDetectorLogger,
+  SolanaDetectorPerfLogger,
+  SolanaDetectorRedisClient,
+  SolanaDetectorStreamsClient,
+  SolanaPool,
+  SolanaPriceUpdate,
+  SolanaTokenInfo,
+  SolanaDetectorHealth,
+  ConnectionPoolConfig,
+  ConnectionMetrics,
+  ProgramSubscription
+} from './solana-detector';
+
 // =============================================================================
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
 // =============================================================================
