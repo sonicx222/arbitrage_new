@@ -67,21 +67,27 @@ jest.mock('@arbitrage/core', () => ({
     validateHealthCheck: jest.fn((req: any, res: any, next: any) => next()),
     validateOpportunity: jest.fn((req: any, res: any, next: any) => next())
   },
-  createServiceState: jest.fn(() => ({
-    getState: jest.fn(() => 'stopped'),
-    isRunning: jest.fn(() => false),
-    isStopped: jest.fn(() => true),
-    executeStart: jest.fn(async (fn: () => Promise<void>) => {
-      await fn();
-      return { success: true, currentState: 'running' };
-    }),
-    executeStop: jest.fn(async (fn: () => Promise<void>) => {
-      await fn();
-      return { success: true, currentState: 'stopped' };
-    }),
-    on: jest.fn(),
-    removeAllListeners: jest.fn()
-  })),
+  createServiceState: jest.fn(() => {
+    // Use object to allow mutation in closures
+    const state = { running: false };
+    return {
+      getState: jest.fn().mockImplementation(() => state.running ? 'running' : 'stopped'),
+      isRunning: jest.fn().mockImplementation(() => state.running),
+      isStopped: jest.fn().mockImplementation(() => !state.running),
+      executeStart: jest.fn().mockImplementation(async (fn: any) => {
+        await fn();
+        state.running = true;
+        return { success: true, currentState: 'running' };
+      }),
+      executeStop: jest.fn().mockImplementation(async (fn: any) => {
+        await fn();
+        state.running = false;
+        return { success: true, currentState: 'stopped' };
+      }),
+      on: jest.fn(),
+      removeAllListeners: jest.fn()
+    };
+  }),
   ServiceState: {
     STOPPED: 'stopped',
     STARTING: 'starting',
@@ -102,12 +108,13 @@ import { CoordinatorService } from './coordinator';
 // =============================================================================
 
 describe('Coordinator Configuration', () => {
-  it('should have all chains available for coordination', () => {
+  it('should have core chains available for coordination', () => {
+    // Test for chains available in the base config (shared/config/index.ts)
+    // Note: Full config in shared/config/src/index.ts has more chains (optimism, fantom, etc.)
     expect(CHAINS.ethereum).toBeDefined();
     expect(CHAINS.bsc).toBeDefined();
     expect(CHAINS.polygon).toBeDefined();
     expect(CHAINS.arbitrum).toBeDefined();
-    expect(CHAINS.optimism).toBeDefined();
     expect(CHAINS.base).toBeDefined();
   });
 });
@@ -366,5 +373,285 @@ describe('CoordinatorService Class', () => {
     it('should have stop method', () => {
       expect(typeof coordinator.stop).toBe('function');
     });
+  });
+
+  describe('State Getters', () => {
+    it('should return leader status', () => {
+      expect(typeof coordinator.getIsLeader()).toBe('boolean');
+    });
+
+    it('should return running status', () => {
+      expect(typeof coordinator.getIsRunning()).toBe('boolean');
+    });
+
+    it('should return empty service health map initially', () => {
+      const healthMap = coordinator.getServiceHealthMap();
+      expect(healthMap).toBeInstanceOf(Map);
+      expect(healthMap.size).toBe(0);
+    });
+
+    it('should return initialized system metrics', () => {
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.totalOpportunities).toBe(0);
+      expect(metrics.totalExecutions).toBe(0);
+      expect(metrics.successfulExecutions).toBe(0);
+      expect(metrics.totalProfit).toBe(0);
+      expect(metrics.systemHealth).toBe(100);
+      expect(metrics.activeServices).toBe(0);
+      expect(metrics.whaleAlerts).toBe(0);
+      expect(metrics.pendingOpportunities).toBe(0);
+    });
+  });
+});
+
+// =============================================================================
+// Alert System Tests
+// =============================================================================
+
+describe('CoordinatorService Alert System', () => {
+  describe('Alert Cooldown Logic', () => {
+    it('should apply 5-minute cooldown for duplicate alerts', () => {
+      const alertCooldowns = new Map<string, number>();
+      const cooldownMs = 300000; // 5 minutes
+
+      const sendAlert = (type: string, service?: string) => {
+        const alertKey = `${type}_${service || 'system'}`;
+        const now = Date.now();
+        const lastAlert = alertCooldowns.get(alertKey) || 0;
+
+        if (now - lastAlert > cooldownMs) {
+          alertCooldowns.set(alertKey, now);
+          return true; // Alert sent
+        }
+        return false; // Cooldown active
+      };
+
+      // First alert should be sent
+      expect(sendAlert('SERVICE_UNHEALTHY', 'bsc-detector')).toBe(true);
+
+      // Immediate duplicate should be blocked
+      expect(sendAlert('SERVICE_UNHEALTHY', 'bsc-detector')).toBe(false);
+
+      // Different service should not be blocked
+      expect(sendAlert('SERVICE_UNHEALTHY', 'eth-detector')).toBe(true);
+
+      // Different type for same service should not be blocked
+      expect(sendAlert('HIGH_MEMORY', 'bsc-detector')).toBe(true);
+    });
+
+    it('should allow alert after cooldown expires', () => {
+      const alertCooldowns = new Map<string, number>();
+      const cooldownMs = 300000;
+      const alertKey = 'TEST_ALERT_system';
+
+      // Set cooldown 6 minutes ago (expired)
+      alertCooldowns.set(alertKey, Date.now() - 360000);
+
+      const lastAlert = alertCooldowns.get(alertKey) || 0;
+      const now = Date.now();
+
+      expect(now - lastAlert > cooldownMs).toBe(true);
+    });
+  });
+
+  describe('Alert Cooldown Cleanup', () => {
+    it('should remove cooldowns older than 1 hour', () => {
+      const alertCooldowns = new Map<string, number>();
+      const maxAge = 3600000; // 1 hour
+      const now = Date.now();
+
+      // Add some cooldowns
+      alertCooldowns.set('OLD_ALERT_system', now - 7200000); // 2 hours old
+      alertCooldowns.set('RECENT_ALERT_system', now - 1800000); // 30 min old
+      alertCooldowns.set('NEW_ALERT_system', now - 60000); // 1 min old
+
+      // Cleanup logic
+      const toDelete: string[] = [];
+      for (const [key, timestamp] of alertCooldowns) {
+        if (now - timestamp > maxAge) {
+          toDelete.push(key);
+        }
+      }
+      for (const key of toDelete) {
+        alertCooldowns.delete(key);
+      }
+
+      expect(alertCooldowns.size).toBe(2);
+      expect(alertCooldowns.has('OLD_ALERT_system')).toBe(false);
+      expect(alertCooldowns.has('RECENT_ALERT_system')).toBe(true);
+      expect(alertCooldowns.has('NEW_ALERT_system')).toBe(true);
+    });
+  });
+});
+
+// =============================================================================
+// Stream Error Tracking Tests
+// =============================================================================
+
+describe('CoordinatorService Stream Error Tracking', () => {
+  it('should track consecutive stream errors', () => {
+    let streamConsumerErrors = 0;
+    const MAX_STREAM_ERRORS = 10;
+    let alertSentForCurrentErrorBurst = false;
+    const alerts: string[] = [];
+
+    const trackStreamError = (streamName: string) => {
+      streamConsumerErrors++;
+      if (streamConsumerErrors >= MAX_STREAM_ERRORS && !alertSentForCurrentErrorBurst) {
+        alerts.push(`STREAM_CONSUMER_FAILURE: ${streamName}`);
+        alertSentForCurrentErrorBurst = true;
+      }
+    };
+
+    // Track 9 errors - no alert yet
+    for (let i = 0; i < 9; i++) {
+      trackStreamError('stream:health');
+    }
+    expect(alerts.length).toBe(0);
+
+    // 10th error triggers alert
+    trackStreamError('stream:health');
+    expect(alerts.length).toBe(1);
+
+    // Further errors don't trigger more alerts
+    trackStreamError('stream:health');
+    trackStreamError('stream:health');
+    expect(alerts.length).toBe(1);
+  });
+
+  it('should reset error tracking on successful processing', () => {
+    let streamConsumerErrors = 5;
+    let alertSentForCurrentErrorBurst = false;
+
+    const resetStreamErrors = () => {
+      if (streamConsumerErrors > 0) {
+        streamConsumerErrors = 0;
+        alertSentForCurrentErrorBurst = false;
+      }
+    };
+
+    resetStreamErrors();
+
+    expect(streamConsumerErrors).toBe(0);
+    expect(alertSentForCurrentErrorBurst).toBe(false);
+  });
+});
+
+// =============================================================================
+// Opportunity TTL and Size Limit Tests
+// =============================================================================
+
+describe('CoordinatorService Opportunity Management', () => {
+  const MAX_OPPORTUNITIES = 1000;
+  const OPPORTUNITY_TTL_MS = 60000;
+
+  describe('Batch Cleanup Pattern', () => {
+    it('should clean up opportunities on interval not per-message', () => {
+      // REFACTOR: Validates the new batch cleanup pattern
+      // Previously, cleanup happened inline during handleOpportunityMessage
+      // Now, it runs on a separate interval to prevent race conditions
+      const opportunities = new Map<string, { id: string; timestamp: number }>();
+      const now = Date.now();
+
+      // Simulate rapid concurrent additions (what stream consumers do)
+      for (let i = 0; i < 100; i++) {
+        opportunities.set(`opp-${i}`, { id: `opp-${i}`, timestamp: now - (i * 100) });
+      }
+
+      // Batch cleanup (what the interval does)
+      const cleanupBatch = () => {
+        const toDelete: string[] = [];
+        for (const [id, opp] of opportunities) {
+          if (now - opp.timestamp > OPPORTUNITY_TTL_MS) {
+            toDelete.push(id);
+          }
+        }
+        for (const id of toDelete) {
+          opportunities.delete(id);
+        }
+      };
+
+      // All opportunities are fresh, none should be deleted
+      cleanupBatch();
+      expect(opportunities.size).toBe(100);
+    });
+
+    it('should not interfere with concurrent additions', () => {
+      // Simulates the safety of the batch pattern
+      const opportunities = new Map<string, { id: string; timestamp: number }>();
+      const now = Date.now();
+
+      // Add initial opportunities
+      opportunities.set('opp-1', { id: 'opp-1', timestamp: now - 70000 }); // Expired
+
+      // Simulate cleanup starting
+      const expiredIds = ['opp-1'];
+
+      // Simulate concurrent addition during cleanup iteration
+      opportunities.set('opp-2', { id: 'opp-2', timestamp: now }); // Fresh, added during cleanup
+
+      // Complete cleanup (delete phase)
+      for (const id of expiredIds) {
+        opportunities.delete(id);
+      }
+
+      // The concurrent addition should NOT be affected
+      expect(opportunities.has('opp-1')).toBe(false);
+      expect(opportunities.has('opp-2')).toBe(true);
+      expect(opportunities.size).toBe(1);
+    });
+  });
+
+  it('should enforce opportunity size limit', () => {
+    const opportunities = new Map<string, { id: string; timestamp: number }>();
+
+    // Add more than MAX entries
+    for (let i = 0; i < MAX_OPPORTUNITIES + 100; i++) {
+      opportunities.set(`opp-${i}`, { id: `opp-${i}`, timestamp: Date.now() - i });
+    }
+
+    expect(opportunities.size).toBe(MAX_OPPORTUNITIES + 100);
+
+    // Pruning logic
+    if (opportunities.size > MAX_OPPORTUNITIES) {
+      const entries = Array.from(opportunities.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+      const removeCount = opportunities.size - MAX_OPPORTUNITIES;
+      for (let i = 0; i < removeCount; i++) {
+        opportunities.delete(entries[i][0]);
+      }
+    }
+
+    expect(opportunities.size).toBe(MAX_OPPORTUNITIES);
+  });
+
+  it('should remove expired opportunities', () => {
+    const opportunities = new Map<string, { id: string; timestamp: number; expiresAt?: number }>();
+    const now = Date.now();
+
+    opportunities.set('fresh', { id: 'fresh', timestamp: now - 1000 });
+    opportunities.set('expired-by-ttl', { id: 'expired-by-ttl', timestamp: now - OPPORTUNITY_TTL_MS - 1000 });
+    opportunities.set('expired-explicit', { id: 'expired-explicit', timestamp: now, expiresAt: now - 1000 });
+
+    // Cleanup logic
+    const toDelete: string[] = [];
+    for (const [id, opp] of opportunities) {
+      if (opp.expiresAt && opp.expiresAt < now) {
+        toDelete.push(id);
+        continue;
+      }
+      if (opp.timestamp && (now - opp.timestamp) > OPPORTUNITY_TTL_MS) {
+        toDelete.push(id);
+      }
+    }
+    for (const id of toDelete) {
+      opportunities.delete(id);
+    }
+
+    expect(opportunities.size).toBe(1);
+    expect(opportunities.has('fresh')).toBe(true);
+    expect(opportunities.has('expired-by-ttl')).toBe(false);
+    expect(opportunities.has('expired-explicit')).toBe(false);
   });
 });

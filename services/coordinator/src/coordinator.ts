@@ -56,6 +56,55 @@ interface LeaderElectionConfig {
   instanceId: string;
 }
 
+// =============================================================================
+// Dependency Injection Interface
+// =============================================================================
+
+/**
+ * Logger interface for dependency injection.
+ * Allows injecting mock loggers in tests.
+ * Uses `unknown` for meta parameter to match @arbitrage/core Logger type.
+ */
+interface Logger {
+  info: (message: string, meta?: unknown) => void;
+  error: (message: string, meta?: unknown) => void;
+  warn: (message: string, meta?: unknown) => void;
+  debug: (message: string, meta?: unknown) => void;
+}
+
+/**
+ * StreamHealthMonitor interface for dependency injection.
+ */
+interface StreamHealthMonitor {
+  setConsumerGroup: (group: string) => void;
+  start?: () => void;
+  stop?: () => void;
+}
+
+/**
+ * Dependencies that can be injected into CoordinatorService.
+ * This enables proper testing without Jest mock hoisting issues.
+ *
+ * All dependencies are optional - if not provided, real implementations
+ * are used from @arbitrage/core.
+ */
+export interface CoordinatorDependencies {
+  /** Custom logger instance */
+  logger?: Logger;
+  /** Custom performance logger instance */
+  perfLogger?: PerformanceLogger;
+  /** Factory function to get Redis client */
+  getRedisClient?: () => Promise<RedisClient>;
+  /** Factory function to get Redis Streams client */
+  getRedisStreamsClient?: () => Promise<RedisStreamsClient>;
+  /** Factory function to create service state manager */
+  createServiceState?: (config: { serviceName: string; transitionTimeoutMs: number }) => ServiceStateManager;
+  /** Factory function to get stream health monitor */
+  getStreamHealthMonitor?: () => StreamHealthMonitor;
+  /** StreamConsumer class constructor */
+  StreamConsumer?: typeof StreamConsumer;
+}
+
 interface CoordinatorConfig {
   port: number;
   leaderElection: LeaderElectionConfig;
@@ -72,7 +121,8 @@ interface StreamMessage {
 // P2 FIX: Type for stream message data with common fields
 interface StreamMessageData {
   // Health message fields
-  service?: string;
+  name?: string;    // P3-2: Unified field name (preferred)
+  service?: string; // P3-2: Legacy field name (fallback)
   status?: string;
   uptime?: number;
   memoryUsage?: number;
@@ -112,15 +162,14 @@ interface Alert {
 export class CoordinatorService {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
-  private logger = createLogger('coordinator');
+  private logger: Logger;
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
   private app: express.Application;
   // P2 FIX: Proper type instead of any
   private server: http.Server | null = null;
-  // P1-8 FIX: isRunning kept for internal state tracking within executeStart/Stop callbacks
-  // External checks should use stateManager.isRunning() for consistency
-  private isRunning = false;
+  // REFACTOR: Removed duplicate isRunning flag - stateManager is now the single source of truth
+  // This eliminates potential sync issues between the flag and stateManager
   private isLeader = false;
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
@@ -131,6 +180,9 @@ export class CoordinatorService {
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private metricsUpdateInterval: NodeJS.Timeout | null = null;
   private leaderHeartbeatInterval: NodeJS.Timeout | null = null;
+  // REFACTOR: Separate interval for opportunity cleanup to prevent race conditions
+  // with concurrent stream consumers adding opportunities
+  private opportunityCleanupInterval: NodeJS.Timeout | null = null;
 
   // Stream consumers (blocking read pattern - replaces setInterval polling)
   private streamConsumers: StreamConsumer[] = [];
@@ -141,13 +193,30 @@ export class CoordinatorService {
   // Consumer group configs for streams
   private readonly consumerGroups: ConsumerGroupConfig[];
 
-  constructor(config?: Partial<CoordinatorConfig>) {
-    this.perfLogger = getPerformanceLogger('coordinator');
+  // REFACTOR: Store injected dependencies for use in start() and other methods
+  // This enables proper testing without Jest mock hoisting issues
+  private readonly deps: Required<CoordinatorDependencies>;
+
+  constructor(config?: Partial<CoordinatorConfig>, deps?: CoordinatorDependencies) {
+    // REFACTOR: Initialize dependencies with defaults or injected values
+    // This pattern allows tests to inject mock dependencies directly
+    this.deps = {
+      logger: deps?.logger ?? createLogger('coordinator'),
+      perfLogger: deps?.perfLogger ?? getPerformanceLogger('coordinator'),
+      getRedisClient: deps?.getRedisClient ?? getRedisClient,
+      getRedisStreamsClient: deps?.getRedisStreamsClient ?? getRedisStreamsClient,
+      createServiceState: deps?.createServiceState ?? createServiceState,
+      getStreamHealthMonitor: deps?.getStreamHealthMonitor ?? getStreamHealthMonitor,
+      StreamConsumer: deps?.StreamConsumer ?? StreamConsumer
+    };
+
+    this.logger = this.deps.logger;
+    this.perfLogger = this.deps.perfLogger;
     this.app = express();
     this.systemMetrics = this.initializeMetrics();
 
     // Initialize state manager for lifecycle management (P0 fix: prevents race conditions)
-    this.stateManager = createServiceState({
+    this.stateManager = this.deps.createServiceState({
       serviceName: 'coordinator',
       transitionTimeoutMs: 30000
     });
@@ -207,25 +276,26 @@ export class CoordinatorService {
         instanceId: this.config.leaderElection.instanceId
       });
 
+      // REFACTOR: Use injected dependencies for testability
       // Initialize Redis client (for legacy operations)
-      this.redis = await getRedisClient() as RedisClient;
+      this.redis = await this.deps.getRedisClient() as RedisClient;
 
       // Initialize Redis Streams client
-      this.streamsClient = await getRedisStreamsClient();
+      this.streamsClient = await this.deps.getRedisStreamsClient();
 
       // Create consumer groups for all streams
       await this.createConsumerGroups();
 
       // Configure StreamHealthMonitor to use our consumer group
       // This fixes the XPENDING errors when monitoring stream health
-      const streamHealthMonitor = getStreamHealthMonitor();
+      const streamHealthMonitor = this.deps.getStreamHealthMonitor();
       streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
 
       // Try to acquire leadership
       await this.tryAcquireLeadership();
 
-      // Set isRunning BEFORE starting intervals (P0 fix: prevents early returns)
-      this.isRunning = true;
+      // REFACTOR: Removed isRunning = true - stateManager.executeStart() handles state
+      // The stateManager transitions to 'running' state after this callback completes
 
       // Start stream consumers (run even as standby for monitoring)
       this.startStreamConsumers();
@@ -235,6 +305,9 @@ export class CoordinatorService {
 
       // Start periodic health monitoring
       this.startHealthMonitoring();
+
+      // REFACTOR: Start opportunity cleanup on separate interval (prevents race conditions)
+      this.startOpportunityCleanup();
 
       // Start HTTP server
       this.server = this.app.listen(serverPort, () => {
@@ -264,7 +337,8 @@ export class CoordinatorService {
     // Use state manager to prevent concurrent stops (P0 fix)
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Coordinator Service');
-      this.isRunning = false;
+      // REFACTOR: Removed isRunning = false - stateManager.executeStop() handles state
+      // The stateManager transitions to 'stopping' immediately upon entering this callback
 
       // Release leadership if held
       if (this.isLeader) {
@@ -350,6 +424,11 @@ export class CoordinatorService {
     if (this.leaderHeartbeatInterval) {
       clearInterval(this.leaderHeartbeatInterval);
       this.leaderHeartbeatInterval = null;
+    }
+    // REFACTOR: Clear opportunity cleanup interval
+    if (this.opportunityCleanupInterval) {
+      clearInterval(this.opportunityCleanupInterval);
+      this.opportunityCleanupInterval = null;
     }
     // Stop all stream consumers (replaces setInterval pattern)
     await Promise.all(this.streamConsumers.map(c => c.stop()));
@@ -557,12 +636,14 @@ export class CoordinatorService {
       [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg)
     };
 
+    // REFACTOR: Use injected StreamConsumer class for testability
     // Create a StreamConsumer for each consumer group
+    const StreamConsumerClass = this.deps.StreamConsumer;
     for (const groupConfig of this.consumerGroups) {
       const handler = handlers[groupConfig.streamName];
       if (!handler) continue;
 
-      const consumer = new StreamConsumer(this.streamsClient, {
+      const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
         handler,
         batchSize: 10,
@@ -659,6 +740,9 @@ export class CoordinatorService {
         status: health.status
       });
 
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
+
     } catch (error) {
       this.logger.error('Failed to handle health message', { error, message });
     }
@@ -667,6 +751,7 @@ export class CoordinatorService {
   // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
   private readonly MAX_OPPORTUNITIES = 1000;
   private readonly OPPORTUNITY_TTL_MS = 60000; // 1 minute default TTL
+  private readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 10000; // 10 seconds
 
   // P2 FIX: Use StreamMessage type instead of any
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
@@ -689,46 +774,11 @@ export class CoordinatorService {
         status: typeof data.status === 'string' ? data.status as ArbitrageOpportunity['status'] : undefined
       };
 
-      // Track opportunity
+      // Track opportunity (fast path - cleanup happens on separate interval)
+      // REFACTOR: Removed inline cleanup to prevent race conditions with concurrent consumers
       this.opportunities.set(data.id, opportunity);
       this.systemMetrics.totalOpportunities++;
       this.systemMetrics.pendingOpportunities = this.opportunities.size;
-
-      // P1-1 fix: Clean up expired opportunities and enforce size limit
-      const now = Date.now();
-      const toDelete: string[] = [];
-
-      for (const [id, opp] of this.opportunities) {
-        // Delete if explicitly expired
-        if (opp.expiresAt && opp.expiresAt < now) {
-          toDelete.push(id);
-          continue;
-        }
-        // P1-1 fix: Also delete if older than TTL (for opportunities without expiresAt)
-        if (opp.timestamp && (now - opp.timestamp) > this.OPPORTUNITY_TTL_MS) {
-          toDelete.push(id);
-        }
-      }
-
-      for (const id of toDelete) {
-        this.opportunities.delete(id);
-      }
-
-      // P1-1 fix: If still over limit, remove oldest entries
-      if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
-        const entries = Array.from(this.opportunities.entries())
-          .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
-
-        const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
-        for (let i = 0; i < removeCount; i++) {
-          this.opportunities.delete(entries[i][0]);
-        }
-
-        this.logger.debug('Pruned opportunities map', {
-          removed: removeCount,
-          remaining: this.opportunities.size
-        });
-      }
 
       this.logger.info('Opportunity detected', {
         id: opportunity.id,
@@ -743,9 +793,92 @@ export class CoordinatorService {
         await this.forwardToExecutionEngine(opportunity);
       }
 
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
+
     } catch (error) {
       this.logger.error('Failed to handle opportunity message', { error, message });
     }
+  }
+
+  /**
+   * REFACTOR: Extracted opportunity cleanup to prevent race conditions.
+   *
+   * This runs on a separate interval (every 10s) instead of on every message.
+   * Benefits:
+   * - Eliminates race condition where concurrent consumers could over-prune
+   * - Faster message handling (no cleanup overhead per message)
+   * - Predictable cleanup timing
+   * - Follows Node.js best practice of batched background operations
+   */
+  private cleanupExpiredOpportunities(): void {
+    const now = Date.now();
+    const toDelete: string[] = [];
+    const initialSize = this.opportunities.size;
+
+    // Phase 1: Identify expired opportunities
+    for (const [id, opp] of this.opportunities) {
+      // Delete if explicitly expired
+      if (opp.expiresAt && opp.expiresAt < now) {
+        toDelete.push(id);
+        continue;
+      }
+      // Delete if older than TTL (for opportunities without expiresAt)
+      if (opp.timestamp && (now - opp.timestamp) > this.OPPORTUNITY_TTL_MS) {
+        toDelete.push(id);
+      }
+    }
+
+    // Phase 2: Delete expired entries
+    for (const id of toDelete) {
+      this.opportunities.delete(id);
+    }
+
+    // Phase 3: Enforce size limit by removing oldest entries
+    if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
+      const entries = Array.from(this.opportunities.entries())
+        .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
+
+      const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
+      for (let i = 0; i < removeCount; i++) {
+        this.opportunities.delete(entries[i][0]);
+      }
+    }
+
+    // Update metrics
+    this.systemMetrics.pendingOpportunities = this.opportunities.size;
+
+    // Log if cleanup occurred
+    const removed = initialSize - this.opportunities.size;
+    if (removed > 0) {
+      this.logger.debug('Opportunity cleanup completed', {
+        removed,
+        remaining: this.opportunities.size,
+        expiredCount: toDelete.length
+      });
+    }
+  }
+
+  /**
+   * Start the opportunity cleanup interval.
+   * Runs every 10 seconds to clean up expired opportunities.
+   */
+  private startOpportunityCleanup(): void {
+    this.opportunityCleanupInterval = setInterval(() => {
+      if (!this.stateManager.isRunning()) return;
+
+      try {
+        this.cleanupExpiredOpportunities();
+      } catch (error) {
+        this.logger.error('Opportunity cleanup failed', { error });
+      }
+    }, this.OPPORTUNITY_CLEANUP_INTERVAL_MS);
+
+    this.logger.info('Opportunity cleanup interval started', {
+      intervalMs: this.OPPORTUNITY_CLEANUP_INTERVAL_MS,
+      maxOpportunities: this.MAX_OPPORTUNITIES,
+      ttlMs: this.OPPORTUNITY_TTL_MS
+    });
   }
 
   // P2 FIX: Use StreamMessage type instead of any
@@ -778,6 +911,9 @@ export class CoordinatorService {
         data,
         timestamp: Date.now()
       });
+
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle whale alert message', { error, message });
@@ -857,11 +993,14 @@ export class CoordinatorService {
   }
 
   private async reportHealth(): Promise<void> {
-    if (!this.streamsClient) return;
+    // P1-8 FIX: Check running state before reporting
+    if (!this.streamsClient || !this.stateManager.isRunning()) return;
 
     try {
       const health = {
-        service: 'coordinator',
+        // P3-2 FIX: Use 'name' as primary field for consistency with handleHealthMessage
+        name: 'coordinator',
+        service: 'coordinator', // Keep for backwards compatibility
         // P1-8 FIX: Use stateManager.isRunning() for consistency
         status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
         isLeader: this.isLeader,
@@ -1281,8 +1420,15 @@ export class CoordinatorService {
 
   private acknowledgeAlert(req: Request, res: Response): void {
     const { alert } = req.params;
-    this.alertCooldowns.delete(alert);
-    res.json({ success: true });
+    // FIX: Alert cooldown keys are stored as `${type}_${service}`, e.g., "SERVICE_UNHEALTHY_bsc-detector"
+    // The alert param can be either the full key or just the type
+    // Try exact match first, then try with _system suffix for system alerts
+    let deleted = this.alertCooldowns.delete(alert);
+    if (!deleted) {
+      // Try with _system suffix (for alerts without service)
+      deleted = this.alertCooldowns.delete(`${alert}_system`);
+    }
+    res.json({ success: deleted, message: deleted ? 'Alert acknowledged' : 'Alert not found in cooldowns' });
   }
 
   // ===========================================================================
@@ -1294,8 +1440,9 @@ export class CoordinatorService {
   }
 
   getIsRunning(): boolean {
-    // P1-8 FIX: Use stateManager.isRunning() for consistency with other services
-    return this.stateManager.isRunning();
+    // REFACTOR: stateManager is now the single source of truth for running state
+    // Returns false if stateManager is not initialized (shouldn't happen in production)
+    return this.stateManager?.isRunning() ?? false;
   }
 
   getServiceHealthMap(): Map<string, ServiceHealth> {
