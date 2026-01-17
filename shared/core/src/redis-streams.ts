@@ -1003,7 +1003,15 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
 
   // Prevent concurrent initialization (race condition fix)
   if (initializingPromise) {
-    return initializingPromise;
+    // P1-FIX: Await and validate instead of returning promise directly.
+    // This prevents returning a disconnected instance if reset() was called
+    // during our await.
+    const instance = await initializingPromise;
+    if (streamsInstance === instance) {
+      return instance;
+    }
+    // Instance was reset during await, retry
+    return getRedisStreamsClient(url, password);
   }
 
   const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
@@ -1027,7 +1035,13 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
     }
   })();
 
-  return initializingPromise;
+  // P1-FIX: Same validation after await
+  const instance = await initializingPromise;
+  if (streamsInstance === instance) {
+    return instance;
+  }
+  // Instance was reset during initialization, retry
+  return getRedisStreamsClient(url, password);
 }
 
 export async function resetRedisStreamsInstance(): Promise<void> {
