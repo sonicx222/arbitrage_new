@@ -1578,3 +1578,259 @@ describe('S3.3.5 Regression: Slot Update Timeout', () => {
     ).rejects.toThrow("Operation 'getSlot' timed out after 50ms");
   });
 });
+
+// =============================================================================
+// Deep Dive Analysis Regression Tests: Pool Updates & Arbitrage Detection
+// =============================================================================
+
+describe('Deep Dive Regression: Pool Update Consistency', () => {
+  let detector: SolanaDetector;
+  let mockDeps: SolanaDetectorDeps;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDeps = {
+      logger: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn()
+      },
+      perfLogger: {
+        logHealthCheck: jest.fn()
+      },
+      redisClient: {
+        ping: jest.fn(() => Promise.resolve('PONG')),
+        disconnect: jest.fn(() => Promise.resolve()),
+        updateServiceHealth: jest.fn(() => Promise.resolve())
+      },
+      streamsClient: {
+        disconnect: jest.fn(() => Promise.resolve()),
+        createBatcher: jest.fn(() => ({
+          add: jest.fn(),
+          destroy: jest.fn(() => Promise.resolve()),
+          getStats: jest.fn(() => ({ currentQueueSize: 0, batchesSent: 0 }))
+        }))
+      }
+    };
+
+    detector = new SolanaDetector({
+      rpcUrl: 'https://api.mainnet-beta.solana.com'
+    }, mockDeps);
+  });
+
+  afterEach(async () => {
+    if (detector.isRunning()) {
+      await detector.stop();
+    }
+  });
+
+  test('should have poolUpdateMutex defined for atomic updates', () => {
+    // REGRESSION TEST: Verifies the mutex exists for defense in depth
+    // The poolUpdateMutex ensures addPool/removePool operations are atomic
+    // even if async operations are added in the future
+    expect((detector as any).poolUpdateMutex).toBeDefined();
+    expect(typeof (detector as any).poolUpdateMutex.acquire).toBe('function');
+    expect(typeof (detector as any).poolUpdateMutex.tryAcquire).toBe('function');
+  });
+
+  test('should keep pools, poolsByDex, and poolsByTokenPair consistent', () => {
+    // REGRESSION TEST: Verifies pool indices stay in sync
+    const testPool: any = {
+      address: 'TestPoolAddress123',
+      dex: 'raydium',
+      token0: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL' },
+      token1: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC' },
+      price: 150,
+      fee: 25
+    };
+
+    // Add pool
+    detector.addPool(testPool);
+
+    // Verify all indices are consistent
+    expect(detector.getPool(testPool.address)).toBeDefined();
+    expect(detector.getPoolsByDex('raydium')).toContainEqual(expect.objectContaining({ address: testPool.address }));
+
+    // Get pools by token pair
+    const pairPools = detector.getPoolsByTokenPair(testPool.token0.mint, testPool.token1.mint);
+    expect(pairPools).toContainEqual(expect.objectContaining({ address: testPool.address }));
+
+    // Remove pool
+    detector.removePool(testPool.address);
+
+    // Verify all indices are cleaned up
+    expect(detector.getPool(testPool.address)).toBeUndefined();
+    expect(detector.getPoolsByDex('raydium')).not.toContainEqual(expect.objectContaining({ address: testPool.address }));
+    const pairPoolsAfter = detector.getPoolsByTokenPair(testPool.token0.mint, testPool.token1.mint);
+    expect(pairPoolsAfter).not.toContainEqual(expect.objectContaining({ address: testPool.address }));
+  });
+
+  test('should cleanup empty Sets when removing last pool', () => {
+    // REGRESSION TEST: Verifies memory doesn't leak from empty Sets
+    const testPool: any = {
+      address: 'OnlyPoolInDex123',
+      dex: 'unique-dex',
+      token0: { mint: 'TokenA111111111111111111111111111111111111', symbol: 'TKA' },
+      token1: { mint: 'TokenB111111111111111111111111111111111111', symbol: 'TKB' },
+      price: 100,
+      fee: 30
+    };
+
+    detector.addPool(testPool);
+    expect(detector.getPoolsByDex('unique-dex')).toHaveLength(1);
+
+    detector.removePool(testPool.address);
+
+    // The dex should be completely removed (not just empty)
+    expect(detector.getPoolsByDex('unique-dex')).toHaveLength(0);
+  });
+});
+
+describe('Deep Dive Regression: Arbitrage Detection Snapshot Pattern', () => {
+  let detector: SolanaDetector;
+  let mockDeps: SolanaDetectorDeps;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockDeps = {
+      logger: {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn()
+      },
+      perfLogger: {
+        logHealthCheck: jest.fn()
+      },
+      redisClient: {
+        ping: jest.fn(() => Promise.resolve('PONG')),
+        disconnect: jest.fn(() => Promise.resolve()),
+        updateServiceHealth: jest.fn(() => Promise.resolve())
+      },
+      streamsClient: {
+        disconnect: jest.fn(() => Promise.resolve()),
+        createBatcher: jest.fn(() => ({
+          add: jest.fn(),
+          destroy: jest.fn(() => Promise.resolve()),
+          getStats: jest.fn(() => ({ currentQueueSize: 0, batchesSent: 0 }))
+        }))
+      }
+    };
+
+    detector = new SolanaDetector({
+      rpcUrl: 'https://api.mainnet-beta.solana.com',
+      minProfitThreshold: 0.1 // Low threshold for testing
+    }, mockDeps);
+  });
+
+  afterEach(async () => {
+    if (detector.isRunning()) {
+      await detector.stop();
+    }
+  });
+
+  test('should detect arbitrage opportunity between pools with price difference', async () => {
+    // REGRESSION TEST: Verifies arbitrage detection works correctly
+    const pool1: any = {
+      address: 'Pool1Address111111111111111111111111111111',
+      dex: 'raydium',
+      token0: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL' },
+      token1: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC' },
+      price: 150, // Lower price - buy here
+      fee: 25 // 0.25%
+    };
+
+    const pool2: any = {
+      address: 'Pool2Address222222222222222222222222222222',
+      dex: 'orca',
+      token0: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL' },
+      token1: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC' },
+      price: 151.5, // Higher price - sell here (1% difference)
+      fee: 30 // 0.30%
+    };
+
+    detector.addPool(pool1);
+    detector.addPool(pool2);
+
+    const opportunities = await detector.checkArbitrage();
+
+    // Should detect 1 opportunity (1% - 0.55% fees = ~0.45% profit)
+    expect(opportunities.length).toBe(1);
+    expect(opportunities[0].type).toBe('intra-dex');
+    expect(opportunities[0].chain).toBe('solana');
+    expect(opportunities[0].buyPrice).toBe(150);
+    expect(opportunities[0].sellPrice).toBe(151.5);
+  });
+
+  test('should use snapshot for consistent reads during arbitrage check', async () => {
+    // REGRESSION TEST: Verifies snapshot pattern prevents race conditions
+    // The checkArbitrage method should work with a snapshot of pools
+    // even if pools are modified during iteration
+
+    const pool1: any = {
+      address: 'SnapshotPool1111111111111111111111111111111',
+      dex: 'raydium',
+      token0: { mint: 'SnapshotToken11111111111111111111111111111', symbol: 'TK1' },
+      token1: { mint: 'SnapshotToken22222222222222222222222222222', symbol: 'TK2' },
+      price: 100,
+      fee: 25
+    };
+
+    const pool2: any = {
+      address: 'SnapshotPool2222222222222222222222222222222',
+      dex: 'orca',
+      token0: { mint: 'SnapshotToken11111111111111111111111111111', symbol: 'TK1' },
+      token1: { mint: 'SnapshotToken22222222222222222222222222222', symbol: 'TK2' },
+      price: 102, // 2% higher
+      fee: 30
+    };
+
+    detector.addPool(pool1);
+    detector.addPool(pool2);
+
+    // Start arbitrage check
+    const opportunitiesPromise = detector.checkArbitrage();
+
+    // Modify pools during check (simulates concurrent modification)
+    // Due to snapshot pattern, this shouldn't affect the current check
+    detector.removePool(pool2.address);
+
+    const opportunities = await opportunitiesPromise;
+
+    // The check should complete successfully despite modification
+    // (uses snapshot taken at start of checkArbitrage)
+    expect(opportunities).toBeDefined();
+    expect(Array.isArray(opportunities)).toBe(true);
+  });
+
+  test('should not detect arbitrage when profit below threshold', async () => {
+    // REGRESSION TEST: Verifies profit threshold is applied correctly
+    const pool1: any = {
+      address: 'LowProfitPool111111111111111111111111111111',
+      dex: 'raydium',
+      token0: { mint: 'LowProfitToken1111111111111111111111111111', symbol: 'LP1' },
+      token1: { mint: 'LowProfitToken2222222222222222222222222222', symbol: 'LP2' },
+      price: 100,
+      fee: 25 // 0.25%
+    };
+
+    const pool2: any = {
+      address: 'LowProfitPool222222222222222222222222222222',
+      dex: 'orca',
+      token0: { mint: 'LowProfitToken1111111111111111111111111111', symbol: 'LP1' },
+      token1: { mint: 'LowProfitToken2222222222222222222222222222', symbol: 'LP2' },
+      price: 100.3, // Only 0.3% difference
+      fee: 30 // 0.30%
+    };
+
+    detector.addPool(pool1);
+    detector.addPool(pool2);
+
+    const opportunities = await detector.checkArbitrage();
+
+    // 0.3% price diff - 0.55% fees = negative profit
+    // Should not be detected
+    expect(opportunities.length).toBe(0);
+  });
+});

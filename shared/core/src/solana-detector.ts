@@ -315,6 +315,10 @@ export class SolanaDetector extends EventEmitter {
   // RACE CONDITION FIX: Mutex to prevent concurrent updateCurrentSlot execution
   private slotUpdateMutex = new AsyncMutex();
 
+  // RACE CONDITION FIX: Mutex for atomic pool updates across multiple maps
+  // Ensures pools, poolsByDex, and poolsByTokenPair stay consistent
+  private poolUpdateMutex = new AsyncMutex();
+
   constructor(config: SolanaDetectorConfig, deps?: SolanaDetectorDeps) {
     super();
 

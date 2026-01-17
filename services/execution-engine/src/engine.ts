@@ -98,6 +98,24 @@ interface Logger {
   debug: (message: string, meta?: object) => void;
 }
 
+/** Simulation mode configuration */
+export interface SimulationConfig {
+  /** Enable simulation mode - bypasses blockchain transactions */
+  enabled: boolean;
+  /** Simulated success rate (0.0 - 1.0), default 0.85 */
+  successRate?: number;
+  /** Simulated execution latency in ms, default 500 */
+  executionLatencyMs?: number;
+  /** Simulated gas used, default 200000 */
+  gasUsed?: number;
+  /** Simulated gas cost multiplier (0.0 - 1.0 of expected profit), default 0.1 */
+  gasCostMultiplier?: number;
+  /** Simulated profit variance (-0.5 to 0.5), randomly varies profit within this range */
+  profitVariance?: number;
+  /** Whether to log simulated executions, default true */
+  logSimulatedExecutions?: boolean;
+}
+
 /** Configuration options for ExecutionEngineService */
 export interface ExecutionEngineConfig {
   queueConfig?: Partial<QueueConfig>;
@@ -107,6 +125,8 @@ export interface ExecutionEngineConfig {
   perfLogger?: PerformanceLogger;
   /** Optional state manager for testing */
   stateManager?: ServiceStateManager;
+  /** Simulation mode configuration for local development/testing */
+  simulationConfig?: SimulationConfig;
 }
 
 // P1-2 FIX: Provider health tracking
@@ -183,7 +203,22 @@ export class ExecutionEngineService {
   // Stream consumer (blocking read pattern with backpressure)
   private streamConsumer: StreamConsumer | null = null;
 
+  // Simulation mode configuration with defaults
+  private readonly simulationConfig: Required<SimulationConfig>;
+  private readonly isSimulationMode: boolean;
+
   constructor(config: ExecutionEngineConfig = {}) {
+    // Initialize simulation config with defaults
+    this.isSimulationMode = config.simulationConfig?.enabled ?? false;
+    this.simulationConfig = {
+      enabled: this.isSimulationMode,
+      successRate: config.simulationConfig?.successRate ?? 0.85,
+      executionLatencyMs: config.simulationConfig?.executionLatencyMs ?? 500,
+      gasUsed: config.simulationConfig?.gasUsed ?? 200000,
+      gasCostMultiplier: config.simulationConfig?.gasCostMultiplier ?? 0.1,
+      profitVariance: config.simulationConfig?.profitVariance ?? 0.2,
+      logSimulatedExecutions: config.simulationConfig?.logSimulatedExecutions ?? true
+    };
     // Use injected dependencies or defaults
     this.logger = config.logger ?? createLogger('execution-engine');
     this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
@@ -221,8 +256,18 @@ export class ExecutionEngineService {
     const result = await this.stateManager.executeStart(async () => {
       this.logger.info('Starting Execution Engine Service', {
         instanceId: this.instanceId,
-        queueConfig: this.queueConfig
+        queueConfig: this.queueConfig,
+        simulationMode: this.isSimulationMode
       });
+
+      // Log simulation mode warning for visibility
+      if (this.isSimulationMode) {
+        this.logger.warn('⚠️ SIMULATION MODE ENABLED - No real transactions will be executed', {
+          successRate: this.simulationConfig.successRate,
+          executionLatencyMs: this.simulationConfig.executionLatencyMs,
+          profitVariance: this.simulationConfig.profitVariance
+        });
+      }
 
       // Initialize Redis clients
       this.redis = await getRedisClient();
@@ -241,18 +286,22 @@ export class ExecutionEngineService {
         maxPendingPerChain: 10
       });
 
-      // Initialize blockchain providers and wallets
-      await this.initializeProviders();
-      this.initializeWallets();
+      // Initialize blockchain providers and wallets (skip in simulation mode)
+      if (!this.isSimulationMode) {
+        await this.initializeProviders();
+        this.initializeWallets();
 
-      // P0-2 FIX: Start nonce manager background sync
-      this.nonceManager.start();
+        // P0-2 FIX: Start nonce manager background sync
+        this.nonceManager.start();
 
-      // P1-2 FIX: Validate provider connectivity before starting
-      await this.validateProviderConnectivity();
+        // P1-2 FIX: Validate provider connectivity before starting
+        await this.validateProviderConnectivity();
 
-      // P1-3 FIX: Start provider health monitoring for reconnection
-      this.startProviderHealthChecks();
+        // P1-3 FIX: Start provider health monitoring for reconnection
+        this.startProviderHealthChecks();
+      } else {
+        this.logger.info('Skipping blockchain initialization in simulation mode');
+      }
 
       // Create consumer groups for Redis Streams
       await this.createConsumerGroups();
@@ -910,9 +959,9 @@ export class ExecutionEngineService {
       return false;
     }
 
-    // Check if we have wallet for the chain
+    // Check if we have wallet for the chain (skip in simulation mode)
     const chain = opportunity.buyChain;
-    if (chain && !this.wallets.has(chain)) {
+    if (chain && !this.isSimulationMode && !this.wallets.has(chain)) {
       this.logger.warn('Opportunity rejected: no wallet for chain', {
         id: opportunity.id,
         chain
@@ -1030,12 +1079,16 @@ export class ExecutionEngineService {
         buyChain: opportunity.buyChain,
         buyDex: opportunity.buyDex,
         sellDex: opportunity.sellDex,
-        expectedProfit: opportunity.expectedProfit
+        expectedProfit: opportunity.expectedProfit,
+        simulationMode: this.isSimulationMode
       });
 
       let result: ExecutionResult;
 
-      if (opportunity.type === 'cross-chain') {
+      // SIMULATION MODE: Bypass real transactions
+      if (this.isSimulationMode) {
+        result = await this.executeSimulatedArbitrage(opportunity);
+      } else if (opportunity.type === 'cross-chain') {
         result = await this.executeCrossChainArbitrage(opportunity);
       } else {
         result = await this.executeIntraChainArbitrage(opportunity);
@@ -1221,6 +1274,92 @@ export class ExecutionEngineService {
       chain: opportunity.buyChain || 'unknown',
       dex: opportunity.buyDex || 'unknown'
     };
+  }
+
+  /**
+   * Execute a simulated arbitrage for local development and testing.
+   *
+   * This method simulates the execution flow without making real blockchain transactions.
+   * It's useful for:
+   * - Local development and testing
+   * - Integration testing with the full pipeline
+   * - Performance testing and benchmarking
+   * - Demo/presentation purposes
+   *
+   * The simulation respects the configured parameters:
+   * - successRate: Probability of simulated success
+   * - executionLatencyMs: Simulated network/blockchain latency
+   * - gasUsed: Simulated gas consumption
+   * - gasCostMultiplier: Gas cost as fraction of expected profit
+   * - profitVariance: Random variance applied to profit
+   */
+  private async executeSimulatedArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {
+    const chain = opportunity.buyChain || 'ethereum';
+    const expectedProfit = opportunity.expectedProfit || 0;
+
+    // Simulate execution latency
+    await this.simulateLatency(this.simulationConfig.executionLatencyMs);
+
+    // Determine simulated success based on configured rate
+    const isSuccess = Math.random() < this.simulationConfig.successRate;
+
+    // Calculate simulated values
+    const simulatedGasUsed = this.simulationConfig.gasUsed;
+    const simulatedGasCost = expectedProfit * this.simulationConfig.gasCostMultiplier;
+
+    // Apply profit variance (e.g., ±20% of expected profit)
+    const variance = this.simulationConfig.profitVariance;
+    const profitMultiplier = 1 + (Math.random() * 2 - 1) * variance; // Range: [1-variance, 1+variance]
+    const simulatedProfit = isSuccess ? (expectedProfit * profitMultiplier) - simulatedGasCost : 0;
+
+    // Generate simulated transaction hash
+    const simulatedTxHash = this.generateSimulatedTxHash();
+
+    const result: ExecutionResult = {
+      opportunityId: opportunity.id,
+      success: isSuccess,
+      transactionHash: isSuccess ? simulatedTxHash : undefined,
+      actualProfit: isSuccess ? simulatedProfit : undefined,
+      gasUsed: isSuccess ? simulatedGasUsed : undefined,
+      gasCost: isSuccess ? simulatedGasCost : undefined,
+      error: isSuccess ? undefined : 'Simulated execution failure (random)',
+      timestamp: Date.now(),
+      chain,
+      dex: opportunity.buyDex || 'unknown'
+    };
+
+    // Log simulated execution if enabled
+    if (this.simulationConfig.logSimulatedExecutions) {
+      this.logger.info('📊 SIMULATED execution completed', {
+        opportunityId: opportunity.id,
+        success: isSuccess,
+        expectedProfit,
+        simulatedProfit: result.actualProfit,
+        simulatedGasCost,
+        simulatedTxHash: result.transactionHash,
+        type: opportunity.type
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Simulate network/execution latency for realistic testing.
+   */
+  private async simulateLatency(baseLatencyMs: number): Promise<void> {
+    // Add some randomness to the latency (±30%)
+    const variance = 0.3;
+    const actualLatency = baseLatencyMs * (1 + (Math.random() * 2 - 1) * variance);
+    await new Promise(resolve => setTimeout(resolve, actualLatency));
+  }
+
+  /**
+   * Generate a realistic-looking simulated transaction hash.
+   */
+  private generateSimulatedTxHash(): string {
+    const bytes = new Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
+    return '0x' + bytes.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   /**
@@ -1690,5 +1829,21 @@ export class ExecutionEngineService {
       if (health.healthy) count++;
     }
     return count;
+  }
+
+  /**
+   * Check if the engine is running in simulation mode.
+   * Useful for integration tests and debugging.
+   */
+  getIsSimulationMode(): boolean {
+    return this.isSimulationMode;
+  }
+
+  /**
+   * Get simulation configuration (read-only).
+   * Returns the resolved configuration with defaults applied.
+   */
+  getSimulationConfig(): Readonly<Required<SimulationConfig>> {
+    return this.simulationConfig;
   }
 }

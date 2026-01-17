@@ -577,4 +577,179 @@ describe('RedisStreamsClient', () => {
       expect(RedisStreamsClient.STREAMS.HEALTH).toBe('stream:health');
     });
   });
+
+  // =============================================================================
+  // Deep Dive Analysis Regression Tests
+  // =============================================================================
+
+  describe('Deep Dive Regression: StreamBatcher Message Loss Prevention', () => {
+    it('should re-queue messages when flush fails', async () => {
+      // Simulate flush failure then success
+      mockRedis.xadd
+        .mockRejectedValueOnce(new Error('Redis connection lost'))
+        .mockResolvedValueOnce('1234-0');
+
+      const batcher = client.createBatcher('stream:test', {
+        maxBatchSize: 2,
+        maxWaitMs: 1000
+      });
+
+      // Add messages to trigger batch
+      batcher.add({ value: 1 });
+      batcher.add({ value: 2 });
+
+      // Wait for first (failed) flush attempt
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // First call should have failed
+      expect(mockRedis.xadd).toHaveBeenCalledTimes(1);
+
+      // Messages should still be in queue - verify by checking stats
+      const statsAfterFailure = batcher.getStats();
+      expect(statsAfterFailure.currentQueueSize).toBe(2);
+
+      // Manual flush to retry
+      await batcher.flush();
+
+      // Second call should succeed
+      expect(mockRedis.xadd).toHaveBeenCalledTimes(2);
+
+      // Messages should now be sent
+      const statsAfterSuccess = batcher.getStats();
+      expect(statsAfterSuccess.currentQueueSize).toBe(0);
+      expect(statsAfterSuccess.totalMessagesSent).toBe(2);
+
+      await batcher.destroy();
+    });
+
+    it('should preserve message order when re-queuing after failure', async () => {
+      // Track the order of messages sent
+      const sentMessages: any[] = [];
+      mockRedis.xadd
+        .mockRejectedValueOnce(new Error('Redis connection lost'))
+        .mockImplementation(async (_stream: string, _id: string, _field: string, value: string) => {
+          sentMessages.push(JSON.parse(value));
+          return '1234-0';
+        });
+
+      const batcher = client.createBatcher('stream:test', {
+        maxBatchSize: 3,
+        maxWaitMs: 1000
+      });
+
+      // Add messages
+      batcher.add({ order: 1 });
+      batcher.add({ order: 2 });
+      batcher.add({ order: 3 }); // Triggers flush
+
+      // Wait for failed flush
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Retry
+      await batcher.flush();
+
+      // Verify messages were sent in order
+      expect(sentMessages).toHaveLength(1);
+      expect(sentMessages[0].messages).toEqual([
+        { order: 1 },
+        { order: 2 },
+        { order: 3 }
+      ]);
+
+      await batcher.destroy();
+    });
+  });
+
+  describe('Deep Dive Regression: Consumer Group Race Condition', () => {
+    it('should handle BUSYGROUP error gracefully', async () => {
+      // Simulate group already exists
+      mockRedis.xgroup.mockRejectedValue(new Error('BUSYGROUP Consumer group already exists'));
+
+      const config: ConsumerGroupConfig = {
+        streamName: 'stream:test',
+        groupName: 'existing-group',
+        consumerName: 'consumer-1'
+      };
+
+      // Should not throw
+      await expect(client.createConsumerGroup(config)).resolves.toBeUndefined();
+    });
+
+    it('should throw on non-BUSYGROUP errors', async () => {
+      mockRedis.xgroup.mockRejectedValue(new Error('NOAUTH Authentication required'));
+
+      const config: ConsumerGroupConfig = {
+        streamName: 'stream:test',
+        groupName: 'test-group',
+        consumerName: 'consumer-1'
+      };
+
+      await expect(client.createConsumerGroup(config)).rejects.toThrow('NOAUTH');
+    });
+  });
+
+  describe('Deep Dive Regression: XREAD Block Time Safety', () => {
+    it('should cap block time to prevent indefinite blocking', async () => {
+      mockRedis.xread.mockResolvedValue(null);
+
+      // Request forever block (0) but should be capped
+      await client.xread('stream:test', '0', { block: 0 });
+
+      // Verify BLOCK was capped to 30000 (default maxBlockMs)
+      expect(mockRedis.xread).toHaveBeenCalledWith(
+        'BLOCK', 30000,
+        'STREAMS', 'stream:test', '0'
+      );
+    });
+
+    it('should cap excessive block times', async () => {
+      mockRedis.xread.mockResolvedValue(null);
+
+      // Request very long block time
+      await client.xread('stream:test', '0', { block: 300000 });
+
+      // Verify BLOCK was capped
+      expect(mockRedis.xread).toHaveBeenCalledWith(
+        'BLOCK', 30000,
+        'STREAMS', 'stream:test', '0'
+      );
+    });
+
+    it('should allow custom maxBlockMs override', async () => {
+      mockRedis.xread.mockResolvedValue(null);
+
+      await client.xread('stream:test', '0', { block: 0, maxBlockMs: 60000 });
+
+      expect(mockRedis.xread).toHaveBeenCalledWith(
+        'BLOCK', 60000,
+        'STREAMS', 'stream:test', '0'
+      );
+    });
+  });
+
+  describe('Deep Dive Regression: Stream MAXLEN Limits', () => {
+    it('should have recommended MAXLEN values for all streams', () => {
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS).toBeDefined();
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.PRICE_UPDATES]).toBe(100000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.SWAP_EVENTS]).toBe(50000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.OPPORTUNITIES]).toBe(10000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.WHALE_ALERTS]).toBe(5000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]).toBe(10000);
+      expect(RedisStreamsClient.STREAM_MAX_LENGTHS[RedisStreamsClient.STREAMS.HEALTH]).toBe(1000);
+    });
+
+    it('should use approximate MAXLEN for better performance', async () => {
+      mockRedis.xadd.mockResolvedValue('1234-0');
+
+      await client.xaddWithLimit('stream:price-updates', { price: 100 });
+
+      // Verify approximate (~) MAXLEN was used
+      expect(mockRedis.xadd).toHaveBeenCalledWith(
+        'stream:price-updates',
+        'MAXLEN', '~', '100000',
+        '*',
+        'data', expect.any(String)
+      );
+    });
+  });
 });

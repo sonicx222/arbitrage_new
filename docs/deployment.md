@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions for deploying the **Professional Arbitrage Detection System** across multiple cloud providers while maintaining zero infrastructure costs.
 
+> **For local development**, see the [Local Development Guide](./local-development.md) instead.
+
 ## 🌍 Infrastructure Strategy
 
 The system achieves institutional-grade performance by strategically placing microservices in specific geographic regions.

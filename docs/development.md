@@ -2,6 +2,8 @@
 
 This document captures the implementation history, current technical debt, and future roadmap for the project.
 
+> **Looking for local development setup?** See the [Local Development Guide](./local-development.md) for instructions on running the system locally with simulation modes.
+
 ## 🔄 Refactoring History
 
 The project underwent a major architectural overhaul in January 2026, moving from a monolithic structure to a Domain-Driven Design (DDD) microservices approach.

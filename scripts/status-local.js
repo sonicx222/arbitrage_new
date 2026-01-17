@@ -19,13 +19,13 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 const ROOT_DIR = path.join(__dirname, '..');
 const PID_FILE = path.join(ROOT_DIR, '.local-services.pid');
 
-// Service configurations
+// Service configurations (ports match .env.local defaults)
 const SERVICES = [
   {
     name: 'Redis',
     type: 'docker',
     container: 'arbitrage-redis',
-    port: 6379
+    port: parseInt(process.env.REDIS_PORT || '6379', 10)
   },
   {
     name: 'Redis Commander',
@@ -37,37 +37,37 @@ const SERVICES = [
   {
     name: 'Coordinator',
     type: 'node',
-    port: process.env.COORDINATOR_PORT || 3000,
+    port: parseInt(process.env.COORDINATOR_PORT || '3000', 10),
     healthEndpoint: '/api/health'
   },
   {
     name: 'P1 Asia-Fast',
     type: 'node',
-    port: 3001,
+    port: parseInt(process.env.P1_ASIA_FAST_PORT || '3001', 10),
     healthEndpoint: '/health'
   },
   {
     name: 'P2 L2-Turbo',
     type: 'node',
-    port: 3002,
+    port: parseInt(process.env.P2_L2_TURBO_PORT || '3002', 10),
     healthEndpoint: '/health'
   },
   {
     name: 'P3 High-Value',
     type: 'node',
-    port: 3003,
+    port: parseInt(process.env.P3_HIGH_VALUE_PORT || '3003', 10),
     healthEndpoint: '/health'
   },
   {
     name: 'Cross-Chain Detector',
     type: 'node',
-    port: 3004,
+    port: parseInt(process.env.CROSS_CHAIN_DETECTOR_PORT || '3004', 10),
     healthEndpoint: '/health'
   },
   {
     name: 'Execution Engine',
     type: 'node',
-    port: 3005,
+    port: parseInt(process.env.EXECUTION_ENGINE_PORT || '3005', 10),
     healthEndpoint: '/health'
   }
 ];
@@ -155,9 +155,15 @@ async function main() {
   const envFile = fs.existsSync(path.join(ROOT_DIR, '.env'));
   log(`Environment: ${envFile ? 'Configured (.env exists)' : 'Using defaults (.env.local)'}`, 'dim');
 
-  // Check simulation mode
-  if (process.env.SIMULATION_MODE === 'true') {
-    log('Mode: SIMULATION (no real blockchain)', 'yellow');
+  // Check simulation modes
+  const priceSimulation = process.env.SIMULATION_MODE === 'true';
+  const executionSimulation = process.env.EXECUTION_SIMULATION_MODE === 'true';
+
+  if (priceSimulation || executionSimulation) {
+    const modes = [];
+    if (priceSimulation) modes.push('PRICE SIMULATION (fake blockchain data)');
+    if (executionSimulation) modes.push('EXECUTION SIMULATION (no real transactions)');
+    log('Mode: ' + modes.join(' + '), 'yellow');
   }
   console.log('');
 
