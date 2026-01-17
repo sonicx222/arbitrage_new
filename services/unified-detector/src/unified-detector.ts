@@ -33,7 +33,8 @@ import {
   CrossRegionHealthManager,
   getCrossRegionHealthManager,
   GracefulDegradationManager,
-  getGracefulDegradationManager
+  getGracefulDegradationManager,
+  FailoverEvent
 } from '@arbitrage/core';
 
 import {
@@ -452,7 +453,7 @@ export class UnifiedChainDetector extends EventEmitter {
     await this.crossRegionHealth.start();
 
     // Listen for failover events
-    this.crossRegionHealth.on('failoverEvent', (event) => {
+    this.crossRegionHealth.on('failoverEvent', (event: FailoverEvent) => {
       this.logger.info('Received failover event', event);
       this.emit('failoverEvent', event);
     });

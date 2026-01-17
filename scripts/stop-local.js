@@ -20,7 +20,8 @@ const colors = {
   green: '\x1b[32m',
   yellow: '\x1b[33m',
   red: '\x1b[31m',
-  cyan: '\x1b[36m'
+  cyan: '\x1b[36m',
+  dim: '\x1b[2m'
 };
 
 function log(message, color = 'reset') {

@@ -26,6 +26,7 @@
     "typecheck": "tsc --noEmit",
     "dev:setup": "node scripts/setup-env.js",
     "dev:redis": "docker-compose -f docker-compose.local.yml up -d redis",
+    "dev:redis:memory": "node scripts/start-redis-memory.js",
     "dev:redis:ui": "docker-compose -f docker-compose.local.yml --profile debug up -d",
     "dev:redis:down": "docker-compose -f docker-compose.local.yml down",
     "dev:redis:logs": "docker-compose -f docker-compose.local.yml logs -f redis",

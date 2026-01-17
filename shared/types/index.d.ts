@@ -14,6 +14,12 @@ export interface Chain {
 }
 /**
  * S3.3.2: DEX type classification for different liquidity models.
+ * - amm: Automated Market Maker (constant product, xy=k)
+ * - clmm: Concentrated Liquidity Market Maker (Uniswap V3 style)
+ * - dlmm: Dynamic Liquidity Market Maker (Meteora bin-based)
+ * - orderbook: On-chain order book (Phoenix)
+ * - pmm: Proactive Market Maker (oracle-based pricing)
+ * - aggregator: Routes through other DEXs (Jupiter)
  */
 export type DexType = 'amm' | 'clmm' | 'dlmm' | 'orderbook' | 'pmm' | 'aggregator';
 export interface Dex {
@@ -56,6 +62,7 @@ export interface PairFull {
 }
 export interface PriceUpdate {
     pairKey: string;
+    pairAddress?: string;
     dex: string;
     chain: string;
     token0: string;
@@ -66,10 +73,11 @@ export interface PriceUpdate {
     blockNumber: number;
     timestamp: number;
     latency: number;
+    fee?: number;
 }
 export interface ArbitrageOpportunity {
     id: string;
-    type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive';
+    type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive' | 'intra-dex';
     chain?: string;
     buyDex?: string;
     sellDex?: string;
@@ -87,7 +95,7 @@ export interface ArbitrageOpportunity {
     expectedProfit?: number;
     estimatedProfit?: number;
     profitPercentage?: number;
-    gasEstimate?: number | string;
+    gasEstimate?: string;
     confidence: number;
     timestamp: number;
     blockNumber?: number;
@@ -241,3 +249,34 @@ export declare class ValidationError extends ArbitrageError {
     field: string;
     constructor(message: string, service: string, field: string);
 }
+export interface CrossChainBridge {
+    bridge: string;
+    sourceChain: string;
+    targetChain: string;
+    token: string;
+    amount: number;
+    estimatedLatency?: number;
+    estimatedCost?: number;
+}
+export interface BridgeLatencyData {
+    bridge: string;
+    sourceChain: string;
+    targetChain: string;
+    token: string;
+    amount: number;
+    latency: number;
+    cost: number;
+    success: boolean;
+    timestamp: number;
+    congestionLevel: number;
+    gasPrice: number;
+}
+/**
+ * Parse gas estimate from various input types to bigint.
+ * Handles string, number, bigint, and undefined inputs safely.
+ *
+ * @param value - The gas estimate value to parse
+ * @returns The gas estimate as a bigint (0n if undefined or invalid)
+ */
+export declare function parseGasEstimate(value: string | number | bigint | undefined): bigint;
+//# sourceMappingURL=index.d.ts.map
