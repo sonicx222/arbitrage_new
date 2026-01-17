@@ -1,0 +1,406 @@
+"use strict";
+/**
+ * T2.7: Price Momentum Detection
+ *
+ * Tracks price history and calculates momentum signals for arbitrage entry timing.
+ * Implements circular buffer for memory efficiency and O(1) updates.
+ *
+ * Features:
+ * - EMA (Exponential Moving Average) calculations: 5/15/60 periods
+ * - Price velocity and acceleration detection
+ * - Z-score deviation alerts for mean reversion
+ * - Volume spike correlation
+ * - Trend detection (bullish/bearish/neutral)
+ *
+ * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 1.4
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PriceMomentumTracker = void 0;
+exports.getPriceMomentumTracker = getPriceMomentumTracker;
+exports.resetPriceMomentumTracker = resetPriceMomentumTracker;
+const logger_1 = require("./logger");
+const logger = (0, logger_1.createLogger)('price-momentum');
+// =============================================================================
+// Default Configuration
+// =============================================================================
+// Maximum number of pairs to track to prevent unbounded memory growth
+const DEFAULT_MAX_PAIRS = 1000;
+const DEFAULT_CONFIG = {
+    windowSize: 100,
+    emaShortPeriod: 5,
+    emaMediumPeriod: 15,
+    emaLongPeriod: 60,
+    zScoreThreshold: 2.0,
+    volumeSpikeThreshold: 2.5,
+    maxPairs: DEFAULT_MAX_PAIRS
+};
+// =============================================================================
+// Price Momentum Tracker
+// =============================================================================
+/**
+ * T2.7: Price Momentum Tracker
+ *
+ * Tracks price history for multiple pairs and calculates momentum signals
+ * for improved arbitrage entry timing.
+ */
+class PriceMomentumTracker {
+    constructor(config = {}) {
+        this.pairs = new Map();
+        this.config = { ...DEFAULT_CONFIG, ...config };
+        // Pre-calculate EMA multipliers: k = 2 / (period + 1)
+        this.emaShortMultiplier = 2 / (this.config.emaShortPeriod + 1);
+        this.emaMediumMultiplier = 2 / (this.config.emaMediumPeriod + 1);
+        this.emaLongMultiplier = 2 / (this.config.emaLongPeriod + 1);
+        this.volumeEmaMultiplier = 2 / (this.config.emaMediumPeriod + 1);
+        logger.info('PriceMomentumTracker initialized', {
+            windowSize: this.config.windowSize,
+            emaPeriods: [this.config.emaShortPeriod, this.config.emaMediumPeriod, this.config.emaLongPeriod]
+        });
+    }
+    /**
+     * Add a price update for a pair.
+     * O(1) operation using circular buffer.
+     */
+    addPriceUpdate(pair, price, volume, timestamp) {
+        const ts = timestamp ?? Date.now();
+        let state = this.pairs.get(pair);
+        if (!state) {
+            // Check max pairs limit before adding new pair
+            this.evictLRUPairsIfNeeded();
+            // Initialize new pair state
+            state = {
+                prices: new Array(this.config.windowSize),
+                writeIndex: 0,
+                sampleCount: 0,
+                emaShort: price,
+                emaMedium: price,
+                emaLong: price,
+                volumeEma: volume,
+                lastAccessTime: ts
+            };
+            this.pairs.set(pair, state);
+        }
+        // Update last access time
+        state.lastAccessTime = ts;
+        // Add to circular buffer
+        state.prices[state.writeIndex] = { price, volume, timestamp: ts };
+        state.writeIndex = (state.writeIndex + 1) % this.config.windowSize;
+        state.sampleCount = Math.min(state.sampleCount + 1, this.config.windowSize);
+        // Update EMAs
+        state.emaShort = this.updateEma(state.emaShort, price, this.emaShortMultiplier);
+        state.emaMedium = this.updateEma(state.emaMedium, price, this.emaMediumMultiplier);
+        state.emaLong = this.updateEma(state.emaLong, price, this.emaLongMultiplier);
+        state.volumeEma = this.updateEma(state.volumeEma, volume, this.volumeEmaMultiplier);
+    }
+    /**
+     * Get current statistics for a pair.
+     */
+    getStats(pair) {
+        const state = this.pairs.get(pair);
+        if (!state || state.sampleCount === 0) {
+            return null;
+        }
+        const prices = this.getPrices(state);
+        const volumes = this.getVolumes(state);
+        const currentPrice = prices[prices.length - 1];
+        const averagePrice = this.calculateMean(prices);
+        const priceStdDev = this.calculateStdDev(prices, averagePrice);
+        const averageVolume = this.calculateMean(volumes);
+        return {
+            sampleCount: state.sampleCount,
+            currentPrice,
+            averagePrice,
+            priceStdDev,
+            emaShort: state.emaShort,
+            emaMedium: state.emaMedium,
+            emaLong: state.emaLong,
+            averageVolume,
+            minPrice: Math.min(...prices),
+            maxPrice: Math.max(...prices)
+        };
+    }
+    /**
+     * Calculate momentum signal for a pair.
+     * Returns null if insufficient data.
+     */
+    getMomentumSignal(pair) {
+        const state = this.pairs.get(pair);
+        if (!state || state.sampleCount < 2) {
+            return null;
+        }
+        const prices = this.getPrices(state);
+        const volumes = this.getVolumes(state);
+        const currentPrice = prices[prices.length - 1];
+        const previousPrice = prices[prices.length - 2];
+        const currentVolume = volumes[volumes.length - 1];
+        // Calculate velocity (rate of change) - guard against division by zero
+        const velocity = previousPrice !== 0
+            ? (currentPrice - previousPrice) / previousPrice
+            : 0;
+        // Calculate acceleration (change in velocity) - guard against division by zero
+        let acceleration = 0;
+        if (prices.length >= 3) {
+            const thirdLastPrice = prices[prices.length - 3];
+            const prevVelocity = thirdLastPrice !== 0
+                ? (previousPrice - thirdLastPrice) / thirdLastPrice
+                : 0;
+            acceleration = velocity - prevVelocity;
+        }
+        // Calculate z-score for mean reversion
+        const mean = this.calculateMean(prices);
+        const stdDev = this.calculateStdDev(prices, mean);
+        const zScore = stdDev > 0 ? (currentPrice - mean) / stdDev : 0;
+        // Mean reversion signal
+        const meanReversionSignal = Math.abs(zScore) > this.config.zScoreThreshold;
+        // Volume analysis - calculate historical average (excluding current) for spike detection
+        // This prevents the spike from inflating the average before comparison
+        const historicalVolumes = volumes.slice(0, -1);
+        const historicalAvgVolume = historicalVolumes.length > 0
+            ? this.calculateMean(historicalVolumes)
+            : state.volumeEma;
+        const volumeRatio = historicalAvgVolume > 0 ? currentVolume / historicalAvgVolume : 0;
+        const volumeSpike = volumeRatio > this.config.volumeSpikeThreshold;
+        // Trend detection
+        const trend = this.detectTrend(currentPrice, state);
+        // Calculate confidence
+        const confidence = this.calculateConfidence(prices, velocity, zScore, volumeRatio, trend, state.sampleCount);
+        return {
+            pair,
+            currentPrice,
+            velocity,
+            acceleration,
+            zScore,
+            meanReversionSignal,
+            volumeSpike,
+            volumeRatio,
+            trend,
+            confidence,
+            emaShort: state.emaShort,
+            emaMedium: state.emaMedium,
+            emaLong: state.emaLong,
+            timestamp: Date.now()
+        };
+    }
+    /**
+     * Reset data for a specific pair.
+     */
+    resetPair(pair) {
+        this.pairs.delete(pair);
+    }
+    /**
+     * Reset all tracked pairs.
+     */
+    resetAll() {
+        this.pairs.clear();
+    }
+    /**
+     * Get all tracked pairs.
+     */
+    getTrackedPairs() {
+        return Array.from(this.pairs.keys());
+    }
+    /**
+     * Get number of currently tracked pairs.
+     */
+    getTrackedPairsCount() {
+        return this.pairs.size;
+    }
+    // ===========================================================================
+    // Private Helpers
+    // ===========================================================================
+    /**
+     * Evict least recently used pairs if we're at the max pairs limit.
+     * Removes the oldest 10% of pairs to make room for new ones.
+     */
+    evictLRUPairsIfNeeded() {
+        const maxPairs = this.config.maxPairs ?? DEFAULT_MAX_PAIRS;
+        if (maxPairs <= 0 || this.pairs.size < maxPairs) {
+            return;
+        }
+        // Find and remove the oldest 10% of pairs (at least 1)
+        const toRemove = Math.max(1, Math.floor(maxPairs * 0.1));
+        const pairsByAccess = Array.from(this.pairs.entries())
+            .sort((a, b) => a[1].lastAccessTime - b[1].lastAccessTime);
+        for (let i = 0; i < toRemove && i < pairsByAccess.length; i++) {
+            this.pairs.delete(pairsByAccess[i][0]);
+        }
+        logger.debug('Evicted LRU pairs due to max limit', {
+            evicted: toRemove,
+            remaining: this.pairs.size,
+            maxPairs
+        });
+    }
+    /**
+     * Update EMA with new value.
+     * EMA = (price * k) + (prevEMA * (1 - k))
+     */
+    updateEma(prevEma, newValue, multiplier) {
+        return (newValue * multiplier) + (prevEma * (1 - multiplier));
+    }
+    /**
+     * Extract prices from circular buffer in chronological order.
+     */
+    getPrices(state) {
+        const prices = [];
+        const count = state.sampleCount;
+        const startIndex = count < this.config.windowSize
+            ? 0
+            : state.writeIndex;
+        for (let i = 0; i < count; i++) {
+            const idx = (startIndex + i) % this.config.windowSize;
+            if (state.prices[idx]) {
+                prices.push(state.prices[idx].price);
+            }
+        }
+        return prices;
+    }
+    /**
+     * Extract volumes from circular buffer in chronological order.
+     */
+    getVolumes(state) {
+        const volumes = [];
+        const count = state.sampleCount;
+        const startIndex = count < this.config.windowSize
+            ? 0
+            : state.writeIndex;
+        for (let i = 0; i < count; i++) {
+            const idx = (startIndex + i) % this.config.windowSize;
+            if (state.prices[idx]) {
+                volumes.push(state.prices[idx].volume);
+            }
+        }
+        return volumes;
+    }
+    /**
+     * Calculate mean of an array.
+     */
+    calculateMean(values) {
+        if (values.length === 0)
+            return 0;
+        return values.reduce((sum, v) => sum + v, 0) / values.length;
+    }
+    /**
+     * Calculate standard deviation.
+     */
+    calculateStdDev(values, mean) {
+        if (values.length < 2)
+            return 0;
+        const avg = mean ?? this.calculateMean(values);
+        const squaredDiffs = values.map(v => Math.pow(v - avg, 2));
+        const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / values.length;
+        return Math.sqrt(variance);
+    }
+    /**
+     * Detect trend based on price vs EMAs.
+     */
+    detectTrend(currentPrice, state) {
+        const aboveShort = currentPrice > state.emaShort;
+        const aboveMedium = currentPrice > state.emaMedium;
+        const aboveLong = currentPrice > state.emaLong;
+        // Strong bullish: price above all EMAs
+        if (aboveShort && aboveMedium && aboveLong) {
+            return 'bullish';
+        }
+        // Strong bearish: price below all EMAs
+        if (!aboveShort && !aboveMedium && !aboveLong) {
+            return 'bearish';
+        }
+        // Mixed signals = neutral
+        return 'neutral';
+    }
+    /**
+     * Calculate signal confidence based on multiple factors.
+     */
+    calculateConfidence(prices, velocity, zScore, volumeRatio, trend, sampleCount) {
+        let confidence = 0.5; // Base confidence
+        // More samples = higher confidence (max +0.2)
+        const sampleFactor = Math.min(sampleCount / this.config.windowSize, 1) * 0.2;
+        confidence += sampleFactor;
+        // Strong trend = higher confidence (+0.15)
+        if (trend !== 'neutral') {
+            confidence += 0.15;
+        }
+        // Volume confirmation = higher confidence (+0.1)
+        if (volumeRatio > 1.5) {
+            confidence += 0.1;
+        }
+        // Calculate trend consistency (lower variance = more consistent)
+        if (prices.length >= 5) {
+            const recentPrices = prices.slice(-5);
+            const changes = [];
+            for (let i = 1; i < recentPrices.length; i++) {
+                // Guard against division by zero
+                const prevPrice = recentPrices[i - 1];
+                const change = prevPrice !== 0
+                    ? (recentPrices[i] - prevPrice) / prevPrice
+                    : 0;
+                changes.push(change);
+            }
+            // Check if all non-zero changes are in same direction (treat 0 as neutral)
+            const nonZeroChanges = changes.filter(c => c !== 0);
+            const allPositive = nonZeroChanges.length > 0 && nonZeroChanges.every(c => c > 0);
+            const allNegative = nonZeroChanges.length > 0 && nonZeroChanges.every(c => c < 0);
+            const allStable = nonZeroChanges.length === 0; // All prices identical
+            if (allPositive || allNegative || allStable) {
+                confidence += 0.15; // Consistent direction or stable prices
+            }
+            else {
+                // Choppy action (actual reversals) reduces confidence significantly
+                // Base penalty for non-consistent direction
+                confidence -= 0.15;
+                // Count actual sign reversals (exclude transitions to/from zero)
+                const signChanges = changes.filter((c, i) => i > 0 &&
+                    c !== 0 && changes[i - 1] !== 0 &&
+                    Math.sign(c) !== Math.sign(changes[i - 1])).length;
+                confidence -= signChanges * 0.05;
+            }
+        }
+        // Extreme z-score = higher confidence for mean reversion
+        if (Math.abs(zScore) > 2) {
+            confidence += 0.1;
+        }
+        // Insufficient data penalty
+        if (sampleCount < 5) {
+            confidence *= 0.5;
+        }
+        return Math.max(0, Math.min(1, confidence));
+    }
+}
+exports.PriceMomentumTracker = PriceMomentumTracker;
+// =============================================================================
+// Singleton Factory
+// =============================================================================
+/**
+ * Singleton Pattern Note:
+ * This uses a configurable singleton pattern rather than `createSingleton` from async-singleton.ts
+ * because it requires configuration parameters on first initialization. The standard createSingleton
+ * pattern uses a fixed factory function which doesn't support runtime configuration.
+ *
+ * Thread safety: JavaScript is single-threaded for synchronous code, so this pattern
+ * is safe. The check-and-set is atomic in the JS event loop.
+ */
+let trackerInstance = null;
+/**
+ * Get the singleton PriceMomentumTracker instance.
+ * Configuration is only applied on first call; subsequent calls return the existing instance.
+ *
+ * @param config - Optional configuration (only used on first initialization)
+ * @returns The singleton PriceMomentumTracker instance
+ */
+function getPriceMomentumTracker(config) {
+    if (!trackerInstance) {
+        trackerInstance = new PriceMomentumTracker(config);
+    }
+    return trackerInstance;
+}
+/**
+ * Reset the singleton instance.
+ * Use for testing or when reconfiguration is needed.
+ */
+function resetPriceMomentumTracker() {
+    if (trackerInstance) {
+        trackerInstance.resetAll();
+    }
+    trackerInstance = null;
+}
+//# sourceMappingURL=price-momentum.js.map

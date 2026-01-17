@@ -6,11 +6,11 @@ This guide covers setting up and running the arbitrage system locally for develo
 
 ### System Requirements
 - Node.js 18+ (LTS recommended)
-- Docker & Docker Compose
 - Git
+- Docker & Docker Compose (optional - can use in-memory Redis instead)
 
 ### Optional (for full functionality)
-- Private RPC endpoints (Alchemy, Infura, QuickNode)
+- Private RPC endpoints (Alchemy, Infura, QuickNode) - recommended for heavy development
 - Test wallet with small amounts on testnets
 
 ## Quick Start
@@ -21,11 +21,13 @@ git clone <repository-url>
 cd arbitrage_new
 npm install
 
-# 2. Copy environment configuration
-cp .env.local .env
+# 2. Copy environment configuration (cross-platform)
+npm run dev:setup
+# Or manually: cp .env.local .env (Unix) / copy .env.local .env (Windows)
 
-# 3. Start Redis (required)
-npm run dev:redis
+# 3. Start Redis (required) - choose one option:
+npm run dev:redis          # Option A: Docker (requires Docker)
+npm run dev:redis:memory   # Option B: In-memory (no Docker needed)
 
 # 4. Start all services
 npm run dev:start
@@ -59,6 +61,28 @@ REDIS_HOST=localhost
 REDIS_PORT=6379
 ```
 
+#### Redis Options
+
+**Option A: Docker Redis (recommended for production-like environment)**
+```bash
+npm run dev:redis           # Start Redis container
+npm run dev:redis:ui        # Start with Redis Commander UI for debugging
+npm run dev:redis:down      # Stop Redis container
+npm run dev:redis:logs      # View container logs
+```
+
+**Option B: In-Memory Redis (no Docker required)**
+```bash
+npm run dev:redis:memory    # Start in-memory Redis server
+```
+
+The in-memory option uses `redis-memory-server` and is useful when:
+- Docker is not installed or Docker Hub is blocked
+- You want a quick, lightweight setup
+- Running in CI/CD environments
+
+The startup scripts automatically detect which Redis mode is running.
+
 ### Blockchain RPC Endpoints
 
 The `.env.local` file includes free public RPC endpoints for development:
@@ -76,6 +100,24 @@ BSC_WS_URL=wss://bsc-ws-node.nariox.org:443
 ```
 
 > **Note**: Free public endpoints have rate limits. For production or heavy development, use paid providers like Alchemy, Infura, or QuickNode.
+
+#### RPC Rate Limiting
+
+The system handles rate limiting automatically through:
+
+1. **Provider Health Scoring**: Tracks success rates, latency, and rate limit events per provider
+2. **Intelligent Fallback**: Automatically switches to healthier providers when rate limits are hit
+3. **Exponential Backoff**: Retries with increasing delays (1s, 2s, 4s...) and jitter
+4. **Chain-Specific Thresholds**: Different staleness detection for fast chains (5s) vs slow chains (15s)
+
+If you see rate limit warnings in logs, this is expected with free endpoints. The system will:
+- Temporarily exclude rate-limited providers
+- Select alternative providers based on health scores
+- Resume using the provider after a cooldown period
+
+For development with heavy RPC usage, either:
+- Enable simulation mode (`SIMULATION_MODE=true`) to avoid real RPC calls
+- Use paid RPC providers with higher rate limits
 
 ## Simulation Modes
 
@@ -136,16 +178,24 @@ EXECUTION_SIMULATION_MODE=true
 
 ## NPM Scripts
 
+### Setup & Configuration
+
+```bash
+# Copy .env.local to .env (cross-platform)
+npm run dev:setup
+```
+
 ### Starting Services
 
 ```bash
-# Start Redis only
-npm run dev:redis
+# Start Redis (choose one)
+npm run dev:redis          # Docker Redis
+npm run dev:redis:memory   # In-memory Redis (no Docker)
 
 # Start Redis with Commander UI (for debugging)
 npm run dev:redis:ui
 
-# Start all services (Redis + all microservices)
+# Start all services (requires Redis to be running first)
 npm run dev:start
 
 # Start with price simulation
@@ -265,11 +315,27 @@ Both Coordinator and Execution Engine consume from the same stream using differe
 
 ```bash
 # Check if Redis is running
-docker ps | grep arbitrage-redis
+npm run dev:status         # Shows all service status including Redis
 
-# Restart Redis
+# For Docker Redis:
+docker ps | grep arbitrage-redis
 npm run dev:redis:down && npm run dev:redis
+
+# For in-memory Redis:
+# Simply restart the redis:memory process
+npm run dev:redis:memory
 ```
+
+### Docker Hub Blocked
+
+If Docker Hub is blocked in your environment:
+
+```bash
+# Use in-memory Redis instead of Docker
+npm run dev:redis:memory
+```
+
+The in-memory Redis provides the same functionality for development without requiring Docker.
 
 ### Port Conflicts
 
@@ -294,6 +360,20 @@ npm run typecheck
 
 # Clean build
 npm run build:clean
+```
+
+### Windows-Specific Issues
+
+On Windows, if services fail to start or stop:
+
+1. **Use PowerShell or Command Prompt** (not Git Bash for some commands)
+2. **Process cleanup**: Services are stopped using `taskkill` automatically
+3. **Path issues**: All scripts use `path.join()` for cross-platform compatibility
+
+```bash
+# Manual cleanup if needed
+tasklist | findstr "node"
+taskkill /F /IM node.exe   # Warning: kills all Node processes
 ```
 
 ## Testing the Full Pipeline

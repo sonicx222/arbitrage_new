@@ -1,0 +1,712 @@
+"use strict";
+/**
+ * T3.11: Multi-Leg Path Finding (5+ tokens)
+ *
+ * Discovers arbitrage opportunities with 5+ token paths.
+ * Uses DFS with pruning for efficient path discovery.
+ *
+ * Key features:
+ * - Supports paths with 5-7 tokens (4-6 swaps)
+ * - Cycle detection to find paths returning to start token
+ * - Performance safeguards (timeout, max candidates per hop)
+ * - BigInt precision for swap calculations
+ * - Integration with existing DEX pool data
+ *
+ * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 1.2
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.MultiLegPathFinder = void 0;
+exports.getMultiLegPathFinder = getMultiLegPathFinder;
+exports.resetMultiLegPathFinder = resetMultiLegPathFinder;
+const logger_1 = require("./logger");
+const gas_price_cache_1 = require("./gas-price-cache");
+const logger = (0, logger_1.createLogger)('multi-leg-path-finder');
+// BigInt constants for precise calculations
+const PRECISION_MULTIPLIER = 10n ** 18n;
+const BASIS_POINTS_DIVISOR = 10000n;
+const ONE_ETH_WEI = 10n ** 18n;
+// =============================================================================
+// Default Configuration
+// =============================================================================
+const DEFAULT_CONFIG = {
+    minProfitThreshold: 0.001,
+    maxPathLength: 7,
+    minPathLength: 5,
+    maxCandidatesPerHop: 15,
+    timeoutMs: 5000,
+    minConfidence: 0.4
+};
+const DEFAULT_SLIPPAGE_CONFIG = {
+    baseSlippage: 0.003,
+    priceImpactScale: 5.0,
+    maxSlippage: 0.10,
+    minLiquidityUsd: 100000,
+    liquidityPenaltyScale: 2.0
+};
+// =============================================================================
+// Multi-Leg Path Finder
+// =============================================================================
+/**
+ * T3.11: Multi-Leg Path Finder
+ *
+ * Discovers arbitrage opportunities with 5+ token paths using
+ * depth-first search with pruning for efficiency.
+ */
+class MultiLegPathFinder {
+    constructor(config = {}) {
+        this.config = { ...DEFAULT_CONFIG, ...config };
+        this.slippageConfig = config.slippageConfig || DEFAULT_SLIPPAGE_CONFIG;
+        this.stats = {
+            totalCalls: 0,
+            totalOpportunitiesFound: 0,
+            totalPathsExplored: 0,
+            timeouts: 0,
+            totalProcessingTimeMs: 0
+        };
+        logger.info('MultiLegPathFinder initialized', {
+            maxPathLength: this.config.maxPathLength,
+            minPathLength: this.config.minPathLength,
+            maxCandidatesPerHop: this.config.maxCandidatesPerHop,
+            timeoutMs: this.config.timeoutMs
+        });
+    }
+    /**
+     * Find multi-leg arbitrage opportunities.
+     *
+     * @param chain - Blockchain name
+     * @param pools - Available DEX pools
+     * @param baseTokens - Starting tokens to explore from
+     * @param targetPathLength - Exact path length to find (5, 6, or 7 tokens)
+     * @returns Array of profitable opportunities
+     */
+    async findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength) {
+        // BUG FIX: Create local execution context to prevent race conditions
+        // Previously startTime and tokenPairs were instance variables
+        const ctx = {
+            startTime: Date.now(),
+            tokenPairs: new Map()
+        };
+        this.stats.totalCalls++;
+        const opportunities = [];
+        // Validate inputs
+        if (pools.length < targetPathLength) {
+            logger.debug('Not enough pools for target path length', {
+                pools: pools.length,
+                targetPathLength
+            });
+            return [];
+        }
+        if (targetPathLength < this.config.minPathLength || targetPathLength > this.config.maxPathLength) {
+            logger.warn('Target path length out of range', {
+                targetPathLength,
+                min: this.config.minPathLength,
+                max: this.config.maxPathLength
+            });
+            return [];
+        }
+        // Group pools by token pairs for O(1) lookup
+        ctx.tokenPairs = this.groupPoolsByPairs(pools);
+        // Count unique tokens
+        const uniqueTokens = this.getUniqueTokens(pools);
+        if (uniqueTokens.size < targetPathLength) {
+            logger.debug('Not enough unique tokens', {
+                uniqueTokens: uniqueTokens.size,
+                targetPathLength
+            });
+            return [];
+        }
+        // Explore paths from each base token
+        let timedOut = false;
+        for (const baseToken of baseTokens) {
+            if (this.isTimeout(ctx)) {
+                logger.warn('Path finding timeout reached');
+                timedOut = true;
+                break;
+            }
+            const paths = await this.findPathsFromToken(baseToken, chain, targetPathLength, pools, ctx);
+            opportunities.push(...paths);
+        }
+        if (timedOut) {
+            this.stats.timeouts++;
+        }
+        // Filter and rank opportunities
+        const validOpportunities = this.filterAndRank(opportunities);
+        // Update stats
+        const processingTime = Date.now() - ctx.startTime;
+        this.stats.totalOpportunitiesFound += validOpportunities.length;
+        this.stats.totalProcessingTimeMs += processingTime;
+        logger.info('Multi-leg path finding complete', {
+            chain,
+            totalPools: pools.length,
+            targetPathLength,
+            foundOpportunities: validOpportunities.length,
+            processingTime
+        });
+        return validOpportunities;
+    }
+    /**
+     * Find all profitable paths starting from a specific token.
+     * Uses DFS with pruning.
+     */
+    async findPathsFromToken(startToken, chain, targetLength, allPools, ctx) {
+        const opportunities = [];
+        // Initialize DFS state
+        const initialState = {
+            tokens: [startToken],
+            dexes: [],
+            amountBigInt: ONE_ETH_WEI,
+            steps: [],
+            visitedTokens: new Set([startToken])
+        };
+        // Start DFS exploration
+        await this.dfs(initialState, startToken, targetLength, chain, allPools, opportunities, ctx);
+        return opportunities;
+    }
+    /**
+     * Depth-first search for path discovery.
+     * Explores all valid paths up to target length that return to start token.
+     */
+    async dfs(state, startToken, targetLength, chain, allPools, opportunities, ctx) {
+        // Check timeout
+        if (this.isTimeout(ctx)) {
+            return;
+        }
+        this.stats.totalPathsExplored++;
+        const currentToken = state.tokens[state.tokens.length - 1];
+        const currentDepth = state.tokens.length;
+        // If we've reached target length - 1, we need to close the cycle
+        if (currentDepth === targetLength) {
+            // Try to close the cycle back to start token
+            const closingPools = this.findBestPoolsForPair(currentToken, startToken, ctx);
+            for (const pool of closingPools.slice(0, 3)) {
+                const opportunity = this.evaluateCompletePath(state, pool, startToken, chain, ctx);
+                if (opportunity && opportunity.netProfit > 0) {
+                    opportunities.push(opportunity);
+                }
+            }
+            return;
+        }
+        // Get next tokens to explore (excluding visited and start token until we're ready to close)
+        const nextTokens = this.getNextCandidates(currentToken, state.visitedTokens, startToken, currentDepth, targetLength, ctx);
+        // Explore each candidate
+        for (const nextToken of nextTokens.slice(0, this.config.maxCandidatesPerHop)) {
+            if (this.isTimeout(ctx)) {
+                return;
+            }
+            // Find pools for this hop
+            const pools = this.findBestPoolsForPair(currentToken, nextToken, ctx);
+            // Try top pools (limit to reduce branching)
+            for (const pool of pools.slice(0, 2)) {
+                // Simulate swap
+                const swapResult = this.simulateSwapBigInt(currentToken, nextToken, state.amountBigInt, pool);
+                if (!swapResult)
+                    continue;
+                // Create new state for recursion
+                const newState = {
+                    tokens: [...state.tokens, nextToken],
+                    dexes: [...state.dexes, pool.dex],
+                    amountBigInt: swapResult.amountOutBigInt,
+                    steps: [...state.steps, swapResult.step],
+                    visitedTokens: new Set([...state.visitedTokens, nextToken])
+                };
+                // Recurse
+                await this.dfs(newState, startToken, targetLength, chain, allPools, opportunities, ctx);
+            }
+        }
+    }
+    /**
+     * Get candidate tokens for next hop.
+     */
+    getNextCandidates(currentToken, visitedTokens, startToken, currentDepth, targetLength, ctx) {
+        const candidates = new Set();
+        // Find all tokens directly connected to current token
+        for (const [pairKey] of ctx.tokenPairs) {
+            const [tokenA, tokenB] = pairKey.split('_');
+            let nextToken = null;
+            if (tokenA === currentToken) {
+                nextToken = tokenB;
+            }
+            else if (tokenB === currentToken) {
+                nextToken = tokenA;
+            }
+            if (nextToken) {
+                // Don't revisit tokens (except start token when closing)
+                if (nextToken === startToken) {
+                    // Only allow returning to start if we're at target length - 1
+                    if (currentDepth === targetLength - 1) {
+                        candidates.add(nextToken);
+                    }
+                }
+                else if (!visitedTokens.has(nextToken)) {
+                    candidates.add(nextToken);
+                }
+            }
+        }
+        // Sort by liquidity (prefer high-liquidity paths)
+        return Array.from(candidates).sort((a, b) => {
+            const liquidityA = this.getMaxLiquidity(currentToken, a, ctx);
+            const liquidityB = this.getMaxLiquidity(currentToken, b, ctx);
+            return liquidityB - liquidityA;
+        });
+    }
+    /**
+     * Evaluate a complete path and create opportunity if profitable.
+     */
+    evaluateCompletePath(state, closingPool, startToken, chain, ctx) {
+        const currentToken = state.tokens[state.tokens.length - 1];
+        // Simulate closing swap
+        const closingSwap = this.simulateSwapBigInt(currentToken, startToken, state.amountBigInt, closingPool);
+        if (!closingSwap)
+            return null;
+        // Calculate profit
+        const finalAmount = closingSwap.amountOutBigInt;
+        const profitBigInt = finalAmount - ONE_ETH_WEI;
+        const grossProfitScaled = (profitBigInt * PRECISION_MULTIPLIER) / ONE_ETH_WEI;
+        const grossProfit = Number(grossProfitScaled) / Number(PRECISION_MULTIPLIER);
+        // All steps including closing
+        const allSteps = [...state.steps, closingSwap.step];
+        const allDexes = [...state.dexes, closingPool.dex];
+        // Gas cost (increases with hops)
+        const gasCost = this.estimateGasCost(chain, allSteps.length);
+        // Total fees
+        const totalFees = allSteps.reduce((sum, step) => sum + step.fee, 0);
+        // Net profit
+        const netProfit = grossProfit - totalFees - gasCost;
+        if (netProfit < this.config.minProfitThreshold) {
+            return null;
+        }
+        // Calculate confidence
+        const pools = this.getPoolsForPath(state.tokens, state.dexes, closingPool, ctx);
+        const confidence = this.calculateConfidence(allSteps, pools);
+        if (confidence < (this.config.minConfidence || 0)) {
+            return null;
+        }
+        // Execution time estimate
+        const executionTime = this.estimateExecutionTime(chain, allSteps.length);
+        // Complete path including return to start
+        const completePath = [...state.tokens, startToken];
+        // BUG FIX: Calculate actual percentage (grossProfit is already a decimal ratio)
+        // profitPercentage should be the percentage form (e.g., 0.01 = 1%)
+        const profitPercentage = grossProfit; // grossProfit is profit/investment ratio
+        return {
+            id: `multi_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+            chain,
+            path: completePath,
+            dexes: allDexes,
+            profitPercentage,
+            profitUSD: netProfit * this.getBaseTokenUsdPrice(chain), // Use configurable price
+            gasCost,
+            netProfit,
+            confidence,
+            steps: allSteps,
+            timestamp: Date.now(),
+            executionTime,
+            pathLength: completePath.length - 1 // Number of swaps
+        };
+    }
+    /**
+     * Simulate a swap using BigInt for precision.
+     */
+    simulateSwapBigInt(fromToken, toToken, amountInBigInt, pool) {
+        try {
+            let reserveInStr, reserveOutStr;
+            if (pool.token0 === fromToken && pool.token1 === toToken) {
+                reserveInStr = pool.reserve0;
+                reserveOutStr = pool.reserve1;
+            }
+            else if (pool.token0 === toToken && pool.token1 === fromToken) {
+                reserveInStr = pool.reserve1;
+                reserveOutStr = pool.reserve0;
+            }
+            else {
+                return null;
+            }
+            const reserveInBigInt = BigInt(reserveInStr);
+            const reserveOutBigInt = BigInt(reserveOutStr);
+            const feeBigInt = BigInt(pool.fee);
+            // Apply fee
+            const feeMultiplierNumerator = BASIS_POINTS_DIVISOR - feeBigInt;
+            const amountInWithFee = (amountInBigInt * feeMultiplierNumerator) / BASIS_POINTS_DIVISOR;
+            // AMM formula
+            const numerator = amountInWithFee * reserveOutBigInt;
+            const denominator = reserveInBigInt + amountInWithFee;
+            if (denominator === 0n)
+                return null;
+            const amountOutBigInt = numerator / denominator;
+            // Calculate dynamic slippage
+            const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6;
+            const amountInNumber = Number(amountInBigInt / (10n ** 12n)) / 1e6;
+            const slippage = this.calculateDynamicSlippage(amountInNumber, reserveInNumber, pool.liquidity);
+            // Create step for display
+            const step = {
+                fromToken,
+                toToken,
+                dex: pool.dex,
+                amountIn: Number(amountInBigInt) / 1e18,
+                amountOut: Number(amountOutBigInt) / 1e18,
+                price: pool.price,
+                fee: pool.fee / 10000,
+                slippage
+            };
+            return { amountOutBigInt, step };
+        }
+        catch (error) {
+            return null;
+        }
+    }
+    /**
+     * Calculate dynamic slippage based on trade size and liquidity.
+     */
+    calculateDynamicSlippage(tradeSize, reserveIn, liquidityUsd) {
+        const config = this.slippageConfig;
+        let slippage = config.baseSlippage;
+        if (reserveIn > 0) {
+            const priceImpact = tradeSize / (reserveIn + tradeSize);
+            slippage += priceImpact * config.priceImpactScale;
+        }
+        if (liquidityUsd > 0 && liquidityUsd < config.minLiquidityUsd) {
+            const liquidityRatio = liquidityUsd / config.minLiquidityUsd;
+            const liquidityPenalty = (1 - liquidityRatio) * config.liquidityPenaltyScale * 0.01;
+            slippage += liquidityPenalty;
+        }
+        return Math.min(slippage, config.maxSlippage);
+    }
+    /**
+     * Group pools by token pairs for O(1) lookup.
+     */
+    groupPoolsByPairs(pools) {
+        const pairs = new Map();
+        for (const pool of pools) {
+            const pairKey = `${pool.token0}_${pool.token1}`;
+            const reverseKey = `${pool.token1}_${pool.token0}`;
+            if (!pairs.has(pairKey))
+                pairs.set(pairKey, []);
+            if (!pairs.has(reverseKey))
+                pairs.set(reverseKey, []);
+            pairs.get(pairKey).push(pool);
+            pairs.get(reverseKey).push(pool);
+        }
+        // Sort by liquidity
+        for (const poolList of pairs.values()) {
+            poolList.sort((a, b) => b.liquidity - a.liquidity);
+        }
+        return pairs;
+    }
+    /**
+     * Find best pools for a token pair.
+     */
+    findBestPoolsForPair(tokenA, tokenB, ctx) {
+        const pairKey = `${tokenA}_${tokenB}`;
+        return ctx.tokenPairs.get(pairKey) || [];
+    }
+    /**
+     * Get maximum liquidity for a token pair.
+     */
+    getMaxLiquidity(tokenA, tokenB, ctx) {
+        const pools = this.findBestPoolsForPair(tokenA, tokenB, ctx);
+        return pools.length > 0 ? pools[0].liquidity : 0;
+    }
+    /**
+     * Get unique tokens from pools.
+     */
+    getUniqueTokens(pools) {
+        const tokens = new Set();
+        for (const pool of pools) {
+            tokens.add(pool.token0);
+            tokens.add(pool.token1);
+        }
+        return tokens;
+    }
+    /**
+     * Get pools for a complete path.
+     */
+    getPoolsForPath(tokens, dexes, closingPool, ctx) {
+        const pools = [];
+        for (let i = 0; i < tokens.length - 1; i++) {
+            const dex = dexes[i];
+            const poolsForPair = this.findBestPoolsForPair(tokens[i], tokens[i + 1], ctx);
+            const pool = poolsForPair.find(p => p.dex === dex);
+            if (pool)
+                pools.push(pool);
+        }
+        pools.push(closingPool);
+        return pools;
+    }
+    /**
+     * Calculate confidence score based on liquidity and slippage.
+     */
+    calculateConfidence(steps, pools) {
+        if (steps.length === 0 || pools.length === 0)
+            return 0;
+        let totalConfidence = 0;
+        for (let i = 0; i < steps.length && i < pools.length; i++) {
+            const step = steps[i];
+            const pool = pools[i];
+            // Liquidity confidence (higher liquidity = higher confidence)
+            const liquidityConfidence = Math.min(1, pool.liquidity / 1000000);
+            // Slippage confidence (lower slippage = higher confidence)
+            const slippageConfidence = Math.max(0, 1 - step.slippage / this.slippageConfig.maxSlippage);
+            // Fee confidence
+            const feeConfidence = Math.max(0, 1 - pool.fee / 100);
+            const stepConfidence = (liquidityConfidence + slippageConfidence + feeConfidence) / 3;
+            totalConfidence += stepConfidence;
+        }
+        // Multi-leg paths have inherently lower confidence due to complexity
+        const pathLengthPenalty = Math.max(0.7, 1 - (steps.length - 3) * 0.05);
+        return (totalConfidence / steps.length) * pathLengthPenalty;
+    }
+    /**
+     * Estimate gas cost for execution.
+     * Phase 2: Uses dynamic gas pricing from GasPriceCache.
+     * Returns gas cost as a ratio of trade amount (to match grossProfit units).
+     */
+    estimateGasCost(chain, numSteps) {
+        try {
+            const gasCache = (0, gas_price_cache_1.getGasPriceCache)();
+            // Use consolidated method for consistent gas cost ratio calculation
+            return gasCache.estimateGasCostRatio(chain, 'multiLeg', numSteps);
+        }
+        catch {
+            // Fallback to static estimates if cache fails
+            // Uses shared constants for consistency across detectors
+            const baseCost = gas_price_cache_1.FALLBACK_GAS_COSTS_ETH[chain] || 0.001;
+            return baseCost * (1 + numSteps * gas_price_cache_1.FALLBACK_GAS_SCALING_PER_STEP);
+        }
+    }
+    /**
+     * Estimate execution time.
+     */
+    estimateExecutionTime(chain, numSteps) {
+        const baseExecutionTimes = {
+            ethereum: 15000,
+            bsc: 3000,
+            arbitrum: 1000,
+            base: 2000,
+            polygon: 2000
+        };
+        const baseTime = baseExecutionTimes[chain] || 5000;
+        const stepTime = 500;
+        return baseTime + (numSteps * stepTime);
+    }
+    /**
+     * Filter and rank opportunities.
+     */
+    filterAndRank(opportunities) {
+        return opportunities
+            .filter(opp => {
+            if (opp.netProfit < this.config.minProfitThreshold)
+                return false;
+            const maxStepSlippage = Math.max(...opp.steps.map(s => s.slippage));
+            if (maxStepSlippage > this.slippageConfig.maxSlippage)
+                return false;
+            if (opp.confidence < (this.config.minConfidence || 0))
+                return false;
+            return true;
+        })
+            .sort((a, b) => {
+            // Sort by net profit descending
+            if (Math.abs(a.netProfit - b.netProfit) > 0.001) {
+                return b.netProfit - a.netProfit;
+            }
+            // Then by confidence
+            if (Math.abs(a.confidence - b.confidence) > 0.1) {
+                return b.confidence - a.confidence;
+            }
+            // Then by execution time
+            return a.executionTime - b.executionTime;
+        })
+            .slice(0, 20); // Return top 20 opportunities
+    }
+    /**
+     * Check if timeout has been reached.
+     */
+    isTimeout(ctx) {
+        return Date.now() - ctx.startTime > this.config.timeoutMs;
+    }
+    /**
+     * Get approximate USD price for base token on chain.
+     * BUG FIX: Replaced hardcoded 2000 magic number with configurable values.
+     */
+    getBaseTokenUsdPrice(chain) {
+        // Approximate prices for native tokens (in production, use price oracle)
+        const chainPrices = {
+            ethereum: 2500, // ETH
+            bsc: 300, // BNB
+            arbitrum: 2500, // ETH
+            base: 2500, // ETH
+            polygon: 0.5 // MATIC
+        };
+        return chainPrices[chain] || 2000;
+    }
+    /**
+     * Get current configuration.
+     */
+    getConfig() {
+        return { ...this.config };
+    }
+    /**
+     * Update configuration.
+     */
+    updateConfig(config) {
+        this.config = { ...this.config, ...config };
+        if (config.slippageConfig) {
+            this.slippageConfig = { ...this.slippageConfig, ...config.slippageConfig };
+        }
+        logger.info('MultiLegPathFinder config updated', config);
+    }
+    /**
+     * Get path finder statistics.
+     */
+    getStats() {
+        const avgTime = this.stats.totalCalls > 0
+            ? this.stats.totalProcessingTimeMs / this.stats.totalCalls
+            : 0;
+        return {
+            totalCalls: this.stats.totalCalls,
+            totalOpportunitiesFound: this.stats.totalOpportunitiesFound,
+            totalPathsExplored: this.stats.totalPathsExplored,
+            timeouts: this.stats.timeouts,
+            avgProcessingTimeMs: avgTime
+        };
+    }
+    /**
+     * Reset statistics.
+     */
+    resetStats() {
+        this.stats = {
+            totalCalls: 0,
+            totalOpportunitiesFound: 0,
+            totalPathsExplored: 0,
+            timeouts: 0,
+            totalProcessingTimeMs: 0
+        };
+    }
+    /**
+     * Find multi-leg arbitrage opportunities using worker thread.
+     * Offloads CPU-intensive DFS from main event loop to prevent blocking.
+     *
+     * @param chain - Blockchain name
+     * @param pools - Available DEX pools
+     * @param baseTokens - Starting tokens to explore from
+     * @param targetPathLength - Exact path length to find (5, 6, or 7 tokens)
+     * @param workerPool - Optional worker pool instance (lazy loaded if not provided)
+     * @returns Promise of array of profitable opportunities
+     */
+    async findMultiLegOpportunitiesAsync(chain, pools, baseTokens, targetPathLength, workerPool) {
+        // Lazy import worker pool to avoid circular dependencies
+        const pool = workerPool || (await Promise.resolve().then(() => __importStar(require('./worker-pool')))).getWorkerPool();
+        // Check if pool is running
+        const health = pool.getHealthStatus?.();
+        if (!health?.healthy) {
+            // Fallback to synchronous execution if worker pool not available
+            logger.warn('Worker pool not healthy, falling back to synchronous execution');
+            return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+        }
+        const taskId = `multi_leg_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        try {
+            const result = await pool.submitTask({
+                id: taskId,
+                type: 'multi_leg_path_finding',
+                data: {
+                    chain,
+                    pools,
+                    baseTokens,
+                    targetPathLength,
+                    config: this.config
+                },
+                priority: 5, // Medium-high priority for path finding
+                timeout: this.config.timeoutMs + 1000 // Allow extra buffer
+            });
+            if (result.success && result.result) {
+                // Update local stats from worker result
+                if (result.result.stats) {
+                    this.stats.totalCalls++;
+                    this.stats.totalPathsExplored += result.result.stats.pathsExplored || 0;
+                    this.stats.totalOpportunitiesFound += result.result.opportunities?.length || 0;
+                    this.stats.totalProcessingTimeMs += result.result.stats.processingTimeMs || 0;
+                }
+                return result.result.opportunities || [];
+            }
+            logger.warn('Worker task failed, falling back to sync', { taskId, error: result.error });
+            return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+        }
+        catch (error) {
+            logger.error('Worker task threw exception, falling back to sync', { taskId, error });
+            return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
+        }
+    }
+}
+exports.MultiLegPathFinder = MultiLegPathFinder;
+// =============================================================================
+// Singleton Factory
+// =============================================================================
+/**
+ * Singleton Pattern Note:
+ * This uses a configurable singleton pattern rather than `createSingleton` from async-singleton.ts
+ * because it requires configuration parameters on first initialization. The standard createSingleton
+ * pattern uses a fixed factory function which doesn't support runtime configuration.
+ *
+ * Thread safety: JavaScript is single-threaded for synchronous code, so this pattern
+ * is safe. The check-and-set is atomic in the JS event loop.
+ *
+ * Note: The findMultiLegOpportunities method is internally thread-safe for concurrent
+ * calls due to the ExecutionContext pattern - each call gets its own isolated state.
+ */
+let pathFinderInstance = null;
+/**
+ * Get the singleton MultiLegPathFinder instance.
+ * Configuration is only applied on first call; subsequent calls return the existing instance.
+ *
+ * @param config - Optional configuration (only used on first initialization)
+ * @returns The singleton MultiLegPathFinder instance
+ */
+function getMultiLegPathFinder(config) {
+    if (!pathFinderInstance) {
+        pathFinderInstance = new MultiLegPathFinder(config);
+    }
+    return pathFinderInstance;
+}
+/**
+ * Reset the singleton instance.
+ * Use for testing or when reconfiguration is needed.
+ */
+function resetMultiLegPathFinder() {
+    if (pathFinderInstance) {
+        pathFinderInstance.resetStats();
+    }
+    pathFinderInstance = null;
+}
+//# sourceMappingURL=multi-leg-path-finder.js.map

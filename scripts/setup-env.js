@@ -48,8 +48,9 @@ function main() {
     console.log('Done! Environment configured successfully.');
     console.log('');
     console.log('Next steps:');
-    console.log('  1. npm run dev:redis     # Start Redis');
-    console.log('  2. npm run dev:coordinator  # Start coordinator');
+    console.log('  1. npm run dev:redis         # Start Redis (Docker)');
+    console.log('     npm run dev:redis:memory  # ...or in-memory (no Docker)');
+    console.log('  2. npm run dev:start         # Start all services');
     console.log('');
   } catch (err) {
     console.error('Error copying file:', err.message);

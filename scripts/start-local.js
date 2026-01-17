@@ -32,19 +32,44 @@ const SERVICES = [
     delay: 0
   },
   {
-    name: 'Unified Detector',
-    script: 'services/unified-detector/src/index.ts',
-    port: process.env.DETECTOR_HEALTH_PORT || 3001,
+    name: 'P1 Asia-Fast Detector',
+    script: 'services/partition-asia-fast/src/index.ts',
+    port: process.env.P1_ASIA_FAST_PORT || 3001,
     healthEndpoint: '/health',
     delay: 2000,
-    env: { PARTITION_ID: 'asia-fast' }
+    env: { HEALTH_CHECK_PORT: process.env.P1_ASIA_FAST_PORT || 3001 }
+  },
+  {
+    name: 'P2 L2-Turbo Detector',
+    script: 'services/partition-l2-turbo/src/index.ts',
+    port: process.env.P2_L2_TURBO_PORT || 3002,
+    healthEndpoint: '/health',
+    delay: 2500,
+    env: { HEALTH_CHECK_PORT: process.env.P2_L2_TURBO_PORT || 3002 }
+  },
+  {
+    name: 'P3 High-Value Detector',
+    script: 'services/partition-high-value/src/index.ts',
+    port: process.env.P3_HIGH_VALUE_PORT || 3003,
+    healthEndpoint: '/health',
+    delay: 3000,
+    env: { HEALTH_CHECK_PORT: process.env.P3_HIGH_VALUE_PORT || 3003 }
   },
   {
     name: 'Cross-Chain Detector',
     script: 'services/cross-chain-detector/src/index.ts',
-    port: process.env.CROSS_CHAIN_HEALTH_PORT || 3002,
+    port: process.env.CROSS_CHAIN_DETECTOR_PORT || 3004,
     healthEndpoint: '/health',
-    delay: 3000
+    delay: 3500,
+    env: { HEALTH_CHECK_PORT: process.env.CROSS_CHAIN_DETECTOR_PORT || 3004 }
+  },
+  {
+    name: 'Execution Engine',
+    script: 'services/execution-engine/src/index.ts',
+    port: process.env.EXECUTION_ENGINE_PORT || 3005,
+    healthEndpoint: '/health',
+    delay: 4000,
+    env: { HEALTH_CHECK_PORT: process.env.EXECUTION_ENGINE_PORT || 3005 }
   }
 ];
 
@@ -67,7 +92,9 @@ function logService(name, message, color = 'cyan') {
   console.log(`${colors.dim}[${timestamp}]${colors.reset} ${colors[color]}[${name}]${colors.reset} ${message}`);
 }
 
-async function checkRedis() {
+const REDIS_MEMORY_CONFIG_FILE = path.join(ROOT_DIR, '.redis-memory-config.json');
+
+async function checkDockerRedis() {
   return new Promise((resolve) => {
     exec('docker ps --filter "name=arbitrage-redis" --format "{{.Status}}"', (error, stdout) => {
       if (error || !stdout.includes('Up')) {
@@ -79,21 +106,72 @@ async function checkRedis() {
   });
 }
 
+async function checkMemoryRedis() {
+  // Check if redis-memory-server config file exists
+  if (fs.existsSync(REDIS_MEMORY_CONFIG_FILE)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(REDIS_MEMORY_CONFIG_FILE, 'utf8'));
+      // Try to connect to verify it's running
+      return new Promise((resolve) => {
+        const net = require('net');
+        const client = new net.Socket();
+        client.setTimeout(1000);
+        client.connect(config.port, config.host, () => {
+          client.destroy();
+          resolve(true);
+        });
+        client.on('error', () => {
+          client.destroy();
+          resolve(false);
+        });
+        client.on('timeout', () => {
+          client.destroy();
+          resolve(false);
+        });
+      });
+    } catch (e) {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function checkRedis() {
+  // First check Docker Redis
+  const dockerRunning = await checkDockerRedis();
+  if (dockerRunning) {
+    return { running: true, type: 'docker' };
+  }
+
+  // Then check memory Redis
+  const memoryRunning = await checkMemoryRedis();
+  if (memoryRunning) {
+    return { running: true, type: 'memory' };
+  }
+
+  return { running: false };
+}
+
 async function waitForRedis(maxAttempts = 30) {
   log('\nChecking Redis connection...', 'yellow');
 
   for (let i = 0; i < maxAttempts; i++) {
-    const isRunning = await checkRedis();
-    if (isRunning) {
-      log('Redis is ready!', 'green');
+    const status = await checkRedis();
+    if (status.running) {
+      if (status.type === 'docker') {
+        log('Redis is ready! (Docker container)', 'green');
+      } else if (status.type === 'memory') {
+        log('Redis is ready! (In-memory server)', 'green');
+      }
       return true;
     }
     await new Promise(r => setTimeout(r, 1000));
     process.stdout.write('.');
   }
 
-  log('\nRedis is not running. Please start it first:', 'red');
-  log('  npm run dev:redis', 'yellow');
+  log('\nRedis is not running. Start it with one of these commands:', 'red');
+  log('  npm run dev:redis         # Docker (requires Docker Hub access)', 'yellow');
+  log('  npm run dev:redis:memory  # In-memory (no Docker required)', 'yellow');
   return false;
 }
 
@@ -121,11 +199,13 @@ async function startService(service) {
       LOG_LEVEL: process.env.LOG_LEVEL || 'info'
     };
 
-    const child = spawn('npx', ['ts-node', service.script], {
+    const isWindows = process.platform === 'win32';
+    const child = spawn('npx', ['ts-node', '-r', 'dotenv/config', '-r', 'tsconfig-paths/register', service.script], {
       cwd: ROOT_DIR,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true
+      detached: !isWindows,  // Don't detach on Windows
+      shell: isWindows       // Use shell on Windows for proper command resolution
     });
 
     // Store PID for later cleanup
@@ -157,8 +237,10 @@ async function startService(service) {
       reject(error);
     });
 
-    // Detach the child process
-    child.unref();
+    // Detach the child process (only on non-Windows)
+    if (!isWindows) {
+      child.unref();
+    }
 
     // Wait for health check
     setTimeout(async () => {
@@ -200,9 +282,12 @@ async function main() {
   log('  Arbitrage System - Local Development Startup', 'cyan');
   console.log('='.repeat(60) + '\n');
 
-  // Check simulation mode
+  // Check simulation modes
   if (process.env.SIMULATION_MODE === 'true') {
-    log('Running in SIMULATION MODE - No real blockchain connections', 'yellow');
+    log('Running in PRICE SIMULATION MODE - No real blockchain connections', 'yellow');
+  }
+  if (process.env.EXECUTION_SIMULATION_MODE === 'true') {
+    log('Running in EXECUTION SIMULATION MODE - No real transactions', 'yellow');
   }
 
   // Check Redis
@@ -229,10 +314,10 @@ async function main() {
   log('  Services Started!', 'green');
   console.log('='.repeat(60));
   log('\nAccess points:', 'cyan');
-  log(`  Coordinator Dashboard:  http://localhost:${SERVICES[0].port}`, 'green');
-  log(`  Detector Health:        http://localhost:${SERVICES[1].port}/health`, 'green');
-  log(`  Cross-Chain Health:     http://localhost:${SERVICES[2].port}/health`, 'green');
-  log(`  Redis Commander (debug): http://localhost:8081`, 'dim');
+  SERVICES.forEach(service => {
+    log(`  ${service.name.padEnd(22)} http://localhost:${service.port}${service.healthEndpoint}`, 'green');
+  });
+  log(`  Redis Commander (debug) http://localhost:8081`, 'dim');
   log('\nCommands:', 'cyan');
   log('  npm run dev:status      Check service status', 'dim');
   log('  npm run dev:stop        Stop all services', 'dim');
