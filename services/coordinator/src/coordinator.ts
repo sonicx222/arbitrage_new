@@ -52,6 +52,8 @@ interface SystemMetrics {
   totalVolumeUsd: number;
   volumeAggregatesProcessed: number;
   activePairsTracked: number;
+  // Price feed metrics (S3.3.5 - Solana Price Feed Integration)
+  priceUpdatesReceived: number;
 }
 
 interface LeaderElectionConfig {
@@ -248,7 +250,7 @@ export class CoordinatorService {
     };
 
     // Define consumer groups for all streams we need to consume
-    // Includes swap-events and volume-aggregates for analytics and monitoring
+    // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
     this.consumerGroups = [
       {
         streamName: RedisStreamsClient.STREAMS.HEALTH,
@@ -276,6 +278,13 @@ export class CoordinatorService {
       },
       {
         streamName: RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
+        groupName: this.config.consumerGroup,
+        consumerName: this.config.consumerId,
+        startId: '$'
+      },
+      // S3.3.5 FIX: Add PRICE_UPDATES consumer for Solana price feed integration
+      {
+        streamName: RedisStreamsClient.STREAMS.PRICE_UPDATES,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
         startId: '$'
@@ -661,7 +670,9 @@ export class CoordinatorService {
       [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
       [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg),
       [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
-      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg)
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg),
+      // S3.3.5 FIX: Add price updates handler
+      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg)
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -709,6 +720,8 @@ export class CoordinatorService {
         type: 'STREAM_CONSUMER_FAILURE',
         message: `Stream consumer experienced ${this.streamConsumerErrors} errors on ${streamName}`,
         severity: 'critical',
+        // S3.3.5 FIX: Include streamName in data for programmatic access
+        data: { streamName, errorCount: this.streamConsumerErrors },
         timestamp: Date.now()
       });
       this.alertSentForCurrentErrorBurst = true;
@@ -1074,6 +1087,50 @@ export class CoordinatorService {
   }
 
   /**
+   * Handle price update messages from stream:price-updates.
+   * S3.3.5 FIX: Coordinator now consumes price updates for monitoring.
+   *
+   * Price updates contain:
+   * - chain: Source blockchain (e.g., 'solana', 'ethereum')
+   * - dex: DEX name (e.g., 'raydium', 'orca')
+   * - pairKey: Trading pair identifier
+   * - price: Current price
+   * - timestamp: Update timestamp
+   */
+  private async handlePriceUpdateMessage(message: StreamMessage): Promise<void> {
+    try {
+      const data = message.data as Record<string, unknown>;
+      if (!data) return;
+
+      // Extract price update data with type checking
+      // Handle wrapped MessageEvent (type='price-update', data={...}) or direct PriceUpdate
+      const rawUpdate = (data.data ?? data) as Record<string, unknown>;
+      const chain = typeof rawUpdate.chain === 'string' ? rawUpdate.chain : 'unknown';
+      const dex = typeof rawUpdate.dex === 'string' ? rawUpdate.dex : 'unknown';
+      const pairKey = typeof rawUpdate.pairKey === 'string' ? rawUpdate.pairKey : '';
+
+      if (!pairKey) return;
+
+      // Update metrics
+      this.systemMetrics.priceUpdatesReceived++;
+
+      // Track active pairs - any pair producing price updates is active
+      this.activePairs.set(pairKey, {
+        lastSeen: Date.now(),
+        chain,
+        dex
+      });
+      this.systemMetrics.activePairsTracked = this.activePairs.size;
+
+      // FIX: Reset stream errors on successful processing
+      this.resetStreamErrors();
+
+    } catch (error) {
+      this.logger.error('Failed to handle price update message', { error, message });
+    }
+  }
+
+  /**
    * Cleanup stale entries from activePairs map.
    * Called periodically to prevent unbounded memory growth.
    */
@@ -1133,7 +1190,9 @@ export class CoordinatorService {
       totalSwapEvents: 0,
       totalVolumeUsd: 0,
       volumeAggregatesProcessed: 0,
-      activePairsTracked: 0
+      activePairsTracked: 0,
+      // Price feed metrics (S3.3.5)
+      priceUpdatesReceived: 0
     };
   }
 

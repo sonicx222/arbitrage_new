@@ -18,7 +18,28 @@
 import { createLogger } from './logger';
 import { CHAINS } from '@arbitrage/config';
 
-const logger = createLogger('gas-price-cache');
+// =============================================================================
+// Dependency Injection Interfaces
+// =============================================================================
+
+/**
+ * Logger interface for GasPriceCache.
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface GasPriceCacheLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Dependencies for GasPriceCache (DI pattern).
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface GasPriceCacheDeps {
+  logger?: GasPriceCacheLogger;
+}
 
 // =============================================================================
 // Types
@@ -189,6 +210,7 @@ export const FALLBACK_GAS_SCALING_PER_STEP = 0.25;
  */
 export class GasPriceCache {
   private config: GasPriceCacheConfig;
+  private logger: GasPriceCacheLogger;
   private gasPrices: Map<string, GasPriceData> = new Map();
   private nativePrices: Map<string, NativeTokenPrice> = new Map();
   private refreshTimer: NodeJS.Timeout | null = null;
@@ -196,15 +218,17 @@ export class GasPriceCache {
   private isRefreshing = false; // Mutex to prevent concurrent refresh
   private providers: Map<string, any> = new Map(); // ethers providers
 
-  constructor(config: Partial<GasPriceCacheConfig> = {}) {
+  constructor(config: Partial<GasPriceCacheConfig> = {}, deps?: GasPriceCacheDeps) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // DI: Use provided logger or create default
+    this.logger = deps?.logger ?? createLogger('gas-price-cache');
 
     // Initialize with fallback values immediately so cache works without start()
     // This ensures getGasPrice() and getNativeTokenPrice() return valid data
     // even if start() is never called (graceful degradation per ADR-013)
     this.initializeFallbacks();
 
-    logger.info('GasPriceCache initialized', {
+    this.logger.info('GasPriceCache initialized', {
       refreshIntervalMs: this.config.refreshIntervalMs,
       staleThresholdMs: this.config.staleThresholdMs,
       autoRefresh: this.config.autoRefresh
@@ -216,7 +240,7 @@ export class GasPriceCache {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      logger.warn('GasPriceCache already running');
+      this.logger.warn('GasPriceCache already running');
       return;
     }
 
@@ -231,7 +255,7 @@ export class GasPriceCache {
       this.startRefreshTimer();
     }
 
-    logger.info('GasPriceCache started');
+    this.logger.info('GasPriceCache started');
   }
 
   /**
@@ -250,7 +274,7 @@ export class GasPriceCache {
     // Clear providers
     this.providers.clear();
 
-    logger.info('GasPriceCache stopped');
+    this.logger.info('GasPriceCache stopped');
   }
 
   /**
@@ -266,7 +290,7 @@ export class GasPriceCache {
       // Check if data is stale
       const age = Date.now() - cached.lastUpdated;
       if (age > this.config.staleThresholdMs) {
-        logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
+        this.logger.warn(`Gas price for ${chain} is stale (${age}ms old)`);
         // Return stale data but mark as potentially unreliable
         return { ...cached, isFallback: true };
       }
@@ -432,7 +456,7 @@ export class GasPriceCache {
   async refreshAll(): Promise<void> {
     // Prevent concurrent refresh operations (race condition protection)
     if (this.isRefreshing) {
-      logger.debug('Refresh already in progress, skipping');
+      this.logger.debug('Refresh already in progress, skipping');
       return;
     }
 
@@ -447,7 +471,7 @@ export class GasPriceCache {
       const succeeded = results.filter(r => r.status === 'fulfilled').length;
       const failed = results.filter(r => r.status === 'rejected').length;
 
-      logger.info('Gas price refresh completed', { succeeded, failed, total: chains.length });
+      this.logger.info('Gas price refresh completed', { succeeded, failed, total: chains.length });
     } finally {
       this.isRefreshing = false;
     }
@@ -463,7 +487,7 @@ export class GasPriceCache {
       // Try to fetch real gas price via RPC
       const chainConfig = CHAINS[chainLower];
       if (!chainConfig) {
-        logger.warn(`Unknown chain: ${chain}`);
+        this.logger.warn(`Unknown chain: ${chain}`);
         return;
       }
 
@@ -496,10 +520,10 @@ export class GasPriceCache {
         isFallback: false
       });
 
-      logger.debug(`Gas price updated for ${chain}`, { gasPriceGwei });
+      this.logger.debug(`Gas price updated for ${chain}`, { gasPriceGwei });
 
     } catch (error) {
-      logger.warn(`Failed to fetch gas price for ${chain}`, { error });
+      this.logger.warn(`Failed to fetch gas price for ${chain}`, { error });
 
       // Keep existing value if available, otherwise use fallback
       if (!this.gasPrices.has(chainLower)) {
@@ -579,7 +603,7 @@ export class GasPriceCache {
       try {
         await this.refreshAll();
       } catch (error) {
-        logger.error('Error in gas price refresh timer', { error });
+        this.logger.error('Error in gas price refresh timer', { error });
       }
     }, this.config.refreshIntervalMs);
   }

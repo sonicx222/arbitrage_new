@@ -23,6 +23,39 @@ import { RedisClient, getRedisClient } from './redis';
 import { createLogger, Logger } from './logger';
 
 // =============================================================================
+// Dependency Injection Interfaces
+// =============================================================================
+
+/**
+ * Logger interface for PriceOracle.
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface PriceOracleLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Redis client interface for PriceOracle.
+ * Matches the subset of RedisClient methods used by PriceOracle.
+ */
+export interface PriceOracleRedisClient {
+  get<T>(key: string): Promise<T | null>;
+  set(key: string, value: unknown, ttlSeconds?: number): Promise<void>;
+}
+
+/**
+ * Dependencies for PriceOracle (DI pattern).
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface PriceOracleDeps {
+  logger?: PriceOracleLogger;
+  redisClient?: PriceOracleRedisClient;
+}
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -48,8 +81,6 @@ export interface PriceOracleConfig {
   customFallbackPrices?: Record<string, number>;
   /** Maximum local cache size to prevent unbounded memory growth (default: 10000) */
   maxCacheSize?: number;
-  /** Optional logger for dependency injection (useful for testing) */
-  logger?: Logger;
 }
 
 export interface PriceBatchRequest {
@@ -144,11 +175,14 @@ const DEFAULT_MAX_STALE_WARNINGS_SIZE = 100;
 // =============================================================================
 
 export class PriceOracle {
-  private redis: RedisClient | null = null;
-  private logger: Logger;
-  private config: Required<Omit<PriceOracleConfig, 'logger'>>;
+  private redis: PriceOracleRedisClient | null = null;
+  private logger: PriceOracleLogger;
+  private config: Required<PriceOracleConfig>;
   private fallbackPrices: Record<string, number>;
   private localCache: Map<string, TokenPrice> = new Map();
+
+  // Injected dependencies (for DI pattern in tests)
+  private injectedRedisClient?: PriceOracleRedisClient;
 
   // ===========================================================================
   // T2.9: Dynamic Fallback Price Tracking
@@ -170,9 +204,12 @@ export class PriceOracle {
     staleFallbackWarnings: new Set<string>()
   };
 
-  constructor(config: PriceOracleConfig = {}) {
+  constructor(config: PriceOracleConfig = {}, deps?: PriceOracleDeps) {
     // DI: Use provided logger or create default
-    this.logger = config.logger ?? createLogger('price-oracle');
+    this.logger = deps?.logger ?? createLogger('price-oracle');
+
+    // Store injected redis client for use in initialize()
+    this.injectedRedisClient = deps?.redisClient;
 
     this.config = {
       cacheKeyPrefix: config.cacheKeyPrefix ?? 'price:',
@@ -194,8 +231,9 @@ export class PriceOracle {
   // Initialization
   // ===========================================================================
 
-  async initialize(redis?: RedisClient): Promise<void> {
-    this.redis = redis ?? await getRedisClient();
+  async initialize(redis?: PriceOracleRedisClient): Promise<void> {
+    // Use injected client first, then parameter, then singleton
+    this.redis = this.injectedRedisClient ?? redis ?? await getRedisClient();
     this.logger.info('PriceOracle initialized', {
       fallbackPriceCount: Object.keys(this.fallbackPrices).length
     });
