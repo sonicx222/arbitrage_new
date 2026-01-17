@@ -980,8 +980,16 @@ export async function getRedisClient(url?: string, password?: string): Promise<R
   // If initialization is already in progress, wait for it
   if (redisInstancePromise) {
     try {
-      redisInstance = await redisInstancePromise;
-      return redisInstance;
+      const instance = await redisInstancePromise;
+      // P1-FIX: Validate instance is still current after await.
+      // resetRedisInstance() may have been called during the await, disconnecting
+      // the instance and clearing globals. Re-assigning a disconnected instance
+      // would return a broken client. If reset occurred, retry initialization.
+      if (redisInstance === instance) {
+        return instance;
+      }
+      // Instance was reset/replaced during await, retry
+      return getRedisClient(url, password);
     } catch (error) {
       initializationError = error as Error;
       throw error;
@@ -1008,8 +1016,13 @@ export async function getRedisClient(url?: string, password?: string): Promise<R
   })();
 
   try {
-    redisInstance = await redisInstancePromise;
-    return redisInstance;
+    const instance = await redisInstancePromise;
+    // P1-FIX: Same validation as above - check instance is still current
+    if (redisInstance === instance) {
+      return instance;
+    }
+    // Instance was reset during initialization, retry
+    return getRedisClient(url, password);
   } catch (error) {
     throw error;
   }
