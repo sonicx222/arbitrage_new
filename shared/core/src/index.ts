@@ -431,6 +431,26 @@ export type {
   ProgramSubscription
 } from './solana-detector';
 
+// Solana swap parser for instruction parsing (S3.3.4)
+export {
+  SolanaSwapParser,
+  getSolanaSwapParser,
+  resetSolanaSwapParser,
+  SOLANA_DEX_PROGRAM_IDS,
+  PROGRAM_ID_TO_DEX,
+  SWAP_DISCRIMINATORS,
+  DISABLED_DEXES
+} from './solana-swap-parser';
+export type {
+  SolanaInstruction,
+  SolanaTransaction,
+  InstructionAccount,
+  TokenBalance,
+  ParsedSolanaSwap,
+  SwapParserConfig,
+  ParserStats
+} from './solana-swap-parser';
+
 // =============================================================================
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
 // =============================================================================

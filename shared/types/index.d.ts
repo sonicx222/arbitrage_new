@@ -12,6 +12,10 @@ export interface Chain {
     /** Whether this chain uses EVM (defaults to true) */
     isEVM?: boolean;
 }
+/**
+ * S3.3.2: DEX type classification for different liquidity models.
+ */
+export type DexType = 'amm' | 'clmm' | 'dlmm' | 'orderbook' | 'pmm' | 'aggregator';
 export interface Dex {
     name: string;
     chain: string;
@@ -19,6 +23,8 @@ export interface Dex {
     routerAddress: string;
     fee: number;
     enabled?: boolean;
+    /** S3.3.2: DEX type classification (primarily for Solana non-factory DEXs) */
+    type?: DexType;
 }
 export interface Token {
     address: string;
