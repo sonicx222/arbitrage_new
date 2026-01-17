@@ -88,7 +88,7 @@ export interface PriceUpdate {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type?: 'simple' | 'cross-dex' | 'triangular' | 'cross-chain' | 'predictive' | 'intra-dex';
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex';
   chain?: string;        // Single chain for same-chain arbitrage
   buyDex?: string;
   sellDex?: string;

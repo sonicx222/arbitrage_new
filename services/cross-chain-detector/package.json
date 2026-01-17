@@ -15,8 +15,7 @@
     "@arbitrage/core": "*",
     "@arbitrage/config": "*",
     "@arbitrage/types": "*",
-    "ethers": "^6.13.2",
-    "redis": "^4.7.0",
+    "ethers": "^6.16.0",
     "winston": "^3.14.2",
     "ioredis": "^5.4.1"
   },

@@ -625,11 +625,22 @@ export {
   PriceSimulator,
   getSimulator,
   isSimulationMode,
-  SIMULATION_CONFIG
+  SIMULATION_CONFIG,
+  // Chain-specific simulators for detector integration
+  ChainSimulator,
+  getChainSimulator,
+  stopChainSimulator,
+  stopAllChainSimulators,
+  resetSimulatorInstance
 } from './simulation-mode';
 export type {
   SimulatedPriceUpdate,
-  SimulationConfig
+  SimulationConfig,
+  // Chain simulator types
+  SimulatedSyncEvent,
+  SimulatedOpportunity,
+  ChainSimulatorConfig,
+  SimulatedPairConfig
 } from './simulation-mode';
 
 // P0-2 FIX: Nonce Manager for Transaction Sequencing

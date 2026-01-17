@@ -108,6 +108,25 @@ docker-compose up -d
 
 ---
 
+## Supported Arbitrage Types
+
+The system detects and executes multiple arbitrage strategies across chains and DEXes.
+
+| Type | Description | Path Length | Status |
+|------|-------------|-------------|--------|
+| **Simple/Cross-DEX** | Same token pair across different DEXes | 2 | ACTIVE |
+| **Triangular** | 3-token cycles (A→B→C→A) | 3 | ACTIVE |
+| **Quadrilateral** | 4-token cycles (A→B→C→D→A) | 4 | ACTIVE |
+| **Multi-Leg** | 5-7 token paths with DFS optimization | 5-7 | ACTIVE |
+| **Cross-Chain** | Price differences across blockchains | 2+ | ACTIVE |
+| **Whale-Triggered** | Signals from large transactions (>$50K) | N/A | ACTIVE |
+
+All arbitrage types are detected in both **production** and **simulation** modes.
+
+For detailed strategy documentation, see [Trading Strategies](docs/strategies.md).
+
+---
+
 ## 🤝 Contributing
 Please see the [Developer Guide](docs/development.md) for contribution guidelines and project roadmap.
 
