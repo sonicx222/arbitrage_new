@@ -6,7 +6,31 @@
 
 import { createLogger } from './logger';
 
-const logger = createLogger('circuit-breaker');
+// =============================================================================
+// Dependency Injection Interfaces
+// =============================================================================
+
+/**
+ * Logger interface for CircuitBreaker.
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface CircuitBreakerLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Dependencies for CircuitBreaker (DI pattern).
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface CircuitBreakerDeps {
+  logger?: CircuitBreakerLogger;
+}
+
+// Default logger (used when deps not provided)
+const defaultLogger = createLogger('circuit-breaker');
 
 export enum CircuitState {
   CLOSED = 'CLOSED',
@@ -56,6 +80,7 @@ export class CircuitBreaker {
   private totalFailures = 0;
   private totalSuccesses = 0;
   private nextAttemptTime = 0;
+  private logger: CircuitBreakerLogger;
 
   // P0-1 FIX: Mutex lock for thread-safe state transitions
   private transitionLock: Promise<void> | null = null;
@@ -64,7 +89,10 @@ export class CircuitBreaker {
   // P2-2 FIX: Track failure timestamps for monitoring window
   private failureTimestamps: number[] = [];
 
-  constructor(private config: CircuitBreakerConfig) { }
+  constructor(private config: CircuitBreakerConfig, deps?: CircuitBreakerDeps) {
+    // DI: Use provided logger or default
+    this.logger = deps?.logger ?? defaultLogger;
+  }
 
   async execute<T>(operation: () => Promise<T>): Promise<T> {
     this.totalRequests++;
@@ -95,7 +123,7 @@ export class CircuitBreaker {
       this.successes = 0; // Reset success counter for HALF_OPEN
 
       // P0-2 FIX: Use structured logger
-      logger.info('Circuit breaker transitioning to HALF_OPEN', {
+      this.logger.info('Circuit breaker transitioning to HALF_OPEN', {
         name: this.config.name,
         recoveryTimeout: this.config.recoveryTimeout
       });
@@ -126,7 +154,7 @@ export class CircuitBreaker {
         this.failureTimestamps = []; // P2-2 FIX: Clear failure history
 
         // P0-2 FIX: Use structured logger
-        logger.info('Circuit breaker transitioned to CLOSED', {
+        this.logger.info('Circuit breaker transitioned to CLOSED', {
           name: this.config.name,
           successThreshold: this.config.successThreshold
         });
@@ -152,7 +180,7 @@ export class CircuitBreaker {
       this.halfOpenInProgress = false; // P0-1 FIX: Reset flag
 
       // P0-2 FIX: Use structured logger
-      logger.warn('Circuit breaker back to OPEN after failure in HALF_OPEN', {
+      this.logger.warn('Circuit breaker back to OPEN after failure in HALF_OPEN', {
         name: this.config.name,
         recoveryTimeout: this.config.recoveryTimeout
       });
@@ -165,7 +193,7 @@ export class CircuitBreaker {
         this.nextAttemptTime = now + this.config.recoveryTimeout;
 
         // P0-2 FIX: Use structured logger
-        logger.warn('Circuit breaker opened due to failures', {
+        this.logger.warn('Circuit breaker opened due to failures', {
           name: this.config.name,
           windowFailures,
           failureThreshold: this.config.failureThreshold,
@@ -216,7 +244,7 @@ export class CircuitBreaker {
     this.halfOpenInProgress = false;
 
     // P0-2 FIX: Use structured logger
-    logger.warn('Circuit breaker manually opened', {
+    this.logger.warn('Circuit breaker manually opened', {
       name: this.config.name
     });
   }
@@ -229,7 +257,7 @@ export class CircuitBreaker {
     this.failureTimestamps = [];
 
     // P0-2 FIX: Use structured logger
-    logger.info('Circuit breaker manually closed', {
+    this.logger.info('Circuit breaker manually closed', {
       name: this.config.name
     });
   }
@@ -248,7 +276,7 @@ export class CircuitBreaker {
     this.failureTimestamps = [];
 
     // P0-2 FIX: Use structured logger
-    logger.info('Circuit breaker reset', {
+    this.logger.info('Circuit breaker reset', {
       name: this.config.name
     });
   }

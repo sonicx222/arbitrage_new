@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-17 (S3.3.4 Solana swap parser: 98 tests)
-> **Tests**: 3810 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests)
+> **Last Updated**: 2025-01-17 (S3.3.5 Solana price feed: 88 tests)
+> **Tests**: 3898 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests + 88 S3.3.5 tests)
 
 ---
 
@@ -789,11 +789,19 @@
     - DEX-specific parsers with swap amount extraction from token balances
     - Statistics tracking with Prometheus metrics integration
 
-[ ] S3.3.5 Create Solana price feed integration
+[x] S3.3.5 Create Solana price feed integration
     - Subscribe to Raydium pool account updates
     - Subscribe to Orca pool account updates
     - Real-time price updates via accountSubscribe
     - File: shared/core/src/solana-price-feed.ts
+    - Tests: tests/integration/s3.3.5-solana-price-feed.integration.test.ts (88 tests)
+    - COMPLETED: 2025-01-17 - TDD implementation
+    - Raydium AMM V4 pool state parsing with reserve-based pricing
+    - Raydium CLMM pool state parsing with sqrtPriceX64
+    - Orca Whirlpool state parsing with sqrtPrice/tick conversion
+    - Price calculation formulas for AMM and concentrated liquidity
+    - Pool subscription management with staleness monitoring
+    - Account data layout constants for all supported DEXs
 
 [ ] S3.3.6 Implement Solana-specific arbitrage detection
     - Intra-Solana arbitrage (between Solana DEXs)

@@ -18,6 +18,29 @@ import { createLogger } from './logger';
 import { Dex, Token } from '../../types';
 
 // =============================================================================
+// Dependency Injection Interfaces
+// =============================================================================
+
+/**
+ * Logger interface for PairDiscoveryService.
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface PairDiscoveryLogger {
+  info: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+/**
+ * Dependencies for PairDiscoveryService (DI pattern).
+ * Enables proper testing without Jest mock hoisting issues.
+ */
+export interface PairDiscoveryDeps {
+  logger?: PairDiscoveryLogger;
+}
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -111,7 +134,7 @@ const V3_FEE_TIERS = [100, 500, 3000, 10000];
 // =============================================================================
 
 export class PairDiscoveryService extends EventEmitter {
-  private logger = createLogger('pair-discovery');
+  private logger: PairDiscoveryLogger;
   private config: PairDiscoveryConfig;
   private providers: Map<string, ethers.JsonRpcProvider> = new Map();
   private factoryContracts: Map<string, ethers.Contract> = new Map();
@@ -138,8 +161,11 @@ export class PairDiscoveryService extends EventEmitter {
   // Concurrency control for batch operations
   private activeQueries = 0;
 
-  constructor(config?: Partial<PairDiscoveryConfig>) {
+  constructor(config?: Partial<PairDiscoveryConfig>, deps?: PairDiscoveryDeps) {
     super();
+
+    // DI: Use provided logger or create default
+    this.logger = deps?.logger ?? createLogger('pair-discovery');
 
     this.config = {
       maxConcurrentQueries: 10,

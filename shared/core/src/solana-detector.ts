@@ -27,6 +27,7 @@ import {
   PerformanceLogger
 } from './logger';
 import { AsyncMutex } from './async-mutex';
+import { withTimeout } from './async-utils';
 import { getRedisClient, RedisClient } from './redis';
 import {
   getRedisStreamsClient,
@@ -308,6 +309,8 @@ export class SolanaDetector extends EventEmitter {
   protected recentLatencies: number[] = [];
   protected static readonly MAX_LATENCY_SAMPLES = 100;
   protected static readonly MAX_LATENCY_VALUE_MS = 30000; // Cap extreme values
+  // S3.3.5 FIX: Timeout for slot updates to prevent indefinite hangs
+  protected static readonly SLOT_UPDATE_TIMEOUT_MS = 10000; // 10 seconds
 
   // RACE CONDITION FIX: Mutex to prevent concurrent updateCurrentSlot execution
   private slotUpdateMutex = new AsyncMutex();
@@ -1263,7 +1266,12 @@ export class SolanaDetector extends EventEmitter {
     try {
       const startTime = Date.now();
       const connection = this.getConnection();
-      this.currentSlot = await connection.getSlot();
+      // S3.3.5 FIX: Add timeout to prevent indefinite hangs on slow RPC nodes
+      this.currentSlot = await withTimeout(
+        connection.getSlot(),
+        SolanaDetector.SLOT_UPDATE_TIMEOUT_MS,
+        'getSlot'
+      );
       let latency = Date.now() - startTime;
 
       // Cap extreme latency values to avoid skewing metrics

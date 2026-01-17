@@ -451,6 +451,26 @@ export type {
   ParserStats
 } from './solana-swap-parser';
 
+// Solana price feed for real-time DEX price updates (S3.3.5)
+export {
+  SolanaPriceFeed,
+  RAYDIUM_AMM_LAYOUT,
+  RAYDIUM_CLMM_LAYOUT,
+  ORCA_WHIRLPOOL_LAYOUT,
+  SOLANA_DEX_PROGRAMS as SOLANA_PRICE_FEED_PROGRAMS
+} from './solana-price-feed';
+export type {
+  SolanaPriceFeedConfig,
+  SolanaPriceFeedDeps,
+  SolanaPriceFeedLogger,
+  RaydiumAmmPoolState,
+  RaydiumClmmPoolState,
+  OrcaWhirlpoolState,
+  SolanaPriceUpdate as SolanaPriceFeedUpdate,
+  PoolSubscription,
+  SupportedDex
+} from './solana-price-feed';
+
 // =============================================================================
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
 // =============================================================================
