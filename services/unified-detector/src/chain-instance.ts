@@ -158,6 +158,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private pairs: Map<string, ExtendedPair> = new Map();
   private pairsByAddress: Map<string, ExtendedPair> = new Map();
+  // P0-PERF FIX: Token-indexed lookup for O(1) arbitrage pair matching
+  // Key: normalized "token0_token1" where addresses are lowercase and alphabetically ordered
+  private pairsByTokens: Map<string, ExtendedPair[]> = new Map();
 
   private status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   private eventsProcessed: number = 0;
@@ -452,6 +455,7 @@ export class ChainDetectorInstance extends EventEmitter {
     // Clear pairs
     this.pairs.clear();
     this.pairsByAddress.clear();
+    this.pairsByTokens.clear();
 
     // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
     this.blockLatencies = [];
@@ -841,11 +845,22 @@ export class ChainDetectorInstance extends EventEmitter {
           const pairKey = `${dex.name}_${token0.symbol}_${token1.symbol}`;
           this.pairs.set(pairKey, pair);
           this.pairsByAddress.set(pairAddress.toLowerCase(), pair);
+
+          // P0-PERF FIX: Add to token-indexed lookup for O(1) arbitrage detection
+          const tokenKey = this.getTokenPairKey(token0.address, token1.address);
+          let pairsForTokens = this.pairsByTokens.get(tokenKey);
+          if (!pairsForTokens) {
+            pairsForTokens = [];
+            this.pairsByTokens.set(tokenKey, pairsForTokens);
+          }
+          pairsForTokens.push(pair);
         }
       }
     }
 
-    this.logger.info(`Initialized ${this.pairs.size} pairs for monitoring`);
+    this.logger.info(`Initialized ${this.pairs.size} pairs for monitoring`, {
+      tokenPairGroups: this.pairsByTokens.size
+    });
   }
 
   private generatePairAddress(factory: string, token0: string, token1: string): string {
@@ -1137,39 +1152,53 @@ export class ChainDetectorInstance extends EventEmitter {
     const currentSnapshot = this.createPairSnapshot(updatedPair);
     if (!currentSnapshot) return;
 
-    // Create deep snapshots of ALL pairs to prevent race conditions
-    // This captures reserve values atomically - concurrent Sync events
-    // won't affect these snapshot values during iteration
-    const pairsSnapshot = this.createPairsSnapshot();
+    // P0-PERF FIX: O(1) lookup instead of O(N) iteration
+    // Get only pairs with the same token pair (typically 2-5 pairs across DEXes)
+    const tokenKey = this.getTokenPairKey(currentSnapshot.token0, currentSnapshot.token1);
+    const matchingPairs = this.pairsByTokens.get(tokenKey) || [];
 
-    // Find pairs with same tokens but different DEXes
-    for (const [key, otherSnapshot] of pairsSnapshot) {
-      // Skip same pair
-      if (otherSnapshot.address === currentSnapshot.address) continue;
+    // Iterate only matching pairs (O(k) where k is typically 2-5)
+    for (const otherPair of matchingPairs) {
+      // Skip same pair (same address)
+      if (otherPair.address.toLowerCase() === currentSnapshot.address.toLowerCase()) continue;
 
-      // BUG FIX: Skip same DEX - arbitrage requires different DEXes
-      if (otherSnapshot.dex === currentSnapshot.dex) continue;
+      // Skip same DEX - arbitrage requires different DEXes
+      if (otherPair.dex === currentSnapshot.dex) continue;
 
-      // Check if same token pair (in either order)
-      if (this.isSameTokenPair(currentSnapshot, otherSnapshot)) {
-        const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
+      // Create snapshot only for pairs we'll actually compare
+      const otherSnapshot = this.createPairSnapshot(otherPair);
+      if (!otherSnapshot) continue;
 
-        if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
-          this.opportunitiesFound++;
-          this.emitOpportunity(opportunity);
-        }
+      const opportunity = this.calculateArbitrage(currentSnapshot, otherSnapshot);
+
+      if (opportunity && (opportunity.expectedProfit ?? 0) > 0) {
+        this.opportunitiesFound++;
+        this.emitOpportunity(opportunity);
       }
     }
 
-    // Triangular/Quadrilateral arbitrage detection (throttled to 500ms)
-    this.checkTriangularOpportunities(pairsSnapshot).catch(error => {
-      this.logger.error('Triangular detection error', { error: (error as Error).message });
-    });
+    // P0-PERF FIX: Check throttle BEFORE creating expensive snapshots
+    // This prevents O(N) snapshot creation when throttled
+    const now = Date.now();
+    const shouldCheckTriangular = now - this.lastTriangularCheck >= this.TRIANGULAR_CHECK_INTERVAL_MS;
+    const shouldCheckMultiLeg = now - this.lastMultiLegCheck >= this.MULTI_LEG_CHECK_INTERVAL_MS;
 
-    // Multi-leg arbitrage detection (throttled to 2000ms, uses worker thread)
-    this.checkMultiLegOpportunities(pairsSnapshot).catch(error => {
-      this.logger.error('Multi-leg detection error', { error: (error as Error).message });
-    });
+    // Only create snapshot if at least one check will run
+    if (shouldCheckTriangular || shouldCheckMultiLeg) {
+      const pairsSnapshot = this.createPairsSnapshot();
+
+      if (shouldCheckTriangular) {
+        this.checkTriangularOpportunities(pairsSnapshot).catch(error => {
+          this.logger.error('Triangular detection error', { error: (error as Error).message });
+        });
+      }
+
+      if (shouldCheckMultiLeg) {
+        this.checkMultiLegOpportunities(pairsSnapshot).catch(error => {
+          this.logger.error('Multi-leg detection error', { error: (error as Error).message });
+        });
+      }
+    }
   }
 
   /**
@@ -1201,6 +1230,17 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   /**
+   * P0-PERF FIX: Generate normalized key for token pair lookup.
+   * Orders addresses alphabetically for consistent matching regardless of token order.
+   * This enables O(1) lookup of all pairs containing the same token pair.
+   */
+  private getTokenPairKey(token0: string, token1: string): string {
+    const t0 = token0.toLowerCase();
+    const t1 = token1.toLowerCase();
+    return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+  }
+
+  /**
    * Get minimum profit threshold for this chain from config.
    * Uses ARBITRAGE_CONFIG.chainMinProfits for consistency with base-detector.ts.
    */
@@ -1223,17 +1263,20 @@ export class ChainDetectorInstance extends EventEmitter {
       return null;
     }
 
-    // Calculate prices (price = token0/token1) - consistent with base-detector.ts
-    // This gives "price of token1 in terms of token0"
-    const price1 = Number(reserve1_0) / Number(reserve1_1);
-    let price2 = Number(reserve2_0) / Number(reserve2_1);
+    // P0-1 FIX: Use precision-safe price calculation to prevent precision loss
+    // for large BigInt values (reserves can be > 2^53)
+    const price1 = calculatePriceFromBigIntReserves(reserve1_0, reserve1_1);
+    const price2Raw = calculatePriceFromBigIntReserves(reserve2_0, reserve2_1);
+
+    // Handle null returns (shouldn't happen since we checked for zero reserves above)
+    if (price1 === null || price2Raw === null) {
+      return null;
+    }
 
     // BUG FIX: Adjust price for reverse order pairs
     // If tokens are in reverse order, invert the price for accurate comparison
     const isReversed = this.isReverseOrder(pair1, pair2);
-    if (isReversed && price2 !== 0) {
-      price2 = 1 / price2;
-    }
+    let price2 = isReversed && price2Raw !== 0 ? 1 / price2Raw : price2Raw;
 
     // Calculate price difference as a percentage of the lower price
     const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
@@ -1342,7 +1385,9 @@ export class ChainDetectorInstance extends EventEmitter {
   private convertPairSnapshotToDexPool(snapshot: PairSnapshot): DexPool {
     const reserve0 = BigInt(snapshot.reserve0);
     const reserve1 = BigInt(snapshot.reserve1);
-    const price = reserve0 > 0n ? Number(reserve1) / Number(reserve0) : 0;
+
+    // P0-1 FIX: Use precision-safe price calculation (consistent with calculateArbitrage)
+    const price = calculatePriceFromBigIntReserves(reserve1, reserve0) ?? 0;
 
     // Estimate liquidity from reserves (simplified USD estimation)
     const liquidity = Number(reserve0) * price * 2;

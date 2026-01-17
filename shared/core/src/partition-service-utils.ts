@@ -381,7 +381,7 @@ export function setupDetectorEventHandlers(
       buyDex: opp.buyDex,
       sellDex: opp.sellDex,
       profit: opp.expectedProfit,
-      percentage: (opp.profitPercentage * 100).toFixed(2) + '%'
+      percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
     });
   });
 
