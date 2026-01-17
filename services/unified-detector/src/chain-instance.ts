@@ -20,7 +20,26 @@ import {
   WebSocketManager,
   WebSocketConfig,
   // P0-1 FIX: Use precision-safe price calculation
-  calculatePriceFromBigIntReserves
+  calculatePriceFromBigIntReserves,
+  // Simulation mode support
+  isSimulationMode,
+  ChainSimulator,
+  getChainSimulator,
+  stopChainSimulator,
+  SimulatedPairConfig,
+  // Triangular/Quadrilateral arbitrage detection
+  CrossDexTriangularArbitrage,
+  DexPool,
+  TriangularOpportunity,
+  QuadrilateralOpportunity,
+  // Multi-leg path finding
+  getMultiLegPathFinder,
+  MultiLegPathFinder,
+  MultiLegOpportunity,
+  // Swap event filtering and whale detection
+  SwapEventFilter,
+  getSwapEventFilter,
+  WhaleAlert
 } from '@arbitrage/core';
 
 import {
@@ -31,7 +50,8 @@ import {
   TOKEN_METADATA,
   ARBITRAGE_CONFIG,
   getEnabledDexes,
-  dexFeeToPercentage
+  dexFeeToPercentage,
+  isEvmChain
 } from '@arbitrage/config';
 
 import {
@@ -156,6 +176,24 @@ export class ChainDetectorInstance extends EventEmitter {
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
 
+  // Simulation mode support
+  private readonly simulationMode: boolean;
+  private chainSimulator: ChainSimulator | null = null;
+
+  // Triangular/Quadrilateral arbitrage detection
+  private triangularDetector: CrossDexTriangularArbitrage;
+  private lastTriangularCheck: number = 0;
+  private readonly TRIANGULAR_CHECK_INTERVAL_MS = 500;
+
+  // Multi-leg path finding (5-7 token paths)
+  private multiLegPathFinder: MultiLegPathFinder | null = null;
+  private lastMultiLegCheck: number = 0;
+  private readonly MULTI_LEG_CHECK_INTERVAL_MS = 2000;
+
+  // Swap event filtering and whale detection
+  private swapEventFilter: SwapEventFilter | null = null;
+  private whaleAlertUnsubscribe: (() => void) | null = null;
+
   constructor(config: ChainInstanceConfig) {
     super();
 
@@ -184,6 +222,20 @@ export class ChainDetectorInstance extends EventEmitter {
     if (config.rpcUrl) {
       this.chainConfig = { ...this.chainConfig, rpcUrl: config.rpcUrl };
     }
+
+    // Check for simulation mode
+    this.simulationMode = isSimulationMode();
+    if (this.simulationMode) {
+      this.logger.info('Running in SIMULATION MODE - no real blockchain connections', {
+        chainId: this.chainId
+      });
+    }
+
+    // Initialize triangular/quadrilateral arbitrage detector
+    this.triangularDetector = new CrossDexTriangularArbitrage({
+      minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.003,
+      maxSlippage: ARBITRAGE_CONFIG.slippageTolerance || 0.10
+    });
   }
 
   // ===========================================================================
@@ -226,28 +278,78 @@ export class ChainDetectorInstance extends EventEmitter {
    * P0-NEW-3 FIX: Internal start implementation separated for promise tracking
    */
   private async performStart(): Promise<void> {
+    // Check if this is a non-EVM chain in simulation mode
+    const isNonEvmChain = !isEvmChain(this.chainId);
+
     this.logger.info('Starting ChainDetectorInstance', {
       chainId: this.chainId,
       partitionId: this.partitionId,
       dexes: this.dexes.length,
-      tokens: this.tokens.length
+      tokens: this.tokens.length,
+      simulationMode: this.simulationMode,
+      isEvmChain: !isNonEvmChain
     });
+
+    // S3.3.1 FIX: Non-EVM chains (like Solana) need special handling in simulation mode
+    // The EVM-based ChainSimulator generates Sync events which don't apply to Solana
+    if (this.simulationMode && isNonEvmChain) {
+      this.logger.warn('Non-EVM chain in simulation mode - using simplified simulation', {
+        chainId: this.chainId,
+        note: 'Solana simulation generates synthetic price updates without real DEX events'
+      });
+      // Set status to connected and start a simplified simulation
+      this.status = 'connected';
+      this.isRunning = true;
+      this.emit('statusChange', this.status);
+      // Start simplified non-EVM simulation (generates periodic price updates)
+      await this.initializeNonEvmSimulation();
+      return;
+    }
 
     this.status = 'connecting';
     this.emit('statusChange', this.status);
 
     try {
-      // Initialize RPC provider
-      this.provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
-
-      // Initialize WebSocket manager
-      await this.initializeWebSocket();
-
-      // Initialize pairs from DEX factories
+      // Initialize pairs first (needed for both real and simulated modes)
       await this.initializePairs();
 
-      // Subscribe to events
-      await this.subscribeToEvents();
+      // Initialize multi-leg path finder for 5-7 token arbitrage
+      this.multiLegPathFinder = getMultiLegPathFinder({
+        minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.005,
+        maxPathLength: 7,
+        minPathLength: 5,
+        timeoutMs: 3000
+      });
+
+      // Initialize swap event filter for whale detection
+      this.swapEventFilter = getSwapEventFilter({
+        minUsdValue: 10,
+        whaleThreshold: 50000,
+        dedupWindowMs: 5000
+      });
+
+      // Register whale alert handler to publish to Redis Streams
+      // Store unsubscribe function for cleanup in performStop()
+      this.whaleAlertUnsubscribe = this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
+        this.publishWhaleAlert(alert).catch(error => {
+          this.logger.error('Failed to publish whale alert', { error: (error as Error).message });
+        });
+      });
+
+      if (this.simulationMode) {
+        // SIMULATION MODE: Use ChainSimulator instead of real connections
+        await this.initializeSimulation();
+      } else {
+        // PRODUCTION MODE: Use real WebSocket and RPC connections
+        // Initialize RPC provider
+        this.provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
+
+        // Initialize WebSocket manager
+        await this.initializeWebSocket();
+
+        // Subscribe to events
+        await this.subscribeToEvents();
+      }
 
       this.isRunning = true;
       this.status = 'connected';
@@ -255,7 +357,8 @@ export class ChainDetectorInstance extends EventEmitter {
       this.emit('statusChange', this.status);
 
       this.logger.info('ChainDetectorInstance started', {
-        pairsMonitored: this.pairs.size
+        pairsMonitored: this.pairs.size,
+        mode: this.simulationMode ? 'SIMULATION' : 'PRODUCTION'
       });
 
     } catch (error) {
@@ -298,6 +401,21 @@ export class ChainDetectorInstance extends EventEmitter {
     this.isStopping = true;
     this.isRunning = false;
 
+    // Stop non-EVM simulation interval if running
+    if (this.nonEvmSimulationInterval) {
+      clearInterval(this.nonEvmSimulationInterval);
+      this.nonEvmSimulationInterval = null;
+    }
+
+    // Stop chain simulator if running
+    if (this.chainSimulator) {
+      this.chainSimulator.removeAllListeners();
+      this.chainSimulator.stop();
+      this.chainSimulator = null;
+      // Also cleanup the global simulator for this chain
+      stopChainSimulator(this.chainId);
+    }
+
     // P0-NEW-6 FIX: Disconnect WebSocket with timeout to prevent indefinite hangs
     if (this.wsManager) {
       // Remove all event listeners before disconnecting to prevent memory leak
@@ -320,6 +438,17 @@ export class ChainDetectorInstance extends EventEmitter {
       this.provider = null;
     }
 
+    // BUG-2 FIX: Unsubscribe whale alert handler to prevent duplicate alerts
+    // and memory leaks when restarting or running multiple chain instances
+    if (this.whaleAlertUnsubscribe) {
+      this.whaleAlertUnsubscribe();
+      this.whaleAlertUnsubscribe = null;
+    }
+
+    // Clear singleton references (they will be re-acquired on restart)
+    this.swapEventFilter = null;
+    this.multiLegPathFinder = null;
+
     // Clear pairs
     this.pairs.clear();
     this.pairsByAddress.clear();
@@ -339,6 +468,275 @@ export class ChainDetectorInstance extends EventEmitter {
     this.emit('statusChange', this.status);
 
     this.logger.info('ChainDetectorInstance stopped');
+  }
+
+  // ===========================================================================
+  // Simulation Mode
+  // ===========================================================================
+
+  // Non-EVM simulation interval reference for cleanup
+  private nonEvmSimulationInterval: NodeJS.Timeout | null = null;
+
+  /**
+   * Initialize simplified simulation for non-EVM chains (like Solana).
+   * Generates periodic price updates without using EVM-specific Sync events.
+   * This allows simulation mode to work across all chain types.
+   */
+  private async initializeNonEvmSimulation(): Promise<void> {
+    this.logger.info('Initializing non-EVM simulation mode', {
+      chainId: this.chainId
+    });
+
+    // Get configured DEXes and tokens for this non-EVM chain
+    const dexNames = this.dexes.map(d => d.name);
+    const tokenSymbols = this.tokens.map(t => t.symbol);
+
+    // If no tokens configured, use default Solana tokens
+    const effectiveTokens = tokenSymbols.length > 0 ? tokenSymbols : ['SOL', 'USDC', 'RAY', 'JUP'];
+    const effectiveDexes = dexNames.length > 0 ? dexNames : ['raydium', 'orca'];
+
+    // Start periodic simulation updates
+    const updateIntervalMs = parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS || '1000', 10);
+    let slotNumber = 250000000; // Starting slot for Solana-like chains
+
+    this.nonEvmSimulationInterval = setInterval(() => {
+      if (this.isStopping || !this.isRunning) {
+        return;
+      }
+
+      slotNumber++;
+      this.lastBlockNumber = slotNumber;
+      this.lastBlockTimestamp = Date.now();
+
+      // Generate synthetic price updates for token pairs across DEXes
+      for (let i = 0; i < effectiveTokens.length; i++) {
+        for (let j = i + 1; j < effectiveTokens.length; j++) {
+          const token0 = effectiveTokens[i];
+          const token1 = effectiveTokens[j];
+
+          // Generate price with some volatility
+          const basePrice = this.getBaseTokenPrice(token0) / this.getBaseTokenPrice(token1);
+          const volatility = parseFloat(process.env.SIMULATION_VOLATILITY || '0.02');
+          const priceVariation = 1 + (Math.random() * 2 - 1) * volatility;
+          const price = basePrice * priceVariation;
+
+          // Emit price update for each DEX
+          for (const dex of effectiveDexes) {
+            const dexPriceVariation = 1 + (Math.random() * 2 - 1) * 0.005; // Small DEX-to-DEX variation
+            const dexPrice = price * dexPriceVariation;
+
+            const priceUpdate: PriceUpdate = {
+              chain: this.chainId,
+              dex,
+              pairKey: `${dex}_${token0}_${token1}`,
+              token0,
+              token1,
+              price: dexPrice,
+              reserve0: '0',  // Non-EVM chains may not have reserve-based AMMs
+              reserve1: '0',
+              blockNumber: slotNumber,
+              timestamp: Date.now(),
+              latency: 0
+            };
+
+            this.emit('priceUpdate', priceUpdate);
+            this.eventsProcessed++;
+          }
+
+          // Occasionally detect arbitrage opportunity
+          if (effectiveDexes.length >= 2 && Math.random() < 0.03) { // 3% chance
+            const dex1 = effectiveDexes[0];
+            const dex2 = effectiveDexes[1];
+            const priceDiff = 0.003 + Math.random() * 0.007; // 0.3% to 1% profit
+
+            const opportunity: ArbitrageOpportunity = {
+              id: `${this.chainId}-sim-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+              type: 'simple',
+              chain: this.chainId,
+              buyDex: dex1,
+              sellDex: dex2,
+              buyPair: `${dex1}_${token0}_${token1}`,
+              sellPair: `${dex2}_${token0}_${token1}`,
+              token0,
+              token1,
+              buyPrice: price * (1 - priceDiff / 2),
+              sellPrice: price * (1 + priceDiff / 2),
+              profitPercentage: priceDiff * 100,
+              expectedProfit: priceDiff,
+              confidence: 0.85,
+              timestamp: Date.now(),
+              expiresAt: Date.now() + 1000, // Fast expiry for Solana
+              status: 'pending'
+            };
+
+            this.opportunitiesFound++;
+            this.emit('opportunity', opportunity);
+          }
+        }
+      }
+    }, updateIntervalMs);
+
+    this.logger.info('Non-EVM simulation initialized', {
+      chainId: this.chainId,
+      dexes: effectiveDexes,
+      tokens: effectiveTokens,
+      updateIntervalMs
+    });
+  }
+
+  /**
+   * Get base token price for simulation (in USD).
+   * Note: Keep in sync with BASE_PRICES in shared/core/src/simulation-mode.ts
+   */
+  private getBaseTokenPrice(symbol: string): number {
+    const basePrices: Record<string, number> = {
+      // Solana-specific tokens
+      SOL: 175, USDC: 1, USDT: 1, RAY: 4.5, JUP: 0.85, ORCA: 3.2,
+      BONK: 0.000025, WIF: 2.5, mSOL: 185, JitoSOL: 180,
+      // Common cross-chain tokens (for non-EVM chains that may support bridged assets)
+      WETH: 3200, WBTC: 65000, LINK: 15, ARB: 1.15, OP: 2.5
+    };
+    return basePrices[symbol.toUpperCase()] ?? 1;
+  }
+
+  /**
+   * Initialize the chain simulator for simulation mode.
+   * Creates simulated pairs from the initialized pairs and starts generating
+   * fake Sync events that mimic real blockchain events.
+   */
+  private async initializeSimulation(): Promise<void> {
+    this.logger.info('Initializing simulation mode', {
+      chainId: this.chainId,
+      pairs: this.pairs.size
+    });
+
+    // Build simulated pair configs from our initialized pairs
+    const simulatedPairs: SimulatedPairConfig[] = [];
+
+    for (const [pairKey, pair] of this.pairs) {
+      // Extract token symbols from pair key (format: dex_TOKEN0_TOKEN1)
+      const parts = pairKey.split('_');
+      if (parts.length < 3) continue;
+
+      const token0Symbol = parts[1];
+      const token1Symbol = parts[2];
+
+      // Get token decimals from config (default to 18 for most tokens)
+      const token0 = this.tokens.find(t => t.symbol === token0Symbol);
+      const token1 = this.tokens.find(t => t.symbol === token1Symbol);
+
+      simulatedPairs.push({
+        address: pair.address,
+        token0Symbol,
+        token1Symbol,
+        token0Decimals: token0?.decimals ?? 18,
+        token1Decimals: token1?.decimals ?? 18,
+        dex: pair.dex,
+        fee: pair.fee ?? 0.003  // Default 0.3% fee
+      });
+    }
+
+    if (simulatedPairs.length === 0) {
+      this.logger.warn('No pairs available for simulation', { chainId: this.chainId });
+      return;
+    }
+
+    // Get or create the chain simulator
+    this.chainSimulator = getChainSimulator(this.chainId, simulatedPairs);
+
+    // Set up event handlers for simulated events
+    this.chainSimulator.on('syncEvent', (event) => {
+      this.handleSimulatedSyncEvent(event);
+    });
+
+    this.chainSimulator.on('blockUpdate', (data) => {
+      this.lastBlockNumber = data.blockNumber;
+      this.lastBlockTimestamp = Date.now();
+    });
+
+    this.chainSimulator.on('opportunity', (opportunity) => {
+      this.opportunitiesFound++;
+      this.emit('opportunity', opportunity);
+      this.logger.debug('Simulated opportunity detected', {
+        id: opportunity.id,
+        profit: `${opportunity.profitPercentage.toFixed(2)}%`
+      });
+    });
+
+    // Start the simulator
+    this.chainSimulator.start();
+
+    this.logger.info('Simulation mode initialized', {
+      chainId: this.chainId,
+      simulatedPairs: simulatedPairs.length
+    });
+  }
+
+  /**
+   * Handle simulated Sync events from the ChainSimulator.
+   * Processes them the same way as real Sync events from WebSocket.
+   */
+  private handleSimulatedSyncEvent(event: { address: string; data: string; blockNumber: string }): void {
+    const pairAddress = event.address.toLowerCase();
+    const pair = this.pairsByAddress.get(pairAddress);
+
+    if (!pair) {
+      return; // Unknown pair, skip
+    }
+
+    try {
+      // Decode reserves from the simulated data
+      // Data format: 0x + 64 hex chars for reserve0 + 64 hex chars for reserve1
+      const data = event.data.slice(2); // Remove '0x'
+      const reserve0Hex = data.slice(0, 64);
+      const reserve1Hex = data.slice(64, 128);
+
+      const reserve0 = BigInt('0x' + reserve0Hex).toString();
+      const reserve1 = BigInt('0x' + reserve1Hex).toString();
+      const blockNumber = parseInt(event.blockNumber, 16);
+
+      // Update pair reserves (using Object.assign for atomicity)
+      Object.assign(pair, {
+        reserve0,
+        reserve1,
+        blockNumber,
+        lastUpdate: Date.now()
+      });
+
+      this.lastBlockNumber = blockNumber;
+      this.lastBlockTimestamp = Date.now();
+      this.eventsProcessed++;
+
+      // Calculate price and emit price update
+      const price = calculatePriceFromBigIntReserves(
+        BigInt(reserve0),
+        BigInt(reserve1)
+      );
+
+      // Skip if price calculation failed
+      if (price === null) {
+        return;
+      }
+
+      const priceUpdate: PriceUpdate = {
+        chain: this.chainId,
+        dex: pair.dex,
+        pairKey: `${pair.dex}_${pair.token0}_${pair.token1}`,
+        token0: pair.token0,
+        token1: pair.token1,
+        price,
+        reserve0,  // Already a string
+        reserve1,  // Already a string
+        blockNumber,
+        timestamp: Date.now(),
+        latency: 0  // Simulated events have zero latency
+      };
+
+      this.emit('priceUpdate', priceUpdate);
+
+    } catch (error) {
+      this.logger.error('Error processing simulated sync event', { error, pairAddress });
+    }
   }
 
   // ===========================================================================
@@ -583,16 +981,40 @@ export class ChainDetectorInstance extends EventEmitter {
 
       this.eventsProcessed++;
 
-      // Emit swap event for downstream processing
-      const swapEvent: Partial<SwapEvent> = {
+      // Build complete SwapEvent with decoded amounts
+      const amount0In = log.data ? BigInt('0x' + log.data.slice(2, 66)).toString() : '0';
+      const amount1In = log.data ? BigInt('0x' + log.data.slice(66, 130)).toString() : '0';
+      const amount0Out = log.data ? BigInt('0x' + log.data.slice(130, 194)).toString() : '0';
+      const amount1Out = log.data ? BigInt('0x' + log.data.slice(194, 258)).toString() : '0';
+
+      const swapEvent: SwapEvent = {
         chain: this.chainId,
         dex: pair.dex,
         pairAddress: pairAddress,
         blockNumber: parseInt(log.blockNumber, 16),
-        transactionHash: log.transactionHash,
-        timestamp: Date.now()
+        transactionHash: log.transactionHash || '',
+        timestamp: Date.now(),
+        sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '',
+        recipient: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '',
+        amount0In,
+        amount1In,
+        amount0Out,
+        amount1Out,
+        to: '',
+        // BUG-3 FIX: Calculate USD value for accurate whale detection
+        usdValue: this.estimateSwapUsdValue(pair, amount0In, amount1In, amount0Out, amount1Out)
       };
 
+      // Process through filter (handles whale detection via registered handler)
+      if (this.swapEventFilter) {
+        const result = this.swapEventFilter.processEvent(swapEvent);
+        if (!result.passed) return;
+      }
+
+      // Publish to Redis Streams for downstream consumers
+      this.publishSwapEvent(swapEvent);
+
+      // Local emit for any listeners
       this.emit('swapEvent', swapEvent);
     } catch (error) {
       this.logger.error('Error handling Swap event', { error });
@@ -738,6 +1160,16 @@ export class ChainDetectorInstance extends EventEmitter {
         }
       }
     }
+
+    // Triangular/Quadrilateral arbitrage detection (throttled to 500ms)
+    this.checkTriangularOpportunities(pairsSnapshot).catch(error => {
+      this.logger.error('Triangular detection error', { error: (error as Error).message });
+    });
+
+    // Multi-leg arbitrage detection (throttled to 2000ms, uses worker thread)
+    this.checkMultiLegOpportunities(pairsSnapshot).catch(error => {
+      this.logger.error('Multi-leg detection error', { error: (error as Error).message });
+    });
   }
 
   /**
@@ -798,7 +1230,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // BUG FIX: Adjust price for reverse order pairs
     // If tokens are in reverse order, invert the price for accurate comparison
-    if (this.isReverseOrder(pair1, pair2) && price2 !== 0) {
+    const isReversed = this.isReverseOrder(pair1, pair2);
+    if (isReversed && price2 !== 0) {
       price2 = 1 / price2;
     }
 
@@ -819,20 +1252,59 @@ export class ChainDetectorInstance extends EventEmitter {
       return null;
     }
 
+    // Determine buy/sell sides based on prices
+    const buyFromPair1 = price1 < price2;
+    const buyPair = buyFromPair1 ? pair1 : pair2;
+    const sellPair = buyFromPair1 ? pair2 : pair1;
+
+    // CRITICAL FIX: Calculate tokenIn, tokenOut, and amountIn for execution engine
+    // For simple arbitrage: buy token1 on cheaper DEX, sell on expensive DEX
+    // tokenIn = the token we're buying (token1), tokenOut = the token we're selling (token0)
+    const tokenIn = buyPair.token1;  // We buy token1 with token0
+    const tokenOut = buyPair.token0; // We end up with token0 after selling token1
+
+    // CRITICAL FIX: Calculate optimal amountIn based on reserves
+    // Use a conservative percentage of the smaller reserve to limit price impact
+    // The buy pair's reserve1 represents available token1 liquidity
+    const buyReserve1 = buyFromPair1 ? reserve1_1 : reserve2_1;
+    const sellReserve1 = buyFromPair1 ? reserve2_1 : reserve1_1;
+
+    // Use 1% of the smaller liquidity pool to minimize slippage
+    // This is conservative but safe for production
+    const maxTradePercent = 0.01; // 1% of pool
+    const smallerReserve = buyReserve1 < sellReserve1 ? buyReserve1 : sellReserve1;
+    const amountIn = (smallerReserve * BigInt(Math.floor(maxTradePercent * 10000))) / 10000n;
+
+    // Skip if calculated amount is too small (dust)
+    if (amountIn < 1000n) {
+      return null;
+    }
+
+    // CRITICAL FIX: Calculate expectedProfit as ABSOLUTE value (not percentage)
+    // The execution engine treats expectedProfit as wei value to convert via: BigInt(Math.floor(opportunity.expectedProfit * 1e18))
+    // So we need to provide profit in the base unit (e.g., 0.005 ETH = 0.005)
+    // expectedProfit = amountIn * netProfitPct (in token units)
+    const expectedProfitAbsolute = Number(amountIn) * netProfitPct;
+
     const opportunity: ArbitrageOpportunity = {
       id: `${this.chainId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       type: 'simple', // Standardized with base-detector.ts
       chain: this.chainId,
-      buyDex: price1 < price2 ? pair1.dex : pair2.dex,
-      sellDex: price1 < price2 ? pair2.dex : pair1.dex,
-      buyPair: price1 < price2 ? pair1.address : pair2.address,
-      sellPair: price1 < price2 ? pair2.address : pair1.address,
+      buyDex: buyPair.dex,
+      sellDex: sellPair.dex,
+      buyPair: buyPair.address,
+      sellPair: sellPair.address,
       token0: pair1.token0,
       token1: pair1.token1,
+      // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
+      tokenIn,
+      tokenOut,
+      amountIn: amountIn.toString(),
       buyPrice: Math.min(price1, price2),
       sellPrice: Math.max(price1, price2),
-      profitPercentage: netProfitPct * 100, // Convert to percentage
-      expectedProfit: netProfitPct, // Net profit after fees
+      profitPercentage: netProfitPct * 100, // Convert to percentage for display
+      // CRITICAL FIX: expectedProfit is now ABSOLUTE value (required by engine.ts:1380)
+      expectedProfit: expectedProfitAbsolute,
       estimatedProfit: 0, // To be calculated by execution engine
       gasEstimate: String(this.detectorConfig.gasEstimate),
       confidence: this.detectorConfig.confidence,
@@ -861,6 +1333,262 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // ===========================================================================
+  // Triangular/Quadrilateral Arbitrage Detection
+  // ===========================================================================
+
+  /**
+   * Convert PairSnapshot to DexPool format required by CrossDexTriangularArbitrage.
+   */
+  private convertPairSnapshotToDexPool(snapshot: PairSnapshot): DexPool {
+    const reserve0 = BigInt(snapshot.reserve0);
+    const reserve1 = BigInt(snapshot.reserve1);
+    const price = reserve0 > 0n ? Number(reserve1) / Number(reserve0) : 0;
+
+    // Estimate liquidity from reserves (simplified USD estimation)
+    const liquidity = Number(reserve0) * price * 2;
+
+    return {
+      dex: snapshot.dex,
+      token0: snapshot.token0,
+      token1: snapshot.token1,
+      reserve0: snapshot.reserve0,
+      reserve1: snapshot.reserve1,
+      fee: Math.round((snapshot.fee ?? 0.003) * 10000), // Convert to basis points
+      liquidity,
+      price
+    };
+  }
+
+  /**
+   * Check for triangular and quadrilateral arbitrage opportunities.
+   * Throttled to 500ms to prevent excessive CPU usage.
+   */
+  private async checkTriangularOpportunities(pairsSnapshot: Map<string, PairSnapshot>): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastTriangularCheck < this.TRIANGULAR_CHECK_INTERVAL_MS) {
+      return;
+    }
+    this.lastTriangularCheck = now;
+
+    if (pairsSnapshot.size < 3) return;
+
+    const pools: DexPool[] = Array.from(pairsSnapshot.values())
+      .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+
+    // BUG-1 FIX: Use token addresses instead of symbols
+    // DexPool.token0/token1 contain addresses, so baseTokens must also be addresses
+    // for the findReachableTokens() token matching to work correctly
+    const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
+
+    try {
+      // Find triangular opportunities (3-token cycles)
+      const triangularOpps = await this.triangularDetector.findTriangularOpportunities(
+        this.chainId, pools, baseTokens
+      );
+
+      for (const opp of triangularOpps) {
+        await this.emitTriangularOpportunity(opp, 'triangular');
+      }
+
+      // Find quadrilateral opportunities (4-token cycles) if enough pools
+      if (pools.length >= 4) {
+        const quadOpps = await this.triangularDetector.findQuadrilateralOpportunities(
+          this.chainId, pools, baseTokens
+        );
+        for (const opp of quadOpps) {
+          await this.emitTriangularOpportunity(opp, 'quadrilateral');
+        }
+      }
+    } catch (error) {
+      this.logger.error('Triangular/quadrilateral detection failed', { error });
+    }
+  }
+
+  /**
+   * Emit a triangular or quadrilateral arbitrage opportunity.
+   */
+  private async emitTriangularOpportunity(
+    opp: TriangularOpportunity | QuadrilateralOpportunity,
+    type: 'triangular' | 'quadrilateral'
+  ): Promise<void> {
+    // CRITICAL FIX: Extract tokenIn, tokenOut, amountIn from steps for execution engine
+    // For cycles: tokenIn = tokenOut = starting token (we end up with same token)
+    const firstStep = opp.steps[0];
+    const tokenIn = firstStep?.fromToken || opp.path[0];
+    const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
+    const amountIn = firstStep?.amountIn || 0;
+
+    const opportunity: ArbitrageOpportunity = {
+      id: opp.id,
+      type,
+      chain: this.chainId,
+      buyDex: opp.steps[0]?.dex || '',
+      sellDex: opp.steps[opp.steps.length - 1]?.dex || '',
+      token0: opp.path[0],
+      token1: opp.path[1],
+      // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
+      tokenIn,
+      tokenOut,
+      amountIn: String(Math.floor(amountIn)),
+      buyPrice: 0,
+      sellPrice: 0,
+      profitPercentage: opp.profitPercentage,
+      // CRITICAL FIX: expectedProfit is already an absolute value from the detector
+      expectedProfit: opp.netProfit,
+      gasEstimate: String(this.detectorConfig.gasEstimate * opp.steps.length),
+      confidence: opp.confidence,
+      timestamp: opp.timestamp,
+      expiresAt: Date.now() + this.detectorConfig.expiryMs,
+      blockNumber: this.lastBlockNumber,
+      status: 'pending'
+    };
+
+    this.opportunitiesFound++;
+    await this.emitOpportunity(opportunity);
+
+    this.logger.debug(`${type} opportunity detected`, {
+      id: opp.id,
+      profit: `${opp.profitPercentage.toFixed(2)}%`,
+      path: opp.path.join(' → ')
+    });
+  }
+
+  // ===========================================================================
+  // Multi-Leg Arbitrage Detection
+  // ===========================================================================
+
+  /**
+   * Check for multi-leg arbitrage opportunities (5-7 token paths).
+   * Throttled to 2000ms and uses worker thread for expensive computation.
+   */
+  private async checkMultiLegOpportunities(pairsSnapshot: Map<string, PairSnapshot>): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastMultiLegCheck < this.MULTI_LEG_CHECK_INTERVAL_MS) {
+      return;
+    }
+
+    if (pairsSnapshot.size < 5 || !this.multiLegPathFinder) return;
+    this.lastMultiLegCheck = now;
+
+    const pools: DexPool[] = Array.from(pairsSnapshot.values())
+      .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+
+    // BUG-1 FIX: Use token addresses instead of symbols (same fix as triangular)
+    const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
+
+    try {
+      // Use async version to offload to worker thread
+      const opportunities = await this.multiLegPathFinder.findMultiLegOpportunitiesAsync(
+        this.chainId, pools, baseTokens, 5
+      );
+
+      for (const opp of opportunities) {
+        await this.emitMultiLegOpportunity(opp);
+      }
+    } catch (error) {
+      this.logger.error('Multi-leg path finding failed', { error });
+    }
+  }
+
+  /**
+   * Emit a multi-leg arbitrage opportunity.
+   */
+  private async emitMultiLegOpportunity(opp: MultiLegOpportunity): Promise<void> {
+    // CRITICAL FIX: Extract tokenIn, tokenOut, amountIn from steps for execution engine
+    // For cycles: tokenIn = tokenOut = starting token (we end up with same token)
+    const firstStep = opp.steps[0];
+    const tokenIn = firstStep?.fromToken || opp.path[0];
+    const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
+    const amountIn = firstStep?.amountIn || 0;
+
+    const opportunity: ArbitrageOpportunity = {
+      id: opp.id,
+      type: 'multi-leg',
+      chain: this.chainId,
+      buyDex: opp.steps[0]?.dex || '',
+      sellDex: opp.steps[opp.steps.length - 1]?.dex || '',
+      token0: opp.path[0],
+      token1: opp.path[1],
+      // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
+      tokenIn,
+      tokenOut,
+      amountIn: String(Math.floor(amountIn)),
+      buyPrice: 0,
+      sellPrice: 0,
+      profitPercentage: opp.profitPercentage,
+      // CRITICAL FIX: expectedProfit is already an absolute value from the detector
+      expectedProfit: opp.netProfit,
+      gasEstimate: String(this.detectorConfig.gasEstimate * opp.steps.length),
+      confidence: opp.confidence,
+      timestamp: opp.timestamp,
+      expiresAt: Date.now() + this.detectorConfig.expiryMs,
+      blockNumber: this.lastBlockNumber,
+      status: 'pending'
+    };
+
+    this.opportunitiesFound++;
+    await this.emitOpportunity(opportunity);
+
+    this.logger.debug('Multi-leg opportunity detected', {
+      id: opp.id,
+      profit: `${opp.profitPercentage.toFixed(2)}%`,
+      pathLength: opp.path.length,
+      path: opp.path.join(' → ')
+    });
+  }
+
+  // ===========================================================================
+  // Whale Alert Publishing
+  // ===========================================================================
+
+  /**
+   * Publish whale alert to Redis Streams for cross-chain detector consumption.
+   */
+  private async publishWhaleAlert(alert: WhaleAlert): Promise<void> {
+    try {
+      const whaleTransaction = {
+        transactionHash: alert.event.transactionHash || '',
+        address: alert.event.sender || '',
+        token: alert.pairAddress,
+        amount: alert.usdValue,
+        usdValue: alert.usdValue,
+        direction: BigInt(alert.event.amount0In || '0') > 0n ? 'sell' : 'buy',
+        dex: alert.dex,
+        chain: this.chainId,
+        timestamp: alert.timestamp,
+        impact: 0
+      };
+
+      await this.streamsClient.xadd(
+        RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        whaleTransaction
+      );
+
+      this.logger.info('Whale alert published', {
+        usdValue: alert.usdValue,
+        dex: alert.dex,
+        direction: whaleTransaction.direction
+      });
+    } catch (error) {
+      this.logger.error('Whale alert publish failed', { error });
+    }
+  }
+
+  /**
+   * Publish swap event to Redis Streams.
+   */
+  private async publishSwapEvent(event: SwapEvent): Promise<void> {
+    try {
+      await this.streamsClient.xadd(
+        RedisStreamsClient.STREAMS.SWAP_EVENTS,
+        event
+      );
+    } catch (error) {
+      this.logger.error('Failed to publish swap event', { error });
+    }
+  }
+
+  // ===========================================================================
   // Helpers
   // ===========================================================================
 
@@ -874,6 +1602,85 @@ export class ChainDetectorInstance extends EventEmitter {
   private getTokenSymbol(address: string): string {
     const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
     return token?.symbol || address.slice(0, 8);
+  }
+
+  /**
+   * Check if a token symbol represents a stablecoin.
+   * Used for USD value estimation in swap events.
+   */
+  private isStablecoin(symbol: string): boolean {
+    const stableSymbols = ['USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'];
+    return stableSymbols.includes(symbol.toUpperCase());
+  }
+
+  /**
+   * Get token decimals for accurate amount conversion.
+   */
+  private getTokenDecimals(address: string): number {
+    const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+    return token?.decimals ?? 18; // Default to 18 decimals
+  }
+
+  /**
+   * BUG-3 FIX: Estimate USD value of a swap for whale detection.
+   * Uses stablecoin amounts directly or estimates via reserve ratios.
+   */
+  private estimateSwapUsdValue(
+    pair: ExtendedPair,
+    amount0In: string,
+    amount1In: string,
+    amount0Out: string,
+    amount1Out: string
+  ): number {
+    try {
+      const token0Symbol = this.getTokenSymbol(pair.token0);
+      const token1Symbol = this.getTokenSymbol(pair.token1);
+      const token0Decimals = this.getTokenDecimals(pair.token0);
+      const token1Decimals = this.getTokenDecimals(pair.token1);
+
+      // Convert amounts to human-readable numbers
+      const amt0In = Number(BigInt(amount0In)) / Math.pow(10, token0Decimals);
+      const amt1In = Number(BigInt(amount1In)) / Math.pow(10, token1Decimals);
+      const amt0Out = Number(BigInt(amount0Out)) / Math.pow(10, token0Decimals);
+      const amt1Out = Number(BigInt(amount1Out)) / Math.pow(10, token1Decimals);
+
+      // If token0 is a stablecoin, use its amounts directly as USD
+      if (this.isStablecoin(token0Symbol)) {
+        return Math.max(amt0In, amt0Out);
+      }
+
+      // If token1 is a stablecoin, use its amounts directly as USD
+      if (this.isStablecoin(token1Symbol)) {
+        return Math.max(amt1In, amt1Out);
+      }
+
+      // Neither token is a stablecoin - estimate using reserve ratios
+      // Use reserve0/reserve1 ratio to estimate USD value
+      // This is a heuristic assuming reasonable market prices
+      const reserve0 = Number(BigInt(pair.reserve0)) / Math.pow(10, token0Decimals);
+      const reserve1 = Number(BigInt(pair.reserve1)) / Math.pow(10, token1Decimals);
+
+      if (reserve0 > 0 && reserve1 > 0) {
+        // Estimate token values based on reserve ratio
+        // Assumes roughly equal USD value in both reserves (constant product)
+        const token0MaxAmount = Math.max(amt0In, amt0Out);
+        const token1MaxAmount = Math.max(amt1In, amt1Out);
+
+        // Use the larger of the two estimates
+        // This is conservative for whale detection
+        const estimate0 = token0MaxAmount * (reserve1 / reserve0);
+        const estimate1 = token1MaxAmount * (reserve0 / reserve1);
+
+        return Math.max(estimate0, estimate1);
+      }
+
+      // Fallback: return 0 if we can't estimate
+      return 0;
+    } catch (error) {
+      // Log and return 0 on error
+      this.logger.debug('USD value estimation failed', { error: (error as Error).message });
+      return 0;
+    }
   }
 
   // ===========================================================================

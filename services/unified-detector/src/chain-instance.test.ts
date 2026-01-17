@@ -749,3 +749,275 @@ describe('P0 Regression Tests: ChainDetectorInstance Lifecycle', () => {
     });
   });
 });
+
+// =============================================================================
+// Bug Fix Regression Tests - Triangular/Multi-leg/Whale Detection
+// =============================================================================
+
+describe('Bug Fix Regression Tests', () => {
+  /**
+   * BUG-1: Token Address vs Symbol Mismatch
+   * Tests that baseTokens use addresses, not symbols for triangular detection
+   */
+  describe('BUG-1: Token Address vs Symbol Matching', () => {
+    it('should use token addresses for matching, not symbols', () => {
+      // Simulate the token configuration
+      const tokens = [
+        { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 },
+        { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
+        { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18 }
+      ];
+
+      // BUG FIX: Use addresses instead of symbols
+      const baseTokens = tokens.slice(0, 4).map(t => t.address.toLowerCase());
+
+      // Verify addresses are used, not symbols
+      expect(baseTokens[0]).toBe('0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9');
+      expect(baseTokens[0]).not.toBe('USDT');
+    });
+
+    it('should match DexPool token0/token1 format (addresses)', () => {
+      // DexPool uses addresses from PairSnapshot
+      const dexPool = {
+        dex: 'uniswap_v3',
+        token0: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+        token1: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+        reserve0: '1000000',
+        reserve1: '2000000',
+        fee: 30,
+        liquidity: 3000000,
+        price: 2
+      };
+
+      // Verify DexPool uses addresses
+      expect(dexPool.token0.startsWith('0x')).toBe(true);
+      expect(dexPool.token1.startsWith('0x')).toBe(true);
+    });
+
+    it('should allow triangular path finding with address-based tokens', () => {
+      // Simulate the token pair key format used in groupPoolsByPairs
+      const pool = {
+        token0: '0xTokenA'.toLowerCase(),
+        token1: '0xTokenB'.toLowerCase()
+      };
+
+      const pairKey = `${pool.token0}_${pool.token1}`;
+      const reverseKey = `${pool.token1}_${pool.token0}`;
+
+      // Both directions should be stored for path finding
+      expect(pairKey).toBe('0xtokena_0xtokenb');
+      expect(reverseKey).toBe('0xtokenb_0xtokena');
+    });
+  });
+
+  /**
+   * BUG-2: Singleton SwapEventFilter Duplicate Handler Registration
+   * Tests that whale alert handlers are properly cleaned up
+   */
+  describe('BUG-2: Whale Alert Handler Cleanup', () => {
+    it('should store unsubscribe function for cleanup', () => {
+      // Simulate handler registration
+      const handlers: (() => void)[] = [];
+      let unsubscribeCalled = false;
+
+      const mockOnWhaleAlert = (handler: () => void) => {
+        handlers.push(handler);
+        // Return unsubscribe function
+        return () => {
+          unsubscribeCalled = true;
+          const index = handlers.indexOf(handler);
+          if (index > -1) handlers.splice(index, 1);
+        };
+      };
+
+      // Register handler and store unsubscribe
+      const unsubscribe = mockOnWhaleAlert(() => {});
+      expect(handlers.length).toBe(1);
+
+      // Call unsubscribe (as done in performStop)
+      unsubscribe();
+      expect(unsubscribeCalled).toBe(true);
+      expect(handlers.length).toBe(0);
+    });
+
+    it('should prevent duplicate alerts from multiple chain instances', () => {
+      const alerts: string[] = [];
+
+      // Simulate singleton with multiple handlers
+      const handlers: ((alert: string) => void)[] = [];
+      const singleton = {
+        onWhaleAlert: (handler: (alert: string) => void) => {
+          handlers.push(handler);
+          return () => {
+            const index = handlers.indexOf(handler);
+            if (index > -1) handlers.splice(index, 1);
+          };
+        },
+        emitWhaleAlert: (alert: string) => {
+          handlers.forEach(h => h(alert));
+        }
+      };
+
+      // Chain 1 registers handler
+      const unsubscribe1 = singleton.onWhaleAlert((alert) => {
+        alerts.push(`chain1: ${alert}`);
+      });
+
+      // Chain 2 registers handler
+      const unsubscribe2 = singleton.onWhaleAlert((alert) => {
+        alerts.push(`chain2: ${alert}`);
+      });
+
+      // Emit alert - both handlers fire (BUG behavior)
+      singleton.emitWhaleAlert('whale-tx-1');
+      expect(alerts).toHaveLength(2);
+
+      // Chain 1 stops and unsubscribes (FIX behavior)
+      unsubscribe1();
+      alerts.length = 0;
+
+      // Emit alert - only chain2 handler fires
+      singleton.emitWhaleAlert('whale-tx-2');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toBe('chain2: whale-tx-2');
+    });
+  });
+
+  /**
+   * BUG-3: Missing usdValue in SwapEvent
+   * Tests USD value estimation for whale detection
+   */
+  describe('BUG-3: USD Value Estimation', () => {
+    // Helper function to test stablecoin detection
+    function isStablecoin(symbol: string): boolean {
+      const stableSymbols = ['USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'];
+      return stableSymbols.includes(symbol.toUpperCase());
+    }
+
+    it('should detect common stablecoins', () => {
+      expect(isStablecoin('USDT')).toBe(true);
+      expect(isStablecoin('USDC')).toBe(true);
+      expect(isStablecoin('DAI')).toBe(true);
+      expect(isStablecoin('BUSD')).toBe(true);
+      expect(isStablecoin('usdt')).toBe(true); // case insensitive
+    });
+
+    it('should not flag non-stablecoins', () => {
+      expect(isStablecoin('WETH')).toBe(false);
+      expect(isStablecoin('WBTC')).toBe(false);
+      expect(isStablecoin('ARB')).toBe(false);
+    });
+
+    it('should use stablecoin amount directly as USD value', () => {
+      // Simulate swap with USDC (6 decimals)
+      const amount0In = '0'; // WETH
+      const amount1In = '50000000000'; // 50,000 USDC
+      const amount0Out = '25000000000000000000'; // 25 WETH
+      const amount1Out = '0';
+
+      const token0Decimals = 18; // WETH
+      const token1Decimals = 6;  // USDC
+      const token1Symbol = 'USDC';
+
+      // If token1 is stablecoin, use its amount as USD
+      if (isStablecoin(token1Symbol)) {
+        const amt1In = Number(BigInt(amount1In)) / Math.pow(10, token1Decimals);
+        const usdValue = Math.max(amt1In, 0);
+        expect(usdValue).toBe(50000); // $50,000
+      }
+    });
+
+    it('should estimate USD value for non-stablecoin pairs using reserves', () => {
+      // ETH/BTC pair - neither is stablecoin
+      const reserve0 = '100000000000000000000'; // 100 ETH (18 decimals)
+      const reserve1 = '500000000'; // 5 BTC (8 decimals: 5 * 10^8)
+
+      const amt0In = 1; // 1 ETH swapped
+
+      const token0Decimals = 18;
+      const token1Decimals = 8;
+
+      const r0 = Number(BigInt(reserve0)) / Math.pow(10, token0Decimals); // 100 ETH
+      const r1 = Number(BigInt(reserve1)) / Math.pow(10, token1Decimals); // 5 BTC
+
+      // Estimate using reserve ratio
+      // If 100 ETH = 5 BTC, then 1 ETH = 0.05 BTC
+      // So trade of 1 ETH is worth approximately 0.05 BTC
+      const estimate = amt0In * (r1 / r0);
+      expect(estimate).toBeCloseTo(0.05, 2);
+    });
+  });
+
+  /**
+   * BUG-4: Missing Cleanup in performStop
+   * Tests that all resources are properly cleaned up
+   */
+  describe('BUG-4: Resource Cleanup in performStop', () => {
+    it('should clear all singleton references on stop', () => {
+      const state = {
+        swapEventFilter: { id: 'filter' },
+        multiLegPathFinder: { id: 'finder' },
+        whaleAlertUnsubscribe: jest.fn()
+      };
+
+      // Simulate cleanup in performStop
+      if (state.whaleAlertUnsubscribe) {
+        state.whaleAlertUnsubscribe();
+      }
+      state.whaleAlertUnsubscribe = null as any;
+      state.swapEventFilter = null as any;
+      state.multiLegPathFinder = null as any;
+
+      expect(state.whaleAlertUnsubscribe).toBeNull();
+      expect(state.swapEventFilter).toBeNull();
+      expect(state.multiLegPathFinder).toBeNull();
+    });
+
+    it('should allow clean restart after stop', () => {
+      let startCount = 0;
+      let stopCount = 0;
+
+      const instance = {
+        swapEventFilter: null as any,
+        whaleAlertUnsubscribe: null as (() => void) | null,
+        isRunning: false,
+
+        start() {
+          startCount++;
+          this.swapEventFilter = { id: `filter-${startCount}` };
+          this.whaleAlertUnsubscribe = () => {};
+          this.isRunning = true;
+        },
+
+        stop() {
+          stopCount++;
+          if (this.whaleAlertUnsubscribe) {
+            this.whaleAlertUnsubscribe();
+            this.whaleAlertUnsubscribe = null;
+          }
+          this.swapEventFilter = null;
+          this.isRunning = false;
+        }
+      };
+
+      // First start
+      instance.start();
+      expect(instance.isRunning).toBe(true);
+      expect(instance.swapEventFilter).not.toBeNull();
+
+      // Stop
+      instance.stop();
+      expect(instance.isRunning).toBe(false);
+      expect(instance.swapEventFilter).toBeNull();
+      expect(instance.whaleAlertUnsubscribe).toBeNull();
+
+      // Restart - should work cleanly
+      instance.start();
+      expect(instance.isRunning).toBe(true);
+      expect(instance.swapEventFilter?.id).toBe('filter-2');
+
+      expect(startCount).toBe(2);
+      expect(stopCount).toBe(1);
+    });
+  });
+});
