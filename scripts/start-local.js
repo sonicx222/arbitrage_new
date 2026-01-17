@@ -200,13 +200,28 @@ async function startService(service) {
     };
 
     const isWindows = process.platform === 'win32';
-    const child = spawn('npx', ['ts-node', '-r', 'dotenv/config', '-r', 'tsconfig-paths/register', service.script], {
-      cwd: ROOT_DIR,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: !isWindows,  // Don't detach on Windows
-      shell: isWindows       // Use shell on Windows for proper command resolution
-    });
+
+    // FIX: DEP0190 - When using shell: true, pass command as a single string
+    // to avoid the deprecation warning about passing args with shell option
+    let child;
+    if (isWindows) {
+      // On Windows, use shell with a single command string
+      const command = `npx ts-node -r dotenv/config -r tsconfig-paths/register ${service.script}`;
+      child = spawn(command, [], {
+        cwd: ROOT_DIR,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true
+      });
+    } else {
+      // On Unix, use array args without shell for better process management
+      child = spawn('npx', ['ts-node', '-r', 'dotenv/config', '-r', 'tsconfig-paths/register', service.script], {
+        cwd: ROOT_DIR,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true
+      });
+    }
 
     // Store PID for later cleanup
     const pids = loadPids();

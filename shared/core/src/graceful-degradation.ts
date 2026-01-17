@@ -261,6 +261,14 @@ export class GracefulDegradationManager {
         recoveryPriority: 10
       },
       {
+        name: 'partial',
+        description: 'Partial chain coverage - some chains unavailable',
+        enabledFeatures: ['arbitrage_detection', 'price_prediction', 'real_time_updates'],
+        disabledFeatures: [],
+        performanceImpact: 0.15,
+        recoveryPriority: 9
+      },
+      {
         name: 'reduced_accuracy',
         description: 'Reduced prediction accuracy, cached data',
         enabledFeatures: ['arbitrage_detection', 'real_time_updates'],
@@ -295,7 +303,19 @@ export class GracefulDegradationManager {
     ];
 
     // Register default levels for common services
-    const services = ['bsc-detector', 'ethereum-detector', 'cross-chain-detector', 'execution-engine', 'coordinator'];
+    // FIX: Added unified-detector partition services to support graceful degradation
+    const services = [
+      'bsc-detector',
+      'ethereum-detector',
+      'cross-chain-detector',
+      'execution-engine',
+      'coordinator',
+      // Unified detector partitions (ADR-003)
+      'unified-detector-asia-fast',
+      'unified-detector-l2-turbo',
+      'unified-detector-high-value',
+      'unified-detector-solana'
+    ];
 
     for (const service of services) {
       for (const level of defaultLevels) {
