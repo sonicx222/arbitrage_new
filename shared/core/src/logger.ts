@@ -8,10 +8,17 @@ const { combine, timestamp, printf, colorize, errors } = format;
 // P2-FIX: Export Logger type for consistent type usage across codebase
 export type Logger = winston.Logger;
 
+// BigInt-safe JSON serializer
+function safeStringify(obj: any): string {
+  return JSON.stringify(obj, (_, value) =>
+    typeof value === 'bigint' ? value.toString() : value
+  );
+}
+
 // Custom log format
 const logFormat = printf(({ level, message, timestamp, service, ...meta }: any) => {
   const serviceName = service || 'unknown';
-  const metaStr = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : '';
+  const metaStr = Object.keys(meta).length > 0 ? ` ${safeStringify(meta)}` : '';
   return `${timestamp} [${serviceName}] ${level}: ${message}${metaStr}`;
 });
 

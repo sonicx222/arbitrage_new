@@ -15,6 +15,17 @@ export interface Chain {
   isEVM?: boolean;
 }
 
+/**
+ * S3.3.2: DEX type classification for different liquidity models.
+ * - amm: Automated Market Maker (constant product, xy=k)
+ * - clmm: Concentrated Liquidity Market Maker (Uniswap V3 style)
+ * - dlmm: Dynamic Liquidity Market Maker (Meteora bin-based)
+ * - orderbook: On-chain order book (Phoenix)
+ * - pmm: Proactive Market Maker (oracle-based pricing)
+ * - aggregator: Routes through other DEXs (Jupiter)
+ */
+export type DexType = 'amm' | 'clmm' | 'dlmm' | 'orderbook' | 'pmm' | 'aggregator';
+
 export interface Dex {
   name: string;
   chain: string;
@@ -22,6 +33,8 @@ export interface Dex {
   routerAddress: string;
   fee: number; // Config stores in basis points (e.g., 30 = 0.30%). Use dexFeeToPercentage() to convert.
   enabled?: boolean; // Optional: defaults to true if not specified
+  /** S3.3.2: DEX type classification (primarily for Solana non-factory DEXs) */
+  type?: DexType;
 }
 
 export interface Token {

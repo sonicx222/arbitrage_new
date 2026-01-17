@@ -610,21 +610,72 @@ export const DEXES: Record<string, Dex[]> = {
       fee: 30
     }
   ],
-  // Solana: 2 DEXs (Non-EVM, uses different program addresses)
+  // S3.3.2: Solana DEXs (Non-EVM, uses Solana program IDs)
+  // 7 DEXs: Jupiter, Raydium AMM, Raydium CLMM, Orca, Meteora, Phoenix, Lifinity
   solana: [
     {
-      name: 'raydium',          // [C] - Largest on Solana
+      name: 'jupiter',          // [C] - Largest aggregator on Solana
+      chain: 'solana',
+      factoryAddress: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+      routerAddress: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+      fee: 0, // Aggregator - fee comes from underlying DEX
+      type: 'aggregator',
+      enabled: false // Disabled for direct pool detection (routes through other DEXs)
+    },
+    {
+      name: 'raydium',          // [C] - Largest AMM on Solana
       chain: 'solana',
       factoryAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // AMM Program
       routerAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-      fee: 25
+      fee: 25, // 0.25%
+      type: 'amm',
+      enabled: true
     },
     {
-      name: 'orca',             // [H] - Second largest
+      name: 'raydium-clmm',     // [C] - Raydium Concentrated Liquidity
       chain: 'solana',
-      factoryAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', // Whirlpool Program
-      routerAddress: '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP',
-      fee: 30
+      factoryAddress: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // CLMM Program
+      routerAddress: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK',
+      fee: 25, // Dynamic based on pool
+      type: 'clmm',
+      enabled: true
+    },
+    {
+      name: 'orca',             // [H] - Second largest, Whirlpools
+      chain: 'solana',
+      // FIX S3.3.2: Corrected Orca Whirlpool program ID (was 9W959... legacy token swap)
+      factoryAddress: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Whirlpool Program
+      routerAddress: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',
+      fee: 30, // Dynamic based on pool
+      type: 'clmm',
+      enabled: true
+    },
+    {
+      name: 'meteora',          // [H] - Dynamic Liquidity Market Maker
+      chain: 'solana',
+      factoryAddress: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', // DLMM Program
+      routerAddress: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
+      fee: 20, // Dynamic based on bin step
+      type: 'dlmm',
+      enabled: true
+    },
+    {
+      name: 'phoenix',          // [H] - On-chain order book
+      chain: 'solana',
+      factoryAddress: 'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',
+      routerAddress: 'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',
+      fee: 10, // 0.1% taker fee
+      type: 'orderbook',
+      enabled: true
+    },
+    {
+      name: 'lifinity',         // [H] - Proactive market maker with oracle pricing
+      chain: 'solana',
+      factoryAddress: '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c',
+      routerAddress: '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c',
+      fee: 20, // 0.2%
+      type: 'pmm',
+      enabled: true
     }
   ]
 };
@@ -801,19 +852,30 @@ export const CORE_TOKENS: Record<string, Token[]> = {
     { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8, chainId: 59144 },
     { address: '0x7d43AABC515C356145049227CeE54B608342c0ad', symbol: 'BUSD', decimals: 18, chainId: 59144 }
   ],
-  // Solana: 8 tokens (non-EVM - uses different address format)
+  // S3.3.3: Solana - 15 tokens (non-EVM - uses different address format)
+  // Categories: anchor (1), stablecoin (2), defi (3), meme (2), governance (4), LST (3)
   solana: [
     // Anchor tokens - Solana uses base58 addresses
     { address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9, chainId: 101 },
+    // Stablecoins
     { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6, chainId: 101 },
     { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6, chainId: 101 },
-    // Core DeFi
+    // Core DeFi (DEX governance tokens)
     { address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', symbol: 'JUP', decimals: 6, chainId: 101 },
     { address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', symbol: 'RAY', decimals: 6, chainId: 101 },
     { address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', symbol: 'ORCA', decimals: 6, chainId: 101 },
-    // High-volume meme
+    // High-volume meme tokens
     { address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK', decimals: 5, chainId: 101 },
-    { address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', symbol: 'WIF', decimals: 6, chainId: 101 }
+    { address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', symbol: 'WIF', decimals: 6, chainId: 101 },
+    // S3.3.3: Governance tokens (ecosystem protocols)
+    { address: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL', symbol: 'JTO', decimals: 9, chainId: 101 },   // Jito governance
+    { address: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3', symbol: 'PYTH', decimals: 6, chainId: 101 },  // Pyth Network oracle
+    { address: '85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ', symbol: 'W', decimals: 6, chainId: 101 },     // Wormhole governance
+    { address: 'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey', symbol: 'MNDE', decimals: 9, chainId: 101 },  // Marinade governance
+    // S3.3.3: Liquid Staking Tokens (LST) - High volume for arbitrage
+    { address: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', symbol: 'mSOL', decimals: 9, chainId: 101 },     // Marinade staked SOL
+    { address: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', symbol: 'jitoSOL', decimals: 9, chainId: 101 }, // Jito staked SOL
+    { address: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1', symbol: 'BSOL', decimals: 9, chainId: 101 }      // BlazeStake staked SOL
   ]
 };
 
@@ -935,6 +997,7 @@ export const PARTITION_CONFIG = {
 // Track progress against targets from ADR-008
 // S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
 // S3.2.2: Updated for Fantom expansion (11 chains, 46 DEXes, 98 tokens)
+// S3.3.3: Updated for Solana token expansion (11 chains, 49 DEXes, 112 tokens)
 // Phase 1 Adapters: Added vault-model DEX adapters (GMX, Platypus, Beethoven X)
 // =============================================================================
 export const PHASE_METRICS = {
@@ -949,10 +1012,13 @@ export const PHASE_METRICS = {
     // Phase 1 with vault-model adapters:
     // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
     // - 49 DEXes (46 + 3 newly enabled: GMX, Platypus, Beethoven X with adapters)
-    // - 105 tokens (S3.2.1: 15 Avalanche + S3.2.2: 10 Fantom)
-    phase1: { chains: 11, dexes: 49, tokens: 105, opportunities: 500 },
-    phase2: { chains: 15, dexes: 60, tokens: 130, opportunities: 750 },
-    phase3: { chains: 20, dexes: 80, tokens: 180, opportunities: 1000 }
+    // - 112 tokens breakdown:
+    //   Original 6 chains: 60 (arb:12 + bsc:10 + base:10 + poly:10 + opt:10 + eth:8)
+    //   S3.1.2 new chains: 12 (zksync:6 + linea:6)
+    //   S3.2.1 Avalanche: 15, S3.2.2 Fantom: 10, S3.3.3 Solana: 15
+    phase1: { chains: 11, dexes: 49, tokens: 112, opportunities: 500 },
+    phase2: { chains: 15, dexes: 60, tokens: 145, opportunities: 750 },
+    phase3: { chains: 20, dexes: 80, tokens: 200, opportunities: 1000 }
   }
 };
 

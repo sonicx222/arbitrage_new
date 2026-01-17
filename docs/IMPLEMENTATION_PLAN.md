@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-14 (S3.2.4 Cross-chain detection verification: 48 tests)
-> **Tests**: 3487 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests)
+> **Last Updated**: 2025-01-17 (S3.3.4 Solana swap parser: 98 tests)
+> **Tests**: 3810 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests)
 
 ---
 
@@ -709,7 +709,7 @@
 ---
 
 #### S3.3: Solana Blockchain Integration
-**Status**: `[ ] Not Started`
+**Status**: `[~] In Progress` (S3.3.1, S3.3.2 completed)
 **Priority**: P0 | **Effort**: 5 days | **Confidence**: 80%
 
 **Hypothesis**: Solana adds 25-35% more arbitrage opportunities due to high DEX volume, fast finality (~400ms), and low fees.
@@ -723,14 +723,20 @@
 
 **Tasks**:
 ```
-[ ] S3.3.1 Create Solana detector base infrastructure
+[x] S3.3.1 Create Solana detector base infrastructure
     - File: shared/core/src/solana-detector.ts
     - Uses @solana/web3.js for RPC/WebSocket
     - Different architecture: Program account subscriptions vs event logs
     - Connection pooling for RPC rate limits
-    - Tests: shared/core/src/solana-detector.test.ts
+    - Tests: shared/core/src/solana-detector.test.ts (52 unit tests)
+    - Integration tests: tests/integration/s3.3.1-solana-detector.integration.test.ts (49 tests)
+    - COMPLETED: 2025-01-16 - TDD implementation with 101 total tests
+    - Features: Connection pooling, program subscriptions, pool management,
+      arbitrage detection, health monitoring, lifecycle management
+    - Bug fixes applied: Connection index tracking, exponential backoff,
+      mutex for slot updates, pool iteration race condition
 
-[ ] S3.3.2 Add Solana DEX configurations (7 DEXs)
+[x] S3.3.2 Add Solana DEX configurations (7 DEXs)
     - Jupiter (aggregator): Program ID JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
     - Raydium AMM: Program ID 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
     - Raydium CLMM: Program ID CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
@@ -738,9 +744,15 @@
     - Meteora DLMM: Program ID LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo
     - Phoenix: Program ID PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY
     - Lifinity: Program ID 2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c
-    - Config: shared/config/src/chains/solana.ts
+    - Config: shared/config/src/index.ts (DEXES.solana)
+    - Tests: tests/integration/s3.3.2-solana-dex-configuration.integration.test.ts (73 tests)
+    - COMPLETED: 2025-01-16 - TDD implementation
+    - Added DEX type classification (amm, clmm, dlmm, orderbook, pmm, aggregator)
+    - Fixed Orca Whirlpool program ID (was 9W959... legacy token swap)
+    - Added type field to Dex interface in shared/types
+    - 6 enabled DEXs (Jupiter disabled as aggregator)
 
-[ ] S3.3.3 Add Solana token configurations (15 tokens)
+[x] S3.3.3 Add Solana token configurations (15 tokens)
     - SOL (native): So11111111111111111111111111111111111111112
     - USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
     - USDT: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
@@ -756,13 +768,26 @@
     - BSOL: bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1
     - W (Wormhole): 85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ
     - MNDE: MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey
+    - Config: shared/config/src/index.ts (CORE_TOKENS.solana)
+    - Tests: tests/integration/s3.3.3-solana-token-configuration.integration.test.ts (51 tests)
+    - COMPLETED: 2025-01-16 - TDD implementation
+    - Token categories: anchor (1), stablecoin (2), defi (3), meme (2), governance (4), lst (3)
+    - All decimals verified: 9 for SOL-based, 6 for stablecoins/DeFi, 5 for BONK
+    - Solana mint addresses validated (base58 format, 32-44 characters)
 
-[ ] S3.3.4 Implement Solana swap event parsing
+[x] S3.3.4 Implement Solana swap event parsing
     - Parse Jupiter swap instructions
-    - Parse Raydium swap events
+    - Parse Raydium swap events (AMM + CLMM)
     - Parse Orca Whirlpool swaps
+    - Parse Meteora DLMM, Phoenix, Lifinity swaps
     - Handle Solana's instruction format (not event logs)
     - File: shared/core/src/solana-swap-parser.ts
+    - Tests: tests/integration/s3.3.4-solana-swap-parser.integration.test.ts (98 tests)
+    - COMPLETED: 2025-01-17 - TDD implementation
+    - Program ID recognition for 7 DEXes: Jupiter, Raydium AMM, Raydium CLMM, Orca Whirlpool, Meteora DLMM, Phoenix, Lifinity
+    - Anchor discriminator parsing for instruction detection
+    - DEX-specific parsers with swap amount extraction from token balances
+    - Statistics tracking with Prometheus metrics integration
 
 [ ] S3.3.5 Create Solana price feed integration
     - Subscribe to Raydium pool account updates
