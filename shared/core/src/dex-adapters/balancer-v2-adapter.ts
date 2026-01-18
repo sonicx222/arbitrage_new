@@ -233,8 +233,10 @@ export class BalancerV2Adapter implements DexAdapter {
       poolId: pool.id,
       address: pool.address,
       tokens: pool.tokens.map((t) => t.address.toLowerCase()),
+      // PRECISION-FIX: Use parseUnits for string-to-BigInt conversion
+      // Previously: BigInt(Math.floor(parseFloat(t.balance) * 1e18)) lost precision
       balances: pool.tokens.map((t) =>
-        BigInt(Math.floor(parseFloat(t.balance) * 1e18))
+        ethers.parseUnits(t.balance || '0', 18)
       ),
       swapFee,
       poolType,
@@ -336,18 +338,28 @@ export class BalancerV2Adapter implements DexAdapter {
     let amountOut: bigint;
     let priceImpact: number;
 
+    // PRECISION-FIX: Calculate fee multiplier in basis points for better precision
+    // fee is already in decimal (0.01 = 1%), convert to basis points complement: (10000 - swapFee)
+    const feeMultiplierBps = BigInt(10000 - pool.swapFee); // e.g., 9900 for 1% fee
+
     if (pool.poolType === 'weighted' && weights) {
       // Weighted pool math: out = balanceOut * (1 - (balanceIn / (balanceIn + amountIn * (1 - fee)))^(wIn/wOut))
       const weightIn = weights[indexIn] || 0.5;
       const weightOut = weights[indexOut] || 0.5;
 
-      const amountInAfterFee =
-        (amountIn * BigInt(Math.floor((1 - fee) * 1e18))) / BigInt(1e18);
+      // PRECISION-FIX: Use basis points for fee calculation
+      const amountInAfterFee = (amountIn * feeMultiplierBps) / 10000n;
+
+      // NOTE: The following calculations require float math for Math.pow with fractional exponents.
+      // This is an unavoidable limitation without a BigNumber library supporting fractional powers.
+      // Precision loss is acceptable here as it's bounded by the ratio/power calculation.
       const ratio =
         Number(balanceIn) / (Number(balanceIn) + Number(amountInAfterFee));
       const power = weightIn / weightOut;
       const outRatio = 1 - Math.pow(ratio, power);
 
+      // PRECISION-NOTE: Converting BigInt to Number for weighted pool math
+      // Large balances (>2^53) will lose precision, but this is inherent to the algorithm
       amountOut = BigInt(Math.floor(Number(balanceOut) * outRatio));
 
       // Price impact calculation
@@ -357,8 +369,8 @@ export class BalancerV2Adapter implements DexAdapter {
       priceImpact = Math.abs(executionPrice - spotPrice) / spotPrice;
     } else {
       // Stable pool - simplified constant sum approximation
-      const amountInAfterFee =
-        (amountIn * BigInt(Math.floor((1 - fee) * 1e18))) / BigInt(1e18);
+      // PRECISION-FIX: Use basis points for fee calculation
+      const amountInAfterFee = (amountIn * feeMultiplierBps) / 10000n;
 
       // For stable pools, approximate 1:1 ratio with small slippage
       amountOut = amountInAfterFee;

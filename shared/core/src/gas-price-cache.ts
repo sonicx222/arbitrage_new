@@ -139,18 +139,20 @@ const FALLBACK_GAS_PRICES: Record<string, number> = {
 /**
  * Static fallback native token prices (USD) per chain.
  * Used when price oracle is unavailable.
+ * MUST stay in sync with price-oracle.ts DEFAULT_FALLBACK_PRICES
+ * Last updated: 2026-01-18
  */
 const FALLBACK_NATIVE_PRICES: Record<string, number> = {
-  ethereum: 2500,
-  arbitrum: 2500,  // ETH
-  optimism: 2500,  // ETH
-  base: 2500,      // ETH
-  polygon: 0.5,    // MATIC
-  bsc: 300,        // BNB
-  avalanche: 25,   // AVAX
-  fantom: 0.3,     // FTM
-  zksync: 2500,    // ETH
-  linea: 2500      // ETH
+  ethereum: 3500,
+  arbitrum: 3500,  // ETH
+  optimism: 3500,  // ETH
+  base: 3500,      // ETH
+  polygon: 1.00,   // MATIC
+  bsc: 600,        // BNB
+  avalanche: 40,   // AVAX
+  fantom: 0.80,    // FTM
+  zksync: 3500,    // ETH
+  linea: 3500      // ETH
 };
 
 /**
@@ -576,7 +578,10 @@ export class GasPriceCache {
 
   private createFallbackGasPrice(chain: string): GasPriceData {
     const fallbackGwei = FALLBACK_GAS_PRICES[chain.toLowerCase()] || 50;
-    const gasPriceWei = BigInt(Math.floor(fallbackGwei * 1e9));
+    // Convert gwei to wei: multiply by 1e9
+    // Note: gwei values are typically whole numbers or simple decimals (e.g., 50, 25, 0.25)
+    // so precision loss is minimal. For critical calculations, use ethers.parseUnits.
+    const gasPriceWei = BigInt(Math.round(fallbackGwei * 1e9));
 
     return {
       gasPriceWei,

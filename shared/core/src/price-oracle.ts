@@ -113,21 +113,30 @@ function normalizeTokenSymbol(symbol: string): string {
 }
 
 // =============================================================================
-// Default Fallback Prices
+// Default Fallback Prices - CANONICAL SOURCE OF TRUTH
 // =============================================================================
-
+//
+// IMPORTANT: This is the SINGLE SOURCE OF TRUTH for fallback token prices.
+// The following files MUST be kept in sync when prices are updated:
+// - shared/core/src/base-detector.ts (defaultPrices in estimateUsdValue)
+// - shared/core/src/gas-price-cache.ts (FALLBACK_NATIVE_PRICES)
+//
+// When updating prices here, search for "MUST stay in sync with price-oracle.ts"
+// in the codebase and update those locations as well.
+//
 // Note: Wrapped token entries (WETH, WBNB, etc.) are NOT included here
 // because normalizeTokenSymbol() aliases them to their native counterparts.
 const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
   // Major cryptocurrencies (native tokens only - wrapped aliases handled by normalizeTokenSymbol)
-  ETH: 2500,
-  BTC: 45000,
-  BNB: 300,
-  MATIC: 0.80,
-  AVAX: 35,
-  FTM: 0.40,
-  OP: 2.50,
-  ARB: 1.20,
+  // Updated: 2026-01-18 to reflect current market prices
+  ETH: 3500,
+  BTC: 100000,
+  BNB: 600,
+  MATIC: 1.00,
+  AVAX: 40,
+  FTM: 0.80,
+  OP: 3.00,
+  ARB: 1.50,
 
   // Stablecoins
   USDT: 1.00,
@@ -139,26 +148,26 @@ const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
   USDP: 1.00,
 
   // DeFi tokens
-  UNI: 8.00,
-  AAVE: 100,
-  LINK: 15,
-  CRV: 0.60,
-  MKR: 1500,
-  COMP: 50,
-  SNX: 3.00,
-  SUSHI: 1.50,
-  YFI: 8000,
+  UNI: 12.00,
+  AAVE: 300,
+  LINK: 25,
+  CRV: 0.80,
+  MKR: 2000,
+  COMP: 80,
+  SNX: 4.00,
+  SUSHI: 2.00,
+  YFI: 10000,
 
-  // Liquid staking
-  STETH: 2500,
-  WSTETH: 2900,
-  RETH: 2700,
-  CBETH: 2600,
+  // Liquid staking (priced relative to ETH at $3500)
+  STETH: 3500,
+  WSTETH: 4100,
+  RETH: 3800,
+  CBETH: 3600,
 
   // Meme coins (approximate)
-  SHIB: 0.00001,
-  DOGE: 0.08,
-  PEPE: 0.000001
+  SHIB: 0.00002,
+  DOGE: 0.15,
+  PEPE: 0.000002
 };
 
 // Cache size limit to prevent unbounded memory growth
