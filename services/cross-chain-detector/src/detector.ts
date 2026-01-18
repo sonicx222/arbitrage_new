@@ -987,6 +987,16 @@ export class CrossChainDetectorService {
       }
     }
 
+    // PRECISION-FIX: Calculate expectedProfit as token amount (not USD/price difference)
+    // The execution engine treats expectedProfit as base token units and converts via:
+    // ethers.parseUnits(expectedProfit.toFixed(18), 18)
+    //
+    // Previously: expectedProfit = opportunity.netProfit (USD price diff, e.g., $25.50)
+    // Correct: expectedProfit = amountIn * profitPercentage (token amount, e.g., 0.255)
+    const amountInWei = '1000000000000000000'; // 1 token
+    const amountInTokens = 1.0; // 1 token for calculation
+    const expectedProfitInTokens = (opportunity.percentageDiff / 100) * amountInTokens;
+
     const arbitrageOpp: ArbitrageOpportunity = {
       id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type: 'cross-chain',
@@ -996,8 +1006,9 @@ export class CrossChainDetectorService {
       sellChain: opportunity.targetChain,
       tokenIn: opportunity.token.split('/')[0],
       tokenOut: opportunity.token.split('/')[1],
-      amountIn: '1000000000000000000', // 1 token (placeholder)
-      expectedProfit: opportunity.netProfit,
+      amountIn: amountInWei,
+      // PRECISION-FIX: Use token amount (not USD difference) for execution engine compatibility
+      expectedProfit: expectedProfitInTokens,
       profitPercentage: opportunity.percentageDiff / 100,
       gasEstimate: '0', // Cross-chain, gas estimated separately
       confidence: opportunity.confidence,

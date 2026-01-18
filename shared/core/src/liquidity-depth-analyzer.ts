@@ -20,6 +20,25 @@ const logger = createLogger('liquidity-depth-analyzer');
 // BigInt precision for calculations
 const PRECISION = 10n ** 18n;
 
+/**
+ * PRECISION-FIX: Safely convert a float to BigInt with 18 decimal places.
+ * Avoids float multiplication precision loss by using string manipulation.
+ *
+ * @param value - Float value to convert (e.g., 0.000000123456789)
+ * @returns BigInt representation in wei (value * 10^18)
+ */
+function floatToBigInt18(value: number): bigint {
+  if (value === 0) return 0n;
+
+  // Use toFixed to get a precise string representation
+  // Then split on decimal and pad/truncate to 18 decimal places
+  const [intPart, decPart = ''] = value.toFixed(18).split('.');
+  const paddedDec = decPart.padEnd(18, '0').slice(0, 18);
+
+  // Combine integer and decimal parts as a single BigInt
+  return BigInt(intPart + paddedDec);
+}
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -290,7 +309,7 @@ export class LiquidityDepthAnalyzer {
     const reserveOut = direction === 'buy' ? pool.reserve1 : pool.reserve0;
 
     const result = this.calculateSwapOutput(
-      BigInt(Math.floor(inputAmount * 1e18)),
+      floatToBigInt18(inputAmount), // PRECISION-FIX: Use helper to avoid float precision loss
       reserveIn,
       reserveOut,
       pool.feeBps
@@ -419,7 +438,8 @@ export class LiquidityDepthAnalyzer {
     for (let i = 1; i <= numLevels; i++) {
       const tradeSizeUsd = i * stepUsd;
       const tradeSize = tradeSizeUsd / basePrice;
-      const tradeSizeBigInt = BigInt(Math.floor(tradeSize * 1e18));
+      // PRECISION-FIX: Use helper to avoid float precision loss
+      const tradeSizeBigInt = floatToBigInt18(tradeSize);
 
       const result = this.calculateSwapOutput(tradeSizeBigInt, reserveIn, reserveOut, pool.feeBps);
 

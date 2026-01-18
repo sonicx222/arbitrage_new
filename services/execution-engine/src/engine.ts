@@ -1144,8 +1144,10 @@ export class ExecutionEngineService {
       throw new Error('No chain specified for opportunity');
     }
 
-    const wallet = this.wallets.get(chain);
-    if (!wallet) {
+    // RACE-CONDITION-FIX: Verify wallet exists early, but get fresh reference later
+    // The wallet map can be modified during provider reconnection (attemptProviderReconnection)
+    // so we check availability here but get the actual wallet right before sending tx
+    if (!this.wallets.has(chain)) {
       throw new Error(`No wallet available for chain: ${chain}`);
     }
 
@@ -1196,6 +1198,13 @@ export class ExecutionEngineService {
     }
 
     try {
+      // RACE-CONDITION-FIX: Get fresh wallet reference right before sending
+      // This prevents using a stale wallet if provider was reconnected during preparation
+      const wallet = this.wallets.get(chain);
+      if (!wallet) {
+        throw new Error(`Wallet became unavailable for chain: ${chain}`);
+      }
+
       // P0-3 FIX: Execute transaction with timeout
       const txResponse = await this.withTransactionTimeout(
         () => wallet.sendTransaction(protectedTx),
@@ -1377,7 +1386,12 @@ export class ExecutionEngineService {
     // CRITICAL-2 FIX: Calculate minAmountOut with slippage protection
     // minAmountOut = amountIn + expectedProfit - slippage allowance
     const amountInBigInt = BigInt(opportunity.amountIn);
-    const expectedProfitWei = BigInt(Math.floor(opportunity.expectedProfit * 1e18));
+    // PRECISION-FIX: Use parseUnits with string conversion to avoid float precision loss
+    // Previously: BigInt(Math.floor(opportunity.expectedProfit * 1e18)) lost precision for small values
+    const expectedProfitWei = ethers.parseUnits(
+      opportunity.expectedProfit.toFixed(18),
+      18
+    );
     const slippageBasisPoints = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
 
     // Calculate expected output (amountIn + profit)

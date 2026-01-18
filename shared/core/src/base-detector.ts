@@ -915,13 +915,14 @@ export abstract class BaseDetector {
     amount0Out: string,
     amount1Out: string
   ): Promise<number> {
-    // Default prices (fallback)
+    // Default prices (fallback) - MUST stay in sync with price-oracle.ts DEFAULT_FALLBACK_PRICES
+    // Last updated: 2026-01-18
     const defaultPrices: Record<string, number> = {
-      ETH: 2500, WETH: 2500,
-      BNB: 300, WBNB: 300,
-      MATIC: 0.80, WMATIC: 0.80,
-      ARB: 1.20,
-      OP: 2.50
+      ETH: 3500, WETH: 3500,
+      BNB: 600, WBNB: 600,
+      MATIC: 1.00, WMATIC: 1.00,
+      ARB: 1.50,
+      OP: 3.00
     };
 
     const token0Lower = pair.token0.toLowerCase();
@@ -940,7 +941,7 @@ export abstract class BaseDetector {
 
         // Get chain-specific native token price
         const nativeSymbol = this.chain === 'bsc' ? 'BNB' : this.chain === 'polygon' ? 'MATIC' : 'ETH';
-        const price = defaultPrices[nativeSymbol] || 2500;
+        const price = defaultPrices[nativeSymbol] || 3500; // Default to ETH price
         return (amount / 1e18) * price;
       }
     }
