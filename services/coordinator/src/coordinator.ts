@@ -5,57 +5,46 @@
  * Uses Redis Streams for event consumption (ADR-002) and implements
  * leader election for failover (ADR-007).
  *
+ * REFACTORED: Routes and middleware extracted to api/ folder.
+ *
  * @see ARCHITECTURE_V2.md Section 4.5 (Layer 5: Coordination)
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy
+ * @see api/ folder for extracted routes and middleware
  */
 import http from 'http';
-import express, { Request, Response, NextFunction } from 'express';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import express from 'express';
 import {
   RedisClient,
   getRedisClient,
   createLogger,
   getPerformanceLogger,
   PerformanceLogger,
-  ValidationMiddleware,
   RedisStreamsClient,
   getRedisStreamsClient,
   ConsumerGroupConfig,
   ServiceStateManager,
   createServiceState,
-  ServiceState,
   StreamConsumer,
   getStreamHealthMonitor
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
-import { apiAuth, apiAuthorize, isAuthEnabled } from '@shared/security';
+import { isAuthEnabled } from '@shared/security';
+
+// Import extracted API modules
+import {
+  configureMiddleware,
+  setupAllRoutes,
+  SystemMetrics,
+  CoordinatorStateProvider,
+  RouteLogger
+} from './api';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface SystemMetrics {
-  totalOpportunities: number;
-  totalExecutions: number;
-  successfulExecutions: number;
-  totalProfit: number;
-  averageLatency: number;
-  averageMemory: number;  // Added: previously memory was incorrectly assigned to latency
-  systemHealth: number;
-  activeServices: number;
-  lastUpdate: number;
-  whaleAlerts: number;
-  pendingOpportunities: number;
-  // Volume and swap event metrics (S1.2 - Swap Event Filter)
-  totalSwapEvents: number;
-  totalVolumeUsd: number;
-  volumeAggregatesProcessed: number;
-  activePairsTracked: number;
-  // Price feed metrics (S3.3.5 - Solana Price Feed Integration)
-  priceUpdatesReceived: number;
-}
+// SystemMetrics is now imported from ./api/types
 
 interface LeaderElectionConfig {
   lockKey: string;
@@ -167,7 +156,7 @@ interface Alert {
 // Coordinator Service
 // =============================================================================
 
-export class CoordinatorService {
+export class CoordinatorService implements CoordinatorStateProvider {
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
   private logger: Logger;
@@ -292,8 +281,9 @@ export class CoordinatorService {
       }
     ];
 
-    this.setupMiddleware();
-    this.setupRoutes();
+    // REFACTORED: Use extracted middleware and routes from api/ folder
+    configureMiddleware(this.app, this.logger);
+    this.setupRoutes(); // Logs auth status and calls setupAllRoutes
   }
 
   // ===========================================================================
@@ -1398,356 +1388,41 @@ export class CoordinatorService {
   }
 
   // ===========================================================================
-  // Express Middleware & Routes
+  // Express Routes Setup (REFACTORED - routes extracted to api/ folder)
   // ===========================================================================
 
-  private setupMiddleware(): void {
-    // Security headers
-    this.app.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "https:"],
-        },
-      },
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true
-      }
-    }));
-
-    // CORS
-    this.app.use((req, res, next) => {
-      const allowedOrigins = process.env.ALLOWED_ORIGINS ?
-        process.env.ALLOWED_ORIGINS.split(',') :
-        ['http://localhost:3000', 'http://localhost:3001'];
-
-      const origin = req.headers.origin;
-      if (origin && allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-      }
-
-      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('X-Content-Type-Options', 'nosniff');
-      res.header('X-Frame-Options', 'DENY');
-      res.header('X-XSS-Protection', '1; mode=block');
-
-      if (req.method === 'OPTIONS') {
-        res.sendStatus(200);
-        return;
-      }
-
-      next();
-    });
-
-    // JSON parsing with limits
-    this.app.use(express.json({ limit: '1mb', strict: true }));
-    this.app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-    this.app.use(express.static('public'));
-
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 100,
-      message: { error: 'Too many requests', retryAfter: 900 },
-      standardHeaders: true,
-      legacyHeaders: false
-    });
-    this.app.use(limiter);
-
-    // Request logging
-    this.app.use((req, res, next) => {
-      const start = Date.now();
-      const clientIP = req.ip || req.connection.remoteAddress || 'unknown';
-
-      res.on('finish', () => {
-        const duration = Date.now() - start;
-        this.logger.info('API Request', {
-          method: req.method,
-          url: req.url,
-          status: res.statusCode,
-          duration,
-          ip: clientIP
-        });
-      });
-
-      next();
-    });
-  }
-
+  /**
+   * Setup routes using extracted route modules.
+   * Logs authentication status and delegates to setupAllRoutes.
+   */
   private setupRoutes(): void {
-    // Phase 4: Log authentication status on startup
-    if (isAuthEnabled()) {
-      this.logger.info('API authentication enabled');
-    } else {
-      this.logger.warn('API authentication NOT configured - endpoints are unprotected. Set JWT_SECRET or API_KEYS env vars for production.');
+    // Log authentication status on startup (defensive check for test environments)
+    if (this.logger) {
+      if (isAuthEnabled()) {
+        this.logger.info('API authentication enabled');
+      } else {
+        this.logger.warn('API authentication NOT configured - endpoints are unprotected. Set JWT_SECRET or API_KEYS env vars for production.');
+      }
     }
 
-    // ==========================================================================
-    // Public Routes (no authentication required)
-    // ==========================================================================
-    // Dashboard - HTML interface, no auth needed
-    this.app.get('/', this.getDashboard.bind(this));
-
-    // Health check - used by load balancers/orchestrators, must be public
-    this.app.get('/api/health', ValidationMiddleware.validateHealthCheck, this.getHealth.bind(this));
-
-    // ==========================================================================
-    // Protected Read Routes (authentication required, read:* permission)
-    // ==========================================================================
-    // Phase 4: Apply unified auth middleware that supports both JWT and API keys
-    const readAuth = apiAuth({ required: true });
-    const readPermission = apiAuthorize('metrics', 'read');
-
-    this.app.get('/api/metrics',
-      readAuth,
-      readPermission,
-      this.getMetrics.bind(this)
-    );
-    this.app.get('/api/services',
-      readAuth,
-      apiAuthorize('services', 'read'),
-      this.getServices.bind(this)
-    );
-    this.app.get('/api/opportunities',
-      readAuth,
-      apiAuthorize('opportunities', 'read'),
-      this.getOpportunities.bind(this)
-    );
-    this.app.get('/api/alerts',
-      readAuth,
-      apiAuthorize('alerts', 'read'),
-      this.getAlerts.bind(this)
-    );
-    this.app.get('/api/leader',
-      readAuth,
-      apiAuthorize('leader', 'read'),
-      this.getLeaderStatus.bind(this)
-    );
-
-    // ==========================================================================
-    // Admin Routes (authentication + write permission + strict rate limiting)
-    // ==========================================================================
-    const strictLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 5,
-      message: { error: 'Too many control actions', retryAfter: 900 }
-    });
-    const writeAuth = apiAuth({ required: true });
-
-    this.app.post('/api/services/:service/restart',
-      strictLimiter,
-      writeAuth,
-      apiAuthorize('services', 'write'),
-      this.validateServiceRestart.bind(this),
-      this.restartService.bind(this)
-    );
-    this.app.post('/api/alerts/:alert/acknowledge',
-      strictLimiter,
-      writeAuth,
-      apiAuthorize('alerts', 'write'),
-      this.validateAlertAcknowledge.bind(this),
-      this.acknowledgeAlert.bind(this)
-    );
+    // REFACTORED: Use extracted routes from api/routes/
+    setupAllRoutes(this.app, this);
   }
 
   // ===========================================================================
-  // Route Handlers
-  // ===========================================================================
-
-  // P2 FIX: Use Express types instead of any
-  private getDashboard(_req: Request, res: Response): void {
-    const leaderBadge = this.isLeader
-      ? '<span style="background:green;color:white;padding:2px 8px;border-radius:3px;">LEADER</span>'
-      : '<span style="background:orange;color:white;padding:2px 8px;border-radius:3px;">STANDBY</span>';
-
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Arbitrage System Dashboard</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; background: #1a1a2e; color: #eee; }
-          .metric { background: #16213e; padding: 15px; margin: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-          .healthy { color: #00ff88; }
-          .unhealthy { color: #ff4444; }
-          .degraded { color: #ffaa00; }
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-          h1 { color: #00ff88; }
-          h3 { color: #4da6ff; margin-bottom: 10px; }
-          .leader-status { margin-bottom: 20px; }
-        </style>
-      </head>
-      <body>
-        <h1>🏦 Professional Arbitrage System Dashboard</h1>
-        <div class="leader-status">Status: ${leaderBadge}</div>
-
-        <div class="grid">
-          <div class="metric">
-            <h3>System Health</h3>
-            <div class="${this.systemMetrics.systemHealth > 80 ? 'healthy' : this.systemMetrics.systemHealth > 50 ? 'degraded' : 'unhealthy'}">
-              ${this.systemMetrics.systemHealth.toFixed(1)}%
-            </div>
-            <small>${this.systemMetrics.activeServices} services active</small>
-          </div>
-
-          <div class="metric">
-            <h3>Opportunities</h3>
-            <div>Detected: ${this.systemMetrics.totalOpportunities}</div>
-            <div>Pending: ${this.systemMetrics.pendingOpportunities}</div>
-            <div>Whale Alerts: ${this.systemMetrics.whaleAlerts}</div>
-          </div>
-
-          <div class="metric">
-            <h3>Trading Performance</h3>
-            <div>Executions: ${this.systemMetrics.totalExecutions}</div>
-            <div>Success Rate: ${this.systemMetrics.totalExecutions > 0 ?
-              ((this.systemMetrics.successfulExecutions / this.systemMetrics.totalExecutions) * 100).toFixed(1) : 0}%</div>
-            <div>Total Profit: $${this.systemMetrics.totalProfit.toFixed(2)}</div>
-          </div>
-
-          <div class="metric">
-            <h3>Service Status</h3>
-            ${Array.from(this.serviceHealth.entries()).map(([name, health]) =>
-              `<div class="${health.status === 'healthy' ? 'healthy' : health.status === 'degraded' ? 'degraded' : 'unhealthy'}">
-                ${name}: ${health.status}
-              </div>`
-            ).join('') || '<div>No services reporting</div>'}
-          </div>
-        </div>
-
-        <div class="metric">
-          <h3>System Information</h3>
-          <div>Instance: ${this.config.leaderElection.instanceId}</div>
-          <div>Last Update: ${new Date(this.systemMetrics.lastUpdate).toLocaleString()}</div>
-          <div>Uptime: ${Math.floor(process.uptime() / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m</div>
-        </div>
-
-        <script>
-          // Auto-refresh every 10 seconds
-          setTimeout(() => window.location.reload(), 10000);
-        </script>
-      </body>
-      </html>
-    `);
-  }
-
-  private getHealth(_req: Request, res: Response): void {
-    res.json({
-      status: 'ok',
-      isLeader: this.isLeader,
-      instanceId: this.config.leaderElection.instanceId,
-      systemHealth: this.systemMetrics.systemHealth,
-      services: Object.fromEntries(this.serviceHealth),
-      timestamp: Date.now()
-    });
-  }
-
-  private getMetrics(_req: Request, res: Response): void {
-    res.json(this.systemMetrics);
-  }
-
-  private getServices(_req: Request, res: Response): void {
-    res.json(Object.fromEntries(this.serviceHealth));
-  }
-
-  private getOpportunities(_req: Request, res: Response): void {
-    const opportunities = Array.from(this.opportunities.values())
-      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-      .slice(0, 100); // Return last 100
-    res.json(opportunities);
-  }
-
-  private getAlerts(_req: Request, res: Response): void {
-    // Return recent alerts (in production, store in database)
-    res.json([]);
-  }
-
-  private getLeaderStatus(_req: Request, res: Response): void {
-    res.json({
-      isLeader: this.isLeader,
-      instanceId: this.config.leaderElection.instanceId,
-      lockKey: this.config.leaderElection.lockKey
-    });
-  }
-
-  // ===========================================================================
-  // Validation Methods
-  // ===========================================================================
-
-  // P2 FIX: Use Express types instead of any
-  private validateServiceRestart(req: Request, res: Response, next: NextFunction): void {
-    const { service } = req.params;
-
-    if (!service || typeof service !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(service)) {
-      res.status(400).json({ error: 'Invalid service name' });
-      return;
-    }
-
-    const allowedServices = ['bsc-detector', 'ethereum-detector', 'arbitrum-detector',
-      'polygon-detector', 'optimism-detector', 'base-detector', 'execution-engine'];
-
-    if (!allowedServices.includes(service)) {
-      res.status(404).json({ error: 'Service not found' });
-      return;
-    }
-
-    // Only leader can restart services
-    if (!this.isLeader) {
-      res.status(403).json({ error: 'Only leader can restart services' });
-      return;
-    }
-
-    next();
-  }
-
-  private validateAlertAcknowledge(req: Request, res: Response, next: NextFunction): void {
-    const { alert } = req.params;
-
-    if (!alert || typeof alert !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(alert)) {
-      res.status(400).json({ error: 'Invalid alert ID' });
-      return;
-    }
-
-    next();
-  }
-
-  private async restartService(req: Request, res: Response): Promise<void> {
-    const { service } = req.params;
-
-    try {
-      this.logger.info(`Restarting service: ${service}`);
-      // In production, implement service restart logic via orchestration
-      res.json({ success: true, message: `Restart requested for ${service}` });
-    } catch (error) {
-      res.status(500).json({ success: false, error: (error as Error).message });
-    }
-  }
-
-  private acknowledgeAlert(req: Request, res: Response): void {
-    const { alert } = req.params;
-    // FIX: Alert cooldown keys are stored as `${type}_${service}`, e.g., "SERVICE_UNHEALTHY_bsc-detector"
-    // The alert param can be either the full key or just the type
-    // Try exact match first, then try with _system suffix for system alerts
-    let deleted = this.alertCooldowns.delete(alert);
-    if (!deleted) {
-      // Try with _system suffix (for alerts without service)
-      deleted = this.alertCooldowns.delete(`${alert}_system`);
-    }
-    res.json({ success: deleted, message: deleted ? 'Alert acknowledged' : 'Alert not found in cooldowns' });
-  }
-
-  // ===========================================================================
-  // Public Getters for Testing
+  // CoordinatorStateProvider Interface Implementation
   // ===========================================================================
 
   getIsLeader(): boolean {
     return this.isLeader;
+  }
+
+  getInstanceId(): string {
+    return this.config.leaderElection.instanceId;
+  }
+
+  getLockKey(): string {
+    return this.config.leaderElection.lockKey;
   }
 
   getIsRunning(): boolean {
@@ -1762,5 +1437,21 @@ export class CoordinatorService {
 
   getSystemMetrics(): SystemMetrics {
     return { ...this.systemMetrics };
+  }
+
+  getOpportunities(): Map<string, ArbitrageOpportunity> {
+    return new Map(this.opportunities);
+  }
+
+  getAlertCooldowns(): Map<string, number> {
+    return new Map(this.alertCooldowns);
+  }
+
+  deleteAlertCooldown(key: string): boolean {
+    return this.alertCooldowns.delete(key);
+  }
+
+  getLogger(): RouteLogger {
+    return this.logger;
   }
 }

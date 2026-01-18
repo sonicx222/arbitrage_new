@@ -699,8 +699,17 @@ export function apiAuth(options: AuthOptions = {}) {
   return async (req: any, res: any, next: any) => {
     try {
       // If no auth is enabled, skip auth (dev mode)
+      // Set a default user with full permissions so apiAuthorize doesn't fail
       if (!isAuthEnabled()) {
-        moduleLogger.debug('Auth not configured - allowing request');
+        moduleLogger.debug('Auth not configured - allowing request with default dev user');
+        req.user = {
+          id: 'dev-user',
+          username: 'dev',
+          roles: ['admin'],  // Array to match User interface
+          permissions: ['*:*'], // Full access in dev mode
+          isApiKey: false,
+          isActive: true
+        };
         return next();
       }
 

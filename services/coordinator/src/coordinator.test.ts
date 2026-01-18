@@ -34,32 +34,49 @@ jest.mock('@arbitrage/core', () => ({
   })),
   getPerformanceLogger: jest.fn(() => ({
     startTimer: jest.fn(() => ({ stop: jest.fn() })),
-    recordMetric: jest.fn()
+    recordMetric: jest.fn(),
+    logEventLatency: jest.fn(),
+    logHealthCheck: jest.fn()
   })),
   getRedisClient: jest.fn(() => Promise.resolve({
     setex: jest.fn(),
     get: jest.fn(),
     del: jest.fn(),
     set: jest.fn(),
+    setNx: jest.fn(() => Promise.resolve(true)),
     setnx: jest.fn(() => Promise.resolve(1)),
     expire: jest.fn(),
-    quit: jest.fn()
+    quit: jest.fn(),
+    disconnect: jest.fn(() => Promise.resolve()),
+    getAllServiceHealth: jest.fn(() => Promise.resolve({})),
+    renewLockIfOwned: jest.fn(() => Promise.resolve(true)),
+    releaseLockIfOwned: jest.fn(() => Promise.resolve(true))
   })),
   getRedisStreamsClient: jest.fn(() => Promise.resolve({
     createConsumerGroup: jest.fn(() => Promise.resolve()),
     readGroup: jest.fn(() => Promise.resolve([])),
+    xreadgroup: jest.fn(() => Promise.resolve([])),
+    xack: jest.fn(() => Promise.resolve(1)),
+    xadd: jest.fn(() => Promise.resolve('1234-0')),
     ack: jest.fn(() => Promise.resolve()),
+    disconnect: jest.fn(() => Promise.resolve()),
     STREAMS: {
       HEALTH: 'stream:health',
       OPPORTUNITIES: 'stream:opportunities',
-      WHALE_ALERTS: 'stream:whale-alerts'
+      WHALE_ALERTS: 'stream:whale-alerts',
+      SWAP_EVENTS: 'stream:swap-events',
+      VOLUME_AGGREGATES: 'stream:volume-aggregates',
+      PRICE_UPDATES: 'stream:price-updates'
     }
   })),
   RedisStreamsClient: {
     STREAMS: {
       HEALTH: 'stream:health',
       OPPORTUNITIES: 'stream:opportunities',
-      WHALE_ALERTS: 'stream:whale-alerts'
+      WHALE_ALERTS: 'stream:whale-alerts',
+      SWAP_EVENTS: 'stream:swap-events',
+      VOLUME_AGGREGATES: 'stream:volume-aggregates',
+      PRICE_UPDATES: 'stream:price-updates'
     }
   },
   ValidationMiddleware: {
@@ -94,7 +111,17 @@ jest.mock('@arbitrage/core', () => ({
     RUNNING: 'running',
     STOPPING: 'stopping',
     ERROR: 'error'
-  }
+  },
+  // Add missing exports
+  StreamConsumer: jest.fn().mockImplementation(() => ({
+    start: jest.fn(),
+    stop: jest.fn(() => Promise.resolve())
+  })),
+  getStreamHealthMonitor: jest.fn(() => ({
+    setConsumerGroup: jest.fn(),
+    start: jest.fn(),
+    stop: jest.fn()
+  }))
 }));
 
 // Import config
