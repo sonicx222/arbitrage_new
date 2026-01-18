@@ -39,19 +39,22 @@ import {
 
 import {
   PartitionConfig,
-  ChainInstance,
   PartitionHealth,
   ChainHealth,
   getPartitionFromEnv,
   getChainsFromEnv,
-  createChainInstance,
   getPartition,
-  CHAINS,
-  DEXES,
-  CORE_TOKENS
+  CHAINS
 } from '@arbitrage/config';
 
 import { ChainDetectorInstance } from './chain-instance';
+import {
+  ChainInstanceManager,
+  createChainInstanceManager,
+  ChainInstanceFactory,
+} from './chain-instance-manager';
+import { HealthReporter, createHealthReporter } from './health-reporter';
+import { MetricsCollector, createMetricsCollector } from './metrics-collector';
 
 // =============================================================================
 // Types
@@ -86,13 +89,8 @@ interface BaseDetectorConfig {
   healthCheckPort?: number;
 }
 
-/** Factory type for creating chain detector instances */
-export type ChainInstanceFactory = (config: {
-  chainId: string;
-  partitionId: string;
-  streamsClient: RedisStreamsClient;
-  perfLogger: PerformanceLogger;
-}) => ChainDetectorInstance;
+// Re-export ChainInstanceFactory for backward compatibility
+export { ChainInstanceFactory };
 
 export interface UnifiedDetectorConfig extends BaseDetectorConfig {
   /** Optional logger for testing (defaults to createLogger) */
