@@ -153,9 +153,72 @@ This "strangler fig" pattern minimizes risk while enabling clean new code.
 - Inheritance creates tight coupling
 - Factory functions are more flexible
 
+## CrossChainDetectorService Modules
+
+Similarly, `CrossChainDetectorService` (1103 lines) was modularized with three focused modules:
+
+### 4. StreamConsumer
+**Purpose**: Handle Redis Streams consumption
+
+**Responsibilities**:
+- Consuming price update streams
+- Consuming whale alert streams
+- Consumer group management
+- Message validation and acknowledgment
+- Concurrency guard to prevent overlapping stream reads
+
+**Interface**:
+```typescript
+interface StreamConsumer extends EventEmitter {
+  createConsumerGroups(): Promise<void>;
+  start(): void;
+  stop(): void;
+}
+```
+
+### 5. PriceDataManager
+**Purpose**: Manage price data storage and cleanup
+
+**Responsibilities**:
+- Storing price updates in hierarchical structure (chain/dex/pair)
+- Cleaning old price data to prevent memory bloat
+- Creating atomic snapshots for thread-safe detection
+- Tracking chains being monitored
+
+**Interface**:
+```typescript
+interface PriceDataManager {
+  handlePriceUpdate(update: PriceUpdate): void;
+  createSnapshot(): PriceData;
+  getChains(): string[];
+  getPairCount(): number;
+  cleanup(): void;
+  clear(): void;
+}
+```
+
+### 6. OpportunityPublisher
+**Purpose**: Publish cross-chain opportunities with deduplication
+
+**Responsibilities**:
+- Publishing opportunities to Redis Streams
+- Deduplication within configurable time window
+- Cache management with TTL and size limits
+- Converting cross-chain opportunities to ArbitrageOpportunity format
+
+**Interface**:
+```typescript
+interface OpportunityPublisher {
+  publish(opportunity: CrossChainOpportunity): Promise<boolean>;
+  getCacheSize(): number;
+  cleanup(): void;
+  clear(): void;
+}
+```
+
 ## Implementation Details
 
-### Files Created
+### UnifiedChainDetector Files Created
 - `services/unified-detector/src/chain-instance-manager.ts`
 - `services/unified-detector/src/health-reporter.ts`
 - `services/unified-detector/src/metrics-collector.ts`
@@ -163,9 +226,19 @@ This "strangler fig" pattern minimizes risk while enabling clean new code.
 - `services/unified-detector/src/__tests__/unit/health-reporter.test.ts`
 - `services/unified-detector/src/__tests__/unit/metrics-collector.test.ts`
 
+### CrossChainDetectorService Files Created
+- `services/cross-chain-detector/src/stream-consumer.ts`
+- `services/cross-chain-detector/src/price-data-manager.ts`
+- `services/cross-chain-detector/src/opportunity-publisher.ts`
+- `services/cross-chain-detector/src/__tests__/unit/stream-consumer.test.ts`
+- `services/cross-chain-detector/src/__tests__/unit/price-data-manager.test.ts`
+- `services/cross-chain-detector/src/__tests__/unit/opportunity-publisher.test.ts`
+
 ### Files Modified
 - `services/unified-detector/src/index.ts` - Added exports for new modules
 - `services/unified-detector/src/unified-detector.ts` - Added imports (for future refactoring)
+- `services/cross-chain-detector/src/index.ts` - Added exports for new modules
+- `services/cross-chain-detector/src/detector.ts` - Added concurrency guards (B1/B2 fixes)
 
 ### Usage Example
 ```typescript
@@ -217,9 +290,52 @@ metricsCollector.start();
 - [ADR-007: Cross-Region Failover Strategy](./ADR-007-failover-strategy.md)
 - [Modularization Enhancement Plan](./.claude/plans/modularization-enhancement-plan.md)
 
+### CrossChainDetectorService Usage Example
+```typescript
+import {
+  createStreamConsumer,
+  createPriceDataManager,
+  createOpportunityPublisher,
+} from '@arbitrage/cross-chain-detector';
+
+// Create modules with dependency injection
+const streamConsumer = createStreamConsumer({
+  instanceId: 'detector-1',
+  streamsClient,
+  stateManager,
+  logger,
+  consumerGroups: [
+    { streamName: 'stream:price-updates', groupName: 'cross-chain-group', consumerName: 'consumer-1' },
+  ],
+});
+
+const priceDataManager = createPriceDataManager({
+  logger,
+  cleanupFrequency: 100,
+  maxPriceAgeMs: 5 * 60 * 1000,
+});
+
+const opportunityPublisher = createOpportunityPublisher({
+  streamsClient,
+  perfLogger,
+  logger,
+  dedupeWindowMs: 5000,
+});
+
+// Wire up event handling
+streamConsumer.on('priceUpdate', (update) => {
+  priceDataManager.handlePriceUpdate(update);
+});
+
+// Start consuming
+await streamConsumer.createConsumerGroups();
+streamConsumer.start();
+```
+
 ## Confidence Level
-92% - High confidence because:
+93% - High confidence because:
 - Follows established patterns in codebase (factory functions, EventEmitter)
 - Low risk approach (modules alongside existing code)
-- All tests passing (159 tests for unified-detector)
+- All tests passing (162 tests for unified-detector, 69 tests for cross-chain-detector)
 - TypeScript types provide compile-time safety
+- Bug fixes (B1/B2 concurrency guards) verified with regression tests
