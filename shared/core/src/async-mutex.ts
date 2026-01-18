@@ -90,14 +90,19 @@ export class AsyncMutex {
       if (released) return; // Prevent double-release
       released = true;
 
-      this.locked = false;
-      this.stats.isLocked = false;
-
-      // Wake up next waiter if any
+      // RACE-CONDITION-FIX: Use direct handoff pattern from NonceManager
+      // Wake up next waiter FIRST, keeping lock held during handoff.
+      // Only release lock if no waiters, preventing race where new caller
+      // grabs lock between release and waiter wake-up.
       const next = this.waitQueue.shift();
       if (next) {
+        // Hand off lock directly to next waiter (lock stays held)
         // Use setImmediate to prevent stack overflow with many waiters
         setImmediate(() => next());
+      } else {
+        // No waiters, safe to release the lock
+        this.locked = false;
+        this.stats.isLocked = false;
       }
     };
   }
@@ -121,12 +126,15 @@ export class AsyncMutex {
       if (released) return;
       released = true;
 
-      this.locked = false;
-      this.stats.isLocked = false;
-
+      // RACE-CONDITION-FIX: Use direct handoff pattern (same as acquire release)
       const next = this.waitQueue.shift();
       if (next) {
+        // Hand off lock directly to next waiter (lock stays held)
         setImmediate(() => next());
+      } else {
+        // No waiters, safe to release the lock
+        this.locked = false;
+        this.stats.isLocked = false;
       }
     };
   }

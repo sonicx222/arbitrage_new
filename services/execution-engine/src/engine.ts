@@ -32,9 +32,13 @@ import {
   // P0-2 FIX: Import NonceManager for transaction nonce management
   NonceManager,
   getNonceManager,
-  StreamConsumer
+  StreamConsumer,
+  // Phase 2: MEV Protection
+  MevProviderFactory,
+  MevGlobalConfig,
 } from '@arbitrage/core';
-import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
+import type { IMevProvider, MevSubmissionResult } from '@arbitrage/core';
+import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG } from '@arbitrage/config';
 import {
   ArbitrageOpportunity,
   ServiceHealth
@@ -205,6 +209,9 @@ export class ExecutionEngineService {
 
   // Simulation mode configuration with defaults
   private readonly simulationConfig: Required<SimulationConfig>;
+
+  // Phase 2: MEV Protection Provider Factory
+  private mevProviderFactory: MevProviderFactory | null = null;
   private readonly isSimulationMode: boolean;
 
   constructor(config: ExecutionEngineConfig = {}) {
@@ -290,6 +297,9 @@ export class ExecutionEngineService {
       if (!this.isSimulationMode) {
         await this.initializeProviders();
         this.initializeWallets();
+
+        // Phase 2: Initialize MEV protection providers
+        this.initializeMevProviders();
 
         // P0-2 FIX: Start nonce manager background sync
         this.nonceManager.start();
@@ -681,6 +691,71 @@ export class ExecutionEngineService {
         }
       }
     }
+  }
+
+  /**
+   * Phase 2: Initialize MEV protection providers for all configured chains.
+   *
+   * Creates MEV providers based on chain-specific strategies:
+   * - Flashbots for Ethereum mainnet (private bundle submission)
+   * - BloXroute for BSC (private transaction API)
+   * - Fastlane for Polygon (MEV protection service)
+   * - Sequencer-based for L2s (inherent MEV protection)
+   * - Standard with gas optimization for other chains
+   */
+  private initializeMevProviders(): void {
+    if (!MEV_CONFIG.enabled) {
+      this.logger.info('MEV protection disabled by configuration');
+      return;
+    }
+
+    // Create MEV provider factory with global configuration
+    const mevGlobalConfig: MevGlobalConfig = {
+      enabled: MEV_CONFIG.enabled,
+      flashbotsAuthKey: MEV_CONFIG.flashbotsAuthKey,
+      bloxrouteAuthHeader: MEV_CONFIG.bloxrouteAuthHeader,
+      flashbotsRelayUrl: MEV_CONFIG.flashbotsRelayUrl,
+      submissionTimeoutMs: MEV_CONFIG.submissionTimeoutMs,
+      maxRetries: MEV_CONFIG.maxRetries,
+      fallbackToPublic: MEV_CONFIG.fallbackToPublic,
+    };
+
+    this.mevProviderFactory = new MevProviderFactory(mevGlobalConfig);
+
+    // Initialize MEV provider for each chain that has a wallet
+    let providersInitialized = 0;
+    for (const chainName of this.wallets.keys()) {
+      const provider = this.providers.get(chainName);
+      const wallet = this.wallets.get(chainName);
+
+      if (provider && wallet) {
+        const chainSettings = MEV_CONFIG.chainSettings[chainName];
+        if (chainSettings?.enabled !== false) {
+          try {
+            const mevProvider = this.mevProviderFactory.createProvider({
+              chain: chainName,
+              provider,
+              wallet,
+            });
+
+            providersInitialized++;
+            this.logger.info(`MEV provider initialized for ${chainName}`, {
+              strategy: mevProvider.strategy,
+              enabled: mevProvider.isEnabled(),
+            });
+          } catch (error) {
+            this.logger.warn(`Failed to initialize MEV provider for ${chainName}`, {
+              error: (error as Error).message,
+            });
+          }
+        }
+      }
+    }
+
+    this.logger.info('MEV protection initialization complete', {
+      providersInitialized,
+      globalEnabled: MEV_CONFIG.enabled,
+    });
   }
 
   // ===========================================================================
@@ -1198,24 +1273,83 @@ export class ExecutionEngineService {
     }
 
     try {
-      // RACE-CONDITION-FIX: Get fresh wallet reference right before sending
-      // This prevents using a stale wallet if provider was reconnected during preparation
-      const wallet = this.wallets.get(chain);
-      if (!wallet) {
-        throw new Error(`Wallet became unavailable for chain: ${chain}`);
+      // Phase 2: Use MEV provider if available for protected submission
+      const mevProvider = this.mevProviderFactory?.getProvider(chain);
+      const chainSettings = MEV_CONFIG.chainSettings[chain];
+
+      // Check if MEV protection should be used for this opportunity
+      const shouldUseMevProtection = mevProvider?.isEnabled() &&
+        chainSettings?.enabled !== false &&
+        (opportunity.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
+
+      let receipt: ethers.TransactionReceipt | null = null;
+      let txHash: string | undefined;
+
+      if (shouldUseMevProtection && mevProvider) {
+        // Use MEV provider for protected transaction submission
+        this.logger.info('Using MEV protected submission', {
+          chain,
+          strategy: mevProvider.strategy,
+          opportunityId: opportunity.id,
+        });
+
+        const mevResult = await this.withTransactionTimeout(
+          () => mevProvider.sendProtectedTransaction(protectedTx, {
+            simulate: MEV_CONFIG.simulateBeforeSubmit,
+            priorityFeeGwei: chainSettings?.priorityFeeGwei,
+          }),
+          'mevProtectedSubmission'
+        );
+
+        if (!mevResult.success) {
+          // MEV submission failed - throw error, outer catch handles nonce failure
+          // NOTE: Don't call failTransaction here - outer catch at line 1385 handles it
+          // to avoid double-fail when error propagates
+          throw new Error(`MEV protected submission failed: ${mevResult.error}`);
+        }
+
+        txHash = mevResult.transactionHash;
+
+        // Get receipt if we have a transaction hash
+        if (txHash) {
+          const provider = this.providers.get(chain);
+          if (provider) {
+            receipt = await this.withTransactionTimeout(
+              () => provider.getTransactionReceipt(txHash!),
+              'getReceipt'
+            );
+          }
+        }
+
+        this.logger.info('MEV protected transaction successful', {
+          chain,
+          strategy: mevResult.strategy,
+          txHash,
+          usedFallback: mevResult.usedFallback,
+          latencyMs: mevResult.latencyMs,
+        });
+      } else {
+        // Standard transaction submission (no MEV protection or disabled)
+        // RACE-CONDITION-FIX: Get fresh wallet reference right before sending
+        const wallet = this.wallets.get(chain);
+        if (!wallet) {
+          throw new Error(`Wallet became unavailable for chain: ${chain}`);
+        }
+
+        // P0-3 FIX: Execute transaction with timeout
+        const txResponse = await this.withTransactionTimeout(
+          () => wallet.sendTransaction(protectedTx),
+          'sendTransaction'
+        );
+
+        txHash = txResponse.hash;
+
+        // P0-3 FIX: Wait for receipt with timeout
+        receipt = await this.withTransactionTimeout(
+          () => txResponse.wait(),
+          'waitForReceipt'
+        );
       }
-
-      // P0-3 FIX: Execute transaction with timeout
-      const txResponse = await this.withTransactionTimeout(
-        () => wallet.sendTransaction(protectedTx),
-        'sendTransaction'
-      );
-
-      // P0-3 FIX: Wait for receipt with timeout
-      const receipt = await this.withTransactionTimeout(
-        () => txResponse.wait(),
-        'waitForReceipt'
-      );
 
       if (!receipt) {
         // P0-2 FIX: Mark transaction as failed if no receipt
@@ -1255,18 +1389,43 @@ export class ExecutionEngineService {
 
   /**
    * P0-3 FIX: Wrap blockchain operations with timeout
+   *
+   * ORPHANED-TIMER-FIX: Uses cancellable timeout pattern to prevent timer leaks.
+   * Previously, the timeout timer was never cleared if operation completed first,
+   * leaving orphaned timers in the event loop.
    */
   private async withTransactionTimeout<T>(
     operation: () => Promise<T>,
     operationName: string
   ): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Transaction ${operationName} timeout after ${TRANSACTION_TIMEOUT_MS}ms`));
-      }, TRANSACTION_TIMEOUT_MS);
-    });
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
 
-    return Promise.race([operation(), timeoutPromise]);
+      // Set up timeout with cleanup
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Transaction ${operationName} timeout after ${TRANSACTION_TIMEOUT_MS}ms`));
+        }
+      }, TRANSACTION_TIMEOUT_MS);
+
+      // Run operation with cleanup
+      operation()
+        .then((result) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            resolve(result);
+          }
+        })
+        .catch((error) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            reject(error);
+          }
+        });
+    });
   }
 
   private async executeCrossChainArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {

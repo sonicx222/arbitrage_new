@@ -669,3 +669,32 @@ export type {
   GasCostEstimate,
   GasPriceCacheConfig
 } from './gas-price-cache';
+
+// Phase 2: MEV Protection (ADR-013)
+export {
+  MevProviderFactory,
+  FlashbotsProvider,
+  L2SequencerProvider,
+  StandardProvider,
+  createFlashbotsProvider,
+  createL2SequencerProvider,
+  createStandardProvider,
+  createMevProvider,
+  hasMevProtection,
+  getRecommendedPriorityFee,
+  isL2SequencerChain,
+  getL2ChainConfig,
+  CHAIN_MEV_STRATEGIES,
+  MEV_DEFAULTS
+} from './mev-protection';
+export type {
+  IMevProvider,
+  MevStrategy,
+  MevSubmissionResult,
+  MevProviderConfig,
+  FlashbotsBundle,
+  BundleSimulationResult,
+  MevMetrics,
+  MevGlobalConfig,
+  ChainWalletConfig
+} from './mev-protection';

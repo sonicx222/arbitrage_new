@@ -916,13 +916,28 @@ export abstract class BaseDetector {
     amount1Out: string
   ): Promise<number> {
     // Default prices (fallback) - MUST stay in sync with price-oracle.ts DEFAULT_FALLBACK_PRICES
-    // Last updated: 2026-01-18
+    // Last updated: 2026-01-18 (Phase 2)
+    // Used for USD value estimation in whale alerts when price oracle is unavailable
     const defaultPrices: Record<string, number> = {
+      // Native tokens and wrappers
       ETH: 3500, WETH: 3500,
       BNB: 600, WBNB: 600,
       MATIC: 1.00, WMATIC: 1.00,
+      AVAX: 40, WAVAX: 40,
+      FTM: 0.80, WFTM: 0.80,
+      // L2 tokens
       ARB: 1.50,
-      OP: 3.00
+      OP: 3.00,
+      // Major tokens
+      BTC: 100000, WBTC: 100000,
+      // Stablecoins (default to 1.00)
+      USDT: 1.00, USDC: 1.00, DAI: 1.00, BUSD: 1.00,
+      FRAX: 1.00, LUSD: 1.00, TUSD: 1.00, USDP: 1.00, GUSD: 1.00,
+      // DeFi tokens
+      UNI: 10.00, AAVE: 250.00, LINK: 15.00, CRV: 1.00,
+      MKR: 2000.00, COMP: 60.00, SNX: 3.00, SUSHI: 1.50, YFI: 10000.00,
+      // Liquid staking
+      STETH: 3500, WSTETH: 4000, RETH: 3700, CBETH: 3600,
     };
 
     const token0Lower = pair.token0.toLowerCase();
