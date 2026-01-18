@@ -1,12 +1,28 @@
 /**
  * Shared Arbitrage Calculator Module
  *
- * REF-1/ARCH-1 FIX: Centralized arbitrage calculation logic used by:
- * - unified-detector/chain-instance.ts (intra-chain arbitrage)
- * - cross-chain-detector/detector.ts (cross-chain arbitrage)
+ * @deprecated This module is deprecated in favor of the components architecture.
+ * Import from './components' instead for the following functions:
  *
- * This eliminates code duplication and ensures consistent calculation
- * across all arbitrage detection services.
+ * - calculatePriceFromReserves → components/price-calculator
+ * - calculatePriceFromBigIntReserves → components/price-calculator
+ * - safeBigIntDivision → components/price-calculator
+ * - invertPrice → components/price-calculator
+ * - calculatePriceDifferencePercent → components/price-calculator
+ * - getDefaultFee → components/price-calculator
+ * - getMinProfitThreshold → components/price-calculator
+ * - isSameTokenPair → components/token-utils
+ * - isReverseOrder → components/token-utils
+ * - calculateCrossChainArbitrage → components/arbitrage-detector
+ * - detectArbitrage → components/arbitrage-detector (replaces calculateIntraChainArbitrage)
+ * - isValidPairSnapshot → components/arbitrage-detector (replaces validatePairSnapshot)
+ *
+ * Types have also been migrated:
+ * - PairSnapshot → components/pair-repository
+ * - ChainPriceData → components/arbitrage-detector
+ * - CrossChainOpportunityResult → components/arbitrage-detector
+ *
+ * This file will be removed in a future version.
  *
  * @see ARCHITECTURE_V2.md Section 4.3 (Arbitrage Detection)
  */

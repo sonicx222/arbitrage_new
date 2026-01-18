@@ -1332,6 +1332,105 @@ interface SystemMetrics {
 
 ---
 
+## Session: 2026-01-18 - Package Refactoring Analysis
+
+### Session Context
+
+**Objective**: Critical evaluation of external refactoring recommendations document (`docs/nodejs_package_best_practices.md`) against the arbitrage system's performance requirements.
+
+**Key Questions Addressed**:
+1. Are the document's problem diagnoses accurate?
+2. Will the proposed solutions help or harm detection performance?
+3. Which recommendations should be accepted/rejected for a latency-sensitive system?
+4. Is the existing components architecture sufficient?
+
+### Analysis Summary
+
+#### Finding 16: God Files Confirmed
+- **Observation**: Document claims about god files are accurate:
+  - `engine.ts`: 2,393 lines (execution, MEV, nonce, bridge, simulation mixed)
+  - `coordinator.ts`: 1,767 lines (HTTP, streams, health, alerts mixed)
+  - `chain-instance.ts`: 1,763 lines (WebSocket, 4 arbitrage types, simulation mixed)
+  - `config/index.ts`: 1,793 lines (chains, DEXs, tokens all in one)
+- **Decision**: Proceed with selective splitting (non-hot-path files only)
+- **Confidence**: 95%
+
+#### Finding 17: God Package Confirmed
+- **Observation**: `shared/core` has 78 files, 46,121 LOC, 98 exports, 150+ types
+- **Observation**: However, components architecture already exists in `shared/core/src/components/`
+- **Decision**: Complete migration to components rather than create 12-15 new packages
+- **Confidence**: 90%
+
+#### Finding 18: Component Architecture Already Exists
+- **Observation**: `components/price-calculator.ts` (437 lines) - pure calculation functions
+- **Observation**: `components/arbitrage-detector.ts` (450 lines) - pure detection logic
+- **Observation**: `components/pair-repository.ts` - O(1) pair lookups
+- **Observation**: `base-detector.ts` already imports from components
+- **Decision**: Complete the migration, deprecate legacy `arbitrage-calculator.ts`
+- **Confidence**: 92%
+
+#### Finding 19: Fragmentation Still Exists
+- **Observation**: `arbitrage-calculator.ts` exists ALONGSIDE `components/arbitrage-detector.ts`
+- **Observation**: Both files have overlapping calculation logic
+- **Decision**: Migrate all consumers to components, then remove legacy file
+- **Confidence**: 88%
+
+#### Finding 20: Package Proliferation Would Hurt Performance
+- **Observation**: Document proposes 12-15 packages (redis, cache, websocket, detection, etc.)
+- **Observation**: Each `import from '@arbitrage/xyz'` adds ~0.5-2ms import resolution
+- **Observation**: Hot path is `WebSocket → detection → publish` - must stay co-located
+- **Decision**: REJECT package proliferation, keep hot path code together
+- **Confidence**: 90%
+
+### Recommendations Assessment
+
+| Document Recommendation | Verdict | Confidence | Rationale |
+|------------------------|---------|------------|-----------|
+| Split config file (1,793 lines) | **ACCEPT** | 95% | Pure data, no runtime impact |
+| Complete component migration | **ACCEPT** | 90% | Already started, consolidates logic |
+| Split coordinator.ts | **ACCEPT** | 85% | Not on hot path |
+| Split engine.ts | **ACCEPT** | 80% | Not on hot path |
+| Add Turborepo | **ACCEPT** | 80% | Build caching valuable for CI/CD |
+| Split chain-instance.ts fully | **REJECT** | 85% | Hot path must stay co-located |
+| Create 12-15 packages | **REJECT** | 90% | Over-engineering, adds latency |
+| Switch to pnpm | **DEFER** | 70% | npm workspaces adequate |
+| 400-line strict limit | **MODIFY** | 75% | 600-800 for detection code |
+
+### Implementation Plan
+
+| Phase | Task | Risk | Priority |
+|-------|------|------|----------|
+| 1 | Split config into chains/dexes/tokens subfolders | LOW | HIGH |
+| 2 | Complete component migration, deprecate arbitrage-calculator.ts | MEDIUM | HIGH |
+| 3.1 | Split coordinator.ts into routes/services/consumers | MEDIUM | MEDIUM |
+| 3.2 | Split engine.ts into strategies/services | MEDIUM | MEDIUM |
+| 3.3 | Partial split chain-instance.ts (non-hot-path only) | HIGH | LOW |
+| 4 | Add Turborepo for build caching | LOW | LOW |
+
+### Key Principle Established
+
+> **"Optimize for detection latency first, maintainability second"**
+
+The refactoring document is designed for general Node.js applications, not latency-sensitive trading systems. The <50ms detection target requires keeping hot path code co-located.
+
+### Files to Modify
+
+| File | Lines | Action |
+|------|-------|--------|
+| `shared/config/src/index.ts` | 1,793 | Split into subfolders |
+| `services/coordinator/src/coordinator.ts` | 1,767 | Split into modules |
+| `services/execution-engine/src/engine.ts` | 2,393 | Split into strategies/services |
+| `shared/core/src/arbitrage-calculator.ts` | ~400 | Deprecate, migrate to components |
+| `services/unified-detector/src/chain-instance.ts` | 1,763 | Partial split only |
+
+### Open Questions
+
+1. **Performance Impact**: Will splitting non-hot-path code have measurable latency impact?
+2. **Turborepo Integration**: Will turbo cache work well with npm workspaces?
+3. **Component Completeness**: Are all calculation functions covered in components?
+
+---
+
 ## References
 
 - [Architecture v2.0](./ARCHITECTURE_V2.md)
@@ -1340,3 +1439,4 @@ interface SystemMetrics {
 - [Original Architecture](../architecture.md)
 - [Deployment Guide](../deployment.md)
 - [Detector Optimization Analysis](../DETECTOR_OPTIMIZATION_ANALYSIS.md)
+- [Package Refactoring Analysis](../../.claude/plans/buzzing-nibbling-abelson.md) - Detailed evaluation
