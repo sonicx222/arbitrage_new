@@ -35,7 +35,9 @@
       "@arbitrage/unified-detector": ["./services/unified-detector/src"],
       "@arbitrage/unified-detector/*": ["./services/unified-detector/src/*"],
       "@arbitrage/test-utils": ["./shared/test-utils/src"],
-      "@arbitrage/test-utils/*": ["./shared/test-utils/src/*"]
+      "@arbitrage/test-utils/*": ["./shared/test-utils/src/*"],
+      "@shared/security": ["./shared/security/src"],
+      "@shared/security/*": ["./shared/security/src/*"]
     }
   },
   "include": [

@@ -3,6 +3,7 @@
 
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';  // BUG-FIX: Import at module level (was require per call)
 import { createLogger } from '../../core/src/logger';
 import { getRedisClient } from '../../core/src/redis';
 
@@ -442,6 +443,36 @@ export class AuthService {
   }
 }
 
+// =============================================================================
+// Singleton AuthService (FIX: Avoid creating new instance per request)
+// =============================================================================
+
+let authServiceInstance: AuthService | null = null;
+
+/**
+ * Get or create the singleton AuthService instance.
+ * This prevents creating new Redis connections on every request.
+ *
+ * Note: Returns null if JWT_SECRET is not configured (allows dev mode).
+ */
+export function getAuthService(): AuthService | null {
+  if (!process.env.JWT_SECRET) {
+    return null;
+  }
+
+  if (!authServiceInstance) {
+    authServiceInstance = new AuthService();
+  }
+  return authServiceInstance;
+}
+
+/**
+ * Reset the AuthService singleton (for testing only).
+ */
+export function resetAuthService(): void {
+  authServiceInstance = null;
+}
+
 // Middleware for authentication
 export function authenticate(required: boolean = true) {
   return async (req: any, res: any, next: any) => {
@@ -455,7 +486,14 @@ export function authenticate(required: boolean = true) {
       }
 
       const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-      const authService = new AuthService();
+      const authService = getAuthService();
+      if (!authService) {
+        // JWT not configured - should not reach here if auth header present
+        if (required) {
+          return res.status(401).json({ error: 'Authentication not configured' });
+        }
+        return next();
+      }
       const user = await authService.validateToken(token);
 
       if (!user) {
@@ -482,7 +520,11 @@ export function authorize(resource: string, action: string) {
         return res.status(401).json({ error: 'Authentication required' });
       }
 
-      const authService = new AuthService();
+      const authService = getAuthService();
+      if (!authService) {
+        // No JWT configured - allow if we have a user (from API key)
+        return next();
+      }
       const allowed = await authService.authorize(req.user, resource, action);
 
       if (!allowed) {
@@ -496,3 +538,278 @@ export function authorize(resource: string, action: string) {
     }
   };
 }
+
+// =============================================================================
+// Phase 4: API Key Authentication
+// =============================================================================
+
+/**
+ * API Key configuration for simple service-to-service authentication
+ * More lightweight than full JWT for internal services
+ */
+export interface ApiKeyConfig {
+  /** Map of API key hash → permissions */
+  keys: Map<string, ApiKeyEntry>;
+}
+
+export interface ApiKeyEntry {
+  name: string;
+  permissions: string[];
+  roles: string[];
+  createdAt: number;
+  lastUsed?: number;
+}
+
+/**
+ * Simple API key user representation
+ */
+export interface ApiKeyUser {
+  id: string;
+  username: string;
+  roles: string[];
+  permissions: string[];
+  isActive: boolean;
+  isApiKey: true;
+}
+
+// In-memory API key store (in production, use Redis or database)
+const apiKeyStore: Map<string, ApiKeyEntry> = new Map();
+
+/**
+ * Initialize API keys from environment variable
+ * Format: API_KEYS=name1:key1:permissions,name2:key2:permissions
+ *
+ * Example: API_KEYS=coordinator:abc123:read:*;write:services,monitor:xyz789:read:*
+ */
+export function initializeApiKeys(): void {
+  const envKeys = process.env.API_KEYS;
+  if (!envKeys) {
+    moduleLogger.debug('No API_KEYS configured - API key auth disabled');
+    return;
+  }
+
+  const keyEntries = envKeys.split(',');
+  for (const entry of keyEntries) {
+    const [name, key, ...permParts] = entry.split(':');
+    if (!name || !key) {
+      moduleLogger.warn('Invalid API key entry format', { entry: entry.substring(0, 10) + '...' });
+      continue;
+    }
+
+    const permissions = permParts.join(':').split(';').filter(p => p);
+
+    // Store key hash, not the actual key
+    const keyHash = hashApiKey(key);
+    apiKeyStore.set(keyHash, {
+      name,
+      permissions: permissions.length > 0 ? permissions : ['read:*'],
+      roles: ['api-service'],
+      createdAt: Date.now(),
+    });
+
+    moduleLogger.info('API key registered', { name, permissionCount: permissions.length });
+  }
+}
+
+/**
+ * Clear all API keys (for testing only)
+ */
+export function clearApiKeyStore(): void {
+  apiKeyStore.clear();
+}
+
+/**
+ * Hash API key for secure storage and comparison
+ * Uses simple SHA-256 hash (sufficient for API keys)
+ *
+ * BUG-FIX: Uses module-level crypto import instead of require per call
+ */
+function hashApiKey(key: string): string {
+  return crypto.createHash('sha256').update(key).digest('hex');
+}
+
+/**
+ * Validate an API key and return the associated user
+ */
+export function validateApiKey(key: string): ApiKeyUser | null {
+  const keyHash = hashApiKey(key);
+  const entry = apiKeyStore.get(keyHash);
+
+  if (!entry) {
+    return null;
+  }
+
+  // Update last used time
+  entry.lastUsed = Date.now();
+
+  return {
+    id: `api_${entry.name}`,
+    username: entry.name,
+    roles: entry.roles,
+    permissions: entry.permissions,
+    isActive: true,
+    isApiKey: true,
+  };
+}
+
+/**
+ * Check if API key auth is enabled
+ */
+export function isApiKeyAuthEnabled(): boolean {
+  return apiKeyStore.size > 0;
+}
+
+/**
+ * Check if JWT auth is enabled (JWT_SECRET is set)
+ */
+export function isJwtAuthEnabled(): boolean {
+  return !!process.env.JWT_SECRET;
+}
+
+/**
+ * Check if any auth method is enabled
+ */
+export function isAuthEnabled(): boolean {
+  return isJwtAuthEnabled() || isApiKeyAuthEnabled();
+}
+
+// =============================================================================
+// Unified Authentication Middleware
+// =============================================================================
+
+export interface AuthOptions {
+  /** Whether authentication is required (default: true) */
+  required?: boolean;
+  /** Allowed authentication methods (default: all enabled) */
+  methods?: ('jwt' | 'apiKey')[];
+}
+
+/**
+ * Unified authentication middleware that supports both JWT and API key auth
+ *
+ * Checks in order:
+ * 1. Bearer token (JWT)
+ * 2. X-API-Key header
+ *
+ * If neither auth is configured, allows all requests (dev mode)
+ */
+export function apiAuth(options: AuthOptions = {}) {
+  const { required = true, methods = ['jwt', 'apiKey'] } = options;
+
+  return async (req: any, res: any, next: any) => {
+    try {
+      // If no auth is enabled, skip auth (dev mode)
+      if (!isAuthEnabled()) {
+        moduleLogger.debug('Auth not configured - allowing request');
+        return next();
+      }
+
+      // Try API key first (simpler, no expiry issues)
+      if (methods.includes('apiKey') && isApiKeyAuthEnabled()) {
+        const apiKey = req.headers['x-api-key'];
+        if (apiKey) {
+          const user = validateApiKey(apiKey);
+          if (user) {
+            req.user = user;
+            moduleLogger.debug('API key authentication successful', { user: user.username });
+            return next();
+          }
+          // Invalid API key - continue to try JWT
+          moduleLogger.debug('Invalid API key provided');
+        }
+      }
+
+      // Try JWT Bearer token
+      if (methods.includes('jwt') && isJwtAuthEnabled()) {
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith('Bearer ')) {
+          const token = authHeader.substring(7);
+          try {
+            const authService = getAuthService();
+            if (authService) {
+              const user = await authService.validateToken(token);
+              if (user) {
+                req.user = user;
+                moduleLogger.debug('JWT authentication successful', { user: user.username });
+                return next();
+              }
+            }
+          } catch (error) {
+            // JWT validation failed - continue
+            moduleLogger.debug('JWT validation failed', { error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      }
+
+      // No valid auth found
+      if (required) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Provide a valid API key (X-API-Key header) or JWT token (Authorization: Bearer)',
+        });
+      }
+
+      // Auth not required, continue without user
+      return next();
+    } catch (error) {
+      moduleLogger.error('Authentication middleware error', { error });
+      return res.status(500).json({ error: 'Authentication failed' });
+    }
+  };
+}
+
+/**
+ * Authorization middleware for permission checking
+ * Works with both JWT users and API key users
+ */
+export function apiAuthorize(resource: string, action: string) {
+  return async (req: any, res: any, next: any) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const requiredPermission = `${action}:${resource}`;
+
+      // Check direct permissions
+      if (req.user.permissions.includes(requiredPermission)) {
+        return next();
+      }
+
+      // Check wildcard permissions
+      for (const perm of req.user.permissions) {
+        const [permAction, permResource] = perm.split(':');
+        if ((permAction === '*' || permAction === action) &&
+            (permResource === '*' || permResource === resource)) {
+          return next();
+        }
+      }
+
+      // Check role-based permissions for JWT users
+      if (!req.user.isApiKey) {
+        try {
+          const authService = getAuthService();
+          if (authService) {
+            const allowed = await authService.authorize(req.user, resource, action);
+            if (allowed) {
+              return next();
+            }
+          }
+        } catch {
+          // Fall through to forbidden
+        }
+      }
+
+      return res.status(403).json({
+        error: 'Insufficient permissions',
+        required: requiredPermission,
+      });
+    } catch (error) {
+      moduleLogger.error('Authorization middleware error', { error });
+      return res.status(500).json({ error: 'Authorization failed' });
+    }
+  };
+}
+
+// Initialize API keys on module load
+initializeApiKeys();

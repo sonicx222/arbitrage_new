@@ -540,6 +540,7 @@ export {
   isRetryableError as isRetryableErrorCheck,
   isCriticalError,
   getErrorSeverity,
+  getErrorMessage,  // FIX: Export safe error message extractor
   formatErrorForLog,
   formatErrorForResponse,
   ErrorAggregator
@@ -698,3 +699,31 @@ export type {
   MevGlobalConfig,
   ChainWalletConfig
 } from './mev-protection';
+
+// Phase 3: Cross-Chain Bridge Router (ADR-014)
+export {
+  StargateRouter,
+  createStargateRouter,
+  BridgeRouterFactory,
+  createBridgeRouterFactory,
+  BRIDGE_DEFAULTS,
+  STARGATE_CHAIN_IDS,
+  STARGATE_POOL_IDS,
+  STARGATE_ROUTER_ADDRESSES,
+  BRIDGE_TIMES
+} from './bridge-router';
+export type {
+  BridgeProtocol,
+  BridgeStatus,
+  BridgeChainConfig,
+  BridgeTokenConfig,
+  BridgeQuoteRequest,
+  BridgeQuote,
+  BridgeExecuteRequest,
+  BridgeExecuteResult,
+  BridgeStatusResult,
+  IBridgeRouter,
+  CrossChainExecutionPlan,
+  CrossChainExecutionResult,
+  BridgeRouterFactoryConfig
+} from './bridge-router';

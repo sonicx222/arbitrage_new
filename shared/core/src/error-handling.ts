@@ -415,6 +415,23 @@ export function getErrorSeverity(error: Error): ErrorSeverity {
 // =============================================================================
 
 /**
+ * Safely extract error message from unknown error type.
+ * Use this instead of unsafe `(error as Error).message` casts.
+ *
+ * @param error - Any error value (Error, string, unknown)
+ * @returns The error message as a string
+ */
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return String(error);
+}
+
+/**
  * Format error for logging.
  */
 export function formatErrorForLog(error: Error): Record<string, unknown> {

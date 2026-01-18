@@ -30,6 +30,7 @@ import {
   getStreamHealthMonitor
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
+import { apiAuth, apiAuthorize, isAuthEnabled } from '@shared/security';
 
 // =============================================================================
 // Types
@@ -1480,29 +1481,76 @@ export class CoordinatorService {
   }
 
   private setupRoutes(): void {
-    // Dashboard routes
-    this.app.get('/', this.getDashboard.bind(this));
-    this.app.get('/api/health', ValidationMiddleware.validateHealthCheck, this.getHealth.bind(this));
-    this.app.get('/api/metrics', this.getMetrics.bind(this));
-    this.app.get('/api/services', this.getServices.bind(this));
-    this.app.get('/api/opportunities', this.getOpportunities.bind(this));
-    this.app.get('/api/alerts', this.getAlerts.bind(this));
-    this.app.get('/api/leader', this.getLeaderStatus.bind(this));
+    // Phase 4: Log authentication status on startup
+    if (isAuthEnabled()) {
+      this.logger.info('API authentication enabled');
+    } else {
+      this.logger.warn('API authentication NOT configured - endpoints are unprotected. Set JWT_SECRET or API_KEYS env vars for production.');
+    }
 
-    // Control routes with strict rate limiting
+    // ==========================================================================
+    // Public Routes (no authentication required)
+    // ==========================================================================
+    // Dashboard - HTML interface, no auth needed
+    this.app.get('/', this.getDashboard.bind(this));
+
+    // Health check - used by load balancers/orchestrators, must be public
+    this.app.get('/api/health', ValidationMiddleware.validateHealthCheck, this.getHealth.bind(this));
+
+    // ==========================================================================
+    // Protected Read Routes (authentication required, read:* permission)
+    // ==========================================================================
+    // Phase 4: Apply unified auth middleware that supports both JWT and API keys
+    const readAuth = apiAuth({ required: true });
+    const readPermission = apiAuthorize('metrics', 'read');
+
+    this.app.get('/api/metrics',
+      readAuth,
+      readPermission,
+      this.getMetrics.bind(this)
+    );
+    this.app.get('/api/services',
+      readAuth,
+      apiAuthorize('services', 'read'),
+      this.getServices.bind(this)
+    );
+    this.app.get('/api/opportunities',
+      readAuth,
+      apiAuthorize('opportunities', 'read'),
+      this.getOpportunities.bind(this)
+    );
+    this.app.get('/api/alerts',
+      readAuth,
+      apiAuthorize('alerts', 'read'),
+      this.getAlerts.bind(this)
+    );
+    this.app.get('/api/leader',
+      readAuth,
+      apiAuthorize('leader', 'read'),
+      this.getLeaderStatus.bind(this)
+    );
+
+    // ==========================================================================
+    // Admin Routes (authentication + write permission + strict rate limiting)
+    // ==========================================================================
     const strictLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 5,
       message: { error: 'Too many control actions', retryAfter: 900 }
     });
+    const writeAuth = apiAuth({ required: true });
 
     this.app.post('/api/services/:service/restart',
       strictLimiter,
+      writeAuth,
+      apiAuthorize('services', 'write'),
       this.validateServiceRestart.bind(this),
       this.restartService.bind(this)
     );
     this.app.post('/api/alerts/:alert/acknowledge',
       strictLimiter,
+      writeAuth,
+      apiAuthorize('alerts', 'write'),
       this.validateAlertAcknowledge.bind(this),
       this.acknowledgeAlert.bind(this)
     );
