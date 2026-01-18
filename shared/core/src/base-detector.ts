@@ -36,6 +36,13 @@ import {
 } from './index';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, dexFeeToPercentage } from '../../config/src';
 import {
+  calculatePriceFromReserves,
+  calculateSpreadSafe,
+  calculateNetProfit,
+  resolveFee,
+  meetsThreshold
+} from './components/price-calculator';
+import {
   Dex,
   Token,
   PriceUpdate,
@@ -828,17 +835,19 @@ export abstract class BaseDetector {
         otherPrice = 1 / otherPrice;
       }
 
+      // ARCH-REFACTOR: Use centralized PriceCalculator functions
       // Calculate price difference percentage (gross spread)
-      const priceDiff = Math.abs(currentPrice - otherPrice) / Math.min(currentPrice, otherPrice);
+      const grossSpread = calculateSpreadSafe(currentPrice, otherPrice);
 
       // Calculate fee-adjusted net profit (S2.2.2 fix: use pair-specific fees)
-      const currentFee = currentSnapshot.fee ?? 0.003;
-      const otherFee = otherSnapshot.fee ?? 0.003;
-      const totalFees = currentFee + otherFee;
-      const netProfitPct = priceDiff - totalFees;
+      // ARCH-REFACTOR: Use resolveFee() for consistent fee resolution
+      const currentFee = resolveFee(currentSnapshot.fee, currentSnapshot.dex);
+      const otherFee = resolveFee(otherSnapshot.fee, otherSnapshot.dex);
+      const netProfitPct = calculateNetProfit(grossSpread, currentFee, otherFee);
 
       // Check against threshold using NET profit (not gross)
-      if (netProfitPct >= this.getMinProfitThreshold()) {
+      // ARCH-REFACTOR: Use centralized meetsThreshold() for consistency
+      if (meetsThreshold(netProfitPct, this.getMinProfitThreshold())) {
         const chainConfig = this.getChainDetectorConfig();
         const opportunity: ArbitrageOpportunity = {
           id: `${currentSnapshot.address}-${otherSnapshot.address}-${Date.now()}`,
@@ -1385,18 +1394,12 @@ export abstract class BaseDetector {
 
 
   // Common price calculation
+  // ARCH-REFACTOR: Uses BigInt-based calculation to avoid precision loss with large reserves
   protected calculatePrice(pair: Pair): number {
     try {
-      const reserve0 = parseFloat(pair.reserve0 || '0');
-      const reserve1 = parseFloat(pair.reserve1 || '0');
-
-      // Return 0 for invalid reserves (zero, NaN, or infinite values)
-      if (reserve0 === 0 || reserve1 === 0 || isNaN(reserve0) || isNaN(reserve1)) {
-        return 0;
-      }
-
-      // Price of token1 in terms of token0
-      return reserve0 / reserve1;
+      // Use PriceCalculator for BigInt precision
+      const price = calculatePriceFromReserves(pair.reserve0 || '0', pair.reserve1 || '0');
+      return price ?? 0;
     } catch (error) {
       this.logger.error('Failed to calculate price', { error, pair });
       return 0;
@@ -1436,17 +1439,13 @@ export abstract class BaseDetector {
   /**
    * Calculate price from a snapshot (thread-safe).
    * Uses pre-captured reserve values that won't change during calculation.
+   * ARCH-REFACTOR: Uses BigInt-based calculation to avoid precision loss with large reserves
    */
   protected calculatePriceFromSnapshot(snapshot: PairSnapshot): number {
     try {
-      const reserve0 = parseFloat(snapshot.reserve0);
-      const reserve1 = parseFloat(snapshot.reserve1);
-
-      if (reserve0 === 0 || reserve1 === 0 || isNaN(reserve0) || isNaN(reserve1)) {
-        return 0;
-      }
-
-      return reserve0 / reserve1;
+      // Use PriceCalculator for BigInt precision
+      const price = calculatePriceFromReserves(snapshot.reserve0, snapshot.reserve1);
+      return price ?? 0;
     } catch (error) {
       this.logger.error('Failed to calculate price from snapshot', { error });
       return 0;

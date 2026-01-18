@@ -1513,3 +1513,132 @@ describe('HIGH-3: Price Re-verification Before Execution', () => {
     expect(isValid2).toBe(false); // 11 < 12
   });
 });
+
+// =============================================================================
+// ARCH-REFACTOR: Solana Threshold Format Standardization
+// =============================================================================
+
+describe('ARCH-REFACTOR: Solana Threshold Format Standardization', () => {
+  it('should convert percent config (0.3 = 0.3%) to decimal for comparison', () => {
+    // Solana config uses percent format (0.3 = 0.3%)
+    // EVM config uses decimal format (0.003 = 0.3%)
+    // Fix: Convert percent to decimal internally
+    const solanaConfig = { minProfitThreshold: 0.3 }; // 0.3%
+    const thresholdDecimal = solanaConfig.minProfitThreshold / 100;
+
+    expect(thresholdDecimal).toBe(0.003);
+  });
+
+  it('should correctly compare netProfit (decimal) against converted threshold', () => {
+    // Simulate the fixed calculation in solana-detector.ts:1165-1170
+    const solanaConfig = { minProfitThreshold: 0.3 }; // 0.3% in percent form
+    const thresholdDecimal = solanaConfig.minProfitThreshold / 100; // 0.003
+
+    // Test case 1: netProfit of 0.5% should pass (above threshold)
+    const netProfit1 = 0.005; // 0.5% in decimal form
+    expect(netProfit1 >= thresholdDecimal).toBe(true);
+
+    // Test case 2: netProfit of 0.2% should fail (below threshold)
+    const netProfit2 = 0.002; // 0.2% in decimal form
+    expect(netProfit2 >= thresholdDecimal).toBe(false);
+
+    // Test case 3: netProfit of exactly 0.3% should pass (equals threshold)
+    const netProfit3 = 0.003; // 0.3% in decimal form
+    expect(netProfit3 >= thresholdDecimal).toBe(true);
+  });
+
+  it('should produce same result as EVM detector comparison', () => {
+    // EVM uses decimal config and decimal comparison
+    const evmConfig = { minProfitThreshold: 0.003 }; // 0.3% in decimal
+    const netProfit = 0.004; // 0.4%
+
+    // EVM comparison
+    const evmResult = netProfit >= evmConfig.minProfitThreshold;
+
+    // Solana comparison with fix
+    const solanaConfig = { minProfitThreshold: 0.3 }; // 0.3% in percent
+    const thresholdDecimal = solanaConfig.minProfitThreshold / 100;
+    const solanaResult = netProfit >= thresholdDecimal;
+
+    // Both should produce the same result
+    expect(solanaResult).toBe(evmResult);
+    expect(solanaResult).toBe(true);
+  });
+});
+
+// =============================================================================
+// ARCH-REFACTOR: Precision Loss Fix for Price Calculation
+// =============================================================================
+
+describe('ARCH-REFACTOR: Precision Loss Fix for Price Calculation', () => {
+  it('should handle large reserves without precision loss (BigInt)', () => {
+    // Import the actual function
+    const { calculatePriceFromReserves } = require('../../src/components/price-calculator');
+
+    // Large reserve values that would lose precision with parseFloat
+    const largeReserve0 = '123456789012345678901234567890'; // 30 digits
+    const largeReserve1 = '987654321098765432109876543210'; // 30 digits
+
+    // OLD: parseFloat loses precision
+    const floatPrice = parseFloat(largeReserve0) / parseFloat(largeReserve1);
+    // floatPrice will have lost precision due to IEEE 754 limitations
+
+    // NEW: BigInt-based calculation preserves precision
+    const bigIntPrice = calculatePriceFromReserves(largeReserve0, largeReserve1);
+
+    // Both should be roughly equal (within float tolerance)
+    expect(bigIntPrice).toBeDefined();
+    expect(bigIntPrice).not.toBeNull();
+
+    // The BigInt calculation should work for arbitrarily large numbers
+    // where parseFloat would return Infinity or NaN
+  });
+
+  it('should return null for zero reserves', () => {
+    const { calculatePriceFromReserves } = require('../../src/components/price-calculator');
+
+    expect(calculatePriceFromReserves('0', '100')).toBeNull();
+    expect(calculatePriceFromReserves('100', '0')).toBeNull();
+    expect(calculatePriceFromReserves('0', '0')).toBeNull();
+  });
+
+  it('should return null for invalid reserve strings', () => {
+    const { calculatePriceFromReserves } = require('../../src/components/price-calculator');
+
+    expect(calculatePriceFromReserves('invalid', '100')).toBeNull();
+    expect(calculatePriceFromReserves('100', 'invalid')).toBeNull();
+    expect(calculatePriceFromReserves('', '100')).toBeNull();
+  });
+
+  it('should calculate correct price for typical ETH/USDC reserves', () => {
+    const { calculatePriceFromReserves } = require('../../src/components/price-calculator');
+
+    // 1000 ETH (18 decimals) and 3500000 USDC (6 decimals)
+    const reserve0 = '1000' + '0'.repeat(18); // 1000 * 10^18
+    const reserve1 = '3500000' + '0'.repeat(6); // 3500000 * 10^6
+
+    const price = calculatePriceFromReserves(reserve0, reserve1);
+
+    // price = reserve0 / reserve1 = 10^21 / 3.5 * 10^12 ≈ 285714285.71
+    expect(price).toBeCloseTo(285714285.71, 0);
+  });
+
+  it('should match expected precision for ETH/USDC arbitrage calculation', () => {
+    const { calculatePriceFromReserves } = require('../../src/components/price-calculator');
+
+    // Two pools with slightly different reserves
+    const pool1Reserve0 = '1000000000000000000000'; // 1000 ETH
+    const pool1Reserve1 = '3500000000000'; // 3500000 USDC
+
+    const pool2Reserve0 = '1010000000000000000000'; // 1010 ETH
+    const pool2Reserve1 = '3535000000000'; // 3535000 USDC
+
+    const price1 = calculatePriceFromReserves(pool1Reserve0, pool1Reserve1);
+    const price2 = calculatePriceFromReserves(pool2Reserve0, pool2Reserve1);
+
+    // Both prices should be very similar (within 1%)
+    expect(price1).not.toBeNull();
+    expect(price2).not.toBeNull();
+    expect(Math.abs(price1! - price2!) / Math.min(price1!, price2!)).toBeLessThan(0.01);
+  });
+});

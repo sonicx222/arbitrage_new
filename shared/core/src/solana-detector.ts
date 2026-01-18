@@ -35,6 +35,18 @@ import {
   StreamBatcher
 } from './redis-streams';
 import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../types';
+import { basisPointsToDecimal, meetsThreshold } from './components/price-calculator';
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * Default gas estimate for Solana DEX swaps.
+ * Solana uses compute units (CU) instead of gas. Typical DEX swap: 200,000-400,000 CU.
+ * With priority fee of ~0.0001 SOL per CU, estimated cost is ~0.02-0.04 SOL.
+ */
+const SOLANA_DEFAULT_GAS_ESTIMATE = '300000';
 
 // =============================================================================
 // Type Definitions
@@ -128,7 +140,11 @@ export interface SolanaDetectorConfig {
   /** Delay between retries in milliseconds (default: 1000) */
   retryDelayMs?: number;
 
-  /** Minimum profit threshold for arbitrage in percent (default: 0.3) */
+  /**
+   * Minimum profit threshold for arbitrage in percent form (default: 0.3 = 0.3%).
+   * Note: EVM detectors use decimal form (0.003 = 0.3%). This is converted internally
+   * for consistency: thresholdDecimal = minProfitThreshold / 100.
+   */
   minProfitThreshold?: number;
 }
 
@@ -1153,16 +1169,21 @@ export class SolanaDetector extends EventEmitter {
     const maxPrice = Math.max(pool1.price, pool2.price);
     const grossDiff = (maxPrice - minPrice) / minPrice;
 
-    // Calculate fees (convert from basis points to percentage)
-    const fee1 = pool1.fee / 10000;
-    const fee2 = pool2.fee / 10000;
+    // ARCH-REFACTOR: Use centralized basisPointsToDecimal for fee conversion
+    const fee1 = basisPointsToDecimal(pool1.fee);
+    const fee2 = basisPointsToDecimal(pool2.fee);
     const totalFees = fee1 + fee2;
 
     // Net profit after fees
     const netProfit = grossDiff - totalFees;
 
     // Check against threshold
-    if (netProfit * 100 < this.config.minProfitThreshold) {
+    // ARCH-REFACTOR: Standardize on decimal format for consistency with EVM detectors
+    // Config minProfitThreshold is in percent (e.g., 0.3 = 0.3%), convert to decimal for comparison
+    const thresholdDecimal = this.config.minProfitThreshold / 100;
+
+    // ARCH-REFACTOR: Use centralized meetsThreshold for consistent comparison
+    if (!meetsThreshold(netProfit, thresholdDecimal)) {
       return null;
     }
 
@@ -1170,8 +1191,12 @@ export class SolanaDetector extends EventEmitter {
     const buyPool = pool1.price < pool2.price ? pool1 : pool2;
     const sellPool = pool1.price < pool2.price ? pool2 : pool1;
 
+    // Generate unique ID with random suffix to prevent collisions
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).slice(2, 11);
+
     return {
-      id: `solana-${buyPool.address}-${sellPool.address}-${Date.now()}`,
+      id: `solana-${buyPool.address}-${sellPool.address}-${timestamp}-${randomSuffix}`,
       type: 'intra-dex',
       chain: 'solana',
       buyDex: buyPool.dex,
@@ -1185,8 +1210,9 @@ export class SolanaDetector extends EventEmitter {
       profitPercentage: netProfit * 100,
       expectedProfit: netProfit,
       confidence: 0.85, // Solana has fast finality
-      timestamp: Date.now(),
-      expiresAt: Date.now() + 1000, // 1 second expiry (Solana is fast)
+      timestamp,
+      expiresAt: timestamp + 1000, // 1 second expiry (Solana is fast)
+      gasEstimate: SOLANA_DEFAULT_GAS_ESTIMATE,
       status: 'pending'
     };
   }
