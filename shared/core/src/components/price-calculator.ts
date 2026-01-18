@@ -434,3 +434,39 @@ export function areValidReserves(
 export function isValidFee(fee: number): boolean {
   return typeof fee === 'number' && isFinite(fee) && fee >= 0 && fee < 1;
 }
+
+// =============================================================================
+// Additional Functions (migrated from arbitrage-calculator.ts)
+// =============================================================================
+
+/**
+ * Calculate price from BigInt reserves directly (avoids string parsing overhead).
+ * P0-1 FIX: Optimized version for when reserves are already BigInt.
+ *
+ * @param reserve0 - Reserve of token0 as BigInt
+ * @param reserve1 - Reserve of token1 as BigInt
+ * @returns Price as number, or null if invalid reserves
+ */
+export function calculatePriceFromBigIntReserves(reserve0: bigint, reserve1: bigint): number | null {
+  if (reserve0 === 0n || reserve1 === 0n) {
+    return null;
+  }
+
+  return safeBigIntDivision(reserve0, reserve1);
+}
+
+/**
+ * Calculate price difference as percentage of lower price.
+ * Alias for calculateSpreadSafe for backward compatibility.
+ *
+ * @param price1 - First price
+ * @param price2 - Second price
+ * @returns Difference as decimal (0.01 = 1%)
+ */
+export function calculatePriceDifferencePercent(price1: number, price2: number): number {
+  return calculateSpreadSafe(price1, price2);
+}
+
+// Re-export getMinProfitThreshold from config (single source of truth)
+// This maintains backward compatibility for code importing from components
+export { getMinProfitThreshold } from '../../../config/src/thresholds';

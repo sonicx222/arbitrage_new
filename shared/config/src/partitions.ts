@@ -18,7 +18,11 @@
 import { PARTITION_IDS, PartitionId } from './partition-ids';
 export { PARTITION_IDS, PartitionId } from './partition-ids';
 
-import { CHAINS, DEXES, CORE_TOKENS, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes } from './index';
+// Import from split modules to avoid circular dependency with index.ts
+import { CHAINS } from './chains';
+import { DEXES, getEnabledDexes } from './dexes';
+import { CORE_TOKENS, TOKEN_METADATA } from './tokens';
+import { DETECTOR_CONFIG } from './detector-config';
 
 // =============================================================================
 // Types

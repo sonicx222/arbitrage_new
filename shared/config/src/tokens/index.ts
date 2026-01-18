@@ -1,0 +1,327 @@
+/**
+ * Token Configurations
+ *
+ * Contains all token configurations per chain including:
+ * - CORE_TOKENS: Primary tokens for arbitrage detection
+ * - TOKEN_METADATA: Chain-specific token addresses for USD estimation
+ *
+ * Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
+ * Total: 112 tokens across 11 chains
+ *
+ * @see S3.1.2: New chain tokens
+ * @see S3.2.1: Avalanche token expansion
+ * @see S3.3.3: Solana token expansion
+ */
+
+import { Token } from '../../../types';
+
+// =============================================================================
+// TOKEN CONFIGURATIONS - 112 Tokens
+// Categories: Anchor (native, stables), Core DeFi, Chain Governance, High-Volume
+// =============================================================================
+export const CORE_TOKENS: Record<string, Token[]> = {
+  // Arbitrum: 12 tokens
+  arbitrum: [
+    // Anchor tokens
+    { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', symbol: 'WETH', decimals: 18, chainId: 42161 },
+    { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6, chainId: 42161 },
+    { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6, chainId: 42161 },
+    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18, chainId: 42161 },
+    { address: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', symbol: 'WBTC', decimals: 8, chainId: 42161 },
+    // Chain governance
+    { address: '0x912CE59144191C1204E64559FE8253a0e49E6548', symbol: 'ARB', decimals: 18, chainId: 42161 },
+    // Core DeFi
+    { address: '0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0', symbol: 'UNI', decimals: 18, chainId: 42161 },
+    { address: '0xf97f4df75117a78c1A5a0DBb814Af92458539FB4', symbol: 'LINK', decimals: 18, chainId: 42161 },
+    { address: '0x6C2C06790b3E3E3c38e12Ee22F8183b37a13EE55', symbol: 'DPX', decimals: 18, chainId: 42161 },
+    { address: '0x539bdE0d7Dbd336b79148AA742883198BBF60342', symbol: 'MAGIC', decimals: 18, chainId: 42161 },
+    // High-volume
+    { address: '0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a', symbol: 'GMX', decimals: 18, chainId: 42161 },
+    { address: '0x5979D7b546E38E414F7E9822514be443A4800529', symbol: 'wstETH', decimals: 18, chainId: 42161 }
+  ],
+  // BSC: 10 tokens
+  bsc: [
+    // Anchor tokens
+    { address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', symbol: 'WBNB', decimals: 18, chainId: 56 },
+    { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18, chainId: 56 },
+    { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18, chainId: 56 },
+    { address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', symbol: 'BUSD', decimals: 18, chainId: 56 },
+    { address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', symbol: 'BTCB', decimals: 18, chainId: 56 },
+    // Bridged ETH
+    { address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', symbol: 'ETH', decimals: 18, chainId: 56 },
+    // Core DeFi
+    { address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', symbol: 'CAKE', decimals: 18, chainId: 56 },
+    { address: '0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD', symbol: 'LINK', decimals: 18, chainId: 56 },
+    // High-volume
+    { address: '0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE', symbol: 'XRP', decimals: 18, chainId: 56 },
+    { address: '0x3EE2200Efb3400fAbB9AacF31297cBdD1d435D47', symbol: 'ADA', decimals: 18, chainId: 56 }
+  ],
+  // Base: 10 tokens
+  base: [
+    // Anchor tokens
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18, chainId: 8453 },
+    { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6, chainId: 8453 },
+    { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', decimals: 18, chainId: 8453 },
+    // Bridged BTC
+    { address: '0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b', symbol: 'tBTC', decimals: 18, chainId: 8453 },
+    // LST tokens
+    { address: '0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452', symbol: 'wstETH', decimals: 18, chainId: 8453 },
+    { address: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', symbol: 'cbETH', decimals: 18, chainId: 8453 },
+    // Core DeFi
+    { address: '0x940181a94A35A4569E4529A3CDfB74e38FD98631', symbol: 'AERO', decimals: 18, chainId: 8453 },
+    // High-volume meme
+    { address: '0x532f27101965dd16442E59d40670FaF5eBB142E4', symbol: 'BRETT', decimals: 18, chainId: 8453 },
+    { address: '0xAC1Bd2486aAf3B5C0fc3Fd868558b082a531B2B4', symbol: 'TOSHI', decimals: 18, chainId: 8453 },
+    { address: '0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b', symbol: 'VIRTUAL', decimals: 18, chainId: 8453 }
+  ],
+  // Polygon: 10 tokens
+  polygon: [
+    // Anchor tokens
+    { address: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', symbol: 'WMATIC', decimals: 18, chainId: 137 },
+    { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6, chainId: 137 },
+    { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6, chainId: 137 },
+    { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', decimals: 18, chainId: 137 },
+    { address: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', symbol: 'WBTC', decimals: 8, chainId: 137 },
+    // Bridged ETH
+    { address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', symbol: 'WETH', decimals: 18, chainId: 137 },
+    // Core DeFi
+    { address: '0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39', symbol: 'LINK', decimals: 18, chainId: 137 },
+    { address: '0xD6DF932A45C0f255f85145f286eA0b292B21C90B', symbol: 'AAVE', decimals: 18, chainId: 137 },
+    // High-volume
+    { address: '0x2C89bbc92BD86F8075d1DEcc58C7F4E0107f286b', symbol: 'AVAX', decimals: 18, chainId: 137 },
+    { address: '0xB0B195aEFA3650A6908f15CdaC7D92F8a5791B0B', symbol: 'BOB', decimals: 18, chainId: 137 }
+  ],
+  // Optimism: 10 tokens (NEW - Phase 1)
+  optimism: [
+    // Anchor tokens
+    { address: '0x4200000000000000000000000000000000000006', symbol: 'WETH', decimals: 18, chainId: 10 },
+    { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', symbol: 'USDT', decimals: 6, chainId: 10 },
+    { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6, chainId: 10 },
+    { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18, chainId: 10 },
+    { address: '0x68f180fcCe6836688e9084f035309E29Bf0A2095', symbol: 'WBTC', decimals: 8, chainId: 10 },
+    // Chain governance
+    { address: '0x4200000000000000000000000000000000000042', symbol: 'OP', decimals: 18, chainId: 10 },
+    // LST tokens
+    { address: '0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb', symbol: 'wstETH', decimals: 18, chainId: 10 },
+    // Core DeFi
+    { address: '0x350a791Bfc2C21F9Ed5d10980Dad2e2638ffa7f6', symbol: 'LINK', decimals: 18, chainId: 10 },
+    { address: '0x9e1028F5F1D5eDE59748FFceE5532509976840E0', symbol: 'PERP', decimals: 18, chainId: 10 },
+    { address: '0x3c8B650257cFb5f272f799F5e2b4e65093a11a05', symbol: 'VELO', decimals: 18, chainId: 10 }
+  ],
+  // Ethereum: 8 tokens (selective - large arbs only)
+  ethereum: [
+    // Anchor tokens
+    { address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', symbol: 'WETH', decimals: 18, chainId: 1 },
+    { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6, chainId: 1 },
+    { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6, chainId: 1 },
+    { address: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', symbol: 'WBTC', decimals: 8, chainId: 1 },
+    // LST tokens (high volume)
+    { address: '0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0', symbol: 'wstETH', decimals: 18, chainId: 1 },
+    { address: '0xae78736Cd615f374D3085123A210448E74Fc6393', symbol: 'rETH', decimals: 18, chainId: 1 },
+    // Core DeFi
+    { address: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984', symbol: 'UNI', decimals: 18, chainId: 1 },
+    { address: '0x514910771AF9Ca656af840dff83E8264EcF986CA', symbol: 'LINK', decimals: 18, chainId: 1 }
+  ],
+  // =============================================================================
+  // S3.1.2: New Chain Tokens for 4-Partition Architecture
+  // S3.2.1: Expanded Avalanche Tokens (15 total)
+  // =============================================================================
+  // Avalanche: 15 tokens
+  avalanche: [
+    // Anchor tokens
+    { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX', decimals: 18, chainId: 43114 },
+    { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6, chainId: 43114 },
+    { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6, chainId: 43114 },
+    { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18, chainId: 43114 },
+    // Bridged BTC
+    { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e', decimals: 8, chainId: 43114 },
+    // Bridged ETH
+    { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e', decimals: 18, chainId: 43114 },
+    // Core DeFi
+    { address: '0x6e84a6216eA6dACC71eE8E6b0a5B7322EEbC0fDd', symbol: 'JOE', decimals: 18, chainId: 43114 },
+    { address: '0x5947BB275c521040051D82396192181b413227A3', symbol: 'LINK', decimals: 18, chainId: 43114 },
+    // S3.2.1: New tokens added
+    { address: '0x63a72806098Bd3D9520cC43356dD78afe5D386D9', symbol: 'AAVE', decimals: 18, chainId: 43114 },
+    { address: '0x2b2C81e08f1Af8835a78Bb2A90AE924ACE0eA4bE', symbol: 'sAVAX', decimals: 18, chainId: 43114 }, // Staked AVAX (Benqi)
+    { address: '0x8729438EB15e2C8B576fCc6AeCdA6A148776C0F5', symbol: 'QI', decimals: 18, chainId: 43114 },    // BENQI token
+    { address: '0x60781C2586D68229fde47564546784ab3fACA982', symbol: 'PNG', decimals: 18, chainId: 43114 },   // Pangolin token
+    { address: '0x22d4002028f537599bE9f666d1c4Fa138522f9c8', symbol: 'PTP', decimals: 18, chainId: 43114 },   // Platypus token
+    { address: '0x62edc0692BD897D2295872a9FFCac5425011c661', symbol: 'GMX', decimals: 18, chainId: 43114 },   // GMX token
+    { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18, chainId: 43114 }   // Frax stablecoin
+  ],
+  // Fantom: 10 tokens (S3.2.2)
+  fantom: [
+    // Anchor tokens
+    { address: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', symbol: 'WFTM', decimals: 18, chainId: 250 },
+    { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6, chainId: 250 },
+    { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6, chainId: 250 },
+    { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18, chainId: 250 },
+    // Bridged tokens
+    { address: '0x74b23882a30290451A17c44f4F05243b6b58C76d', symbol: 'WETH', decimals: 18, chainId: 250 },
+    { address: '0x321162Cd933E2Be498Cd2267a90534A804051b11', symbol: 'WBTC', decimals: 8, chainId: 250 },
+    // DEX governance tokens (S3.2.2)
+    { address: '0x841FAD6EAe12c286d1Fd18d1d525DFfA75C7EFFE', symbol: 'BOO', decimals: 18, chainId: 250 },    // SpookySwap
+    { address: '0x5Cc61A78F164885776AA610fb0FE1257df78E59B', symbol: 'SPIRIT', decimals: 18, chainId: 250 }, // SpiritSwap
+    { address: '0x3Fd3A0c85B70754eFc07aC9Ac0cbBDCe664865A6', symbol: 'EQUAL', decimals: 18, chainId: 250 },  // Equalizer
+    { address: '0xF24Bcf4d1e507740041C9cFd2DddB29585aDCe1e', symbol: 'BEETS', decimals: 18, chainId: 250 }   // Beethoven X
+  ],
+  // zkSync Era: 6 tokens
+  zksync: [
+    // Anchor tokens
+    { address: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', symbol: 'WETH', decimals: 18, chainId: 324 },
+    { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6, chainId: 324 },
+    { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6, chainId: 324 },
+    // Core DeFi
+    { address: '0xBBeB516fb02a01611cBBE0453Fe3c580D7281011', symbol: 'WBTC', decimals: 8, chainId: 324 },
+    { address: '0x5A7d6b2F92C77FAD6CCaBd7EE0624E64907Eaf3E', symbol: 'ZK', decimals: 18, chainId: 324 },
+    { address: '0x32fD44Bb4895705dca62f5E22ba9e3A6cd3C8B13', symbol: 'MUTE', decimals: 18, chainId: 324 }
+  ],
+  // Linea: 6 tokens
+  linea: [
+    // Anchor tokens
+    { address: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', symbol: 'WETH', decimals: 18, chainId: 59144 },
+    { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6, chainId: 59144 },
+    { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6, chainId: 59144 },
+    { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18, chainId: 59144 },
+    // Core DeFi
+    { address: '0x3aAB2285ddcDdaD8edf438C1bAB47e1a9D05a9b4', symbol: 'WBTC', decimals: 8, chainId: 59144 },
+    { address: '0x7d43AABC515C356145049227CeE54B608342c0ad', symbol: 'BUSD', decimals: 18, chainId: 59144 }
+  ],
+  // S3.3.3: Solana - 15 tokens (non-EVM - uses different address format)
+  // Categories: anchor (1), stablecoin (2), defi (3), meme (2), governance (4), LST (3)
+  solana: [
+    // Anchor tokens - Solana uses base58 addresses
+    { address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9, chainId: 101 },
+    // Stablecoins
+    { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6, chainId: 101 },
+    { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6, chainId: 101 },
+    // Core DeFi (DEX governance tokens)
+    { address: 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', symbol: 'JUP', decimals: 6, chainId: 101 },
+    { address: '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R', symbol: 'RAY', decimals: 6, chainId: 101 },
+    { address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE', symbol: 'ORCA', decimals: 6, chainId: 101 },
+    // High-volume meme tokens
+    { address: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', symbol: 'BONK', decimals: 5, chainId: 101 },
+    { address: 'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm', symbol: 'WIF', decimals: 6, chainId: 101 },
+    // S3.3.3: Governance tokens (ecosystem protocols)
+    { address: 'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL', symbol: 'JTO', decimals: 9, chainId: 101 },   // Jito governance
+    { address: 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3', symbol: 'PYTH', decimals: 6, chainId: 101 },  // Pyth Network oracle
+    { address: '85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ', symbol: 'W', decimals: 6, chainId: 101 },     // Wormhole governance
+    { address: 'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey', symbol: 'MNDE', decimals: 9, chainId: 101 },  // Marinade governance
+    // S3.3.3: Liquid Staking Tokens (LST) - High volume for arbitrage
+    { address: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', symbol: 'mSOL', decimals: 9, chainId: 101 },     // Marinade staked SOL
+    { address: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', symbol: 'jitoSOL', decimals: 9, chainId: 101 }, // Jito staked SOL
+    { address: 'bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1', symbol: 'BSOL', decimals: 9, chainId: 101 }      // BlazeStake staked SOL
+  ]
+};
+
+// =============================================================================
+// TOKEN METADATA - Chain-specific token addresses and categories
+// Used for USD value estimation and price calculations
+// =============================================================================
+export const TOKEN_METADATA: Record<string, {
+  weth: string;
+  stablecoins: { address: string; symbol: string; decimals: number }[];
+  nativeWrapper: string;
+}> = {
+  optimism: {
+    weth: '0x4200000000000000000000000000000000000006',
+    nativeWrapper: '0x4200000000000000000000000000000000000006',
+    stablecoins: [
+      { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', symbol: 'USDT', decimals: 6 },
+      { address: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', symbol: 'USDC', decimals: 6 },
+      { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  arbitrum: {
+    weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    nativeWrapper: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    stablecoins: [
+      { address: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', symbol: 'USDT', decimals: 6 },
+      { address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', symbol: 'USDC', decimals: 6 },
+      { address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  bsc: {
+    weth: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH on BSC
+    nativeWrapper: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
+    stablecoins: [
+      { address: '0x55d398326f99059fF775485246999027B3197955', symbol: 'USDT', decimals: 18 },
+      { address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', symbol: 'USDC', decimals: 18 },
+      { address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', symbol: 'BUSD', decimals: 18 }
+    ]
+  },
+  base: {
+    weth: '0x4200000000000000000000000000000000000006',
+    nativeWrapper: '0x4200000000000000000000000000000000000006',
+    stablecoins: [
+      { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
+      { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDbC', decimals: 6 }, // Bridged USDC
+      { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  polygon: {
+    weth: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+    nativeWrapper: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
+    stablecoins: [
+      { address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', symbol: 'USDT', decimals: 6 },
+      { address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', symbol: 'USDC', decimals: 6 },
+      { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  ethereum: {
+    weth: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    nativeWrapper: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    stablecoins: [
+      { address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', symbol: 'USDT', decimals: 6 },
+      { address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', symbol: 'USDC', decimals: 6 }
+    ]
+  },
+  // =============================================================================
+  // S3.1.2: New Chain Token Metadata
+  // S3.2.1: Updated Avalanche stablecoins (added FRAX)
+  // =============================================================================
+  avalanche: {
+    weth: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', // WETH.e on Avalanche
+    nativeWrapper: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // WAVAX
+    stablecoins: [
+      { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7', symbol: 'USDT', decimals: 6 },
+      { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC', decimals: 6 },
+      { address: '0xd586E7F844cEa2F87f50152665BCbc2C279D8d70', symbol: 'DAI', decimals: 18 },
+      { address: '0xD24C2Ad096400B6FBcd2ad8B24E7acBc21A1da64', symbol: 'FRAX', decimals: 18 } // S3.2.1: Added FRAX
+    ]
+  },
+  fantom: {
+    weth: '0x74b23882a30290451A17c44f4F05243b6b58C76d', // WETH on Fantom
+    nativeWrapper: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', // WFTM
+    stablecoins: [
+      { address: '0x049d68029688eAbF473097a2fC38ef61633A3C7A', symbol: 'fUSDT', decimals: 6 },
+      { address: '0x04068DA6C83AFCFA0e13ba15A6696662335D5B75', symbol: 'USDC', decimals: 6 },
+      { address: '0x8D11eC38a3EB5E956B052f67Da8Bdc9bef8Abf3E', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  zksync: {
+    weth: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH on zkSync
+    nativeWrapper: '0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0x493257fD37EDB34451f62EDf8D2a0C418852bA4C', symbol: 'USDT', decimals: 6 },
+      { address: '0x3355df6D4c9C3035724Fd0e3914dE96A5a83aaf4', symbol: 'USDC', decimals: 6 }
+    ]
+  },
+  linea: {
+    weth: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH on Linea
+    nativeWrapper: '0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f', // WETH (native is ETH)
+    stablecoins: [
+      { address: '0xA219439258ca9da29E9Cc4cE5596924745e12B93', symbol: 'USDT', decimals: 6 },
+      { address: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff', symbol: 'USDC', decimals: 6 },
+      { address: '0x4AF15ec2A0BD43Db75dd04E62FAA3B8EF36b00d5', symbol: 'DAI', decimals: 18 }
+    ]
+  },
+  solana: {
+    weth: 'So11111111111111111111111111111111111111112', // Wrapped SOL (native equivalent)
+    nativeWrapper: 'So11111111111111111111111111111111111111112', // Wrapped SOL
+    stablecoins: [
+      { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6 },
+      { address: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', symbol: 'USDT', decimals: 6 }
+    ]
+  }
+};

@@ -17,8 +17,10 @@
 export {
   // Core price calculations
   calculatePriceFromReserves,
+  calculatePriceFromBigIntReserves,
   safeBigIntDivision,
   invertPrice,
+  calculatePriceDifferencePercent,
 
   // Spread and profit calculations
   calculateSpread,
@@ -35,6 +37,7 @@ export {
   // Threshold utilities
   meetsThreshold,
   calculateConfidence,
+  getMinProfitThreshold,
 
   // Validation utilities
   isValidPrice,
@@ -76,6 +79,7 @@ export {
   detectArbitrage,
   detectArbitrageForTokenPair,
   calculateArbitrageProfit,
+  calculateCrossChainArbitrage,
 
   // Token order utilities
   isReverseTokenOrder,
@@ -92,6 +96,8 @@ export type {
   ArbitrageDetectionResult,
   ArbitrageOpportunityData,
   BatchDetectionOptions,
+  ChainPriceData,
+  CrossChainOpportunityResult,
 } from './arbitrage-detector';
 
 // Token Utils - Address normalization and token handling

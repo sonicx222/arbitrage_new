@@ -24,6 +24,7 @@ import {
   invertPrice,
   isValidPrice,
   getBlockTimeMs,
+  calculatePriceDifferencePercent,
   type PriceSource,
   type ProfitCalculationResult,
 } from './price-calculator';
@@ -446,4 +447,124 @@ export function validateDetectionInput(input: ArbitrageDetectionInput): {
     valid: errors.length === 0,
     errors,
   };
+}
+
+// =============================================================================
+// Cross-Chain Arbitrage (migrated from arbitrage-calculator.ts)
+// =============================================================================
+
+/**
+ * Price data for cross-chain arbitrage.
+ */
+export interface ChainPriceData {
+  chain: string;
+  dex: string;
+  price: number;
+  fee?: number;
+  timestamp: number;
+  pairKey?: string;
+}
+
+/**
+ * Result of cross-chain arbitrage calculation.
+ */
+export interface CrossChainOpportunityResult {
+  token: string;
+  sourceChain: string;
+  sourceDex: string;
+  sourcePrice: number;
+  targetChain: string;
+  targetDex: string;
+  targetPrice: number;
+  priceDiff: number;
+  percentageDiff: number;
+  estimatedProfit: number;
+  bridgeCost: number;
+  netProfit: number;
+  confidence: number;
+}
+
+/**
+ * Default minimum profit percentage for cross-chain arbitrage.
+ */
+const MIN_CROSS_CHAIN_PROFIT = 0.003; // 0.3%
+
+/**
+ * Calculate cross-chain arbitrage opportunity.
+ * Used by cross-chain-detector service.
+ *
+ * @param chainPrices - Array of price data from different chains
+ * @param bridgeCost - Estimated bridge cost in USD
+ * @param minProfitPct - Minimum profit percentage (default: 0.3%)
+ * @returns CrossChainOpportunityResult or null if not profitable
+ */
+export function calculateCrossChainArbitrage(
+  chainPrices: ChainPriceData[],
+  bridgeCost: number,
+  minProfitPct: number = MIN_CROSS_CHAIN_PROFIT
+): CrossChainOpportunityResult | null {
+  if (chainPrices.length < 2) {
+    return null;
+  }
+
+  // Sort by price to find best buy/sell
+  const sortedPrices = [...chainPrices].sort((a, b) => a.price - b.price);
+
+  const lowestPrice = sortedPrices[0];
+  const highestPrice = sortedPrices[sortedPrices.length - 1];
+
+  const priceDiff = highestPrice.price - lowestPrice.price;
+  const percentageDiff = calculatePriceDifferencePercent(lowestPrice.price, highestPrice.price) * 100;
+
+  // Calculate net profit after bridge cost
+  const netProfit = priceDiff - bridgeCost;
+
+  // Check if profitable
+  if (netProfit <= minProfitPct * lowestPrice.price) {
+    return null;
+  }
+
+  // Calculate confidence based on price difference and data freshness
+  const confidence = calculateCrossChainConfidence(lowestPrice, highestPrice);
+
+  return {
+    token: lowestPrice.pairKey || 'UNKNOWN',
+    sourceChain: lowestPrice.chain,
+    sourceDex: lowestPrice.dex,
+    sourcePrice: lowestPrice.price,
+    targetChain: highestPrice.chain,
+    targetDex: highestPrice.dex,
+    targetPrice: highestPrice.price,
+    priceDiff,
+    percentageDiff,
+    estimatedProfit: priceDiff,
+    bridgeCost,
+    netProfit,
+    confidence,
+  };
+}
+
+/**
+ * Calculate confidence for cross-chain opportunity.
+ * Based on price spread and data freshness.
+ *
+ * @param lowPrice - Lower price data point
+ * @param highPrice - Higher price data point
+ * @returns Confidence score 0-1
+ */
+function calculateCrossChainConfidence(
+  lowPrice: ChainPriceData,
+  highPrice: ChainPriceData
+): number {
+  // Base confidence on price difference
+  let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2;
+
+  // Apply freshness penalty (maxAgeMs = 10 seconds)
+  const maxAgeMs = 10000;
+  const ageMs = Date.now() - lowPrice.timestamp;
+  const freshnessScore = Math.max(0.5, 1.0 - ageMs / maxAgeMs);
+  confidence *= freshnessScore;
+
+  // Cap at 95%
+  return Math.min(confidence, 0.95);
 }
