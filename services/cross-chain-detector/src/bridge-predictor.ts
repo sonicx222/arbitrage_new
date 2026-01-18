@@ -113,6 +113,23 @@ export class BridgeLatencyPredictor {
     const latencies = successfulBridges.map(h => h.latency);
     const costs = successfulBridges.map(h => h.cost);
 
+    // B4-FIX: Handle case where all bridges failed (no successful bridges)
+    // Return null if we have no successful bridges to calculate metrics from
+    if (latencies.length === 0) {
+      // Return partial metrics showing 0% success rate but no latency/cost data
+      const failureMetrics: BridgeMetrics = {
+        bridgeName: bridgeKey,
+        avgLatency: 0,
+        minLatency: 0,
+        maxLatency: 0,
+        avgCost: 0,
+        successRate: 0,
+        sampleCount: history.length
+      };
+      this.metricsCache.set(bridgeKey, failureMetrics);
+      return failureMetrics;
+    }
+
     const metrics: BridgeMetrics = {
       bridgeName: bridgeKey,
       avgLatency: latencies.reduce((a, b) => a + b, 0) / latencies.length,

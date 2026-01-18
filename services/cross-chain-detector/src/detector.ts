@@ -152,6 +152,10 @@ export class CrossChainDetectorService {
   private priceUpdateCounter = 0;
   private readonly CLEANUP_FREQUENCY = 100; // Cleanup every 100 price updates
 
+  // FIX B1/B2: Concurrency guards for async intervals
+  private isConsumingStreams = false;
+  private isMonitoringHealth = false;
+
   constructor() {
     this.perfLogger = getPerformanceLogger('cross-chain-detector');
     this.bridgePredictor = new BridgeLatencyPredictor();
@@ -284,6 +288,10 @@ export class CrossChainDetectorService {
       // P1-NEW-7 FIX: Reset counter for clean restart
       this.priceUpdateCounter = 0;
 
+      // FIX B1/B2: Reset concurrency guards for clean restart
+      this.isConsumingStreams = false;
+      this.isMonitoringHealth = false;
+
       this.logger.info('Cross-Chain Detector Service stopped');
     });
 
@@ -340,8 +348,10 @@ export class CrossChainDetectorService {
   private startStreamConsumers(): void {
     // Poll streams every 100ms
     this.streamConsumerInterval = setInterval(async () => {
-      if (!this.stateManager.isRunning() || !this.streamsClient) return;
+      // FIX B1: Skip if already consuming (prevents concurrent stream reads)
+      if (this.isConsumingStreams || !this.stateManager.isRunning() || !this.streamsClient) return;
 
+      this.isConsumingStreams = true;
       try {
         await Promise.all([
           this.consumePriceUpdatesStream(),
@@ -349,6 +359,8 @@ export class CrossChainDetectorService {
         ]);
       } catch (error) {
         this.logger.error('Stream consumer error', { error });
+      } finally {
+        this.isConsumingStreams = false;
       }
     }, 100);
   }
@@ -441,6 +453,8 @@ export class CrossChainDetectorService {
         this.priceUpdateCounter = 0;
         this.cleanOldPriceData();
         this.cleanOldOpportunityCache();
+        // I1-FIX: Periodic bridge predictor cleanup to prevent memory bloat
+        this.bridgePredictor.cleanup();
       }
 
       this.logger.debug(`Updated price: ${update.chain}/${update.dex}/${update.pairKey} = ${update.price}`);
@@ -480,7 +494,8 @@ export class CrossChainDetectorService {
     if (typeof update.pairKey !== 'string' || !update.pairKey) {
       return false;
     }
-    if (typeof update.price !== 'number' || isNaN(update.price) || update.price < 0) {
+    // B1-FIX: Use <= 0 to prevent division by zero in profit calculations
+    if (typeof update.price !== 'number' || isNaN(update.price) || update.price <= 0) {
       return false;
     }
     if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
@@ -997,6 +1012,13 @@ export class CrossChainDetectorService {
     const amountInTokens = 1.0; // 1 token for calculation
     const expectedProfitInTokens = (opportunity.percentageDiff / 100) * amountInTokens;
 
+    // B3-FIX: Defensive token parsing with fallback
+    const tokenParts = opportunity.token.includes('/')
+      ? opportunity.token.split('/')
+      : [opportunity.token, opportunity.token]; // Fallback for malformed token
+    const tokenIn = tokenParts[0] || opportunity.token;
+    const tokenOut = tokenParts[1] || tokenParts[0] || opportunity.token;
+
     const arbitrageOpp: ArbitrageOpportunity = {
       id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       type: 'cross-chain',
@@ -1004,8 +1026,8 @@ export class CrossChainDetectorService {
       sellDex: opportunity.targetDex,
       buyChain: opportunity.sourceChain,
       sellChain: opportunity.targetChain,
-      tokenIn: opportunity.token.split('/')[0],
-      tokenOut: opportunity.token.split('/')[1],
+      tokenIn,
+      tokenOut,
       amountIn: amountInWei,
       // PRECISION-FIX: Use token amount (not USD difference) for execution engine compatibility
       expectedProfit: expectedProfitInTokens,
@@ -1044,6 +1066,10 @@ export class CrossChainDetectorService {
 
   private startHealthMonitoring(): void {
     this.healthMonitoringInterval = setInterval(async () => {
+      // FIX B2: Skip if already monitoring (prevents concurrent health updates)
+      if (this.isMonitoringHealth || !this.stateManager.isRunning()) return;
+
+      this.isMonitoringHealth = true;
       try {
         // P3-2 FIX: Use unified ServiceHealth with 'name' field
         // FIX: Add 'timestamp' field - coordinator maps data.timestamp to lastHeartbeat
@@ -1077,6 +1103,8 @@ export class CrossChainDetectorService {
         this.perfLogger.logHealthCheck('cross-chain-detector', health);
       } catch (error) {
         this.logger.error('Cross-chain health monitoring failed', { error });
+      } finally {
+        this.isMonitoringHealth = false;
       }
     }, 30000);
   }

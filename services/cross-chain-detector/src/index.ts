@@ -92,3 +92,33 @@ main().catch((error) => {
   console.error('Unhandled error in Cross-Chain Detector Service:', error);
   process.exit(1);
 });
+
+// =============================================================================
+// Module Exports (ADR-014: Modular Detector Components)
+// =============================================================================
+
+export { CrossChainDetectorService } from './detector';
+
+// Stream consumption module
+export {
+  createStreamConsumer,
+  StreamConsumer,
+  StreamConsumerConfig,
+  StreamConsumerEvents,
+} from './stream-consumer';
+
+// Price data management module
+export {
+  createPriceDataManager,
+  PriceDataManager,
+  PriceDataManagerConfig,
+  PriceData,
+} from './price-data-manager';
+
+// Opportunity publishing module
+export {
+  createOpportunityPublisher,
+  OpportunityPublisher,
+  OpportunityPublisherConfig,
+  CrossChainOpportunity,
+} from './opportunity-publisher';
