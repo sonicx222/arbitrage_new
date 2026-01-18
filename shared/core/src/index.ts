@@ -727,3 +727,63 @@ export type {
   CrossChainExecutionResult,
   BridgeRouterFactoryConfig
 } from './bridge-router';
+
+// =============================================================================
+// ARCH-REFACTOR: Component Architecture
+// Foundation components for detection and price calculation refactoring
+// @see .claude/plans/detection-refactoring-plan.md
+// @see .claude/plans/component-architecture-proposal.md
+// =============================================================================
+
+// PriceCalculator - Pure functions for price/profit calculations
+export {
+  // Core price calculations
+  calculatePriceFromReserves as calcPriceFromReserves,
+  safeBigIntDivision as safeBigIntDiv,
+  invertPrice as invertPriceValue,
+
+  // Spread and profit calculations
+  calculateSpread,
+  calculateSpreadSafe,
+  calculateNetProfit,
+  calculateProfitBetweenSources,
+
+  // Fee utilities
+  getDefaultFee as getDefaultDexFee,
+  resolveFee,
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+
+  // Threshold utilities
+  meetsThreshold,
+  calculateConfidence,
+
+  // Validation utilities
+  isValidPrice,
+  areValidReserves,
+  isValidFee,
+
+  // Error class
+  PriceCalculationError,
+} from './components/price-calculator';
+
+export type {
+  ReserveInput,
+  SpreadResult,
+  PriceSource as PriceSourceInput,
+  ProfitCalculationResult,
+} from './components/price-calculator';
+
+// PairRepository - In-memory storage with O(1) lookups
+export {
+  PairRepository,
+  createPairRepository,
+} from './components/pair-repository';
+
+export type {
+  PairSnapshot as ComponentPairSnapshot,
+  ExtendedPair as ComponentExtendedPair,
+  SnapshotOptions,
+  RepositoryStats,
+  PairChangeCallback,
+} from './components/pair-repository';
