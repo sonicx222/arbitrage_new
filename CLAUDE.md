@@ -14,5 +14,6 @@
 - Stick to the existing architecture design and implementation structure
 - ALWAYS read and understand relevant files before proposing edits. Do not speculate about code you have not inspected
 - Understand the data flow. Then propose a fix
+- The corrected code should be functional, efficient, and adhere to best practices in node.js programming
 - Always create a regression test after fixing a critical issue
 - Be sure to typecheck when you're done making a series of code changes

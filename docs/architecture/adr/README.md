@@ -24,6 +24,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-008](./ADR-008-chain-dex-token-selection.md) | Chain/DEX/Token Selection Strategy | Accepted | 2025-01-10 | 92% |
 | [ADR-009](./ADR-009-test-architecture.md) | Test Architecture | Accepted | 2025-01-12 | 90% |
 | [ADR-010](./ADR-010-websocket-resilience.md) | WebSocket Connection Resilience | Accepted | 2026-01-15 | 95% |
+| [ADR-014](./ADR-014-modular-detector-components.md) | Modular Detector Components | Accepted | 2026-01-18 | 92% |
 
 ## Decision Summary
 
@@ -87,6 +88,14 @@ An Architecture Decision Record captures an important architectural decision mad
    - Health-based provider selection
    - Proactive staleness detection
 
+### Code Architecture
+
+10. **Modular Detector Components** (ADR-014)
+    - ChainInstanceManager for lifecycle management
+    - HealthReporter for health monitoring
+    - MetricsCollector for metrics logging
+    - Factory functions for dependency injection
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -147,3 +156,4 @@ XX% - Explanation of confidence factors
 | 2025-01-10 | All | Initial creation from architecture analysis session |
 | 2025-01-12 | ADR-009 | Added Test Architecture decision |
 | 2026-01-15 | ADR-010 | Added WebSocket Connection Resilience decision |
+| 2026-01-18 | ADR-014 | Added Modular Detector Components decision |

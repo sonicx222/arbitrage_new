@@ -231,3 +231,29 @@ if (!process.env.JEST_WORKER_ID) {
 export { UnifiedChainDetector } from './unified-detector';
 export { ChainDetectorInstance } from './chain-instance';
 export type { UnifiedDetectorConfig, UnifiedDetectorStats, ChainStats } from './unified-detector';
+
+// ARCH-REFACTOR: New modular components extracted from UnifiedChainDetector
+export {
+  createChainInstanceManager,
+  type ChainInstanceManager,
+  type ChainInstanceManagerConfig,
+  type ChainInstanceFactory,
+  type StartResult,
+} from './chain-instance-manager';
+
+export {
+  createHealthReporter,
+  type HealthReporter,
+  type HealthReporterConfig,
+  type GetHealthDataFn,
+} from './health-reporter';
+
+export {
+  createMetricsCollector,
+  type MetricsCollector,
+  type MetricsCollectorConfig,
+  type GetStatsFn,
+} from './metrics-collector';
+
+// Shared types
+export { type Logger } from './types';
