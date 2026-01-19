@@ -1,7 +1,7 @@
 // Shared Memory Cache using SharedArrayBuffer
 // Enables atomic operations and cross-worker data sharing
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('shared-memory-cache');
 

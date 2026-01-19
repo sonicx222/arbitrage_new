@@ -31,7 +31,7 @@ import {
   BRIDGE_TIMES,
 } from './types';
 import { createLogger } from '../logger';
-import { AsyncMutex } from '../async-mutex';
+import { AsyncMutex } from '../async/async-mutex';
 
 const logger = createLogger('stargate-router');
 

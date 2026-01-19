@@ -19,8 +19,8 @@
  * - Stablecoins: $1.00
  */
 
-import { RedisClient, getRedisClient } from './redis';
-import { createLogger, Logger } from './logger';
+import { RedisClient, getRedisClient } from '../redis';
+import { createLogger, Logger } from '../logger';
 
 // =============================================================================
 // Dependency Injection Interfaces

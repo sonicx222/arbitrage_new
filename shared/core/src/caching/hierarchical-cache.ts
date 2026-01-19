@@ -3,13 +3,13 @@
 // L2: Redis for distributed caching
 // L3: Persistent storage for long-term data
 
-import { getRedisClient } from './redis';
-import { createLogger } from './logger';
+import { getRedisClient } from '../redis';
+import { createLogger } from '../logger';
 
 // P2-2-FIX: Import config with fallback for test environment
-let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
+let SYSTEM_CONSTANTS: typeof import('../../../config/src').SYSTEM_CONSTANTS | undefined;
 try {
-  SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+  SYSTEM_CONSTANTS = require('../../../config/src').SYSTEM_CONSTANTS;
 } catch {
   // Config not available, will use defaults
 }
@@ -230,7 +230,7 @@ export class HierarchicalCache {
    *
    * Type is RedisClient | Promise<RedisClient> | null to be explicit about this pattern.
    */
-  private redisPromise: Promise<import('./redis').RedisClient> | null = null;
+  private redisPromise: Promise<import('../redis').RedisClient> | null = null;
 
   // L1 Cache: SharedArrayBuffer for ultra-fast access
   private l1Metadata: Map<string, CacheEntry> = new Map();

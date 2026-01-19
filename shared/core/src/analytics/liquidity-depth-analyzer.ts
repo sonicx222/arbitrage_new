@@ -13,7 +13,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding T3.15
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('liquidity-depth-analyzer');
 

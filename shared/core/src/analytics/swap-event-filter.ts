@@ -14,8 +14,8 @@
  * @see ADR-002: Redis Streams over Pub/Sub
  */
 
-import { SwapEvent } from '../../types';
-import { createLogger } from './logger';
+import { SwapEvent } from '../../../types';
+import { createLogger } from '../logger';
 
 const logger = createLogger('swap-event-filter');
 

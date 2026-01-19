@@ -10,7 +10,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 4.2
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('whale-activity-tracker');
 

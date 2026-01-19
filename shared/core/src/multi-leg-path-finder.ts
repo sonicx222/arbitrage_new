@@ -20,7 +20,7 @@ import {
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP
-} from './gas-price-cache';
+} from './caching/gas-price-cache';
 import type { DexPool, TriangularStep, DynamicSlippageConfig } from './cross-dex-triangular-arbitrage';
 
 const logger = createLogger('multi-leg-path-finder');
@@ -868,7 +868,7 @@ export class MultiLegPathFinder {
     workerPool?: any
   ): Promise<MultiLegOpportunity[]> {
     // Lazy import worker pool to avoid circular dependencies
-    const pool = workerPool || (await import('./worker-pool')).getWorkerPool();
+    const pool = workerPool || (await import('./async/worker-pool')).getWorkerPool();
 
     // Check if pool is running
     const health = pool.getHealthStatus?.();

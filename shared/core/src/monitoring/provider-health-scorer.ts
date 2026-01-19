@@ -13,7 +13,7 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
-import { createLogger, Logger } from './logger';
+import { createLogger, Logger } from '../logger';
 
 /**
  * Health metrics for a single provider

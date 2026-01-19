@@ -14,7 +14,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 4.1
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 import type { MomentumSignal } from './price-momentum';
 
 const logger = createLogger('ml-opportunity-scorer');

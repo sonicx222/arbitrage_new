@@ -15,7 +15,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Phase 2 recommendations
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 import { CHAINS } from '@arbitrage/config';
 
 // =============================================================================

@@ -1,8 +1,8 @@
 // Cache Coherency Manager with Gossip Protocol
 // Maintains cache consistency across distributed nodes
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
 
 const logger = createLogger('cache-coherency');
 

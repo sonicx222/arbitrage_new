@@ -22,7 +22,7 @@
  * - For strict consistency, use version numbers or mutex locks
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('price-matrix');
 

@@ -18,7 +18,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 // ===========================================================================
 
 // Import LRUQueue directly for isolated testing
-import { LRUQueue } from '../../src/hierarchical-cache';
+import { LRUQueue } from '../../src/caching/hierarchical-cache';
 
 describe('T1.4: O(1) LRU Queue', () => {
   let queue: LRUQueue;

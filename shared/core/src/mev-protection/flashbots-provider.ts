@@ -19,7 +19,7 @@ import {
   FlashbotsBundle,
   MEV_DEFAULTS,
 } from './types';
-import { AsyncMutex } from '../async-mutex';
+import { AsyncMutex } from '../async/async-mutex';
 
 // =============================================================================
 // Flashbots Provider Implementation

@@ -7,8 +7,8 @@
  * @see S1.1.5: Add Stream health monitoring
  */
 
-import { createLogger } from './logger';
-import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
+import { createLogger } from '../logger';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 
 /** Logger interface for dependency injection */
 interface Logger {

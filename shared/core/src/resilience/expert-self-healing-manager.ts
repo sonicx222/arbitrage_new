@@ -10,12 +10,12 @@
 // - [TODO] Add consumer groups for stream consumption
 // - [TODO] Remove Pub/Sub after all consumers migrated
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
-import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
-import { getEnhancedHealthMonitor } from './enhanced-health-monitor';
+import { getEnhancedHealthMonitor } from '../monitoring/enhanced-health-monitor';
 import { getErrorRecoveryOrchestrator } from './error-recovery';
 
 const logger = createLogger('expert-self-healing-manager');

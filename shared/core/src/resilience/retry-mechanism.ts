@@ -1,7 +1,7 @@
 // Exponential Backoff and Retry Mechanism
 // Intelligent retry logic with jitter and circuit breaker integration
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('retry-mechanism');
 

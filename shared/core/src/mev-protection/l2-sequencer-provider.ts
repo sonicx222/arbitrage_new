@@ -25,7 +25,7 @@ import {
   MevMetrics,
   CHAIN_MEV_STRATEGIES,
 } from './types';
-import { AsyncMutex } from '../async-mutex';
+import { AsyncMutex } from '../async/async-mutex';
 
 // =============================================================================
 // L2 Chain Configuration

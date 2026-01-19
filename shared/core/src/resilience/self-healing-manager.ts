@@ -1,17 +1,17 @@
 // Self-Healing Service Manager
 // Automatically detects failures and orchestrates recovery
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
-import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
 // P3-2 FIX: Import unified ServiceHealth from shared types
-import type { ServiceHealth } from '../../types';
+import type { ServiceHealth } from '../../../types';
 
 // P2-2-FIX: Import config with fallback for test environment
-let SYSTEM_CONSTANTS: typeof import('../../config/src').SYSTEM_CONSTANTS | undefined;
+let SYSTEM_CONSTANTS: typeof import('../../../config/src').SYSTEM_CONSTANTS | undefined;
 try {
-  SYSTEM_CONSTANTS = require('../../config/src').SYSTEM_CONSTANTS;
+  SYSTEM_CONSTANTS = require('../../../config/src').SYSTEM_CONSTANTS;
 } catch {
   // Config not available, will use defaults
 }
@@ -49,7 +49,7 @@ export interface ServiceDefinition {
 
 // P3-2 FIX: ServiceHealth interface now imported from @arbitrage/types
 // Re-export for backwards compatibility
-export type { ServiceHealth } from '../../types';
+export type { ServiceHealth } from '../../../types';
 
 export interface RecoveryStrategy {
   name: string;

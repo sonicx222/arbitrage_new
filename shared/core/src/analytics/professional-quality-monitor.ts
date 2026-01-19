@@ -2,8 +2,8 @@
 // Measures and tracks the "Arbitrage Detection Professional Quality Score (AD-PQS)"
 // This is the single most important metric for measuring system professionalism
 
-import { createLogger } from './logger';
-import { getRedisClient, RedisClient } from './redis';
+import { createLogger } from '../logger';
+import { getRedisClient, RedisClient } from '../redis';
 
 const logger = createLogger('professional-quality-monitor');
 

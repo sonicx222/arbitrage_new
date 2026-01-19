@@ -4,7 +4,7 @@
 import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('worker-pool');
 

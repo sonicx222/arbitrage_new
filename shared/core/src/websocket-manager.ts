@@ -3,7 +3,7 @@
 
 import WebSocket from 'ws';
 import { createLogger } from './logger';
-import { getProviderHealthScorer, ProviderHealthScorer } from './provider-health-scorer';
+import { getProviderHealthScorer, ProviderHealthScorer } from './monitoring/provider-health-scorer';
 
 export interface WebSocketConfig {
   url: string;
