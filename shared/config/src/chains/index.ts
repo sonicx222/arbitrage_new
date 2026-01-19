@@ -211,18 +211,87 @@ export const CHAINS: Record<string, Chain> = {
     nativeToken: 'ETH'
   },
   // Non-EVM chain (P4)
+  // S3.3.7: Enhanced RPC configuration with Helius/Triton support
+  // Priority order: 1. Explicit URL, 2. Helius, 3. Triton, 4. Public RPC
   solana: {
     id: 101, // Convention for Solana mainnet
     name: 'Solana',
-    rpcUrl: process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com',
-    wsUrl: process.env.SOLANA_WS_URL || 'wss://api.mainnet-beta.solana.com',
-    // S3.3: WebSocket fallback URLs for resilience
+    // Primary: Use explicit URL > Helius > Triton > Public RPC
+    rpcUrl: process.env.SOLANA_RPC_URL ||
+      (process.env.HELIUS_API_KEY
+        ? `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+        : process.env.TRITON_API_KEY
+          ? `https://solana-mainnet.triton.one/v1/${process.env.TRITON_API_KEY}`
+          : 'https://api.mainnet-beta.solana.com'),
+    wsUrl: process.env.SOLANA_WS_URL ||
+      (process.env.HELIUS_API_KEY
+        ? `wss://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+        : process.env.TRITON_API_KEY
+          ? `wss://solana-mainnet.triton.one/v1/${process.env.TRITON_API_KEY}`
+          : 'wss://api.mainnet-beta.solana.com'),
+    // S3.3.7: Prioritized fallback URLs (Triton > PublicNode > Public RPC)
     wsFallbackUrls: [
-      'wss://solana.publicnode.com'
+      // Triton fallback (if API key available and not already primary)
+      ...(process.env.TRITON_API_KEY && !process.env.HELIUS_API_KEY
+        ? [] // Already primary, no need as fallback
+        : process.env.TRITON_API_KEY
+          ? [`wss://solana-mainnet.triton.one/v1/${process.env.TRITON_API_KEY}`]
+          : []),
+      'wss://solana.publicnode.com',
+      'wss://api.mainnet-beta.solana.com'
     ],
     rpcFallbackUrls: [
+      // Triton fallback (if API key available and not already primary)
+      ...(process.env.TRITON_API_KEY && !process.env.HELIUS_API_KEY
+        ? [] // Already primary, no need as fallback
+        : process.env.TRITON_API_KEY
+          ? [`https://solana-mainnet.triton.one/v1/${process.env.TRITON_API_KEY}`]
+          : []),
+      'https://solana-mainnet.rpc.extrnode.com',
       'https://solana.publicnode.com',
+      'https://api.mainnet-beta.solana.com',
       'https://solana-mainnet.g.alchemy.com/v2/demo'
+    ],
+    blockTime: 0.4,
+    nativeToken: 'SOL',
+    isEVM: false
+  },
+  // S3.3.7: Solana Devnet for testing
+  // Priority order: 1. Explicit URL, 2. Helius, 3. Triton, 4. Public RPC
+  'solana-devnet': {
+    id: 102, // Convention for Solana devnet
+    name: 'Solana Devnet',
+    rpcUrl: process.env.SOLANA_DEVNET_RPC_URL ||
+      (process.env.HELIUS_API_KEY
+        ? `https://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+        : process.env.TRITON_API_KEY
+          ? `https://solana-devnet.triton.one/v1/${process.env.TRITON_API_KEY}`
+          : 'https://api.devnet.solana.com'),
+    wsUrl: process.env.SOLANA_DEVNET_WS_URL ||
+      (process.env.HELIUS_API_KEY
+        ? `wss://devnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`
+        : process.env.TRITON_API_KEY
+          ? `wss://solana-devnet.triton.one/v1/${process.env.TRITON_API_KEY}`
+          : 'wss://api.devnet.solana.com'),
+    wsFallbackUrls: [
+      // Triton fallback (if API key available and not already primary)
+      ...(process.env.TRITON_API_KEY && !process.env.HELIUS_API_KEY
+        ? []
+        : process.env.TRITON_API_KEY
+          ? [`wss://solana-devnet.triton.one/v1/${process.env.TRITON_API_KEY}`]
+          : []),
+      'wss://solana-devnet.publicnode.com',
+      'wss://api.devnet.solana.com'
+    ],
+    rpcFallbackUrls: [
+      // Triton fallback (if API key available and not already primary)
+      ...(process.env.TRITON_API_KEY && !process.env.HELIUS_API_KEY
+        ? []
+        : process.env.TRITON_API_KEY
+          ? [`https://solana-devnet.triton.one/v1/${process.env.TRITON_API_KEY}`]
+          : []),
+      'https://solana-devnet.publicnode.com',
+      'https://api.devnet.solana.com'
     ],
     blockTime: 0.4,
     nativeToken: 'SOL',

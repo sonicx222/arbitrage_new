@@ -57,6 +57,8 @@ docker-compose logs -f
 
 ### Environment Variables
 
+#### Core Configuration
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PARTITION_ID` | Partition identifier | `solana-native` |
@@ -65,9 +67,32 @@ docker-compose logs -f
 | `REDIS_URL` | Redis connection URL | - |
 | `LOG_LEVEL` | Logging verbosity | `info` |
 | `REGION_ID` | Deployment region | `us-west1` |
-| `SOLANA_RPC_URL` | Solana RPC endpoint | `https://api.mainnet-beta.solana.com` |
-| `SOLANA_WS_URL` | Solana WebSocket endpoint | `wss://api.mainnet-beta.solana.com` |
-| `HELIUS_API_KEY` | Helius API key (optional) | - |
+
+#### Solana RPC Configuration (S3.3.7)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SOLANA_RPC_URL` | Primary Solana RPC endpoint | Auto-select (Helius > Triton > public) |
+| `SOLANA_WS_URL` | Primary Solana WebSocket endpoint | Auto-select |
+| `HELIUS_API_KEY` | Helius API key (recommended) | - |
+| `TRITON_API_KEY` | Triton API key (optional, used if Helius unavailable) | - |
+
+#### Devnet Testing (S3.3.7)
+
+To use devnet, set `PARTITION_CHAINS=solana-devnet`:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PARTITION_CHAINS` | Set to `solana-devnet` for devnet | `solana` |
+| `SOLANA_DEVNET_RPC_URL` | Devnet RPC endpoint override | Auto-select |
+| `SOLANA_DEVNET_WS_URL` | Devnet WebSocket endpoint override | Auto-select |
+
+**RPC Provider Priority (for both mainnet and devnet):**
+1. **Explicit URL** (if `SOLANA_RPC_URL` or `SOLANA_DEVNET_RPC_URL` set)
+2. **Helius** (if `HELIUS_API_KEY` set) - 100K free credits/day
+3. **Triton** (if `TRITON_API_KEY` set) - 50K free credits/day
+4. **PublicNode** - Unlimited, rate-limited
+5. **Solana Public** - Unlimited, rate-limited
 
 ## API Endpoints
 
