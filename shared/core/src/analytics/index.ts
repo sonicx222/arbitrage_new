@@ -10,6 +10,7 @@
  * - PerformanceAnalytics: Strategy attribution analysis
  * - ProfessionalQualityMonitor: AD-PQS scoring system
  * - PriceOracle: Centralized price source with fallbacks
+ * - PairActivityTracker: Volatility-based pair prioritization
  *
  * @module analytics
  */
@@ -124,3 +125,15 @@ export type {
   PriceOracleConfig,
   PriceBatchRequest
 } from './price-oracle';
+
+// Pair Activity Tracker (Volatility-based prioritization)
+export {
+  PairActivityTracker,
+  getPairActivityTracker,
+  resetPairActivityTracker
+} from './pair-activity-tracker';
+export type {
+  ActivityTrackerConfig,
+  PairActivityMetrics,
+  ActivityTrackerStats
+} from './pair-activity-tracker';

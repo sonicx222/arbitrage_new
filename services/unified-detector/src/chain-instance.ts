@@ -39,7 +39,10 @@ import {
   // Swap event filtering and whale detection
   SwapEventFilter,
   getSwapEventFilter,
-  WhaleAlert
+  WhaleAlert,
+  // Pair activity tracking for volatility-based prioritization
+  PairActivityTracker,
+  getPairActivityTracker
 } from '@arbitrage/core';
 
 import {
@@ -201,6 +204,10 @@ export class ChainDetectorInstance extends EventEmitter {
   // PHASE-3.3: Extracted whale alert publisher for cleaner separation
   private whaleAlertPublisher: WhaleAlertPublisher | null = null;
 
+  // Pair activity tracking for volatility-based prioritization
+  // Hot pairs (high update frequency) bypass time-based throttling
+  private activityTracker: PairActivityTracker;
+
   constructor(config: ChainInstanceConfig) {
     super();
 
@@ -242,6 +249,14 @@ export class ChainDetectorInstance extends EventEmitter {
     this.triangularDetector = new CrossDexTriangularArbitrage({
       minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.003,
       maxSlippage: ARBITRAGE_CONFIG.slippageTolerance || 0.10
+    });
+
+    // Initialize pair activity tracker for volatility-based prioritization
+    // Uses singleton to share state across chain instances (useful for cross-chain hot pairs)
+    this.activityTracker = getPairActivityTracker({
+      windowMs: 10000,                    // 10 second window
+      hotThresholdUpdatesPerSecond: 2,    // 2+ updates/sec = hot pair
+      maxPairs: 5000                      // Max pairs to track
     });
   }
 
@@ -983,6 +998,11 @@ export class ChainDetectorInstance extends EventEmitter {
       // Decode reserves from log data
       const data = log.data;
       if (data && data.length >= 130) {
+        // BUG-FIX: Record activity AFTER validating data, not before
+        // This prevents inflating activity scores for malformed events
+        // Use chain:address format to avoid cross-chain address collisions in shared tracker
+        this.activityTracker.recordUpdate(`${this.chainId}:${pairAddress}`);
+
         const reserve0 = BigInt('0x' + data.slice(2, 66)).toString();
         const reserve1 = BigInt('0x' + data.slice(66, 130)).toString();
 
@@ -1217,21 +1237,30 @@ export class ChainDetectorInstance extends EventEmitter {
     // P0-PERF FIX: Check throttle BEFORE creating expensive snapshots
     // This prevents O(N) snapshot creation when throttled
     const now = Date.now();
-    const shouldCheckTriangular = now - this.lastTriangularCheck >= this.TRIANGULAR_CHECK_INTERVAL_MS;
-    const shouldCheckMultiLeg = now - this.lastMultiLegCheck >= this.MULTI_LEG_CHECK_INTERVAL_MS;
+
+    // VOLATILITY-OPT: Hot pairs (high activity) bypass time-based throttling
+    // This ensures we catch arbitrage opportunities on rapidly-updating pairs
+    // Use chain:address format to match recordUpdate format
+    const isHotPair = this.activityTracker.isHotPair(`${this.chainId}:${updatedPair.address}`);
+
+    // Time-based throttle OR hot pair override
+    const shouldCheckTriangular = isHotPair || (now - this.lastTriangularCheck >= this.TRIANGULAR_CHECK_INTERVAL_MS);
+    const shouldCheckMultiLeg = isHotPair || (now - this.lastMultiLegCheck >= this.MULTI_LEG_CHECK_INTERVAL_MS);
 
     // Only create snapshot if at least one check will run
     if (shouldCheckTriangular || shouldCheckMultiLeg) {
       const pairsSnapshot = this.createPairsSnapshot();
 
       if (shouldCheckTriangular) {
-        this.checkTriangularOpportunities(pairsSnapshot).catch(error => {
+        // Pass isHotPair as forceCheck to bypass internal throttle for hot pairs
+        this.checkTriangularOpportunities(pairsSnapshot, isHotPair).catch(error => {
           this.logger.error('Triangular detection error', { error: (error as Error).message });
         });
       }
 
       if (shouldCheckMultiLeg) {
-        this.checkMultiLegOpportunities(pairsSnapshot).catch(error => {
+        // Pass isHotPair as forceCheck to bypass internal throttle for hot pairs
+        this.checkMultiLegOpportunities(pairsSnapshot, isHotPair).catch(error => {
           this.logger.error('Multi-leg detection error', { error: (error as Error).message });
         });
       }
@@ -1444,10 +1473,18 @@ export class ChainDetectorInstance extends EventEmitter {
   /**
    * Check for triangular and quadrilateral arbitrage opportunities.
    * Throttled to 500ms to prevent excessive CPU usage.
+   *
+   * @param pairsSnapshot - Snapshot of pairs for thread-safe detection
+   * @param forceCheck - If true, bypass throttle check (used for hot pairs)
    */
-  private async checkTriangularOpportunities(pairsSnapshot: Map<string, PairSnapshot>): Promise<void> {
+  private async checkTriangularOpportunities(
+    pairsSnapshot: Map<string, PairSnapshot>,
+    forceCheck: boolean = false
+  ): Promise<void> {
     const now = Date.now();
-    if (now - this.lastTriangularCheck < this.TRIANGULAR_CHECK_INTERVAL_MS) {
+
+    // VOLATILITY-OPT: Skip throttle check when forceCheck is true (hot pair bypass)
+    if (!forceCheck && now - this.lastTriangularCheck < this.TRIANGULAR_CHECK_INTERVAL_MS) {
       return;
     }
     this.lastTriangularCheck = now;
@@ -1542,10 +1579,18 @@ export class ChainDetectorInstance extends EventEmitter {
   /**
    * Check for multi-leg arbitrage opportunities (5-7 token paths).
    * Throttled to 2000ms and uses worker thread for expensive computation.
+   *
+   * @param pairsSnapshot - Snapshot of pairs for thread-safe detection
+   * @param forceCheck - If true, bypass throttle check (used for hot pairs)
    */
-  private async checkMultiLegOpportunities(pairsSnapshot: Map<string, PairSnapshot>): Promise<void> {
+  private async checkMultiLegOpportunities(
+    pairsSnapshot: Map<string, PairSnapshot>,
+    forceCheck: boolean = false
+  ): Promise<void> {
     const now = Date.now();
-    if (now - this.lastMultiLegCheck < this.MULTI_LEG_CHECK_INTERVAL_MS) {
+
+    // VOLATILITY-OPT: Skip throttle check when forceCheck is true (hot pair bypass)
+    if (!forceCheck && now - this.lastMultiLegCheck < this.MULTI_LEG_CHECK_INTERVAL_MS) {
       return;
     }
 

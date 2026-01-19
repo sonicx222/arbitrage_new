@@ -405,6 +405,18 @@ export type {
   ScorerStats
 } from './analytics/ml-opportunity-scorer';
 
+// Pair Activity Tracker (Volatility-based prioritization)
+export {
+  PairActivityTracker,
+  getPairActivityTracker,
+  resetPairActivityTracker
+} from './analytics/pair-activity-tracker';
+export type {
+  ActivityTrackerConfig,
+  PairActivityMetrics,
+  ActivityTrackerStats
+} from './analytics/pair-activity-tracker';
+
 // Domain models and core interfaces
 export * from './domain-models';
 
