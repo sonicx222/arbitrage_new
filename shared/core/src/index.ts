@@ -85,6 +85,40 @@ export type {
   RedisStreamsClientDeps
 } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
+
+// =============================================================================
+// Logging Infrastructure (ADR-015: Pino Logger Migration)
+// High-performance logging with DI pattern for testability
+// =============================================================================
+
+// Pino-based production logging
+export {
+  createPinoLogger,
+  getLogger,
+  getPinoPerformanceLogger,
+  PinoPerformanceLogger,
+  resetLoggerCache,
+  resetPerformanceLoggerCache,
+} from './logging';
+
+// Testing utilities (no jest.mock needed)
+export {
+  RecordingLogger,
+  RecordingPerformanceLogger,
+  NullLogger,
+  createMockLoggerFactory,
+} from './logging';
+
+// Types
+export type {
+  ILogger,
+  IPerformanceLogger,
+  LoggerConfig,
+  LogLevel,
+  LogMeta,
+  LogEntry,
+} from './logging';
+
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './async/worker-pool';
 export type { Task, TaskResult } from './async/worker-pool';
