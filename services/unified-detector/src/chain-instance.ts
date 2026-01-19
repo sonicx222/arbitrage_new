@@ -64,6 +64,7 @@ import {
 } from '@arbitrage/types';
 
 import { ChainStats } from './unified-detector';
+import { WhaleAlertPublisher, ExtendedPairInfo } from './publishers';
 
 // =============================================================================
 // Types
@@ -196,6 +197,9 @@ export class ChainDetectorInstance extends EventEmitter {
   // Swap event filtering and whale detection
   private swapEventFilter: SwapEventFilter | null = null;
   private whaleAlertUnsubscribe: (() => void) | null = null;
+
+  // PHASE-3.3: Extracted whale alert publisher for cleaner separation
+  private whaleAlertPublisher: WhaleAlertPublisher | null = null;
 
   constructor(config: ChainInstanceConfig) {
     super();
@@ -331,10 +335,18 @@ export class ChainDetectorInstance extends EventEmitter {
         dedupWindowMs: 5000
       });
 
+      // PHASE-3.3: Initialize whale alert publisher (extracted module)
+      this.whaleAlertPublisher = new WhaleAlertPublisher({
+        chainId: this.chainId,
+        logger: this.logger,
+        streamsClient: this.streamsClient,
+        tokens: this.tokens
+      });
+
       // Register whale alert handler to publish to Redis Streams
       // Store unsubscribe function for cleanup in performStop()
       this.whaleAlertUnsubscribe = this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
-        this.publishWhaleAlert(alert).catch(error => {
+        this.whaleAlertPublisher?.publishWhaleAlert(alert).catch(error => {
           this.logger.error('Failed to publish whale alert', { error: (error as Error).message });
         });
       });
@@ -451,6 +463,8 @@ export class ChainDetectorInstance extends EventEmitter {
     // Clear singleton references (they will be re-acquired on restart)
     this.swapEventFilter = null;
     this.multiLegPathFinder = null;
+    // PHASE-3.3: Clean up extracted publisher
+    this.whaleAlertPublisher = null;
 
     // Clear pairs
     this.pairs.clear();
@@ -1002,6 +1016,16 @@ export class ChainDetectorInstance extends EventEmitter {
       const amount0Out = log.data ? BigInt('0x' + log.data.slice(130, 194)).toString() : '0';
       const amount1Out = log.data ? BigInt('0x' + log.data.slice(194, 258)).toString() : '0';
 
+      // PHASE-3.3: Create pair info for USD value estimation
+      const pairInfo: ExtendedPairInfo = {
+        address: pair.address,
+        dex: pair.dex,
+        token0: pair.token0,
+        token1: pair.token1,
+        reserve0: pair.reserve0,
+        reserve1: pair.reserve1
+      };
+
       const swapEvent: SwapEvent = {
         chain: this.chainId,
         dex: pair.dex,
@@ -1017,7 +1041,8 @@ export class ChainDetectorInstance extends EventEmitter {
         amount1Out,
         to: '',
         // BUG-3 FIX: Calculate USD value for accurate whale detection
-        usdValue: this.estimateSwapUsdValue(pair, amount0In, amount1In, amount0Out, amount1Out)
+        // PHASE-3.3: Use extracted publisher's estimation method
+        usdValue: this.whaleAlertPublisher?.estimateSwapUsdValue(pairInfo, amount0In, amount1In, amount0Out, amount1Out) ?? 0
       };
 
       // Process through filter (handles whale detection via registered handler)
@@ -1026,8 +1051,8 @@ export class ChainDetectorInstance extends EventEmitter {
         if (!result.passed) return;
       }
 
-      // Publish to Redis Streams for downstream consumers
-      this.publishSwapEvent(swapEvent);
+      // PHASE-3.3: Publish to Redis Streams using extracted publisher
+      this.whaleAlertPublisher?.publishSwapEvent(swapEvent);
 
       // Local emit for any listeners
       this.emit('swapEvent', swapEvent);
@@ -1583,57 +1608,6 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // ===========================================================================
-  // Whale Alert Publishing
-  // ===========================================================================
-
-  /**
-   * Publish whale alert to Redis Streams for cross-chain detector consumption.
-   */
-  private async publishWhaleAlert(alert: WhaleAlert): Promise<void> {
-    try {
-      const whaleTransaction = {
-        transactionHash: alert.event.transactionHash || '',
-        address: alert.event.sender || '',
-        token: alert.pairAddress,
-        amount: alert.usdValue,
-        usdValue: alert.usdValue,
-        direction: BigInt(alert.event.amount0In || '0') > 0n ? 'sell' : 'buy',
-        dex: alert.dex,
-        chain: this.chainId,
-        timestamp: alert.timestamp,
-        impact: 0
-      };
-
-      await this.streamsClient.xadd(
-        RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        whaleTransaction
-      );
-
-      this.logger.info('Whale alert published', {
-        usdValue: alert.usdValue,
-        dex: alert.dex,
-        direction: whaleTransaction.direction
-      });
-    } catch (error) {
-      this.logger.error('Whale alert publish failed', { error });
-    }
-  }
-
-  /**
-   * Publish swap event to Redis Streams.
-   */
-  private async publishSwapEvent(event: SwapEvent): Promise<void> {
-    try {
-      await this.streamsClient.xadd(
-        RedisStreamsClient.STREAMS.SWAP_EVENTS,
-        event
-      );
-    } catch (error) {
-      this.logger.error('Failed to publish swap event', { error });
-    }
-  }
-
-  // ===========================================================================
   // Helpers
   // ===========================================================================
 
@@ -1647,85 +1621,6 @@ export class ChainDetectorInstance extends EventEmitter {
   private getTokenSymbol(address: string): string {
     const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
     return token?.symbol || address.slice(0, 8);
-  }
-
-  /**
-   * Check if a token symbol represents a stablecoin.
-   * Used for USD value estimation in swap events.
-   */
-  private isStablecoin(symbol: string): boolean {
-    const stableSymbols = ['USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'];
-    return stableSymbols.includes(symbol.toUpperCase());
-  }
-
-  /**
-   * Get token decimals for accurate amount conversion.
-   */
-  private getTokenDecimals(address: string): number {
-    const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
-    return token?.decimals ?? 18; // Default to 18 decimals
-  }
-
-  /**
-   * BUG-3 FIX: Estimate USD value of a swap for whale detection.
-   * Uses stablecoin amounts directly or estimates via reserve ratios.
-   */
-  private estimateSwapUsdValue(
-    pair: ExtendedPair,
-    amount0In: string,
-    amount1In: string,
-    amount0Out: string,
-    amount1Out: string
-  ): number {
-    try {
-      const token0Symbol = this.getTokenSymbol(pair.token0);
-      const token1Symbol = this.getTokenSymbol(pair.token1);
-      const token0Decimals = this.getTokenDecimals(pair.token0);
-      const token1Decimals = this.getTokenDecimals(pair.token1);
-
-      // Convert amounts to human-readable numbers
-      const amt0In = Number(BigInt(amount0In)) / Math.pow(10, token0Decimals);
-      const amt1In = Number(BigInt(amount1In)) / Math.pow(10, token1Decimals);
-      const amt0Out = Number(BigInt(amount0Out)) / Math.pow(10, token0Decimals);
-      const amt1Out = Number(BigInt(amount1Out)) / Math.pow(10, token1Decimals);
-
-      // If token0 is a stablecoin, use its amounts directly as USD
-      if (this.isStablecoin(token0Symbol)) {
-        return Math.max(amt0In, amt0Out);
-      }
-
-      // If token1 is a stablecoin, use its amounts directly as USD
-      if (this.isStablecoin(token1Symbol)) {
-        return Math.max(amt1In, amt1Out);
-      }
-
-      // Neither token is a stablecoin - estimate using reserve ratios
-      // Use reserve0/reserve1 ratio to estimate USD value
-      // This is a heuristic assuming reasonable market prices
-      const reserve0 = Number(BigInt(pair.reserve0)) / Math.pow(10, token0Decimals);
-      const reserve1 = Number(BigInt(pair.reserve1)) / Math.pow(10, token1Decimals);
-
-      if (reserve0 > 0 && reserve1 > 0) {
-        // Estimate token values based on reserve ratio
-        // Assumes roughly equal USD value in both reserves (constant product)
-        const token0MaxAmount = Math.max(amt0In, amt0Out);
-        const token1MaxAmount = Math.max(amt1In, amt1Out);
-
-        // Use the larger of the two estimates
-        // This is conservative for whale detection
-        const estimate0 = token0MaxAmount * (reserve1 / reserve0);
-        const estimate1 = token1MaxAmount * (reserve0 / reserve1);
-
-        return Math.max(estimate0, estimate1);
-      }
-
-      // Fallback: return 0 if we can't estimate
-      return 0;
-    } catch (error) {
-      // Log and return 0 on error
-      this.logger.debug('USD value estimation failed', { error: (error as Error).message });
-      return 0;
-    }
   }
 
   // ===========================================================================
