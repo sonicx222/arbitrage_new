@@ -52,10 +52,7 @@
     "dev:partitions:restart": "docker-compose -f docker-compose.partitions.yml restart"
   },
   "workspaces": [
-    "shared/core",
-    "shared/config",
-    "shared/types",
-    "shared/security",
+    "shared/*",
     "services/*",
     "infrastructure/*"
   ],
@@ -93,7 +90,17 @@
   "overrides": {
     "rimraf": "^6.0.1",
     "glob": "^11.0.0",
-    "tar": "^7.5.3"
+    "tar": "7.5.3",
+    "diff": "8.0.3",
+    "@mapbox/node-pre-gyp": {
+      "tar": "7.5.3"
+    },
+    "@tensorflow/tfjs-node": {
+      "tar": "7.5.3",
+      "@mapbox/node-pre-gyp": {
+        "tar": "7.5.3"
+      }
+    }
   },
   "engines": {
     "node": ">=18.0.0"
