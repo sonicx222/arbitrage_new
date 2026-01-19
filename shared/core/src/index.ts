@@ -88,7 +88,7 @@ export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from '.
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
 export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './async/worker-pool';
 export type { Task, TaskResult } from './async/worker-pool';
-export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
+export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './event-batcher';
 export {
   WebSocketManager,
   WebSocketConfig,

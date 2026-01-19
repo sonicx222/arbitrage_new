@@ -73,18 +73,28 @@ class MockRedisClient {
     return this.store.delete(key) ? 1 : 0;
   }
 
-  async eval(script: string, ...args: any[]): Promise<number> {
+  async eval<T = number>(script: string, keys: string[], args: string[]): Promise<T> {
     this.commandCount++;
-    // Mock Lua script for lock release
-    const key = args[1];
-    const value = args[2];
+    // P1-1 FIX: Mock Lua script for lock release/extend
+    // Signature matches redis.eval(script, keys[], args[])
+    // For release: KEYS[1] = lock key, ARGV[1] = expected value
+    const key = keys[0];
+    const expectedValue = args[0];
 
     const entry = this.store.get(key);
-    if (entry && entry.value === value) {
-      this.store.delete(key);
-      return 1;
+    if (entry && entry.value === expectedValue) {
+      // Handle both release (del) and extend (expire) scripts
+      if (script.includes('del')) {
+        this.store.delete(key);
+      } else if (script.includes('expire')) {
+        // Extend - reset the TTL
+        const newTtl = parseInt(args[1]) * 1000;
+        entry.ttl = newTtl;
+        entry.createdAt = Date.now();
+      }
+      return 1 as T;
     }
-    return 0;
+    return 0 as T;
   }
 
   // setNx: Set key with value and TTL only if key doesn't exist
@@ -199,8 +209,8 @@ describe('DistributedLockManager Integration', () => {
       expect(second.acquired).toBe(false);
     });
 
-    // Skip: Mock doesn't properly simulate lock release behavior
-    it.skip('should release lock correctly', async () => {
+    // P1-1 FIX: Un-skipped - Mock properly simulates lock release via eval()
+    it('should release lock correctly', async () => {
       const result = await lockManager.acquireLock('test:lock', { ttlMs: 5000 });
       expect(result.acquired).toBe(true);
 
@@ -213,8 +223,8 @@ describe('DistributedLockManager Integration', () => {
   });
 
   describe('withLock Helper', () => {
-    // Skip: Mock doesn't properly simulate lock lifecycle
-    it.skip('should execute function under lock', async () => {
+    // P1-1 FIX: Un-skipped - Verified withLock works with mock
+    it('should execute function under lock', async () => {
       let executed = false;
 
       const result = await lockManager.withLock('test:lock', async () => {
@@ -231,8 +241,8 @@ describe('DistributedLockManager Integration', () => {
       expect(mockRedis.hasKey('lock:test:lock')).toBe(false);
     });
 
-    // Skip: Mock doesn't properly simulate lock release on error
-    it.skip('should release lock even on error', async () => {
+    // P1-1 FIX: Un-skipped - Verified error handling releases lock
+    it('should release lock even on error', async () => {
       const result = await lockManager.withLock('test:lock', async () => {
         throw new Error('Test error');
       }, { ttlMs: 5000 });
@@ -311,42 +321,49 @@ describe('ServiceStateManager Integration', () => {
       expect(stateManager.getState()).toBe(ServiceState.STOPPED);
     });
 
-    // Skip: State transitions require proper mock setup
-    it.skip('should transition through valid lifecycle', async () => {
+    // P1-1 FIX: Un-skipped - Fixed to use StateTransitionResult.success
+    it('should transition through valid lifecycle', async () => {
       // STOPPED -> STARTING
-      expect(await stateManager.transitionTo(ServiceState.STARTING)).toBe(true);
+      const r1 = await stateManager.transitionTo(ServiceState.STARTING);
+      expect(r1.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.STARTING);
 
       // STARTING -> RUNNING
-      expect(await stateManager.transitionTo(ServiceState.RUNNING)).toBe(true);
+      const r2 = await stateManager.transitionTo(ServiceState.RUNNING);
+      expect(r2.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.RUNNING);
 
       // RUNNING -> STOPPING
-      expect(await stateManager.transitionTo(ServiceState.STOPPING)).toBe(true);
+      const r3 = await stateManager.transitionTo(ServiceState.STOPPING);
+      expect(r3.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.STOPPING);
 
       // STOPPING -> STOPPED
-      expect(await stateManager.transitionTo(ServiceState.STOPPED)).toBe(true);
+      const r4 = await stateManager.transitionTo(ServiceState.STOPPED);
+      expect(r4.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.STOPPED);
     });
 
-    // Skip: State transitions require proper mock setup
-    it.skip('should reject invalid transitions', async () => {
+    // P1-1 FIX: Un-skipped - Fixed to use StateTransitionResult.success
+    it('should reject invalid transitions', async () => {
       // Cannot go from STOPPED to RUNNING directly
-      expect(await stateManager.transitionTo(ServiceState.RUNNING)).toBe(false);
+      const result = await stateManager.transitionTo(ServiceState.RUNNING);
+      expect(result.success).toBe(false);
       expect(stateManager.getState()).toBe(ServiceState.STOPPED);
     });
 
-    // Skip: State transitions require proper mock setup
-    it.skip('should handle error state transitions', async () => {
+    // P1-1 FIX: Un-skipped - Fixed to use StateTransitionResult.success
+    it('should handle error state transitions', async () => {
       await stateManager.transitionTo(ServiceState.STARTING);
 
       // STARTING -> ERROR (valid)
-      expect(await stateManager.transitionTo(ServiceState.ERROR)).toBe(true);
+      const r1 = await stateManager.transitionTo(ServiceState.ERROR);
+      expect(r1.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.ERROR);
 
       // ERROR -> STOPPED (valid recovery)
-      expect(await stateManager.transitionTo(ServiceState.STOPPED)).toBe(true);
+      const r2 = await stateManager.transitionTo(ServiceState.STOPPED);
+      expect(r2.success).toBe(true);
       expect(stateManager.getState()).toBe(ServiceState.STOPPED);
     });
   });
@@ -390,8 +407,8 @@ describe('ServiceStateManager Integration', () => {
   });
 
   describe('Concurrent State Changes', () => {
-    // Skip: Concurrent state transitions require proper synchronization mock
-    it.skip('should handle concurrent transition attempts safely', async () => {
+    // P1-1 FIX: Un-skipped - Fixed to use StateTransitionResult.success
+    it('should handle concurrent transition attempts safely', async () => {
       await stateManager.transitionTo(ServiceState.STARTING);
       await stateManager.transitionTo(ServiceState.RUNNING);
 
@@ -402,9 +419,12 @@ describe('ServiceStateManager Integration', () => {
         stateManager.transitionTo(ServiceState.STOPPING)
       ]);
 
-      // Only one should succeed
-      const successCount = results.filter(r => r).length;
+      // Only one should succeed (others rejected due to invalid state)
+      const successCount = results.filter(r => r.success).length;
       expect(successCount).toBe(1);
+
+      // State should be STOPPING after first success
+      expect(stateManager.getState()).toBe(ServiceState.STOPPING);
     });
   });
 });
@@ -429,8 +449,8 @@ describe('Cross-Component Integration', () => {
   });
 
   describe('Service Lifecycle with Distributed Locking', () => {
-    // Skip: Lock coordination requires proper mock lifecycle
-    it.skip('should coordinate service startup with lock', async () => {
+    // P1-1 FIX: Un-skipped - Fixed to use StateTransitionResult.success
+    it('should coordinate service startup with lock', async () => {
       const startService = async () => {
         // Acquire startup lock
         const lock = await lockManager.acquireLock('service:startup', { ttlMs: 10000 });
@@ -440,14 +460,16 @@ describe('Cross-Component Integration', () => {
 
         try {
           // Perform state transition
-          if (!await stateManager.transitionTo(ServiceState.STARTING)) {
+          const r1 = await stateManager.transitionTo(ServiceState.STARTING);
+          if (!r1.success) {
             return { started: false, reason: 'transition_failed' };
           }
 
           // Simulate initialization
           await new Promise(resolve => setTimeout(resolve, 10));
 
-          if (!await stateManager.transitionTo(ServiceState.RUNNING)) {
+          const r2 = await stateManager.transitionTo(ServiceState.RUNNING);
+          if (!r2.success) {
             return { started: false, reason: 'running_failed' };
           }
 

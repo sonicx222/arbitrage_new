@@ -305,6 +305,10 @@ export class EventBatcher {
     }
   }
 
+  /**
+   * Process an event immediately without batching.
+   * P3-FIX: Handle async callback errors to prevent unhandled rejections.
+   */
   private processEventImmediately(event: any): void {
     // For events that can't be batched, process immediately
     const batchedEvent: BatchedEvent = {
@@ -314,7 +318,10 @@ export class EventBatcher {
       batchSize: 1
     };
 
-    this.onBatchReady(batchedEvent);
+    // P3-FIX: Handle async callback errors - onBatchReady may return Promise
+    Promise.resolve(this.onBatchReady(batchedEvent)).catch(error => {
+      logger.error('Failed to process immediate event', { error, pairKey: batchedEvent.pairKey });
+    });
   }
 
   /**
@@ -361,24 +368,63 @@ export function createEventBatcher(
   return new EventBatcher(config, onBatchReady);
 }
 
-// Singleton instance
-let defaultEventBatcher: EventBatcher | null = null;
+// =============================================================================
+// Singleton Instance (P0-3 FIX: Thread-safe pattern with reset support)
+// =============================================================================
 
+/**
+ * P0-3 FIX: Singleton instance with initialization guard.
+ * Note: JavaScript is single-threaded, so no async mutex needed for synchronous constructors.
+ * The guard variable prevents re-initialization during destroy/create cycles.
+ */
+let defaultEventBatcher: EventBatcher | null = null;
+let isInitializing = false;
+
+/**
+ * Get the default singleton EventBatcher instance.
+ * Creates one if it doesn't exist.
+ *
+ * P0-3 FIX: Added guard against re-initialization during destroy cycle.
+ */
 export function getDefaultEventBatcher(): EventBatcher {
+  // Guard against concurrent initialization (defensive, though JS is single-threaded)
+  if (isInitializing) {
+    throw new Error('EventBatcher singleton is being initialized - recursive call detected');
+  }
+
   if (!defaultEventBatcher) {
-    defaultEventBatcher = new EventBatcher(
-      {
-        maxBatchSize: 25, // Optimized for high-throughput
-        // T1.3: Reduced from 25ms to 5ms for ultra-low latency detection
-        maxWaitTime: 5,   // 5ms for minimal latency
-        enableDeduplication: true,
-        enablePrioritization: true
-      },
-      (batch) => {
-        // Default batch processor - would be customized per use case
-        logger.info(`Processing batch: ${batch.pairKey} (${batch.batchSize} events)`);
-      }
-    );
+    isInitializing = true;
+    try {
+      defaultEventBatcher = new EventBatcher(
+        {
+          maxBatchSize: 25, // Optimized for high-throughput
+          // T1.3: Reduced from 25ms to 5ms for ultra-low latency detection
+          maxWaitTime: 5,   // 5ms for minimal latency
+          enableDeduplication: true,
+          enablePrioritization: true
+        },
+        (batch) => {
+          // Default batch processor - would be customized per use case
+          logger.info(`Processing batch: ${batch.pairKey} (${batch.batchSize} events)`);
+        }
+      );
+    } finally {
+      isInitializing = false;
+    }
   }
   return defaultEventBatcher;
+}
+
+/**
+ * P0-3 FIX: Reset the singleton instance.
+ * Required for testing and for cleanup during service shutdown.
+ *
+ * @returns Promise that resolves when destroy is complete
+ */
+export async function resetDefaultEventBatcher(): Promise<void> {
+  if (defaultEventBatcher) {
+    const instance = defaultEventBatcher;
+    defaultEventBatcher = null;
+    await instance.destroy();
+  }
 }
