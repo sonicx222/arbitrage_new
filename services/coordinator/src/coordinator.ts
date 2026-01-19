@@ -480,20 +480,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return true;
       }
 
-      // P0-4 fix: Check if we already hold the lock
-      // Note: There's an inherent TOCTOU between setNx failure and this get,
-      // but the consequence is benign - we just don't become leader this round.
-      // The next heartbeat interval will retry. Using a Lua script would be
-      // more atomic but adds complexity for minimal benefit here.
-      const currentLeader = await this.redis.get(lockKey);
-      if (currentLeader === instanceId) {
-        // We already hold the lock - refresh TTL to prevent expiration
-        await this.redis.expire(lockKey, Math.ceil(lockTtlMs / 1000));
+      // S4.1.1-FIX-1: Use atomic renewLockIfOwned instead of TOCTOU-prone get+expire
+      // This atomically checks if we own the lock and extends TTL in one operation.
+      // Eliminates race condition where lock could expire between get and expire calls.
+      const renewed = await this.redis.renewLockIfOwned(
+        lockKey,
+        instanceId,
+        Math.ceil(lockTtlMs / 1000)
+      );
+      if (renewed) {
+        // We already held the lock and successfully renewed it
         this.isLeader = true;
         return true;
       }
 
-      this.logger.info('Another instance is leader', { currentLeader });
+      this.logger.info('Another instance is leader', { lockKey });
       return false;
 
     } catch (error) {
@@ -562,6 +563,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
     let consecutiveHeartbeatFailures = 0;
     const maxHeartbeatFailures = 3;
 
+    // S4.1.1-FIX-3: Add jitter to prevent thundering herd on leader failover
+    // Random offset of ±2 seconds spreads leadership acquisition attempts across instances
+    const jitterMs = Math.floor(Math.random() * 4000) - 2000; // Range: -2000 to +2000
+    const effectiveInterval = Math.max(1000, heartbeatIntervalMs + jitterMs); // Minimum 1 second
+    this.logger.debug('Leader heartbeat interval with jitter', {
+      baseInterval: heartbeatIntervalMs,
+      jitter: jitterMs,
+      effectiveInterval
+    });
+
     this.leaderHeartbeatInterval = setInterval(async () => {
       // P1-8 FIX: Use stateManager.isRunning() for consistency
       if (!this.stateManager.isRunning() || !this.redis) return;
@@ -612,7 +623,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           });
         }
       }
-    }, heartbeatIntervalMs);
+    }, effectiveInterval); // S4.1.1-FIX-3: Use jittered interval
   }
 
   // ===========================================================================

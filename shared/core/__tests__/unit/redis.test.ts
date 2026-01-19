@@ -463,4 +463,105 @@ describe('RedisClient', () => {
         .toThrow('Subscribe failed');
     });
   });
+
+  // ===========================================================================
+  // S4.1.1-FIX-4: Tests for atomic lock operations (renewLockIfOwned, releaseLockIfOwned)
+  // ===========================================================================
+
+  describe('renewLockIfOwned', () => {
+    it('should return true when lock is owned and renewal succeeds', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 1 (success)
+      mainClient.eval.mockResolvedValue(1);
+
+      const result = await redisClient.renewLockIfOwned('lock:test', 'instance-1', 30);
+
+      expect(result).toBe(true);
+      expect(mainClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('redis.call'),
+        1,
+        'lock:test',
+        'instance-1',
+        '30'
+      );
+    });
+
+    it('should return false when lock is owned by another instance', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 0 (lock owned by another)
+      mainClient.eval.mockResolvedValue(0);
+
+      const result = await redisClient.renewLockIfOwned('lock:test', 'instance-1', 30);
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when lock does not exist', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 0 (lock doesn't exist)
+      mainClient.eval.mockResolvedValue(0);
+
+      const result = await redisClient.renewLockIfOwned('lock:test', 'instance-1', 30);
+
+      expect(result).toBe(false);
+    });
+
+    it('should throw RedisOperationError on Redis failure', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to reject (Redis unavailable)
+      mainClient.eval.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(redisClient.renewLockIfOwned('lock:test', 'instance-1', 30))
+        .rejects
+        .toThrow('Redis renewLockIfOwned failed');
+    });
+  });
+
+  describe('releaseLockIfOwned', () => {
+    it('should return true when lock is owned and release succeeds', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 1 (success)
+      mainClient.eval.mockResolvedValue(1);
+
+      const result = await redisClient.releaseLockIfOwned('lock:test', 'instance-1');
+
+      expect(result).toBe(true);
+      expect(mainClient.eval).toHaveBeenCalledWith(
+        expect.stringContaining('redis.call'),
+        1,
+        'lock:test',
+        'instance-1'
+      );
+    });
+
+    it('should return false when lock is owned by another instance', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 0 (lock owned by another)
+      mainClient.eval.mockResolvedValue(0);
+
+      const result = await redisClient.releaseLockIfOwned('lock:test', 'instance-1');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false when lock does not exist', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to return 0 (lock doesn't exist)
+      mainClient.eval.mockResolvedValue(0);
+
+      const result = await redisClient.releaseLockIfOwned('lock:test', 'instance-1');
+
+      expect(result).toBe(false);
+    });
+
+    it('should throw RedisOperationError on Redis failure', async () => {
+      const { mainClient } = getClients();
+      // Mock eval to reject (Redis unavailable)
+      mainClient.eval.mockRejectedValue(new Error('Connection refused'));
+
+      await expect(redisClient.releaseLockIfOwned('lock:test', 'instance-1'))
+        .rejects
+        .toThrow('Redis releaseLockIfOwned failed');
+    });
+  });
 });
