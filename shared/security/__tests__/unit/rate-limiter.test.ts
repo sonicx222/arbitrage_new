@@ -4,18 +4,14 @@
  * @see ADR-009: Test Architecture
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { RecordingLogger } from '@arbitrage/core';
 
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};
 
-// P1-3 FIX: Create mock objects that will be shared with the mock factory
-// These are defined here and captured by the mock factory closure
-const mockLogger = {
-  warn: jest.fn<any>(),
-  error: jest.fn<any>(),
-  debug: jest.fn<any>(),
-  info: jest.fn<any>()
-};
+// RecordingLogger instance that will be populated by the mock factory
+// This must be declared before jest.mock() but populated inside the factory
+let recordingLogger: RecordingLogger;
 
 const mockRedis: Record<string, jest.Mock<any>> = {
   multi: jest.fn<any>(),
@@ -49,9 +45,21 @@ const setupMockDefaults = () => {
 // From rate-limiter.ts: import { createLogger } from '../../core/src/logger';
 // rate-limiter.ts is at shared/security/src/
 // The test mocks need to use the actual resolved module path
-jest.mock('../../../core/src/logger', () => ({
-  createLogger: () => mockLogger
-}));
+jest.mock('../../../core/src/logger', () => {
+  // Import RecordingLogger inside the factory to avoid hoisting issues
+  // Using direct path to avoid circular dependency issues with barrel exports
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { RecordingLogger: RL } = require('../../../core/src/logging/testing-logger');
+  // Create a single instance that will be reused
+  const logger = new RL();
+  return {
+    createLogger: () => {
+      // Store reference so tests can access it
+      recordingLogger = logger;
+      return logger;
+    }
+  };
+});
 
 jest.mock('../../../core/src/redis', () => ({
   getRedisClient: () => Promise.resolve(mockRedis)
@@ -70,6 +78,10 @@ describe('RateLimiter', () => {
   beforeEach(() => {
     // Reset all mocks first
     jest.resetAllMocks();
+    // Clear recorded logs (recordingLogger is set when RateLimiter is created)
+    if (recordingLogger) {
+      recordingLogger.clear();
+    }
     // Set up default implementations
     setupMockDefaults();
   });
@@ -90,7 +102,7 @@ describe('RateLimiter', () => {
       expect(result.exceeded).toBe(false);
       expect(result.remaining).toBe(5); // 10 - 5 = 5
       expect(result.total).toBe(10);
-      expect(mockLogger.warn).not.toHaveBeenCalled();
+      expect(recordingLogger.getLogs('warn').length).toBe(0);
     });
 
     it('should block requests over limit', async () => {
@@ -107,7 +119,7 @@ describe('RateLimiter', () => {
 
       expect(result.exceeded).toBe(true);
       expect(result.remaining).toBe(0);
-      expect(mockLogger.warn).toHaveBeenCalledWith('Rate limit exceeded', expect.any(Object));
+      expect(recordingLogger.hasLogMatching('warn', 'Rate limit exceeded')).toBe(true);
     });
 
     it('should handle Redis errors gracefully', async () => {
@@ -119,7 +131,7 @@ describe('RateLimiter', () => {
       // Should fail open (allow request) on Redis error
       expect(result.exceeded).toBe(false);
       expect(result.total).toBe(10);
-      expect(mockLogger.error).toHaveBeenCalledWith('Rate limiter error', expect.any(Object));
+      expect(recordingLogger.hasLogMatching('error', 'Rate limiter error')).toBe(true);
     });
 
     it('should calculate reset time correctly', async () => {
@@ -246,7 +258,7 @@ describe('RateLimiter', () => {
 
       // Should fail open
       expect(mockNext).toHaveBeenCalled();
-      expect(mockLogger.error).toHaveBeenCalledWith('Rate limiter error', expect.any(Object));
+      expect(recordingLogger.hasLogMatching('error', 'Rate limiter error')).toBe(true);
     });
   });
 
@@ -258,7 +270,8 @@ describe('RateLimiter', () => {
       await rateLimiter.resetLimit('user_123');
 
       expect(mockRedis.del).toHaveBeenCalledWith('test:user_123');
-      expect(mockLogger.debug).toHaveBeenCalledWith('Rate limit reset', { identifier: 'user_123' });
+      expect(recordingLogger.hasLogMatching('debug', 'Rate limit reset')).toBe(true);
+      expect(recordingLogger.hasLogWithMeta('debug', { identifier: 'user_123' })).toBe(true);
     });
   });
 
@@ -289,7 +302,7 @@ describe('RateLimiter', () => {
       const status = await rateLimiter.getLimitStatus('user_123');
 
       expect(status).toBeNull();
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(recordingLogger.getLogs('error').length).toBeGreaterThan(0);
     });
   });
 
@@ -306,7 +319,8 @@ describe('RateLimiter', () => {
 
       expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'test:*', 'COUNT', 100);
       expect(mockRedis.del).toHaveBeenCalledTimes(oldKeys.length);
-      expect(mockLogger.info).toHaveBeenCalledWith('Rate limiter cleanup completed', { keysProcessed: 2 });
+      expect(recordingLogger.hasLogMatching('info', 'Rate limiter cleanup completed')).toBe(true);
+      expect(recordingLogger.hasLogWithMeta('info', { keysProcessed: 2 })).toBe(true);
     });
 
     it('should handle cleanup errors gracefully', async () => {
@@ -315,7 +329,7 @@ describe('RateLimiter', () => {
       const rateLimiter = createRateLimiter();
       await rateLimiter.cleanup();
 
-      expect(mockLogger.error).toHaveBeenCalledWith('Rate limiter cleanup failed', expect.any(Object));
+      expect(recordingLogger.hasLogMatching('error', 'Rate limiter cleanup failed')).toBe(true);
     });
   });
 });

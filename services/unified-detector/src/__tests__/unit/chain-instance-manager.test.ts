@@ -15,6 +15,8 @@ import {
 } from '../../chain-instance-manager';
 import { ChainDetectorInstance } from '../../chain-instance';
 import { ChainStats } from '../../unified-detector';
+import { Logger } from '../../types';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Mock Types
@@ -65,12 +67,7 @@ function createMockChainInstance(chainId: string, shouldFail = false): MockChain
 // =============================================================================
 
 describe('ChainInstanceManager', () => {
-  let mockLogger: {
-    info: jest.Mock;
-    error: jest.Mock;
-    warn: jest.Mock;
-    debug: jest.Mock;
-  };
+  let logger: RecordingLogger;
   let mockStreamsClient: { xadd: jest.Mock };
   let mockPerfLogger: { logHealthCheck: jest.Mock };
   let mockDegradationManager: {
@@ -81,12 +78,7 @@ describe('ChainInstanceManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockLogger = {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
+    logger = new RecordingLogger();
 
     mockStreamsClient = {
       xadd: jest.fn().mockResolvedValue('stream-id'),
@@ -116,7 +108,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       expect(manager).toBeDefined();
@@ -147,7 +139,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const result = await manager.startAll();
@@ -174,7 +166,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const result = await manager.startAll();
@@ -182,7 +174,7 @@ describe('ChainInstanceManager', () => {
       expect(result.success).toBe(true); // Partial success
       expect(result.chainsStarted).toBe(1);
       expect(result.chainsFailed).toBe(1);
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(logger.getLogs('error').length).toBeGreaterThan(0);
     });
 
     it('should skip chains not in CHAINS config', async () => {
@@ -196,7 +188,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         // Pass a mock chain validator
         chainValidator: (chainId) => chainId === 'ethereum',
       });
@@ -204,10 +196,7 @@ describe('ChainInstanceManager', () => {
       const result = await manager.startAll();
 
       expect(mockFactory).toHaveBeenCalledTimes(1);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('invalid_chain'),
-        expect.any(Object)
-      );
+      expect(logger.hasLogMatching('warn', 'invalid_chain')).toBe(true);
     });
 
     it('should emit events from chain instances', async () => {
@@ -223,7 +212,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const priceUpdateHandler = jest.fn();
@@ -265,7 +254,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const result = await manager.startAll();
@@ -299,7 +288,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -326,7 +315,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         stopTimeoutMs: 100, // Short timeout for test
       });
 
@@ -347,7 +336,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -369,7 +358,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -412,7 +401,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -438,7 +427,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -468,7 +457,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -488,7 +477,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await manager.startAll();
@@ -514,7 +503,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         degradationManager: mockDegradationManager as any,
       });
 
@@ -542,7 +531,7 @@ describe('ChainInstanceManager', () => {
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         chainInstanceFactory: mockFactory,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         degradationManager: mockDegradationManager as any,
       });
 

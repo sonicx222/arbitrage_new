@@ -9,18 +9,14 @@ import {
   createMetricsCollector,
 } from '../../metrics-collector';
 import { UnifiedDetectorStats, ChainStats } from '../../unified-detector';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Tests
 // =============================================================================
 
 describe('MetricsCollector', () => {
-  let mockLogger: {
-    info: jest.Mock;
-    error: jest.Mock;
-    warn: jest.Mock;
-    debug: jest.Mock;
-  };
+  let logger: RecordingLogger;
   let mockPerfLogger: { logHealthCheck: jest.Mock };
   let mockStateManager: { isRunning: jest.Mock };
   let mockGetStats: jest.Mock;
@@ -29,12 +25,7 @@ describe('MetricsCollector', () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
 
-    mockLogger = {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
+    logger = new RecordingLogger();
 
     mockPerfLogger = {
       logHealthCheck: jest.fn(),
@@ -88,7 +79,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
       });
 
@@ -108,7 +99,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
         metricsIntervalMs: 1000,
       });
@@ -136,7 +127,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
       });
 
@@ -162,7 +153,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
         metricsIntervalMs: 1000,
       });
@@ -192,7 +183,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
         metricsIntervalMs: 1000,
       });
@@ -216,7 +207,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
         metricsIntervalMs: 1000,
       });
@@ -227,10 +218,7 @@ describe('MetricsCollector', () => {
       expect(() => jest.advanceTimersByTime(1000)).not.toThrow();
 
       // Should log error
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        expect.stringContaining('Metrics collection error'),
-        expect.any(Object)
-      );
+      expect(logger.hasLogMatching('error', /Metrics collection error/)).toBe(true);
     });
   });
 
@@ -244,7 +232,7 @@ describe('MetricsCollector', () => {
         partitionId: 'test-partition',
         perfLogger: mockPerfLogger as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as any,
         getStats: mockGetStats,
         metricsIntervalMs: 1000,
       });

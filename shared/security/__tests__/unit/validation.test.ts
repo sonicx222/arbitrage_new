@@ -6,23 +6,62 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import Joi from 'joi';
 
+// Type definition for the inline recording logger (compatible with RecordingLogger interface)
+interface TestLogger {
+  fatal(msg: string, meta?: any): void;
+  error(msg: string, meta?: any): void;
+  warn(msg: string, meta?: any): void;
+  info(msg: string, meta?: any): void;
+  debug(msg: string, meta?: any): void;
+  trace(msg: string, meta?: any): void;
+  child(): TestLogger;
+  isLevelEnabled(): boolean;
+  getLogs(level: string): Array<{ level: string; msg: string; meta?: any }>;
+  getAllLogs(): Array<{ level: string; msg: string; meta?: any }>;
+  clear(): void;
+  hasLogMatching(level: string, pattern: string | RegExp): boolean;
+}
+
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};
 
-const mockLogger = {
-  warn: jest.fn<any>(),
-  error: jest.fn<any>(),
-  info: jest.fn<any>(),
-  debug: jest.fn<any>()
-};
-
 // Mock logger before importing validation module
 // Use the actual import path from validation.ts: '../../core/src/logger'
-jest.mock('../../../core/src/logger', () => ({
-  createLogger: () => mockLogger
-}));
+// We create a simple recording logger inline to avoid hoisting issues with jest.mock
+jest.mock('../../../core/src/logger', () => {
+  // Inline RecordingLogger implementation for jest.mock (avoids circular import issues)
+  const logs: Array<{ level: string; msg: string; meta?: any }> = [];
+  const sharedLogger = {
+    fatal: (msg: string, meta?: any) => logs.push({ level: 'fatal', msg, meta }),
+    error: (msg: string, meta?: any) => logs.push({ level: 'error', msg, meta }),
+    warn: (msg: string, meta?: any) => logs.push({ level: 'warn', msg, meta }),
+    info: (msg: string, meta?: any) => logs.push({ level: 'info', msg, meta }),
+    debug: (msg: string, meta?: any) => logs.push({ level: 'debug', msg, meta }),
+    trace: (msg: string, meta?: any) => logs.push({ level: 'trace', msg, meta }),
+    child: () => sharedLogger,
+    isLevelEnabled: () => true,
+    // Test helpers
+    getLogs: (level: string) => logs.filter(l => l.level === level),
+    getAllLogs: () => [...logs],
+    clear: () => { logs.length = 0; },
+    hasLogMatching: (level: string, pattern: string | RegExp) => {
+      return logs.filter(l => l.level === level).some(log => {
+        if (typeof pattern === 'string') return log.msg.includes(pattern);
+        return pattern.test(log.msg);
+      });
+    }
+  };
+  // Store on a global for test access
+  (globalThis as any).__validationTestLogger = sharedLogger;
+  return {
+    createLogger: jest.fn(() => sharedLogger)
+  };
+});
 
 import { validateArbitrageRequest, validateHealthRequest, validateMetricsRequest, validateLoginRequest, validateRegisterRequest, sanitizeInput } from '../../src/validation';
+
+// Get the shared logger from the mock (created inside jest.mock callback)
+const getTestLogger = (): TestLogger => (globalThis as any).__validationTestLogger;
 
 describe('Validation Middleware', () => {
   let mockReq: any;
@@ -30,6 +69,9 @@ describe('Validation Middleware', () => {
   let mockNext: jest.Mock;
 
   beforeEach(() => {
+    // Clear all recorded logs between tests
+    getTestLogger().clear();
+
     mockReq = {
       body: {},
       query: {},
@@ -79,7 +121,8 @@ describe('Validation Middleware', () => {
       expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
         error: 'Validation failed'
       }));
-      expect(mockLogger.warn).toHaveBeenCalled();
+      // Check that a warning was logged using RecordingLogger
+      expect(getTestLogger().getLogs('warn').length).toBeGreaterThan(0);
     });
 
     it('should reject invalid token address', () => {

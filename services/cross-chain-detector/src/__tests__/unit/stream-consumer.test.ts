@@ -9,20 +9,17 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import {
   createStreamConsumer,
   StreamConsumer,
+  Logger,
 } from '../../stream-consumer';
 import { PriceUpdate, WhaleTransaction } from '@arbitrage/types';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Tests
 // =============================================================================
 
 describe('StreamConsumer', () => {
-  let mockLogger: {
-    info: jest.Mock;
-    error: jest.Mock;
-    warn: jest.Mock;
-    debug: jest.Mock;
-  };
+  let logger: RecordingLogger;
   let mockStreamsClient: {
     xreadgroup: jest.Mock<() => Promise<any[]>>;
     xack: jest.Mock<() => Promise<number>>;
@@ -47,12 +44,8 @@ describe('StreamConsumer', () => {
     jest.clearAllMocks();
     jest.useFakeTimers();
 
-    mockLogger = {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
+    logger = new RecordingLogger();
+    logger.clear();
 
     mockStreamsClient = {
       xreadgroup: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
@@ -79,7 +72,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
       });
 
@@ -94,7 +87,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
       });
 
@@ -112,7 +105,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
       });
 
@@ -128,13 +121,13 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
       });
 
       await consumer.createConsumerGroups();
 
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(logger.getLogs('error').length).toBeGreaterThan(0);
     });
   });
 
@@ -148,17 +141,14 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
 
       consumer.start();
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Starting'),
-        expect.any(Object)
-      );
+      expect(logger.hasLogMatching('info', /Starting/)).toBe(true);
     });
 
     it('should poll streams at configured interval', async () => {
@@ -166,7 +156,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -188,7 +178,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -234,7 +224,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -268,7 +258,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -285,10 +275,7 @@ describe('StreamConsumer', () => {
       await Promise.resolve();
 
       expect(priceUpdateHandler).not.toHaveBeenCalled();
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('invalid'),
-        expect.any(Object)
-      );
+      expect(logger.hasLogMatching('warn', /invalid/i)).toBe(true);
       // Should still ack invalid messages to prevent replay
       expect(mockStreamsClient.xack).toHaveBeenCalled();
     });
@@ -322,7 +309,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -355,7 +342,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -372,7 +359,7 @@ describe('StreamConsumer', () => {
       await Promise.resolve();
 
       expect(whaleTxHandler).not.toHaveBeenCalled();
-      expect(mockLogger.warn).toHaveBeenCalled();
+      expect(logger.getLogs('warn').length).toBeGreaterThan(0);
     });
   });
 
@@ -394,7 +381,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 50,
       });
@@ -433,7 +420,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -462,7 +449,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -477,7 +464,7 @@ describe('StreamConsumer', () => {
       await Promise.resolve();
 
       // Errors are logged in the individual consume methods
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(logger.getLogs('error').length).toBeGreaterThan(0);
     });
 
     it('should not log timeout errors (they are expected)', async () => {
@@ -487,7 +474,7 @@ describe('StreamConsumer', () => {
         instanceId: 'test-instance',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         consumerGroups,
         pollIntervalMs: 100,
       });
@@ -501,10 +488,7 @@ describe('StreamConsumer', () => {
       await Promise.resolve();
 
       // Timeout errors should be silently ignored (not logged as errors)
-      expect(mockLogger.error).not.toHaveBeenCalledWith(
-        expect.stringContaining('consuming'),
-        expect.any(Object)
-      );
+      expect(logger.hasLogMatching('error', /consuming/)).toBe(false);
     });
   });
 });

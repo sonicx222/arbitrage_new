@@ -9,8 +9,10 @@ import {
   createOpportunityPublisher,
   OpportunityPublisher,
   CrossChainOpportunity,
+  Logger,
 } from '../../opportunity-publisher';
 import { ArbitrageOpportunity } from '@arbitrage/types';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Helper
@@ -39,12 +41,7 @@ const createTestOpportunity = (overrides?: Partial<CrossChainOpportunity>): Cros
 // =============================================================================
 
 describe('OpportunityPublisher', () => {
-  let mockLogger: {
-    info: jest.Mock;
-    error: jest.Mock;
-    warn: jest.Mock;
-    debug: jest.Mock;
-  };
+  let logger: RecordingLogger;
   let mockStreamsClient: {
     xadd: jest.Mock<(stream: string, data: any) => Promise<string>>;
   };
@@ -55,12 +52,7 @@ describe('OpportunityPublisher', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    mockLogger = {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
+    logger = new RecordingLogger();
 
     mockStreamsClient = {
       xadd: jest.fn<(stream: string, data: any) => Promise<string>>().mockResolvedValue('stream-id'),
@@ -80,7 +72,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       expect(publisher).toBeDefined();
@@ -100,7 +92,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity();
@@ -115,7 +107,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity();
@@ -134,7 +126,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity({ token: 'WETH/USDC' });
@@ -149,7 +141,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity();
@@ -164,14 +156,14 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity();
       const result = await publisher.publish(opportunity);
 
       expect(result).toBe(false);
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(logger.getLogs('error').length).toBeGreaterThan(0);
     });
   });
 
@@ -184,7 +176,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         dedupeWindowMs: 5000,
       });
 
@@ -205,7 +197,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         dedupeWindowMs: 5000,
         minProfitImprovement: 0.1, // 10% improvement needed
       });
@@ -224,7 +216,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         dedupeWindowMs: 5000,
         minProfitImprovement: 0.1, // 10% improvement needed
       });
@@ -243,7 +235,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       // Same source-target-token should dedupe
@@ -272,7 +264,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opp1 = createTestOpportunity({
@@ -302,7 +294,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       expect(publisher.getCacheSize()).toBe(0);
@@ -324,7 +316,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         cacheTtlMs: 100, // 100ms TTL
         maxCacheSize: 1000,
       });
@@ -343,7 +335,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         maxCacheSize: 2,
         cacheTtlMs: 60000, // Long TTL
       });
@@ -377,7 +369,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       await publisher.publish(createTestOpportunity({ token: 'TOKEN1' }));
@@ -390,16 +382,14 @@ describe('OpportunityPublisher', () => {
       publisher.clear();
 
       expect(publisher.getCacheSize()).toBe(0);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('cleared')
-      );
+      expect(logger.hasLogMatching('info', /cleared/)).toBe(true);
     });
 
     it('should allow publishing after clear', async () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity();
@@ -423,7 +413,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity({
@@ -443,7 +433,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
       });
 
       const opportunity = createTestOpportunity({
@@ -463,7 +453,7 @@ describe('OpportunityPublisher', () => {
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
-        logger: mockLogger,
+        logger: logger as unknown as Logger,
         dedupeWindowMs: 0, // Disable dedupe to test ID generation
       });
 
