@@ -149,7 +149,7 @@ describe('Singleton Race Condition Regression Tests', () => {
 
     beforeEach(async () => {
       jest.resetModules();
-      const module = await import('../../src/price-oracle');
+      const module = await import('../../src/analytics/price-oracle');
       getPriceOracle = module.getPriceOracle;
       resetPriceOracle = module.resetPriceOracle;
       resetPriceOracle();

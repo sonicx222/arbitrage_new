@@ -7,14 +7,19 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-// Mock logger
+// =============================================================================
+// Mock Setup - Must be before any imports that might use these modules
+// =============================================================================
+
+// Mock logger as fallback (DI is preferred via deps parameter)
+// Note: This mock is needed for getGasPriceCache() singleton tests that don't support DI
 jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => ({
+  createLogger: () => ({
     info: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
     debug: jest.fn()
-  }))
+  })
 }));
 
 // Mock ethers
@@ -58,6 +63,11 @@ jest.mock('@arbitrage/config', () => ({
   }
 }));
 
+// =============================================================================
+// Imports - After mocks
+// =============================================================================
+
+import { RecordingLogger } from '@arbitrage/core';
 import {
   GasPriceCache,
   getGasPriceCache,
@@ -67,16 +77,20 @@ import {
   GasCostEstimate
 } from '../../src/caching/gas-price-cache';
 
+// Create shared logger instance for DI
+const logger = new RecordingLogger();
+
 describe('GasPriceCache', () => {
   let cache: GasPriceCache;
 
   beforeEach(async () => {
     await resetGasPriceCache();
+    logger.clear();
     cache = new GasPriceCache({
       refreshIntervalMs: 60000,
       staleThresholdMs: 120000,
       autoRefresh: false // Disable for tests
-    });
+    }, { logger: logger as any });
   });
 
   afterEach(async () => {
@@ -86,7 +100,7 @@ describe('GasPriceCache', () => {
 
   describe('Initialization', () => {
     it('should initialize with default configuration', () => {
-      const defaultCache = new GasPriceCache();
+      const defaultCache = new GasPriceCache({}, { logger: logger as any });
       expect(defaultCache).toBeDefined();
     });
 
@@ -94,7 +108,7 @@ describe('GasPriceCache', () => {
       const customCache = new GasPriceCache({
         refreshIntervalMs: 30000,
         staleThresholdMs: 60000
-      });
+      }, { logger: logger as any });
       expect(customCache).toBeDefined();
     });
 
@@ -356,9 +370,10 @@ describe('Graceful Degradation (without start)', () => {
 
   beforeEach(async () => {
     await resetGasPriceCache();
+    logger.clear();
     unstartedCache = new GasPriceCache({
       autoRefresh: false
-    });
+    }, { logger: logger as any });
     // Intentionally NOT calling start()
   });
 
@@ -405,11 +420,12 @@ describe('Concurrent Refresh Protection', () => {
 
   beforeEach(async () => {
     await resetGasPriceCache();
+    logger.clear();
     cache = new GasPriceCache({
       refreshIntervalMs: 60000,
       staleThresholdMs: 120000,
       autoRefresh: false
-    });
+    }, { logger: logger as any });
     await cache.start();
   });
 

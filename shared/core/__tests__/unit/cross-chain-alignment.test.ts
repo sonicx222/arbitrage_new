@@ -101,7 +101,7 @@ jest.mock('../../src/logger', () => ({
   }))
 }));
 
-jest.mock('../../src/price-oracle', () => ({
+jest.mock('../../src/analytics/price-oracle', () => ({
   getPriceOracle: jest.fn(() => Promise.resolve({
     getPrice: jest.fn(() => Promise.resolve(2000)),
     initialize: jest.fn(() => Promise.resolve())
