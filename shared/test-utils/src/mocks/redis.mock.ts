@@ -38,8 +38,9 @@ export interface RedisOperation {
 export class RedisMock {
   private data = new Map<string, unknown>();
   private streams = new Map<string, Array<{ id: string; fields: Record<string, string> }>>();
-  private consumerGroups = new Map<string, Map<string, { lastDeliveredId: string }>>();
+  private consumerGroups = new Map<string, Map<string, { lastDeliveredId: string; pending: string[] }>>();
   private pubSubChannels = new Map<string, Set<(channel: string, message: string) => void>>();
+  private streamSequences = new Map<string, number>(); // Monotonic sequence per stream
   private options: RedisMockOptions;
   private operations: RedisOperation[] = [];
   private connected = true;
@@ -112,19 +113,77 @@ export class RedisMock {
     return this.data.has(key) ? 1 : 0;
   }
 
+  /**
+   * SET if Not eXists - used by distributed locking
+   * Returns true if key was set (did not exist), false otherwise
+   */
+  async setNx(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
+    await this.simulateLatency();
+    this.trackOperation('setNx', [key, value, ttlSeconds]);
+    this.checkFailure('setNx');
+
+    if (this.data.has(key)) {
+      return false;
+    }
+
+    this.data.set(key, value);
+    // Note: TTL not simulated in mock - would need setTimeout to auto-delete
+    return true;
+  }
+
+  /**
+   * Compare-and-delete for lock release (Lua script emulation)
+   */
+  async compareAndDelete(key: string, expectedValue: string): Promise<boolean> {
+    await this.simulateLatency();
+    this.trackOperation('compareAndDelete', [key, expectedValue]);
+    this.checkFailure('compareAndDelete');
+
+    const currentValue = this.data.get(key);
+    if (currentValue === expectedValue) {
+      this.data.delete(key);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Compare-and-extend for lock extension (Lua script emulation)
+   */
+  async compareAndExtend(key: string, expectedValue: string, ttlSeconds: number): Promise<boolean> {
+    await this.simulateLatency();
+    this.trackOperation('compareAndExtend', [key, expectedValue, ttlSeconds]);
+    this.checkFailure('compareAndExtend');
+
+    const currentValue = this.data.get(key);
+    if (currentValue === expectedValue) {
+      // In real Redis, this would reset TTL - we just confirm value matches
+      return true;
+    }
+    return false;
+  }
+
   // =========================================================================
   // Hash Operations
   // =========================================================================
 
-  async hset(key: string, field: string, value: string): Promise<number> {
+  async hset(key: string, ...fieldValues: string[]): Promise<number> {
     await this.simulateLatency();
-    this.trackOperation('hset', [key, field, value]);
+    this.trackOperation('hset', [key, ...fieldValues]);
     this.checkFailure('hset');
     const hash = (this.data.get(key) as Record<string, string>) || {};
-    const isNew = !(field in hash);
-    hash[field] = value;
+    let newFields = 0;
+
+    // Support both hset(key, field, value) and hset(key, field1, value1, field2, value2, ...)
+    for (let i = 0; i < fieldValues.length; i += 2) {
+      const field = fieldValues[i];
+      const value = fieldValues[i + 1];
+      if (!(field in hash)) newFields++;
+      hash[field] = value;
+    }
+
     this.data.set(key, hash);
-    return isNew ? 1 : 0;
+    return newFields;
   }
 
   async hget(key: string, field: string): Promise<string | null> {
@@ -225,7 +284,16 @@ export class RedisMock {
     this.checkFailure('xadd');
 
     const streamData = this.streams.get(stream) || [];
-    const messageId = id === '*' ? `${Date.now()}-${streamData.length}` : id;
+
+    // Use monotonic sequence number for reliable ID generation
+    let messageId: string;
+    if (id === '*') {
+      const sequence = (this.streamSequences.get(stream) || 0) + 1;
+      this.streamSequences.set(stream, sequence);
+      messageId = `${Date.now()}-${sequence}`;
+    } else {
+      messageId = id;
+    }
 
     const fields: Record<string, string> = {};
     for (let i = 0; i < fieldValues.length; i += 2) {
@@ -326,7 +394,7 @@ export class RedisMock {
       if (groups.has(group)) {
         throw new Error('BUSYGROUP Consumer Group name already exists');
       }
-      groups.set(group, { lastDeliveredId: '0-0' });
+      groups.set(group, { lastDeliveredId: '0-0', pending: [] });
       this.consumerGroups.set(stream, groups);
     }
 
@@ -382,13 +450,18 @@ export class RedisMock {
 
     const subscribers = this.pubSubChannels.get(channel);
     if (subscribers) {
-      subscribers.forEach(cb => {
-        try {
-          cb(channel, message);
-        } catch {
-          // Ignore callback errors in mock
-        }
-      });
+      // Execute callbacks asynchronously for better isolation (like real Redis pub/sub)
+      const callbackPromises = Array.from(subscribers).map(cb =>
+        Promise.resolve().then(() => {
+          try {
+            cb(channel, message);
+          } catch {
+            // Ignore callback errors in mock
+          }
+        })
+      );
+      // Don't await - fire and forget like real Redis
+      Promise.all(callbackPromises).catch(() => {});
       return subscribers.size;
     }
     return 0;
@@ -485,6 +558,7 @@ export class RedisMock {
     this.streams.clear();
     this.consumerGroups.clear();
     this.pubSubChannels.clear();
+    this.streamSequences.clear();
     this.operations = [];
     this.connected = true;
   }
@@ -552,4 +626,190 @@ export function setupRedisMock(mock?: RedisMock): { mock: RedisMock; MockRedis: 
   // Note: Jest mock must be called before importing modules that use Redis
   // This function returns the mock for manual setup in jest.mock()
   return { mock: instance, MockRedis };
+}
+
+// =========================================================================
+// Shared Mock State (for integration tests that need shared state)
+// =========================================================================
+
+/**
+ * Centralized mock state manager for Redis-like data in integration tests.
+ *
+ * This solves the global state leakage problem where module-level Maps
+ * persist between tests. Use this singleton instead of creating module-level
+ * state in test files.
+ *
+ * @example
+ * // In test file
+ * import { RedisMockState } from '@arbitrage/test-utils';
+ *
+ * const mockState = RedisMockState.getInstance();
+ * mockState.data.set('key', 'value');
+ * mockState.streams.set('stream', []);
+ *
+ * // State is automatically cleared between tests by singleton-reset
+ */
+export class RedisMockState {
+  private static instance: RedisMockState | null = null;
+  private static initializing = false; // Guard against double initialization
+
+  readonly data = new Map<string, unknown>();
+  readonly streams = new Map<string, Array<{ id: string; fields: Record<string, string> }>>();
+  readonly consumerGroups = new Map<string, Map<string, { lastDeliveredId: string; pending: string[] }>>();
+  readonly pubSubChannels = new Map<string, Set<(channel: string, message: string) => void>>();
+  readonly streamSequences = new Map<string, number>(); // Shared monotonic counters per stream
+
+  private constructor() {
+    // Private constructor for singleton pattern
+  }
+
+  static getInstance(): RedisMockState {
+    // Double-check pattern with initialization guard
+    if (!RedisMockState.instance && !RedisMockState.initializing) {
+      RedisMockState.initializing = true;
+      RedisMockState.instance = new RedisMockState();
+      RedisMockState.initializing = false;
+    }
+    return RedisMockState.instance!;
+  }
+
+  /**
+   * Reset all state - called automatically between tests
+   */
+  static reset(): void {
+    if (RedisMockState.instance) {
+      RedisMockState.instance.data.clear();
+      RedisMockState.instance.streams.clear();
+      RedisMockState.instance.consumerGroups.clear();
+      RedisMockState.instance.pubSubChannels.clear();
+      RedisMockState.instance.streamSequences.clear();
+    }
+  }
+
+  /**
+   * Destroy the singleton instance completely
+   */
+  static destroy(): void {
+    RedisMockState.reset();
+    RedisMockState.instance = null;
+  }
+
+  /**
+   * Get next monotonic sequence number for a stream (thread-safe within single process)
+   */
+  getNextSequence(stream: string): number {
+    const current = this.streamSequences.get(stream) || 0;
+    const next = current + 1;
+    this.streamSequences.set(stream, next);
+    return next;
+  }
+
+  /**
+   * Create a mock Redis object that uses this shared state.
+   * Uses 'any' to avoid Jest 29+ strict typing issues.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createMockRedis(): any {
+    const state = this;
+
+    const mockGet = jest.fn(async (key: string) => state.data.get(key) ?? null);
+    const mockSet = jest.fn(async (key: string, value: unknown) => {
+      state.data.set(key, value);
+      return 'OK';
+    });
+    const mockDel = jest.fn(async (...keys: string[]) => {
+      let count = 0;
+      keys.forEach(key => { if (state.data.delete(key)) count++; });
+      return count;
+    });
+    const mockExists = jest.fn(async (key: string) => state.data.has(key) ? 1 : 0);
+    const mockHset = jest.fn(async (key: string, ...fieldValues: string[]) => {
+      const hash = (state.data.get(key) as Record<string, string>) || {};
+      let newFields = 0;
+      for (let i = 0; i < fieldValues.length; i += 2) {
+        const field = fieldValues[i];
+        const value = fieldValues[i + 1];
+        if (!(field in hash)) newFields++;
+        hash[field] = value;
+      }
+      state.data.set(key, hash);
+      return newFields;
+    });
+    const mockHget = jest.fn(async (key: string, field: string) => {
+      const hash = state.data.get(key) as Record<string, string> | undefined;
+      return hash?.[field] ?? null;
+    });
+    const mockHgetall = jest.fn(async (key: string) => {
+      return (state.data.get(key) as Record<string, string>) || {};
+    });
+    const mockXadd = jest.fn(async (stream: string, id: string, ...fieldValues: string[]) => {
+      const streamData = state.streams.get(stream) || [];
+      // Use shared monotonic sequence to prevent ID collisions
+      const messageId = id === '*' ? `${Date.now()}-${state.getNextSequence(stream)}` : id;
+      const fields: Record<string, string> = {};
+      for (let i = 0; i < fieldValues.length; i += 2) {
+        fields[fieldValues[i]] = fieldValues[i + 1];
+      }
+      streamData.push({ id: messageId, fields });
+      state.streams.set(stream, streamData);
+      return messageId;
+    });
+    const mockXread = jest.fn(async () => null);
+    const mockXreadgroup = jest.fn(async () => null);
+    const mockXack = jest.fn(async (_stream: string, _group: string, ...ids: string[]) => ids.length);
+    const mockXgroup = jest.fn(async () => 'OK');
+    const mockXlen = jest.fn(async (stream: string) => (state.streams.get(stream) || []).length);
+    const mockPublish = jest.fn(async (channel: string, message: string) => {
+      const subs = state.pubSubChannels.get(channel);
+      if (subs) {
+        // Fire callbacks asynchronously for better isolation
+        subs.forEach(cb => Promise.resolve().then(() => {
+          try { cb(channel, message); } catch { /* ignore */ }
+        }));
+        return subs.size;
+      }
+      return 0;
+    });
+    const mockSubscribe = jest.fn(async (channel: string, cb: (channel: string, message: string) => void) => {
+      if (!state.pubSubChannels.has(channel)) {
+        state.pubSubChannels.set(channel, new Set());
+      }
+      state.pubSubChannels.get(channel)!.add(cb);
+    });
+    const mockPing = jest.fn(async () => 'PONG');
+    const mockQuit = jest.fn(async () => 'OK');
+    const mockDisconnect = jest.fn(async () => undefined);
+    const mockOn = jest.fn(() => ({}));
+    const mockRemoveAllListeners = jest.fn(() => ({}));
+
+    return {
+      get: mockGet,
+      set: mockSet,
+      del: mockDel,
+      exists: mockExists,
+      hset: mockHset,
+      hget: mockHget,
+      hgetall: mockHgetall,
+      xadd: mockXadd,
+      xread: mockXread,
+      xreadgroup: mockXreadgroup,
+      xack: mockXack,
+      xgroup: mockXgroup,
+      xlen: mockXlen,
+      publish: mockPublish,
+      subscribe: mockSubscribe,
+      ping: mockPing,
+      quit: mockQuit,
+      disconnect: mockDisconnect,
+      on: mockOn,
+      removeAllListeners: mockRemoveAllListeners,
+    };
+  }
+}
+
+/**
+ * Reset function for singleton-reset.ts integration
+ */
+export function resetRedisMockState(): void {
+  RedisMockState.reset();
 }
