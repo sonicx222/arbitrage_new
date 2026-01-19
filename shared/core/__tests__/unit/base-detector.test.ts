@@ -289,7 +289,7 @@ class TestDetector extends BaseDetector {
   public override async getHealth(): Promise<any> {
     return {
       service: `${this.chain}-detector`,
-      status: this.isRunning ? 'healthy' : 'unhealthy',
+      status: this.isRunning && !this.isStopping ? 'healthy' : 'unhealthy',
       uptime: this.isRunning ? Date.now() : 0,
       state: this.isRunning ? 'running' : (this.isStopping ? 'stopping' : 'stopped'),
       chain: this.chain,
@@ -404,7 +404,8 @@ describe('BaseDetector', () => {
           'initializePairs',
           'connectWebSocket',
           'subscribeToEvents',
-          'onStart'
+          'onStart',
+          'startHealthMonitoring' // Added for health monitoring feature
         ]);
         expect(detector.getIsRunning()).toBe(true);
       });

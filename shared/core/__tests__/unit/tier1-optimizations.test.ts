@@ -386,7 +386,7 @@ jest.mock('../../src/logger', () => ({
 }));
 
 // Mock provider-health-scorer
-jest.mock('../../src/provider-health-scorer', () => ({
+jest.mock('../../src/monitoring/provider-health-scorer', () => ({
   getProviderHealthScorer: jest.fn().mockReturnValue({
     selectBestProvider: jest.fn((chain: string, candidates: string[]) => candidates[0]),
     getHealthScore: jest.fn().mockReturnValue(0.9),

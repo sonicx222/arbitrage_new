@@ -22,7 +22,7 @@ import {
   FailoverEvent,
   getCrossRegionHealthManager,
   resetCrossRegionHealthManager
-} from '../../src/cross-region-health';
+} from '../../src/monitoring/cross-region-health';
 
 // ============================================================================
 // Mock Factories (using dependency injection instead of module mocks)

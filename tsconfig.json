@@ -51,6 +51,12 @@
     "**/*.test.ts",
     "**/*.spec.ts",
     "**/__tests__/**",
-    "shared/ml/**"
+    "shared/ml/**",
+    "services/arbitrum-detector/**",
+    "services/base-detector/**",
+    "services/bsc-detector/**",
+    "services/ethereum-detector/**",
+    "services/optimism-detector/**",
+    "services/polygon-detector/**"
   ]
 }

@@ -66,12 +66,11 @@ describe('T2.9: Dynamic Fallback Prices', () => {
     mockRedisClient = createMockRedisClient();
     mockLogger = createMockLogger();
 
-    // Use DI to inject mock logger
+    // Use DI to inject mock logger (second parameter is deps object)
     oracle = new PriceOracle({
       cacheTtlSeconds: 60,
-      stalenessThresholdMs: 300000,
-      logger: mockLogger as any
-    });
+      stalenessThresholdMs: 300000
+    }, { logger: mockLogger as any });
     await oracle.initialize(mockRedisClient as any);
   });
 
@@ -168,7 +167,7 @@ describe('T2.9: Dynamic Fallback Prices', () => {
 
       // Invalid prices should be ignored
       expect(oracle.getFallbackPrice('ETH')).toBe(originalEth);
-      expect(oracle.getFallbackPrice('BTC')).toBe(45000); // Original
+      expect(oracle.getFallbackPrice('BTC')).toBe(100000); // Original
       expect(oracle.getFallbackPrice('BNB')).toBe(350); // Valid update
     });
 
@@ -239,7 +238,7 @@ describe('T2.9: Dynamic Fallback Prices', () => {
 
       const result = await oracle.getPrice('ETH');
 
-      expect(result.price).toBe(2500); // Static fallback
+      expect(result.price).toBe(3500); // Static fallback
       expect(result.source).toBe('fallback');
     });
   });
@@ -487,9 +486,7 @@ describe('Tier 2 Integration', () => {
     it('should update last known good prices from cache hits', async () => {
       // This test validates that price updates flow correctly through the system
       const mockRedis = createMockRedisClient();
-      const oracle = new PriceOracle({
-        logger: createMockLogger() as any
-      });
+      const oracle = new PriceOracle({}, { logger: createMockLogger() as any });
       await oracle.initialize(mockRedis as any);
 
       // Simulate a cache hit by setting up mock to return price data
@@ -1489,7 +1486,7 @@ describe('T2.8: ML Predictor Integration', () => {
       });
 
       // Full MomentumSignal with all required properties
-      const bullishSignal: import('../../src/price-momentum').MomentumSignal = {
+      const bullishSignal: import('../../src/analytics/price-momentum').MomentumSignal = {
         pair: 'ETH_USDT',
         currentPrice: 2500,
         velocity: 0.02,

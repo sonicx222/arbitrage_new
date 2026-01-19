@@ -13,13 +13,13 @@ import {
   WhaleSignal,
   getWhaleActivityTracker,
   resetWhaleActivityTracker
-} from '../../src/whale-activity-tracker';
+} from '../../src/analytics/whale-activity-tracker';
 import {
   LiquidityDepthAnalyzer,
   PoolLiquidity,
   getLiquidityDepthAnalyzer,
   resetLiquidityDepthAnalyzer
-} from '../../src/liquidity-depth-analyzer';
+} from '../../src/analytics/liquidity-depth-analyzer';
 
 // ===========================================================================
 // Test Data Factories
