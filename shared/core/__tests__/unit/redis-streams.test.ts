@@ -658,6 +658,61 @@ describe('RedisStreamsClient', () => {
 
       await batcher.destroy();
     });
+
+    /**
+     * P0-2 Regression Test: Messages added DURING flush must not be lost.
+     * This tests the pendingDuringFlush queue that prevents race condition where
+     * messages could be lost between queue swap and error re-queue.
+     */
+    it('should not lose messages added during flush operation', async () => {
+      // Create a slow flush that allows messages to be added mid-flush
+      let flushResolve: () => void;
+      const flushPromise = new Promise<void>(resolve => { flushResolve = resolve; });
+
+      mockRedis.xadd.mockImplementation(async () => {
+        // Wait for external signal before completing
+        await flushPromise;
+        return '1234-0';
+      });
+
+      const batcher = client.createBatcher('stream:test', {
+        maxBatchSize: 2,
+        maxWaitMs: 5000 // Long timeout so only batch size triggers flush
+      });
+
+      // Add 2 messages to trigger flush
+      batcher.add({ id: 1, phase: 'before_flush' });
+      batcher.add({ id: 2, phase: 'before_flush' }); // Triggers flush
+
+      // Wait for flush to start (async)
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Flush is now in progress - add messages that should go to pendingDuringFlush
+      batcher.add({ id: 3, phase: 'during_flush' });
+      batcher.add({ id: 4, phase: 'during_flush' });
+
+      // Verify pending messages are counted in stats
+      const statsWhileFlushing = batcher.getStats();
+      expect(statsWhileFlushing.currentQueueSize).toBe(2); // pendingDuringFlush should be included
+
+      // Complete the flush
+      flushResolve!();
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Messages 3 and 4 should now be in the main queue
+      const statsAfterFlush = batcher.getStats();
+      expect(statsAfterFlush.currentQueueSize).toBe(2); // Should have messages 3 and 4
+      expect(statsAfterFlush.totalMessagesSent).toBe(2); // Messages 1 and 2 sent
+
+      // Flush again to send remaining messages
+      await batcher.flush();
+
+      const finalStats = batcher.getStats();
+      expect(finalStats.currentQueueSize).toBe(0);
+      expect(finalStats.totalMessagesSent).toBe(4); // All 4 messages sent
+
+      await batcher.destroy();
+    });
   });
 
   describe('Deep Dive Regression: Consumer Group Race Condition', () => {
@@ -750,6 +805,549 @@ describe('RedisStreamsClient', () => {
         '*',
         'data', expect.any(String)
       );
+    });
+  });
+});
+
+// =============================================================================
+// StreamConsumer Tests (P0-4 FIX: Previously 0% coverage on critical class)
+// =============================================================================
+
+import { StreamConsumer } from '@arbitrage/core';
+import type { StreamConsumerConfig, StreamConsumerStats } from '@arbitrage/core';
+
+/**
+ * Helper to create a mock handler that matches StreamConsumerConfig.handler signature.
+ * We use `any` for the mock return type to avoid complex Jest type gymnastics.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const createMockHandler = (): any => jest.fn();
+
+describe('StreamConsumer', () => {
+  let client: RedisStreamsClient;
+  let mockRedis: any;
+  let MockRedis: RedisStreamsConstructor;
+  let getMockInstance: () => any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+
+    // Create mock Redis constructor
+    const mocks = createMockRedisConstructor();
+    MockRedis = mocks.MockRedis;
+    getMockInstance = mocks.getMockInstance;
+
+    // Create client with injected mock
+    client = new RedisStreamsClient('redis://localhost:6379', undefined, {
+      RedisImpl: MockRedis
+    });
+
+    mockRedis = getMockInstance();
+  });
+
+  afterEach(async () => {
+    jest.useRealTimers();
+    if (client && mockRedis) {
+      mockRedis.disconnect.mockResolvedValue(undefined);
+      await client.disconnect();
+    }
+  });
+
+  describe('Lifecycle', () => {
+    it('should start consuming messages when start() is called', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        batchSize: 10,
+        blockMs: 1000
+      };
+
+      // Mock xreadgroup to return empty initially
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      expect(consumer.getStats().isRunning).toBe(true);
+
+      await consumer.stop();
+    });
+
+    it('should stop consuming when stop() is called', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0 // Non-blocking for test
+      };
+
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      expect(consumer.getStats().isRunning).toBe(true);
+
+      await consumer.stop();
+
+      expect(consumer.getStats().isRunning).toBe(false);
+    });
+
+    it('should not start if already running', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler
+      };
+
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+      consumer.start(); // Second start should be no-op
+
+      expect(consumer.getStats().isRunning).toBe(true);
+
+      await consumer.stop();
+    });
+  });
+
+  describe('Message Processing', () => {
+    it('should call handler for each received message', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0
+      };
+
+      // Mock message response
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test","value":1}']],
+          ['1234-1', ['data', '{"type":"test","value":2}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      // Advance timers to allow poll to complete
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Handler should have been called for each message
+      expect(handler).toHaveBeenCalledTimes(2);
+
+      await consumer.stop();
+    });
+
+    it('should auto-acknowledge messages after successful processing', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        autoAck: true,
+        blockMs: 0
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should have called xack for the message
+      expect(mockRedis.xack).toHaveBeenCalledWith(
+        'stream:test',
+        'test-group',
+        '1234-0'
+      );
+
+      await consumer.stop();
+    });
+
+    it('should NOT acknowledge messages when autoAck is false', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        autoAck: false,
+        blockMs: 0
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should NOT have called xack
+      expect(mockRedis.xack).not.toHaveBeenCalled();
+
+      await consumer.stop();
+    });
+
+    it('should NOT acknowledge messages when handler fails', async () => {
+      const handler = createMockHandler().mockRejectedValue(new Error('Handler error'));
+      const logger = { error: jest.fn(), debug: jest.fn() };
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        autoAck: true,
+        blockMs: 0,
+        logger
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should NOT acknowledge failed message
+      expect(mockRedis.xack).not.toHaveBeenCalled();
+
+      // Should have logged error
+      expect(logger.error).toHaveBeenCalled();
+
+      await consumer.stop();
+    });
+  });
+
+  describe('Statistics', () => {
+    it('should track messages processed', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']],
+          ['1234-1', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      const stats = consumer.getStats();
+      expect(stats.messagesProcessed).toBe(2);
+      expect(stats.messagesFailed).toBe(0);
+      expect(stats.lastProcessedAt).not.toBeNull();
+
+      await consumer.stop();
+    });
+
+    it('should track failed messages', async () => {
+      const handler = createMockHandler().mockRejectedValue(new Error('Handler error'));
+      const logger = { error: jest.fn(), debug: jest.fn() };
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0,
+        logger
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      mockRedis.xreadgroup
+        .mockResolvedValueOnce(mockMessages)
+        .mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      const stats = consumer.getStats();
+      expect(stats.messagesProcessed).toBe(0);
+      expect(stats.messagesFailed).toBe(1);
+
+      await consumer.stop();
+    });
+  });
+
+  describe('Backpressure (Pause/Resume)', () => {
+    it('should pause consumption when pause() is called', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0
+      };
+
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      expect(consumer.isPaused()).toBe(false);
+
+      consumer.pause();
+
+      expect(consumer.isPaused()).toBe(true);
+      expect(consumer.getStats().isPaused).toBe(true);
+
+      await consumer.stop();
+    });
+
+    it('should resume consumption when resume() is called', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0
+      };
+
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+      consumer.pause();
+
+      expect(consumer.isPaused()).toBe(true);
+
+      consumer.resume();
+
+      expect(consumer.isPaused()).toBe(false);
+      expect(consumer.getStats().isPaused).toBe(false);
+
+      await consumer.stop();
+    });
+
+    it('should call onPauseStateChange callback when pause state changes', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const onPauseStateChange = jest.fn();
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        onPauseStateChange,
+        blockMs: 0
+      };
+
+      mockRedis.xreadgroup.mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      consumer.pause();
+      expect(onPauseStateChange).toHaveBeenCalledWith(true);
+
+      consumer.resume();
+      expect(onPauseStateChange).toHaveBeenCalledWith(false);
+
+      await consumer.stop();
+    });
+
+    it('should not process messages while paused', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0
+      };
+
+      const mockMessages = [
+        ['stream:test', [
+          ['1234-0', ['data', '{"type":"test"}']]
+        ]]
+      ];
+
+      // Initially return no messages, then set up messages after pause
+      mockRedis.xreadgroup.mockResolvedValue(null);
+      mockRedis.xack.mockResolvedValue(1);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      // Let initial poll complete with no messages
+      await jest.advanceTimersByTimeAsync(10);
+
+      // Now pause the consumer
+      consumer.pause();
+
+      // Clear any calls from before pause
+      handler.mockClear();
+      mockRedis.xreadgroup.mockClear();
+
+      // Now set up messages to be returned (if poll runs)
+      mockRedis.xreadgroup.mockResolvedValue(mockMessages);
+
+      // Advance time - poll should NOT run while paused
+      await jest.advanceTimersByTimeAsync(1000);
+
+      // Should not have called xreadgroup while paused
+      expect(mockRedis.xreadgroup).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+
+      await consumer.stop();
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should continue polling after stream read error', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const logger = { error: jest.fn(), debug: jest.fn() };
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 0,
+        logger
+      };
+
+      // First call fails, subsequent calls succeed
+      mockRedis.xreadgroup
+        .mockRejectedValueOnce(new Error('Connection error'))
+        .mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      // First poll fails
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should have logged error
+      expect(logger.error).toHaveBeenCalled();
+
+      // Consumer should still be running
+      expect(consumer.getStats().isRunning).toBe(true);
+
+      await consumer.stop();
+    });
+
+    it('should ignore timeout errors from blocking read', async () => {
+      const handler = createMockHandler().mockResolvedValue(undefined);
+      const logger = { error: jest.fn(), debug: jest.fn() };
+      const config: StreamConsumerConfig = {
+        config: {
+          streamName: 'stream:test',
+          groupName: 'test-group',
+          consumerName: 'consumer-1'
+        },
+        handler,
+        blockMs: 1000,
+        logger
+      };
+
+      // Simulate timeout error from blocking read
+      mockRedis.xreadgroup
+        .mockRejectedValueOnce(new Error('read timeout'))
+        .mockResolvedValue(null);
+
+      const consumer = new StreamConsumer(client, config);
+      consumer.start();
+
+      await jest.advanceTimersByTimeAsync(100);
+
+      // Should NOT have logged error for timeout
+      expect(logger.error).not.toHaveBeenCalled();
+
+      await consumer.stop();
     });
   });
 });

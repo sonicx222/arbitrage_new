@@ -210,14 +210,14 @@ describe('HierarchicalCache', () => {
   });
 
   describe('Advanced Features', () => {
-    // Skip TTL test - L1 cache may not enforce TTL on reads, only on eviction
-    it.skip('should respect TTL', async () => {
+    // P2-FIX: Test un-skipped - L1 cache enforces TTL on reads (lines 494-498 in hierarchical-cache.ts)
+    it('should respect TTL', async () => {
       const testKey = 'ttl:test';
       const testValue = 'ttl-value';
 
-      await cache.set(testKey, testValue, 0.05); // 0.05s = 50ms TTL
+      await cache.set(testKey, testValue, 0.1); // 0.1s = 100ms TTL
 
-      await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms
+      await new Promise(resolve => setTimeout(resolve, 150)); // Wait 150ms (50% margin)
 
       const result = await cache.get(testKey);
       expect(result).toBeNull();

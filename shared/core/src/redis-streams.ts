@@ -121,6 +121,12 @@ export class StreamBatcher<T = Record<string, unknown>> {
   private timer: NodeJS.Timeout | null = null;
   private flushing = false; // Guard against concurrent flushes
   private flushLock: Promise<void> | null = null; // P0-1 fix: Mutex for atomic flush
+  /**
+   * P0-2 FIX: Pending queue for messages added during flush.
+   * Messages added while flushing are stored here to prevent loss
+   * if they arrive between queue swap and error re-queue.
+   */
+  private pendingDuringFlush: T[] = [];
   private destroyed = false;
   private stats: BatcherStats = {
     currentQueueSize: 0,
@@ -142,6 +148,14 @@ export class StreamBatcher<T = Record<string, unknown>> {
   add(message: T): void {
     if (this.destroyed) {
       this.logger.warn('Attempted to add message to destroyed batcher', { streamName: this.streamName });
+      return;
+    }
+
+    // P0-2 FIX: If currently flushing, add to pending queue to prevent race condition
+    // where messages could be lost between queue swap and error re-queue
+    if (this.flushing) {
+      this.pendingDuringFlush.push(message);
+      this.stats.totalMessagesQueued++;
       return;
     }
 
@@ -222,6 +236,12 @@ export class StreamBatcher<T = Record<string, unknown>> {
       this.queue = [...batch, ...this.queue];
       throw error;
     } finally {
+      // P0-2 FIX: Merge any messages that arrived during flush back to main queue
+      // Do this BEFORE clearing flushing flag to ensure no messages are lost
+      if (this.pendingDuringFlush.length > 0) {
+        this.queue.push(...this.pendingDuringFlush);
+        this.pendingDuringFlush = [];
+      }
       this.flushing = false;
       this.flushLock = null;
       resolveLock!();
@@ -229,7 +249,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
   }
 
   getStats(): BatcherStats {
-    return { ...this.stats, currentQueueSize: this.queue.length };
+    // P0-2 FIX: Include pendingDuringFlush in queue size calculation
+    return { ...this.stats, currentQueueSize: this.queue.length + this.pendingDuringFlush.length };
   }
 
   async destroy(): Promise<void> {
@@ -243,14 +264,22 @@ export class StreamBatcher<T = Record<string, unknown>> {
       this.timer = null;
     }
 
+    // P0-2 FIX: Merge any pending messages before final flush
+    if (this.pendingDuringFlush.length > 0) {
+      this.queue.push(...this.pendingDuringFlush);
+      this.pendingDuringFlush = [];
+    }
+
     // Await final flush to ensure messages are sent
     if (this.queue.length > 0) {
+      // P0-2 FIX: Capture lost count BEFORE flush attempt (pendingDuringFlush already merged above)
+      const lostMessageCount = this.queue.length;
       try {
         await this.flush();
       } catch (error) {
         this.logger.warn('Failed to flush remaining messages on destroy', {
           error,
-          lostMessages: this.queue.length
+          lostMessages: lostMessageCount
         });
       }
     }
