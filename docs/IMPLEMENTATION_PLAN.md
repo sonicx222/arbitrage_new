@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-17 (S3.3.5 Solana price feed: 88 tests)
-> **Tests**: 3898 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests + 88 S3.3.5 tests)
+> **Last Updated**: 2025-01-19 (S3.3.6 Solana arbitrage detection: 47 tests)
+> **Tests**: 3945 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests + 88 S3.3.5 tests + 47 S3.3.6 tests)
 
 ---
 
@@ -803,10 +803,14 @@
     - Pool subscription management with staleness monitoring
     - Account data layout constants for all supported DEXs
 
-[ ] S3.3.6 Implement Solana-specific arbitrage detection
+[x] S3.3.6 Implement Solana-specific arbitrage detection (COMPLETED 2025-01-19, 47 tests)
     - Intra-Solana arbitrage (between Solana DEXs)
     - Cross-chain price comparison (SOL-USDC vs EVM)
     - Account for Solana's priority fees
+    - Triangular arbitrage detection (SOL→USDC→JUP→SOL)
+    - Token normalization for cross-chain matching (MSOL→SOL, JITOSOL→SOL)
+    - Redis Streams integration for opportunity publishing
+    - SolanaDetector composition pattern for pool updates
     - File: services/partition-solana/src/arbitrage-detector.ts
 
 [ ] S3.3.7 Deploy and test Solana partition (P4)

@@ -160,4 +160,23 @@ main().catch((error) => {
 // Exports
 // =============================================================================
 
+// Runtime exports
 export { detector, config, P4_PARTITION_ID, P4_CHAINS, P4_REGION };
+
+// S3.3.6: Re-export Solana arbitrage detector for external use
+export {
+  SolanaArbitrageDetector,
+  type SolanaArbitrageConfig,
+  type SolanaArbitrageDeps,
+  type SolanaArbitrageOpportunity,
+  type SolanaArbitrageStreamsClient,
+  type SolanaPoolInfo,
+  type SolanaTokenInfo,
+  type EvmPriceUpdate,
+  type TriangularPath,
+  type TriangularPathStep,
+  type CrossChainPriceComparison,
+  type PriorityFeeEstimate,
+  type PriorityFeeRequest,
+  type SolanaArbitrageStats,
+} from './arbitrage-detector';
