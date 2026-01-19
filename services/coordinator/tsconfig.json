@@ -2,7 +2,9 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
@@ -17,19 +19,52 @@
     "composite": true,
     "baseUrl": ".",
     "paths": {
-      "@arbitrage/types": ["../../shared/types/src"],
-      "@arbitrage/types/*": ["../../shared/types/src/*"],
-      "@arbitrage/config": ["../../shared/config/src"],
-      "@arbitrage/config/*": ["../../shared/config/src/*"],
-      "@arbitrage/core": ["../../shared/core/src"],
-      "@arbitrage/core/*": ["../../shared/core/src/*"]
+      "@arbitrage/types": [
+        "../../shared/types/src"
+      ],
+      "@arbitrage/types/*": [
+        "../../shared/types/src/*"
+      ],
+      "@arbitrage/config": [
+        "../../shared/config/src"
+      ],
+      "@arbitrage/config/*": [
+        "../../shared/config/src/*"
+      ],
+      "@arbitrage/core": [
+        "../../shared/core/src"
+      ],
+      "@arbitrage/core/*": [
+        "../../shared/core/src/*"
+      ],
+      "@shared/security": [
+        "../../shared/security/src"
+      ],
+      "@shared/security/*": [
+        "../../shared/security/src/*"
+      ]
     }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"],
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.test.ts"
+  ],
   "references": [
-    { "path": "../../shared/types" },
-    { "path": "../../shared/config" },
-    { "path": "../../shared/core" }
+    {
+      "path": "../../shared/types"
+    },
+    {
+      "path": "../../shared/config"
+    },
+    {
+      "path": "../../shared/core"
+    },
+    {
+      "path": "../../shared/security"
+    }
   ]
 }

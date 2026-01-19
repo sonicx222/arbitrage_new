@@ -145,7 +145,7 @@ export const DEXES: Record<string, Dex[]> = {
     {
       name: 'nomiswap',         // [M] - Competitive fees
       chain: 'bsc',
-      factoryAddress: '0xD6715A8Be3944Ec72738f0bFdc739571659D8010',
+      factoryAddress: '0xD6715A8BE3944Ec72738f0bFdc739571659D8010',
       routerAddress: '0xD654953D746f0b114d1F85332Dc43446ac79413d',
       fee: 10  // 0.1% competitive fee
     }
