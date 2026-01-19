@@ -13,13 +13,9 @@
 
 import { EventEmitter } from 'events';
 
-// Mock dependencies before imports
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
+// RecordingLogger will be imported dynamically to avoid hoisting issues
+// The instance is created and exported for use in tests
+let recordingLogger: any;
 
 const mockPerfLogger = {
   logEventLatency: jest.fn(),
@@ -89,7 +85,10 @@ class MockWebSocketManager extends EventEmitter {
 }
 
 jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => mockLogger),
+  createLogger: jest.fn(() => {
+    // Return the recording logger at call time, not at mock setup time
+    return recordingLogger;
+  }),
   getPerformanceLogger: jest.fn(() => mockPerfLogger)
 }));
 
@@ -178,7 +177,10 @@ jest.mock('@arbitrage/config', () => mockConfig);
 jest.mock('../../../config/src', () => mockConfig);
 
 // Import after mocks
-import { PartitionedDetector, PartitionedDetectorConfig, ChainHealth, PartitionHealth, PartitionedDetectorDeps, TokenNormalizeFn } from '@arbitrage/core';
+import { PartitionedDetector, PartitionedDetectorConfig, ChainHealth, PartitionHealth, PartitionedDetectorDeps, PartitionedDetectorLogger, TokenNormalizeFn, RecordingLogger } from '@arbitrage/core';
+
+// Initialize the recording logger after imports
+recordingLogger = new RecordingLogger();
 
 // =============================================================================
 // DI Helper (P16 pattern - uses DI instead of Jest mock hoisting)
@@ -205,7 +207,7 @@ const mockNormalizeToken: TokenNormalizeFn = (symbol: string) => {
  * This uses the DI pattern to inject mocks instead of relying on Jest mock hoisting.
  */
 const createMockDetectorDeps = (): PartitionedDetectorDeps => ({
-  logger: mockLogger,
+  logger: recordingLogger as unknown as PartitionedDetectorLogger,
   perfLogger: mockPerfLogger as any,
   normalizeToken: mockNormalizeToken
 });
@@ -216,6 +218,7 @@ describe('PartitionedDetector', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    recordingLogger.clear();
 
     defaultConfig = {
       partitionId: 'test-partition',
@@ -283,10 +286,7 @@ describe('PartitionedDetector', () => {
       await detector.start();
 
       expect(detector.isRunning()).toBe(true);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Starting PartitionedDetector'),
-        expect.any(Object)
-      );
+      expect(recordingLogger.hasLogMatching('info', /Starting PartitionedDetector/)).toBe(true);
     });
 
     it('should initialize Redis and Streams clients', async () => {
@@ -312,7 +312,7 @@ describe('PartitionedDetector', () => {
       await detector.start();
       await detector.start();
 
-      expect(mockLogger.warn).toHaveBeenCalledWith('PartitionedDetector already running');
+      expect(recordingLogger.hasLogMatching('warn', 'PartitionedDetector already running')).toBe(true);
     });
 
     it('should wait for pending stop before starting', async () => {
@@ -347,10 +347,7 @@ describe('PartitionedDetector', () => {
       await detector.stop();
 
       expect(detector.isRunning()).toBe(false);
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('Stopping PartitionedDetector'),
-        expect.any(Object)
-      );
+      expect(recordingLogger.hasLogMatching('info', /Stopping PartitionedDetector/)).toBe(true);
     });
 
     it('should disconnect all WebSocket managers', async () => {
@@ -366,7 +363,7 @@ describe('PartitionedDetector', () => {
     it('should not stop if not running', async () => {
       await detector.stop();
 
-      expect(mockLogger.debug).toHaveBeenCalledWith('PartitionedDetector not running');
+      expect(recordingLogger.hasLogMatching('debug', 'PartitionedDetector not running')).toBe(true);
     });
 
     it('should return existing promise if stop already in progress', async () => {
@@ -716,7 +713,7 @@ describe('PartitionedDetector', () => {
       wsManager?.emit('disconnected');
 
       // Should trigger reconnection logic
-      expect(mockLogger.warn).toHaveBeenCalled();
+      expect(recordingLogger.getLogs('warn').length).toBeGreaterThan(0);
     });
   });
 });

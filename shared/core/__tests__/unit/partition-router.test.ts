@@ -18,7 +18,8 @@ import {
   getMigrationRecommendation,
   warnIfDeprecated,
   PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES
+  PARTITION_SERVICE_NAMES,
+  RecordingLogger
 } from '@arbitrage/core';
 import type { PartitionEndpoint } from '@arbitrage/core';
 import { PARTITION_IDS } from '@arbitrage/config';
@@ -335,22 +336,24 @@ describe('Deprecation Utilities', () => {
   });
 
   describe('warnIfDeprecated', () => {
+    let logger: RecordingLogger;
+
+    beforeEach(() => {
+      logger = new RecordingLogger();
+    });
+
     it('should log warning for deprecated patterns', () => {
-      const mockLogger = { warn: jest.fn() };
+      warnIfDeprecated('bsc-detector', logger);
 
-      warnIfDeprecated('bsc-detector', mockLogger);
-
-      expect(mockLogger.warn).toHaveBeenCalledTimes(1);
-      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('[DEPRECATED]'));
+      expect(logger.getLogs('warn').length).toBe(1);
+      expect(logger.hasLogMatching('warn', '[DEPRECATED]')).toBe(true);
     });
 
     it('should not log for non-deprecated patterns', () => {
-      const mockLogger = { warn: jest.fn() };
+      warnIfDeprecated('partition-asia-fast', logger);
+      warnIfDeprecated('coordinator', logger);
 
-      warnIfDeprecated('partition-asia-fast', mockLogger);
-      warnIfDeprecated('coordinator', mockLogger);
-
-      expect(mockLogger.warn).not.toHaveBeenCalled();
+      expect(logger.getLogs('warn').length).toBe(0);
     });
 
     it('should use console.warn when no logger provided', () => {
@@ -363,11 +366,9 @@ describe('Deprecation Utilities', () => {
     });
 
     it('should include migration recommendation in warning', () => {
-      const mockLogger = { warn: jest.fn() };
+      warnIfDeprecated('arbitrum-detector', logger);
 
-      warnIfDeprecated('arbitrum-detector', mockLogger);
-
-      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('partition-l2-turbo'));
+      expect(logger.hasLogMatching('warn', 'partition-l2-turbo')).toBe(true);
     });
   });
 });

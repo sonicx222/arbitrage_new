@@ -6,6 +6,7 @@
  * Uses DI pattern (P16) to inject mock dependencies instead of Jest mock hoisting.
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Mock Setup
@@ -26,12 +27,7 @@ jest.mock('bcrypt', () => ({
 // DI Mock Instances (P16 pattern)
 // =============================================================================
 
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
+const logger = new RecordingLogger();
 
 const mockRedis = {
   get: jest.fn(() => Promise.resolve(null)),
@@ -44,8 +40,8 @@ const mockRedis = {
 /**
  * Creates mock dependencies for AuthService tests using DI pattern.
  */
-const createMockAuthDeps = () => ({
-  logger: mockLogger,
+const createMockAuthDeps = (): AuthServiceDeps => ({
+  logger: logger as AuthServiceDeps['logger'],
   redis: mockRedis
 });
 
@@ -59,6 +55,7 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    logger.clear();
 
     // Set environment variables BEFORE creating AuthService
     process.env.JWT_SECRET = 'test-secret';
@@ -100,7 +97,7 @@ describe('AuthService', () => {
       expect(result.email).toBe(registerRequest.email);
       expect(result.roles).toEqual(['user']);
       expect(mockSaveUser).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith('User registered successfully', expect.any(Object));
+      expect(logger.hasLogMatching('info', 'User registered successfully')).toBe(true);
     });
 
     it('should reject weak passwords', async () => {
@@ -156,7 +153,7 @@ describe('AuthService', () => {
       expect(result.user).toEqual(mockUser);
       expect(result.token).toBe('mock_jwt_token');
       expect(mockUpdateUser).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith('User logged in successfully', expect.any(Object));
+      expect(logger.hasLogMatching('info', 'User logged in successfully')).toBe(true);
     });
 
     it('should reject invalid credentials', async () => {
@@ -171,7 +168,8 @@ describe('AuthService', () => {
       (bcrypt.compare as jest.Mock).mockImplementation(() => Promise.resolve(false));
 
       await expect(authService.login(loginRequest)).rejects.toThrow('Invalid username or password');
-      expect(mockLogger.warn).toHaveBeenCalledWith('Failed login attempt - invalid password', { userId: 'user_123', username: 'testuser' });
+      expect(logger.hasLogMatching('warn', 'Failed login attempt - invalid password')).toBe(true);
+      expect(logger.hasLogWithMeta('warn', { userId: 'user_123', username: 'testuser' })).toBe(true);
     });
 
     it('should reject inactive users', async () => {
@@ -248,7 +246,7 @@ describe('AuthService', () => {
       const result = await authService.validateToken(token);
 
       expect(result).toBeNull();
-      expect(mockLogger.debug).toHaveBeenCalledWith('Token validation failed', expect.any(Object));
+      expect(logger.hasLogMatching('debug', 'Token validation failed')).toBe(true);
     });
   });
 

@@ -4,16 +4,22 @@
  * Tests the price data management module extracted from CrossChainDetectorService.
  */
 
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach } from '@jest/globals';
 import {
   createPriceDataManager,
   PriceDataManager,
+  Logger,
 } from '../../price-data-manager';
 import { PriceUpdate } from '@arbitrage/types';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Helper
 // =============================================================================
+
+/** Helper function to cast RecordingLogger as Logger for type compatibility */
+const asLogger = (recordingLogger: RecordingLogger): Logger =>
+  recordingLogger as unknown as Logger;
 
 function createPriceUpdate(overrides?: Partial<PriceUpdate>): PriceUpdate {
   return {
@@ -37,22 +43,10 @@ function createPriceUpdate(overrides?: Partial<PriceUpdate>): PriceUpdate {
 // =============================================================================
 
 describe('PriceDataManager', () => {
-  let mockLogger: {
-    info: jest.Mock;
-    error: jest.Mock;
-    warn: jest.Mock;
-    debug: jest.Mock;
-  };
+  let logger: RecordingLogger;
 
   beforeEach(() => {
-    jest.clearAllMocks();
-
-    mockLogger = {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
+    logger = new RecordingLogger();
   });
 
   // ===========================================================================
@@ -62,7 +56,7 @@ describe('PriceDataManager', () => {
   describe('createPriceDataManager', () => {
     it('should create manager with required config', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       expect(manager).toBeDefined();
@@ -82,7 +76,7 @@ describe('PriceDataManager', () => {
   describe('handlePriceUpdate', () => {
     it('should store price update in hierarchical structure', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       const update = createPriceUpdate();
@@ -97,7 +91,7 @@ describe('PriceDataManager', () => {
 
     it('should create nested structure for new chains', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       const update = createPriceUpdate({
@@ -117,7 +111,7 @@ describe('PriceDataManager', () => {
 
     it('should update existing price data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       const update1 = createPriceUpdate({ price: 2500 });
@@ -132,7 +126,7 @@ describe('PriceDataManager', () => {
 
     it('should trigger cleanup at configured frequency', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
         cleanupFrequency: 3, // Cleanup every 3 updates
         maxPriceAgeMs: 1000,
       });
@@ -167,14 +161,14 @@ describe('PriceDataManager', () => {
 
     it('should handle errors gracefully', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       // This should not throw
       manager.handlePriceUpdate(null as any);
       manager.handlePriceUpdate(undefined as any);
 
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(logger.getLogs('error').length).toBeGreaterThan(0);
     });
   });
 
@@ -185,7 +179,7 @@ describe('PriceDataManager', () => {
   describe('createSnapshot', () => {
     it('should create deep copy of price data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       const update = createPriceUpdate();
@@ -204,7 +198,7 @@ describe('PriceDataManager', () => {
 
     it('should return empty object when no data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       const snapshot = manager.createSnapshot();
@@ -219,7 +213,7 @@ describe('PriceDataManager', () => {
   describe('getChains', () => {
     it('should return list of monitored chains', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       manager.handlePriceUpdate(createPriceUpdate({
@@ -242,7 +236,7 @@ describe('PriceDataManager', () => {
 
     it('should return empty array when no data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       expect(manager.getChains()).toEqual([]);
@@ -256,7 +250,7 @@ describe('PriceDataManager', () => {
   describe('getPairCount', () => {
     it('should return total pair count across all chains/dexes', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       // 3 pairs across 2 chains
@@ -284,7 +278,7 @@ describe('PriceDataManager', () => {
 
     it('should return 0 when no data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       expect(manager.getPairCount()).toBe(0);
@@ -298,7 +292,7 @@ describe('PriceDataManager', () => {
   describe('cleanup', () => {
     it('should remove old price data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
         maxPriceAgeMs: 1000, // 1 second
       });
 
@@ -325,7 +319,7 @@ describe('PriceDataManager', () => {
 
     it('should remove empty dex objects', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
         maxPriceAgeMs: 1000,
       });
 
@@ -346,7 +340,7 @@ describe('PriceDataManager', () => {
 
     it('should remove empty chain objects', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
         maxPriceAgeMs: 1000,
       });
 
@@ -374,7 +368,7 @@ describe('PriceDataManager', () => {
   describe('clear', () => {
     it('should remove all price data', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       manager.handlePriceUpdate(createPriceUpdate({
@@ -397,14 +391,12 @@ describe('PriceDataManager', () => {
 
     it('should log clear operation', () => {
       const manager = createPriceDataManager({
-        logger: mockLogger,
+        logger: asLogger(logger),
       });
 
       manager.clear();
 
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        expect.stringContaining('cleared')
-      );
+      expect(logger.hasLogMatching('info', 'cleared')).toBe(true);
     });
   });
 });

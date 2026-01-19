@@ -12,21 +12,10 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventEmitter } from 'events';
 import { Server, IncomingMessage, ServerResponse, createServer } from 'http';
+import { RecordingLogger, createLogger } from '@arbitrage/core';
 
-// =============================================================================
-// Mocks
-// =============================================================================
-
-const mockLogger = {
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-  debug: jest.fn()
-};
-
-jest.mock('../../src/logger', () => ({
-  createLogger: jest.fn(() => mockLogger)
-}));
+// Type alias for the logger type expected by partition-service-utils
+type PartitionLogger = ReturnType<typeof createLogger>;
 
 // Mock CHAINS for validation
 jest.mock('@arbitrage/config', () => ({
@@ -52,7 +41,6 @@ import {
   PartitionServiceConfig,
   PartitionDetectorInterface
 } from '@arbitrage/core';
-import { createLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Test Helpers
@@ -120,7 +108,10 @@ class MockDetector extends EventEmitter implements PartitionDetectorInterface {
 // =============================================================================
 
 describe('Partition Service Utilities', () => {
+  let logger: RecordingLogger;
+
   beforeEach(() => {
+    logger = new RecordingLogger();
     jest.clearAllMocks();
   });
 
@@ -145,21 +136,21 @@ describe('Partition Service Utilities', () => {
     });
 
     it('should return default for invalid port (NaN)', () => {
-      const port = parsePort('abc', 3001, mockLogger as unknown as ReturnType<typeof createLogger>);
+      const port = parsePort('abc', 3001, logger as unknown as PartitionLogger);
       expect(port).toBe(3001);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Invalid HEALTH_CHECK_PORT, using default',
-        expect.objectContaining({ provided: 'abc', default: 3001 })
-      );
+      expect(logger.hasLogMatching('warn', 'Invalid HEALTH_CHECK_PORT, using default')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      expect(warnLogs.length).toBeGreaterThan(0);
+      expect(warnLogs[0].meta).toMatchObject({ provided: 'abc', default: 3001 });
     });
 
     it('should return default for port below 1', () => {
-      const port = parsePort('0', 3001, mockLogger as unknown as ReturnType<typeof createLogger>);
+      const port = parsePort('0', 3001, logger as unknown as PartitionLogger);
       expect(port).toBe(3001);
     });
 
     it('should return default for port above 65535', () => {
-      const port = parsePort('70000', 3001, mockLogger as unknown as ReturnType<typeof createLogger>);
+      const port = parsePort('70000', 3001, logger as unknown as PartitionLogger);
       expect(port).toBe(3001);
     });
 
@@ -169,8 +160,9 @@ describe('Partition Service Utilities', () => {
     });
 
     it('should not log warning when no logger provided', () => {
+      const separateLogger = new RecordingLogger();
       parsePort('invalid', 3001);
-      expect(mockLogger.warn).not.toHaveBeenCalled();
+      expect(separateLogger.getLogs('warn').length).toBe(0);
     });
   });
 
@@ -210,29 +202,30 @@ describe('Partition Service Utilities', () => {
       const chains = validateAndFilterChains(
         'arbitrum,invalid,optimism',
         defaultChains,
-        mockLogger as unknown as ReturnType<typeof createLogger>
+        logger as unknown as PartitionLogger
       );
       expect(chains).toEqual(['arbitrum', 'optimism']);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'Invalid chain IDs in PARTITION_CHAINS, ignoring',
-        expect.objectContaining({
-          invalidChains: ['invalid'],
-          validChains: ['arbitrum', 'optimism']
-        })
-      );
+      expect(logger.hasLogMatching('warn', 'Invalid chain IDs in PARTITION_CHAINS, ignoring')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      expect(warnLogs.length).toBeGreaterThan(0);
+      expect(warnLogs[0].meta).toMatchObject({
+        invalidChains: ['invalid'],
+        validChains: ['arbitrum', 'optimism']
+      });
     });
 
     it('should return defaults when all chains are invalid', () => {
       const chains = validateAndFilterChains(
         'invalid1,invalid2',
         defaultChains,
-        mockLogger as unknown as ReturnType<typeof createLogger>
+        logger as unknown as PartitionLogger
       );
       expect(chains).toEqual(['bsc', 'polygon']);
-      expect(mockLogger.warn).toHaveBeenCalledWith(
-        'No valid chains in PARTITION_CHAINS, using defaults',
-        expect.objectContaining({ defaults: defaultChains })
-      );
+      expect(logger.hasLogMatching('warn', 'No valid chains in PARTITION_CHAINS, using defaults')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      // Find the log with the defaults message
+      const defaultsLog = warnLogs.find(log => log.msg.includes('using defaults'));
+      expect(defaultsLog?.meta).toMatchObject({ defaults: defaultChains });
     });
 
     it('should return copy of defaults, not reference', () => {
@@ -278,7 +271,7 @@ describe('Partition Service Utilities', () => {
         port: testPort,
         config: serviceConfig,
         detector: mockDetector,
-        logger: mockLogger as unknown as ReturnType<typeof createLogger>
+        logger: logger as unknown as PartitionLogger
       });
 
       expect(server).toBeInstanceOf(Server);
@@ -302,7 +295,7 @@ describe('Partition Service Utilities', () => {
     it('should set up event handlers', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
@@ -318,24 +311,27 @@ describe('Partition Service Utilities', () => {
     it('should log debug on priceUpdate', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
       mockDetector.emit('priceUpdate', { chain: 'bsc', dex: 'pancakeswap', price: 100 });
 
-      expect(mockLogger.debug).toHaveBeenCalledWith('Price update', expect.objectContaining({
+      expect(logger.hasLogMatching('debug', 'Price update')).toBe(true);
+      const debugLogs = logger.getLogs('debug');
+      expect(debugLogs.length).toBeGreaterThan(0);
+      expect(debugLogs[0].meta).toMatchObject({
         partition: 'test-partition',
         chain: 'bsc',
         dex: 'pancakeswap',
         price: 100
-      }));
+      });
     });
 
     it('should log info on opportunity', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
@@ -345,72 +341,87 @@ describe('Partition Service Utilities', () => {
         buyDex: 'pancakeswap',
         sellDex: 'biswap',
         expectedProfit: 100,
-        profitPercentage: 0.05
+        profitPercentage: 5.00
       });
 
-      expect(mockLogger.info).toHaveBeenCalledWith('Arbitrage opportunity detected', expect.objectContaining({
+      expect(logger.hasLogMatching('info', 'Arbitrage opportunity detected')).toBe(true);
+      const infoLogs = logger.getLogs('info');
+      const oppLog = infoLogs.find(log => log.msg.includes('Arbitrage opportunity'));
+      expect(oppLog?.meta).toMatchObject({
         partition: 'test-partition',
         id: 'opp-1',
         percentage: '5.00%'
-      }));
+      });
     });
 
     it('should log error on chainError', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
       mockDetector.emit('chainError', { chainId: 'bsc', error: new Error('Connection failed') });
 
-      expect(mockLogger.error).toHaveBeenCalledWith('Chain error: bsc', expect.objectContaining({
+      expect(logger.hasLogMatching('error', 'Chain error: bsc')).toBe(true);
+      const errorLogs = logger.getLogs('error');
+      expect(errorLogs.length).toBeGreaterThan(0);
+      expect(errorLogs[0].meta).toMatchObject({
         partition: 'test-partition',
         error: 'Connection failed'
-      }));
+      });
     });
 
     it('should log info on chainConnected', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
       mockDetector.emit('chainConnected', { chainId: 'bsc' });
 
-      expect(mockLogger.info).toHaveBeenCalledWith('Chain connected: bsc', expect.objectContaining({
+      expect(logger.hasLogMatching('info', 'Chain connected: bsc')).toBe(true);
+      const infoLogs = logger.getLogs('info');
+      const connectedLog = infoLogs.find(log => log.msg.includes('Chain connected'));
+      expect(connectedLog?.meta).toMatchObject({
         partition: 'test-partition'
-      }));
+      });
     });
 
     it('should log warn on chainDisconnected', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
       mockDetector.emit('chainDisconnected', { chainId: 'polygon' });
 
-      expect(mockLogger.warn).toHaveBeenCalledWith('Chain disconnected: polygon', expect.objectContaining({
+      expect(logger.hasLogMatching('warn', 'Chain disconnected: polygon')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      expect(warnLogs.length).toBeGreaterThan(0);
+      expect(warnLogs[0].meta).toMatchObject({
         partition: 'test-partition'
-      }));
+      });
     });
 
     it('should log warn on failoverEvent', () => {
       setupDetectorEventHandlers(
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-partition'
       );
 
       mockDetector.emit('failoverEvent', { type: 'primary_down' });
 
-      expect(mockLogger.warn).toHaveBeenCalledWith('Failover event received', expect.objectContaining({
+      expect(logger.hasLogMatching('warn', 'Failover event received')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      const failoverLog = warnLogs.find(log => log.msg.includes('Failover'));
+      expect(failoverLog?.meta).toMatchObject({
         partition: 'test-partition',
         type: 'primary_down'
-      }));
+      });
     });
   });
 
@@ -454,7 +465,7 @@ describe('Partition Service Utilities', () => {
       setupProcessHandlers(
         healthServerRef,
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-service'
       );
 
@@ -473,7 +484,7 @@ describe('Partition Service Utilities', () => {
       setupProcessHandlers(
         healthServerRef,
         mockDetector,
-        mockLogger as unknown as ReturnType<typeof createLogger>,
+        logger as unknown as PartitionLogger,
         'test-service'
       );
 
