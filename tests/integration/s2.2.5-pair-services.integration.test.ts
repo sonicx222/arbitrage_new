@@ -35,10 +35,14 @@ const mockRedisClient = {
 };
 
 // Mock Redis module (kept for backwards compatibility, but DI is preferred)
-jest.mock('@arbitrage/core/redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue(mockRedisClient),
-  RedisClient: jest.fn()
-}));
+jest.mock('@arbitrage/core', () => {
+  const actual = jest.requireActual('@arbitrage/core') as Record<string, unknown>;
+  return {
+    ...actual,
+    getRedisClient: jest.fn().mockResolvedValue(mockRedisClient),
+    RedisClient: jest.fn()
+  };
+});
 
 // Helper function to create mock deps for PairCacheService
 const createMockCacheDeps = () => ({
@@ -70,14 +74,12 @@ jest.mock('ethers', () => {
 import {
   PairDiscoveryService,
   getPairDiscoveryService,
-  resetPairDiscoveryService
-} from '@arbitrage/core/pair-discovery';
-import {
+  resetPairDiscoveryService,
   PairCacheService,
   getPairCacheService,
   resetPairCacheService,
-  CachedPairData
-} from '@arbitrage/core/pair-cache';
+  type CachedPairData
+} from '@arbitrage/core';
 import { Dex, Token } from '../../shared/types';
 
 // =============================================================================

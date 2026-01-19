@@ -21,29 +21,27 @@ import { ethers } from 'ethers';
 // =============================================================================
 
 // Mock logger
-jest.mock('@arbitrage/core/logger', () => ({
-  createLogger: () => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  }),
-}));
-
-// Mock Redis
-const mockRedisClient = {
-  get: jest.fn(() => Promise.resolve(null)),
-  setex: jest.fn(() => Promise.resolve('OK')),
-  del: jest.fn(() => Promise.resolve(1)),
-  incr: jest.fn(() => Promise.resolve(1)),
-  expire: jest.fn(() => Promise.resolve(1)),
-  xadd: jest.fn(() => Promise.resolve('1234-0')),
-  xread: jest.fn(() => Promise.resolve(null)),
-};
-
-jest.mock('@arbitrage/core/redis', () => ({
-  getRedisClient: jest.fn(() => Promise.resolve(mockRedisClient)),
-}));
+jest.mock('@arbitrage/core', () => {
+  const actual = jest.requireActual('@arbitrage/core') as Record<string, unknown>;
+  return {
+    ...actual,
+    createLogger: () => ({
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+    }),
+    getRedisClient: jest.fn(() => Promise.resolve({
+      get: jest.fn(() => Promise.resolve(null)),
+      setex: jest.fn(() => Promise.resolve('OK')),
+      del: jest.fn(() => Promise.resolve(1)),
+      incr: jest.fn(() => Promise.resolve(1)),
+      expire: jest.fn(() => Promise.resolve(1)),
+      xadd: jest.fn(() => Promise.resolve('1234-0')),
+      xread: jest.fn(() => Promise.resolve(null)),
+    })),
+  };
+});
 
 // =============================================================================
 // Imports After Mocking
@@ -55,10 +53,9 @@ import {
   BridgeRouterFactory,
   BRIDGE_DEFAULTS,
   STARGATE_CHAIN_IDS,
-  BridgeStatusResult,
-} from '@arbitrage/core/bridge-router';
-
-import { AsyncMutex } from '@arbitrage/core/async-mutex';
+  AsyncMutex,
+  type BridgeStatusResult,
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Utilities

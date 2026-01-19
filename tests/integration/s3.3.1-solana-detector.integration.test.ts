@@ -24,11 +24,11 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import {
   SolanaDetector,
   SOLANA_DEX_PROGRAMS,
-  SolanaDetectorConfig,
-  SolanaPool,
-  SolanaDetectorRedisClient,
-  SolanaDetectorStreamsClient
-} from '@arbitrage/core/solana-detector';
+  type SolanaDetectorConfig,
+  type SolanaPool,
+  type SolanaDetectorRedisClient,
+  type SolanaDetectorStreamsClient
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Constants
@@ -525,7 +525,7 @@ describe('S3.3.1 SolanaDetector DEX Program Constants Integration', () => {
     it('should have valid base58 format for all program IDs', () => {
       const base58Regex = /^[A-HJ-NP-Za-km-z1-9]+$/;
 
-      for (const [name, programId] of Object.entries(SOLANA_DEX_PROGRAMS)) {
+      for (const [_name, programId] of Object.entries(SOLANA_DEX_PROGRAMS) as [string, string][]) {
         expect(base58Regex.test(programId)).toBe(true);
         expect(programId.length).toBeGreaterThanOrEqual(32);
         expect(programId.length).toBeLessThanOrEqual(50);
@@ -533,7 +533,7 @@ describe('S3.3.1 SolanaDetector DEX Program Constants Integration', () => {
     });
 
     it('should not contain EVM-style hex addresses', () => {
-      for (const [name, programId] of Object.entries(SOLANA_DEX_PROGRAMS)) {
+      for (const [_name, programId] of Object.entries(SOLANA_DEX_PROGRAMS) as [string, string][]) {
         expect(programId).not.toMatch(/^0x/);
       }
     });

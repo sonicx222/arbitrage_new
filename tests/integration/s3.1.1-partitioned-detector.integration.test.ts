@@ -128,12 +128,12 @@ jest.mock('@arbitrage/core/websocket-manager', () => ({
 // Import after mocks
 import {
   PartitionedDetector,
-  PartitionedDetectorConfig,
-  PartitionedDetectorDeps,
-  TokenNormalizeFn,
-  PartitionHealth,
-  CrossChainDiscrepancy
-} from '@arbitrage/core/partitioned-detector';
+  type PartitionedDetectorConfig,
+  type PartitionedDetectorDeps,
+  type TokenNormalizeFn,
+  type PartitionHealth,
+  type CrossChainDiscrepancy
+} from '@arbitrage/core';
 
 import {
   PARTITIONS,

@@ -132,7 +132,7 @@ import {
   PartitionedDetectorConfig,
   PartitionedDetectorDeps,
   TokenNormalizeFn
-} from '@arbitrage/core/partitioned-detector';
+} from '@arbitrage/core';
 
 /**
  * Mock token normalizer for cross-chain matching tests.
@@ -1050,13 +1050,15 @@ describe('S3.1.4.13: Shared Partition Utilities Integration', () => {
     it('should log arbitrage opportunities with profit percentage', () => {
       setupDetectorEventHandlers(mockDetector as any, mockLogger as any, P2_PARTITION_ID);
 
+      // profitPercentage is expected to be a percentage value (e.g., 2.5 for 2.5%)
+      // not a decimal ratio (0.025)
       mockDetector.emit('opportunity', {
         id: 'opp-l2-1',
         type: 'cross-dex',
         buyDex: 'uniswap_v3',
         sellDex: 'camelot',
         expectedProfit: 50,
-        profitPercentage: 0.025
+        profitPercentage: 2.5
       });
 
       expect(mockLogger.info).toHaveBeenCalledWith(
