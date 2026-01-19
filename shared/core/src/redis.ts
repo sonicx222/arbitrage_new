@@ -471,10 +471,14 @@ export class RedisClient {
    * This prevents the TOCTOU race condition where another instance could acquire
    * the lock between the check and the TTL extension.
    *
+   * S4.1.1-FIX-2: Now throws on Redis errors to distinguish "lock owned by another"
+   * from "Redis unavailable". Callers must handle errors appropriately.
+   *
    * @param key - Lock key
    * @param instanceId - Expected owner of the lock
    * @param ttlSeconds - New TTL to set if renewal succeeds
    * @returns true if lock was renewed, false if lock is owned by another instance or doesn't exist
+   * @throws RedisOperationError if Redis operation fails (network error, timeout, etc.)
    */
   async renewLockIfOwned(key: string, instanceId: string, ttlSeconds: number): Promise<boolean> {
     // Lua script for atomic compare-and-extend-TTL
@@ -498,8 +502,9 @@ export class RedisClient {
       const result = await this.eval<number>(script, [key], [instanceId, String(ttlSeconds)]);
       return result === 1;
     } catch (error) {
+      // S4.1.1-FIX-2: Throw to distinguish "lock owned by another" from "Redis unavailable"
       this.logger.error('Error renewing lock', { error, key, instanceId });
-      return false;
+      throw new RedisOperationError('renewLockIfOwned', error as Error, key);
     }
   }
 
@@ -508,9 +513,13 @@ export class RedisClient {
    * Atomically checks if the lock is owned by the given instanceId and deletes it.
    * This prevents releasing a lock that was acquired by another instance.
    *
+   * S4.1.1-FIX-2: Now throws on Redis errors to distinguish "lock owned by another"
+   * from "Redis unavailable". Callers must handle errors appropriately.
+   *
    * @param key - Lock key
    * @param instanceId - Expected owner of the lock
    * @returns true if lock was released, false if lock is owned by another instance or doesn't exist
+   * @throws RedisOperationError if Redis operation fails (network error, timeout, etc.)
    */
   async releaseLockIfOwned(key: string, instanceId: string): Promise<boolean> {
     const script = `
@@ -531,8 +540,9 @@ export class RedisClient {
       const result = await this.eval<number>(script, [key], [instanceId]);
       return result === 1;
     } catch (error) {
+      // S4.1.1-FIX-2: Throw to distinguish "lock owned by another" from "Redis unavailable"
       this.logger.error('Error releasing lock', { error, key, instanceId });
-      return false;
+      throw new RedisOperationError('releaseLockIfOwned', error as Error, key);
     }
   }
 
