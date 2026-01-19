@@ -25,7 +25,7 @@ import {
 } from '@arbitrage/config';
 
 // Import solana-detector for program ID constants
-import { SOLANA_DEX_PROGRAMS } from '@arbitrage/core/solana-detector';
+import { SOLANA_DEX_PROGRAMS } from '@arbitrage/core';
 
 // =============================================================================
 // S3.3.2 Expected Configuration

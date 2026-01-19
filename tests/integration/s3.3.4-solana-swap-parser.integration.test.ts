@@ -32,7 +32,7 @@ import type {
   ParsedSolanaSwap,
   SwapParserConfig,
   ParserStats
-} from '@arbitrage/core/solana-swap-parser';
+} from '@arbitrage/core';
 
 // Import the actual implementation for integration testing
 import {
@@ -43,7 +43,7 @@ import {
   PROGRAM_ID_TO_DEX,
   SWAP_DISCRIMINATORS as IMPL_SWAP_DISCRIMINATORS,
   DISABLED_DEXES
-} from '@arbitrage/core/solana-swap-parser';
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Constants - Solana DEX Program IDs

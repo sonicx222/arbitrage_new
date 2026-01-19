@@ -30,9 +30,9 @@ import {
   BALANCER_VAULT_ADDRESSES,
   GMX_ADDRESSES,
   PLATYPUS_ADDRESSES,
-  AdapterConfig,
-  DexAdapter
-} from '@arbitrage/core/dex-adapters';
+  type AdapterConfig,
+  type DexAdapter
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Constants

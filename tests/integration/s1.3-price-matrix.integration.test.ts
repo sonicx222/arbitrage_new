@@ -15,14 +15,14 @@ import {
   PriceIndexMapper,
   getPriceMatrix,
   resetPriceMatrix
-} from '@arbitrage/core/price-matrix';
+} from '@arbitrage/core';
 
 import type {
   PriceMatrixConfig,
   PriceEntry,
   MemoryUsage,
   BatchUpdate
-} from '@arbitrage/core/price-matrix';
+} from '@arbitrage/core';
 
 // =============================================================================
 // Test Helpers
@@ -390,9 +390,9 @@ describe('S1.3 L1 Price Matrix Integration Tests', () => {
       ]);
 
       expect(prices.length).toBe(3);
-      expect(prices.every(p => p !== null)).toBe(true);
+      expect(prices.every((p: PriceEntry | null) => p !== null)).toBe(true);
 
-      const priceValues = prices.map(p => p!.price);
+      const priceValues = prices.map((p: PriceEntry | null) => p!.price);
       const minPrice = Math.min(...priceValues);
       const maxPrice = Math.max(...priceValues);
       const spread = maxPrice - minPrice;
@@ -419,10 +419,10 @@ describe('S1.3 L1 Price Matrix Integration Tests', () => {
       const keys = ethPrices.map(p => p.key);
       const prices = matrix.getBatch(keys);
 
-      expect(prices.every(p => p !== null)).toBe(true);
+      expect(prices.every((p: PriceEntry | null) => p !== null)).toBe(true);
 
       // Calculate average for cross-chain arbitrage
-      const avg = prices.reduce((sum, p) => sum + p!.price, 0) / prices.length;
+      const avg = prices.reduce((sum: number, p: PriceEntry | null) => sum + p!.price, 0) / prices.length;
       expect(avg).toBeCloseTo(1849.64, 1);
     });
   });
@@ -687,7 +687,7 @@ describe('Singleton Race Condition Guard', () => {
 
     // All should be the same instance
     const firstInstance = instances[0];
-    expect(instances.every(inst => inst === firstInstance)).toBe(true);
+    expect(instances.every((inst: PriceMatrix) => inst === firstInstance)).toBe(true);
   });
 });
 
@@ -771,9 +771,9 @@ describe('End-to-End Workflow', () => {
       'bsc:apeswap:0xWBNB-USDT'
     ]);
 
-    expect(bscPrices.every(p => p !== null)).toBe(true);
+    expect(bscPrices.every((p: { price: number; timestamp: number } | null) => p !== null)).toBe(true);
 
-    const priceValues = bscPrices.map(p => p!.price);
+    const priceValues = bscPrices.map((p: { price: number; timestamp: number } | null) => p!.price);
     const minPrice = Math.min(...priceValues);
     const maxPrice = Math.max(...priceValues);
     const spread = ((maxPrice - minPrice) / minPrice) * 100;
@@ -788,7 +788,7 @@ describe('End-to-End Workflow', () => {
       'arbitrum:uniswap:0xWETH-USDC'
     ]);
 
-    expect(ethPrices.every(p => p !== null)).toBe(true);
+    expect(ethPrices.every((p: { price: number; timestamp: number } | null) => p !== null)).toBe(true);
     const ethSpread = Math.abs(ethPrices[0]!.price - ethPrices[1]!.price);
     expect(ethSpread).toBeCloseTo(1.50, 1);
 

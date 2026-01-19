@@ -84,8 +84,9 @@ jest.mock('ioredis', () => {
 import {
   SwapEventFilter,
   getSwapEventFilter,
-  resetSwapEventFilter
-} from '@arbitrage/core/swap-event-filter';
+  resetSwapEventFilter,
+  resetRedisStreamsInstance,
+} from '@arbitrage/core';
 
 import type {
   SwapEventFilterConfig,
@@ -93,11 +94,7 @@ import type {
   VolumeAggregate,
   WhaleAlert,
   FilterStats
-} from '@arbitrage/core/swap-event-filter';
-
-import {
-  resetRedisStreamsInstance
-} from '@arbitrage/core/redis-streams';
+} from '@arbitrage/core';
 
 import { delay, measurePerformance, generateRandomHash, generateRandomAddress } from '../../shared/test-utils/src';
 
@@ -437,7 +434,7 @@ describe('S1.2 Smart Swap Event Filter Integration Tests', () => {
       });
 
       let aggregateEmitted: VolumeAggregate | null = null;
-      shortWindowFilter.onVolumeAggregate((agg) => {
+      shortWindowFilter.onVolumeAggregate((agg: VolumeAggregate) => {
         aggregateEmitted = agg;
       });
 
@@ -469,7 +466,7 @@ describe('S1.2 Smart Swap Event Filter Integration Tests', () => {
       });
 
       const aggregates: VolumeAggregate[] = [];
-      shortWindowFilter.onVolumeAggregate((agg) => {
+      shortWindowFilter.onVolumeAggregate((agg: VolumeAggregate) => {
         aggregates.push(agg);
       });
 
@@ -516,7 +513,7 @@ describe('S1.2 Smart Swap Event Filter Integration Tests', () => {
       });
 
       let aggregateEmitted: VolumeAggregate | null = null;
-      shortWindowFilter.onVolumeAggregate((agg) => {
+      shortWindowFilter.onVolumeAggregate((agg: VolumeAggregate) => {
         aggregateEmitted = agg;
       });
 
@@ -894,7 +891,7 @@ describe('S1.2 Smart Swap Event Filter Integration Tests', () => {
       );
 
       expect(results.length).toBe(100);
-      expect(results.filter(r => r.passed).length).toBe(100);
+      expect(results.filter((r: FilterResult) => r.passed).length).toBe(100);
     });
   });
 

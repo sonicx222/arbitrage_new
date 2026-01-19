@@ -55,8 +55,9 @@ describe('S2.2.4 Token Coverage Verification', () => {
     it('should have tokens for all 11 chains after S3.1.2 expansion', () => {
       const totalTokens = Object.values(CORE_TOKENS).flat().length;
       // 11 chains with tokens: original 6 + 5 new chains
-      // S3.2.1: Avalanche expanded to 15, Fantom to 10 → Total 105
-      expect(totalTokens).toBe(105);
+      // S3.2.1: Avalanche expanded to 15, Fantom to 10
+      // S3.3.3: Solana expanded to 15 → Total 112
+      expect(totalTokens).toBe(112);
     });
 
     it('should have tokens configured for all chains', () => {
@@ -77,6 +78,7 @@ describe('S2.2.4 Token Coverage Verification', () => {
   describe('Per-Chain Token Count', () => {
     // S3.1.2: Added 5 new chains with token configurations
     // S3.2.1: Expanded Avalanche to 15, Fantom to 10
+    // S3.3.3: Expanded Solana to 15
     const expectedCounts: Record<string, number> = {
       // Original 6 chains
       arbitrum: 12,
@@ -85,12 +87,12 @@ describe('S2.2.4 Token Coverage Verification', () => {
       polygon: 10,
       optimism: 10,
       ethereum: 8,
-      // S3.1.2: New chains (S3.2.1: avalanche expanded to 15, fantom to 10)
+      // S3.1.2: New chains (S3.2.1: avalanche expanded to 15, fantom to 10, S3.3.3: solana to 15)
       avalanche: 15,
       fantom: 10,
       zksync: 6,
       linea: 6,
-      solana: 8
+      solana: 15
     };
 
     Object.entries(expectedCounts).forEach(([chain, expectedCount]) => {

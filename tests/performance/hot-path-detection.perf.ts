@@ -25,9 +25,14 @@ import {
   calculateSpreadSafe,
   calculateNetProfit,
   calculateProfitBetweenSources,
-  type ReserveInput,
-  type PriceSourceInput,
 } from '@arbitrage/core';
+
+// Local type definition matching @arbitrage/core/components/price-calculator
+interface PriceSource {
+  price: number;
+  fee: number;
+  source: string;
+}
 
 // =============================================================================
 // Test Data Factories
@@ -86,14 +91,10 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
   describe('Price Calculation', () => {
     it(`should calculate price from reserves in <${PERFORMANCE_THRESHOLDS.PRICE_CALCULATION_MS}ms`, async () => {
       const pair = createTestPair(1);
-      const reserveInput: ReserveInput = {
-        reserve0: pair.reserve0,
-        reserve1: pair.reserve1,
-      };
 
       const result = await measurePerformance(() => {
         // Test the REAL price calculation function from @arbitrage/core
-        const price = calcPriceFromReserves(reserveInput);
+        const price = calcPriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
         return price;
       });
 
@@ -106,8 +107,13 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const pair1 = createTestPair(1, 0);
       const pair2 = createTestPair(2, 0.5);
 
-      const price1 = calcPriceFromReserves({ reserve0: pair1.reserve0, reserve1: pair1.reserve1 });
-      const price2 = calcPriceFromReserves({ reserve0: pair2.reserve0, reserve1: pair2.reserve1 });
+      const price1 = calcPriceFromReserves(pair1.reserve0.toString(), pair1.reserve1.toString());
+      const price2 = calcPriceFromReserves(pair2.reserve0.toString(), pair2.reserve1.toString());
+
+      // Skip test if prices are null (invalid reserves)
+      if (price1 === null || price2 === null) {
+        throw new Error('Invalid test data: prices are null');
+      }
 
       const result = await measurePerformance(() => {
         // Test the REAL spread calculation function from @arbitrage/core
@@ -126,22 +132,27 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const testData = createArbitrageTestData();
 
       // Pre-calculate prices for test setup (not measured)
-      const price1 = calcPriceFromReserves({
-        reserve0: testData.pair1.reserve0,
-        reserve1: testData.pair1.reserve1,
-      });
-      const price2 = calcPriceFromReserves({
-        reserve0: testData.pair2.reserve0,
-        reserve1: testData.pair2.reserve1,
-      });
+      const price1 = calcPriceFromReserves(
+        testData.pair1.reserve0.toString(),
+        testData.pair1.reserve1.toString()
+      );
+      const price2 = calcPriceFromReserves(
+        testData.pair2.reserve0.toString(),
+        testData.pair2.reserve1.toString()
+      );
+
+      // Skip test if prices are null
+      if (price1 === null || price2 === null) {
+        throw new Error('Invalid test data: prices are null');
+      }
 
       // Create price sources for the real function
-      const source1: PriceSourceInput = {
+      const source1: PriceSource = {
         price: price1,
         fee: testData.pair1.fee,
         source: testData.pair1.dex,
       };
-      const source2: PriceSourceInput = {
+      const source2: PriceSource = {
         price: price2,
         fee: testData.pair2.fee,
         source: testData.pair2.dex,
@@ -151,7 +162,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
         // Test the REAL profit calculation function from @arbitrage/core
         const profitResult = calculateProfitBetweenSources(source1, source2);
         return {
-          found: profitResult.isProfitable && profitResult.netProfit > testData.minProfitThreshold,
+          found: profitResult.netProfit > testData.minProfitThreshold,
           profitPercentage: profitResult.netProfit,
           buyDex: profitResult.buySource,
           sellDex: profitResult.sellSource,
@@ -170,17 +181,20 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       );
 
       // Pre-calculate prices (in real system this would be cached)
-      const pairPrices = pairs.map(pair => ({
-        address: pair.address,
-        dex: pair.dex,
-        token0: pair.token0,
-        token1: pair.token1,
-        price: calcPriceFromReserves({ reserve0: pair.reserve0, reserve1: pair.reserve1 }),
-        fee: pair.fee,
-      }));
+      const pairPrices = pairs.map(pair => {
+        const price = calcPriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
+        return {
+          address: pair.address,
+          dex: pair.dex,
+          token0: pair.token0,
+          token1: pair.token1,
+          price: price ?? 0, // Default to 0 if null
+          fee: pair.fee,
+        };
+      }).filter(p => p.price > 0); // Filter out invalid prices
 
       const result = await measurePerformance(() => {
-        const opportunities = [];
+        const opportunities: Array<{ pair1: string; pair2: string; spread: number }> = [];
 
         // Compare all pairs with each other using REAL spread calculation
         for (let i = 0; i < pairPrices.length; i++) {
@@ -191,7 +205,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
             // Use REAL spread calculation from @arbitrage/core
             const spread = calculateSpreadSafe(pairPrices[i].price, pairPrices[j].price);
 
-            if (spread !== null && spread > 0.006) { // > 0.6% after fees
+            if (spread > 0.006) { // > 0.6% after fees
               opportunities.push({
                 pair1: pairPrices[i].address,
                 pair2: pairPrices[j].address,
@@ -215,10 +229,15 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const testData = createArbitrageTestData();
 
       // Pre-calculate existing price (simulates cached price from pair2)
-      const existingPrice = calcPriceFromReserves({
-        reserve0: testData.pair2.reserve0,
-        reserve1: testData.pair2.reserve1,
-      });
+      const existingPrice = calcPriceFromReserves(
+        testData.pair2.reserve0.toString(),
+        testData.pair2.reserve1.toString()
+      );
+
+      // Skip test if existing price is null
+      if (existingPrice === null) {
+        throw new Error('Invalid test data: existing price is null');
+      }
 
       const result = await measurePerformance(() => {
         // Step 1: Parse price update (simulate incoming event)
@@ -230,10 +249,15 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
         };
 
         // Step 2: Calculate price using REAL function
-        const price = calcPriceFromReserves({
-          reserve0: priceUpdate.reserve0,
-          reserve1: priceUpdate.reserve1,
-        });
+        const price = calcPriceFromReserves(
+          priceUpdate.reserve0.toString(),
+          priceUpdate.reserve1.toString()
+        );
+
+        // Handle null price
+        if (price === null) {
+          return null;
+        }
 
         // Step 3: Calculate spread using REAL function
         const spread = calculateSpread(price, existingPrice);
@@ -267,14 +291,19 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const concurrencyLevel = 10;
 
       // Pre-calculate prices (simulates cached state)
-      const price1 = calcPriceFromReserves({
-        reserve0: testData.pair1.reserve0,
-        reserve1: testData.pair1.reserve1,
-      });
-      const price2 = calcPriceFromReserves({
-        reserve0: testData.pair2.reserve0,
-        reserve1: testData.pair2.reserve1,
-      });
+      const price1 = calcPriceFromReserves(
+        testData.pair1.reserve0.toString(),
+        testData.pair1.reserve1.toString()
+      );
+      const price2 = calcPriceFromReserves(
+        testData.pair2.reserve0.toString(),
+        testData.pair2.reserve1.toString()
+      );
+
+      // Skip test if prices are null
+      if (price1 === null || price2 === null) {
+        throw new Error('Invalid test data: prices are null');
+      }
 
       // Detection function using REAL spread calculation
       const detectArbitrageReal = () => {
@@ -323,19 +352,25 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
 
       for (let i = 0; i < iterations; i++) {
         // Use REAL functions from @arbitrage/core
-        const price1 = calcPriceFromReserves({
-          reserve0: testData.pair1.reserve0,
-          reserve1: testData.pair1.reserve1,
-        });
-        const price2 = calcPriceFromReserves({
-          reserve0: testData.pair2.reserve0,
-          reserve1: testData.pair2.reserve1,
-        });
+        const price1 = calcPriceFromReserves(
+          testData.pair1.reserve0.toString(),
+          testData.pair1.reserve1.toString()
+        );
+        const price2 = calcPriceFromReserves(
+          testData.pair2.reserve0.toString(),
+          testData.pair2.reserve1.toString()
+        );
+
+        // Skip iteration if prices are null
+        if (price1 === null || price2 === null) {
+          continue;
+        }
+
         const spread = calculateSpread(price1, price2);
         const netProfit = calculateNetProfit(spread, testData.pair1.fee, testData.pair2.fee);
 
         // Create result object (should be garbage collected)
-        const result = {
+        const _result = {
           found: netProfit > 0,
           spread,
           netProfit,
