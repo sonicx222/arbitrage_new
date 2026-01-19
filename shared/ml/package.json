@@ -11,8 +11,8 @@
     "lint:fix": "eslint src --ext .ts --fix"
   },
   "dependencies": {
-    "@tensorflow/tfjs": "^4.20.0",
-    "@tensorflow/tfjs-node": "^4.20.0",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
     "es6-promisify": "^7.0.0"
   },
   "devDependencies": {
