@@ -8,7 +8,7 @@ export {
 export type { RedisClientDeps, RedisConstructor } from './redis';
 
 // P1-3-FIX: Standardized singleton pattern utilities
-export { createAsyncSingleton, createSingleton, singleton } from './async-singleton';
+export { createAsyncSingleton, createSingleton, singleton } from './async/async-singleton';
 
 // P2-2 FIX: Reusable AsyncMutex utility
 export {
@@ -16,8 +16,8 @@ export {
   namedMutex,
   clearNamedMutex,
   clearAllNamedMutexes
-} from './async-mutex';
-export type { MutexStats } from './async-mutex';
+} from './async/async-mutex';
+export type { MutexStats } from './async/async-mutex';
 export {
   RedisStreamsClient,
   StreamBatcher,
@@ -62,12 +62,12 @@ export {
   resetPriceOracle,
   getDefaultPrice,
   hasDefaultPrice
-} from './price-oracle';
+} from './analytics/price-oracle';
 export type {
   TokenPrice,
   PriceOracleConfig,
   PriceBatchRequest
-} from './price-oracle';
+} from './analytics/price-oracle';
 export type {
   StreamMessage,
   ConsumerGroupConfig,
@@ -86,8 +86,8 @@ export type {
 } from './redis-streams';
 export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
-export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './worker-pool';
-export type { Task, TaskResult } from './worker-pool';
+export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './async/worker-pool';
+export type { Task, TaskResult } from './async/worker-pool';
 export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher } from './event-batcher';
 export {
   WebSocketManager,
@@ -105,15 +105,15 @@ export {
   ProviderHealthScorer,
   getProviderHealthScorer,
   resetProviderHealthScorer
-} from './provider-health-scorer';
+} from './monitoring/provider-health-scorer';
 export type {
   ProviderHealthMetrics,
   ProviderHealthScorerConfig
-} from './provider-health-scorer';
+} from './monitoring/provider-health-scorer';
 
-export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './hierarchical-cache';
-export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './shared-memory-cache';
-export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './cache-coherency-manager';
+export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
+export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
+export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
 // REMOVED: ABTestingFramework (unused module cleaned up)
 export {
   CircuitBreaker,
@@ -125,7 +125,7 @@ export {
   createCircuitBreaker,
   getCircuitBreakerRegistry,
   withCircuitBreaker
-} from './circuit-breaker';
+} from './resilience/circuit-breaker';
 export {
   RetryMechanism,
   RetryPresets,
@@ -136,8 +136,8 @@ export {
   ErrorCategory,
   classifyError,
   isRetryableError
-} from './retry-mechanism';
-export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './graceful-degradation';
+} from './resilience/retry-mechanism';
+export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './resilience/graceful-degradation';
 
 // Cross-Region Health (ADR-007)
 export {
@@ -145,7 +145,7 @@ export {
   getCrossRegionHealthManager,
   resetCrossRegionHealthManager,
   DegradationLevel
-} from './cross-region-health';
+} from './monitoring/cross-region-health';
 export type {
   RegionHealth,
   RegionStatus,
@@ -153,17 +153,17 @@ export type {
   FailoverEvent,
   CrossRegionHealthConfig,
   GlobalHealthStatus
-} from './cross-region-health';
-export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './dead-letter-queue';
-export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './self-healing-manager';
-export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './expert-self-healing-manager';
-export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './error-recovery';
-export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './enhanced-health-monitor';
+} from './monitoring/cross-region-health';
+export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './resilience/dead-letter-queue';
+export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
+export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './resilience/expert-self-healing-manager';
+export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
+export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './monitoring/enhanced-health-monitor';
 export {
   StreamHealthMonitor,
   getStreamHealthMonitor,
   resetStreamHealthMonitor
-} from './stream-health-monitor';
+} from './monitoring/stream-health-monitor';
 export type {
   StreamHealthStatus,
   StreamLagInfo,
@@ -176,12 +176,12 @@ export type {
   StreamHealthThresholds,
   StreamAlert,
   StreamHealthMonitorConfig
-} from './stream-health-monitor';
+} from './monitoring/stream-health-monitor';
 export {
   SwapEventFilter,
   getSwapEventFilter,
   resetSwapEventFilter
-} from './swap-event-filter';
+} from './analytics/swap-event-filter';
 export type {
   SwapEventFilterConfig,
   FilterResult,
@@ -190,14 +190,14 @@ export type {
   WhaleAlert,
   FilterStats,
   BatchResult
-} from './swap-event-filter';
+} from './analytics/swap-event-filter';
 
 // T3.12: Enhanced Whale Activity Detection
 export {
   WhaleActivityTracker,
   getWhaleActivityTracker,
   resetWhaleActivityTracker
-} from './whale-activity-tracker';
+} from './analytics/whale-activity-tracker';
 export type {
   WhaleTrackerConfig,
   TrackedWhaleTransaction,
@@ -206,14 +206,14 @@ export type {
   WhaleSignal,
   WhaleActivitySummary,
   WhaleTrackerStats
-} from './whale-activity-tracker';
+} from './analytics/whale-activity-tracker';
 
 // T3.15: Liquidity Depth Analysis
 export {
   LiquidityDepthAnalyzer,
   getLiquidityDepthAnalyzer,
   resetLiquidityDepthAnalyzer
-} from './liquidity-depth-analyzer';
+} from './analytics/liquidity-depth-analyzer';
 export type {
   LiquidityDepthConfig,
   PoolLiquidity,
@@ -221,21 +221,21 @@ export type {
   DepthAnalysis,
   SlippageEstimate,
   LiquidityAnalyzerStats
-} from './liquidity-depth-analyzer';
+} from './analytics/liquidity-depth-analyzer';
 
 export {
   PriceMatrix,
   PriceIndexMapper,
   getPriceMatrix,
   resetPriceMatrix
-} from './price-matrix';
+} from './caching/price-matrix';
 export type {
   PriceMatrixConfig,
   PriceEntry,
   MemoryUsage,
   PriceMatrixStats,
   BatchUpdate
-} from './price-matrix';
+} from './caching/price-matrix';
 
 // Pair Discovery and Caching (S2.2.5)
 export {
@@ -252,25 +252,25 @@ export {
   PairCacheService,
   getPairCacheService,
   resetPairCacheService
-} from './pair-cache';
+} from './caching/pair-cache';
 export type {
   PairCacheConfig,
   CachedPairData,
   PairCacheStats,
   CacheLookupResult,
   PairCacheServiceDeps
-} from './pair-cache';
+} from './caching/pair-cache';
 
 // Professional Quality Monitor (AD-PQS scoring)
 export {
   ProfessionalQualityMonitor
-} from './professional-quality-monitor';
+} from './analytics/professional-quality-monitor';
 export type {
   ProfessionalQualityScore,
   QualityMetrics,
   QualityMonitorDeps,
   QualityMonitorRedis
-} from './professional-quality-monitor';
+} from './analytics/professional-quality-monitor';
 
 // DEX Adapters for non-factory DEXes (Balancer V2, GMX, Platypus)
 export {
@@ -319,7 +319,7 @@ export {
   TimePerformance,
   BenchmarkComparison,
   AttributionAnalysis
-} from './performance-analytics';
+} from './analytics/performance-analytics';
 export {
   CrossDexTriangularArbitrage,
   DexPool,
@@ -354,14 +354,14 @@ export {
   PairStats,
   getPriceMomentumTracker,
   resetPriceMomentumTracker
-} from './price-momentum';
+} from './analytics/price-momentum';
 
 // T2.8: ML Opportunity Scorer
 export {
   MLOpportunityScorer,
   getMLOpportunityScorer,
   resetMLOpportunityScorer
-} from './ml-opportunity-scorer';
+} from './analytics/ml-opportunity-scorer';
 export type {
   MLPrediction,
   MLScorerConfig,
@@ -369,7 +369,7 @@ export type {
   OpportunityWithMomentum,
   EnhancedScore,
   ScorerStats
-} from './ml-opportunity-scorer';
+} from './analytics/ml-opportunity-scorer';
 
 // Domain models and core interfaces
 export * from './domain-models';
@@ -414,7 +414,7 @@ export type {
 } from './partitioned-detector';
 
 // Solana detector for non-EVM chain support (S3.3.1)
-export { SolanaDetector, SOLANA_DEX_PROGRAMS } from './solana-detector';
+export { SolanaDetector, SOLANA_DEX_PROGRAMS } from './solana/solana-detector';
 export type {
   SolanaDetectorConfig,
   SolanaDetectorDeps,
@@ -429,7 +429,7 @@ export type {
   ConnectionPoolConfig,
   ConnectionMetrics,
   ProgramSubscription
-} from './solana-detector';
+} from './solana/solana-detector';
 
 // Solana swap parser for instruction parsing (S3.3.4)
 export {
@@ -440,7 +440,7 @@ export {
   PROGRAM_ID_TO_DEX,
   SWAP_DISCRIMINATORS,
   DISABLED_DEXES
-} from './solana-swap-parser';
+} from './solana/solana-swap-parser';
 export type {
   SolanaInstruction,
   SolanaTransaction,
@@ -449,7 +449,7 @@ export type {
   ParsedSolanaSwap,
   SwapParserConfig,
   ParserStats
-} from './solana-swap-parser';
+} from './solana/solana-swap-parser';
 
 // Solana price feed for real-time DEX price updates (S3.3.5)
 export {
@@ -458,7 +458,7 @@ export {
   RAYDIUM_CLMM_LAYOUT,
   ORCA_WHIRLPOOL_LAYOUT,
   SOLANA_DEX_PROGRAMS as SOLANA_PRICE_FEED_PROGRAMS
-} from './solana-price-feed';
+} from './solana/solana-price-feed';
 export type {
   SolanaPriceFeedConfig,
   SolanaPriceFeedDeps,
@@ -469,7 +469,7 @@ export type {
   SolanaPriceUpdate as SolanaPriceFeedUpdate,
   PoolSubscription,
   SupportedDex
-} from './solana-price-feed';
+} from './solana/solana-price-feed';
 
 // =============================================================================
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
@@ -544,8 +544,8 @@ export {
   formatErrorForLog,
   formatErrorForResponse,
   ErrorAggregator
-} from './error-handling';
-export type { Result } from './error-handling';
+} from './resilience/error-handling';
+export type { Result } from './resilience/error-handling';
 
 // REF-4/ARCH-3: Shared async utilities
 export {
@@ -562,11 +562,11 @@ export {
   throttleAsync,
   gracefulShutdown,
   waitWithTimeouts
-} from './async-utils';
+} from './async/async-utils';
 export type {
   RetryConfig,
   Deferred
-} from './async-utils';
+} from './async/async-utils';
 
 // Re-export types for convenience
 export type {
@@ -663,13 +663,13 @@ export {
   DEFAULT_TRADE_AMOUNT_USD,
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP
-} from './gas-price-cache';
+} from './caching/gas-price-cache';
 export type {
   GasPriceData,
   NativeTokenPrice,
   GasCostEstimate,
   GasPriceCacheConfig
-} from './gas-price-cache';
+} from './caching/gas-price-cache';
 
 // Phase 2: MEV Protection (ADR-013)
 export {

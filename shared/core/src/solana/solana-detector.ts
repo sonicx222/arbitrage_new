@@ -25,17 +25,17 @@ import {
   createLogger,
   getPerformanceLogger,
   PerformanceLogger
-} from './logger';
-import { AsyncMutex } from './async-mutex';
-import { withTimeout } from './async-utils';
-import { getRedisClient, RedisClient } from './redis';
+} from '../logger';
+import { AsyncMutex } from '../async/async-mutex';
+import { withTimeout } from '../async/async-utils';
+import { getRedisClient, RedisClient } from '../redis';
 import {
   getRedisStreamsClient,
   RedisStreamsClient,
   StreamBatcher
-} from './redis-streams';
-import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../types';
-import { basisPointsToDecimal, meetsThreshold } from './components/price-calculator';
+} from '../redis-streams';
+import { PriceUpdate, ArbitrageOpportunity, MessageEvent } from '../../../types';
+import { basisPointsToDecimal, meetsThreshold } from '../components/price-calculator';
 
 // =============================================================================
 // Constants

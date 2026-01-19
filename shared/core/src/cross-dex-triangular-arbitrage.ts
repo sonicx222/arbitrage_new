@@ -3,13 +3,13 @@
 // P0-FIX: Uses BigInt for precise wei calculations to prevent precision loss
 
 import { createLogger } from './logger';
-import { getHierarchicalCache } from './hierarchical-cache';
+import { getHierarchicalCache } from './caching/hierarchical-cache';
 import {
   getGasPriceCache,
   GAS_UNITS,
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP
-} from './gas-price-cache';
+} from './caching/gas-price-cache';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
 

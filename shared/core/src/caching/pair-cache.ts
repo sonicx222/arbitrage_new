@@ -14,8 +14,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { createLogger } from './logger';
-import { getRedisClient, RedisClient } from './redis';
+import { createLogger } from '../logger';
+import { getRedisClient, RedisClient } from '../redis';
 
 // =============================================================================
 // Types

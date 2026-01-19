@@ -14,7 +14,7 @@
 
 import { EventEmitter } from 'events';
 import { Connection, PublicKey, Commitment, AccountInfo, Context } from '@solana/web3.js';
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 // =============================================================================
 // Type Definitions

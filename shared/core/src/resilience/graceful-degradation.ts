@@ -1,9 +1,9 @@
 // Graceful Degradation System
 // Allows services to continue operating with reduced functionality during failures
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
-import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 
 const logger = createLogger('graceful-degradation');
 

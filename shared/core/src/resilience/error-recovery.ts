@@ -1,7 +1,7 @@
 // Comprehensive Error Recovery System
 // Integrates circuit breakers, retries, dead letter queues, and graceful degradation
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 import { getCircuitBreakerRegistry, CircuitBreakerError } from './circuit-breaker';
 import { getDeadLetterQueue, enqueueFailedOperation } from './dead-letter-queue';
 import { getGracefulDegradationManager, triggerDegradation } from './graceful-degradation';

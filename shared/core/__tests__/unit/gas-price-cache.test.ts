@@ -65,7 +65,7 @@ import {
   GAS_UNITS,
   GasPriceData,
   GasCostEstimate
-} from '../../src/gas-price-cache';
+} from '../../src/caching/gas-price-cache';
 
 describe('GasPriceCache', () => {
   let cache: GasPriceCache;

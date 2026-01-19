@@ -14,7 +14,7 @@
  * @see docs/DETECTOR_OPTIMIZATION_ANALYSIS.md - Finding 1.4
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('price-momentum');
 

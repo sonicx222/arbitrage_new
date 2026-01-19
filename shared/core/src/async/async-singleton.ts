@@ -17,7 +17,7 @@
  * const client = await getRedisClient();
  */
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 const logger = createLogger('async-singleton');
 

@@ -18,8 +18,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { SwapEvent } from '../../types';
-import { createLogger } from './logger';
+import { SwapEvent } from '../../../types';
+import { createLogger } from '../logger';
 
 const logger = createLogger('solana-swap-parser');
 

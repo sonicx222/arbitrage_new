@@ -22,7 +22,7 @@ import {
   CHAIN_MEV_STRATEGIES,
   MEV_DEFAULTS,
 } from './types';
-import { AsyncMutex } from '../async-mutex';
+import { AsyncMutex } from '../async/async-mutex';
 
 // =============================================================================
 // Standard Provider Implementation

@@ -2,13 +2,13 @@
 // Comprehensive monitoring with predictive analytics and automatic alerts
 // Updated 2025-01-10: Added Redis Streams health monitoring (ADR-002, S1.1.5)
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
-import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
-import { getCircuitBreakerRegistry } from './circuit-breaker';
-import { getDeadLetterQueue } from './dead-letter-queue';
-import { getGracefulDegradationManager } from './graceful-degradation';
-import { checkRecoverySystemHealth } from './error-recovery';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
+import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { getCircuitBreakerRegistry } from '../resilience/circuit-breaker';
+import { getDeadLetterQueue } from '../resilience/dead-letter-queue';
+import { getGracefulDegradationManager } from '../resilience/graceful-degradation';
+import { checkRecoverySystemHealth } from '../resilience/error-recovery';
 import { getStreamHealthMonitor, StreamHealthSummary } from './stream-health-monitor';
 
 const logger = createLogger('enhanced-health-monitor');

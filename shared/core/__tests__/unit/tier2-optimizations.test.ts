@@ -251,7 +251,7 @@ describe('T2.9: Dynamic Fallback Prices', () => {
 
 // Note: Using the same mock from above for Redis
 
-import { HierarchicalCache, LRUQueue } from '../../src/hierarchical-cache';
+import { HierarchicalCache, LRUQueue } from '../../src/caching/hierarchical-cache';
 
 describe('T2.10: L3 Cache Eviction Policy', () => {
   describe('L3 Max Size Configuration', () => {
@@ -823,7 +823,7 @@ describe('T2.6: Quadrilateral Arbitrage', () => {
 // T2.7: Price Momentum Detection Tests
 // ===========================================================================
 
-import { PriceMomentumTracker, MomentumSignal } from '../../src/price-momentum';
+import { PriceMomentumTracker, MomentumSignal } from '../../src/analytics/price-momentum';
 
 describe('T2.7: Price Momentum Detection', () => {
   let tracker: PriceMomentumTracker;
@@ -1158,7 +1158,7 @@ import {
   MLOpportunityScorer,
   getMLOpportunityScorer,
   resetMLOpportunityScorer
-} from '../../src/ml-opportunity-scorer';
+} from '../../src/analytics/ml-opportunity-scorer';
 
 describe('T2.8: ML Predictor Integration', () => {
   let scorer: MLOpportunityScorer;

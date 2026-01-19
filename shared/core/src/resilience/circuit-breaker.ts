@@ -4,7 +4,7 @@
 // P0-2 FIX: Replaced console.log with structured logger
 // P2-2 FIX: Added monitoring period window for failure tracking
 
-import { createLogger } from './logger';
+import { createLogger } from '../logger';
 
 // =============================================================================
 // Dependency Injection Interfaces

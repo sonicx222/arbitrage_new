@@ -1,8 +1,8 @@
 // Performance Analytics Engine
 // Advanced performance tracking with risk-adjusted metrics and statistical analysis
 
-import { createLogger } from './logger';
-import { getRedisClient } from './redis';
+import { createLogger } from '../logger';
+import { getRedisClient } from '../redis';
 
 const logger = createLogger('performance-analytics');
 
