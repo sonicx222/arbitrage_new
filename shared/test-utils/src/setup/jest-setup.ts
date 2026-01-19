@@ -69,6 +69,76 @@ if (process.env.DEBUG_TESTS === 'true') {
 }
 
 // =============================================================================
+// Fake Timers Utilities
+// =============================================================================
+
+/**
+ * Execute a function with fake timers, automatically cleaning up after.
+ *
+ * Use this for tests that depend on timing (setTimeout, setInterval, Date.now).
+ * This makes tests deterministic and not flaky.
+ *
+ * @example
+ * it('should timeout after 5 seconds', async () => {
+ *   await withFakeTimers(async () => {
+ *     const promise = operationWithTimeout(5000);
+ *     jest.advanceTimersByTime(5000);
+ *     await expect(promise).rejects.toThrow('timeout');
+ *   });
+ * });
+ */
+export async function withFakeTimers<T>(fn: () => T | Promise<T>): Promise<T> {
+  jest.useFakeTimers();
+  try {
+    const result = fn();
+    if (result instanceof Promise) {
+      return await result;
+    }
+    return result;
+  } finally {
+    jest.useRealTimers();
+  }
+}
+
+/**
+ * Execute a function with fake timers and advance time automatically.
+ *
+ * @example
+ * it('should debounce calls', async () => {
+ *   const result = await withAdvancedTimers(
+ *     async () => debouncedFn(),
+ *     100 // advance 100ms
+ *   );
+ *   expect(result).toBe('debounced');
+ * });
+ */
+export async function withAdvancedTimers<T>(
+  fn: () => T | Promise<T>,
+  advanceMs: number
+): Promise<T> {
+  return withFakeTimers(async () => {
+    const promise = fn();
+    jest.advanceTimersByTime(advanceMs);
+    if (promise instanceof Promise) {
+      return await promise;
+    }
+    return promise;
+  });
+}
+
+/**
+ * Run all pending timers and flush promises.
+ *
+ * Useful when you need to resolve all pending timeouts and promises
+ * in fake timer mode.
+ */
+export async function flushTimersAndPromises(): Promise<void> {
+  jest.runAllTimers();
+  // Flush promise queue
+  await new Promise(resolve => setImmediate(resolve));
+}
+
+// =============================================================================
 // Custom Matchers
 // =============================================================================
 
@@ -131,10 +201,18 @@ expect.extend({
    * @example
    * await expect(async () => someAsyncFn()).toCompleteWithin(100);
    */
-  async toCompleteWithin(received: () => Promise<unknown>, timeoutMs: number) {
+  async toCompleteWithin(received: unknown, timeoutMs: number) {
+    // Type validation
+    if (typeof received !== 'function') {
+      return {
+        pass: false,
+        message: () => `expected a function but received ${typeof received}`
+      };
+    }
+
     const start = Date.now();
     try {
-      await received();
+      await (received as () => Promise<unknown>)();
       const duration = Date.now() - start;
       const pass = duration <= timeoutMs;
       return {

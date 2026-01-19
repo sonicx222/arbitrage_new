@@ -18,6 +18,10 @@ interface RegisteredSingleton {
 
 const registeredSingletons: RegisteredSingleton[] = [];
 
+// Simple mutex to prevent concurrent reset operations
+let resetInProgress = false;
+let resetQueue: Array<() => void> = [];
+
 /**
  * Register a singleton reset function
  *
@@ -54,26 +58,44 @@ export function unregisterSingletonReset(name: string): void {
 /**
  * Reset all registered singletons
  *
- * Call this in afterEach() to ensure test isolation
+ * Call this in afterEach() to ensure test isolation.
+ * Uses a mutex to prevent concurrent reset operations in parallel tests.
  */
 export async function resetAllSingletons(): Promise<void> {
-  const errors: Array<{ name: string; error: Error }> = [];
-
-  for (const singleton of registeredSingletons) {
-    try {
-      await singleton.reset();
-    } catch (error) {
-      // Collect errors but continue resetting others
-      errors.push({
-        name: singleton.name,
-        error: error instanceof Error ? error : new Error(String(error))
-      });
-    }
+  // If reset is already in progress, queue this call
+  if (resetInProgress) {
+    return new Promise<void>(resolve => {
+      resetQueue.push(resolve);
+    });
   }
 
-  // Log errors if any (don't throw to avoid masking test failures)
-  if (errors.length > 0 && process.env.DEBUG_TESTS === 'true') {
-    console.warn('Singleton reset errors:', errors);
+  resetInProgress = true;
+  const errors: Array<{ name: string; error: Error }> = [];
+
+  try {
+    for (const singleton of registeredSingletons) {
+      try {
+        await singleton.reset();
+      } catch (error) {
+        // Collect errors but continue resetting others
+        errors.push({
+          name: singleton.name,
+          error: error instanceof Error ? error : new Error(String(error))
+        });
+      }
+    }
+
+    // Log errors if any (don't throw to avoid masking test failures)
+    if (errors.length > 0 && process.env.DEBUG_TESTS === 'true') {
+      console.warn('Singleton reset errors:', errors);
+    }
+  } finally {
+    resetInProgress = false;
+
+    // Process queued reset calls
+    const pendingResolvers = resetQueue;
+    resetQueue = [];
+    pendingResolvers.forEach(resolve => resolve());
   }
 }
 
@@ -90,6 +112,15 @@ export function getRegisteredSingletons(): string[] {
 export function clearRegisteredSingletons(): void {
   registeredSingletons.length = 0;
 }
+
+// =============================================================================
+// Pre-register test-utils mocks (priority 5 - reset before core singletons)
+// =============================================================================
+
+import { resetRedisMockState } from '../mocks/redis.mock';
+
+// Register test mock state resets (very high priority - reset first)
+registerSingletonReset('redisMockState', resetRedisMockState, 5);
 
 // =============================================================================
 // Pre-register known singletons from @arbitrage/core

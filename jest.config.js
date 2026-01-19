@@ -42,25 +42,23 @@ module.exports = {
   globalSetup: '<rootDir>/jest.globalSetup.ts',
   globalTeardown: '<rootDir>/jest.globalTeardown.ts',
 
-  // Per-file setup - note: using new setup file when ready
-  // During migration, keep using the legacy setup for backward compatibility
-  setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/index.ts'],
-  // After migration complete, switch to:
-  // setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/setup/jest-setup.ts'],
+  // Per-file setup - uses the new setup file with proper singleton resets
+  setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/setup/jest-setup.ts'],
 
   // Parallelization
   maxWorkers: process.env.CI ? 2 : '50%',
 
-  // Test timeout
-  testTimeout: 30000,
+  // Test timeout - default for non-project runs (projects override this)
+  // Matches unit test timeout for consistency
+  testTimeout: 10000,
 
-  // Coverage thresholds (enforce quality)
+  // Coverage thresholds (enforce quality) - standardized to 60%
   coverageThreshold: {
     global: {
-      branches: 50,
-      functions: 50,
-      lines: 50,
-      statements: 50
+      branches: 60,
+      functions: 60,
+      lines: 60,
+      statements: 60
     }
   },
 
@@ -90,31 +88,40 @@ module.exports = {
   bail: process.env.CI ? 1 : 0,
 
   // Projects configuration for categorized test runs
-  // Enable these for targeted test runs: npm run test:unit, npm run test:integration
-  // Note: Uncomment when migration is complete
-  /*
+  // Run with: npm run test:unit, npm run test:integration, npm run test:e2e, npm run test:performance
   projects: [
     {
       displayName: 'unit',
-      testMatch: ['**\/__tests__\/unit\/**\/*.test.ts'],
+      testMatch: ['**/__tests__/unit/**/*.test.ts', '**/__tests__/unit/**/*.spec.ts'],
       testTimeout: 10000,
       ...baseConfig
     },
     {
       displayName: 'integration',
       testMatch: [
-        '**\/__tests__\/integration\/**\/*.test.ts',
-        '*\/tests\/integration\/**\/*.test.ts'
+        '**/__tests__/integration/**/*.test.ts',
+        '**/tests/integration/**/*.test.ts'
       ],
       testTimeout: 60000,
       ...baseConfig
     },
     {
       displayName: 'e2e',
-      testMatch: ['*\/tests\/e2e\/**\/*.test.ts'],
+      testMatch: ['**/tests/e2e/**/*.test.ts'],
       testTimeout: 120000,
+      ...baseConfig
+    },
+    {
+      displayName: 'performance',
+      testMatch: ['**/tests/performance/**/*.test.ts', '**/tests/performance/**/*.perf.ts'],
+      testTimeout: 300000,
+      ...baseConfig
+    },
+    {
+      displayName: 'smoke',
+      testMatch: ['**/tests/smoke/**/*.test.ts', '**/tests/smoke/**/*.smoke.ts'],
+      testTimeout: 30000,
       ...baseConfig
     }
   ]
-  */
 };
