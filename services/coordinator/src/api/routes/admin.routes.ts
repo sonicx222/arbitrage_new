@@ -12,14 +12,13 @@ import rateLimit from 'express-rate-limit';
 import { apiAuth, apiAuthorize } from '@shared/security';
 import type { CoordinatorStateProvider } from '../types';
 
-// Allowed services for restart operations
+// Allowed services for restart operations (per ADR-003: partitioned architecture)
 const ALLOWED_SERVICES = [
-  'bsc-detector',
-  'ethereum-detector',
-  'arbitrum-detector',
-  'polygon-detector',
-  'optimism-detector',
-  'base-detector',
+  'unified-detector',
+  'partition-asia-fast',
+  'partition-l2-turbo',
+  'partition-high-value',
+  'cross-chain-detector',
   'execution-engine'
 ];
 
@@ -118,7 +117,7 @@ export function createAdminRoutes(state: CoordinatorStateProvider): Router {
     (req: Request, res: Response) => {
       const { alert } = req.params;
 
-      // Alert cooldown keys are stored as `${type}_${service}`, e.g., "SERVICE_UNHEALTHY_bsc-detector"
+      // Alert cooldown keys are stored as `${type}_${service}`, e.g., "SERVICE_UNHEALTHY_partition-asia-fast"
       // The alert param can be either the full key or just the type
       // Try exact match first, then try with _system suffix for system alerts
       let deleted = state.deleteAlertCooldown(alert);

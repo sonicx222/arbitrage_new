@@ -180,7 +180,7 @@ describe('Validation Middleware', () => {
   describe('validateHealthRequest', () => {
     it('should validate valid health request', () => {
       mockReq.query = {
-        service: 'bsc-detector',
+        service: 'partition-asia-fast',
         detailed: true
       };
 
@@ -214,7 +214,7 @@ describe('Validation Middleware', () => {
   describe('validateMetricsRequest', () => {
     it('should validate valid metrics request', () => {
       mockReq.query = {
-        service: 'bsc-detector',
+        service: 'partition-asia-fast',
         limit: 500
       };
 
@@ -226,7 +226,7 @@ describe('Validation Middleware', () => {
 
     it('should set default limit', () => {
       mockReq.query = {
-        service: 'bsc-detector'
+        service: 'partition-asia-fast'
       };
 
       validateMetricsRequest(mockReq, mockRes, mockNext);
@@ -236,7 +236,7 @@ describe('Validation Middleware', () => {
 
     it('should validate date ranges', () => {
       mockReq.query = {
-        service: 'bsc-detector',
+        service: 'partition-asia-fast',
         startTime: '2024-01-01T00:00:00Z',
         endTime: '2024-01-02T00:00:00Z'
       };
@@ -248,7 +248,7 @@ describe('Validation Middleware', () => {
 
     it('should reject invalid date order', () => {
       mockReq.query = {
-        service: 'bsc-detector',
+        service: 'partition-asia-fast',
         startTime: '2024-01-02T00:00:00Z',
         endTime: '2024-01-01T00:00:00Z' // Before start time
       };

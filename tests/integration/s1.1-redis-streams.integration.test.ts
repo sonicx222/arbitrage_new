@@ -705,7 +705,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
           type: 'price-update',
           data: update,
           timestamp: Date.now(),
-          source: 'bsc-detector'
+          source: 'partition-asia-fast'
         });
       });
 
@@ -736,7 +736,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
         type: 'swap-event',
         data: swapEvent,
         timestamp: Date.now(),
-        source: 'bsc-detector'
+        source: 'partition-asia-fast'
       });
 
       await batcher.flush();
@@ -766,7 +766,7 @@ describe('S1.1 Redis Streams Migration Integration Tests', () => {
           type: 'arbitrage-opportunity',
           data: opportunity,
           timestamp: Date.now(),
-          source: 'bsc-detector'
+          source: 'partition-asia-fast'
         }
       );
 

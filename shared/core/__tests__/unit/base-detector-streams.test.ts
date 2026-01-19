@@ -95,7 +95,7 @@ describe('BaseDetector Streams Migration', () => {
           price: 300.5,
           timestamp: Date.now()
         },
-        source: 'bsc-detector'
+        source: 'partition-asia-fast'
       };
 
       // Simulate publishing to stream
@@ -157,7 +157,7 @@ describe('BaseDetector Streams Migration', () => {
           amount1Out: '300000000000000000000',
           usdValue: 300
         },
-        source: 'bsc-detector'
+        source: 'partition-asia-fast'
       };
 
       await streamsClient.xadd(
@@ -180,7 +180,7 @@ describe('BaseDetector Streams Migration', () => {
           direction: 'buy',
           impact: 0.02
         },
-        source: 'bsc-detector'
+        source: 'partition-asia-fast'
       };
 
       await streamsClient.xadd(
@@ -207,7 +207,7 @@ describe('BaseDetector Streams Migration', () => {
           estimatedProfit: 50,
           confidence: 0.85
         },
-        source: 'bsc-detector'
+        source: 'partition-asia-fast'
       };
 
       await streamsClient.xadd(

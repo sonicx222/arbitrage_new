@@ -26,10 +26,9 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 // =============================================================================
 
 describe('ADR-003: Partitioned Chain Detectors Compliance', () => {
-  // NOTE: Skipped until single-chain services are removed per ADR-003 migration plan.
-  // The deprecated services still exist as they contain active test infrastructure.
-  // Future work: Remove these services after partition migration is complete.
-  describe.skip('Single-Chain Service Removal', () => {
+  // Single-chain services have been removed per ADR-003 migration.
+  // These tests verify the deprecated services no longer exist.
+  describe('Single-Chain Service Removal', () => {
     const deprecatedServices = [
       'ethereum-detector',
       'arbitrum-detector',
