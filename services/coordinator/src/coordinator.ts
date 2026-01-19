@@ -748,7 +748,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const statusValue = data.status;
       const validStatus: ServiceHealth['status'] =
         statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
-        statusValue === 'starting' || statusValue === 'stopping'
+          statusValue === 'starting' || statusValue === 'stopping'
           ? statusValue
           : 'unhealthy'; // Default to unhealthy for unknown status
 
