@@ -476,7 +476,7 @@ describe('GlobalHealthStatus interface', () => {
       redis: { healthy: true, latencyMs: 5 },
       executor: { healthy: true, region: 'us-east1' },
       detectors: [
-        { name: 'bsc-detector', healthy: true, region: 'asia-southeast1' }
+        { name: 'partition-asia-fast', healthy: true, region: 'asia-southeast1' }
       ],
       degradationLevel: DegradationLevel.FULL_OPERATION,
       overallStatus: 'healthy'
@@ -496,7 +496,7 @@ describe('FailoverEvent interface', () => {
       type: 'failover_started',
       sourceRegion: 'asia-southeast1',
       targetRegion: 'us-east1',
-      services: ['bsc-detector', 'polygon-detector'],
+      services: ['partition-asia-fast', 'partition-l2-turbo'],
       timestamp: Date.now()
     };
 
@@ -509,7 +509,7 @@ describe('FailoverEvent interface', () => {
       type: 'failover_completed',
       sourceRegion: 'asia-southeast1',
       targetRegion: 'us-east1',
-      services: ['bsc-detector'],
+      services: ['partition-asia-fast'],
       timestamp: Date.now(),
       durationMs: 5000
     };
@@ -523,7 +523,7 @@ describe('FailoverEvent interface', () => {
       type: 'failover_failed',
       sourceRegion: 'asia-southeast1',
       targetRegion: 'us-east1',
-      services: ['bsc-detector'],
+      services: ['partition-asia-fast'],
       timestamp: Date.now(),
       error: 'Connection timeout'
     };

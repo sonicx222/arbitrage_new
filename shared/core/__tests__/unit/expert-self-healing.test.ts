@@ -134,7 +134,7 @@ describe('ExpertSelfHealingManager', () => {
 
     it('should report failures and update service state', async () => {
       const failure = {
-        serviceName: 'bsc-detector',
+        serviceName: 'partition-asia-fast',
         component: 'websocket',
         error: new Error('Connection timeout'),
         context: {}
@@ -150,11 +150,11 @@ describe('ExpertSelfHealingManager', () => {
       // Verify failure was recorded
       const failures = (selfHealingManager as any).failureHistory;
       expect(failures.length).toBe(1);
-      expect(failures[0].serviceName).toBe('bsc-detector');
+      expect(failures[0].serviceName).toBe('partition-asia-fast');
 
       // Verify service state was updated
       const states = (selfHealingManager as any).serviceHealthStates;
-      const state = states.get('bsc-detector');
+      const state = states.get('partition-asia-fast');
       expect(state.consecutiveFailures).toBe(1);
       expect(state.healthScore).toBeLessThan(100);
     });
@@ -230,10 +230,20 @@ describe('ExpertSelfHealingManager', () => {
     it('should respect recovery cooldown', async () => {
       // Set up service with recent recovery
       const states = (selfHealingManager as any).serviceHealthStates;
-      states.get('bsc-detector').recoveryCooldown = Date.now() + 60000; // 1 minute from now
+      // Initialize the state if it doesn't exist
+      if (!states.has('partition-asia-fast')) {
+        states.set('partition-asia-fast', {
+          healthScore: 100,
+          consecutiveFailures: 0,
+          lastFailure: undefined,
+          recoveryCooldown: 0,
+          activeRecoveryActions: []
+        });
+      }
+      states.get('partition-asia-fast').recoveryCooldown = Date.now() + 60000; // 1 minute from now
 
       const failure = {
-        serviceName: 'bsc-detector',
+        serviceName: 'partition-asia-fast',
         component: 'websocket',
         error: new Error('Connection failed'),
         context: {}
@@ -256,7 +266,17 @@ describe('ExpertSelfHealingManager', () => {
 
     it('should limit active recovery actions', async () => {
       const states = (selfHealingManager as any).serviceHealthStates;
-      const state = states.get('bsc-detector');
+      // Initialize the state if it doesn't exist
+      if (!states.has('partition-asia-fast')) {
+        states.set('partition-asia-fast', {
+          healthScore: 100,
+          consecutiveFailures: 0,
+          lastFailure: undefined,
+          recoveryCooldown: 0,
+          activeRecoveryActions: []
+        });
+      }
+      const state = states.get('partition-asia-fast');
 
       // Add 3 active recovery actions (at limit)
       state.activeRecoveryActions = [
@@ -266,7 +286,7 @@ describe('ExpertSelfHealingManager', () => {
       ];
 
       const failure = {
-        serviceName: 'bsc-detector',
+        serviceName: 'partition-asia-fast',
         component: 'service',
         error: new Error('Service failed'),
         severity: FailureSeverity.HIGH,
@@ -293,7 +313,7 @@ describe('ExpertSelfHealingManager', () => {
     it.skip('should execute restart service recovery', async () => {
       const failure = {
         id: 'test-failure',
-        serviceName: 'bsc-detector',
+        serviceName: 'partition-asia-fast',
         component: 'service',
         error: new Error('Service crashed'),
         severity: FailureSeverity.HIGH,
@@ -309,7 +329,7 @@ describe('ExpertSelfHealingManager', () => {
 
       // Verify recovery command was published
       expect(mockRedis.publish).toHaveBeenCalledWith(
-        'service:bsc-detector:control',
+        'service:partition-asia-fast:control',
         expect.objectContaining({
           command: 'restart'
         })
@@ -372,10 +392,10 @@ describe('ExpertSelfHealingManager', () => {
     it.skip('should provide system health overview', async () => {
       // Set up some test health states
       const states = (selfHealingManager as any).serviceHealthStates;
-      states.get('bsc-detector').healthScore = 90;
-      states.get('bsc-detector').consecutiveFailures = 1;
-      states.get('ethereum-detector').healthScore = 70;
-      states.get('ethereum-detector').activeRecoveryActions = [
+      states.get('partition-asia-fast').healthScore = 90;
+      states.get('partition-asia-fast').consecutiveFailures = 1;
+      states.get('partition-high-value').healthScore = 70;
+      states.get('partition-high-value').activeRecoveryActions = [
         { id: 'action1', status: 'executing' }
       ];
 
@@ -393,7 +413,7 @@ describe('ExpertSelfHealingManager', () => {
       failures.push(
         {
           id: 'fail1',
-          serviceName: 'bsc-detector',
+          serviceName: 'partition-asia-fast',
           component: 'websocket',
           error: new Error('Connection failed'),
           severity: FailureSeverity.MEDIUM,
@@ -403,7 +423,7 @@ describe('ExpertSelfHealingManager', () => {
         },
         {
           id: 'fail2',
-          serviceName: 'ethereum-detector',
+          serviceName: 'partition-high-value',
           component: 'memory',
           error: new Error('Out of memory'),
           severity: FailureSeverity.HIGH,
@@ -416,8 +436,8 @@ describe('ExpertSelfHealingManager', () => {
       const stats = await selfHealingManager.getFailureStatistics(5000);
 
       expect(stats.totalFailures).toBe(2);
-      expect(stats.failureByService['bsc-detector']).toBe(1);
-      expect(stats.failureByService['ethereum-detector']).toBe(1);
+      expect(stats.failureByService['partition-asia-fast']).toBe(1);
+      expect(stats.failureByService['partition-high-value']).toBe(1);
       expect(stats.failureBySeverity[FailureSeverity.MEDIUM]).toBe(1);
       expect(stats.failureBySeverity[FailureSeverity.HIGH]).toBe(1);
     });

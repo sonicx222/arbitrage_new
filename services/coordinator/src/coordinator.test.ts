@@ -155,19 +155,19 @@ describe('CoordinatorService Health Management', () => {
     it('should track service health status', () => {
       const serviceHealth = new Map<string, { status: string; memoryUsage: number }>();
 
-      serviceHealth.set('bsc-detector', { status: 'healthy', memoryUsage: 50 });
-      serviceHealth.set('ethereum-detector', { status: 'healthy', memoryUsage: 60 });
-      serviceHealth.set('polygon-detector', { status: 'unhealthy', memoryUsage: 90 });
+      serviceHealth.set('partition-asia-fast', { status: 'healthy', memoryUsage: 50 });
+      serviceHealth.set('partition-high-value', { status: 'healthy', memoryUsage: 60 });
+      serviceHealth.set('partition-l2-turbo', { status: 'unhealthy', memoryUsage: 90 });
 
-      expect(serviceHealth.get('bsc-detector')?.status).toBe('healthy');
-      expect(serviceHealth.get('polygon-detector')?.status).toBe('unhealthy');
+      expect(serviceHealth.get('partition-asia-fast')?.status).toBe('healthy');
+      expect(serviceHealth.get('partition-l2-turbo')?.status).toBe('unhealthy');
     });
 
     it('should calculate system health percentage', () => {
       const serviceHealth = new Map<string, { status: string; memoryUsage: number }>();
 
-      serviceHealth.set('bsc-detector', { status: 'healthy', memoryUsage: 50 });
-      serviceHealth.set('ethereum-detector', { status: 'healthy', memoryUsage: 60 });
+      serviceHealth.set('partition-asia-fast', { status: 'healthy', memoryUsage: 50 });
+      serviceHealth.set('partition-high-value', { status: 'healthy', memoryUsage: 60 });
       serviceHealth.set('coordinator', { status: 'unhealthy', memoryUsage: 40 });
 
       const healthyCount = Array.from(serviceHealth.values())
@@ -182,17 +182,17 @@ describe('CoordinatorService Health Management', () => {
     it('should identify unhealthy services', () => {
       const serviceHealth = new Map<string, { status: string; memoryUsage: number }>();
 
-      serviceHealth.set('bsc-detector', { status: 'healthy', memoryUsage: 50 });
-      serviceHealth.set('ethereum-detector', { status: 'unhealthy', memoryUsage: 95 });
-      serviceHealth.set('polygon-detector', { status: 'degraded', memoryUsage: 75 });
+      serviceHealth.set('partition-asia-fast', { status: 'healthy', memoryUsage: 50 });
+      serviceHealth.set('partition-high-value', { status: 'unhealthy', memoryUsage: 95 });
+      serviceHealth.set('partition-l2-turbo', { status: 'degraded', memoryUsage: 75 });
 
       const unhealthyServices = Array.from(serviceHealth.entries())
         .filter(([_, health]) => health.status !== 'healthy')
         .map(([name, _]) => name);
 
-      expect(unhealthyServices).toContain('ethereum-detector');
-      expect(unhealthyServices).toContain('polygon-detector');
-      expect(unhealthyServices).not.toContain('bsc-detector');
+      expect(unhealthyServices).toContain('partition-high-value');
+      expect(unhealthyServices).toContain('partition-l2-turbo');
+      expect(unhealthyServices).not.toContain('partition-asia-fast');
     });
   });
 
@@ -214,9 +214,9 @@ describe('CoordinatorService Health Management', () => {
     it('should update active service count', () => {
       const serviceHealth = new Map<string, { status: string }>();
 
-      serviceHealth.set('bsc-detector', { status: 'healthy' });
-      serviceHealth.set('ethereum-detector', { status: 'healthy' });
-      serviceHealth.set('polygon-detector', { status: 'healthy' });
+      serviceHealth.set('partition-asia-fast', { status: 'healthy' });
+      serviceHealth.set('partition-high-value', { status: 'healthy' });
+      serviceHealth.set('partition-l2-turbo', { status: 'healthy' });
 
       const activeServices = Array.from(serviceHealth.values())
         .filter(s => s.status === 'healthy').length;
@@ -335,18 +335,18 @@ describe('CoordinatorService Communication', () => {
     it('should track message acknowledgments', () => {
       const acks = new Map<string, boolean>();
 
-      const services = ['bsc-detector', 'ethereum-detector', 'polygon-detector'];
+      const services = ['partition-asia-fast', 'partition-high-value', 'partition-l2-turbo'];
       services.forEach(s => acks.set(s, false));
 
       // Simulate acknowledgments
-      acks.set('bsc-detector', true);
-      acks.set('ethereum-detector', true);
+      acks.set('partition-asia-fast', true);
+      acks.set('partition-high-value', true);
 
       const pendingAcks = Array.from(acks.entries())
         .filter(([_, acked]) => !acked)
         .map(([name, _]) => name);
 
-      expect(pendingAcks).toEqual(['polygon-detector']);
+      expect(pendingAcks).toEqual(['partition-l2-turbo']);
     });
   });
 });
@@ -454,16 +454,16 @@ describe('CoordinatorService Alert System', () => {
       };
 
       // First alert should be sent
-      expect(sendAlert('SERVICE_UNHEALTHY', 'bsc-detector')).toBe(true);
+      expect(sendAlert('SERVICE_UNHEALTHY', 'partition-asia-fast')).toBe(true);
 
       // Immediate duplicate should be blocked
-      expect(sendAlert('SERVICE_UNHEALTHY', 'bsc-detector')).toBe(false);
+      expect(sendAlert('SERVICE_UNHEALTHY', 'partition-asia-fast')).toBe(false);
 
       // Different service should not be blocked
       expect(sendAlert('SERVICE_UNHEALTHY', 'eth-detector')).toBe(true);
 
       // Different type for same service should not be blocked
-      expect(sendAlert('HIGH_MEMORY', 'bsc-detector')).toBe(true);
+      expect(sendAlert('HIGH_MEMORY', 'partition-asia-fast')).toBe(true);
     });
 
     it('should allow alert after cooldown expires', () => {

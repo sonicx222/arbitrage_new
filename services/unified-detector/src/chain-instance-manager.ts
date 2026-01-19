@@ -98,9 +98,6 @@ export interface ChainInstanceManager extends EventEmitter {
   /** Stop all running chain instances (FIX I2: renamed from stopAll for consistency) */
   stop(): Promise<void>;
 
-  /** @deprecated Use stop() instead */
-  stopAll(): Promise<void>;
-
   /** Get list of currently healthy (connected) chain IDs */
   getHealthyChains(): string[];
 
@@ -394,7 +391,6 @@ export function createChainInstanceManager(
 
   emitter.startAll = startAll;
   emitter.stop = stop;
-  emitter.stopAll = stop; // @deprecated alias for backward compatibility
   emitter.getHealthyChains = getHealthyChains;
   emitter.getStats = getStats;
   emitter.getChains = getChains;

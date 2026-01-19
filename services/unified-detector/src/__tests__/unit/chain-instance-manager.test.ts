@@ -114,7 +114,6 @@ describe('ChainInstanceManager', () => {
       expect(manager).toBeDefined();
       expect(typeof manager.startAll).toBe('function');
       expect(typeof manager.stop).toBe('function');
-      expect(typeof manager.stopAll).toBe('function'); // deprecated alias
       expect(typeof manager.getHealthyChains).toBe('function');
       expect(typeof manager.getStats).toBe('function');
     });
@@ -364,8 +363,8 @@ describe('ChainInstanceManager', () => {
       await manager.startAll();
       expect(manager.getChains()).toHaveLength(1);
 
-      // Use deprecated alias
-      await manager.stopAll();
+      // Use stop() method (stopAll was deprecated and removed)
+      await manager.stop();
       expect(manager.getChains()).toHaveLength(0);
     });
   });
