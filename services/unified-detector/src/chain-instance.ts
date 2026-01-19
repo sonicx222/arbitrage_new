@@ -567,6 +567,13 @@ export class ChainDetectorInstance extends EventEmitter {
             const dex2 = effectiveDexes[1];
             const priceDiff = 0.003 + Math.random() * 0.007; // 0.3% to 1% profit
 
+            // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
+            // For simulation, use 1 token as trade size (1e9 lamports for Solana)
+            const simulatedAmountIn = '1000000000'; // 1 SOL in lamports
+            const simulatedAmountInNum = 1.0; // 1 token for calculation
+            // expectedProfit must be ABSOLUTE value (not percentage) per engine.ts
+            const expectedProfitAbsolute = simulatedAmountInNum * priceDiff;
+
             const opportunity: ArbitrageOpportunity = {
               id: `${this.chainId}-sim-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
               type: 'simple',
@@ -577,10 +584,15 @@ export class ChainDetectorInstance extends EventEmitter {
               sellPair: `${dex2}_${token0}_${token1}`,
               token0,
               token1,
+              // CRITICAL FIX: Required fields for execution engine validation
+              tokenIn: token0,
+              tokenOut: token1,
+              amountIn: simulatedAmountIn,
               buyPrice: price * (1 - priceDiff / 2),
               sellPrice: price * (1 + priceDiff / 2),
               profitPercentage: priceDiff * 100,
-              expectedProfit: priceDiff,
+              // CRITICAL FIX: expectedProfit as ABSOLUTE value (token amount, not percentage)
+              expectedProfit: expectedProfitAbsolute,
               confidence: 0.85,
               timestamp: Date.now(),
               expiresAt: Date.now() + 1000, // Fast expiry for Solana
