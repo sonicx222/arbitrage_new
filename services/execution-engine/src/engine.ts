@@ -4,17 +4,17 @@
  * Executes arbitrage opportunities detected by the system.
  * Uses distributed locking to prevent duplicate executions.
  *
- * Fixes applied:
- * - Redis Streams for event consumption (ADR-002 compliant)
- * - DistributedLockManager for atomic execution locking
- * - ServiceStateManager for lifecycle management
- * - Queue size limits with backpressure
+ * Architecture (Phase 3.2 refactored):
+ * - types.ts: Shared types and interfaces
+ * - services/provider.service.ts: RPC provider management
+ * - services/queue.service.ts: Execution queue with backpressure
+ * - strategies/*.ts: Execution strategies (intra-chain, cross-chain, simulation)
+ * - consumers/opportunity.consumer.ts: Redis Stream consumption
  *
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy
  */
 
-import { ethers } from 'ethers';
 import {
   getRedisClient,
   RedisClient,
@@ -23,232 +23,120 @@ import {
   PerformanceLogger,
   RedisStreamsClient,
   getRedisStreamsClient,
-  ConsumerGroupConfig,
   ServiceStateManager,
   ServiceState,
   createServiceState,
   DistributedLockManager,
   getDistributedLockManager,
-  // P0-2 FIX: Import NonceManager for transaction nonce management
   NonceManager,
   getNonceManager,
-  StreamConsumer,
-  // Phase 2: MEV Protection
   MevProviderFactory,
   MevGlobalConfig,
-  // Phase 3: Cross-Chain Bridge Router
   BridgeRouterFactory,
   createBridgeRouterFactory,
-  BRIDGE_DEFAULTS,
-  // Error handling utility
   getErrorMessage,
 } from '@arbitrage/core';
-import type {
-  IMevProvider,
-  MevSubmissionResult,
-  // Phase 3: Cross-Chain types
-  IBridgeRouter,
-  BridgeQuote,
-  BridgeStatusResult,
-} from '@arbitrage/core';
-import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG } from '@arbitrage/config';
+import { MEV_CONFIG } from '@arbitrage/config';
+import type { ArbitrageOpportunity, ServiceHealth } from '@arbitrage/types';
+
+// Internal modules
 import {
-  ArbitrageOpportunity,
-  ServiceHealth
-} from '@arbitrage/types';
+  ExecutionEngineConfig,
+  ExecutionStats,
+  ExecutionResult,
+  StrategyContext,
+  Logger,
+  ProviderHealth,
+  SimulationConfig,
+  ResolvedSimulationConfig,
+  QueueConfig,
+  EXECUTION_TIMEOUT_MS,
+  SHUTDOWN_TIMEOUT_MS,
+  createInitialStats,
+  resolveSimulationConfig,
+  DEFAULT_QUEUE_CONFIG,
+} from './types';
+import { ProviderServiceImpl } from './services/provider.service';
+import { QueueServiceImpl } from './services/queue.service';
+import { IntraChainStrategy } from './strategies/intra-chain.strategy';
+import { CrossChainStrategy } from './strategies/cross-chain.strategy';
+import { SimulationStrategy } from './strategies/simulation.strategy';
+import { OpportunityConsumer } from './consumers/opportunity.consumer';
 
-// =============================================================================
-// Types
-// =============================================================================
+// Re-export types for consumers
+export type {
+  ExecutionEngineConfig,
+  ExecutionStats,
+  ExecutionResult,
+  SimulationConfig,
+  QueueConfig,
+  ProviderHealth,
+};
 
-interface ExecutionResult {
-  opportunityId: string;
-  success: boolean;
-  transactionHash?: string;
-  actualProfit?: number;
-  gasUsed?: number;
-  gasCost?: number;
-  error?: string;
-  timestamp: number;
-  chain: string;
-  dex: string;
-}
-
-interface FlashLoanParams {
-  token: string;
-  amount: string;
-  path: string[];
-  minProfit: number;
-  /**
-   * CRITICAL-2 FIX: Minimum amount out after all swaps.
-   * This is the slippage-protected output amount that MUST be received.
-   * If the actual output is less, the transaction should revert.
-   */
-  minAmountOut: string;
-}
-
-interface QueueConfig {
-  maxSize: number;        // Maximum queue size
-  highWaterMark: number;  // Start rejecting at this level
-  lowWaterMark: number;   // Resume accepting at this level
-}
-
-interface ExecutionStats {
-  opportunitiesReceived: number;
-  opportunitiesExecuted: number;
-  opportunitiesRejected: number;
-  successfulExecutions: number;
-  failedExecutions: number;
-  queueRejects: number;
-  lockConflicts: number;
-  executionTimeouts: number;
-  messageProcessingErrors: number;
-  providerReconnections: number;
-  providerHealthCheckFailures: number;
-}
-
-/** Logger interface for dependency injection */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
-
-/** Simulation mode configuration */
-export interface SimulationConfig {
-  /** Enable simulation mode - bypasses blockchain transactions */
-  enabled: boolean;
-  /** Simulated success rate (0.0 - 1.0), default 0.85 */
-  successRate?: number;
-  /** Simulated execution latency in ms, default 500 */
-  executionLatencyMs?: number;
-  /** Simulated gas used, default 200000 */
-  gasUsed?: number;
-  /** Simulated gas cost multiplier (0.0 - 1.0 of expected profit), default 0.1 */
-  gasCostMultiplier?: number;
-  /** Simulated profit variance (-0.5 to 0.5), randomly varies profit within this range */
-  profitVariance?: number;
-  /** Whether to log simulated executions, default true */
-  logSimulatedExecutions?: boolean;
-}
-
-/** Configuration options for ExecutionEngineService */
-export interface ExecutionEngineConfig {
-  queueConfig?: Partial<QueueConfig>;
-  /** Optional logger for testing (defaults to createLogger) */
-  logger?: Logger;
-  /** Optional perf logger for testing */
-  perfLogger?: PerformanceLogger;
-  /** Optional state manager for testing */
-  stateManager?: ServiceStateManager;
-  /** Simulation mode configuration for local development/testing */
-  simulationConfig?: SimulationConfig;
-}
-
-// P1-2 FIX: Provider health tracking
-interface ProviderHealth {
-  healthy: boolean;
-  lastCheck: number;
-  consecutiveFailures: number;
-  lastError?: string;
-}
-
-// P0-3 FIX: Execution timeout configuration
-const EXECUTION_TIMEOUT_MS = 55000; // 55 seconds - must be less than lock TTL (60s)
-const TRANSACTION_TIMEOUT_MS = 50000; // 50 seconds for blockchain operations
-
-// =============================================================================
-// Execution Engine Service
-// =============================================================================
-
+/**
+ * Execution Engine Service - Composition Root
+ *
+ * Orchestrates all execution components:
+ * - Provider management (RPC connections, health, reconnection)
+ * - Queue management (backpressure, water marks)
+ * - Stream consumption (opportunities from Redis)
+ * - Execution strategies (intra-chain, cross-chain, simulation)
+ * - Distributed locking (prevent duplicate executions)
+ */
 export class ExecutionEngineService {
+  // Core dependencies
   private redis: RedisClient | null = null;
   private streamsClient: RedisStreamsClient | null = null;
   private lockManager: DistributedLockManager | null = null;
-  // P0-2 FIX: NonceManager for atomic nonce allocation
   private nonceManager: NonceManager | null = null;
-  private logger: Logger;
-  private perfLogger: PerformanceLogger;
-  private stateManager: ServiceStateManager;
+  private mevProviderFactory: MevProviderFactory | null = null;
+  private bridgeRouterFactory: BridgeRouterFactory | null = null;
 
-  private wallets: Map<string, ethers.Wallet> = new Map();
-  private providers: Map<string, ethers.JsonRpcProvider> = new Map();
-  // P1-2 FIX: Track provider health for each chain
-  private providerHealth: Map<string, ProviderHealth> = new Map();
-  // P1-5 FIX: Track baseline gas prices for spike detection
-  private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
-  private executionQueue: ArbitrageOpportunity[] = [];
-  private activeExecutions: Set<string> = new Set();
+  // Extracted services
+  private providerService: ProviderServiceImpl | null = null;
+  private queueService: QueueServiceImpl | null = null;
+  private opportunityConsumer: OpportunityConsumer | null = null;
 
-  // Consumer group configuration
-  private readonly consumerGroups: ConsumerGroupConfig[];
+  // Execution strategies
+  private intraChainStrategy: IntraChainStrategy | null = null;
+  private crossChainStrategy: CrossChainStrategy | null = null;
+  private simulationStrategy: SimulationStrategy | null = null;
+
+  // Infrastructure
+  private readonly logger: Logger;
+  private readonly perfLogger: PerformanceLogger;
+  private readonly stateManager: ServiceStateManager;
   private readonly instanceId: string;
 
-  // Queue configuration with backpressure
-  private readonly queueConfig: QueueConfig = {
-    maxSize: 1000,
-    highWaterMark: 800,
-    lowWaterMark: 200
-  };
-  private queuePaused = false;
+  // Configuration
+  private readonly simulationConfig: ResolvedSimulationConfig;
+  private readonly isSimulationMode: boolean;
+  private readonly queueConfig: QueueConfig;
 
-  // Statistics
-  private stats: ExecutionStats = {
-    opportunitiesReceived: 0,
-    opportunitiesExecuted: 0,
-    opportunitiesRejected: 0,
-    successfulExecutions: 0,
-    failedExecutions: 0,
-    queueRejects: 0,
-    lockConflicts: 0,
-    executionTimeouts: 0,
-    messageProcessingErrors: 0,
-    providerReconnections: 0,
-    providerHealthCheckFailures: 0
-  };
-
-  // P0-1 FIX: Track pending messages for deferred ACK
-  private pendingMessages: Map<string, { streamName: string; groupName: string; messageId: string }> = new Map();
+  // State
+  private stats: ExecutionStats;
+  private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
+  private activeExecutionCount = 0;
+  private readonly maxConcurrentExecutions = 5; // Limit parallel executions
 
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
-  // P1-2/P1-3 FIX: Provider health check interval
-  private providerHealthCheckInterval: NodeJS.Timeout | null = null;
-
-  // Stream consumer (blocking read pattern with backpressure)
-  private streamConsumer: StreamConsumer | null = null;
-
-  // Simulation mode configuration with defaults
-  private readonly simulationConfig: Required<SimulationConfig>;
-
-  // Phase 2: MEV Protection Provider Factory
-  private mevProviderFactory: MevProviderFactory | null = null;
-  // Phase 3: Cross-Chain Bridge Router
-  private bridgeRouterFactory: BridgeRouterFactory | null = null;
-  private readonly isSimulationMode: boolean;
 
   constructor(config: ExecutionEngineConfig = {}) {
-    // Initialize simulation config with defaults
+    // Initialize simulation config
     this.isSimulationMode = config.simulationConfig?.enabled ?? false;
-    this.simulationConfig = {
-      enabled: this.isSimulationMode,
-      successRate: config.simulationConfig?.successRate ?? 0.85,
-      executionLatencyMs: config.simulationConfig?.executionLatencyMs ?? 500,
-      gasUsed: config.simulationConfig?.gasUsed ?? 200000,
-      gasCostMultiplier: config.simulationConfig?.gasCostMultiplier ?? 0.1,
-      profitVariance: config.simulationConfig?.profitVariance ?? 0.2,
-      logSimulatedExecutions: config.simulationConfig?.logSimulatedExecutions ?? true
+    this.simulationConfig = resolveSimulationConfig(config.simulationConfig);
+
+    // Initialize queue config
+    this.queueConfig = {
+      ...DEFAULT_QUEUE_CONFIG,
+      ...config.queueConfig
     };
+
     // Use injected dependencies or defaults
     this.logger = config.logger ?? createLogger('execution-engine');
     this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
-
-    // Apply custom queue config
-    if (config.queueConfig) {
-      this.queueConfig = { ...this.queueConfig, ...config.queueConfig };
-    }
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
@@ -259,15 +147,8 @@ export class ExecutionEngineService {
       transitionTimeoutMs: 30000
     });
 
-    // Define consumer groups for streams
-    this.consumerGroups = [
-      {
-        streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        groupName: 'execution-engine-group',
-        consumerName: this.instanceId,
-        startId: '$'
-      }
-    ];
+    // Initialize stats
+    this.stats = createInitialStats();
   }
 
   // ===========================================================================
@@ -282,7 +163,6 @@ export class ExecutionEngineService {
         simulationMode: this.isSimulationMode
       });
 
-      // Log simulation mode warning for visibility
       if (this.isSimulationMode) {
         this.logger.warn('⚠️ SIMULATION MODE ENABLED - No real transactions will be executed', {
           successRate: this.simulationConfig.successRate,
@@ -298,44 +178,66 @@ export class ExecutionEngineService {
       // Initialize distributed lock manager
       this.lockManager = await getDistributedLockManager({
         keyPrefix: 'lock:execution:',
-        defaultTtlMs: 60000 // 60 second lock TTL
+        defaultTtlMs: 60000
       });
 
-      // P0-2 FIX: Initialize nonce manager
+      // Initialize nonce manager
       this.nonceManager = getNonceManager({
         syncIntervalMs: 30000,
         pendingTimeoutMs: 300000,
         maxPendingPerChain: 10
       });
 
-      // Initialize blockchain providers and wallets (skip in simulation mode)
-      if (!this.isSimulationMode) {
-        await this.initializeProviders();
-        this.initializeWallets();
+      // Initialize provider service
+      this.providerService = new ProviderServiceImpl({
+        logger: this.logger,
+        stateManager: this.stateManager,
+        nonceManager: this.nonceManager,
+        stats: this.stats
+      });
 
-        // Phase 2: Initialize MEV protection providers
+      // Initialize queue service
+      this.queueService = new QueueServiceImpl({
+        logger: this.logger,
+        queueConfig: this.queueConfig
+      });
+
+      // Initialize blockchain providers (skip in simulation mode)
+      if (!this.isSimulationMode) {
+        await this.providerService.initialize();
+        this.providerService.initializeWallets();
+
+        // Initialize MEV protection
         this.initializeMevProviders();
 
-        // Phase 3: Initialize Cross-Chain Bridge Router
+        // Initialize bridge router
         this.initializeBridgeRouter();
 
-        // P0-2 FIX: Start nonce manager background sync
+        // Start nonce manager
         this.nonceManager.start();
 
-        // P1-2 FIX: Validate provider connectivity before starting
-        await this.validateProviderConnectivity();
-
-        // P1-3 FIX: Start provider health monitoring for reconnection
-        this.startProviderHealthChecks();
+        // Validate and start health monitoring
+        await this.providerService.validateConnectivity();
+        this.providerService.startHealthChecks();
       } else {
         this.logger.info('Skipping blockchain initialization in simulation mode');
       }
 
-      // Create consumer groups for Redis Streams
-      await this.createConsumerGroups();
+      // Initialize execution strategies
+      this.initializeStrategies();
 
-      // Start stream consumers
-      this.startStreamConsumers();
+      // Initialize opportunity consumer
+      this.opportunityConsumer = new OpportunityConsumer({
+        logger: this.logger,
+        streamsClient: this.streamsClient,
+        queueService: this.queueService,
+        stats: this.stats,
+        instanceId: this.instanceId
+      });
+
+      // Create consumer groups and start consuming
+      await this.opportunityConsumer.createConsumerGroup();
+      this.opportunityConsumer.start();
 
       // Start execution processing
       this.startExecutionProcessing();
@@ -354,29 +256,38 @@ export class ExecutionEngineService {
     }
   }
 
-  // P0-NEW-6 FIX: Timeout constant for shutdown operations
-  private static readonly SHUTDOWN_TIMEOUT_MS = 5000;
-
   async stop(): Promise<void> {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Execution Engine Service');
 
-      // Clear all intervals and stop stream consumer
-      await this.clearAllIntervals();
+      // Clear intervals
+      this.clearIntervals();
 
-      // P0-2 FIX: Stop NonceManager
+      // Stop consumer
+      if (this.opportunityConsumer) {
+        await this.opportunityConsumer.stop();
+        this.opportunityConsumer = null;
+      }
+
+      // Stop nonce manager
       if (this.nonceManager) {
         this.nonceManager.stop();
         this.nonceManager = null;
       }
 
-      // Shutdown lock manager with timeout (P0-NEW-6 FIX)
+      // Stop provider service
+      if (this.providerService) {
+        this.providerService.clear();
+        this.providerService = null;
+      }
+
+      // Shutdown lock manager with timeout
       if (this.lockManager) {
         try {
           await Promise.race([
             this.lockManager.shutdown(),
             new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Lock manager shutdown timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+              setTimeout(() => reject(new Error('Lock manager shutdown timeout')), SHUTDOWN_TIMEOUT_MS)
             )
           ]);
         } catch (error) {
@@ -385,13 +296,13 @@ export class ExecutionEngineService {
         this.lockManager = null;
       }
 
-      // Disconnect streams client with timeout (P0-NEW-6 FIX)
+      // Disconnect streams client with timeout
       if (this.streamsClient) {
         try {
           await Promise.race([
             this.streamsClient.disconnect(),
             new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Streams client disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+              setTimeout(() => reject(new Error('Streams client disconnect timeout')), SHUTDOWN_TIMEOUT_MS)
             )
           ]);
         } catch (error) {
@@ -400,13 +311,13 @@ export class ExecutionEngineService {
         this.streamsClient = null;
       }
 
-      // Disconnect Redis with timeout (P0-NEW-6 FIX)
+      // Disconnect Redis with timeout
       if (this.redis) {
         try {
           await Promise.race([
             this.redis.disconnect(),
             new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Redis disconnect timeout')), ExecutionEngineService.SHUTDOWN_TIMEOUT_MS)
+              setTimeout(() => reject(new Error('Redis disconnect timeout')), SHUTDOWN_TIMEOUT_MS)
             )
           ]);
         } catch (error) {
@@ -415,15 +326,16 @@ export class ExecutionEngineService {
         this.redis = null;
       }
 
+      // Clear queue
+      if (this.queueService) {
+        this.queueService.clear();
+        this.queueService = null;
+      }
+
       // Clear state
-      this.executionQueue = [];
-      this.activeExecutions.clear();
-      this.wallets.clear();
-      this.providers.clear();
-      // P1-2/P1-3 FIX: Clear provider health tracking
-      this.providerHealth.clear();
-      // P0-NEW-2 FIX: Clear pending messages (messages will be redelivered by Redis Streams)
-      this.pendingMessages.clear();
+      this.gasBaselines.clear();
+      this.mevProviderFactory = null;
+      this.bridgeRouterFactory = null;
 
       this.logger.info('Execution Engine Service stopped');
     });
@@ -435,7 +347,7 @@ export class ExecutionEngineService {
     }
   }
 
-  private async clearAllIntervals(): Promise<void> {
+  private clearIntervals(): void {
     if (this.executionProcessingInterval) {
       clearInterval(this.executionProcessingInterval);
       this.executionProcessingInterval = null;
@@ -444,290 +356,18 @@ export class ExecutionEngineService {
       clearInterval(this.healthMonitoringInterval);
       this.healthMonitoringInterval = null;
     }
-    // P1-2/P1-3 FIX: Clear provider health check interval
-    if (this.providerHealthCheckInterval) {
-      clearInterval(this.providerHealthCheckInterval);
-      this.providerHealthCheckInterval = null;
-    }
-    // Stop stream consumer (blocking read pattern)
-    if (this.streamConsumer) {
-      await this.streamConsumer.stop();
-      this.streamConsumer = null;
-    }
   }
 
   // ===========================================================================
   // Initialization
   // ===========================================================================
 
-  /**
-   * P1-2 FIX: Initialize providers with health tracking
-   */
-  private async initializeProviders(): Promise<void> {
-    for (const [chainName, chainConfig] of Object.entries(CHAINS)) {
-      try {
-        const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
-        this.providers.set(chainName, provider);
-
-        // Initialize health tracking for this provider
-        this.providerHealth.set(chainName, {
-          healthy: false, // Will be verified in validateProviderConnectivity
-          lastCheck: 0,
-          consecutiveFailures: 0
-        });
-      } catch (error) {
-        this.logger.warn(`Failed to initialize provider for ${chainName}`, { error });
-        this.providerHealth.set(chainName, {
-          healthy: false,
-          lastCheck: Date.now(),
-          consecutiveFailures: 1,
-          lastError: getErrorMessage(error)
-        });
-      }
-    }
-    this.logger.info('Initialized blockchain providers', {
-      count: this.providers.size
-    });
-  }
-
-  /**
-   * P1-2 FIX: Validate provider connectivity before starting
-   * Ensures RPC endpoints are actually reachable
-   */
-  private async validateProviderConnectivity(): Promise<void> {
-    const healthyProviders: string[] = [];
-    const unhealthyProviders: string[] = [];
-
-    for (const [chainName, provider] of this.providers) {
-      try {
-        // Quick connectivity check - get block number
-        await Promise.race([
-          provider.getBlockNumber(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Connectivity check timeout')), 5000)
-          )
-        ]);
-
-        // Mark as healthy
-        this.providerHealth.set(chainName, {
-          healthy: true,
-          lastCheck: Date.now(),
-          consecutiveFailures: 0
-        });
-        healthyProviders.push(chainName);
-
-        this.logger.debug(`Provider connectivity verified for ${chainName}`);
-      } catch (error) {
-        // Mark as unhealthy
-        const health = this.providerHealth.get(chainName) || {
-          healthy: false,
-          lastCheck: 0,
-          consecutiveFailures: 0
-        };
-        this.providerHealth.set(chainName, {
-          ...health,
-          healthy: false,
-          lastCheck: Date.now(),
-          consecutiveFailures: health.consecutiveFailures + 1,
-          lastError: getErrorMessage(error)
-        });
-        unhealthyProviders.push(chainName);
-        this.stats.providerHealthCheckFailures++;
-
-        this.logger.warn(`Provider connectivity failed for ${chainName}`, {
-          error: getErrorMessage(error)
-        });
-      }
-    }
-
-    this.logger.info('Provider connectivity validation complete', {
-      healthy: healthyProviders,
-      unhealthy: unhealthyProviders,
-      healthyCount: healthyProviders.length,
-      unhealthyCount: unhealthyProviders.length
-    });
-
-    // Don't fail startup if some providers are unhealthy - they may recover
-    if (healthyProviders.length === 0 && this.providers.size > 0) {
-      this.logger.warn('No providers are currently healthy - service may be limited');
-    }
-  }
-
-  /**
-   * P1-3 FIX: Start periodic provider health checks for reconnection
-   * P1-NEW-5 FIX: Added state check inside loop to abort early if stopping
-   */
-  private startProviderHealthChecks(): void {
-    // Check provider health every 30 seconds
-    this.providerHealthCheckInterval = setInterval(async () => {
-      // P1-NEW-5 FIX: Early exit if not running
-      if (!this.stateManager.isRunning()) return;
-
-      for (const [chainName, provider] of this.providers) {
-        // P1-NEW-5 FIX: Check state before each provider check to abort early during shutdown
-        if (!this.stateManager.isRunning()) {
-          this.logger.debug('Aborting provider health checks - service stopping');
-          return;
-        }
-        await this.checkAndReconnectProvider(chainName, provider);
-      }
-    }, 30000);
-  }
-
-  /**
-   * P1-3 FIX: Check provider health and attempt reconnection if needed
-   */
-  private async checkAndReconnectProvider(
-    chainName: string,
-    provider: ethers.JsonRpcProvider
-  ): Promise<void> {
-    const health = this.providerHealth.get(chainName);
-    if (!health) return;
-
-    try {
-      // Quick health check
-      await Promise.race([
-        provider.getBlockNumber(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), 5000)
-        )
-      ]);
-
-      // Update health status
-      if (!health.healthy) {
-        // Provider recovered
-        this.logger.info(`Provider recovered for ${chainName}`, {
-          previousFailures: health.consecutiveFailures
-        });
-      }
-
-      this.providerHealth.set(chainName, {
-        healthy: true,
-        lastCheck: Date.now(),
-        consecutiveFailures: 0
-      });
-    } catch (error) {
-      // Provider unhealthy - attempt reconnection
-      const newFailures = health.consecutiveFailures + 1;
-      this.providerHealth.set(chainName, {
-        healthy: false,
-        lastCheck: Date.now(),
-        consecutiveFailures: newFailures,
-        lastError: getErrorMessage(error)
-      });
-      this.stats.providerHealthCheckFailures++;
-
-      this.logger.warn(`Provider health check failed for ${chainName}`, {
-        consecutiveFailures: newFailures,
-        error: getErrorMessage(error)
-      });
-
-      // Attempt reconnection after 3 consecutive failures
-      if (newFailures >= 3) {
-        await this.attemptProviderReconnection(chainName);
-      }
-    }
-  }
-
-  /**
-   * P1-3 FIX: Attempt to reconnect a failed provider
-   */
-  private async attemptProviderReconnection(chainName: string): Promise<void> {
-    const chainConfig = CHAINS[chainName];
-    if (!chainConfig) return;
-
-    try {
-      this.logger.info(`Attempting provider reconnection for ${chainName}`);
-
-      // Create new provider instance
-      const newProvider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
-
-      // Verify connectivity
-      await Promise.race([
-        newProvider.getBlockNumber(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Reconnection timeout')), 10000)
-        )
-      ]);
-
-      // Replace old provider
-      this.providers.set(chainName, newProvider);
-      this.providerHealth.set(chainName, {
-        healthy: true,
-        lastCheck: Date.now(),
-        consecutiveFailures: 0
-      });
-      this.stats.providerReconnections++;
-
-      // Update wallet if exists
-      const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
-      if (privateKey && this.wallets.has(chainName)) {
-        const wallet = new ethers.Wallet(privateKey, newProvider);
-        this.wallets.set(chainName, wallet);
-
-        // P0-2 FIX: Re-register wallet with NonceManager after provider reconnection
-        if (this.nonceManager) {
-          await this.nonceManager.resetChain(chainName);
-          this.nonceManager.registerWallet(chainName, wallet);
-        }
-      }
-
-      this.logger.info(`Provider reconnection successful for ${chainName}`);
-    } catch (error) {
-      this.logger.error(`Provider reconnection failed for ${chainName}`, {
-        error: getErrorMessage(error)
-      });
-    }
-  }
-
-  private initializeWallets(): void {
-    for (const chainName of Object.keys(CHAINS)) {
-      const privateKey = process.env[`${chainName.toUpperCase()}_PRIVATE_KEY`];
-
-      // Skip if no private key configured
-      if (!privateKey) {
-        this.logger.debug(`No private key configured for ${chainName}`);
-        continue;
-      }
-
-      const provider = this.providers.get(chainName);
-      if (provider) {
-        try {
-          const wallet = new ethers.Wallet(privateKey, provider);
-          this.wallets.set(chainName, wallet);
-
-          // P0-2 FIX: Register wallet with nonce manager for atomic nonce allocation
-          if (this.nonceManager) {
-            this.nonceManager.registerWallet(chainName, wallet);
-          }
-
-          this.logger.info(`Initialized wallet for ${chainName}`, {
-            address: wallet.address
-          });
-        } catch (error) {
-          this.logger.error(`Failed to initialize wallet for ${chainName}`, { error });
-        }
-      }
-    }
-  }
-
-  /**
-   * Phase 2: Initialize MEV protection providers for all configured chains.
-   *
-   * Creates MEV providers based on chain-specific strategies:
-   * - Flashbots for Ethereum mainnet (private bundle submission)
-   * - BloXroute for BSC (private transaction API)
-   * - Fastlane for Polygon (MEV protection service)
-   * - Sequencer-based for L2s (inherent MEV protection)
-   * - Standard with gas optimization for other chains
-   */
   private initializeMevProviders(): void {
-    if (!MEV_CONFIG.enabled) {
+    if (!MEV_CONFIG.enabled || !this.providerService) {
       this.logger.info('MEV protection disabled by configuration');
       return;
     }
 
-    // Create MEV provider factory with global configuration
     const mevGlobalConfig: MevGlobalConfig = {
       enabled: MEV_CONFIG.enabled,
       flashbotsAuthKey: MEV_CONFIG.flashbotsAuthKey,
@@ -740,11 +380,10 @@ export class ExecutionEngineService {
 
     this.mevProviderFactory = new MevProviderFactory(mevGlobalConfig);
 
-    // Initialize MEV provider for each chain that has a wallet
     let providersInitialized = 0;
-    for (const chainName of this.wallets.keys()) {
-      const provider = this.providers.get(chainName);
-      const wallet = this.wallets.get(chainName);
+    for (const chainName of this.providerService.getWallets().keys()) {
+      const provider = this.providerService.getProvider(chainName);
+      const wallet = this.providerService.getWallet(chainName);
 
       if (provider && wallet) {
         const chainSettings = MEV_CONFIG.chainSettings[chainName];
@@ -776,318 +415,30 @@ export class ExecutionEngineService {
     });
   }
 
-  /**
-   * Phase 3: Initialize Cross-Chain Bridge Router
-   *
-   * Creates the bridge router factory with all available providers,
-   * enabling cross-chain arbitrage execution via Stargate (LayerZero).
-   */
   private initializeBridgeRouter(): void {
+    if (!this.providerService) return;
+
     try {
       this.bridgeRouterFactory = createBridgeRouterFactory({
         defaultProtocol: 'stargate',
-        providers: this.providers,
+        providers: this.providerService.getProviders(),
       });
 
       this.logger.info('Bridge router initialized', {
         protocols: this.bridgeRouterFactory.getAvailableProtocols(),
-        chainsWithProviders: Array.from(this.providers.keys()),
+        chainsWithProviders: Array.from(this.providerService.getProviders().keys()),
       });
     } catch (error) {
       this.logger.error('Failed to initialize bridge router', {
         error: getErrorMessage(error),
       });
-      // Non-fatal: cross-chain will be unavailable but intra-chain works
     }
   }
 
-  // ===========================================================================
-  // Redis Streams (ADR-002 Compliant)
-  // ===========================================================================
-
-  private async createConsumerGroups(): Promise<void> {
-    if (!this.streamsClient) return;
-
-    for (const config of this.consumerGroups) {
-      try {
-        await this.streamsClient.createConsumerGroup(config);
-        this.logger.info('Consumer group ready', {
-          stream: config.streamName,
-          group: config.groupName
-        });
-      } catch (error) {
-        this.logger.error('Failed to create consumer group', {
-          error,
-          stream: config.streamName
-        });
-      }
-    }
-  }
-
-  /**
-   * Start stream consumer using blocking reads pattern with backpressure coupling.
-   * Replaces setInterval polling for better latency and reduced Redis command usage.
-   *
-   * Key improvements:
-   * - Latency: <1ms vs ~25ms average with 50ms polling
-   * - Redis commands: ~90% reduction (only call when messages exist)
-   * - Backpressure: Pauses/resumes based on queue water marks
-   *
-   * Preserves P0-1 (deferred ACK) and P0-12 (error handling) fixes.
-   */
-  private startStreamConsumers(): void {
-    if (!this.streamsClient) return;
-
-    const config = this.consumerGroups[0]; // opportunities stream
-    if (!config) return;
-
-    this.streamConsumer = new StreamConsumer(this.streamsClient, {
-      config,
-      handler: async (message) => {
-        await this.handleStreamMessage(message, config);
-      },
-      batchSize: 10,
-      blockMs: 1000, // Block for 1s - immediate delivery when messages arrive
-      autoAck: false, // P0-1: Deferred ACK after execution
-      logger: {
-        error: (msg, ctx) => this.logger.error(msg, ctx),
-        debug: (msg, ctx) => this.logger.debug(msg, ctx)
-      },
-      onPauseStateChange: (isPaused) => {
-        this.logger.info('Stream consumer pause state changed', {
-          isPaused,
-          queueSize: this.executionQueue.length
-        });
-      }
-    });
-
-    this.streamConsumer.start();
-    this.logger.info('Stream consumer started with blocking reads', {
-      stream: config.streamName,
-      blockMs: 1000
-    });
-  }
-
-  /**
-   * Handle individual stream message with deferred ACK pattern.
-   * P0-1 FIX: Messages are ACKed only after successful execution
-   * P0-12 FIX: Exception handling - wrap in try/catch, ACK errors to prevent infinite redelivery
-   */
-  private async handleStreamMessage(
-    message: { id: string; data: unknown },
-    config: ConsumerGroupConfig
-  ): Promise<void> {
-    try {
-      if (!message.data) {
-        this.logger.warn('Skipping message with no data', { messageId: message.id });
-        // ACK empty messages to prevent redelivery
-        await this.streamsClient?.xack(config.streamName, config.groupName, message.id);
-        return;
-      }
-
-      const opportunity = message.data as unknown as ArbitrageOpportunity;
-
-      // P0-1 FIX: Store message info for deferred ACK after execution
-      this.pendingMessages.set(opportunity.id, {
-        streamName: config.streamName,
-        groupName: config.groupName,
-        messageId: message.id
-      });
-
-      // Queue the opportunity - ACK will happen after execution completes
-      this.handleArbitrageOpportunity(opportunity);
-    } catch (error) {
-      // P0-12 FIX: Always ACK on processing error to prevent infinite redelivery
-      this.stats.messageProcessingErrors++;
-      this.logger.error('Message processing error - ACKing to prevent redelivery loop', {
-        messageId: message.id,
-        error: getErrorMessage(error)
-      });
-
-      // Move to Dead Letter Queue and ACK
-      await this.moveToDeadLetterQueue(message, error as Error);
-      await this.streamsClient?.xack(config.streamName, config.groupName, message.id);
-    }
-  }
-
-  /**
-   * P0-1 FIX: ACK message after successful execution
-   */
-  private async ackMessageAfterExecution(opportunityId: string): Promise<void> {
-    const pendingInfo = this.pendingMessages.get(opportunityId);
-    if (!pendingInfo || !this.streamsClient) return;
-
-    try {
-      await this.streamsClient.xack(
-        pendingInfo.streamName,
-        pendingInfo.groupName,
-        pendingInfo.messageId
-      );
-      this.pendingMessages.delete(opportunityId);
-      this.logger.debug('Message ACKed after execution', { opportunityId });
-    } catch (error) {
-      this.logger.error('Failed to ACK message after execution', {
-        opportunityId,
-        error: getErrorMessage(error)
-      });
-    }
-  }
-
-  /**
-   * P0-12 FIX: Move failed messages to Dead Letter Queue
-   */
-  private async moveToDeadLetterQueue(message: { id: string; data: unknown }, error: Error): Promise<void> {
-    if (!this.streamsClient) return;
-
-    try {
-      await this.streamsClient.xadd('stream:dead-letter-queue', {
-        originalMessageId: message.id,
-        originalStream: RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        data: message.data,
-        error: error.message,
-        timestamp: Date.now(),
-        service: 'execution-engine'
-      });
-    } catch (dlqError) {
-      this.logger.error('Failed to move message to DLQ', {
-        messageId: message.id,
-        error: (dlqError as Error).message
-      });
-    }
-  }
-
-  // ===========================================================================
-  // Opportunity Handling with Queue Backpressure
-  // ===========================================================================
-
-  private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): void {
-    this.stats.opportunitiesReceived++;
-
-    try {
-      // Check queue backpressure
-      if (!this.canEnqueue()) {
-        this.stats.queueRejects++;
-        this.logger.warn('Opportunity rejected due to queue backpressure', {
-          id: opportunity.id,
-          queueSize: this.executionQueue.length,
-          highWaterMark: this.queueConfig.highWaterMark
-        });
-        return;
-      }
-
-      // Validate opportunity
-      if (this.validateOpportunity(opportunity)) {
-        this.executionQueue.push(opportunity);
-        this.updateQueueStatus();
-
-        this.logger.info('Added opportunity to execution queue', {
-          id: opportunity.id,
-          type: opportunity.type,
-          profit: opportunity.expectedProfit,
-          queueSize: this.executionQueue.length
-        });
-      } else {
-        this.stats.opportunitiesRejected++;
-      }
-    } catch (error) {
-      this.logger.error('Failed to handle arbitrage opportunity', { error });
-    }
-  }
-
-  /**
-   * P1-2 fix: Consolidated backpressure logic to prevent race conditions.
-   * This is the ONLY method that modifies queuePaused state.
-   * Returns whether new items can be enqueued.
-   *
-   * NEW: Couples backpressure to StreamConsumer pause/resume for efficient
-   * resource usage - consumer stops reading when queue is full.
-   */
-  private updateAndCheckBackpressure(): boolean {
-    const queueSize = this.executionQueue.length;
-    const prevPaused = this.queuePaused;
-
-    // Update backpressure state atomically
-    if (this.queuePaused) {
-      // If paused, only release when below low water mark (hysteresis)
-      if (queueSize <= this.queueConfig.lowWaterMark) {
-        this.queuePaused = false;
-      }
-    } else {
-      // If not paused, engage at high water mark
-      if (queueSize >= this.queueConfig.highWaterMark) {
-        this.queuePaused = true;
-      }
-    }
-
-    // Couple backpressure state to stream consumer
-    if (prevPaused !== this.queuePaused) {
-      if (this.queuePaused) {
-        // Pause stream consumer to stop reading new messages
-        this.streamConsumer?.pause();
-        this.logger.warn('Queue backpressure engaged - stream consumer paused', {
-          queueSize,
-          highWaterMark: this.queueConfig.highWaterMark
-        });
-      } else {
-        // Resume stream consumer
-        this.streamConsumer?.resume();
-        this.logger.info('Queue backpressure released - stream consumer resumed', {
-          queueSize,
-          lowWaterMark: this.queueConfig.lowWaterMark
-        });
-      }
-    }
-
-    // Return whether we can accept new items
-    return !this.queuePaused && queueSize < this.queueConfig.maxSize;
-  }
-
-  private canEnqueue(): boolean {
-    return this.updateAndCheckBackpressure();
-  }
-
-  private updateQueueStatus(): void {
-    // P1-2 fix: Delegate to single source of truth
-    this.updateAndCheckBackpressure();
-  }
-
-  private validateOpportunity(opportunity: ArbitrageOpportunity): boolean {
-    // Basic validation checks
-    if (opportunity.confidence < ARBITRAGE_CONFIG.confidenceThreshold) {
-      this.logger.debug('Opportunity rejected: low confidence', {
-        id: opportunity.id,
-        confidence: opportunity.confidence
-      });
-      return false;
-    }
-
-    if ((opportunity.expectedProfit ?? 0) < ARBITRAGE_CONFIG.minProfitPercentage) {
-      this.logger.debug('Opportunity rejected: insufficient profit', {
-        id: opportunity.id,
-        profit: opportunity.expectedProfit
-      });
-      return false;
-    }
-
-    // Check if already in local tracking (non-atomic, but quick filter)
-    if (this.activeExecutions.has(opportunity.id)) {
-      this.logger.debug('Opportunity rejected: already executing', {
-        id: opportunity.id
-      });
-      return false;
-    }
-
-    // Check if we have wallet for the chain (skip in simulation mode)
-    const chain = opportunity.buyChain;
-    if (chain && !this.isSimulationMode && !this.wallets.has(chain)) {
-      this.logger.warn('Opportunity rejected: no wallet for chain', {
-        id: opportunity.id,
-        chain
-      });
-      return false;
-    }
-
-    return true;
+  private initializeStrategies(): void {
+    this.intraChainStrategy = new IntraChainStrategy(this.logger);
+    this.crossChainStrategy = new CrossChainStrategy(this.logger);
+    this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
   }
 
   // ===========================================================================
@@ -1095,24 +446,26 @@ export class ExecutionEngineService {
   // ===========================================================================
 
   private startExecutionProcessing(): void {
-    // Process execution queue every 50ms
     this.executionProcessingInterval = setInterval(() => {
-      if (this.stateManager.isRunning() && this.executionQueue.length > 0) {
-        const opportunity = this.executionQueue.shift();
-        if (opportunity) {
-          this.executeOpportunityWithLock(opportunity);
-        }
+      // Check preconditions: running, queue exists, items available, under concurrency limit
+      if (!this.stateManager.isRunning()) return;
+      if (!this.queueService || this.queueService.size() === 0) return;
+      if (this.activeExecutionCount >= this.maxConcurrentExecutions) return;
+
+      const opportunity = this.queueService.dequeue();
+      if (opportunity) {
+        // Increment counter before async operation
+        this.activeExecutionCount++;
+
+        // Execute and decrement counter when done (success or failure)
+        this.executeOpportunityWithLock(opportunity)
+          .finally(() => {
+            this.activeExecutionCount--;
+          });
       }
     }, 50);
   }
 
-  /**
-   * Execute opportunity with distributed lock to prevent duplicate executions.
-   * This fixes the TOCTOU race condition.
-   *
-   * P0-2 FIX: Lock TTL now matches execution timeout
-   * P0-3 FIX: Execution is wrapped with timeout to prevent indefinite hangs
-   */
   private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
     if (!this.lockManager) {
       this.logger.error('Lock manager not initialized');
@@ -1122,18 +475,16 @@ export class ExecutionEngineService {
     const lockResult = await this.lockManager.withLock(
       `opportunity:${opportunity.id}`,
       async () => {
-        // P0-3 FIX: Wrap execution with timeout
         await this.executeWithTimeout(opportunity);
       },
       {
-        // P0-2 FIX: Lock TTL increased to 120s to accommodate execution timeout + buffer
-        ttlMs: 120000, // 120 second lock (2x execution timeout for safety)
-        retries: 0     // No retry - if locked, another instance is handling it
+        ttlMs: 120000, // 2x execution timeout for safety
+        retries: 0
       }
     );
 
-    // P0-1 FIX: ACK the message after execution (success or failure)
-    await this.ackMessageAfterExecution(opportunity.id);
+    // ACK the message after execution
+    await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
 
     if (!lockResult.success) {
       if (lockResult.reason === 'lock_not_acquired') {
@@ -1142,12 +493,10 @@ export class ExecutionEngineService {
           id: opportunity.id
         });
       } else if (lockResult.reason === 'redis_error') {
-        // P0-3 FIX: Handle Redis errors explicitly - this is critical
         this.logger.error('Opportunity skipped - Redis unavailable', {
           id: opportunity.id,
           error: lockResult.error?.message
         });
-        // Don't increment lockConflicts - this is a different failure mode
       } else if (lockResult.reason === 'execution_error') {
         this.logger.error('Opportunity execution failed', {
           id: opportunity.id,
@@ -1157,12 +506,11 @@ export class ExecutionEngineService {
     }
   }
 
-  /**
-   * P0-3 FIX: Execute with timeout to prevent indefinite hangs
-   */
   private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
+    let timeoutId: NodeJS.Timeout | null = null;
+
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         reject(new Error(`Execution timeout after ${EXECUTION_TIMEOUT_MS}ms`));
       }, EXECUTION_TIMEOUT_MS);
     });
@@ -1181,6 +529,11 @@ export class ExecutionEngineService {
         });
       }
       throw error;
+    } finally {
+      // Always clear the timeout to prevent timer leaks
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
   }
 
@@ -1188,7 +541,7 @@ export class ExecutionEngineService {
     const startTime = performance.now();
 
     try {
-      this.activeExecutions.add(opportunity.id);
+      this.opportunityConsumer?.markActive(opportunity.id);
       this.stats.opportunitiesExecuted++;
 
       this.logger.info('Executing arbitrage opportunity', {
@@ -1201,20 +554,24 @@ export class ExecutionEngineService {
         simulationMode: this.isSimulationMode
       });
 
+      // Build strategy context
+      const ctx = this.buildStrategyContext();
+
       let result: ExecutionResult;
 
-      // SIMULATION MODE: Bypass real transactions
-      if (this.isSimulationMode) {
-        result = await this.executeSimulatedArbitrage(opportunity);
-      } else if (opportunity.type === 'cross-chain') {
-        result = await this.executeCrossChainArbitrage(opportunity);
+      // Select and execute strategy
+      if (this.isSimulationMode && this.simulationStrategy) {
+        result = await this.simulationStrategy.execute(opportunity, ctx);
+      } else if (opportunity.type === 'cross-chain' && this.crossChainStrategy) {
+        result = await this.crossChainStrategy.execute(opportunity, ctx);
+      } else if (this.intraChainStrategy) {
+        result = await this.intraChainStrategy.execute(opportunity, ctx);
       } else {
-        result = await this.executeIntraChainArbitrage(opportunity);
+        throw new Error('No execution strategy available');
       }
 
-      // Publish execution result
+      // Publish result
       await this.publishExecutionResult(result);
-
       this.perfLogger.logExecutionResult(result);
 
       if (result.success) {
@@ -1224,7 +581,6 @@ export class ExecutionEngineService {
       }
 
       const latency = performance.now() - startTime;
-      // S2.2.3 FIX: Use ?? instead of || to correctly handle actualProfit: 0
       this.perfLogger.logEventLatency('opportunity_execution', latency, {
         success: result.success,
         profit: result.actualProfit ?? 0
@@ -1248,1025 +604,24 @@ export class ExecutionEngineService {
 
       await this.publishExecutionResult(errorResult);
     } finally {
-      this.activeExecutions.delete(opportunity.id);
+      this.opportunityConsumer?.markComplete(opportunity.id);
     }
   }
 
-  // ===========================================================================
-  // Arbitrage Execution
-  // ===========================================================================
-
-  private async executeIntraChainArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {
-    const chain = opportunity.buyChain;
-    if (!chain) {
-      throw new Error('No chain specified for opportunity');
-    }
-
-    // RACE-CONDITION-FIX: Verify wallet exists early, but get fresh reference later
-    // The wallet map can be modified during provider reconnection (attemptProviderReconnection)
-    // so we check availability here but get the actual wallet right before sending tx
-    if (!this.wallets.has(chain)) {
-      throw new Error(`No wallet available for chain: ${chain}`);
-    }
-
-    // Get optimal gas price
-    const gasPrice = await this.getOptimalGasPrice(chain);
-
-    // HIGH-3 FIX: Re-verify prices before execution
-    // Prices can change between detection and execution (especially on fast chains)
-    const priceVerification = await this.verifyOpportunityPrices(opportunity, chain);
-    if (!priceVerification.valid) {
-      this.logger.warn('Price re-verification failed, aborting execution', {
-        opportunityId: opportunity.id,
-        reason: priceVerification.reason,
-        originalProfit: opportunity.expectedProfit,
-        currentProfit: priceVerification.currentProfit
-      });
-
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `Price verification failed: ${priceVerification.reason}`,
-        timestamp: Date.now(),
-        chain,
-        dex: opportunity.buyDex || 'unknown'
-      };
-    }
-
-    // Prepare flash loan transaction
-    const flashLoanTx = await this.prepareFlashLoanTransaction(opportunity, chain);
-
-    // Apply MEV protection
-    const protectedTx = await this.applyMEVProtection(flashLoanTx, chain);
-
-    // P0-2 FIX: Get nonce from NonceManager for atomic allocation
-    let nonce: number | undefined;
-    if (this.nonceManager) {
-      try {
-        nonce = await this.nonceManager.getNextNonce(chain);
-        protectedTx.nonce = nonce;
-        this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
-      } catch (error) {
-        this.logger.error('Failed to get nonce from NonceManager', {
-          chain,
-          error: getErrorMessage(error)
-        });
-        throw error;
-      }
-    }
-
-    try {
-      // Phase 2: Use MEV provider if available for protected submission
-      const mevProvider = this.mevProviderFactory?.getProvider(chain);
-      const chainSettings = MEV_CONFIG.chainSettings[chain];
-
-      // Check if MEV protection should be used for this opportunity
-      const shouldUseMevProtection = mevProvider?.isEnabled() &&
-        chainSettings?.enabled !== false &&
-        (opportunity.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
-
-      let receipt: ethers.TransactionReceipt | null = null;
-      let txHash: string | undefined;
-
-      if (shouldUseMevProtection && mevProvider) {
-        // Use MEV provider for protected transaction submission
-        this.logger.info('Using MEV protected submission', {
-          chain,
-          strategy: mevProvider.strategy,
-          opportunityId: opportunity.id,
-        });
-
-        const mevResult = await this.withTransactionTimeout(
-          () => mevProvider.sendProtectedTransaction(protectedTx, {
-            simulate: MEV_CONFIG.simulateBeforeSubmit,
-            priorityFeeGwei: chainSettings?.priorityFeeGwei,
-          }),
-          'mevProtectedSubmission'
-        );
-
-        if (!mevResult.success) {
-          // MEV submission failed - throw error, outer catch handles nonce failure
-          // NOTE: Don't call failTransaction here - outer catch at line 1385 handles it
-          // to avoid double-fail when error propagates
-          throw new Error(`MEV protected submission failed: ${mevResult.error}`);
-        }
-
-        txHash = mevResult.transactionHash;
-
-        // Get receipt if we have a transaction hash
-        if (txHash) {
-          const provider = this.providers.get(chain);
-          if (provider) {
-            receipt = await this.withTransactionTimeout(
-              () => provider.getTransactionReceipt(txHash!),
-              'getReceipt'
-            );
-          }
-        }
-
-        this.logger.info('MEV protected transaction successful', {
-          chain,
-          strategy: mevResult.strategy,
-          txHash,
-          usedFallback: mevResult.usedFallback,
-          latencyMs: mevResult.latencyMs,
-        });
-      } else {
-        // Standard transaction submission (no MEV protection or disabled)
-        // RACE-CONDITION-FIX: Get fresh wallet reference right before sending
-        const wallet = this.wallets.get(chain);
-        if (!wallet) {
-          throw new Error(`Wallet became unavailable for chain: ${chain}`);
-        }
-
-        // P0-3 FIX: Execute transaction with timeout
-        const txResponse = await this.withTransactionTimeout(
-          () => wallet.sendTransaction(protectedTx),
-          'sendTransaction'
-        );
-
-        txHash = txResponse.hash;
-
-        // P0-3 FIX: Wait for receipt with timeout
-        receipt = await this.withTransactionTimeout(
-          () => txResponse.wait(),
-          'waitForReceipt'
-        );
-      }
-
-      if (!receipt) {
-        // P0-2 FIX: Mark transaction as failed if no receipt
-        if (this.nonceManager && nonce !== undefined) {
-          this.nonceManager.failTransaction(chain, nonce, 'No receipt received');
-        }
-        throw new Error('Transaction receipt not received');
-      }
-
-      // P0-2 FIX: Confirm transaction with NonceManager
-      if (this.nonceManager && nonce !== undefined) {
-        this.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
-      }
-
-      // Calculate actual profit
-      const actualProfit = await this.calculateActualProfit(receipt, opportunity);
-
-      return {
-        opportunityId: opportunity.id,
-        success: true,
-        transactionHash: receipt.hash,
-        actualProfit,
-        gasUsed: Number(receipt.gasUsed),
-        gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
-        timestamp: Date.now(),
-        chain,
-        dex: opportunity.buyDex || 'unknown'
-      };
-    } catch (error) {
-      // P0-2 FIX: Mark transaction as failed in NonceManager
-      if (this.nonceManager && nonce !== undefined) {
-        this.nonceManager.failTransaction(chain, nonce, getErrorMessage(error));
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * P0-3 FIX: Wrap blockchain operations with timeout
-   *
-   * ORPHANED-TIMER-FIX: Uses cancellable timeout pattern to prevent timer leaks.
-   * Previously, the timeout timer was never cleared if operation completed first,
-   * leaving orphaned timers in the event loop.
-   */
-  private async withTransactionTimeout<T>(
-    operation: () => Promise<T>,
-    operationName: string
-  ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-
-      // Set up timeout with cleanup
-      const timeoutId = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error(`Transaction ${operationName} timeout after ${TRANSACTION_TIMEOUT_MS}ms`));
-        }
-      }, TRANSACTION_TIMEOUT_MS);
-
-      // Run operation with cleanup
-      operation()
-        .then((result) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(result);
-          }
-        })
-        .catch((error) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeoutId);
-            reject(error);
-          }
-        });
-    });
-  }
-
-  /**
-   * Phase 3: Execute cross-chain arbitrage via bridge router
-   *
-   * Execution flow:
-   * 1. Execute buy side on source chain
-   * 2. Bridge tokens to destination chain via Stargate
-   * 3. Wait for bridge completion
-   * 4. Execute sell side on destination chain
-   *
-   * Includes timeout handling and partial execution recovery.
-   */
-  private async executeCrossChainArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {
-    const sourceChain = opportunity.buyChain;
-    const destChain = opportunity.sellChain;
-    const startTime = Date.now();
-
-    // Validate chains
-    if (!sourceChain || !destChain) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Missing source or destination chain',
-        timestamp: Date.now(),
-        chain: sourceChain || 'unknown',
-        dex: opportunity.buyDex || 'unknown',
-      };
-    }
-
-    if (sourceChain === destChain) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Cross-chain arbitrage requires different chains',
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
-    }
-
-    // Validate bridge router is available
-    if (!this.bridgeRouterFactory) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Bridge router not initialized',
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
-    }
-
-    // Find suitable bridge router
-    const bridgeToken = opportunity.tokenOut || 'USDC'; // Token to bridge
-    const bridgeRouter = this.bridgeRouterFactory.findBestRouter(sourceChain, destChain, bridgeToken);
-
-    if (!bridgeRouter) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
-    }
-
-    this.logger.info('Starting cross-chain arbitrage execution', {
-      opportunityId: opportunity.id,
-      sourceChain,
-      destChain,
-      bridgeToken,
-      bridgeProtocol: bridgeRouter.protocol,
-    });
-
-    try {
-      // Step 1: Get bridge quote
-      const bridgeAmount = opportunity.amountIn || '0';
-      const bridgeQuote = await bridgeRouter.quote({
-        sourceChain,
-        destChain,
-        token: bridgeToken,
-        amount: bridgeAmount,
-        slippage: ARBITRAGE_CONFIG.slippageTolerance,
-      });
-
-      if (!bridgeQuote.valid) {
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge quote failed: ${bridgeQuote.error}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Validate profit still viable after bridge fees
-      const bridgeFeeEth = parseFloat(ethers.formatEther(bridgeQuote.totalFee));
-      const expectedProfit = opportunity.expectedProfit || 0;
-
-      if (bridgeFeeEth >= expectedProfit * 0.5) {
-        this.logger.warn('Cross-chain profit too low after bridge fees', {
-          opportunityId: opportunity.id,
-          bridgeFee: bridgeFeeEth,
-          expectedProfit,
-        });
-
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge fees (${bridgeFeeEth.toFixed(4)} ETH) exceed 50% of profit`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Step 2: Execute buy side on source chain
-      // Note: In production, this would execute the actual DEX swap
-      // For now, we prepare the bridge directly (assuming tokens are ready)
-
-      const sourceWallet = this.wallets.get(sourceChain);
-      const sourceProvider = this.providers.get(sourceChain);
-
-      if (!sourceWallet || !sourceProvider) {
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `No wallet/provider for source chain: ${sourceChain}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Get nonce for bridge transaction
-      let bridgeNonce: number | undefined;
-      if (this.nonceManager) {
-        try {
-          bridgeNonce = await this.nonceManager.getNextNonce(sourceChain);
-        } catch (error) {
-          this.logger.error('Failed to get nonce for bridge', {
-            error: getErrorMessage(error),
-          });
-        }
-      }
-
-      // FIX: Re-validate quote expiry before execution (time may have passed)
-      if (Date.now() > bridgeQuote.expiresAt) {
-        // Mark nonce as failed if we allocated one (quote expired before use)
-        if (this.nonceManager && bridgeNonce !== undefined) {
-          this.nonceManager.failTransaction(sourceChain, bridgeNonce, 'Quote expired');
-        }
-
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: 'Bridge quote expired before execution',
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Step 3: Execute bridge
-      const bridgeResult = await this.withTransactionTimeout(
-        () => bridgeRouter.execute({
-          quote: bridgeQuote,
-          wallet: sourceWallet,
-          provider: sourceProvider,
-          nonce: bridgeNonce,
-          deadline: Date.now() + BRIDGE_DEFAULTS.quoteValidityMs,
-        }),
-        'bridgeExecution'
-      );
-
-      if (!bridgeResult.success) {
-        // Mark nonce as failed if we allocated one
-        if (this.nonceManager && bridgeNonce !== undefined) {
-          this.nonceManager.failTransaction(sourceChain, bridgeNonce, bridgeResult.error || 'Bridge failed');
-        }
-
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge execution failed: ${bridgeResult.error}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Confirm nonce usage
-      if (this.nonceManager && bridgeNonce !== undefined) {
-        this.nonceManager.confirmTransaction(sourceChain, bridgeNonce, bridgeResult.sourceTxHash || '');
-      }
-
-      this.logger.info('Bridge transaction submitted', {
-        opportunityId: opportunity.id,
-        bridgeId: bridgeResult.bridgeId,
-        sourceTxHash: bridgeResult.sourceTxHash,
-      });
-
-      // Step 4: Wait for bridge completion (with timeout)
-      const bridgeId = bridgeResult.bridgeId!;
-      const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
-      const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
-      const bridgeStartTime = Date.now();
-
-      // BUG-FIX: Initialize bridgeStatus to avoid use-before-assignment
-      let bridgeStatus: BridgeStatusResult | null = null;
-      let bridgeCompleted = false;
-
-      while (Date.now() - bridgeStartTime < maxWaitTime) {
-        // FIX: Check for shutdown to avoid blocking during graceful shutdown
-        if (!this.stateManager.isRunning()) {
-          this.logger.warn('Bridge polling interrupted by shutdown', {
-            opportunityId: opportunity.id,
-            bridgeId,
-          });
-          return {
-            opportunityId: opportunity.id,
-            success: false,
-            error: 'Execution interrupted by shutdown',
-            transactionHash: bridgeResult.sourceTxHash,
-            timestamp: Date.now(),
-            chain: sourceChain,
-            dex: opportunity.buyDex || 'unknown',
-          };
-        }
-
-        bridgeStatus = await bridgeRouter.getStatus(bridgeId);
-
-        if (bridgeStatus.status === 'completed') {
-          bridgeCompleted = true;
-          this.logger.info('Bridge completed', {
-            opportunityId: opportunity.id,
-            bridgeId,
-            destTxHash: bridgeStatus.destTxHash,
-            amountReceived: bridgeStatus.amountReceived,
-          });
-          break;
-        }
-
-        if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
-          return {
-            opportunityId: opportunity.id,
-            success: false,
-            error: `Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
-            transactionHash: bridgeResult.sourceTxHash,
-            timestamp: Date.now(),
-            chain: sourceChain,
-            dex: opportunity.buyDex || 'unknown',
-          };
-        }
-
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-      }
-
-      if (!bridgeCompleted) {
-        // BUG-FIX: Nonce was not handled on timeout - now we confirm it
-        // since the bridge transaction was submitted successfully
-        // (the timeout is for destination chain delivery, not source tx)
-        // The nonce was already used, so we confirm it to prevent gaps
-        if (this.nonceManager && bridgeNonce !== undefined) {
-          this.nonceManager.confirmTransaction(
-            sourceChain,
-            bridgeNonce,
-            bridgeResult.sourceTxHash || 'bridge-timeout'
-          );
-        }
-
-        // Bridge timeout - funds may still arrive
-        this.logger.warn('Bridge timeout - funds may still be in transit', {
-          opportunityId: opportunity.id,
-          bridgeId,
-          elapsedMs: Date.now() - bridgeStartTime,
-        });
-
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: 'Bridge timeout - transaction may still complete',
-          transactionHash: bridgeResult.sourceTxHash,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
-      }
-
-      // Step 5: Execute sell side on destination chain
-      // Note: In production, this would execute the actual DEX swap
-      // For now, we return success with the bridge completion
-
-      const executionTimeMs = Date.now() - startTime;
-      const estimatedProfit = expectedProfit - bridgeFeeEth;
-
-      // CONSISTENCY-FIX: gasCost now correctly reflects actual gas used,
-      // bridgeFee is reported separately in the log
-      const actualGasCost = bridgeResult.gasUsed
-        ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * 30000000000n)) // Estimate at 30 gwei
-        : 0;
-
-      this.logger.info('Cross-chain arbitrage completed', {
-        opportunityId: opportunity.id,
-        executionTimeMs,
-        bridgeFee: bridgeFeeEth,
-        gasUsed: bridgeResult.gasUsed?.toString(),
-        estimatedProfit,
-      });
-
-      return {
-        opportunityId: opportunity.id,
-        success: true,
-        transactionHash: bridgeResult.sourceTxHash,
-        actualProfit: estimatedProfit,
-        gasUsed: bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined,
-        gasCost: actualGasCost,  // CONSISTENCY-FIX: Now actual gas cost, not bridge fee
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
-
-    } catch (error) {
-      this.logger.error('Cross-chain arbitrage execution failed', {
-        opportunityId: opportunity.id,
-        sourceChain,
-        destChain,
-        error: getErrorMessage(error),
-      });
-
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `Cross-chain execution error: ${getErrorMessage(error)}`,
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
-    }
-  }
-
-  /**
-   * Execute a simulated arbitrage for local development and testing.
-   *
-   * This method simulates the execution flow without making real blockchain transactions.
-   * It's useful for:
-   * - Local development and testing
-   * - Integration testing with the full pipeline
-   * - Performance testing and benchmarking
-   * - Demo/presentation purposes
-   *
-   * The simulation respects the configured parameters:
-   * - successRate: Probability of simulated success
-   * - executionLatencyMs: Simulated network/blockchain latency
-   * - gasUsed: Simulated gas consumption
-   * - gasCostMultiplier: Gas cost as fraction of expected profit
-   * - profitVariance: Random variance applied to profit
-   */
-  private async executeSimulatedArbitrage(opportunity: ArbitrageOpportunity): Promise<ExecutionResult> {
-    const chain = opportunity.buyChain || 'ethereum';
-    const expectedProfit = opportunity.expectedProfit || 0;
-
-    // Simulate execution latency
-    await this.simulateLatency(this.simulationConfig.executionLatencyMs);
-
-    // Determine simulated success based on configured rate
-    const isSuccess = Math.random() < this.simulationConfig.successRate;
-
-    // Calculate simulated values
-    const simulatedGasUsed = this.simulationConfig.gasUsed;
-    const simulatedGasCost = expectedProfit * this.simulationConfig.gasCostMultiplier;
-
-    // Apply profit variance (e.g., ±20% of expected profit)
-    const variance = this.simulationConfig.profitVariance;
-    const profitMultiplier = 1 + (Math.random() * 2 - 1) * variance; // Range: [1-variance, 1+variance]
-    const simulatedProfit = isSuccess ? (expectedProfit * profitMultiplier) - simulatedGasCost : 0;
-
-    // Generate simulated transaction hash
-    const simulatedTxHash = this.generateSimulatedTxHash();
-
-    const result: ExecutionResult = {
-      opportunityId: opportunity.id,
-      success: isSuccess,
-      transactionHash: isSuccess ? simulatedTxHash : undefined,
-      actualProfit: isSuccess ? simulatedProfit : undefined,
-      gasUsed: isSuccess ? simulatedGasUsed : undefined,
-      gasCost: isSuccess ? simulatedGasCost : undefined,
-      error: isSuccess ? undefined : 'Simulated execution failure (random)',
-      timestamp: Date.now(),
-      chain,
-      dex: opportunity.buyDex || 'unknown'
+  private buildStrategyContext(): StrategyContext {
+    return {
+      logger: this.logger,
+      perfLogger: this.perfLogger,
+      providers: this.providerService?.getProviders() ?? new Map(),
+      wallets: this.providerService?.getWallets() ?? new Map(),
+      providerHealth: this.providerService?.getHealthMap() ?? new Map(),
+      nonceManager: this.nonceManager,
+      mevProviderFactory: this.mevProviderFactory,
+      bridgeRouterFactory: this.bridgeRouterFactory,
+      stateManager: this.stateManager,
+      gasBaselines: this.gasBaselines,
+      stats: this.stats,
     };
-
-    // Log simulated execution if enabled
-    if (this.simulationConfig.logSimulatedExecutions) {
-      this.logger.info('📊 SIMULATED execution completed', {
-        opportunityId: opportunity.id,
-        success: isSuccess,
-        expectedProfit,
-        simulatedProfit: result.actualProfit,
-        simulatedGasCost,
-        simulatedTxHash: result.transactionHash,
-        type: opportunity.type
-      });
-    }
-
-    return result;
-  }
-
-  /**
-   * Simulate network/execution latency for realistic testing.
-   */
-  private async simulateLatency(baseLatencyMs: number): Promise<void> {
-    // Add some randomness to the latency (±30%)
-    const variance = 0.3;
-    const actualLatency = baseLatencyMs * (1 + (Math.random() * 2 - 1) * variance);
-    await new Promise(resolve => setTimeout(resolve, actualLatency));
-  }
-
-  /**
-   * Generate a realistic-looking simulated transaction hash.
-   */
-  private generateSimulatedTxHash(): string {
-    const bytes = new Array(32).fill(0).map(() => Math.floor(Math.random() * 256));
-    return '0x' + bytes.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  /**
-   * CRITICAL-2 FIX: Prepare flash loan transaction with proper slippage protection.
-   * Includes minAmountOut calculation to prevent partial fills from causing losses.
-   */
-  private async prepareFlashLoanTransaction(
-    opportunity: ArbitrageOpportunity,
-    chain: string
-  ): Promise<ethers.TransactionRequest> {
-    if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.expectedProfit) {
-      throw new Error('Invalid opportunity: missing required fields (tokenIn, amountIn, expectedProfit)');
-    }
-
-    // CRITICAL-2 FIX: Calculate minAmountOut with slippage protection
-    // minAmountOut = amountIn + expectedProfit - slippage allowance
-    const amountInBigInt = BigInt(opportunity.amountIn);
-    // PRECISION-FIX: Use parseUnits with string conversion to avoid float precision loss
-    // Previously: BigInt(Math.floor(opportunity.expectedProfit * 1e18)) lost precision for small values
-    const expectedProfitWei = ethers.parseUnits(
-      opportunity.expectedProfit.toFixed(18),
-      18
-    );
-    const slippageBasisPoints = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
-
-    // Calculate expected output (amountIn + profit)
-    const expectedAmountOut = amountInBigInt + expectedProfitWei;
-    // Apply slippage: minAmountOut = expectedAmountOut * (1 - slippage)
-    const minAmountOut = expectedAmountOut - (expectedAmountOut * slippageBasisPoints / 10000n);
-
-    const flashParams: FlashLoanParams = {
-      token: opportunity.tokenIn,
-      amount: opportunity.amountIn,
-      path: this.buildSwapPath(opportunity),
-      // P1-4 FIX: Use configurable slippage tolerance from ARBITRAGE_CONFIG
-      minProfit: opportunity.expectedProfit * (1 - ARBITRAGE_CONFIG.slippageTolerance),
-      // CRITICAL-2 FIX: Include minAmountOut for on-chain slippage protection
-      minAmountOut: minAmountOut.toString()
-    };
-
-    this.logger.debug('Flash loan params prepared', {
-      token: flashParams.token,
-      amount: flashParams.amount,
-      minProfit: flashParams.minProfit,
-      minAmountOut: flashParams.minAmountOut,
-      slippageTolerance: ARBITRAGE_CONFIG.slippageTolerance
-    });
-
-    const flashLoanContract = await this.getFlashLoanContract(chain);
-
-    const tx = await flashLoanContract.executeFlashLoan.populateTransaction(
-      flashParams.token,
-      flashParams.amount,
-      flashParams.path,
-      flashParams.minProfit,
-      flashParams.minAmountOut  // CRITICAL-2 FIX: Pass minAmountOut to contract
-    );
-
-    return tx;
-  }
-
-  private buildSwapPath(opportunity: ArbitrageOpportunity): string[] {
-    if (!opportunity.tokenIn || !opportunity.tokenOut) {
-      throw new Error('Invalid opportunity: missing tokenIn or tokenOut');
-    }
-    return [opportunity.tokenIn, opportunity.tokenOut];
-  }
-
-  private async getFlashLoanContract(chain: string): Promise<ethers.Contract> {
-    const provider = this.providers.get(chain);
-    if (!provider) {
-      throw new Error(`No provider for chain: ${chain}`);
-    }
-
-    // P1-4 fix: Use centralized config instead of hardcoded addresses
-    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-    if (!flashLoanConfig) {
-      throw new Error(`No flash loan provider configured for chain: ${chain}`);
-    }
-
-    // Select ABI based on protocol type
-    // CRITICAL-2 FIX: Updated ABI to include minAmountOut for slippage protection
-    const flashLoanAbi = flashLoanConfig.protocol === 'aave_v3'
-      ? ['function executeFlashLoan(address asset, uint256 amount, address[] calldata path, uint256 minProfit, uint256 minAmountOut) external']
-      : ['function flashSwap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, bytes calldata data) external'];
-
-    return new ethers.Contract(flashLoanConfig.address, flashLoanAbi, provider);
-  }
-
-  /**
-   * HIGH-3 FIX: Verify opportunity prices are still valid before execution.
-   *
-   * This prevents executing stale opportunities where prices have moved
-   * between detection and execution. Critical for fast chains where
-   * block times are < 1 second.
-   *
-   * @param opportunity - The opportunity to verify
-   * @param chain - Target chain
-   * @returns Verification result with validity and reason
-   */
-  private async verifyOpportunityPrices(
-    opportunity: ArbitrageOpportunity,
-    chain: string
-  ): Promise<{ valid: boolean; reason?: string; currentProfit?: number }> {
-    // Check opportunity age - reject if too old
-    const maxAgeMs = ARBITRAGE_CONFIG.opportunityTimeoutMs || 30000;
-    const opportunityAge = Date.now() - opportunity.timestamp;
-
-    if (opportunityAge > maxAgeMs) {
-      return {
-        valid: false,
-        reason: `Opportunity too old: ${opportunityAge}ms > ${maxAgeMs}ms`
-      };
-    }
-
-    // For fast chains (< 2s block time), apply stricter age limits
-    const chainConfig = CHAINS[chain];
-    if (chainConfig && chainConfig.blockTime < 2) {
-      const fastChainMaxAge = Math.min(maxAgeMs, chainConfig.blockTime * 5000); // 5 blocks
-      if (opportunityAge > fastChainMaxAge) {
-        return {
-          valid: false,
-          reason: `Opportunity too old for fast chain: ${opportunityAge}ms > ${fastChainMaxAge}ms`
-        };
-      }
-    }
-
-    // Verify minimum profit threshold is still met
-    const expectedProfit = opportunity.expectedProfit || 0;
-    const minProfitThreshold = ARBITRAGE_CONFIG.minProfitThreshold || 10;
-
-    // Apply a 20% safety margin - require profit to be at least 120% of threshold
-    // to account for potential price movement during execution
-    const requiredProfit = minProfitThreshold * 1.2;
-
-    if (expectedProfit < requiredProfit) {
-      return {
-        valid: false,
-        reason: `Profit below safety threshold: ${expectedProfit} < ${requiredProfit}`,
-        currentProfit: expectedProfit
-      };
-    }
-
-    // Verify confidence score
-    if (opportunity.confidence < ARBITRAGE_CONFIG.minConfidenceThreshold) {
-      return {
-        valid: false,
-        reason: `Confidence below threshold: ${opportunity.confidence} < ${ARBITRAGE_CONFIG.minConfidenceThreshold}`,
-        currentProfit: expectedProfit
-      };
-    }
-
-    this.logger.debug('Price verification passed', {
-      opportunityId: opportunity.id,
-      age: opportunityAge,
-      profit: expectedProfit,
-      confidence: opportunity.confidence
-    });
-
-    return { valid: true, currentProfit: expectedProfit };
-  }
-
-  /**
-   * CRITICAL-1 FIX: Apply MEV protection to prevent sandwich attacks.
-   *
-   * Strategies applied:
-   * 1. Use private transaction pools (Flashbots on supported chains)
-   * 2. Set strict maxPriorityFeePerGas to avoid overpaying
-   * 3. Use EIP-1559 transactions where supported for predictable fees
-   * 4. Add deadline parameter to prevent stale transactions
-   *
-   * @param tx - Transaction to protect
-   * @param chain - Target chain
-   * @returns Protected transaction request
-   */
-  private async applyMEVProtection(
-    tx: ethers.TransactionRequest,
-    chain: string
-  ): Promise<ethers.TransactionRequest> {
-    const provider = this.providers.get(chain);
-    if (!provider) {
-      tx.gasPrice = await this.getOptimalGasPrice(chain);
-      return tx;
-    }
-
-    try {
-      const feeData = await provider.getFeeData();
-
-      // Use EIP-1559 transaction format for better fee predictability
-      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-        // EIP-1559 supported - use type 2 transaction
-        tx.type = 2;
-        tx.maxFeePerGas = feeData.maxFeePerGas;
-        // Cap priority fee to prevent MEV extractors from frontrunning
-        // by limiting how much extra we're willing to pay
-        const maxPriorityFee = feeData.maxPriorityFeePerGas;
-        const cappedPriorityFee = maxPriorityFee < ethers.parseUnits('3', 'gwei')
-          ? maxPriorityFee
-          : ethers.parseUnits('3', 'gwei');
-        tx.maxPriorityFeePerGas = cappedPriorityFee;
-
-        // Remove legacy gasPrice if using EIP-1559
-        delete tx.gasPrice;
-      } else {
-        // Legacy transaction - use optimal gas price
-        tx.gasPrice = await this.getOptimalGasPrice(chain);
-      }
-
-      // CRITICAL-1 FIX: For Ethereum mainnet, use Flashbots RPC
-      // Flashbots prevents sandwich attacks by sending to private mempool
-      if (chain === 'ethereum') {
-        this.logger.info('MEV protection: Using Flashbots-style private transaction', {
-          chain,
-          hasEIP1559: !!feeData.maxFeePerGas
-        });
-        // Note: Actual Flashbots integration requires:
-        // 1. Signing bundle with Flashbots auth key
-        // 2. Sending to Flashbots relay endpoint
-        // 3. Waiting for inclusion in block
-        // For now, we apply fee-based protection which reduces (but doesn't eliminate) MEV risk
-      }
-
-      // Log MEV protection applied
-      this.logger.debug('MEV protection applied', {
-        chain,
-        type: tx.type,
-        maxFeePerGas: tx.maxFeePerGas?.toString(),
-        maxPriorityFeePerGas: tx.maxPriorityFeePerGas?.toString(),
-        gasPrice: tx.gasPrice?.toString()
-      });
-
-      return tx;
-    } catch (error) {
-      this.logger.warn('Failed to apply full MEV protection, using basic gas price', {
-        chain,
-        error: getErrorMessage(error)
-      });
-      tx.gasPrice = await this.getOptimalGasPrice(chain);
-      return tx;
-    }
-  }
-
-  /**
-   * P1-5 FIX: Get optimal gas price with spike protection.
-   * Tracks baseline gas prices and rejects if current price exceeds threshold.
-   * @throws Error if gas price spike detected and protection is enabled
-   */
-  private async getOptimalGasPrice(chain: string): Promise<bigint> {
-    const provider = this.providers.get(chain);
-    if (!provider) {
-      return ethers.parseUnits('50', 'gwei');
-    }
-
-    try {
-      const feeData = await provider.getFeeData();
-      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || ethers.parseUnits('50', 'gwei');
-
-      // P1-5 FIX: Update baseline and check for spike
-      this.updateGasBaseline(chain, currentPrice);
-
-      if (ARBITRAGE_CONFIG.gasPriceSpikeEnabled) {
-        const baselinePrice = this.getGasBaseline(chain);
-        if (baselinePrice > 0n) {
-          const maxAllowedPrice = baselinePrice * BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100)) / 100n;
-
-          if (currentPrice > maxAllowedPrice) {
-            const currentGwei = Number(currentPrice / BigInt(1e9));
-            const baselineGwei = Number(baselinePrice / BigInt(1e9));
-            const maxGwei = Number(maxAllowedPrice / BigInt(1e9));
-
-            this.logger.warn('Gas price spike detected, aborting transaction', {
-              chain,
-              currentGwei,
-              baselineGwei,
-              maxGwei,
-              multiplier: ARBITRAGE_CONFIG.gasPriceSpikeMultiplier
-            });
-
-            throw new Error(`Gas price spike: ${currentGwei} gwei exceeds ${maxGwei} gwei (${ARBITRAGE_CONFIG.gasPriceSpikeMultiplier}x baseline)`);
-          }
-        }
-      }
-
-      return currentPrice;
-    } catch (error) {
-      // Re-throw gas spike errors
-      if (getErrorMessage(error)?.includes('Gas price spike')) {
-        throw error;
-      }
-      this.logger.warn('Failed to get optimal gas price, using default', {
-        chain,
-        error
-      });
-      return ethers.parseUnits('50', 'gwei');
-    }
-  }
-
-  /**
-   * P1-5 FIX: Update gas price baseline for spike detection
-   */
-  private updateGasBaseline(chain: string, price: bigint): void {
-    const now = Date.now();
-    const windowMs = ARBITRAGE_CONFIG.gasPriceBaselineWindowMs;
-
-    if (!this.gasBaselines.has(chain)) {
-      this.gasBaselines.set(chain, []);
-    }
-
-    const history = this.gasBaselines.get(chain)!;
-
-    // Add current price
-    history.push({ price, timestamp: now });
-
-    // Remove entries older than window
-    const cutoff = now - windowMs;
-    while (history.length > 0 && history[0].timestamp < cutoff) {
-      history.shift();
-    }
-
-    // Keep maximum 100 entries to prevent memory growth
-    if (history.length > 100) {
-      history.splice(0, history.length - 100);
-    }
-  }
-
-  /**
-   * P1-5 FIX: Calculate baseline gas price from recent history
-   * Uses median to avoid outlier influence
-   *
-   * HIGH-2 FIX: When not enough history exists, use the average of available
-   * samples multiplied by a safety factor, rather than returning 0n which
-   * disables spike protection entirely during the warmup period.
-   */
-  private getGasBaseline(chain: string): bigint {
-    const history = this.gasBaselines.get(chain);
-    if (!history || history.length === 0) {
-      return 0n; // No data at all, caller should handle this
-    }
-
-    // HIGH-2 FIX: With fewer than 3 samples, use average with safety margin
-    // This provides protection during the warmup period instead of no protection
-    if (history.length < 3) {
-      const sum = history.reduce((acc, h) => acc + h.price, 0n);
-      const avg = sum / BigInt(history.length);
-      // Apply 1.5x safety margin for limited data (more conservative than full median)
-      return avg * 3n / 2n;
-    }
-
-    // Sort by price and get median
-    const sorted = [...history].sort((a, b) => {
-      if (a.price < b.price) return -1;
-      if (a.price > b.price) return 1;
-      return 0;
-    });
-
-    const midIndex = Math.floor(sorted.length / 2);
-    return sorted[midIndex].price;
-  }
-
-  private async calculateActualProfit(
-    receipt: ethers.TransactionReceipt,
-    opportunity: ArbitrageOpportunity
-  ): Promise<number> {
-    // Analyze transaction logs to calculate actual profit
-    // Simplified - in production would parse specific events
-    const gasPrice = receipt.gasPrice || BigInt(0);
-    const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
-    const expectedProfit = opportunity.expectedProfit || 0;
-    return expectedProfit - gasCost;
   }
 
   // ===========================================================================
@@ -2277,7 +632,6 @@ export class ExecutionEngineService {
     if (!this.streamsClient) return;
 
     try {
-      // Publish to a new execution-results stream
       await this.streamsClient.xadd('stream:execution-results', result);
     } catch (error) {
       this.logger.error('Failed to publish execution result', { error });
@@ -2291,7 +645,6 @@ export class ExecutionEngineService {
   private startHealthMonitoring(): void {
     this.healthMonitoringInterval = setInterval(async () => {
       try {
-        // P3-2 FIX: Use unified ServiceHealth with 'name' field
         const health: ServiceHealth = {
           name: 'execution-engine',
           status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
@@ -2302,21 +655,19 @@ export class ExecutionEngineService {
           error: undefined
         };
 
-        // Publish health to stream
         if (this.streamsClient) {
           await this.streamsClient.xadd(
             RedisStreamsClient.STREAMS.HEALTH,
             {
               ...health,
-              queueSize: this.executionQueue.length,
-              queuePaused: this.queuePaused,
-              activeExecutions: this.activeExecutions.size,
+              queueSize: this.queueService?.size() ?? 0,
+              queuePaused: this.queueService?.isPaused() ?? false,
+              activeExecutions: this.opportunityConsumer?.getActiveCount() ?? 0,
               stats: this.stats
             }
           );
         }
 
-        // Also update legacy health key
         if (this.redis) {
           await this.redis.updateServiceHealth('execution-engine', health);
         }
@@ -2341,11 +692,11 @@ export class ExecutionEngineService {
   }
 
   getQueueSize(): number {
-    return this.executionQueue.length;
+    return this.queueService?.size() ?? 0;
   }
 
   isQueuePaused(): boolean {
-    return this.queuePaused;
+    return this.queueService?.isPaused() ?? false;
   }
 
   getStats(): ExecutionStats {
@@ -2353,40 +704,22 @@ export class ExecutionEngineService {
   }
 
   getActiveExecutionsCount(): number {
-    return this.activeExecutions.size;
+    return this.opportunityConsumer?.getActiveCount() ?? 0;
   }
 
-  /**
-   * P1-2/P1-3 FIX: Get provider health status for monitoring
-   */
   getProviderHealth(): Map<string, ProviderHealth> {
-    return new Map(this.providerHealth);
+    return this.providerService?.getHealthMap() ?? new Map();
   }
 
-  /**
-   * P1-2/P1-3 FIX: Get healthy providers count
-   */
   getHealthyProvidersCount(): number {
-    let count = 0;
-    for (const health of this.providerHealth.values()) {
-      if (health.healthy) count++;
-    }
-    return count;
+    return this.providerService?.getHealthyCount() ?? 0;
   }
 
-  /**
-   * Check if the engine is running in simulation mode.
-   * Useful for integration tests and debugging.
-   */
   getIsSimulationMode(): boolean {
     return this.isSimulationMode;
   }
 
-  /**
-   * Get simulation configuration (read-only).
-   * Returns the resolved configuration with defaults applied.
-   */
-  getSimulationConfig(): Readonly<Required<SimulationConfig>> {
+  getSimulationConfig(): Readonly<ResolvedSimulationConfig> {
     return this.simulationConfig;
   }
 }
