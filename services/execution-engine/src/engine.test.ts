@@ -61,53 +61,16 @@ describe('ExecutionEngineService', () => {
     expect(engine).toBeDefined();
   });
 
-  test('should validate opportunities correctly', () => {
-    // Note: buyChain is omitted/undefined to skip wallet check in validation
-    const validOpportunity = {
-      id: 'test-opp-1',
-      type: 'cross-dex',
-      buyDex: 'uniswap_v3',
-      sellDex: 'sushiswap',
-      buyChain: undefined, // No wallet check when undefined
-      tokenIn: 'WETH',
-      tokenOut: 'USDT',
-      amountIn: '1000000000000000000',
-      expectedProfit: 0.1, // Above minProfitPercentage (0.003)
-      profitPercentage: 0.02,
-      gasEstimate: 200000,
-      confidence: 0.85, // Above confidenceThreshold (0.75)
-      timestamp: Date.now(),
-      blockNumber: 18000000
-    };
+  // PHASE-3.2: validateOpportunity and buildSwapPath methods were moved to OpportunityConsumer
+  // See consumers/opportunity.consumer.test.ts for consumer-specific tests
 
-    const isValid = (engine as any).validateOpportunity(validOpportunity);
-    expect(isValid).toBe(true);
-
-    const invalidOpportunity = {
-      ...validOpportunity,
-      confidence: 0.5 // Below threshold (0.75)
-    };
-
-    const isInvalid = (engine as any).validateOpportunity(invalidOpportunity);
-    expect(isInvalid).toBe(false);
-
-    // Verify logger was called for low confidence rejection
-    expect(mockLogger.debug).toHaveBeenCalledWith(
-      'Opportunity rejected: low confidence',
-      expect.objectContaining({ id: invalidOpportunity.id })
-    );
-  });
-
-  test('should build swap paths correctly', () => {
-    const opportunity = {
-      tokenIn: 'WETH',
-      tokenOut: 'USDT',
-      buyDex: 'uniswap_v3',
-      sellDex: 'sushiswap'
-    };
-
-    const path = (engine as any).buildSwapPath(opportunity);
-    expect(path).toEqual(['WETH', 'USDT']);
+  test('should provide stats correctly', () => {
+    const stats = engine.getStats();
+    expect(stats).toBeDefined();
+    expect(stats.opportunitiesReceived).toBe(0);
+    expect(stats.opportunitiesExecuted).toBe(0);
+    expect(stats.successfulExecutions).toBe(0);
+    expect(stats.failedExecutions).toBe(0);
   });
 });
 
