@@ -172,6 +172,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // REFACTOR: Removed duplicate isRunning flag - stateManager is now the single source of truth
   // This eliminates potential sync issues between the flag and stateManager
   private isLeader = false;
+  private isActivating = false; // Mutex to prevent concurrent activation (ADR-007)
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
   private alertCooldowns: Map<string, number> = new Map();
@@ -1503,6 +1504,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
     return this.config.regionId;
   }
 
+  getIsActivating(): boolean {
+    return this.isActivating;
+  }
+
   /**
    * Activate a standby coordinator to become the active leader.
    * This is called when CrossRegionHealthManager signals activation.
@@ -1510,6 +1515,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * @returns Promise<boolean> - true if activation succeeded
    */
   async activateStandby(): Promise<boolean> {
+    // Check if already leader
+    if (this.isLeader) {
+      this.logger.warn('Coordinator already leader, skipping activation');
+      return true;
+    }
+
+    // Mutex to prevent concurrent activation attempts (ADR-007)
+    if (this.isActivating) {
+      this.logger.warn('Activation already in progress, skipping duplicate call');
+      return false;
+    }
+
     if (!this.config.isStandby) {
       this.logger.warn('activateStandby called on non-standby instance');
       return false;
@@ -1519,6 +1536,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.error('Cannot activate - canBecomeLeader is false');
       return false;
     }
+
+    // Acquire activation mutex
+    this.isActivating = true;
 
     this.logger.warn('🚀 ACTIVATING STANDBY COORDINATOR', {
       instanceId: this.config.leaderElection.instanceId,
@@ -1551,6 +1571,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.config.isStandby = originalIsStandby;
       this.logger.error('Error during standby activation', { error });
       return false;
+    } finally {
+      // Release activation mutex
+      this.isActivating = false;
     }
   }
 }

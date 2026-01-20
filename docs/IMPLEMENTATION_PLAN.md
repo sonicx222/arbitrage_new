@@ -841,7 +841,7 @@
 ### Sprint 4 (Days 22-28): Reliability & Optimization
 
 #### S4.1: Cross-Region Failover
-**Status**: `[~] In Progress`
+**Status**: `[x] Complete` (2025-01-20)
 **Priority**: P2 | **Effort**: 3 days | **Confidence**: 90%
 
 **Hypothesis**: Active-passive failover achieves 99.9% uptime.
@@ -891,16 +891,29 @@
       * P1 Documented: Coordinator needs CrossRegionHealthManager integration (see TODO in Dockerfile)
       * P2 Fixed: Tests updated to verify correct env var names (65 tests pass)
 
-[ ] S4.1.5 Test failover scenarios
+[x] S4.1.5 Test failover scenarios
     - Simulate primary failure
     - Verify <60s failover time
-    - PREREQUISITE: Integrate CrossRegionHealthManager with coordinator service
-      * Update services/coordinator/src/index.ts to initialize CrossRegionHealthManager
-      * Read IS_STANDBY, CAN_BECOME_LEADER, REGION_ID from env vars
-      * Wire up failover events to coordinator service lifecycle
-    - PREREQUISITE: Implement executor activation logic
-      * Disable simulation mode on activation (ACTIVATION_DISABLES_SIMULATION)
-      * Resume queue processing after activation
+    - COMPLETED (2025-01-20):
+      * PREREQUISITE 1: CrossRegionHealthManager integrated with coordinator
+        - Updated services/coordinator/src/index.ts with CrossRegionHealthManager
+        - Coordinator reads IS_STANDBY, CAN_BECOME_LEADER, REGION_ID from env
+        - Added activateStandby() method to coordinator
+        - Added guards in tryAcquireLeadership() for standby mode
+      * PREREQUISITE 2: Executor activation logic implemented
+        - engine.ts:activate() disables simulation when activationDisablesSimulation=true
+        - Queue resumes on activation via resumeQueue()
+        - Added isActivating mutex to prevent concurrent activations
+      * Comprehensive test coverage (41 tests) in s4.1.5-failover-scenarios.integration.test.ts:
+        - Primary failure detection (stale health, consecutive failures)
+        - Failover timing verification (<60s target per ADR-007)
+        - Failover event chain (failoverStarted, activateStandby, failoverCompleted)
+        - Leader election during failover (Redis distributed lock)
+        - Coordinator failover (isStandby flag, activation logic)
+        - Executor failover (simulation mode, queue pause/resume, mutex)
+        - End-to-end timing simulation
+        - Environment variable configuration verification
+        - Failover metrics tracking
 ```
 
 ---

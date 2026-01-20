@@ -174,7 +174,10 @@ async function main() {
     });
 
     // Initialize CrossRegionHealthManager for cross-region failover (ADR-007)
-    // Only initialize if running as standby to avoid unnecessary overhead
+    // NOTE: Executor only initializes CrossRegionHealthManager when running as standby,
+    // unlike Coordinator which always initializes it (coordinator participates in leader
+    // election regardless of standby status). This design choice avoids unnecessary
+    // overhead for primary executors while ensuring coordinators can always failover.
     let crossRegionManager: ReturnType<typeof getCrossRegionHealthManager> | null = null;
     if (standbyConfig.isStandby) {
       const crossRegionConfig: CrossRegionHealthConfig = {
