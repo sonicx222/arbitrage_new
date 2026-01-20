@@ -65,9 +65,10 @@ export class QueueServiceImpl implements QueueService {
 
   /**
    * Check if queue can accept more items.
+   * Respects both backpressure pause and manual pause (standby mode).
    */
   canEnqueue(): boolean {
-    return !this.paused && this.queue.length < this.config.maxSize;
+    return !this.paused && !this.manuallyPaused && this.queue.length < this.config.maxSize;
   }
 
   /**
@@ -78,10 +79,49 @@ export class QueueServiceImpl implements QueueService {
   }
 
   /**
-   * Check if queue is paused due to backpressure.
+   * Check if queue is paused due to backpressure or manual pause.
    */
   isPaused(): boolean {
-    return this.paused;
+    return this.paused || this.manuallyPaused;
+  }
+
+  // Manual pause state for standby mode (ADR-007)
+  private manuallyPaused = false;
+
+  /**
+   * Manually pause the queue (for standby mode).
+   * Unlike backpressure pause, this doesn't auto-release.
+   */
+  pause(): void {
+    if (!this.manuallyPaused) {
+      this.manuallyPaused = true;
+      this.logger.info('Queue manually paused (standby mode)');
+      if (this.pauseCallback) {
+        this.pauseCallback(true);
+      }
+    }
+  }
+
+  /**
+   * Resume a manually paused queue (for standby activation).
+   * Backpressure still applies after resuming.
+   */
+  resume(): void {
+    if (this.manuallyPaused) {
+      this.manuallyPaused = false;
+      this.logger.info('Queue manually resumed (activated)');
+      // Only notify resume if not also backpressure-paused
+      if (this.pauseCallback && !this.paused) {
+        this.pauseCallback(false);
+      }
+    }
+  }
+
+  /**
+   * Check if queue is manually paused (standby mode).
+   */
+  isManuallyPaused(): boolean {
+    return this.manuallyPaused;
   }
 
   /**
@@ -90,6 +130,7 @@ export class QueueServiceImpl implements QueueService {
   clear(): void {
     this.queue = [];
     this.paused = false;
+    this.manuallyPaused = false;
   }
 
   /**

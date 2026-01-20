@@ -50,6 +50,7 @@ import {
   SimulationConfig,
   ResolvedSimulationConfig,
   QueueConfig,
+  StandbyConfig,
   EXECUTION_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_MS,
   createInitialStats,
@@ -110,8 +111,11 @@ export class ExecutionEngineService {
 
   // Configuration
   private readonly simulationConfig: ResolvedSimulationConfig;
-  private readonly isSimulationMode: boolean;
+  private isSimulationMode: boolean; // Mutable for activation (ADR-007)
   private readonly queueConfig: QueueConfig;
+  private readonly standbyConfig: StandbyConfig;
+  private isActivated = false; // Track if standby has been activated
+  private isActivating = false; // Mutex to prevent concurrent activation (ADR-007)
 
   // State
   private stats: ExecutionStats;
@@ -132,6 +136,14 @@ export class ExecutionEngineService {
     this.queueConfig = {
       ...DEFAULT_QUEUE_CONFIG,
       ...config.queueConfig
+    };
+
+    // Initialize standby config (ADR-007)
+    this.standbyConfig = {
+      isStandby: config.standbyConfig?.isStandby ?? false,
+      queuePausedOnStart: config.standbyConfig?.queuePausedOnStart ?? false,
+      activationDisablesSimulation: config.standbyConfig?.activationDisablesSimulation ?? true,
+      regionId: config.standbyConfig?.regionId
     };
 
     // Use injected dependencies or defaults
@@ -201,6 +213,15 @@ export class ExecutionEngineService {
         logger: this.logger,
         queueConfig: this.queueConfig
       });
+
+      // Pause queue if standby mode configured (ADR-007)
+      if (this.standbyConfig.queuePausedOnStart) {
+        this.queueService.pause();
+        this.logger.info('Queue paused on start (standby mode)', {
+          isStandby: this.standbyConfig.isStandby,
+          regionId: this.standbyConfig.regionId
+        });
+      }
 
       // Initialize blockchain providers (skip in simulation mode)
       if (!this.isSimulationMode) {
@@ -721,5 +742,129 @@ export class ExecutionEngineService {
 
   getSimulationConfig(): Readonly<ResolvedSimulationConfig> {
     return this.simulationConfig;
+  }
+
+  getIsStandby(): boolean {
+    return this.standbyConfig.isStandby;
+  }
+
+  getIsActivated(): boolean {
+    return this.isActivated;
+  }
+
+  getStandbyConfig(): Readonly<StandbyConfig> {
+    return this.standbyConfig;
+  }
+
+  // ===========================================================================
+  // Standby Activation (ADR-007)
+  // ===========================================================================
+
+  /**
+   * Activate a standby executor to become the active executor.
+   * This is called when the primary executor fails and this standby takes over.
+   *
+   * Activation:
+   * 1. Disables simulation mode (if configured)
+   * 2. Resumes the paused queue
+   * 3. Initializes real blockchain providers if not already done
+   *
+   * @returns Promise<boolean> - true if activation succeeded
+   */
+  async activate(): Promise<boolean> {
+    // Check if already activated
+    if (this.isActivated) {
+      this.logger.warn('Executor already activated, skipping');
+      return true;
+    }
+
+    // Mutex to prevent concurrent activation attempts (ADR-007)
+    if (this.isActivating) {
+      this.logger.warn('Activation already in progress, skipping duplicate call');
+      return false;
+    }
+
+    if (!this.stateManager.isRunning()) {
+      this.logger.error('Cannot activate - executor not running');
+      return false;
+    }
+
+    // Acquire activation mutex
+    this.isActivating = true;
+
+    this.logger.warn('🚀 ACTIVATING STANDBY EXECUTOR', {
+      previousSimulationMode: this.isSimulationMode,
+      queuePaused: this.queueService?.isPaused() ?? false,
+      regionId: this.standbyConfig.regionId
+    });
+
+    try {
+      // Step 1: Disable simulation mode if configured
+      if (this.standbyConfig.activationDisablesSimulation && this.isSimulationMode) {
+        this.isSimulationMode = false;
+        this.logger.warn('⚠️ SIMULATION MODE DISABLED - Real transactions will now execute');
+
+        // Initialize real blockchain providers if not already done
+        if (this.providerService && !this.providerService.getHealthyCount()) {
+          this.logger.info('Initializing blockchain providers for real execution');
+          await this.providerService.initialize();
+          this.providerService.initializeWallets();
+
+          // Initialize MEV protection
+          this.initializeMevProviders();
+
+          // Initialize bridge router
+          this.initializeBridgeRouter();
+
+          // Start nonce manager
+          if (this.nonceManager) {
+            this.nonceManager.start();
+          }
+
+          // Validate and start health monitoring
+          await this.providerService.validateConnectivity();
+          this.providerService.startHealthChecks();
+        }
+      }
+
+      // Step 2: Resume the queue
+      if (this.queueService?.isManuallyPaused()) {
+        this.queueService.resume();
+        this.logger.info('Queue resumed - now processing opportunities');
+      }
+
+      // Mark as activated
+      this.isActivated = true;
+
+      this.logger.warn('✅ STANDBY EXECUTOR ACTIVATED SUCCESSFULLY', {
+        simulationMode: this.isSimulationMode,
+        queuePaused: this.queueService?.isPaused() ?? false,
+        healthyProviders: this.providerService?.getHealthyCount() ?? 0
+      });
+
+      // Publish activation event to stream
+      if (this.streamsClient) {
+        await this.streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, {
+          name: 'execution-engine',
+          service: 'execution-engine',
+          status: 'healthy',
+          event: 'standby_activated',
+          regionId: this.standbyConfig.regionId,
+          simulationMode: this.isSimulationMode,
+          timestamp: Date.now()
+        });
+      }
+
+      return true;
+
+    } catch (error) {
+      this.logger.error('Failed to activate standby executor', {
+        error: getErrorMessage(error)
+      });
+      return false;
+    } finally {
+      // Release activation mutex
+      this.isActivating = false;
+    }
   }
 }

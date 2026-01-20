@@ -869,13 +869,38 @@
     - COMPLETED: 2025-01-19 - Already implemented with 6 degradation levels
     - 34 unit tests passing for GracefulDegradationManager
 
-[ ] S4.1.4 Deploy standby services
+[x] S4.1.4 Deploy standby services
     - Coordinator standby on GCP
     - Executor backup on Render
+    - COMPLETED: 2025-01-20 - TDD implementation with 65 integration tests
+    - Files Created:
+      * services/coordinator/deploy/standby/Dockerfile.standby - GCP Cloud Run standby
+      * services/coordinator/deploy/standby/cloudrun.yaml - GCP Cloud Run configuration
+      * services/coordinator/deploy/standby/env.standby - Environment configuration
+      * services/execution-engine/deploy/standby/Dockerfile.standby - Render standby
+      * services/execution-engine/deploy/standby/render.yaml - Render deployment configuration
+      * services/execution-engine/deploy/standby/env.standby - Environment configuration
+    - Integration Tests: tests/integration/s4.1.4-standby-service-deployment.integration.test.ts
+    - Key Features:
+      * Coordinator standby: IS_STANDBY=true, CAN_BECOME_LEADER=true, REGION_ID=us-central1
+      * Executor standby: EXECUTION_SIMULATION_MODE=true until activation, REGION_ID=us-east1
+      * Leader election via Redis SET NX with 30s TTL, 10s heartbeat (ADR-007 compliant)
+      * Failover configuration: <60s total (30s detection + 10s election + 20s activation)
+    - Code Review Findings (2025-01-20):
+      * P0 Fixed: Executor env var corrected from SIMULATION_MODE to EXECUTION_SIMULATION_MODE
+      * P1 Documented: Coordinator needs CrossRegionHealthManager integration (see TODO in Dockerfile)
+      * P2 Fixed: Tests updated to verify correct env var names (65 tests pass)
 
 [ ] S4.1.5 Test failover scenarios
     - Simulate primary failure
     - Verify <60s failover time
+    - PREREQUISITE: Integrate CrossRegionHealthManager with coordinator service
+      * Update services/coordinator/src/index.ts to initialize CrossRegionHealthManager
+      * Read IS_STANDBY, CAN_BECOME_LEADER, REGION_ID from env vars
+      * Wire up failover events to coordinator service lifecycle
+    - PREREQUISITE: Implement executor activation logic
+      * Disable simulation mode on activation (ACTIVATION_DISABLES_SIMULATION)
+      * Resume queue processing after activation
 ```
 
 ---
@@ -993,9 +1018,9 @@
 | Sprint 1 | 20 | 20 | 0 | 0 |
 | Sprint 2 | 10 | 10 | 0 | 0 |
 | Sprint 3 | 18 | 10 | 0 | 0 |
-| Sprint 4 | 9 | 1 | 0 | 0 |
+| Sprint 4 | 9 | 4 | 0 | 0 |
 | Sprint 5-6 | 10 | 0 | 0 | 0 |
-| **Total** | **67** | **41** | **0** | **0** |
+| **Total** | **67** | **44** | **0** | **0** |
 
 *Note: Sprint 3 includes S3.1 Partitioning (7 tasks), S3.2 Avalanche+Fantom (4 tasks, 3 completed), S3.3 Solana Integration (7 tasks)*
 

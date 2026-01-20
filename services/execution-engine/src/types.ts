@@ -173,6 +173,22 @@ export interface ExecutionEngineConfig {
   stateManager?: ServiceStateManager;
   /** Simulation mode configuration for local development/testing */
   simulationConfig?: SimulationConfig;
+  /** Standby mode configuration (ADR-007) */
+  standbyConfig?: StandbyConfig;
+}
+
+/**
+ * Standby configuration for executor failover (ADR-007)
+ */
+export interface StandbyConfig {
+  /** Whether this instance starts as standby (default: false) */
+  isStandby: boolean;
+  /** Whether queue starts paused for standby mode (default: false) */
+  queuePausedOnStart: boolean;
+  /** Whether activation should disable simulation mode (default: true) */
+  activationDisablesSimulation: boolean;
+  /** Region identifier for this instance */
+  regionId?: string;
 }
 
 // =============================================================================
@@ -232,12 +248,18 @@ export interface QueueService {
   canEnqueue(): boolean;
   /** Get current queue size */
   size(): number;
-  /** Check if queue is paused due to backpressure */
+  /** Check if queue is paused (backpressure or manual) */
   isPaused(): boolean;
   /** Clear the queue */
   clear(): void;
   /** Set pause state change callback */
   onPauseStateChange(callback: (isPaused: boolean) => void): void;
+  /** Manually pause the queue (for standby mode - ADR-007) */
+  pause(): void;
+  /** Resume a manually paused queue (for standby activation - ADR-007) */
+  resume(): void;
+  /** Check if queue is manually paused (standby mode) */
+  isManuallyPaused(): boolean;
 }
 
 // =============================================================================
