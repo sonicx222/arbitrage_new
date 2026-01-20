@@ -19,27 +19,16 @@
  */
 
 import { PriceUpdate } from '@arbitrage/types';
+// TYPE-CONSOLIDATION: Import shared types instead of duplicating
+import { Logger, PriceData, IndexedSnapshot, PricePoint } from './types';
+import { normalizeTokenForCrossChain } from '@arbitrage/config';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** Logger interface for dependency injection */
-export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
-
-/** Hierarchical price data structure */
-export interface PriceData {
-  [chain: string]: {
-    [dex: string]: {
-      [pairKey: string]: PriceUpdate;
-    };
-  };
-}
+// Logger and PriceData are now imported from ./types for consistency
+export type { Logger, PriceData, IndexedSnapshot, PricePoint };
 
 /** Configuration for PriceDataManager */
 export interface PriceDataManagerConfig {
@@ -58,8 +47,14 @@ export interface PriceDataManager {
   /** Handle incoming price update */
   handlePriceUpdate(update: PriceUpdate): void;
 
-  /** Create atomic snapshot of price data */
+  /** Create atomic snapshot of price data (legacy) */
   createSnapshot(): PriceData;
+
+  /**
+   * PERF-P1: Create indexed snapshot with O(1) token pair lookups.
+   * Use this instead of createSnapshot() for detection to avoid O(n²) iteration.
+   */
+  createIndexedSnapshot(): IndexedSnapshot;
 
   /** Get list of chains being monitored */
   getChains(): string[];
@@ -101,6 +96,16 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
   const priceData: PriceData = {};
   let updateCounter = 0;
 
+  // PERF-P4: Snapshot caching to avoid rebuilding when no data has changed
+  // FIX 5.2: Use modulo to prevent integer overflow after billions of updates
+  const MAX_VERSION = Number.MAX_SAFE_INTEGER - 1000; // Reset well before overflow
+  let lastSnapshotVersion = 0; // Increments when data changes
+  let cachedSnapshot: IndexedSnapshot | null = null;
+  let cachedSnapshotVersion = -1;
+
+  // FIX 10.1: Cache normalized token pairs to avoid repeated normalization
+  const normalizedPairCache = new Map<string, string | null>();
+
   // ===========================================================================
   // Price Data Management
   // ===========================================================================
@@ -121,6 +126,20 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
       // Store update
       priceData[update.chain][update.dex][update.pairKey] = update;
 
+      // PERF-P4: Increment version to invalidate cached snapshot
+      // FIX 5.2: Reset version counter to prevent overflow
+      lastSnapshotVersion++;
+      if (lastSnapshotVersion > MAX_VERSION) {
+        // FIX #14: Log version reset for monitoring (rare event, indicates long-running service)
+        logger.info('Snapshot version counter reset to prevent overflow', {
+          previousVersion: MAX_VERSION,
+          resetThreshold: MAX_VERSION,
+        });
+        // FIX 4.4: Reset to 1, not 0, to avoid potential collision with cachedSnapshotVersion=0 after clear()
+        lastSnapshotVersion = 1;
+        cachedSnapshotVersion = -1; // Force cache rebuild after reset
+      }
+
       // Deterministic cleanup
       updateCounter++;
       if (updateCounter >= cleanupFrequency) {
@@ -140,6 +159,7 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
    */
   function cleanup(): void {
     const cutoffTime = Date.now() - maxPriceAgeMs;
+    let dataRemoved = false;
 
     // Take snapshot of keys to prevent iterator invalidation
     const chainSnapshot = Object.keys(priceData);
@@ -163,6 +183,7 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
           const update = priceData[chain][dex][pairKey];
           if (update && update.timestamp < cutoffTime) {
             delete priceData[chain][dex][pairKey];
+            dataRemoved = true;
           }
         }
 
@@ -177,11 +198,22 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         delete priceData[chain];
       }
     }
+
+    // PERF-P4: Invalidate cache if data was removed
+    if (dataRemoved) {
+      lastSnapshotVersion++;
+      // FIX 4.4: Handle overflow in cleanup (same as handlePriceUpdate)
+      if (lastSnapshotVersion > MAX_VERSION) {
+        lastSnapshotVersion = 1; // FIX: Reset to 1, not 0, to avoid cachedSnapshotVersion=0 collision
+        cachedSnapshotVersion = -1;
+      }
+    }
   }
 
   /**
    * Create atomic snapshot of priceData for thread-safe detection.
    * Prevents race conditions where priceData is modified during detection.
+   * @deprecated Use createIndexedSnapshot() for O(1) token pair lookups
    */
   function createSnapshot(): PriceData {
     const snapshot: PriceData = {};
@@ -192,11 +224,159 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         snapshot[chain][dex] = {};
         for (const pairKey of Object.keys(priceData[chain][dex])) {
           // Deep copy the PriceUpdate object
+          // RACE-FIX: Check if original still exists (may have been deleted concurrently)
           const original = priceData[chain][dex][pairKey];
-          snapshot[chain][dex][pairKey] = { ...original };
+          if (original) {
+            snapshot[chain][dex][pairKey] = { ...original };
+          }
         }
       }
     }
+
+    return snapshot;
+  }
+
+  /**
+   * PERF-P1: Create indexed snapshot with O(1) token pair lookups.
+   *
+   * This builds a reverse index during snapshot creation so that detection
+   * can look up prices by normalized token pair in O(1) instead of O(n²).
+   *
+   * Performance improvement:
+   * - Old: O(tokenPairs × chains × dexes × pairs) for each detection cycle
+   * - New: O(chains × dexes × pairs) once to build index, then O(1) per lookup
+   *
+   * PERF-P4: Added caching - returns cached snapshot if no data has changed.
+   */
+  function createIndexedSnapshot(): IndexedSnapshot {
+    // PERF-P4: Return cached snapshot if data hasn't changed
+    if (cachedSnapshot !== null && cachedSnapshotVersion === lastSnapshotVersion) {
+      logger.debug('Returning cached snapshot', {
+        version: cachedSnapshotVersion,
+        tokenPairs: cachedSnapshot.tokenPairs.length,
+      });
+      return cachedSnapshot;
+    }
+
+    const raw: PriceData = {};
+    const byToken = new Map<string, PricePoint[]>();
+    const tokenPairsSet = new Set<string>();
+    const timestamp = Date.now();
+
+    for (const chain of Object.keys(priceData)) {
+      raw[chain] = {};
+      for (const dex of Object.keys(priceData[chain])) {
+        raw[chain][dex] = {};
+        for (const pairKey of Object.keys(priceData[chain][dex])) {
+          // RACE-FIX: Check if original still exists
+          const original = priceData[chain][dex][pairKey];
+          if (!original) continue;
+
+          // Deep copy for raw snapshot
+          const update = { ...original };
+          raw[chain][dex][pairKey] = update;
+
+          // FIX 10.1: Check cache first for normalized pair
+          let normalizedPair = normalizedPairCache.get(pairKey);
+
+          if (normalizedPair === undefined) {
+            // Not in cache - extract and normalize token pair from pairKey (format: DEX_TOKEN0_TOKEN1)
+            const parts = pairKey.split('_');
+            if (parts.length >= 2) {
+              const token0 = parts[parts.length - 2];
+              const token1 = parts[parts.length - 1];
+
+              // FIX 4.4: Validate token symbols are non-empty strings
+              if (!token0 || !token1 || token0.length === 0 || token1.length === 0) {
+                logger.warn('Invalid token pair format in pairKey', { pairKey, chain, dex });
+                normalizedPairCache.set(pairKey, null); // Cache the invalid result
+                continue; // Skip this price point
+              }
+
+              // FIX 4.2: Wrap normalization in try-catch to handle any errors
+              try {
+                const normalizedToken0 = normalizeTokenForCrossChain(token0);
+                const normalizedToken1 = normalizeTokenForCrossChain(token1);
+
+                // FIX: Ensure normalized tokens are valid
+                if (!normalizedToken0 || !normalizedToken1) {
+                  logger.warn('Token normalization returned empty', { token0, token1, pairKey });
+                  normalizedPairCache.set(pairKey, null);
+                  continue;
+                }
+
+                normalizedPair = `${normalizedToken0}_${normalizedToken1}`;
+                normalizedPairCache.set(pairKey, normalizedPair);
+              } catch (normError) {
+                logger.warn('Token normalization threw error', {
+                  token0, token1, pairKey,
+                  error: (normError as Error).message
+                });
+                normalizedPairCache.set(pairKey, null);
+                continue;
+              }
+            } else {
+              normalizedPairCache.set(pairKey, null);
+              continue;
+            }
+          } else if (normalizedPair === null) {
+            // Previously failed normalization - skip
+            continue;
+          }
+
+          // Add to token pair set
+          tokenPairsSet.add(normalizedPair);
+
+          // Build price point
+          const pricePoint: PricePoint = {
+            chain,
+            dex,
+            pairKey,
+            price: update.price,
+            update,
+          };
+
+          // Add to index
+          const existing = byToken.get(normalizedPair);
+          if (existing) {
+            existing.push(pricePoint);
+          } else {
+            byToken.set(normalizedPair, [pricePoint]);
+          }
+        }
+      }
+    }
+
+    // PERF 10.2: Filter out token pairs with only single-chain data
+    // Cross-chain arbitrage requires at least 2 chains with different prices
+    const validTokenPairs: string[] = [];
+    for (const tokenPair of tokenPairsSet) {
+      const prices = byToken.get(tokenPair);
+      if (prices && prices.length >= 2) {
+        // Also verify we have at least 2 different chains
+        const chains = new Set(prices.map(p => p.chain));
+        if (chains.size >= 2) {
+          validTokenPairs.push(tokenPair);
+        }
+      }
+    }
+
+    const snapshot: IndexedSnapshot = {
+      byToken,
+      raw,
+      tokenPairs: validTokenPairs, // PERF 10.2: Only include pairs with cross-chain potential
+      timestamp,
+    };
+
+    // PERF-P4: Cache the newly built snapshot
+    cachedSnapshot = snapshot;
+    cachedSnapshotVersion = lastSnapshotVersion;
+
+    logger.debug('Built new indexed snapshot', {
+      version: cachedSnapshotVersion,
+      tokenPairs: snapshot.tokenPairs.length,
+      chains: Object.keys(raw).length,
+    });
 
     return snapshot;
   }
@@ -230,12 +410,22 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
       delete priceData[chain];
     }
     updateCounter = 0;
+
+    // PERF-P4: Reset cache
+    cachedSnapshot = null;
+    cachedSnapshotVersion = -1;
+    lastSnapshotVersion = 0;
+
+    // FIX BUG-2: Clear normalizedPairCache to prevent stale entries on restart
+    normalizedPairCache.clear();
+
     logger.info('PriceDataManager cleared');
   }
 
   return {
     handlePriceUpdate,
     createSnapshot,
+    createIndexedSnapshot,
     getChains,
     getPairCount,
     cleanup,

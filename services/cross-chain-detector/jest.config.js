@@ -6,6 +6,17 @@ module.exports = {
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
+  // Module resolution - maps package aliases to source directories (from base config)
+  moduleNameMapper: {
+    '^@arbitrage/core$': '<rootDir>/../../shared/core/src',
+    '^@arbitrage/core/(.*)$': '<rootDir>/../../shared/core/src/$1',
+    '^@arbitrage/config$': '<rootDir>/../../shared/config/src',
+    '^@arbitrage/config/(.*)$': '<rootDir>/../../shared/config/src/$1',
+    '^@arbitrage/types$': '<rootDir>/../../shared/types',
+    '^@arbitrage/types/(.*)$': '<rootDir>/../../shared/types/$1',
+    '^@arbitrage/ml$': '<rootDir>/../../shared/ml/src',
+    '^@arbitrage/ml/(.*)$': '<rootDir>/../../shared/ml/src/$1',
+  },
   setupFilesAfterEnv: ['<rootDir>/src/setupTests.ts'],
   testTimeout: 10000,
 };

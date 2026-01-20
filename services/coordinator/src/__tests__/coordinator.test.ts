@@ -128,7 +128,7 @@ jest.mock('@arbitrage/core', () => ({
 import { CHAINS } from '@arbitrage/config';
 
 // P1-FIX-2: Import the actual CoordinatorService
-import { CoordinatorService } from './coordinator';
+import { CoordinatorService } from '../coordinator';
 
 // =============================================================================
 // Configuration Tests

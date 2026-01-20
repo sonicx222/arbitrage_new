@@ -24,36 +24,15 @@ import {
   PerformanceLogger,
 } from '@arbitrage/core';
 import { ArbitrageOpportunity } from '@arbitrage/types';
+// TYPE-CONSOLIDATION: Import shared types instead of duplicating
+import { Logger, CrossChainOpportunity } from './types';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** Logger interface for dependency injection */
-export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
-
-/** Cross-chain opportunity data */
-export interface CrossChainOpportunity {
-  token: string;
-  sourceChain: string;
-  sourceDex: string;
-  sourcePrice: number;
-  targetChain: string;
-  targetDex: string;
-  targetPrice: number;
-  priceDiff: number;
-  percentageDiff: number;
-  estimatedProfit: number;
-  bridgeCost?: number;
-  netProfit: number;
-  confidence: number;
-  createdAt: number;
-}
+// Logger and CrossChainOpportunity are now imported from ./types for consistency
+export type { Logger, CrossChainOpportunity };
 
 /** Configuration for OpportunityPublisher */
 export interface OpportunityPublisherConfig {
@@ -77,6 +56,12 @@ export interface OpportunityPublisherConfig {
 
   /** Cache TTL in ms (default: 10 minutes) */
   cacheTtlMs?: number;
+
+  /**
+   * FIX #3: Default trade size in USD for profit calculation (default: 1000)
+   * Used to calculate actual token amounts instead of hardcoded 1 token.
+   */
+  defaultTradeSizeUsd?: number;
 }
 
 /** Public interface for OpportunityPublisher */
@@ -102,6 +87,7 @@ const DEFAULT_DEDUPE_WINDOW_MS = 5000;
 const DEFAULT_MIN_PROFIT_IMPROVEMENT = 0.1;
 const DEFAULT_MAX_CACHE_SIZE = 1000;
 const DEFAULT_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const DEFAULT_TRADE_SIZE_USD = 1000; // FIX #3: Default trade size for profit calculation
 
 // =============================================================================
 // Implementation
@@ -122,6 +108,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     minProfitImprovement = DEFAULT_MIN_PROFIT_IMPROVEMENT,
     maxCacheSize = DEFAULT_MAX_CACHE_SIZE,
     cacheTtlMs = DEFAULT_CACHE_TTL_MS,
+    defaultTradeSizeUsd = DEFAULT_TRADE_SIZE_USD, // FIX #3
   } = config;
 
   const opportunitiesCache = new Map<string, CrossChainOpportunity>();
@@ -132,6 +119,8 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
 
   /**
    * Generate deterministic deduplication key for an opportunity.
+   * FIX 6.2: Document key format - uses '-' as separator consistently.
+   * Format: "sourceChain-targetChain-token" e.g., "ethereum-arbitrum-WETH/USDC"
    */
   function generateDedupeKey(opportunity: CrossChainOpportunity): string {
     return `${opportunity.sourceChain}-${opportunity.targetChain}-${opportunity.token}`;
@@ -154,7 +143,10 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     }
 
     // Only republish if profit improved significantly
-    const profitImprovement = (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit;
+    // DIV-ZERO-FIX: Guard against division by zero when existing profit is 0 or negative
+    const profitImprovement = existingOpp.netProfit > 0
+      ? (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit
+      : (opportunity.netProfit > existingOpp.netProfit ? 1.0 : 0);
     if (profitImprovement >= minProfitImprovement) {
       return true;
     }
@@ -174,13 +166,25 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
 
   /**
    * Convert cross-chain opportunity to ArbitrageOpportunity format.
+   *
+   * FIX #3: Calculate actual token amounts based on trade size and source price
+   * instead of hardcoding 1 token. This ensures the execution engine receives
+   * accurate profit estimates.
    */
   function toArbitrageOpportunity(opportunity: CrossChainOpportunity): ArbitrageOpportunity {
-    // PRECISION-FIX: Calculate expectedProfit as token amount (not USD/price difference)
-    // The execution engine treats expectedProfit as base token units
-    const amountInWei = '1000000000000000000'; // 1 token
-    const amountInTokens = 1.0;
-    const expectedProfitInTokens = (opportunity.percentageDiff / 100) * amountInTokens;
+    // FIX #3: Calculate actual token amount based on trade size and price
+    // If sourcePrice is 0 or invalid, fall back to 1 token to avoid division by zero
+    const sourcePrice = opportunity.sourcePrice > 0 ? opportunity.sourcePrice : 1;
+    const amountInTokens = defaultTradeSizeUsd / sourcePrice;
+
+    // Convert to wei (18 decimals) - use BigInt for precision
+    // Guard against unreasonably large amounts that could overflow
+    const MAX_AMOUNT_IN_TOKENS = 1e12;
+    const safeAmountInTokens = Math.min(amountInTokens, MAX_AMOUNT_IN_TOKENS);
+    const amountInWei = BigInt(Math.floor(safeAmountInTokens * 1e18)).toString();
+
+    // Calculate expected profit in token units
+    const expectedProfitInTokens = (opportunity.percentageDiff / 100) * safeAmountInTokens;
 
     // Extract tokens from token string (format: "TOKEN0/TOKEN1")
     const tokenParts = opportunity.token.split('/');
@@ -188,7 +192,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     const tokenOut = tokenParts[1] || opportunity.token;
 
     return {
-      id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `cross-chain-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       type: 'cross-chain',
       buyDex: opportunity.sourceDex,
       sellDex: opportunity.targetDex,

@@ -34,6 +34,8 @@ module.exports = {
     '^@arbitrage/test-utils/(.*)$': '<rootDir>/shared/test-utils/src/$1',
     '^@arbitrage/unified-detector$': '<rootDir>/services/unified-detector/src',
     '^@arbitrage/unified-detector/(.*)$': '<rootDir>/services/unified-detector/src/$1',
+    '^@arbitrage/ml$': '<rootDir>/shared/ml/src',
+    '^@arbitrage/ml/(.*)$': '<rootDir>/shared/ml/src/$1',
     '^@shared/security$': '<rootDir>/shared/security/src',
     '^@shared/security/(.*)$': '<rootDir>/shared/security/src/$1'
   },

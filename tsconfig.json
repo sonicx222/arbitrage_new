@@ -37,7 +37,9 @@
       "@arbitrage/test-utils": ["./shared/test-utils/src"],
       "@arbitrage/test-utils/*": ["./shared/test-utils/src/*"],
       "@shared/security": ["./shared/security/src"],
-      "@shared/security/*": ["./shared/security/src/*"]
+      "@shared/security/*": ["./shared/security/src/*"],
+      "@arbitrage/ml": ["./shared/ml/src"],
+      "@arbitrage/ml/*": ["./shared/ml/src/*"]
     }
   },
   "include": [
@@ -50,7 +52,6 @@
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts",
-    "**/__tests__/**",
-    "shared/ml/**"
+    "**/__tests__/**"
   ]
 }

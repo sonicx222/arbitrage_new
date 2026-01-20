@@ -123,3 +123,41 @@ export function getChainSpecificTokenSymbol(chainId: string, canonicalSymbol: st
 
   return undefined;
 }
+
+// =============================================================================
+// CHAIN-SPECIFIC DEFAULT QUOTE TOKENS (Refactored from detector.ts)
+// =============================================================================
+
+/**
+ * Chain-specific default quote tokens for whale transaction parsing.
+ * Different chains have different primary stablecoins used as quote currency.
+ *
+ * Used when a whale transaction contains a single token (e.g., "WETH")
+ * and we need to infer the quote token for the trading pair.
+ *
+ * @see services/cross-chain-detector/src/detector.ts - analyzeWhaleImpact()
+ */
+export const DEFAULT_QUOTE_TOKENS: Readonly<Record<string, string>> = {
+  ethereum: 'USDC',
+  arbitrum: 'USDC',
+  optimism: 'USDC',
+  polygon: 'USDC',
+  base: 'USDC',
+  bsc: 'BUSD',         // BSC uses BUSD as primary stablecoin
+  avalanche: 'USDC.e', // Avalanche uses bridged USDC
+  fantom: 'USDC',
+  zksync: 'USDC',
+  linea: 'USDC',
+  solana: 'USDC',
+} as const;
+
+/**
+ * Get the default quote token for a given chain.
+ * Falls back to 'USDC' if the chain is not configured.
+ *
+ * @param chain - The chain identifier (lowercase)
+ * @returns The default quote token symbol for that chain
+ */
+export function getDefaultQuoteToken(chain: string): string {
+  return DEFAULT_QUOTE_TOKENS[chain.toLowerCase()] || 'USDC';
+}

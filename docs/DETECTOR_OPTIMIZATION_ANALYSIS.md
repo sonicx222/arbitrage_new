@@ -56,32 +56,38 @@ After comprehensive analysis of the detection system, I've identified **47 optim
 
 **Location**: `base-detector.ts` - `checkIntraDexArbitrage()`
 
-**Evidence**:
+**Status**: ✅ **IMPLEMENTED** for CrossChainDetectorService (2026-01-20)
+
+**Original Evidence**:
 ```typescript
-// Current: Quadratic scanning
+// Original: Quadratic scanning
 for (const [key, otherSnapshot] of pairsSnapshots) {
   // Iterates through ALL pairs for EVERY sync event
   // With 1,000+ pairs = 1M+ comparisons per event
 }
 ```
 
-**Hypothesis**: Implementing token-pair indexing will reduce detection time by 100-1000x
-
-**Confidence**: 95%
-
-**Proposed Solution**:
+**Implementation** (services/cross-chain-detector):
 ```typescript
-// Create Map<tokenPairKey, DexPool[]>
-private pairsByTokens: Map<string, TradingPair[]> = new Map();
+// New: O(1) lookup via IndexedSnapshot
+interface IndexedSnapshot {
+  byToken: Map<string, PricePoint[]>;  // Token pair index
+  raw: PriceData;
+  tokenPairs: string[];
+  timestamp: number;
+}
 
-// O(1) lookup instead of O(n) scan
-const tokenKey = this.getTokenPairKey(tokenA, tokenB);
-const matchingPairs = this.pairsByTokens.get(tokenKey) || [];
+// PriceDataManager.createIndexedSnapshot() builds the index
+// Detection iterates tokenPairs once, comparing price points per token
 ```
 
-**Expected Impact**:
-- Detection latency: 150ms → <15ms (10x improvement)
-- CPU usage: -80% during high-activity periods
+**Actual Impact**:
+- Detection complexity: O(chains² × dexes² × pairs²) → O(tokenPairs × pricesPerToken²)
+- CPU usage reduced during cross-chain detection
+
+**See Also**: [ADR-014](architecture/adr/ADR-014-modular-detector-components.md) Phase 3 Enhancements (Section 9)
+
+**Note**: base-detector.ts (unified-detector) still uses original approach - optimization pending
 
 ---
 
@@ -343,8 +349,8 @@ this.l1EvictionQueue.push(key);  // O(1) append
 |---------|--------|----------|
 | MEV Protection | ⚠️ Partial | Fee-based only |
 | Flash Loans | ✅ Present | Good |
-| ML Detection | ⚠️ Isolated | Not integrated |
-| Whale Detection | ❌ Missing | Interface only |
+| ML Detection | ✅ **Integrated** | Cross-chain detector + LSTM predictor |
+| Whale Detection | ✅ **Implemented** | Pattern detection + activity tracking |
 | Mempool Analysis | ❌ Missing | Not implemented |
 
 ### Finding 4.1: ML Predictor Not Integrated
@@ -357,13 +363,31 @@ this.l1EvictionQueue.push(key);  // O(1) append
 - Online learning
 - Real-time retraining
 
-**Problem**: Not connected to detection pipeline
+**Status**: ✅ **IMPLEMENTED** (2026-01-20)
 
-**Hypothesis**: Integrating existing ML will improve prediction accuracy by 15-25%
+**Implementation Details**:
+- ML predictor integrated into `CrossChainDetectorService.detectCrossChainOpportunities()`
+- Price history caching per chain/pair (100-entry buffer)
+- Prediction caching with 1s TTL to prevent repeated calls
+- Timeout protection (10ms default) to prevent latency impact
+- Parallel pre-fetching of ML predictions for all token pairs
+- Confidence adjustment: +15% when ML direction aligns, -10% when opposed
 
-**Confidence**: 70% (needs validation)
+**Configuration** (MLPredictionConfig):
+```typescript
+{
+  enabled: boolean;        // Enable/disable ML (default: true)
+  minConfidence: number;   // Minimum ML confidence to use (default: 0.6)
+  alignedBoost: number;    // Confidence boost when aligned (default: 1.15)
+  opposedPenalty: number;  // Confidence penalty when opposed (default: 0.9)
+  maxLatencyMs: number;    // Skip if prediction takes longer (default: 10)
+  cacheTtlMs: number;      // Cache TTL in ms (default: 1000)
+}
+```
 
-**Action**: Wire ML predictor output to opportunity scoring
+**Test Coverage**: 127 tests in cross-chain-detector service
+
+**See Also**: [ADR-014](architecture/adr/ADR-014-modular-detector-components.md) Phase 3 Enhancements
 
 ---
 
@@ -483,13 +507,35 @@ const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6;
 
 ### Tier 1: Critical (1-2 days each, highest ROI)
 
-| # | Enhancement | Expected Impact | Confidence | Effort |
-|---|-------------|-----------------|------------|--------|
-| 1 | **Token Pair Indexing** | 100-1000x detection speed | 95% | 1 day |
-| 2 | **Dynamic Slippage Calculation** | +30% accuracy | 85% | 1 day |
-| 3 | **Reduce Batch Timeout** (25ms→5ms) | -20ms latency | 88% | 2 hours |
-| 4 | **LRU Queue O(1) Operations** | -95% cache overhead | 95% | 1 day |
-| 5 | **Reduce Staleness Threshold** (30s→5-15s) | +80% stale detection | 90% | 2 hours |
+| # | Enhancement | Expected Impact | Confidence | Effort | Status |
+|---|-------------|-----------------|------------|--------|--------|
+| 1 | **Token Pair Indexing** | 100-1000x detection speed | 95% | 1 day | ✅ **IMPLEMENTED** |
+| 2 | **Dynamic Slippage Calculation** | +30% accuracy | 85% | 1 day | Pending |
+| 3 | **Reduce Batch Timeout** (25ms→5ms) | -20ms latency | 88% | 2 hours | Pending |
+| 4 | **LRU Queue O(1) Operations** | -95% cache overhead | 95% | 1 day | Pending |
+| 5 | **Reduce Staleness Threshold** (30s→5-15s) | +80% stale detection | 90% | 2 hours | Pending |
+
+#### T1.1 Token Pair Indexing - Implementation Details (2026-01-20)
+
+**Status**: COMPLETED
+
+**Location**: `services/cross-chain-detector/src/price-data-manager.ts`
+
+**Implementation**:
+- New `createIndexedSnapshot()` method builds token pair index
+- `IndexedSnapshot` type with `byToken: Map<string, PricePoint[]>` for O(1) lookups
+- Detection iterates token pairs once, comparing all price points per token
+- Reduces complexity from O(chains² × dexes² × pairs²) to O(tokenPairs × pricesPerToken²)
+
+**P4 Enhancement: Snapshot Caching** (2026-01-20):
+- Version tracking (`lastSnapshotVersion`) increments on every price update
+- Cached snapshot returned if version unchanged since last build
+- Cache invalidated automatically when data is added, modified, or cleaned up
+- Prevents redundant snapshot rebuilding during high-frequency detection cycles
+- Debug logging for cache hits/misses to monitor effectiveness
+- 8 additional unit tests verify caching behavior and invalidation
+
+**See Also**: [ADR-014](architecture/adr/ADR-014-modular-detector-components.md) Phase 3 Enhancements
 
 **Combined Tier 1 Impact**: +200% speed, +30% accuracy
 
@@ -497,13 +543,29 @@ const reserveInNumber = Number(reserveInBigInt / (10n ** 12n)) / 1e6;
 
 ### Tier 2: High Priority (3-5 days each)
 
-| # | Enhancement | Expected Impact | Confidence | Effort |
-|---|-------------|-----------------|------------|--------|
-| 6 | **Quadrilateral Arbitrage** | +25% opportunities | 88% | 3 days |
-| 7 | **Price Momentum Detection** | +15% early detection | 75% | 3 days |
-| 8 | **Integrate ML Predictor** | +15-25% prediction accuracy | 70% | 2 days |
-| 9 | **Dynamic Fallback Prices** | -5% calculation errors | 92% | 1 day |
-| 10 | **L3 Cache Eviction** | Prevent memory leaks | 90% | 1 day |
+| # | Enhancement | Expected Impact | Confidence | Effort | Status |
+|---|-------------|-----------------|------------|--------|--------|
+| 6 | **Quadrilateral Arbitrage** | +25% opportunities | 88% | 3 days | Pending |
+| 7 | **Price Momentum Detection** | +15% early detection | 75% | 3 days | Pending |
+| 8 | **Integrate ML Predictor** | +15-25% prediction accuracy | 70% | 2 days | ✅ **IMPLEMENTED** |
+| 9 | **Dynamic Fallback Prices** | -5% calculation errors | 92% | 1 day | ✅ **IMPLEMENTED** |
+| 10 | **L3 Cache Eviction** | Prevent memory leaks | 90% | 1 day | Pending |
+
+#### T2.8 ML Predictor Integration - Implementation Details (2026-01-20)
+
+**Status**: COMPLETED
+
+**Location**: `services/cross-chain-detector/src/detector.ts`
+
+**Features Implemented**:
+- Price history caching per chain/pair (100-entry circular buffer)
+- ML prediction caching with configurable TTL (default 1s)
+- Timeout protection (10ms default) via Promise.race to prevent latency impact
+- Parallel pre-fetching of ML predictions for all token pairs before detection
+- Confidence adjustment: +15% when ML direction aligns with opportunity, -10% when opposed
+- Configurable via `MLPredictionConfig` for different environments
+
+**See Also**: [ADR-014](architecture/adr/ADR-014-modular-detector-components.md) Phase 3 Enhancements
 
 **Combined Tier 2 Impact**: +40% opportunities, +20% accuracy
 

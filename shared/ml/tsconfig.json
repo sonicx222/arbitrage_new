@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@arbitrage/core": ["../core/src"],
+      "@arbitrage/core/*": ["../core/src/*"],
+      "@arbitrage/types": ["../types/src"],
+      "@arbitrage/types/*": ["../types/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../types" }
+  ]
+}
