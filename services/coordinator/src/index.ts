@@ -26,8 +26,33 @@ import type { CrossRegionHealthConfig } from '@arbitrage/core';
 const logger = createLogger('coordinator');
 
 /**
+ * FIX: Helper to parse and validate numeric environment variables.
+ * Throws descriptive error if value is invalid or out of range.
+ */
+function parseEnvInt(
+  name: string,
+  defaultValue: number,
+  min: number,
+  max: number
+): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) {
+    throw new Error(`Invalid ${name}: "${raw}" is not a valid integer`);
+  }
+  if (parsed < min || parsed > max) {
+    throw new Error(`Invalid ${name}: ${parsed} is out of range [${min}, ${max}]`);
+  }
+  return parsed;
+}
+
+/**
  * Parse standby configuration from environment variables.
  * Returns configuration object for coordinator and cross-region health.
+ *
+ * FIX: Added validation for numeric env vars to catch misconfigurations early.
  */
 function getStandbyConfigFromEnv() {
   const isStandby = process.env.IS_STANDBY === 'true';
@@ -36,15 +61,23 @@ function getStandbyConfigFromEnv() {
   const instanceRole = process.env.INSTANCE_ROLE || (isStandby ? 'standby' : 'primary');
   const serviceName = process.env.SERVICE_NAME || 'coordinator';
 
-  // Leader election settings
+  // Leader election settings with validation
   const leaderLockKey = process.env.LEADER_LOCK_KEY || 'coordinator:leader:lock';
-  const leaderLockTtlMs = parseInt(process.env.LEADER_LOCK_TTL_MS || '30000', 10);
-  const leaderHeartbeatIntervalMs = parseInt(process.env.LEADER_HEARTBEAT_INTERVAL_MS || '10000', 10);
+  const leaderLockTtlMs = parseEnvInt('LEADER_LOCK_TTL_MS', 30000, 5000, 300000);
+  const leaderHeartbeatIntervalMs = parseEnvInt('LEADER_HEARTBEAT_INTERVAL_MS', 10000, 1000, 60000);
 
-  // Health check settings
-  const healthCheckIntervalMs = parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '10000', 10);
-  const failoverThreshold = parseInt(process.env.FAILOVER_THRESHOLD || '3', 10);
-  const failoverTimeoutMs = parseInt(process.env.FAILOVER_TIMEOUT_MS || '60000', 10);
+  // Health check settings with validation
+  const healthCheckIntervalMs = parseEnvInt('HEALTH_CHECK_INTERVAL_MS', 10000, 1000, 60000);
+  const failoverThreshold = parseEnvInt('FAILOVER_THRESHOLD', 3, 1, 10);
+  const failoverTimeoutMs = parseEnvInt('FAILOVER_TIMEOUT_MS', 60000, 10000, 300000);
+
+  // Validate heartbeat is less than lock TTL (per ADR-007: should be ~1/3 of TTL)
+  if (leaderHeartbeatIntervalMs >= leaderLockTtlMs) {
+    throw new Error(
+      `Invalid configuration: LEADER_HEARTBEAT_INTERVAL_MS (${leaderHeartbeatIntervalMs}) ` +
+      `must be less than LEADER_LOCK_TTL_MS (${leaderLockTtlMs})`
+    );
+  }
 
   return {
     isStandby,
@@ -64,7 +97,8 @@ function getStandbyConfigFromEnv() {
 async function main() {
   try {
     const standbyConfig = getStandbyConfigFromEnv();
-    const port = parseInt(process.env.PORT || '3000', 10);
+    // FIX: Validate PORT env var
+    const port = parseEnvInt('PORT', 3000, 1, 65535);
 
     logger.info('Starting Coordinator Service', {
       isStandby: standbyConfig.isStandby,
@@ -112,8 +146,22 @@ async function main() {
     // Start cross-region health manager
     await crossRegionManager.start();
 
+    // FIX: Add explicit types for event handlers to satisfy strict TypeScript
+    interface LeaderChangeEvent {
+      type: string;
+      targetRegion: string;
+      sourceRegion: string;
+    }
+
+    interface FailoverEvent {
+      sourceRegion: string;
+      targetRegion: string;
+      services?: string[];
+      durationMs?: number;
+    }
+
     // Wire up failover events
-    crossRegionManager.on('leaderChange', (event) => {
+    crossRegionManager.on('leaderChange', (event: LeaderChangeEvent) => {
       logger.info('Leader change event received', {
         type: event.type,
         targetRegion: event.targetRegion,
@@ -121,7 +169,7 @@ async function main() {
       });
     });
 
-    crossRegionManager.on('failoverStarted', (event) => {
+    crossRegionManager.on('failoverStarted', (event: FailoverEvent) => {
       logger.warn('Failover started', {
         sourceRegion: event.sourceRegion,
         targetRegion: event.targetRegion,
@@ -129,7 +177,7 @@ async function main() {
       });
     });
 
-    crossRegionManager.on('failoverCompleted', (event) => {
+    crossRegionManager.on('failoverCompleted', (event: FailoverEvent) => {
       logger.info('Failover completed', {
         sourceRegion: event.sourceRegion,
         targetRegion: event.targetRegion,

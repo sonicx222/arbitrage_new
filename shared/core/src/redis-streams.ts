@@ -303,7 +303,9 @@ export class RedisStreamsClient {
     OPPORTUNITIES: 'stream:opportunities',
     WHALE_ALERTS: 'stream:whale-alerts',
     VOLUME_AGGREGATES: 'stream:volume-aggregates',
-    HEALTH: 'stream:health'
+    HEALTH: 'stream:health',
+    // FIX: Added for coordinator to forward opportunities to execution engine
+    EXECUTION_REQUESTS: 'stream:execution-requests'
   } as const;
 
   /**
@@ -316,7 +318,8 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.OPPORTUNITIES]: 10000,     // Lower volume, important data
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
-    [RedisStreamsClient.STREAMS.HEALTH]: 1000              // Health checks, short history
+    [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
+    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 5000  // Execution requests, critical for trading
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {

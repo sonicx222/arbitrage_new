@@ -83,10 +83,20 @@ export interface CoordinatorStateProvider {
 }
 
 /**
- * Minimal logger interface for route handlers.
+ * Logger interface for route handlers and coordinator internals.
+ * FIX: Consolidated Logger interface (previously duplicated in coordinator.ts)
  */
 export interface RouteLogger {
   info: (message: string, meta?: unknown) => void;
   error: (message: string, meta?: unknown) => void;
   warn: (message: string, meta?: unknown) => void;
+  debug?: (message: string, meta?: unknown) => void; // Optional for routes, required for coordinator
+}
+
+/**
+ * FIX: Full logger interface with required debug method.
+ * Used by CoordinatorService for internal logging.
+ */
+export interface Logger extends RouteLogger {
+  debug: (message: string, meta?: unknown) => void;
 }
