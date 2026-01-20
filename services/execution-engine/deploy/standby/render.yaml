@@ -1,0 +1,123 @@
+# Render Deployment Configuration for Executor Standby
+# Region: Ohio (us-east)
+#
+# Standby executor that runs in simulation mode until activated.
+# Takes over real execution when primary fails.
+#
+# Deploy: Link this repo to Render and use this file as blueprint
+#
+# @see ADR-007: Cross-Region Failover Strategy
+# @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4
+
+services:
+  - type: web
+    name: executor-standby
+    # Runtime environment
+    runtime: node
+    # Region: Ohio (closest to us-east1)
+    region: ohio
+    # Plan: Starter for cost efficiency (can scale on activation)
+    plan: starter
+    # Build configuration
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    # Dockerfile path (alternative to buildCommand)
+    # dockerfilePath: ./services/execution-engine/deploy/standby/Dockerfile.standby
+    # dockerContext: .
+
+    # Health check configuration
+    healthCheckPath: /health
+
+    # Auto-deploy disabled for standby (manual activation)
+    autoDeploy: false
+
+    # Branch to deploy from
+    branch: main
+
+    # Root directory
+    rootDir: services/execution-engine
+
+    # Environment variables
+    envVars:
+      # Node.js configuration
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+
+      # Standby mode configuration
+      - key: IS_STANDBY
+        value: 'true'
+      - key: INSTANCE_ROLE
+        value: standby
+      - key: SERVICE_NAME
+        value: executor-standby
+      - key: REGION_ID
+        value: us-east1
+      - key: PROVIDER
+        value: render
+
+      # CRITICAL: Simulation mode for safety
+      # NOTE: Code reads EXECUTION_SIMULATION_MODE (prefixed)
+      - key: EXECUTION_SIMULATION_MODE
+        value: 'true'
+      # COMPLETED S4.1.5: Activation logic implemented in engine.ts:activate()
+      # activationDisablesSimulation is set to true by default in standbyConfig
+
+      # Failover configuration
+      - key: FAILOVER_ACTIVATION_ENDPOINT
+        sync: false  # Set manually or via secret
+      - key: FAILOVER_TIMEOUT_MS
+        value: '60000'
+
+      # Queue configuration
+      - key: QUEUE_PAUSED_ON_START
+        value: 'true'
+
+      # Health check port
+      - key: HEALTH_CHECK_PORT
+        value: '10000'
+      - key: PORT
+        value: '10000'
+
+      # Redis connection (from secret group or manual)
+      - key: REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+
+      # Wallet/MEV configuration (secrets)
+      - key: PRIVATE_KEY
+        sync: false
+      - key: FLASHBOTS_AUTH_KEY
+        sync: false
+
+    # Scaling configuration
+    scaling:
+      # Minimum instances: 1 (always warm for fast failover)
+      minInstances: 1
+      # Maximum instances: 1 (only one standby needed)
+      maxInstances: 1
+      # Target CPU utilization (not used with fixed instance count)
+      targetCPUPercent: 75
+      # Target memory utilization
+      targetMemoryPercent: 80
+
+    # Disk configuration (if needed for logs)
+    # disk:
+    #   name: executor-standby-disk
+    #   mountPath: /var/log/executor
+    #   sizeGB: 1
+
+# Environment groups for shared secrets
+# envVarGroups:
+#   - name: redis-secrets
+#     envVars:
+#       - key: REDIS_URL
+#         value: redis://default:xxx@xxx.upstash.io:6379
+#   - name: wallet-secrets
+#     envVars:
+#       - key: PRIVATE_KEY
+#         value: 0x...

@@ -1,0 +1,137 @@
+# GCP Cloud Run Configuration for Coordinator Standby
+# Region: us-central1
+#
+# Standby coordinator that monitors primary via Redis and
+# acquires leadership on primary failure (ADR-007).
+#
+# Deploy command:
+#   gcloud run services replace cloudrun.yaml --region=us-central1
+#
+# @see ADR-007: Cross-Region Failover Strategy
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: coordinator-standby
+  annotations:
+    # Region deployment
+    run.googleapis.com/launch-stage: GA
+    # Ingress settings - allow all traffic (internal load balancer)
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scaling configuration for standby
+        # min=0: Scale to zero when idle (cost efficient)
+        # max=1: Only one standby instance needed
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '1'
+        # Startup CPU boost for faster cold start
+        run.googleapis.com/startup-cpu-boost: 'true'
+        # Execution environment (gen2 for better performance)
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      # Service account with Redis/Secret Manager access
+      # serviceAccountName: coordinator-standby@YOUR_PROJECT.iam.gserviceaccount.com
+
+      # Timeout for requests (standby activation can take time)
+      containerConcurrency: 80
+      timeoutSeconds: 300
+
+      containers:
+        - image: gcr.io/YOUR_PROJECT/coordinator-standby:latest
+          name: coordinator-standby
+
+          # Resource limits (standby needs minimal resources)
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+            requests:
+              cpu: '0.25'
+              memory: 256Mi
+
+          # Port configuration
+          ports:
+            - name: http1
+              containerPort: 3000
+
+          # Environment variables
+          env:
+            # Standby mode configuration
+            - name: IS_STANDBY
+              value: 'true'
+            - name: CAN_BECOME_LEADER
+              value: 'true'
+            - name: INSTANCE_ROLE
+              value: 'standby'
+            - name: SERVICE_NAME
+              value: 'coordinator-standby'
+            - name: REGION_ID
+              value: 'us-central1'
+
+            # Leader election (ADR-007)
+            - name: LEADER_LOCK_KEY
+              value: 'coordinator:leader:lock'
+            - name: LEADER_LOCK_TTL_MS
+              value: '30000'
+            - name: LEADER_HEARTBEAT_INTERVAL_MS
+              value: '10000'
+
+            # Failover settings
+            - name: HEALTH_CHECK_INTERVAL_MS
+              value: '10000'
+            - name: FAILOVER_THRESHOLD
+              value: '3'
+            - name: FAILOVER_TIMEOUT_MS
+              value: '60000'
+
+            # Redis connection (from Secret Manager)
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: redis-url
+                  key: latest
+
+            # Node.js settings
+            - name: NODE_ENV
+              value: 'production'
+            - name: LOG_LEVEL
+              value: 'info'
+            - name: PORT
+              value: '3000'
+
+          # Startup probe for fast activation
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+            timeoutSeconds: 5
+
+          # Liveness probe
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          # Readiness probe
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 2
+            timeoutSeconds: 5
+
+  traffic:
+    - percent: 100
+      latestRevision: true

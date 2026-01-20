@@ -107,6 +107,10 @@ interface CoordinatorConfig {
   leaderElection: LeaderElectionConfig;
   consumerGroup: string;
   consumerId: string;
+  // Standby configuration (ADR-007)
+  isStandby?: boolean;
+  canBecomeLeader?: boolean;
+  regionId?: string;
 }
 
 // P2 FIX: Proper type for stream messages with typed data access
@@ -236,7 +240,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
         ...config?.leaderElection
       },
       consumerGroup: config?.consumerGroup || 'coordinator-group',
-      consumerId: config?.consumerId || instanceId
+      consumerId: config?.consumerId || instanceId,
+      // Standby configuration (ADR-007)
+      isStandby: config?.isStandby ?? false,
+      canBecomeLeader: config?.canBecomeLeader ?? true,
+      regionId: config?.regionId
     };
 
     // Define consumer groups for all streams we need to consume
@@ -467,6 +475,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   private async tryAcquireLeadership(): Promise<boolean> {
     if (!this.redis) return false;
+
+    // ADR-007: Respect standby configuration - don't acquire leadership if not allowed
+    if (!this.config.canBecomeLeader) {
+      this.logger.debug('Cannot become leader - canBecomeLeader is false');
+      return false;
+    }
+
+    // ADR-007: Standby instances should not proactively acquire leadership
+    // They wait for CrossRegionHealthManager to signal activation
+    if (this.config.isStandby) {
+      this.logger.debug('Standby instance - waiting for activation signal');
+      return false;
+    }
 
     try {
       const { lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
@@ -1464,5 +1485,72 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   getLogger(): RouteLogger {
     return this.logger;
+  }
+
+  // ===========================================================================
+  // Standby Configuration Getters (ADR-007)
+  // ===========================================================================
+
+  getIsStandby(): boolean {
+    return this.config.isStandby ?? false;
+  }
+
+  getCanBecomeLeader(): boolean {
+    return this.config.canBecomeLeader ?? true;
+  }
+
+  getRegionId(): string | undefined {
+    return this.config.regionId;
+  }
+
+  /**
+   * Activate a standby coordinator to become the active leader.
+   * This is called when CrossRegionHealthManager signals activation.
+   *
+   * @returns Promise<boolean> - true if activation succeeded
+   */
+  async activateStandby(): Promise<boolean> {
+    if (!this.config.isStandby) {
+      this.logger.warn('activateStandby called on non-standby instance');
+      return false;
+    }
+
+    if (!this.config.canBecomeLeader) {
+      this.logger.error('Cannot activate - canBecomeLeader is false');
+      return false;
+    }
+
+    this.logger.warn('🚀 ACTIVATING STANDBY COORDINATOR', {
+      instanceId: this.config.leaderElection.instanceId,
+      regionId: this.config.regionId,
+      previousIsLeader: this.isLeader
+    });
+
+    // Temporarily allow leadership acquisition
+    const originalIsStandby = this.config.isStandby;
+    this.config.isStandby = false;
+
+    try {
+      // Force attempt to acquire leadership
+      const acquired = await this.tryAcquireLeadership();
+
+      if (acquired) {
+        this.logger.warn('✅ STANDBY COORDINATOR ACTIVATED - Now leader', {
+          instanceId: this.config.leaderElection.instanceId,
+          regionId: this.config.regionId
+        });
+        return true;
+      } else {
+        // Restore standby state if we couldn't acquire
+        this.config.isStandby = originalIsStandby;
+        this.logger.error('Failed to acquire leadership during activation');
+        return false;
+      }
+
+    } catch (error) {
+      this.config.isStandby = originalIsStandby;
+      this.logger.error('Error during standby activation', { error });
+      return false;
+    }
   }
 }

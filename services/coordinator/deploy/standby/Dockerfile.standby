@@ -1,0 +1,123 @@
+# Coordinator Standby Service Dockerfile
+# Deployment: GCP Cloud Run (us-central1)
+#
+# This is the standby coordinator that monitors the primary and takes over
+# leadership via Redis distributed lock on primary failure.
+#
+# @see ADR-007: Cross-Region Failover Strategy
+# @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4
+#
+# Multi-stage build for optimized image size
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy workspace files
+COPY package*.json ./
+COPY tsconfig*.json ./
+
+# Copy shared packages
+COPY shared/ ./shared/
+
+# Copy coordinator service files
+COPY services/coordinator/ ./services/coordinator/
+
+# Install dependencies
+RUN npm install
+
+# Build shared packages first
+WORKDIR /app/shared/types
+RUN npm run build || true
+
+WORKDIR /app/shared/config
+RUN npm run build || true
+
+WORKDIR /app/shared/core
+RUN npm run build || true
+
+# Build coordinator service
+WORKDIR /app/services/coordinator
+RUN npm run build
+
+# Production image
+FROM node:20-alpine AS production
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /app/services/coordinator/dist ./dist
+COPY --from=builder /app/services/coordinator/package*.json ./
+COPY --from=builder /app/shared ./shared
+
+# Install production dependencies only
+RUN npm install --production
+
+# ============================================================================
+# Standby Configuration (ADR-007)
+# ============================================================================
+#
+# COMPLETED S4.1.5: CrossRegionHealthManager integration implemented.
+# The coordinator service now reads these env vars via getStandbyConfigFromEnv():
+# - IS_STANDBY: Marks this instance as standby (won't proactively acquire leadership)
+# - CAN_BECOME_LEADER: Controls whether this instance can acquire leadership
+# - REGION_ID: Region identifier for cross-region health monitoring
+# - LEADER_LOCK_*: Leader election settings passed to Redis distributed lock
+#
+# See: services/coordinator/src/index.ts for the integration
+# See: shared/core/src/monitoring/cross-region-health.ts for the CrossRegionHealthManager
+#
+
+# Core standby settings
+ENV NODE_ENV=production
+ENV LOG_LEVEL=info
+
+# Standby mode configuration
+ENV IS_STANDBY=true
+ENV CAN_BECOME_LEADER=true
+ENV INSTANCE_ROLE=standby
+
+# Region configuration (GCP US-Central1)
+ENV REGION_ID=us-central1
+ENV SERVICE_NAME=coordinator-standby
+ENV PROVIDER=gcp
+
+# Leader election settings (ADR-007)
+# Lock TTL: 30s, Heartbeat: 10s (1/3 of TTL)
+ENV LEADER_LOCK_KEY=coordinator:leader:lock
+ENV LEADER_LOCK_TTL_MS=30000
+ENV LEADER_HEARTBEAT_INTERVAL_MS=10000
+
+# Failover configuration (ADR-007: <60s total)
+# Detection: 30s (3 failures x 10s health check)
+# Election: 10s
+# Activation: 20s
+ENV HEALTH_CHECK_INTERVAL_MS=10000
+ENV FAILOVER_THRESHOLD=3
+ENV FAILOVER_TIMEOUT_MS=60000
+
+# HTTP port
+ENV PORT=3000
+
+# Health check
+# Check /api/health endpoint (returns 200 for healthy/degraded)
+HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+
+# Run as non-root user for security
+RUN addgroup -g 1001 -S nodejs && adduser -S coordinator -u 1001
+USER coordinator
+
+# Expose HTTP API port
+EXPOSE 3000
+
+# Labels for deployment tracking
+LABEL maintainer="arbitrage-team"
+LABEL service="coordinator-standby"
+LABEL service.role="standby"
+LABEL service.region="us-central1"
+LABEL service.provider="gcp"
+LABEL adr.reference="ADR-007"
+
+# Start coordinator service
+CMD ["node", "dist/index.js"]

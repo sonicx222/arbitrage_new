@@ -1,0 +1,107 @@
+# Executor Standby Service Dockerfile
+# Deployment: Render (us-east1/ohio)
+#
+# This is the standby executor that runs in simulation mode until activated.
+# On primary failure, it disables simulation mode and takes over execution.
+#
+# @see ADR-007: Cross-Region Failover Strategy
+# @see IMPLEMENTATION_PLAN.md Sprint 4, Task S4.1.4
+#
+# Multi-stage build for optimized image size
+
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy workspace files
+COPY package*.json ./
+COPY tsconfig*.json ./
+
+# Copy shared packages
+COPY shared/ ./shared/
+
+# Copy execution engine service files
+COPY services/execution-engine/ ./services/execution-engine/
+
+# Install dependencies
+RUN npm install
+
+# Build shared packages first
+WORKDIR /app/shared/types
+RUN npm run build || true
+
+WORKDIR /app/shared/config
+RUN npm run build || true
+
+WORKDIR /app/shared/core
+RUN npm run build || true
+
+# Build execution engine service
+WORKDIR /app/services/execution-engine
+RUN npm run build
+
+# Production image
+FROM node:20-alpine AS production
+
+WORKDIR /app
+
+# Copy built files
+COPY --from=builder /app/services/execution-engine/dist ./dist
+COPY --from=builder /app/services/execution-engine/package*.json ./
+COPY --from=builder /app/shared ./shared
+
+# Install production dependencies only
+RUN npm install --production
+
+# ============================================================================
+# Standby Configuration (ADR-007)
+# ============================================================================
+
+# Core standby settings
+ENV NODE_ENV=production
+ENV LOG_LEVEL=info
+
+# Standby mode configuration
+ENV IS_STANDBY=true
+ENV INSTANCE_ROLE=standby
+
+# Region configuration (Render US-East/Ohio)
+ENV REGION_ID=us-east1
+ENV SERVICE_NAME=executor-standby
+ENV PROVIDER=render
+
+# CRITICAL: Start in simulation mode for safety
+# Real transactions only occur after activation
+# NOTE: Code reads EXECUTION_SIMULATION_MODE (prefixed)
+ENV EXECUTION_SIMULATION_MODE=true
+# COMPLETED S4.1.5: Activation logic implemented in engine.ts:activate()
+# activationDisablesSimulation is set to true by default in standbyConfig
+
+# Failover configuration (ADR-007: <60s total)
+ENV FAILOVER_ACTIVATION_ENDPOINT=https://coordinator.example.com/api/health
+ENV FAILOVER_TIMEOUT_MS=60000
+
+# Queue configuration (ready but not processing until activated)
+ENV QUEUE_PAUSED_ON_START=true
+
+# Health check port (internal)
+ENV HEALTH_CHECK_PORT=10000
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "const h=require('http');h.get('http://localhost:10000/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
+# Run as non-root user for security
+RUN addgroup -g 1001 -S nodejs && adduser -S executor -u 1001
+USER executor
+
+# Labels for deployment tracking
+LABEL maintainer="arbitrage-team"
+LABEL service="executor-standby"
+LABEL service.role="standby"
+LABEL service.region="us-east1"
+LABEL service.provider="render"
+LABEL adr.reference="ADR-007"
+
+# Start execution engine service
+CMD ["node", "dist/index.js"]

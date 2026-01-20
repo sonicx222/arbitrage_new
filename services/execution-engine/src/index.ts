@@ -1,7 +1,25 @@
-// Execution Engine Service Entry Point
+/**
+ * Execution Engine Service Entry Point
+ *
+ * Reads standby configuration from environment variables and initializes
+ * the execution engine with proper failover settings (ADR-007).
+ *
+ * Environment Variables:
+ * - IS_STANDBY: Whether this instance is a standby (default: false)
+ * - QUEUE_PAUSED_ON_START: Whether queue starts paused (default: false)
+ * - REGION_ID: Region identifier for this instance (default: 'us-east1')
+ * - EXECUTION_SIMULATION_MODE: Whether simulation mode is enabled
+ *
+ * @see ADR-007: Cross-Region Failover Strategy
+ */
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { ExecutionEngineService, SimulationConfig } from './engine';
-import { createLogger } from '@arbitrage/core';
+import {
+  createLogger,
+  getCrossRegionHealthManager,
+  resetCrossRegionHealthManager
+} from '@arbitrage/core';
+import type { CrossRegionHealthConfig } from '@arbitrage/core';
 
 const logger = createLogger('execution-engine');
 
@@ -29,6 +47,35 @@ function getSimulationConfigFromEnv(): SimulationConfig | undefined {
     gasCostMultiplier: parseFloat(process.env.EXECUTION_SIMULATION_GAS_COST_MULTIPLIER || '0.1'),
     profitVariance: parseFloat(process.env.EXECUTION_SIMULATION_PROFIT_VARIANCE || '0.2'),
     logSimulatedExecutions: process.env.EXECUTION_SIMULATION_LOG !== 'false'
+  };
+}
+
+/**
+ * Parse standby configuration from environment variables (ADR-007).
+ */
+function getStandbyConfigFromEnv() {
+  const isStandby = process.env.IS_STANDBY === 'true';
+  const queuePausedOnStart = process.env.QUEUE_PAUSED_ON_START === 'true';
+  const regionId = process.env.REGION_ID || 'us-east1';
+  const serviceName = process.env.SERVICE_NAME || 'execution-engine';
+
+  // Health check settings for cross-region monitoring
+  const healthCheckIntervalMs = parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '10000', 10);
+  const failoverThreshold = parseInt(process.env.FAILOVER_THRESHOLD || '3', 10);
+  const failoverTimeoutMs = parseInt(process.env.FAILOVER_TIMEOUT_MS || '60000', 10);
+  const leaderHeartbeatIntervalMs = parseInt(process.env.LEADER_HEARTBEAT_INTERVAL_MS || '10000', 10);
+  const leaderLockTtlMs = parseInt(process.env.LEADER_LOCK_TTL_MS || '30000', 10);
+
+  return {
+    isStandby,
+    queuePausedOnStart,
+    regionId,
+    serviceName,
+    healthCheckIntervalMs,
+    failoverThreshold,
+    failoverTimeoutMs,
+    leaderHeartbeatIntervalMs,
+    leaderLockTtlMs
   };
 }
 
@@ -103,23 +150,95 @@ function createHealthServer(engine: ExecutionEngineService): Server {
 async function main() {
   try {
     const simulationConfig = getSimulationConfigFromEnv();
+    const standbyConfig = getStandbyConfigFromEnv();
 
     logger.info('Starting Execution Engine Service', {
       simulationMode: simulationConfig?.enabled ?? false,
+      isStandby: standbyConfig.isStandby,
+      queuePausedOnStart: standbyConfig.queuePausedOnStart,
+      regionId: standbyConfig.regionId,
       healthCheckPort: HEALTH_CHECK_PORT
     });
 
+    // Generate unique instance ID
+    const instanceId = `execution-engine-${standbyConfig.regionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+
     const engine = new ExecutionEngineService({
-      simulationConfig
+      simulationConfig,
+      standbyConfig: {
+        isStandby: standbyConfig.isStandby,
+        queuePausedOnStart: standbyConfig.queuePausedOnStart,
+        activationDisablesSimulation: true, // Default behavior for standby activation
+        regionId: standbyConfig.regionId
+      }
     });
+
+    // Initialize CrossRegionHealthManager for cross-region failover (ADR-007)
+    // Only initialize if running as standby to avoid unnecessary overhead
+    let crossRegionManager: ReturnType<typeof getCrossRegionHealthManager> | null = null;
+    if (standbyConfig.isStandby) {
+      const crossRegionConfig: CrossRegionHealthConfig = {
+        instanceId,
+        regionId: standbyConfig.regionId,
+        serviceName: standbyConfig.serviceName,
+        healthCheckIntervalMs: standbyConfig.healthCheckIntervalMs,
+        failoverThreshold: standbyConfig.failoverThreshold,
+        failoverTimeoutMs: standbyConfig.failoverTimeoutMs,
+        leaderHeartbeatIntervalMs: standbyConfig.leaderHeartbeatIntervalMs,
+        leaderLockTtlMs: standbyConfig.leaderLockTtlMs,
+        canBecomeLeader: true, // Standby executor can become leader on failover
+        isStandby: standbyConfig.isStandby
+      };
+
+      crossRegionManager = getCrossRegionHealthManager(crossRegionConfig);
+
+      // Wire up failover events
+      crossRegionManager.on('activateStandby', async (event: { failedRegion: string; timestamp: number }) => {
+        logger.warn('Standby activation triggered by CrossRegionHealthManager', {
+          failedRegion: event.failedRegion
+        });
+        const activated = await engine.activate();
+        if (activated) {
+          logger.info('Executor successfully activated');
+        } else {
+          logger.error('Failed to activate executor');
+        }
+      });
+
+      crossRegionManager.on('failoverStarted', (event) => {
+        logger.warn('Failover started', {
+          sourceRegion: event.sourceRegion,
+          targetRegion: event.targetRegion,
+          services: event.services
+        });
+      });
+
+      crossRegionManager.on('failoverCompleted', (event) => {
+        logger.info('Failover completed', {
+          sourceRegion: event.sourceRegion,
+          targetRegion: event.targetRegion,
+          durationMs: event.durationMs
+        });
+      });
+
+      // Start cross-region health manager
+      await crossRegionManager.start();
+      logger.info('CrossRegionHealthManager started for standby executor');
+    }
 
     // Start health server first
     healthServer = createHealthServer(engine);
 
     await engine.start();
 
-    const shutdown = async () => {
-      logger.info('Shutting down gracefully');
+    const shutdown = async (signal: string) => {
+      logger.info(`Received ${signal}, shutting down gracefully`);
+
+      // Stop cross-region health manager if running
+      if (crossRegionManager) {
+        await resetCrossRegionHealthManager();
+      }
+
       if (healthServer) {
         healthServer.close();
       }
@@ -127,10 +246,16 @@ async function main() {
       process.exit(0);
     };
 
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 
-    logger.info('Execution Engine Service is running');
+    logger.info('Execution Engine Service is running', {
+      isStandby: standbyConfig.isStandby,
+      simulationMode: engine.getIsSimulationMode(),
+      queuePaused: engine.isQueuePaused(),
+      regionId: standbyConfig.regionId,
+      instanceId
+    });
 
   } catch (error) {
     logger.error('Failed to start Execution Engine Service', { error });
