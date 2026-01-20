@@ -1,13 +1,31 @@
 // Graceful Degradation System
 // Allows services to continue operating with reduced functionality during failures
+//
+// S4.1.3-FIX (Option A): Unified DegradationLevel enum with cross-region-health.ts
+// This aligns with ADR-007 which defines the canonical degradation levels.
 
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+// S4.1.3-FIX: Import canonical DegradationLevel enum from cross-region-health (ADR-007)
+import { DegradationLevel } from '../monitoring/cross-region-health';
 
 const logger = createLogger('graceful-degradation');
 
-export interface DegradationLevel {
+// Re-export for convenience so consumers can import from resilience module
+export { DegradationLevel };
+
+/**
+ * S4.1.3-FIX: Renamed from DegradationLevel to DegradationLevelConfig to avoid
+ * conflict with the canonical DegradationLevel enum from ADR-007.
+ *
+ * This interface provides detailed configuration for each degradation level,
+ * including which features are enabled/disabled and recovery priority.
+ */
+export interface DegradationLevelConfig {
+  /** Canonical degradation level from ADR-007 enum */
+  level: DegradationLevel;
+  /** Human-readable name for this configuration */
   name: string;
   description: string;
   enabledFeatures: string[];
@@ -20,13 +38,15 @@ export interface ServiceCapability {
   name: string;
   required: boolean; // If true, service cannot operate without this
   fallback?: any;    // Fallback implementation when capability fails
-  degradationLevel: string; // Which degradation level to apply
+  /** S4.1.3-FIX: Use canonical DegradationLevel enum instead of string */
+  degradationLevel: DegradationLevel;
 }
 
 export interface DegradationState {
   serviceName: string;
-  currentLevel: DegradationLevel;
-  previousLevel?: DegradationLevel;
+  /** S4.1.3-FIX: Use DegradationLevelConfig for full config object */
+  currentLevel: DegradationLevelConfig;
+  previousLevel?: DegradationLevelConfig;
   triggeredBy: string; // What caused the degradation
   timestamp: number;
   canRecover: boolean;
@@ -42,10 +62,15 @@ export class GracefulDegradationManager {
   private redis = getRedisClient();
   // P1-15 FIX: Add Redis Streams client for ADR-002 compliance
   private streamsClient: RedisStreamsClient | null = null;
-  private degradationLevels = new Map<string, DegradationLevel>();
+  /** S4.1.3-FIX: Map stores DegradationLevelConfig (config objects), keyed by "serviceName:level" */
+  private degradationLevels = new Map<string, DegradationLevelConfig>();
   private serviceCapabilities = new Map<string, ServiceCapability[]>();
   private serviceStates = new Map<string, DegradationState>();
   private recoveryTimers = new Map<string, NodeJS.Timeout>();
+  // S4.1.3-FIX: Track in-progress recoveries to prevent race conditions
+  private recoveryInProgress = new Set<string>();
+  // S4.1.3-FIX: Injectable capability tester for deterministic testing
+  private capabilityTester?: (serviceName: string, capability: ServiceCapability) => Promise<boolean>;
 
   constructor() {
     this.initializeDefaultDegradationLevels();
@@ -95,10 +120,15 @@ export class GracefulDegradationManager {
     }
   }
 
-  // Register degradation levels for a service
-  registerDegradationLevels(serviceName: string, levels: DegradationLevel[]): void {
-    for (const level of levels) {
-      this.degradationLevels.set(`${serviceName}:${level.name}`, level);
+  /**
+   * Register degradation level configurations for a service.
+   * S4.1.3-FIX: Now accepts DegradationLevelConfig with canonical enum level.
+   * Key format: "serviceName:enumValue" (e.g., "bsc-detector:1" for REDUCED_CHAINS)
+   */
+  registerDegradationLevels(serviceName: string, levels: DegradationLevelConfig[]): void {
+    for (const levelConfig of levels) {
+      // S4.1.3-FIX: Key by enum value for type-safe lookup
+      this.degradationLevels.set(`${serviceName}:${levelConfig.level}`, levelConfig);
     }
     logger.info(`Registered ${levels.length} degradation levels for ${serviceName}`);
   }
@@ -127,35 +157,35 @@ export class GracefulDegradationManager {
       return false;
     }
 
-    // Determine appropriate degradation level
+    // S4.1.3-FIX: Determine appropriate degradation level using enum value
     const degradationKey = `${serviceName}:${capability.degradationLevel}`;
-    const degradationLevel = this.degradationLevels.get(degradationKey);
+    const degradationLevelConfig = this.degradationLevels.get(degradationKey);
 
-    if (!degradationLevel) {
-      logger.error(`Degradation level ${capability.degradationLevel} not found for ${serviceName}`);
+    if (!degradationLevelConfig) {
+      logger.error(`Degradation level ${DegradationLevel[capability.degradationLevel]} not found for ${serviceName}`);
       return false;
     }
 
-    // Check if already in this degradation state
+    // Check if already in this degradation state (compare by canonical enum level)
     const currentState = this.serviceStates.get(serviceName);
-    if (currentState?.currentLevel.name === degradationLevel.name) {
-      logger.debug(`Already in degradation level ${degradationLevel.name} for ${serviceName}`);
+    if (currentState?.currentLevel.level === degradationLevelConfig.level) {
+      logger.debug(`Already in degradation level ${degradationLevelConfig.name} for ${serviceName}`);
       return true;
     }
 
     // Apply degradation
     const newState: DegradationState = {
       serviceName,
-      currentLevel: degradationLevel,
+      currentLevel: degradationLevelConfig,
       previousLevel: currentState?.currentLevel,
       triggeredBy: failedCapability,
       timestamp: Date.now(),
       canRecover: true,
       recoveryAttempts: 0,
       metrics: {
-        performanceImpact: degradationLevel.performanceImpact,
+        performanceImpact: degradationLevelConfig.performanceImpact,
         errorRate: 0.1, // Estimate based on degradation
-        throughputReduction: degradationLevel.performanceImpact * 0.5
+        throughputReduction: degradationLevelConfig.performanceImpact * 0.5
       }
     };
 
@@ -165,27 +195,35 @@ export class GracefulDegradationManager {
     await this.notifyDegradation(serviceName, newState);
 
     // Apply the degradation changes
-    await this.applyDegradation(serviceName, degradationLevel);
+    await this.applyDegradation(serviceName, degradationLevelConfig);
 
     // Schedule recovery attempt
     this.scheduleRecovery(serviceName);
 
     logger.warn(`Applied graceful degradation for ${serviceName}`, {
-      level: degradationLevel.name,
+      level: degradationLevelConfig.name,
       triggeredBy: failedCapability,
-      performanceImpact: degradationLevel.performanceImpact
+      performanceImpact: degradationLevelConfig.performanceImpact
     });
 
     return true;
   }
 
   // Attempt to recover from degradation
+  // S4.1.3-FIX: Added mutex to prevent concurrent recovery attempts (race condition)
   async attemptRecovery(serviceName: string): Promise<boolean> {
     const state = this.serviceStates.get(serviceName);
     if (!state || !state.canRecover) {
       return false;
     }
 
+    // S4.1.3-FIX: Prevent concurrent recovery attempts for the same service
+    if (this.recoveryInProgress.has(serviceName)) {
+      logger.debug(`Recovery already in progress for ${serviceName}, skipping`);
+      return false;
+    }
+
+    this.recoveryInProgress.add(serviceName);
     state.recoveryAttempts++;
 
     try {
@@ -206,6 +244,9 @@ export class GracefulDegradationManager {
     } catch (error) {
       logger.error(`Recovery attempt failed for ${serviceName}`, { error });
       return false;
+    } finally {
+      // S4.1.3-FIX: Always release the lock
+      this.recoveryInProgress.delete(serviceName);
     }
   }
 
@@ -249,10 +290,29 @@ export class GracefulDegradationManager {
     return await this.recoverService(serviceName, state);
   }
 
+  /**
+   * S4.1.3-FIX: Set a custom capability tester for deterministic testing.
+   * This allows tests to control capability test outcomes instead of using Math.random().
+   */
+  setCapabilityTester(tester: (serviceName: string, capability: ServiceCapability) => Promise<boolean>): void {
+    this.capabilityTester = tester;
+  }
+
+  /**
+   * S4.1.3-FIX (Option A): Initialize default degradation levels with canonical enum values.
+   *
+   * Mapping from ADR-007 DegradationLevel enum to DegradationLevelConfig:
+   * - FULL_OPERATION (0) → 'normal' - All services healthy
+   * - REDUCED_CHAINS (1) → 'partial', 'reduced_accuracy' - Some chains/features down
+   * - DETECTION_ONLY (2) → 'batch_only' - Execution disabled, detection continues
+   * - READ_ONLY (3) → 'minimal' - Only dashboard/monitoring
+   * - COMPLETE_OUTAGE (4) → 'emergency' - All services down
+   */
   private initializeDefaultDegradationLevels(): void {
-    // Define common degradation levels that can be used across services
-    const defaultLevels: DegradationLevel[] = [
+    // Define common degradation levels with canonical enum values (ADR-007)
+    const defaultLevels: DegradationLevelConfig[] = [
       {
+        level: DegradationLevel.FULL_OPERATION,
         name: 'normal',
         description: 'Full functionality',
         enabledFeatures: ['arbitrage_detection', 'price_prediction', 'bridge_calls', 'real_time_updates'],
@@ -261,6 +321,7 @@ export class GracefulDegradationManager {
         recoveryPriority: 10
       },
       {
+        level: DegradationLevel.REDUCED_CHAINS,
         name: 'partial',
         description: 'Partial chain coverage - some chains unavailable',
         enabledFeatures: ['arbitrage_detection', 'price_prediction', 'real_time_updates'],
@@ -269,14 +330,7 @@ export class GracefulDegradationManager {
         recoveryPriority: 9
       },
       {
-        name: 'reduced_accuracy',
-        description: 'Reduced prediction accuracy, cached data',
-        enabledFeatures: ['arbitrage_detection', 'real_time_updates'],
-        disabledFeatures: ['price_prediction', 'bridge_calls'],
-        performanceImpact: 0.2,
-        recoveryPriority: 8
-      },
-      {
+        level: DegradationLevel.DETECTION_ONLY,
         name: 'batch_only',
         description: 'Batch processing only, no real-time updates',
         enabledFeatures: ['arbitrage_detection'],
@@ -285,6 +339,7 @@ export class GracefulDegradationManager {
         recoveryPriority: 6
       },
       {
+        level: DegradationLevel.READ_ONLY,
         name: 'minimal',
         description: 'Minimal functionality, basic arbitrage only',
         enabledFeatures: ['basic_arbitrage'],
@@ -293,6 +348,7 @@ export class GracefulDegradationManager {
         recoveryPriority: 4
       },
       {
+        level: DegradationLevel.COMPLETE_OUTAGE,
         name: 'emergency',
         description: 'Emergency mode, very basic functionality',
         enabledFeatures: [],
@@ -318,13 +374,15 @@ export class GracefulDegradationManager {
     ];
 
     for (const service of services) {
-      for (const level of defaultLevels) {
-        this.degradationLevels.set(`${service}:${level.name}`, level);
+      for (const levelConfig of defaultLevels) {
+        // S4.1.3-FIX: Key by enum value for type-safe lookup
+        this.degradationLevels.set(`${service}:${levelConfig.level}`, levelConfig);
       }
     }
   }
 
-  private async applyDegradation(serviceName: string, level: DegradationLevel): Promise<void> {
+  /** S4.1.3-FIX: Updated to use DegradationLevelConfig */
+  private async applyDegradation(serviceName: string, levelConfig: DegradationLevelConfig): Promise<void> {
     const redis = await this.redis;
 
     // P1-15 FIX: Use dual-publish pattern (Streams + Pub/Sub)
@@ -333,10 +391,12 @@ export class GracefulDegradationManager {
       type: 'degradation_applied',
       data: {
         serviceName,
-        degradationLevel: level.name,
-        enabledFeatures: level.enabledFeatures,
-        disabledFeatures: level.disabledFeatures,
-        performanceImpact: level.performanceImpact
+        // S4.1.3-FIX: Include both enum level and human-readable name
+        degradationLevel: levelConfig.level,
+        degradationLevelName: levelConfig.name,
+        enabledFeatures: levelConfig.enabledFeatures,
+        disabledFeatures: levelConfig.disabledFeatures,
+        performanceImpact: levelConfig.performanceImpact
       },
       timestamp: Date.now(),
       source: 'graceful-degradation-manager'
@@ -350,13 +410,14 @@ export class GracefulDegradationManager {
 
     // Update service configuration in Redis
     await redis.set(`service-config:${serviceName}:degradation`, {
-      level: level.name,
-      enabledFeatures: level.enabledFeatures,
-      disabledFeatures: level.disabledFeatures,
+      level: levelConfig.level,
+      levelName: levelConfig.name,
+      enabledFeatures: levelConfig.enabledFeatures,
+      disabledFeatures: levelConfig.disabledFeatures,
       appliedAt: Date.now()
     });
 
-    logger.info(`Applied degradation level ${level.name} to ${serviceName}`);
+    logger.info(`Applied degradation level ${levelConfig.name} (${DegradationLevel[levelConfig.level]}) to ${serviceName}`);
   }
 
   private async testRecovery(serviceName: string, state: DegradationState): Promise<boolean> {
@@ -381,24 +442,35 @@ export class GracefulDegradationManager {
   }
 
   private async testCapability(serviceName: string, capability: ServiceCapability): Promise<boolean> {
-    // This would implement service-specific capability testing
-    // For now, we'll use a simple health check simulation
+    // S4.1.3-FIX: Use injectable tester if provided (for deterministic testing)
+    if (this.capabilityTester) {
+      return this.capabilityTester(serviceName, capability);
+    }
 
+    // Production capability testing
     const redis = await this.redis;
     switch (capability.name) {
       case 'redis_connection':
         return await redis.ping();
 
       case 'web3_connection':
-        // Would test blockchain connectivity
-        return Math.random() > 0.1; // Simulate 90% success
+        // S4.1.3-FIX: Removed Math.random() - in production, this should
+        // actually test the web3 connection. Return true to allow recovery
+        // attempts; the actual capability should be tested by the service.
+        logger.debug(`Testing web3_connection for ${serviceName}`);
+        return true; // Optimistic - let the service verify actual connectivity
 
       case 'ml_prediction':
-        // Would test ML model availability
-        return Math.random() > 0.05; // Simulate 95% success
+        // S4.1.3-FIX: Removed Math.random() - in production, this should
+        // actually test ML model availability
+        logger.debug(`Testing ml_prediction for ${serviceName}`);
+        return true; // Optimistic - let the service verify actual availability
 
       default:
-        return Math.random() > 0.2; // Simulate 80% success for unknown capabilities
+        // S4.1.3-FIX: For unknown capabilities, return true to allow recovery.
+        // Services should register capability-specific testers for accurate testing.
+        logger.debug(`Testing unknown capability ${capability.name} for ${serviceName}`);
+        return true;
     }
   }
 
@@ -489,6 +561,24 @@ export function getGracefulDegradationManager(): GracefulDegradationManager {
     globalDegradationManager = new GracefulDegradationManager();
   }
   return globalDegradationManager;
+}
+
+/**
+ * S4.1.3-FIX: Reset the singleton instance (for testing).
+ * This prevents test pollution across test files.
+ */
+export function resetGracefulDegradationManager(): void {
+  if (globalDegradationManager) {
+    // Clear all recovery timers to prevent leaks
+    const manager = globalDegradationManager as any;
+    if (manager.recoveryTimers) {
+      for (const timer of manager.recoveryTimers.values()) {
+        clearTimeout(timer);
+      }
+      manager.recoveryTimers.clear();
+    }
+  }
+  globalDegradationManager = null;
 }
 
 // Convenience functions

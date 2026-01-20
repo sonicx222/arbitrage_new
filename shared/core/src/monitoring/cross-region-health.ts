@@ -413,12 +413,24 @@ export class CrossRegionHealthManager extends EventEmitter {
       timestamp: Date.now()
     });
 
-    // Attempt to re-acquire leadership after delay
+    // S4.1.2-FIX: Add jitter to prevent thundering herd when multiple instances lose leadership
+    // Random offset of ±2 seconds spreads leadership re-acquisition attempts across instances
+    const baseDelayMs = 5000;
+    const jitterMs = Math.floor(Math.random() * 4000) - 2000; // Range: -2000 to +2000
+    const effectiveDelay = Math.max(1000, baseDelayMs + jitterMs); // Minimum 1 second
+
+    this.logger.debug('Scheduling leadership re-election with jitter', {
+      baseDelayMs,
+      jitterMs,
+      effectiveDelay
+    });
+
+    // Attempt to re-acquire leadership after jittered delay
     setTimeout(() => {
       if (this.isRunning && this.config.canBecomeLeader) {
         this.attemptLeaderElection();
       }
-    }, 5000);
+    }, effectiveDelay);
   }
 
   /**

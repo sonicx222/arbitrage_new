@@ -170,7 +170,9 @@ jest.mock('@arbitrage/core', () => ({
     removeAllListeners: jest.fn()
   }),
   getGracefulDegradationManager: jest.fn().mockReturnValue({
-    triggerDegradation: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
+    triggerDegradation: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
+    // S4.1.3-FIX: Add missing registerCapabilities method
+    registerCapabilities: jest.fn<() => void>()
   })
 }));
 

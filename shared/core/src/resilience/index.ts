@@ -70,12 +70,20 @@ export {
 } from './dead-letter-queue';
 
 // Graceful Degradation
+// S4.1.3-FIX (Option A): Re-export DegradationLevel enum for unified access
 export {
   GracefulDegradationManager,
   getGracefulDegradationManager,
+  resetGracefulDegradationManager,  // S4.1.3-FIX: Export reset for testing
   triggerDegradation,
   isFeatureEnabled,
-  getCapabilityFallback
+  getCapabilityFallback,
+  DegradationLevel  // S4.1.3-FIX: Re-export canonical enum from cross-region-health
+} from './graceful-degradation';
+export type {
+  DegradationLevelConfig,  // S4.1.3-FIX: Export renamed config interface
+  ServiceCapability,
+  DegradationState
 } from './graceful-degradation';
 
 // Self-Healing Manager

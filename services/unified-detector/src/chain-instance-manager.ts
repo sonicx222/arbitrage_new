@@ -22,6 +22,7 @@ import {
   PerformanceLogger,
   RedisStreamsClient,
   GracefulDegradationManager,
+  DegradationLevel,  // S4.1.3-FIX: Import canonical enum
 } from '@arbitrage/core';
 
 import { CHAINS } from '@arbitrage/config';
@@ -184,7 +185,8 @@ export function createChainInstanceManager(
       .map((chainId) => ({
         name: `chain_${chainId}_failure`,
         required: false,
-        degradationLevel: 'partial',
+        // S4.1.3-FIX: Use canonical DegradationLevel enum instead of string
+        degradationLevel: DegradationLevel.REDUCED_CHAINS,
       }));
 
     degradationManager.registerCapabilities(serviceName, capabilities);

@@ -34,6 +34,7 @@ import {
   getCrossRegionHealthManager,
   GracefulDegradationManager,
   getGracefulDegradationManager,
+  DegradationLevel,  // S4.1.3-FIX: Import canonical enum
   FailoverEvent
 } from '@arbitrage/core';
 
@@ -471,7 +472,8 @@ export class UnifiedChainDetector extends EventEmitter {
     const capabilities = this.config.chains.map(chainId => ({
       name: `chain_${chainId}_failure`,
       required: false,  // Individual chain failures don't require service shutdown
-      degradationLevel: 'partial'  // Service continues with reduced chain coverage
+      // S4.1.3-FIX: Use canonical DegradationLevel enum instead of string
+      degradationLevel: DegradationLevel.REDUCED_CHAINS  // Service continues with reduced chain coverage
     }));
 
     this.degradationManager.registerCapabilities(serviceName, capabilities);

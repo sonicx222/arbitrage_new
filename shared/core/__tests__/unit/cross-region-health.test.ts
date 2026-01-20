@@ -37,6 +37,7 @@ const createMockLogger = () => ({
 });
 
 // Mock Redis client factory
+// S4.1.2-FIX: Added scan method to match cross-region-health.ts fetchRemoteRegionHealth()
 const createMockRedisClient = () => ({
   set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
   get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
@@ -45,7 +46,9 @@ const createMockRedisClient = () => ({
   publish: jest.fn<() => Promise<number>>().mockResolvedValue(1),
   subscribe: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined)
+  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  // S4.1.2-FIX: scan() is used by fetchRemoteRegionHealth() for iterating region health keys
+  scan: jest.fn<() => Promise<[string, string[]]>>().mockResolvedValue(['0', []])
 });
 
 // Mock Redis Streams client factory
