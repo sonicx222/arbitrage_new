@@ -99,6 +99,26 @@ main().catch((error) => {
 
 export { CrossChainDetectorService } from './detector';
 
+// Shared types (TYPE-CONSOLIDATION)
+// FIX 2.2: Export all types from types.ts including previously missing ones
+export {
+  ModuleLogger,
+  Logger,
+  PriceData,
+  CrossChainOpportunity,
+  IndexedSnapshot,
+  PricePoint,
+  DetectorConfig,
+  WhaleAnalysisConfig,
+  MLPredictionConfig,
+  // Token pair format utilities (INC-2 FIX: Standardized format handling)
+  TOKEN_PAIR_INTERNAL_SEPARATOR,
+  TOKEN_PAIR_DISPLAY_SEPARATOR,
+  toDisplayTokenPair,
+  toInternalTokenPair,
+  normalizeToInternalFormat,
+} from './types';
+
 // Stream consumption module
 export {
   createStreamConsumer,
@@ -112,7 +132,6 @@ export {
   createPriceDataManager,
   PriceDataManager,
   PriceDataManagerConfig,
-  PriceData,
 } from './price-data-manager';
 
 // Opportunity publishing module
@@ -120,5 +139,22 @@ export {
   createOpportunityPublisher,
   OpportunityPublisher,
   OpportunityPublisherConfig,
-  CrossChainOpportunity,
 } from './opportunity-publisher';
+
+// Bridge latency predictor
+export { BridgeLatencyPredictor, BridgePrediction, BridgeMetrics } from './bridge-predictor';
+
+// Bridge cost estimator module (ADR-014)
+export {
+  createBridgeCostEstimator,
+  BridgeCostEstimator,
+  BridgeCostEstimatorConfig,
+  BridgeCostEstimate,
+} from './bridge-cost-estimator';
+
+// ML prediction manager module (ADR-014)
+export {
+  createMLPredictionManager,
+  MLPredictionManager,
+  MLPredictionManagerConfig,
+} from './ml-prediction-manager';

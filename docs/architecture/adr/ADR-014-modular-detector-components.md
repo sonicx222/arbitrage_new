@@ -332,10 +332,247 @@ await streamConsumer.createConsumerGroups();
 streamConsumer.start();
 ```
 
+## Phase 3 Enhancements
+
+### 7. Shared Types Module (types.ts)
+**Purpose**: Consolidate duplicate type definitions across modules
+
+**Key Types**:
+```typescript
+// Logger interface for dependency injection
+interface ModuleLogger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug: (message: string, meta?: object) => void;
+}
+
+// Price data storage structure
+interface PriceData {
+  [chain: string]: { [dex: string]: { [pairKey: string]: PriceUpdate } };
+}
+
+// Cross-chain opportunity with whale/ML fields
+interface CrossChainOpportunity {
+  // ... base fields ...
+  whaleTriggered?: boolean;
+  whaleTxHash?: string;
+  whaleDirection?: 'bullish' | 'bearish' | 'neutral';
+  mlConfidenceBoost?: number;
+  mlSourceDirection?: 'up' | 'down' | 'sideways';
+  mlTargetDirection?: 'up' | 'down' | 'sideways';
+  mlSupported?: boolean;
+}
+
+// Indexed snapshot for O(1) token lookups
+interface IndexedSnapshot {
+  byToken: Map<string, PricePoint[]>;
+  raw: PriceData;
+  tokenPairs: string[];
+  timestamp: number;
+}
+
+// Configuration types
+interface DetectorConfig { /* ... */ }
+interface WhaleAnalysisConfig { /* ... */ }
+interface MLPredictionConfig { /* ... */ }
+```
+
+### 8. ML Prediction Integration
+**Purpose**: Integrate LSTM price prediction into opportunity detection
+
+**Features**:
+- **Price History Caching**: Track recent prices per chain/pair for ML input
+- **Prediction Caching**: Cache ML predictions with configurable TTL (default 1s)
+- **Timeout Protection**: Skip ML predictions that exceed latency threshold (default 10ms)
+- **Parallel Pre-fetching**: Fetch ML predictions for all token pairs before detection
+- **Confidence Adjustment**: Boost confidence when ML predictions align with opportunity direction
+
+**Configuration** (MLPredictionConfig):
+```typescript
+{
+  enabled: boolean;        // Enable/disable ML (default: true)
+  minConfidence: number;   // Minimum ML confidence to use (default: 0.6)
+  alignedBoost: number;    // Confidence boost when aligned (default: 1.15)
+  opposedPenalty: number;  // Confidence penalty when opposed (default: 0.9)
+  maxLatencyMs: number;    // Skip if prediction takes longer (default: 50, FIX PERF-1)
+  cacheTtlMs: number;      // Cache TTL in ms (default: 1000)
+}
+```
+
+### 9. Performance Optimization: Token Pair Index (P1)
+**Purpose**: Reduce O(n²) cross-chain iteration to O(n)
+
+**Implementation**:
+- `PriceDataManager.createIndexedSnapshot()` builds token pair index
+- Index maps normalized token pairs to all price points
+- Detection iterates token pairs once, comparing all price points per token
+- Reduces complexity from O(chains² × dexes² × pairs²) to O(tokenPairs × pricesPerToken²)
+
+### 10. Bridge Latency Predictor
+**Purpose**: Predict cross-chain bridge times and costs using ML
+
+**Features**:
+- Statistical model updates from actual bridge completions
+- Conservative estimates for new/unknown bridges
+- Metrics caching for performance
+- Optimal bridge selection based on urgency (low/medium/high)
+- History management with 1000-entry cap and TTL cleanup
+
+## Files Created/Modified (Phase 3)
+
+### New Files
+- `services/cross-chain-detector/src/types.ts` - Shared type definitions
+- `services/cross-chain-detector/src/__tests__/integration/detector-integration.test.ts` - Integration tests
+
+### Modified Files
+- `services/cross-chain-detector/src/detector.ts`:
+  - Added ML prediction caching and timeout protection
+  - Added price history tracking
+  - Updated confidence calculation with ML boost
+  - Added DetectorConfig support
+- `services/cross-chain-detector/src/price-data-manager.ts`:
+  - Added `createIndexedSnapshot()` for O(1) token lookups
+- `services/cross-chain-detector/src/bridge-predictor.ts`:
+  - B4-FIX: Handle NaN when all bridges fail
+  - WEIGHT-FIX: Correct exponential weighting (recent = higher)
+  - KEY-FORMAT-FIX: Consistent bridge key format
+
+## Test Coverage
+
+| Component | Unit Tests | Integration Tests |
+|-----------|------------|-------------------|
+| StreamConsumer | 15 | - |
+| PriceDataManager | 25 | - |
+| OpportunityPublisher | 19 | - |
+| BridgePredictor | 34 | - |
+| BridgeCostEstimator | 19 | - |
+| MLPredictionManager | 18 | - |
+| Detector (main service) | 35+ | 19 |
+| **Total** | **165+** | **19** |
+
+*Note: Test counts updated 2026-01-20 to include circuit breaker, version counter, ETH price detection, and token normalization tests.*
+
+### Regression Tests
+- B1-FIX: Concurrent stream read prevention
+- B2-FIX: Price guard in confidence calculation
+- B4-FIX: NaN handling when all bridges fail
+- WEIGHT-FIX: Exponential weight direction verification
+
+## Future Considerations
+
+### 11. ML Worker Thread Offloading (PERF-CONSIDERATION)
+
+**Status**: Documented for future implementation if needed
+
+**Problem**:
+TensorFlow.js ML predictions run synchronously on the main Node.js event loop, which can block
+opportunity detection when predictions take longer than expected. While the current implementation
+mitigates this with timeout protection (50ms default), high-throughput scenarios may benefit from
+true parallelism.
+
+**Current Mitigation**:
+```typescript
+// MLPredictionManager uses Promise.race with timeout
+const prediction = await Promise.race([
+  mlPredictor.predictPrice(priceHistory, context),
+  new Promise<null>((resolve) => setTimeout(() => resolve(null), maxLatencyMs))
+]);
+```
+
+**Benefits**: Simple, no additional complexity, graceful degradation (returns null on timeout)
+
+**Limitation**: Prediction still blocks the event loop until timeout, consuming CPU time
+
+**When to Consider Worker Threads**:
+1. Detection interval < 50ms (high-frequency trading)
+2. ML prediction consistently takes 30-50ms (saturating timeout)
+3. Multiple price pairs need predictions simultaneously (CPU contention)
+4. System CPU utilization > 70% during detection
+
+**Worker Thread Implementation Guidance** (if needed):
+```typescript
+// worker-pool.ts
+import { Worker } from 'worker_threads';
+
+interface WorkerPool {
+  predict(priceHistory: PriceHistory[], context: any): Promise<PredictionResult | null>;
+  shutdown(): Promise<void>;
+}
+
+function createMLWorkerPool(config: { poolSize?: number; timeoutMs?: number }): WorkerPool {
+  const poolSize = config.poolSize ?? 2; // Match CPU cores / 2
+  const workers: Worker[] = [];
+
+  // Initialize workers
+  for (let i = 0; i < poolSize; i++) {
+    workers.push(new Worker('./ml-worker.js'));
+  }
+
+  // Round-robin worker selection
+  let nextWorker = 0;
+
+  return {
+    async predict(priceHistory, context) {
+      const worker = workers[nextWorker++ % poolSize];
+
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(null), config.timeoutMs ?? 50);
+
+        worker.once('message', (result) => {
+          clearTimeout(timeout);
+          resolve(result);
+        });
+
+        worker.postMessage({ type: 'predict', priceHistory, context });
+      });
+    },
+
+    async shutdown() {
+      await Promise.all(workers.map(w => w.terminate()));
+    }
+  };
+}
+
+// ml-worker.js (separate file)
+const { parentPort } = require('worker_threads');
+const { getLSTMPredictor } = require('@arbitrage/ml');
+
+const predictor = getLSTMPredictor();
+
+parentPort.on('message', async (msg) => {
+  if (msg.type === 'predict') {
+    try {
+      const result = await predictor.predictPrice(msg.priceHistory, msg.context);
+      parentPort.postMessage(result);
+    } catch (error) {
+      parentPort.postMessage(null);
+    }
+  }
+});
+```
+
+**Integration Points** (if implementing):
+1. Replace `getLSTMPredictor()` calls with worker pool in `MLPredictionManager.initialize()`
+2. Update `getCachedPrediction()` to use worker pool's `predict()` method
+3. Add `shutdown()` call in `CrossChainDetectorService.stop()`
+4. Add pool size and timeout to `MLPredictionConfig`
+
+**Recommended Testing**:
+1. Benchmark prediction latency before/after worker threads
+2. Verify graceful degradation when workers are busy
+3. Test worker crash recovery
+4. Load test with 1000+ predictions/second
+
+**Decision**: Defer implementation until benchmarks show event loop blocking is impacting detection accuracy. Current timeout-based approach provides adequate performance for 100ms detection intervals.
+
 ## Confidence Level
-93% - High confidence because:
+95% - Very high confidence because:
 - Follows established patterns in codebase (factory functions, EventEmitter)
 - Low risk approach (modules alongside existing code)
-- All tests passing (162 tests for unified-detector, 69 tests for cross-chain-detector)
+- All tests passing (172 tests for cross-chain-detector)
 - TypeScript types provide compile-time safety
-- Bug fixes (B1/B2 concurrency guards) verified with regression tests
+- Bug fixes (B1/B2/B4) verified with regression tests
+- ML integration has timeout protection to prevent latency impact
+- Performance optimization (P1) reduces detection complexity
+- Worker thread consideration documented for future scaling needs

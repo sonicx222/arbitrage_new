@@ -362,6 +362,265 @@ describe('PriceDataManager', () => {
   });
 
   // ===========================================================================
+  // createIndexedSnapshot
+  // ===========================================================================
+
+  describe('createIndexedSnapshot', () => {
+    it('should create indexed snapshot with token pair map', () => {
+      const manager = createPriceDataManager({
+        logger: asLogger(logger),
+      });
+
+      // PERF 10.2: Need data from at least 2 chains for token pair to be included
+      manager.handlePriceUpdate(createPriceUpdate({
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'uniswap_WETH_USDC',
+        price: 2500,
+        token0: 'WETH',
+        token1: 'USDC',
+      }));
+
+      manager.handlePriceUpdate(createPriceUpdate({
+        chain: 'arbitrum',
+        dex: 'camelot',
+        pairKey: 'camelot_WETH_USDC',
+        price: 2510,
+        token0: 'WETH',
+        token1: 'USDC',
+      }));
+
+      const snapshot = manager.createIndexedSnapshot();
+
+      expect(snapshot.byToken).toBeInstanceOf(Map);
+      expect(snapshot.raw).toBeDefined();
+      expect(snapshot.tokenPairs.length).toBeGreaterThan(0);
+      expect(snapshot.timestamp).toBeDefined();
+    });
+
+    it('should index by normalized token pair', () => {
+      const manager = createPriceDataManager({
+        logger: asLogger(logger),
+      });
+
+      // Add same token pair on different chains/dexes
+      manager.handlePriceUpdate(createPriceUpdate({
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'uniswap_WETH_USDC',
+        price: 2500,
+        token0: 'WETH',
+        token1: 'USDC',
+      }));
+
+      manager.handlePriceUpdate(createPriceUpdate({
+        chain: 'arbitrum',
+        dex: 'camelot',
+        pairKey: 'camelot_WETH_USDC',
+        price: 2510,
+        token0: 'WETH',
+        token1: 'USDC',
+      }));
+
+      const snapshot = manager.createIndexedSnapshot();
+      const wethPrices = snapshot.byToken.get('WETH_USDC');
+
+      // Both should be indexed under normalized WETH_USDC (WETH stays as WETH)
+      expect(wethPrices).toBeDefined();
+      expect(wethPrices!.length).toBe(2);
+    });
+
+    // PERF-P4: Snapshot caching tests
+    describe('caching (PERF-P4)', () => {
+      it('should return cached snapshot when no updates', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+        });
+
+        manager.handlePriceUpdate(createPriceUpdate({
+          pairKey: 'uniswap_WETH_USDC',
+        }));
+
+        const snapshot1 = manager.createIndexedSnapshot();
+        const snapshot2 = manager.createIndexedSnapshot();
+
+        // Should be the exact same object reference (cached)
+        expect(snapshot1).toBe(snapshot2);
+      });
+
+      it('should invalidate cache after handlePriceUpdate', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+        });
+
+        // PERF 10.2: Need multi-chain data for token pairs to be included
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_WETH_USDC',
+          price: 2500,
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'arbitrum',
+          pairKey: 'camelot_WETH_USDC',
+          price: 2510,
+        }));
+
+        const snapshot1 = manager.createIndexedSnapshot();
+        expect(snapshot1.tokenPairs.length).toBe(1); // 1 cross-chain pair
+
+        // Add another token pair on multiple chains
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_WETH_USDT',
+          price: 2501,
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'polygon',
+          pairKey: 'quickswap_WETH_USDT',
+          price: 2502,
+        }));
+
+        const snapshot2 = manager.createIndexedSnapshot();
+
+        // Should be different objects (cache invalidated)
+        expect(snapshot1).not.toBe(snapshot2);
+        // But should contain updated data (now 2 cross-chain pairs)
+        expect(snapshot2.tokenPairs.length).toBeGreaterThan(snapshot1.tokenPairs.length);
+      });
+
+      it('should invalidate cache after cleanup removes data', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+          maxPriceAgeMs: 1000,
+        });
+
+        const now = Date.now();
+
+        // PERF 10.2: Add cross-chain data for OLD token (will be cleaned up)
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_OLD_TOKEN',
+          timestamp: now - 5000,
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'arbitrum',
+          pairKey: 'camelot_OLD_TOKEN',
+          timestamp: now - 5000,
+        }));
+
+        // Add cross-chain fresh data (will remain)
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_FRESH_TOKEN',
+          timestamp: now,
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'polygon',
+          pairKey: 'quickswap_FRESH_TOKEN',
+          timestamp: now,
+        }));
+
+        const snapshot1 = manager.createIndexedSnapshot();
+        expect(snapshot1.tokenPairs.length).toBe(2); // 2 cross-chain pairs
+
+        // Cleanup should remove old data and invalidate cache
+        manager.cleanup();
+
+        const snapshot2 = manager.createIndexedSnapshot();
+
+        // Should be different object
+        expect(snapshot1).not.toBe(snapshot2);
+        // Should have fewer token pairs (old data removed)
+        expect(snapshot2.tokenPairs.length).toBe(1);
+      });
+
+      it('should NOT invalidate cache after cleanup removes no data', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+          maxPriceAgeMs: 60000, // 1 minute - data won't be old enough
+        });
+
+        manager.handlePriceUpdate(createPriceUpdate({
+          pairKey: 'uniswap_WETH_USDC',
+          timestamp: Date.now(),
+        }));
+
+        const snapshot1 = manager.createIndexedSnapshot();
+
+        // Cleanup should not remove anything (data is fresh)
+        manager.cleanup();
+
+        const snapshot2 = manager.createIndexedSnapshot();
+
+        // Should be the same object (cache still valid)
+        expect(snapshot1).toBe(snapshot2);
+      });
+
+      it('should reset cache after clear', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+        });
+
+        // PERF 10.2: Add cross-chain data
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_WETH_USDC',
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'arbitrum',
+          pairKey: 'camelot_WETH_USDC',
+        }));
+
+        const snapshot1 = manager.createIndexedSnapshot();
+        expect(snapshot1.tokenPairs.length).toBe(1); // 1 cross-chain pair
+
+        // Clear all data
+        manager.clear();
+
+        // Add new cross-chain data
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'ethereum',
+          pairKey: 'uniswap_ARB_USDC',
+          token0: 'ARB',
+        }));
+        manager.handlePriceUpdate(createPriceUpdate({
+          chain: 'polygon',
+          pairKey: 'quickswap_ARB_USDC',
+          token0: 'ARB',
+        }));
+
+        const snapshot2 = manager.createIndexedSnapshot();
+
+        // Should be different object
+        expect(snapshot1).not.toBe(snapshot2);
+        // New data should be reflected (1 cross-chain pair)
+        expect(snapshot2.tokenPairs.length).toBe(1);
+        expect(snapshot2.tokenPairs).toContain('ARB_USDC');
+      });
+
+      it('should log cache hit/miss debug messages', () => {
+        const manager = createPriceDataManager({
+          logger: asLogger(logger),
+        });
+
+        manager.handlePriceUpdate(createPriceUpdate({
+          pairKey: 'uniswap_WETH_USDC',
+        }));
+
+        // First call - cache miss (builds new snapshot)
+        manager.createIndexedSnapshot();
+        expect(logger.hasLogMatching('debug', 'Built new indexed snapshot')).toBe(true);
+
+        logger.clear();
+
+        // Second call - cache hit
+        manager.createIndexedSnapshot();
+        expect(logger.hasLogMatching('debug', 'Returning cached snapshot')).toBe(true);
+      });
+    });
+  });
+
+  // ===========================================================================
   // clear
   // ===========================================================================
 

@@ -86,7 +86,10 @@ export {
   CROSS_CHAIN_TOKEN_ALIASES,
   normalizeTokenForCrossChain,
   findCommonTokensBetweenChains,
-  getChainSpecificTokenSymbol
+  getChainSpecificTokenSymbol,
+  // Refactored from detector.ts - chain-specific quote tokens
+  DEFAULT_QUOTE_TOKENS,
+  getDefaultQuoteToken
 } from './cross-chain';
 
 // =============================================================================

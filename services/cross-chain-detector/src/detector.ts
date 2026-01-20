@@ -52,50 +52,99 @@ import {
   ARBITRAGE_CONFIG,
   calculateBridgeCostUsd,
   // S3.2.4-FIX: Import token normalization for cross-chain matching
-  normalizeTokenForCrossChain
+  normalizeTokenForCrossChain,
+  // REFACTOR: Use centralized default quote tokens from config
+  getDefaultQuoteToken,
 } from '@arbitrage/config';
 import {
   PriceUpdate,
-  ArbitrageOpportunity,
   WhaleTransaction,
   CrossChainBridge
 } from '@arbitrage/types';
 import { BridgeLatencyPredictor } from './bridge-predictor';
 
+// ADR-014: Import modular components for single-responsibility design
+import { createStreamConsumer, StreamConsumer } from './stream-consumer';
+import { createPriceDataManager, PriceDataManager, PricePoint } from './price-data-manager';
+import { createOpportunityPublisher, OpportunityPublisher } from './opportunity-publisher';
+import { createBridgeCostEstimator, BridgeCostEstimator } from './bridge-cost-estimator';
+// ADR-014: Import MLPredictionManager for centralized ML prediction handling
+import { createMLPredictionManager, MLPredictionManager } from './ml-prediction-manager';
+// TYPE-CONSOLIDATION: Import shared types from types.ts
+import {
+  CrossChainOpportunity,
+  DetectorConfig,
+  WhaleAnalysisConfig,
+  MLPredictionConfig,
+  // FIX 4.2: Import normalizeToInternalFormat for consistent token pair lookups
+  normalizeToInternalFormat,
+} from './types';
+
+// Phase 3: Whale Activity Tracker imports
+// DEAD-CODE-REMOVED: PriceMomentumTracker, MomentumSignal - never used in detection
+import {
+  getWhaleActivityTracker,
+  WhaleActivityTracker,
+  WhaleActivitySummary,
+  TrackedWhaleTransaction,
+} from '@arbitrage/core';
+// ML Predictor for TensorFlow.js integration
+import {
+  getLSTMPredictor,
+  LSTMPredictor,
+  PredictionResult,
+  // ADR-014: PriceHistory now only used by MLPredictionManager, not needed here
+} from '@arbitrage/ml';
+
 // =============================================================================
 // Types
 // =============================================================================
 
-interface PriceData {
-  [chain: string]: {
-    [dex: string]: {
-      [pairKey: string]: PriceUpdate
-    }
-  }
-}
+// PriceData, CrossChainOpportunity, DetectorConfig, WhaleAnalysisConfig, MLPredictionConfig
+// are now imported from ./types.ts - See ADR-014: Type Consolidation
 
-interface CrossChainOpportunity {
-  token: string;
-  sourceChain: string;
-  sourceDex: string;
-  sourcePrice: number;
-  targetChain: string;
-  targetDex: string;
-  targetPrice: number;
-  priceDiff: number;
-  percentageDiff: number;
-  estimatedProfit: number;
-  bridgeCost?: number;
-  netProfit: number;
-  confidence: number;
-  // P1-NEW-3 FIX: Store timestamp in object instead of parsing from ID
-  createdAt: number;
-}
+// =============================================================================
+// Default Configuration (Config C1: Configurable Values)
+// =============================================================================
 
-interface MLPredictor {
-  predictPriceMovement: () => Promise<{ direction: number; confidence: number }>;
-  predictOpportunity: () => Promise<{ confidence: number; expectedProfit: number }>;
-}
+/** Default whale analysis configuration */
+const DEFAULT_WHALE_CONFIG: WhaleAnalysisConfig = {
+  superWhaleThresholdUsd: 500000,
+  significantFlowThresholdUsd: 100000,
+  whaleBullishBoost: 1.15,
+  whaleBearishPenalty: 0.85,
+  superWhaleBoost: 1.25,
+  activityWindowMs: 5 * 60 * 1000, // 5 minutes
+};
+
+/** Default ML prediction configuration */
+const DEFAULT_ML_CONFIG: MLPredictionConfig = {
+  enabled: true,
+  minConfidence: 0.6,
+  alignedBoost: 1.15,
+  opposedPenalty: 0.9,
+  // FIX PERF-1: Increased from 10ms to 50ms - TensorFlow.js predictions typically take 20-50ms
+  // 10ms caused most predictions to timeout, wasting computation
+  maxLatencyMs: 50,
+  cacheTtlMs: 1000,
+};
+
+/**
+ * FIX #12: Environment-aware detector configuration
+ * Production environments need faster detection for competitive arbitrage trading.
+ */
+const isProduction = process.env.NODE_ENV === 'production';
+
+const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
+  // FIX #12: Faster detection in production for competitive trading
+  detectionIntervalMs: isProduction ? 50 : 100,
+  // FIX #12: More frequent health checks in production for faster failover
+  healthCheckIntervalMs: isProduction ? 10000 : 30000,
+  bridgeCleanupFrequency: 100,
+  defaultTradeSizeUsd: 1000,
+  whaleConfig: DEFAULT_WHALE_CONFIG,
+  mlConfig: DEFAULT_ML_CONFIG,
+};
 
 // =============================================================================
 // S3.2.4-FIX: Token Pair Normalization Helper
@@ -133,10 +182,27 @@ export class CrossChainDetectorService {
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;
 
-  private priceData: PriceData = {};
-  private opportunitiesCache: Map<string, CrossChainOpportunity> = new Map();
+  // ADR-014: Modular components for single-responsibility design
+  private streamConsumer: StreamConsumer | null = null;
+  private priceDataManager: PriceDataManager | null = null;
+  private opportunityPublisher: OpportunityPublisher | null = null;
+  private bridgeCostEstimator: BridgeCostEstimator | null = null;
+  // ADR-014: MLPredictionManager for centralized ML prediction handling (replaces inline implementation)
+  private mlPredictionManager: MLPredictionManager | null = null;
+
   private bridgePredictor: BridgeLatencyPredictor;
-  private mlPredictor: MLPredictor | null = null;
+
+  // Phase 3: ML Predictor (TensorFlow.js LSTM) and Whale Activity Tracker
+  // NOTE: mlPredictor is now managed by MLPredictionManager, but kept for direct access if needed
+  private mlPredictor: LSTMPredictor | null = null;
+  private mlPredictorInitialized = false;
+  private whaleTracker: WhaleActivityTracker | null = null;
+  // DEAD-CODE-REMOVED: momentumTracker was never used in detection logic
+
+  // Config C1: Configurable values (replaces hardcoded constants)
+  private readonly config: Required<DetectorConfig>;
+  private readonly whaleConfig: WhaleAnalysisConfig;
+  private readonly mlConfig: MLPredictionConfig;
 
   // Consumer group configuration
   private readonly consumerGroups: ConsumerGroupConfig[];
@@ -145,20 +211,42 @@ export class CrossChainDetectorService {
   // Intervals
   private opportunityDetectionInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
-  private streamConsumerInterval: NodeJS.Timeout | null = null;
-  private cacheCleanupInterval: NodeJS.Timeout | null = null;
 
-  // Counter for deterministic cleanup (replaces random sampling)
-  private priceUpdateCounter = 0;
-  private readonly CLEANUP_FREQUENCY = 100; // Cleanup every 100 price updates
-
-  // FIX B1/B2: Concurrency guards for async intervals
-  private isConsumingStreams = false;
+  // FIX B2: Concurrency guard for health monitoring
   private isMonitoringHealth = false;
 
-  constructor() {
+  // FIX #5: Circuit breaker for detection loop errors
+  private consecutiveDetectionErrors = 0;
+  private static readonly DETECTION_ERROR_THRESHOLD = 5;
+  private static readonly CIRCUIT_BREAKER_RESET_MS = 30000; // 30 seconds to reset
+  private lastCircuitBreakerTrip = 0;
+
+  // FIX #22: Reuse ML predictions map across cycles to reduce GC pressure
+  private mlPredictionsCache = new Map<string, PredictionResult | null>();
+
+  // FIX #23: Cycle counter for structured logging
+  private detectionCycleCounter = 0;
+
+  // ADR-014: ML Integration now handled by MLPredictionManager module
+  // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
+  // These are now managed by mlPredictionManager for single-responsibility design
+
+  constructor(userConfig: DetectorConfig = {}) {
     this.perfLogger = getPerformanceLogger('cross-chain-detector');
     this.bridgePredictor = new BridgeLatencyPredictor();
+
+    // Config C1: Merge user config with defaults
+    this.config = {
+      ...DEFAULT_DETECTOR_CONFIG,
+      ...userConfig,
+      whaleConfig: { ...DEFAULT_WHALE_CONFIG, ...userConfig.whaleConfig },
+      mlConfig: { ...DEFAULT_ML_CONFIG, ...userConfig.mlConfig },
+    } as Required<DetectorConfig>;
+    this.whaleConfig = this.config.whaleConfig!;
+    this.mlConfig = this.config.mlConfig!;
+
+    // FIX: Configuration validation
+    this.validateConfiguration();
 
     // Generate unique instance ID
     this.instanceId = `cross-chain-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
@@ -187,6 +275,61 @@ export class CrossChainDetectorService {
   }
 
   // ===========================================================================
+  // Configuration Validation
+  // ===========================================================================
+
+  /**
+   * Validate configuration values are within acceptable bounds.
+   * Throws on invalid configuration, warns on suboptimal values.
+   */
+  private validateConfiguration(): void {
+    const { detectionIntervalMs, healthCheckIntervalMs, defaultTradeSizeUsd } = this.config;
+    const { maxLatencyMs, minConfidence, alignedBoost, opposedPenalty } = this.mlConfig;
+
+    // Critical validation - throw on invalid config
+    if (detectionIntervalMs !== undefined && detectionIntervalMs < 10) {
+      throw new Error(`detectionIntervalMs must be >= 10ms, got ${detectionIntervalMs}`);
+    }
+
+    if (defaultTradeSizeUsd !== undefined && defaultTradeSizeUsd <= 0) {
+      throw new Error(`defaultTradeSizeUsd must be > 0, got ${defaultTradeSizeUsd}`);
+    }
+
+    if (minConfidence !== undefined && (minConfidence < 0 || minConfidence > 1)) {
+      throw new Error(`mlConfig.minConfidence must be 0-1, got ${minConfidence}`);
+    }
+
+    if (alignedBoost !== undefined && alignedBoost < 1) {
+      throw new Error(`mlConfig.alignedBoost must be >= 1, got ${alignedBoost}`);
+    }
+
+    if (opposedPenalty !== undefined && (opposedPenalty < 0 || opposedPenalty > 1)) {
+      throw new Error(`mlConfig.opposedPenalty must be 0-1, got ${opposedPenalty}`);
+    }
+
+    // Warning validation - suboptimal but valid config
+    if (maxLatencyMs !== undefined && detectionIntervalMs !== undefined && maxLatencyMs > detectionIntervalMs) {
+      this.logger.warn('mlConfig.maxLatencyMs exceeds detectionIntervalMs - ML predictions may delay detection', {
+        maxLatencyMs,
+        detectionIntervalMs,
+      });
+    }
+
+    if (healthCheckIntervalMs !== undefined && healthCheckIntervalMs < 5000) {
+      this.logger.warn('healthCheckIntervalMs is very low - may cause excessive Redis writes', {
+        healthCheckIntervalMs,
+      });
+    }
+
+    this.logger.debug('Configuration validated', {
+      detectionIntervalMs,
+      healthCheckIntervalMs,
+      defaultTradeSizeUsd,
+      mlEnabled: this.mlConfig.enabled,
+    });
+  }
+
+  // ===========================================================================
   // Lifecycle Methods
   // ===========================================================================
 
@@ -195,6 +338,12 @@ export class CrossChainDetectorService {
       this.logger.info('Starting Cross-Chain Detector Service', {
         instanceId: this.instanceId
       });
+
+      // FIX: Check if cross-chain arbitrage is enabled in config
+      if (!ARBITRAGE_CONFIG.crossChainEnabled) {
+        this.logger.warn('Cross-chain arbitrage is DISABLED in config (ARBITRAGE_CONFIG.crossChainEnabled=false). ' +
+          'Service will start but opportunities will not be published until enabled.');
+      }
 
       // Initialize Redis clients
       this.redis = await getRedisClient();
@@ -216,14 +365,18 @@ export class CrossChainDetectorService {
         throw new Error('Failed to initialize Price Oracle - returned null');
       }
 
-      // Create consumer groups for Redis Streams
-      await this.createConsumerGroups();
+      // ADR-014: Initialize modular components
+      this.initializeModules();
 
-      // Initialize ML predictor (placeholder)
+      // Create consumer groups and start stream consumption
+      await this.streamConsumer!.createConsumerGroups();
+      this.streamConsumer!.start();
+
+      // Phase 3: Initialize ML predictor (TensorFlow.js LSTM)
       await this.initializeMLPredictor();
 
-      // Start stream consumers
-      this.startStreamConsumers();
+      // Phase 3: Initialize whale activity tracker
+      this.initializeWhaleTracker();
 
       // Start opportunity detection loop
       this.startOpportunityDetection();
@@ -231,7 +384,12 @@ export class CrossChainDetectorService {
       // Start health monitoring
       this.startHealthMonitoring();
 
-      this.logger.info('Cross-Chain Detector Service started successfully');
+      this.logger.info('Cross-Chain Detector Service started successfully', {
+        crossChainEnabled: ARBITRAGE_CONFIG.crossChainEnabled,
+        mlPredictorActive: this.mlPredictorInitialized,
+        whaleTrackerActive: !!this.whaleTracker,
+        // DEAD-CODE-REMOVED: momentumTrackerActive removed - feature was never used
+      });
     });
 
     if (!result.success) {
@@ -249,7 +407,7 @@ export class CrossChainDetectorService {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Cross-Chain Detector Service');
 
-      // Clear all intervals
+      // Stop modular components and clear intervals
       this.clearAllIntervals();
 
       // P0-NEW-6 FIX: Disconnect streams client with timeout
@@ -282,14 +440,24 @@ export class CrossChainDetectorService {
         this.redis = null;
       }
 
-      // Clear caches
-      this.priceData = {};
-      this.opportunitiesCache.clear();
-      // P1-NEW-7 FIX: Reset counter for clean restart
-      this.priceUpdateCounter = 0;
+      // ADR-014: Clear modular components
+      if (this.priceDataManager) {
+        this.priceDataManager.clear();
+        this.priceDataManager = null;
+      }
+      if (this.opportunityPublisher) {
+        this.opportunityPublisher.clear();
+        this.opportunityPublisher = null;
+      }
+      // ADR-014: Clear MLPredictionManager (replaces priceHistoryCache and mlPredictionCache)
+      if (this.mlPredictionManager) {
+        this.mlPredictionManager.clear();
+        this.mlPredictionManager = null;
+      }
+      this.streamConsumer = null;
+      this.bridgeCostEstimator = null;
 
-      // FIX B1/B2: Reset concurrency guards for clean restart
-      this.isConsumingStreams = false;
+      // Reset concurrency guard for clean restart
       this.isMonitoringHealth = false;
 
       this.logger.info('Cross-Chain Detector Service stopped');
@@ -303,6 +471,10 @@ export class CrossChainDetectorService {
   }
 
   private clearAllIntervals(): void {
+    // ADR-014: Stop stream consumer module
+    if (this.streamConsumer) {
+      this.streamConsumer.stop();
+    }
     if (this.opportunityDetectionInterval) {
       clearInterval(this.opportunityDetectionInterval);
       this.opportunityDetectionInterval = null;
@@ -311,338 +483,222 @@ export class CrossChainDetectorService {
       clearInterval(this.healthMonitoringInterval);
       this.healthMonitoringInterval = null;
     }
-    if (this.streamConsumerInterval) {
-      clearInterval(this.streamConsumerInterval);
-      this.streamConsumerInterval = null;
-    }
-    // P0-5 FIX: Clear cacheCleanupInterval to prevent memory leaks
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
-    }
   }
 
   // ===========================================================================
-  // Redis Streams (ADR-002 Compliant)
+  // ADR-014: Modular Component Initialization
   // ===========================================================================
 
-  private async createConsumerGroups(): Promise<void> {
-    if (!this.streamsClient) return;
-
-    for (const config of this.consumerGroups) {
-      try {
-        await this.streamsClient.createConsumerGroup(config);
-        this.logger.info('Consumer group ready', {
-          stream: config.streamName,
-          group: config.groupName
-        });
-      } catch (error) {
-        this.logger.error('Failed to create consumer group', {
-          error,
-          stream: config.streamName
-        });
-      }
+  /**
+   * Initialize modular components and wire up event handlers.
+   * This method must be called after Redis clients are initialized.
+   */
+  private initializeModules(): void {
+    if (!this.streamsClient) {
+      throw new Error('Cannot initialize modules: streamsClient is null');
     }
-  }
 
-  private startStreamConsumers(): void {
-    // Poll streams every 100ms
-    this.streamConsumerInterval = setInterval(async () => {
-      // FIX B1: Skip if already consuming (prevents concurrent stream reads)
-      if (this.isConsumingStreams || !this.stateManager.isRunning() || !this.streamsClient) return;
+    // Create PriceDataManager
+    this.priceDataManager = createPriceDataManager({
+      logger: this.logger,
+      cleanupFrequency: 100,
+      maxPriceAgeMs: 5 * 60 * 1000, // 5 minutes
+    });
 
-      this.isConsumingStreams = true;
-      try {
-        await Promise.all([
-          this.consumePriceUpdatesStream(),
-          this.consumeWhaleAlertsStream()
-        ]);
-      } catch (error) {
-        this.logger.error('Stream consumer error', { error });
-      } finally {
-        this.isConsumingStreams = false;
-      }
-    }, 100);
-  }
+    // Create OpportunityPublisher
+    this.opportunityPublisher = createOpportunityPublisher({
+      streamsClient: this.streamsClient,
+      perfLogger: this.perfLogger,
+      logger: this.logger,
+      dedupeWindowMs: 5000,
+      minProfitImprovement: 0.1,
+      maxCacheSize: 1000,
+      cacheTtlMs: 10 * 60 * 1000, // 10 minutes
+    });
 
-  private async consumePriceUpdatesStream(): Promise<void> {
-    if (!this.streamsClient) return;
+    // Create BridgeCostEstimator (ADR-014: modular bridge cost estimation)
+    // Note: cachedEthPriceUsd uses default value; for production, consider
+    // periodic updates from priceOracle to improve accuracy
+    this.bridgeCostEstimator = createBridgeCostEstimator({
+      bridgePredictor: this.bridgePredictor,
+      logger: this.logger,
+      defaultTradeSizeUsd: this.config.defaultTradeSizeUsd,
+    });
 
-    const config = this.consumerGroups.find(
-      c => c.streamName === RedisStreamsClient.STREAMS.PRICE_UPDATES
-    );
-    if (!config) return;
+    // ADR-014: Create MLPredictionManager for centralized ML prediction handling
+    // Replaces inline priceHistoryCache, mlPredictionCache, and related methods
+    this.mlPredictionManager = createMLPredictionManager({
+      logger: this.logger,
+      mlConfig: this.mlConfig,
+      priceHistoryMaxLength: 100,
+      maxPriceHistoryKeys: 10000,
+      priceHistoryTtlMs: 10 * 60 * 1000, // 10 minutes
+    });
 
-    try {
-      const messages = await this.streamsClient.xreadgroup(config, {
-        count: 50,
-        block: 0,
-        startId: '>'
-      });
+    // Create StreamConsumer and wire up events
+    this.streamConsumer = createStreamConsumer({
+      instanceId: this.instanceId,
+      streamsClient: this.streamsClient,
+      stateManager: this.stateManager,
+      logger: this.logger,
+      consumerGroups: this.consumerGroups,
+      pollIntervalMs: 100,
+      priceUpdatesBatchSize: 50,
+      whaleAlertsBatchSize: 10,
+    });
 
-      for (const message of messages) {
-        // P1-6 FIX: Validate message data before processing
-        const update = message.data as unknown as PriceUpdate;
-        if (!this.validatePriceUpdate(update)) {
-          this.logger.warn('Skipping invalid price update message', { messageId: message.id });
-          await this.streamsClient.xack(config.streamName, config.groupName, message.id);
-          continue;
-        }
-        this.handlePriceUpdate(update);
-        await this.streamsClient.xack(config.streamName, config.groupName, message.id);
-      }
-    } catch (error) {
-      if (!(error as Error).message?.includes('timeout')) {
-        this.logger.error('Error consuming price updates stream', { error });
-      }
-    }
-  }
+    // Wire StreamConsumer events to handlers
+    this.streamConsumer.on('priceUpdate', (update: PriceUpdate) => {
+      this.handlePriceUpdate(update);
+    });
 
-  private async consumeWhaleAlertsStream(): Promise<void> {
-    if (!this.streamsClient) return;
+    this.streamConsumer.on('whaleTransaction', (tx: WhaleTransaction) => {
+      this.handleWhaleTransaction(tx);
+    });
 
-    const config = this.consumerGroups.find(
-      c => c.streamName === RedisStreamsClient.STREAMS.WHALE_ALERTS
-    );
-    if (!config) return;
+    this.streamConsumer.on('error', (error: Error) => {
+      this.logger.error('StreamConsumer error', { error: error.message });
+    });
 
-    try {
-      const messages = await this.streamsClient.xreadgroup(config, {
-        count: 10,
-        block: 0,
-        startId: '>'
-      });
-
-      for (const message of messages) {
-        // P1-6 FIX: Validate message data before processing
-        const whaleTx = message.data as unknown as WhaleTransaction;
-        if (!this.validateWhaleTransaction(whaleTx)) {
-          this.logger.warn('Skipping invalid whale transaction message', { messageId: message.id });
-          await this.streamsClient.xack(config.streamName, config.groupName, message.id);
-          continue;
-        }
-        this.handleWhaleTransaction(whaleTx);
-        await this.streamsClient.xack(config.streamName, config.groupName, message.id);
-      }
-    } catch (error) {
-      if (!(error as Error).message?.includes('timeout')) {
-        this.logger.error('Error consuming whale alerts stream', { error });
-      }
-    }
+    this.logger.info('Modular components initialized', {
+      modules: ['StreamConsumer', 'PriceDataManager', 'OpportunityPublisher'],
+    });
   }
 
   // ===========================================================================
-  // Price Update Handling
+  // Price Update Handling (delegates to PriceDataManager)
   // ===========================================================================
 
   private handlePriceUpdate(update: PriceUpdate): void {
+    if (!this.priceDataManager) return;
+
     try {
-      // Update price data structure
-      if (!this.priceData[update.chain]) {
-        this.priceData[update.chain] = {};
-      }
-      if (!this.priceData[update.chain][update.dex]) {
-        this.priceData[update.chain][update.dex] = {};
+      // ADR-014: Delegate to PriceDataManager
+      this.priceDataManager.handlePriceUpdate(update);
+
+      // ADR-014: ML Integration via MLPredictionManager (replaces inline trackPriceHistory)
+      if (this.mlPredictionManager) {
+        this.mlPredictionManager.trackPriceUpdate(update);
       }
 
-      this.priceData[update.chain][update.dex][update.pairKey] = update;
+      // FIX: Update ETH price in BridgeCostEstimator for accurate gas cost estimation
+      // Check if this is an ETH or WETH price update paired with a stablecoin
+      this.maybeUpdateEthPrice(update);
 
-      // Deterministic cleanup instead of random sampling (fixes P0 issue)
-      this.priceUpdateCounter++;
-      if (this.priceUpdateCounter >= this.CLEANUP_FREQUENCY) {
-        this.priceUpdateCounter = 0;
-        this.cleanOldPriceData();
-        this.cleanOldOpportunityCache();
-        // I1-FIX: Periodic bridge predictor cleanup to prevent memory bloat
+      // Periodic bridge predictor cleanup (still managed here as cross-cutting concern)
+      // PriceDataManager handles its own cleanup internally
+      // FIX 4.1: Cache pair count before modulo check to ensure consistent behavior
+      const currentPairCount = this.priceDataManager.getPairCount();
+      if (currentPairCount > 0 && currentPairCount % 100 === 0) {
         this.bridgePredictor.cleanup();
+        if (this.opportunityPublisher) {
+          this.opportunityPublisher.cleanup();
+        }
+        // ADR-014: MLPredictionManager handles its own cleanup internally via trackPriceUpdate
+        // (cleanup triggered every 1000 updates)
+        if (this.mlPredictionManager) {
+          this.mlPredictionManager.cleanup();
+        }
       }
-
-      this.logger.debug(`Updated price: ${update.chain}/${update.dex}/${update.pairKey} = ${update.price}`);
     } catch (error) {
       this.logger.error('Failed to handle price update', { error });
     }
   }
 
+  /**
+   * FIX: Update ETH price in BridgeCostEstimator when we receive ETH/WETH price updates.
+   * This ensures bridge cost estimation uses accurate gas prices.
+   */
+  private maybeUpdateEthPrice(update: PriceUpdate): void {
+    if (!this.bridgeCostEstimator) return;
+
+    // Check if this is an ETH or WETH price against a stablecoin
+    const pairKey = update.pairKey.toUpperCase();
+    const isEthPair = (
+      (pairKey.includes('WETH') || pairKey.includes('_ETH_') || pairKey.startsWith('ETH_')) &&
+      (pairKey.includes('USDC') || pairKey.includes('USDT') || pairKey.includes('DAI') || pairKey.includes('BUSD'))
+    );
+
+    if (isEthPair && update.price > 0) {
+      // ETH price should be in the thousands range (sanity check)
+      if (update.price > 100 && update.price < 100000) {
+        this.bridgeCostEstimator.updateEthPrice(update.price);
+      }
+    }
+  }
+
+  // ADR-014: REMOVED - trackPriceHistory, cleanupMlPredictionCache, getCachedMlPrediction, calculateSimpleVolatility
+  // These methods are now handled by MLPredictionManager module for single-responsibility design
+  // See: mlPredictionManager.trackPriceUpdate(), mlPredictionManager.cleanup(),
+  //      mlPredictionManager.getCachedPrediction(), mlPredictionManager.calculateVolatility()
+
   private handleWhaleTransaction(whaleTx: WhaleTransaction): void {
-    try {
-      // Analyze whale transaction for cross-chain implications
-      this.analyzeWhaleImpact(whaleTx);
-    } catch (error) {
-      this.logger.error('Failed to handle whale transaction', { error });
-    }
-  }
-
-  // ===========================================================================
-  // P1-6 FIX: Message Validation
-  // ===========================================================================
-
-  /**
-   * Validate PriceUpdate message has all required fields
-   */
-  private validatePriceUpdate(update: PriceUpdate | null | undefined): update is PriceUpdate {
-    if (!update || typeof update !== 'object') {
-      return false;
-    }
-
-    // Required fields for price updates
-    if (typeof update.chain !== 'string' || !update.chain) {
-      return false;
-    }
-    if (typeof update.dex !== 'string' || !update.dex) {
-      return false;
-    }
-    if (typeof update.pairKey !== 'string' || !update.pairKey) {
-      return false;
-    }
-    // B1-FIX: Use <= 0 to prevent division by zero in profit calculations
-    if (typeof update.price !== 'number' || isNaN(update.price) || update.price <= 0) {
-      return false;
-    }
-    if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Validate WhaleTransaction message has all required fields
-   */
-  private validateWhaleTransaction(tx: WhaleTransaction | null | undefined): tx is WhaleTransaction {
-    if (!tx || typeof tx !== 'object') {
-      return false;
-    }
-
-    // Required fields for whale transactions
-    if (typeof tx.chain !== 'string' || !tx.chain) {
-      return false;
-    }
-    if (typeof tx.usdValue !== 'number' || isNaN(tx.usdValue) || tx.usdValue < 0) {
-      return false;
-    }
-    if (typeof tx.direction !== 'string' || !['buy', 'sell'].includes(tx.direction)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * P0-NEW-7 FIX: Clean old price data using snapshot-based iteration
-   * Prevents race conditions where priceData is modified during cleanup
-   */
-  private cleanOldPriceData(): void {
-    const cutoffTime = Date.now() - (5 * 60 * 1000); // 5 minutes ago
-
-    // P0-NEW-7 FIX: Take snapshot of keys to prevent iterator invalidation
-    const chainSnapshot = Object.keys(this.priceData);
-
-    for (const chain of chainSnapshot) {
-      // Check if chain still exists (may have been deleted by concurrent operation)
-      if (!this.priceData[chain]) continue;
-
-      const dexSnapshot = Object.keys(this.priceData[chain]);
-
-      for (const dex of dexSnapshot) {
-        // Check if dex still exists
-        if (!this.priceData[chain] || !this.priceData[chain][dex]) continue;
-
-        const pairSnapshot = Object.keys(this.priceData[chain][dex]);
-
-        for (const pairKey of pairSnapshot) {
-          // Check if pair still exists before accessing
-          if (!this.priceData[chain]?.[dex]?.[pairKey]) continue;
-
-          const update = this.priceData[chain][dex][pairKey];
-          if (update && update.timestamp < cutoffTime) {
-            delete this.priceData[chain][dex][pairKey];
-          }
-        }
-
-        // Clean empty dex objects (re-check existence)
-        if (this.priceData[chain]?.[dex] && Object.keys(this.priceData[chain][dex]).length === 0) {
-          delete this.priceData[chain][dex];
-        }
-      }
-
-      // Clean empty chain objects (re-check existence)
-      if (this.priceData[chain] && Object.keys(this.priceData[chain]).length === 0) {
-        delete this.priceData[chain];
-      }
-    }
-  }
-
-  /**
-   * Clean old entries from opportunity cache to prevent memory leak (P0 fix)
-   * Keeps cache bounded to prevent unbounded growth
-   * P1-NEW-3 FIX: Uses createdAt field instead of parsing from ID
-   */
-  private cleanOldOpportunityCache(): void {
-    const maxCacheSize = 1000; // Hard limit on cache size
-    const maxAgeMs = 10 * 60 * 1000; // 10 minutes TTL
-    const now = Date.now();
-
-    // First pass: remove old entries using createdAt field
-    for (const [id, opp] of this.opportunitiesCache) {
-      // P1-NEW-3 FIX: Use createdAt field for reliable age checking
-      if (opp.createdAt && (now - opp.createdAt) > maxAgeMs) {
-        this.opportunitiesCache.delete(id);
-      }
-    }
-
-    // Second pass: if still over limit, remove oldest entries
-    if (this.opportunitiesCache.size > maxCacheSize) {
-      const entries = Array.from(this.opportunitiesCache.entries());
-      // P1-NEW-3 FIX: Sort by createdAt field (oldest first)
-      entries.sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
-
-      // Remove oldest entries to get under limit
-      const toRemove = entries.slice(0, entries.length - maxCacheSize);
-      for (const [id] of toRemove) {
-        this.opportunitiesCache.delete(id);
-      }
-
-      this.logger.debug('Trimmed opportunity cache', {
-        removed: toRemove.length,
-        remaining: this.opportunitiesCache.size
+    // Phase 3: Async whale analysis - handle errors gracefully
+    this.analyzeWhaleImpact(whaleTx).catch(error => {
+      this.logger.error('Failed to handle whale transaction', {
+        error: (error as Error).message,
+        txHash: whaleTx.transactionHash
       });
-    }
-  }
-
-  /**
-   * Create atomic snapshot of priceData for thread-safe detection (P1 fix)
-   * Prevents race conditions where priceData is modified during detection
-   */
-  private createPriceDataSnapshot(): PriceData {
-    const snapshot: PriceData = {};
-
-    for (const chain of Object.keys(this.priceData)) {
-      snapshot[chain] = {};
-      for (const dex of Object.keys(this.priceData[chain])) {
-        snapshot[chain][dex] = {};
-        for (const pairKey of Object.keys(this.priceData[chain][dex])) {
-          // Deep copy the PriceUpdate object
-          const original = this.priceData[chain][dex][pairKey];
-          snapshot[chain][dex][pairKey] = { ...original };
-        }
-      }
-    }
-
-    return snapshot;
+    });
   }
 
   // ===========================================================================
-  // ML Predictor
+  // ADR-014: Validation and cleanup now handled by modular components
+  // - StreamConsumer handles message validation
+  // - PriceDataManager handles price data cleanup and snapshots
+  // - OpportunityPublisher handles opportunity cache cleanup
+  // ===========================================================================
+
+  // ===========================================================================
+  // Phase 3: ML Predictor and Whale/Momentum Trackers
   // ===========================================================================
 
   private async initializeMLPredictor(): Promise<void> {
-    // Placeholder for ML predictor initialization
-    // Will be implemented in Phase 3 with TensorFlow.js
-    this.mlPredictor = {
-      predictPriceMovement: async () => ({ direction: 0, confidence: 0.5 }),
-      predictOpportunity: async () => ({ confidence: 0.5, expectedProfit: 0 })
-    };
-    this.logger.info('ML predictor initialized (placeholder)');
+    // ADR-014: Use MLPredictionManager.initialize() for centralized ML initialization
+    if (this.mlPredictionManager) {
+      const success = await this.mlPredictionManager.initialize();
+      this.mlPredictorInitialized = success;
+
+      if (success) {
+        // Also keep direct reference for legacy code that may need it
+        try {
+          this.mlPredictor = getLSTMPredictor();
+        } catch {
+          // Non-critical - MLPredictionManager handles predictions
+        }
+        this.logger.info('ML predictor initialized via MLPredictionManager (TensorFlow.js LSTM)');
+      } else {
+        this.mlPredictor = null;
+        // Graceful degradation - service continues without ML
+        this.logger.warn('ML predictor initialization failed, continuing without ML predictions');
+      }
+    } else {
+      // Fallback to direct initialization if MLPredictionManager not available
+      try {
+        this.mlPredictor = getLSTMPredictor();
+        this.mlPredictorInitialized = true;
+        this.logger.info('ML predictor initialized directly (TensorFlow.js LSTM)');
+      } catch (error) {
+        this.logger.warn('ML predictor initialization failed, continuing without ML predictions', {
+          error: (error as Error).message
+        });
+        this.mlPredictor = null;
+        this.mlPredictorInitialized = false;
+      }
+    }
+  }
+
+  private initializeWhaleTracker(): void {
+    try {
+      // Initialize whale activity tracker singleton
+      this.whaleTracker = getWhaleActivityTracker();
+      this.logger.info('Whale activity tracker initialized');
+      // DEAD-CODE-REMOVED: momentumTracker was never used in detection logic
+    } catch (error) {
+      this.logger.warn('Failed to initialize whale tracker', {
+        error: (error as Error).message
+      });
+    }
   }
 
   // ===========================================================================
@@ -650,32 +706,115 @@ export class CrossChainDetectorService {
   // ===========================================================================
 
   private startOpportunityDetection(): void {
-    // Run opportunity detection every 100ms for real-time analysis
-    this.opportunityDetectionInterval = setInterval(() => {
-      if (this.stateManager.isRunning()) {
-        this.detectCrossChainOpportunities();
+    // CONFIG-C1: Use configurable detection interval
+    const intervalMs = this.config.detectionIntervalMs!;
+    this.opportunityDetectionInterval = setInterval(async () => {
+      if (!this.stateManager.isRunning()) return;
+
+      // FIX #5: Circuit breaker - skip detection if too many consecutive errors
+      const now = Date.now();
+      if (this.consecutiveDetectionErrors >= CrossChainDetectorService.DETECTION_ERROR_THRESHOLD) {
+        // Check if we should reset the circuit breaker
+        if (now - this.lastCircuitBreakerTrip < CrossChainDetectorService.CIRCUIT_BREAKER_RESET_MS) {
+          return; // Still in cooldown period
+        }
+        // Reset circuit breaker after cooldown
+        this.logger.info('Circuit breaker reset after cooldown', {
+          previousErrors: this.consecutiveDetectionErrors,
+          cooldownMs: CrossChainDetectorService.CIRCUIT_BREAKER_RESET_MS,
+        });
+        this.consecutiveDetectionErrors = 0;
       }
-    }, 100);
+
+      try {
+        await this.detectCrossChainOpportunities();
+        // Reset error count on success
+        this.consecutiveDetectionErrors = 0;
+      } catch (error) {
+        this.consecutiveDetectionErrors++;
+        this.logger.error('Opportunity detection error', {
+          error: (error as Error).message,
+          consecutiveErrors: this.consecutiveDetectionErrors,
+          threshold: CrossChainDetectorService.DETECTION_ERROR_THRESHOLD,
+        });
+
+        // FIX #5: Trip circuit breaker if threshold exceeded
+        if (this.consecutiveDetectionErrors >= CrossChainDetectorService.DETECTION_ERROR_THRESHOLD) {
+          this.lastCircuitBreakerTrip = now;
+          this.logger.error('Circuit breaker triggered - pausing detection', {
+            consecutiveErrors: this.consecutiveDetectionErrors,
+            cooldownMs: CrossChainDetectorService.CIRCUIT_BREAKER_RESET_MS,
+          });
+        }
+      }
+    }, intervalMs);
   }
 
-  private detectCrossChainOpportunities(): void {
+  private async detectCrossChainOpportunities(): Promise<void> {
+    if (!this.priceDataManager) return;
+
+    // FIX: Check if cross-chain arbitrage is enabled before detection
+    if (!ARBITRAGE_CONFIG.crossChainEnabled) {
+      return; // Skip detection if disabled
+    }
+
     const startTime = performance.now();
 
+    // FIX #23: Generate cycle ID for structured logging traceability
+    this.detectionCycleCounter++;
+    const cycleId = `det-${this.detectionCycleCounter}`;
+
     try {
-      // P1 fix: Take atomic snapshot of priceData to prevent race conditions
-      // during concurrent modifications by handlePriceUpdate
-      const priceSnapshot = this.createPriceDataSnapshot();
+      // PERF-P1: Use IndexedSnapshot for O(1) token pair lookups instead of O(n²) iteration
+      const indexedSnapshot = this.priceDataManager.createIndexedSnapshot();
+
+      // ADR-014: ML Integration via MLPredictionManager
+      // FIX #22: Reuse map instance to reduce GC pressure (clear instead of new)
+      this.mlPredictionsCache.clear();
+
+      if (this.mlPredictionManager && this.mlPredictionManager.isReady()) {
+        // Build list of pairs to fetch predictions for
+        const pairsToFetch: Array<{ chain: string; pairKey: string; price: number }> = [];
+
+        for (const tokenPair of indexedSnapshot.tokenPairs) {
+          const chainPrices = indexedSnapshot.byToken.get(tokenPair);
+          if (chainPrices) {
+            for (const pricePoint of chainPrices) {
+              pairsToFetch.push({
+                chain: pricePoint.chain,
+                pairKey: pricePoint.pairKey,
+                price: pricePoint.price,
+              });
+            }
+          }
+        }
+
+        // ADR-014: Use MLPredictionManager.prefetchPredictions for parallel fetching
+        // This method handles deduplication, caching, and batch-write internally
+        if (pairsToFetch.length > 0) {
+          // FIX #22: Copy results into reusable cache to reduce GC pressure
+          const fetchedPredictions = await this.mlPredictionManager.prefetchPredictions(pairsToFetch);
+          for (const [key, value] of fetchedPredictions) {
+            this.mlPredictionsCache.set(key, value);
+          }
+        }
+      }
 
       const opportunities: CrossChainOpportunity[] = [];
 
-      // Get all unique token pairs across chains (using snapshot)
-      const tokenPairs = this.getAllTokenPairsFromSnapshot(priceSnapshot);
+      // PERF-P1: Token pairs are pre-computed in snapshot, no need to iterate
+      for (const tokenPair of indexedSnapshot.tokenPairs) {
+        // PERF-P1: O(1) lookup instead of O(chains × dexes × pairs) iteration
+        const chainPrices = indexedSnapshot.byToken.get(tokenPair);
 
-      for (const tokenPair of tokenPairs) {
-        const chainPrices = this.getPricesForTokenPairFromSnapshot(tokenPair, priceSnapshot);
-
-        if (chainPrices.length >= 2) {
-          const pairOpportunities = this.findArbitrageInPair(chainPrices);
+        if (chainPrices && chainPrices.length >= 2) {
+          // Pass ML predictions to arbitrage detection
+          const pairOpportunities = this.findArbitrageInPrices(
+            chainPrices,
+            undefined, // whaleData
+            undefined, // whaleTx
+            this.mlPredictionsCache.size > 0 ? this.mlPredictionsCache : undefined
+          );
           opportunities.push(...pairOpportunities);
         }
       }
@@ -683,111 +822,178 @@ export class CrossChainDetectorService {
       // Filter and rank opportunities
       const validOpportunities = this.filterValidOpportunities(opportunities);
 
-      // Publish opportunities
+      // FIX: Await async publish calls to properly handle errors and backpressure
+      // ADR-014: Publish opportunities via OpportunityPublisher
       for (const opportunity of validOpportunities) {
-        this.publishArbitrageOpportunity(opportunity);
+        await this.publishArbitrageOpportunity(opportunity);
       }
 
       const latency = performance.now() - startTime;
       this.perfLogger.logEventLatency('cross_chain_detection', latency, {
         opportunitiesFound: validOpportunities.length,
-        totalPairs: tokenPairs.length
+        totalPairs: indexedSnapshot.tokenPairs.length,
+        mlPredictionsUsed: this.mlPredictionsCache.size,
+        cycleId, // FIX #23: Include cycle ID for traceability
       });
     } catch (error) {
       this.logger.error('Failed to detect cross-chain opportunities', { error });
     }
   }
 
-  private getAllTokenPairsFromSnapshot(priceData: PriceData): string[] {
-    const tokenPairs = new Set<string>();
+  // ===========================================================================
+  // DUPLICATION-I1: Shared Arbitrage Detection Logic
+  // Extracted from findArbitrageInPair and findArbitrageInPairWithWhaleData
+  // ===========================================================================
 
-    for (const chain of Object.keys(priceData)) {
-      for (const dex of Object.keys(priceData[chain])) {
-        for (const pairKey of Object.keys(priceData[chain][dex])) {
-          // Extract token pair from pairKey (format: DEX_TOKEN1_TOKEN2)
-          const tokens = pairKey.split('_').slice(1).join('_');
-          // S3.2.4-FIX: Normalize token pairs for cross-chain matching
-          // WETH.e_USDT (Avalanche) and ETH_USDT (BSC) both normalize to WETH_USDT
-          tokenPairs.add(normalizeTokenPair(tokens));
-        }
-      }
-    }
-
-    return Array.from(tokenPairs);
-  }
-
-  private getPricesForTokenPairFromSnapshot(
-    tokenPair: string,
-    priceData: PriceData
-  ): Array<{chain: string, dex: string, price: number, update: PriceUpdate}> {
-    const prices: Array<{chain: string, dex: string, price: number, update: PriceUpdate}> = [];
-
-    for (const chain of Object.keys(priceData)) {
-      for (const dex of Object.keys(priceData[chain])) {
-        for (const pairKey of Object.keys(priceData[chain][dex])) {
-          const tokens = pairKey.split('_').slice(1).join('_');
-          // S3.2.4-FIX: Use normalized comparison for cross-chain matching
-          // tokenPair is already normalized from getAllTokenPairsFromSnapshot
-          if (normalizeTokenPair(tokens) === tokenPair) {
-            const update = priceData[chain][dex][pairKey];
-            prices.push({
-              chain,
-              dex,
-              price: update.price,
-              update
-            });
-          }
-        }
-      }
-    }
-
-    return prices;
-  }
-
-  private findArbitrageInPair(chainPrices: Array<{chain: string, dex: string, price: number, update: PriceUpdate}>): CrossChainOpportunity[] {
+  /**
+   * Core arbitrage detection algorithm - finds min/max prices and calculates opportunity.
+   * This is the shared logic extracted from findArbitrageInPair and findArbitrageInPairWithWhaleData.
+   *
+   * @param chainPrices - Array of price points from different chains/dexes
+   * @param whaleData - Optional whale activity summary for confidence boost
+   * @param whaleTx - Optional whale transaction for opportunity tagging
+   * @param mlPredictions - Optional ML predictions for source and target chains
+   * @returns Array of detected opportunities (0 or 1 elements)
+   */
+  private findArbitrageInPrices(
+    chainPrices: PricePoint[],
+    whaleData?: WhaleActivitySummary,
+    whaleTx?: WhaleTransaction,
+    mlPredictions?: Map<string, PredictionResult | null>
+  ): CrossChainOpportunity[] {
     const opportunities: CrossChainOpportunity[] = [];
 
-    // Sort by price to find best buy/sell opportunities
-    const sortedPrices = chainPrices.sort((a, b) => a.price - b.price);
+    // PERF-OPT: Use O(n) min/max instead of O(n log n) sorting
+    if (chainPrices.length < 2) {
+      return opportunities;
+    }
 
-    if (sortedPrices.length >= 2) {
-      const lowestPrice = sortedPrices[0];
-      const highestPrice = sortedPrices[sortedPrices.length - 1];
+    let lowestPrice = chainPrices[0];
+    let highestPrice = chainPrices[0];
 
-      const priceDiff = highestPrice.price - lowestPrice.price;
-      const percentageDiff = (priceDiff / lowestPrice.price) * 100;
-
-      // Check if profitable after estimated bridge costs
-      const bridgeCost = this.estimateBridgeCost(lowestPrice.chain, highestPrice.chain, lowestPrice.update);
-      const netProfit = priceDiff - bridgeCost;
-
-      if (netProfit > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
-        const opportunity: CrossChainOpportunity = {
-          token: this.extractTokenFromPair(lowestPrice.update.pairKey),
-          sourceChain: lowestPrice.chain,
-          sourceDex: lowestPrice.dex,
-          sourcePrice: lowestPrice.price,
-          targetChain: highestPrice.chain,
-          targetDex: highestPrice.dex,
-          targetPrice: highestPrice.price,
-          priceDiff,
-          percentageDiff,
-          estimatedProfit: priceDiff,
-          bridgeCost,
-          netProfit,
-          confidence: this.calculateConfidence(lowestPrice, highestPrice),
-          // P1-NEW-3 FIX: Include createdAt for reliable cleanup
-          createdAt: Date.now()
-        };
-
-        opportunities.push(opportunity);
+    for (let i = 1; i < chainPrices.length; i++) {
+      if (chainPrices[i].price < lowestPrice.price) {
+        lowestPrice = chainPrices[i];
       }
+      if (chainPrices[i].price > highestPrice.price) {
+        highestPrice = chainPrices[i];
+      }
+    }
+
+    // BUG-B2-FIX: Guard against invalid prices before calculation
+    if (lowestPrice.price <= 0 || !Number.isFinite(lowestPrice.price)) {
+      return opportunities;
+    }
+
+    const priceDiff = highestPrice.price - lowestPrice.price;
+    const percentageDiff = (priceDiff / lowestPrice.price) * 100;
+
+    // Check if profitable after estimated bridge costs
+    const bridgeCost = this.estimateBridgeCost(lowestPrice.chain, highestPrice.chain, lowestPrice.update);
+    const netProfit = priceDiff - bridgeCost;
+
+    if (netProfit > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
+      // Build ML prediction object if predictions available
+      let mlPredictionData: { source?: PredictionResult | null; target?: PredictionResult | null } | undefined;
+      if (mlPredictions) {
+        const sourceKey = `${lowestPrice.chain}:${lowestPrice.pairKey}`;
+        const targetKey = `${highestPrice.chain}:${highestPrice.pairKey}`;
+        mlPredictionData = {
+          source: mlPredictions.get(sourceKey),
+          target: mlPredictions.get(targetKey),
+        };
+      }
+
+      // Calculate confidence with optional whale data and ML predictions
+      const confidence = this.calculateConfidence(
+        { update: lowestPrice.update, price: lowestPrice.price },
+        { price: highestPrice.price },
+        whaleData,
+        mlPredictionData
+      );
+
+      // Compute ML fields for opportunity tracking
+      let mlFields: Partial<CrossChainOpportunity> = {};
+      if (mlPredictionData) {
+        const { source, target } = mlPredictionData;
+        const hasValidSource = source && source.confidence >= this.mlConfig.minConfidence;
+        const hasValidTarget = target && target.confidence >= this.mlConfig.minConfidence;
+
+        if (hasValidSource || hasValidTarget) {
+          // Calculate ML confidence boost (same logic as in calculateConfidence)
+          let mlBoost = 1.0;
+          let supported = false;
+
+          if (hasValidSource) {
+            if (source!.direction === 'up') {
+              mlBoost *= this.mlConfig.alignedBoost;
+              supported = true;
+            } else if (source!.direction === 'down') {
+              mlBoost *= this.mlConfig.opposedPenalty;
+            }
+          }
+          if (hasValidTarget) {
+            if (target!.direction === 'up' || target!.direction === 'sideways') {
+              mlBoost *= supported ? 1.05 : this.mlConfig.alignedBoost;
+              supported = true;
+            } else if (target!.direction === 'down') {
+              mlBoost *= this.mlConfig.opposedPenalty;
+              supported = false;
+            }
+          }
+
+          mlFields = {
+            mlConfidenceBoost: mlBoost,
+            mlSourceDirection: hasValidSource ? source!.direction : undefined,
+            mlTargetDirection: hasValidTarget ? target!.direction : undefined,
+            mlSupported: supported,
+          };
+        }
+      }
+
+      const opportunity: CrossChainOpportunity = {
+        token: this.extractTokenFromPair(lowestPrice.pairKey),
+        sourceChain: lowestPrice.chain,
+        sourceDex: lowestPrice.dex,
+        sourcePrice: lowestPrice.price,
+        targetChain: highestPrice.chain,
+        targetDex: highestPrice.dex,
+        targetPrice: highestPrice.price,
+        priceDiff,
+        percentageDiff,
+        estimatedProfit: priceDiff,
+        bridgeCost,
+        netProfit,
+        confidence,
+        createdAt: Date.now(),
+        // Whale enhancement fields (only set if whale data provided)
+        ...(whaleTx && whaleData ? {
+          whaleTriggered: true,
+          whaleTxHash: whaleTx.transactionHash,
+          whaleDirection: whaleData.dominantDirection as 'bullish' | 'bearish' | 'neutral',
+          whaleVolumeUsd: whaleData.buyVolumeUsd + whaleData.sellVolumeUsd,
+        } : {}),
+        // ML enhancement fields
+        ...mlFields,
+      };
+
+      opportunities.push(opportunity);
     }
 
     return opportunities;
   }
 
+  // ===========================================================================
+  // Helper Methods
+  // ===========================================================================
+
   private extractTokenFromPair(pairKey: string): string {
+    // FIX 4.4: Guard against empty or invalid pairKey
+    if (!pairKey || typeof pairKey !== 'string' || pairKey.length === 0) {
+      this.logger.warn('Invalid pairKey in extractTokenFromPair', { pairKey });
+      return 'UNKNOWN/UNKNOWN';
+    }
+
     // S3.2.4-FIX: Extract and normalize tokens from pair key
     // Handles both formats:
     // - "traderjoe_WETH.e_USDT" (3 parts) -> "WETH/USDT"
@@ -797,113 +1003,60 @@ export class CrossChainDetectorService {
       // Always take last 2 parts as tokens regardless of DEX name format
       const token0 = parts[parts.length - 2];
       const token1 = parts[parts.length - 1];
-      // Normalize for consistent canonical names
-      return `${normalizeTokenForCrossChain(token0)}/${normalizeTokenForCrossChain(token1)}`;
+
+      // FIX 4.4: Validate extracted tokens are non-empty
+      if (!token0 || !token1 || token0.length === 0 || token1.length === 0) {
+        this.logger.warn('Empty tokens extracted from pairKey', { pairKey, token0, token1 });
+        return pairKey; // Return original as fallback
+      }
+
+      // FIX 4.2: Wrap normalization in try-catch
+      try {
+        const normalizedToken0 = normalizeTokenForCrossChain(token0);
+        const normalizedToken1 = normalizeTokenForCrossChain(token1);
+        return `${normalizedToken0 || token0}/${normalizedToken1 || token1}`;
+      } catch (error) {
+        this.logger.warn('Token normalization failed in extractTokenFromPair', {
+          pairKey,
+          error: (error as Error).message
+        });
+        return `${token0}/${token1}`;
+      }
     }
     return pairKey;
   }
 
+  /**
+   * ADR-014: Delegate bridge cost estimation to BridgeCostEstimator module.
+   * This replaces the previous inline implementation with the modular component.
+   */
   private estimateBridgeCost(sourceChain: string, targetChain: string, tokenUpdate: PriceUpdate): number {
-    // Use bridge predictor for accurate cost estimation
-    const availableBridges = this.bridgePredictor.getAvailableRoutes(sourceChain, targetChain);
-
-    if (availableBridges.length === 0) {
-      // Fallback to simplified estimation if no bridge data available
-      return this.fallbackBridgeCost(sourceChain, targetChain, tokenUpdate);
+    if (this.bridgeCostEstimator) {
+      return this.bridgeCostEstimator.estimateBridgeCost(sourceChain, targetChain, tokenUpdate);
     }
 
-    // Get the best bridge prediction
-    const tokenAmount = this.extractTokenAmount(tokenUpdate);
-    const prediction = this.bridgePredictor.predictOptimalBridge(
-      sourceChain,
-      targetChain,
-      tokenAmount,
-      'medium' // Default urgency
-    );
-
-    if (prediction && prediction.confidence > 0.3) {
-      // Convert from wei to token units (simplified conversion)
-      return prediction.estimatedCost / 1e18;
-    }
-
-    // Fallback if prediction confidence is too low
-    return this.fallbackBridgeCost(sourceChain, targetChain, tokenUpdate);
+    // Fallback if module not initialized (should not happen in normal operation)
+    this.logger.warn('BridgeCostEstimator not initialized, using fallback');
+    return this.fallbackBridgeCostLegacy(sourceChain, targetChain);
   }
 
   /**
-   * P1-5 FIX: Use centralized bridge cost configuration instead of hardcoded multipliers.
-   * This provides more accurate cost estimates based on actual bridge fees.
+   * Legacy fallback bridge cost estimation.
+   * Only used if BridgeCostEstimator module fails to initialize.
+   * @deprecated Use BridgeCostEstimator module instead
    */
-  private fallbackBridgeCost(sourceChain: string, targetChain: string, tokenUpdate: PriceUpdate): number {
-    const DEFAULT_TRADE_SIZE_USD = 1000; // Standard trade size for cost estimation
-
-    // P1-5 FIX: Use centralized bridge cost configuration
-    const bridgeCostResult = calculateBridgeCostUsd(sourceChain, targetChain, DEFAULT_TRADE_SIZE_USD);
+  private fallbackBridgeCostLegacy(sourceChain: string, targetChain: string): number {
+    const tradeSizeUsd = this.config.defaultTradeSizeUsd!;
+    const bridgeCostResult = calculateBridgeCostUsd(sourceChain, targetChain, tradeSizeUsd);
 
     if (bridgeCostResult) {
-      this.logger.debug('Using configured bridge cost', {
-        sourceChain,
-        targetChain,
-        bridge: bridgeCostResult.bridge,
-        feeUsd: bridgeCostResult.fee,
-        latency: bridgeCostResult.latency
-      });
       return bridgeCostResult.fee;
     }
 
-    // Fallback: Estimate cost if no configuration exists
-    this.logger.debug('No bridge cost config, using fallback estimate', {
-      sourceChain,
-      targetChain
-    });
-
-    // Base cost as percentage of trade size
-    const baseFeePercentage = 0.1; // 0.1% fallback fee
-    const minFeeUsd = 2.0; // Minimum $2 fee
-    const percentageFee = DEFAULT_TRADE_SIZE_USD * (baseFeePercentage / 100);
-
-    return Math.max(percentageFee, minFeeUsd);
-  }
-
-  /**
-   * P0-4 FIX: Extract token amount for bridge cost estimation
-   *
-   * Previous implementation was WRONG:
-   *   return price > 0 ? 1.0 / price : 1.0  // Returns inverse of price, NOT token amount!
-   *
-   * This caused bridge cost calculations to be off by ±500% because:
-   *   - If ETH price = $3000, it would return 0.000333 tokens
-   *   - If ETH price = $0.01, it would return 100 tokens
-   *
-   * Correct implementation: Return a reasonable default trade size in token terms.
-   * For cross-chain arbitrage, we typically trade a fixed USD amount (e.g., $1000)
-   * and calculate how many tokens that represents.
-   */
-  private extractTokenAmount(tokenUpdate: PriceUpdate): number {
-    const DEFAULT_TRADE_SIZE_USD = 1000; // Standard trade size for bridge cost estimation
-
-    const price = tokenUpdate.price;
-    if (price <= 0) {
-      this.logger.warn('Invalid token price for amount extraction', {
-        pairKey: tokenUpdate.pairKey,
-        price
-      });
-      return 1.0; // Fallback to 1 token
-    }
-
-    // Calculate tokens worth $1000 USD
-    // If price is $3000/ETH, then $1000 = 0.333 ETH
-    // If price is $0.01/token, then $1000 = 100,000 tokens
-    const tokenAmount = DEFAULT_TRADE_SIZE_USD / price;
-
-    this.logger.debug('Extracted token amount for bridge estimation', {
-      pairKey: tokenUpdate.pairKey,
-      price,
-      usdValue: DEFAULT_TRADE_SIZE_USD,
-      tokenAmount
-    });
-
-    return tokenAmount;
+    // Minimal fallback
+    const baseFeePercentage = 0.1;
+    const minFeeUsd = 2.0;
+    return Math.max(tradeSizeUsd * (baseFeePercentage / 100), minFeeUsd);
   }
 
   // Method to update bridge predictor with actual bridge transaction data
@@ -942,19 +1095,108 @@ export class CrossChainDetectorService {
     });
   }
 
-  private calculateConfidence(lowPrice: {update: PriceUpdate; price: number}, highPrice: {price: number}): number {
+  private calculateConfidence(
+    lowPrice: {update: PriceUpdate; price: number},
+    highPrice: {price: number},
+    whaleData?: WhaleActivitySummary,
+    mlPrediction?: { source?: PredictionResult | null; target?: PredictionResult | null }
+  ): number {
+    // BUG-B2-FIX: Guard against division by zero and invalid prices
+    if (lowPrice.price <= 0 || highPrice.price <= 0 || !Number.isFinite(lowPrice.price) || !Number.isFinite(highPrice.price)) {
+      this.logger.warn('Invalid prices in confidence calculation', {
+        lowPrice: lowPrice.price,
+        highPrice: highPrice.price,
+      });
+      return 0; // Zero confidence for invalid data
+    }
+
     // Base confidence on price difference and data freshness
     let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2; // 0-1 scale
+
+    // BUG-B2-FIX: Ensure confidence is a valid number
+    if (!Number.isFinite(confidence) || confidence < 0) {
+      return 0;
+    }
 
     // Reduce confidence for stale data
     const agePenalty = Math.max(0, (Date.now() - lowPrice.update.timestamp) / 60000); // 1 minute = 1.0 penalty
     confidence *= Math.max(0.1, 1 - agePenalty * 0.1);
 
-    // ML prediction boost (placeholder)
-    if (this.mlPredictor) {
-      confidence *= 1.2; // Boost from ML prediction
-      confidence = Math.min(confidence, 0.95); // Cap at 95%
+    // Phase 3: ML prediction confidence adjustment
+    // Uses actual predictions instead of static boost
+    let mlConfidenceBoost = 1.0;
+    let mlSupported = false;
+
+    if (this.mlConfig.enabled && mlPrediction) {
+      const { source, target } = mlPrediction;
+
+      // For cross-chain arbitrage: buy on source (low price), sell on target (high price)
+      // Favorable: source price going up (buy now before it increases) OR
+      //            target price stable/up (will still be high when we sell)
+      // Unfavorable: source price going down (wait for lower) OR
+      //              target price going down (opportunity may disappear)
+
+      if (source && source.confidence >= this.mlConfig.minConfidence) {
+        if (source.direction === 'up') {
+          // Source price predicted to go up - good to buy now
+          mlConfidenceBoost *= this.mlConfig.alignedBoost;
+          mlSupported = true;
+        } else if (source.direction === 'down') {
+          // Source price predicted to go down - maybe wait
+          mlConfidenceBoost *= this.mlConfig.opposedPenalty;
+        }
+      }
+
+      if (target && target.confidence >= this.mlConfig.minConfidence) {
+        if (target.direction === 'up' || target.direction === 'sideways') {
+          // Target price stable or going up - opportunity will persist
+          mlConfidenceBoost *= mlSupported ? 1.05 : this.mlConfig.alignedBoost;
+          mlSupported = true;
+        } else if (target.direction === 'down') {
+          // Target price predicted to drop - opportunity may vanish
+          mlConfidenceBoost *= this.mlConfig.opposedPenalty;
+          mlSupported = false;
+        }
+      }
+
+      confidence *= mlConfidenceBoost;
+
+      this.logger.debug('ML prediction applied to confidence', {
+        sourceDirection: source?.direction,
+        sourceConfidence: source?.confidence,
+        targetDirection: target?.direction,
+        targetConfidence: target?.confidence,
+        mlConfidenceBoost,
+        mlSupported,
+      });
     }
+
+    // Phase 3: Whale activity confidence adjustment
+    if (whaleData) {
+      const { dominantDirection, netFlowUsd, superWhaleCount } = whaleData;
+
+      // Boost confidence if whale direction aligns with opportunity
+      // For cross-chain arb: we're buying low, selling high
+      // Bullish whale activity on source chain (buying) supports our buy side
+      if (dominantDirection === 'bullish') {
+        confidence *= this.whaleConfig.whaleBullishBoost;
+      } else if (dominantDirection === 'bearish') {
+        confidence *= this.whaleConfig.whaleBearishPenalty;
+      }
+
+      // Super whale activity = high conviction signal
+      if (superWhaleCount > 0) {
+        confidence *= this.whaleConfig.superWhaleBoost;
+      }
+
+      // Large net flow indicates strong directional conviction
+      if (Math.abs(netFlowUsd) > this.whaleConfig.significantFlowThresholdUsd) {
+        confidence *= 1.1; // Additional 10% boost for significant flow
+      }
+    }
+
+    // Cap confidence at 95%
+    confidence = Math.min(confidence, 0.95);
 
     return confidence;
   }
@@ -963,98 +1205,169 @@ export class CrossChainDetectorService {
     return opportunities
       .filter(opp => opp.netProfit > 0)
       .filter(opp => opp.confidence > ARBITRAGE_CONFIG.confidenceThreshold)
-      .sort((a, b) => b.netProfit - a.netProfit)
+      // Phase 3: Prioritize whale-triggered opportunities
+      .sort((a, b) => {
+        // Whale-triggered first
+        if (a.whaleTriggered && !b.whaleTriggered) return -1;
+        if (!a.whaleTriggered && b.whaleTriggered) return 1;
+        // Then by net profit
+        return b.netProfit - a.netProfit;
+      })
       .slice(0, 10); // Top 10 opportunities
   }
 
-  private analyzeWhaleImpact(whaleTx: WhaleTransaction): void {
-    // Analyze how whale transaction affects cross-chain opportunities
-    // This could trigger immediate opportunity detection or adjust confidence scores
-
-    this.logger.debug('Analyzing whale transaction impact', {
-      chain: whaleTx.chain,
-      usdValue: whaleTx.usdValue,
-      direction: whaleTx.direction
-    });
-  }
-
-  private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
-    if (!this.streamsClient) return;
-
-    // S3.2.4-FIX: Generate deterministic cache key for deduplication BEFORE publishing
-    // Key based on opportunity characteristics, not random ID
-    const dedupeKey = `${opportunity.sourceChain}-${opportunity.targetChain}-${opportunity.token}`;
-
-    // Check if we recently published this opportunity (within 5 seconds)
-    const existingOpp = this.opportunitiesCache.get(dedupeKey);
-    const DEDUPE_WINDOW_MS = 5000; // Don't republish same opportunity within 5 seconds
-
-    if (existingOpp && (Date.now() - existingOpp.createdAt) < DEDUPE_WINDOW_MS) {
-      // Skip duplicate - only publish if profit improved significantly (>10%)
-      const profitImprovement = (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit;
-      if (profitImprovement < 0.1) {
-        this.logger.debug('Skipping duplicate opportunity', {
-          dedupeKey,
-          ageMs: Date.now() - existingOpp.createdAt,
-          profitImprovement: `${(profitImprovement * 100).toFixed(1)}%`
-        });
-        return;
-      }
+  /**
+   * Phase 3: Analyze whale transaction impact on cross-chain opportunities.
+   * Records whale activity to tracker and triggers immediate detection for super whales.
+   */
+  private async analyzeWhaleImpact(whaleTx: WhaleTransaction): Promise<void> {
+    if (!this.whaleTracker) {
+      this.logger.debug('Whale tracker not initialized, skipping impact analysis');
+      return;
     }
 
-    // PRECISION-FIX: Calculate expectedProfit as token amount (not USD/price difference)
-    // The execution engine treats expectedProfit as base token units and converts via:
-    // ethers.parseUnits(expectedProfit.toFixed(18), 18)
-    //
-    // Previously: expectedProfit = opportunity.netProfit (USD price diff, e.g., $25.50)
-    // Correct: expectedProfit = amountIn * profitPercentage (token amount, e.g., 0.255)
-    const amountInWei = '1000000000000000000'; // 1 token
-    const amountInTokens = 1.0; // 1 token for calculation
-    const expectedProfitInTokens = (opportunity.percentageDiff / 100) * amountInTokens;
+    try {
+      // Convert WhaleTransaction to TrackedWhaleTransaction format
+      // Note: TrackedWhaleTransaction has more detailed fields; we map what's available
+      // FIX 4.3: Improved token parsing - handle multiple formats:
+      // - "WETH/USDC" (standard pair format)
+      // - "WETH_USDC" (underscore separator)
+      // - "WETH" (single token - use chain-specific quote token)
 
-    // B3-FIX: Defensive token parsing with fallback
-    const tokenParts = opportunity.token.includes('/')
-      ? opportunity.token.split('/')
-      : [opportunity.token, opportunity.token]; // Fallback for malformed token
-    const tokenIn = tokenParts[0] || opportunity.token;
-    const tokenOut = tokenParts[1] || tokenParts[0] || opportunity.token;
+      // REFACTOR: Use getDefaultQuoteToken from @arbitrage/config
+      // See shared/config/src/cross-chain.ts for chain-specific default quote tokens
 
-    const arbitrageOpp: ArbitrageOpportunity = {
-      id: `cross-chain-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      type: 'cross-chain',
-      buyDex: opportunity.sourceDex,
-      sellDex: opportunity.targetDex,
-      buyChain: opportunity.sourceChain,
-      sellChain: opportunity.targetChain,
-      tokenIn,
-      tokenOut,
-      amountIn: amountInWei,
-      // PRECISION-FIX: Use token amount (not USD difference) for execution engine compatibility
-      expectedProfit: expectedProfitInTokens,
-      profitPercentage: opportunity.percentageDiff / 100,
-      gasEstimate: '0', // Cross-chain, gas estimated separately
-      confidence: opportunity.confidence,
-      timestamp: Date.now(),
-      blockNumber: 0, // Cross-chain
-      bridgeRequired: true,
-      bridgeCost: opportunity.bridgeCost
-    };
+      let baseToken: string;
+      let quoteToken: string;
+
+      if (whaleTx.token.includes('/')) {
+        const tokenParts = whaleTx.token.split('/');
+        baseToken = tokenParts[0] || whaleTx.token;
+        quoteToken = tokenParts[1] || getDefaultQuoteToken(whaleTx.chain);
+      } else if (whaleTx.token.includes('_')) {
+        const tokenParts = whaleTx.token.split('_');
+        // Take last two parts as tokens (handles DEX_TOKEN0_TOKEN1 format)
+        baseToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 2] : whaleTx.token;
+        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : getDefaultQuoteToken(whaleTx.chain);
+      } else {
+        // Single token - common case is trading against stablecoins
+        baseToken = whaleTx.token;
+        quoteToken = getDefaultQuoteToken(whaleTx.chain); // FIX #17: Chain-specific quote token
+      }
+
+      // Normalize tokens for consistency
+      try {
+        baseToken = normalizeTokenForCrossChain(baseToken) || baseToken;
+        quoteToken = normalizeTokenForCrossChain(quoteToken) || quoteToken;
+      } catch {
+        // Keep original tokens if normalization fails
+      }
+
+      const trackedTx: TrackedWhaleTransaction = {
+        transactionHash: whaleTx.transactionHash,
+        walletAddress: whaleTx.address,
+        chain: whaleTx.chain,
+        dex: whaleTx.dex,
+        pairAddress: whaleTx.token, // Token being traded (used as pair identifier)
+        // FIX: Use actual token pair info instead of hardcoded USDC assumption
+        tokenIn: whaleTx.direction === 'buy' ? quoteToken : baseToken,
+        tokenOut: whaleTx.direction === 'buy' ? baseToken : quoteToken,
+        amountIn: whaleTx.direction === 'buy' ? whaleTx.usdValue : whaleTx.amount,
+        amountOut: whaleTx.direction === 'buy' ? whaleTx.amount : whaleTx.usdValue,
+        usdValue: whaleTx.usdValue,
+        direction: whaleTx.direction,
+        priceImpact: whaleTx.impact,
+        timestamp: whaleTx.timestamp,
+      };
+
+      // Record transaction in whale tracker
+      this.whaleTracker.recordTransaction(trackedTx);
+
+      // Get whale activity summary for this chain/token
+      const summary = this.whaleTracker.getActivitySummary(whaleTx.token, whaleTx.chain);
+
+      this.logger.debug('Whale transaction analyzed', {
+        chain: whaleTx.chain,
+        usdValue: whaleTx.usdValue,
+        direction: whaleTx.direction,
+        dominantDirection: summary.dominantDirection,
+        netFlowUsd: summary.netFlowUsd,
+        superWhaleCount: summary.superWhaleCount
+      });
+
+      // Phase 3: Trigger immediate detection for super whale or significant activity
+      if (whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd ||
+          Math.abs(summary.netFlowUsd) > this.whaleConfig.significantFlowThresholdUsd) {
+
+        this.logger.info('Super whale detected, triggering immediate opportunity scan', {
+          token: whaleTx.token,
+          chain: whaleTx.chain,
+          usdValue: whaleTx.usdValue,
+          isSuperWhale: whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd
+        });
+
+        // Trigger immediate cross-chain detection for this token
+        await this.detectWhaleInducedOpportunities(whaleTx, summary);
+      }
+    } catch (error) {
+      this.logger.error('Failed to analyze whale impact', {
+        error: (error as Error).message,
+        txHash: whaleTx.transactionHash
+      });
+    }
+  }
+
+  /**
+   * Phase 3: Detect opportunities specifically triggered by whale activity.
+   * Scans for cross-chain opportunities for the affected token with whale-boosted confidence.
+   * DUPLICATION-I1: Now uses shared findArbitrageInPrices method.
+   */
+  private async detectWhaleInducedOpportunities(
+    whaleTx: WhaleTransaction,
+    summary: WhaleActivitySummary
+  ): Promise<void> {
+    if (!this.priceDataManager || !ARBITRAGE_CONFIG.crossChainEnabled) return;
 
     try {
-      // Publish to Redis Streams (ADR-002 compliant)
-      await this.streamsClient.xadd(
-        RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        arbitrageOpp
-      );
+      // PERF-P1: Use indexed snapshot for O(1) lookups
+      const indexedSnapshot = this.priceDataManager.createIndexedSnapshot();
 
-      this.perfLogger.logArbitrageOpportunity(arbitrageOpp);
+      // FIX 4.2: Normalize the token from whale transaction for lookup
+      // Use normalizeToInternalFormat to ensure consistent WETH_USDC format
+      // (handles both "WETH/USDC" display format and "WETH_USDC" internal format)
+      const normalizedToken = normalizeToInternalFormat(normalizeTokenPair(whaleTx.token));
 
-      // S3.2.4-FIX: Cache with deterministic key for proper deduplication
-      // P1-NEW-3 FIX: Add createdAt timestamp for reliable cleanup
-      this.opportunitiesCache.set(dedupeKey, {
-        ...opportunity,
-        createdAt: Date.now()
+      // PERF-P1: O(1) lookup instead of O(n²) iteration
+      const chainPrices = indexedSnapshot.byToken.get(normalizedToken);
+
+      if (chainPrices && chainPrices.length >= 2) {
+        // DUPLICATION-I1: Use shared method with whale data
+        const opportunities = this.findArbitrageInPrices(chainPrices, summary, whaleTx);
+
+        for (const opportunity of opportunities) {
+          if (opportunity.confidence > ARBITRAGE_CONFIG.confidenceThreshold) {
+            await this.publishArbitrageOpportunity(opportunity);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.error('Failed to detect whale-induced opportunities', {
+        error: (error as Error).message
       });
+    }
+  }
+
+  // DUPLICATION-I1: findArbitrageInPairWithWhaleData removed - logic merged into findArbitrageInPrices
+
+  /**
+   * ADR-014: Publish opportunity via OpportunityPublisher module.
+   * The module handles deduplication, conversion, and caching.
+   */
+  private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
+    if (!this.opportunityPublisher) return;
+
+    try {
+      await this.opportunityPublisher.publish(opportunity);
     } catch (error) {
       this.logger.error('Failed to publish arbitrage opportunity', { error });
     }
@@ -1065,6 +1378,8 @@ export class CrossChainDetectorService {
   // ===========================================================================
 
   private startHealthMonitoring(): void {
+    // CONFIG-C1: Use configurable health check interval
+    const intervalMs = this.config.healthCheckIntervalMs!;
     this.healthMonitoringInterval = setInterval(async () => {
       // FIX B2: Skip if already monitoring (prevents concurrent health updates)
       if (this.isMonitoringHealth || !this.stateManager.isRunning()) return;
@@ -1082,8 +1397,9 @@ export class CrossChainDetectorService {
           cpuUsage: 0,
           timestamp: now,        // FIX: Coordinator expects 'timestamp' for health tracking
           lastHeartbeat: now,    // Keep for backwards compatibility
-          chainsMonitored: Object.keys(this.priceData).length,
-          opportunitiesCache: this.opportunitiesCache.size,
+          // ADR-014: Use module getters for health metrics
+          chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
+          opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,
           mlPredictorActive: !!this.mlPredictor
         };
 
@@ -1106,7 +1422,7 @@ export class CrossChainDetectorService {
       } finally {
         this.isMonitoringHealth = false;
       }
-    }, 30000);
+    }, intervalMs);
   }
 
   // ===========================================================================
@@ -1121,11 +1437,13 @@ export class CrossChainDetectorService {
     return this.stateManager.getState();
   }
 
+  // ADR-014: Use PriceDataManager for chain information
   getChainsMonitored(): string[] {
-    return Object.keys(this.priceData);
+    return this.priceDataManager?.getChains() ?? [];
   }
 
+  // ADR-014: Use OpportunityPublisher for cache metrics
   getOpportunitiesCount(): number {
-    return this.opportunitiesCache.size;
+    return this.opportunityPublisher?.getCacheSize() ?? 0;
   }
 }

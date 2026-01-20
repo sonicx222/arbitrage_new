@@ -1,8 +1,10 @@
 // ML Prediction Engine with LSTM Models
 // Advanced price forecasting and pattern recognition for arbitrage
 
-import * as tf from '@tensorflow/tfjs-node';
-import { createLogger } from '../../core/src/logger';
+// Use pure JS TensorFlow.js for cross-platform compatibility
+// Note: @tensorflow/tfjs-node provides better performance but requires native compilation
+import * as tf from '@tensorflow/tfjs';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('ml-predictor');
 
@@ -364,9 +366,14 @@ export class LSTMPredictor {
     const sumXY = x.reduce((sum, xi, i) => sum + xi * y[i], 0);
     const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
 
-    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    // FIX #2: Guard against division by zero when all prices are identical
+    const denominator = n * sumXX - sumX * sumX;
+    if (denominator === 0 || !Number.isFinite(denominator)) {
+      return 0;
+    }
 
-    return slope;
+    const slope = (n * sumXY - sumX * sumY) / denominator;
+    return Number.isFinite(slope) ? slope : 0;
   }
 
   private calculateErrorFeatures(errors: number[]): number[] {

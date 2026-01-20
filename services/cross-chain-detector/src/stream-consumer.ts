@@ -26,18 +26,15 @@ import {
   ServiceStateManager,
 } from '@arbitrage/core';
 import { PriceUpdate, WhaleTransaction } from '@arbitrage/types';
+// TYPE-CONSOLIDATION: Import shared Logger type instead of duplicating
+import { Logger } from './types';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-/** Logger interface for dependency injection */
-export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+// Logger is now imported from ./types for consistency across modules
+export type { Logger };
 
 /** Configuration for StreamConsumer */
 export interface StreamConsumerConfig {
@@ -64,6 +61,9 @@ export interface StreamConsumerConfig {
 
   /** Whale alerts batch size (default: 10) */
   whaleAlertsBatchSize?: number;
+
+  /** FIX 3.2: Block timeout for XREADGROUP in ms (default: 1000) */
+  blockTimeoutMs?: number;
 }
 
 /** Public interface for StreamConsumer */
@@ -92,6 +92,9 @@ export interface StreamConsumerEvents {
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_PRICE_UPDATES_BATCH_SIZE = 50;
 const DEFAULT_WHALE_ALERTS_BATCH_SIZE = 10;
+// FIX: Use 1 second block timeout instead of infinite (0)
+// ADR-002 specifies 1000ms for low latency without hanging
+const DEFAULT_BLOCK_TIMEOUT_MS = 1000;
 
 // =============================================================================
 // Implementation
@@ -113,6 +116,7 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
     priceUpdatesBatchSize = DEFAULT_PRICE_UPDATES_BATCH_SIZE,
     whaleAlertsBatchSize = DEFAULT_WHALE_ALERTS_BATCH_SIZE,
+    blockTimeoutMs = DEFAULT_BLOCK_TIMEOUT_MS, // FIX 3.2: Configurable block timeout
   } = config;
 
   const emitter = new EventEmitter() as StreamConsumer;
@@ -140,7 +144,8 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (typeof update.pairKey !== 'string' || !update.pairKey) {
       return false;
     }
-    if (typeof update.price !== 'number' || isNaN(update.price) || update.price < 0) {
+    // B1-FIX: Use <= 0 to prevent division by zero in profit calculations
+    if (typeof update.price !== 'number' || isNaN(update.price) || update.price <= 0) {
       return false;
     }
     if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
@@ -209,9 +214,10 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (!config) return;
 
     try {
+      // FIX 3.2: Use configurable block timeout instead of hardcoded value
       const messages = await streamsClient.xreadgroup(config, {
         count: priceUpdatesBatchSize,
-        block: 0,
+        block: blockTimeoutMs,
         startId: '>',
       });
 
@@ -242,9 +248,10 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (!config) return;
 
     try {
+      // FIX 3.2: Use configurable block timeout instead of hardcoded value
       const messages = await streamsClient.xreadgroup(config, {
         count: whaleAlertsBatchSize,
-        block: 0,
+        block: blockTimeoutMs,
         startId: '>',
       });
 

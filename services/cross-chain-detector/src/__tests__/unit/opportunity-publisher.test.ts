@@ -410,21 +410,27 @@ describe('OpportunityPublisher', () => {
 
   describe('ArbitrageOpportunity conversion', () => {
     it('should set correct profit fields', async () => {
+      // FIX #3: Trade amount is now calculated based on defaultTradeSizeUsd and sourcePrice
+      // With sourcePrice=2500 and defaultTradeSizeUsd=2500, we get 1 token
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
         perfLogger: mockPerfLogger as any,
         logger: logger as unknown as Logger,
+        defaultTradeSizeUsd: 2500, // Match sourcePrice to get 1 token worth
       });
 
       const opportunity = createTestOpportunity({
         percentageDiff: 1.5, // 1.5%
+        sourcePrice: 2500,
       });
 
       await publisher.publish(opportunity);
 
       const publishedOpp = mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity;
 
-      // expectedProfit = (percentageDiff / 100) * amountInTokens (1.0)
+      // expectedProfit = (percentageDiff / 100) * amountInTokens
+      // amountInTokens = defaultTradeSizeUsd / sourcePrice = 2500 / 2500 = 1.0
+      // expectedProfit = (1.5 / 100) * 1.0 = 0.015
       expect(publishedOpp.expectedProfit).toBeCloseTo(0.015, 5);
       expect(publishedOpp.profitPercentage).toBeCloseTo(0.015, 5);
     });

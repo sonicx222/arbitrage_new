@@ -22,7 +22,9 @@
       "@arbitrage/config": ["../../shared/config/src"],
       "@arbitrage/config/*": ["../../shared/config/src/*"],
       "@arbitrage/core": ["../../shared/core/src"],
-      "@arbitrage/core/*": ["../../shared/core/src/*"]
+      "@arbitrage/core/*": ["../../shared/core/src/*"],
+      "@arbitrage/ml": ["../../shared/ml/src"],
+      "@arbitrage/ml/*": ["../../shared/ml/src/*"]
     }
   },
   "include": ["src/**/*"],
@@ -30,6 +32,7 @@
   "references": [
     { "path": "../../shared/types" },
     { "path": "../../shared/config" },
-    { "path": "../../shared/core" }
+    { "path": "../../shared/core" },
+    { "path": "../../shared/ml" }
   ]
 }
