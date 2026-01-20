@@ -12,14 +12,26 @@ import rateLimit from 'express-rate-limit';
 import { apiAuth, apiAuthorize } from '@shared/security';
 import type { CoordinatorStateProvider } from '../types';
 
-// Allowed services for restart operations (per ADR-003: partitioned architecture)
+/**
+ * Allowed services for restart operations.
+ * FIX: Expanded to include both new partitioned names (ADR-003) and legacy names
+ * for backwards compatibility during migration.
+ */
 const ALLOWED_SERVICES = [
+  // New partitioned architecture (ADR-003)
   'unified-detector',
   'partition-asia-fast',
   'partition-l2-turbo',
   'partition-high-value',
   'cross-chain-detector',
-  'execution-engine'
+  'execution-engine',
+  // Legacy service names (deprecated but still supported)
+  'bsc-detector',
+  'ethereum-detector',
+  'polygon-detector',
+  'solana-detector',
+  'coordinator',
+  'coordinator-standby'
 ];
 
 /**

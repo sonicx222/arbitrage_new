@@ -32,12 +32,14 @@ import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { isAuthEnabled } from '@shared/security';
 
 // Import extracted API modules
+// FIX: Import Logger from consolidated api/types (was duplicated locally)
 import {
   configureMiddleware,
   setupAllRoutes,
   SystemMetrics,
   CoordinatorStateProvider,
-  RouteLogger
+  RouteLogger,
+  Logger
 } from './api';
 
 // =============================================================================
@@ -53,21 +55,23 @@ interface LeaderElectionConfig {
   instanceId: string;
 }
 
+/**
+ * FIX: Graceful degradation modes per ADR-007.
+ * Allows coordinator to communicate system capability level.
+ */
+export enum DegradationLevel {
+  FULL_OPERATION = 0,      // All services healthy
+  REDUCED_CHAINS = 1,      // Some chain detectors down
+  DETECTION_ONLY = 2,      // Execution disabled
+  READ_ONLY = 3,           // Only dashboard/monitoring
+  COMPLETE_OUTAGE = 4      // All services down
+}
+
 // =============================================================================
 // Dependency Injection Interface
 // =============================================================================
 
-/**
- * Logger interface for dependency injection.
- * Allows injecting mock loggers in tests.
- * Uses `unknown` for meta parameter to match @arbitrage/core Logger type.
- */
-interface Logger {
-  info: (message: string, meta?: unknown) => void;
-  error: (message: string, meta?: unknown) => void;
-  warn: (message: string, meta?: unknown) => void;
-  debug: (message: string, meta?: unknown) => void;
-}
+// FIX: Logger interface now imported from ./api/types (consolidated)
 
 /**
  * StreamHealthMonitor interface for dependency injection.
@@ -111,6 +115,12 @@ interface CoordinatorConfig {
   isStandby?: boolean;
   canBecomeLeader?: boolean;
   regionId?: string;
+  // FIX: Configurable constants (previously hardcoded)
+  maxOpportunities?: number;       // Max opportunities in memory (default: 1000)
+  opportunityTtlMs?: number;       // Opportunity expiry time (default: 60000)
+  opportunityCleanupIntervalMs?: number; // Cleanup interval (default: 10000)
+  pairTtlMs?: number;              // Active pair expiry time (default: 300000)
+  alertCooldownMs?: number;        // Alert cooldown duration (default: 300000)
 }
 
 // P2 FIX: Proper type for stream messages with typed data access
@@ -172,9 +182,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // REFACTOR: Removed duplicate isRunning flag - stateManager is now the single source of truth
   // This eliminates potential sync issues between the flag and stateManager
   private isLeader = false;
-  private isActivating = false; // Mutex to prevent concurrent activation (ADR-007)
+  // FIX: Use Promise-based mutex to prevent race condition in activateStandby()
+  // Two rapid calls could both pass the boolean check before either sets it
+  private activationPromise: Promise<boolean> | null = null;
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
+  // FIX: Track degradation level per ADR-007
+  private degradationLevel: DegradationLevel = DegradationLevel.FULL_OPERATION;
   private alertCooldowns: Map<string, number> = new Map();
   private opportunities: Map<string, ArbitrageOpportunity> = new Map();
 
@@ -245,8 +259,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // Standby configuration (ADR-007)
       isStandby: config?.isStandby ?? false,
       canBecomeLeader: config?.canBecomeLeader ?? true,
-      regionId: config?.regionId
+      regionId: config?.regionId,
+      // FIX: Configurable constants with env var support
+      maxOpportunities: config?.maxOpportunities ?? parseInt(process.env.MAX_OPPORTUNITIES || '1000'),
+      opportunityTtlMs: config?.opportunityTtlMs ?? parseInt(process.env.OPPORTUNITY_TTL_MS || '60000'),
+      opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? parseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS || '10000'),
+      pairTtlMs: config?.pairTtlMs ?? parseInt(process.env.PAIR_TTL_MS || '300000'),
+      alertCooldownMs: config?.alertCooldownMs ?? parseInt(process.env.ALERT_COOLDOWN_MS || '300000')
     };
+
+    // FIX: Initialize configurable constants from config
+    this.MAX_OPPORTUNITIES = this.config.maxOpportunities!;
+    this.OPPORTUNITY_TTL_MS = this.config.opportunityTtlMs!;
+    this.OPPORTUNITY_CLEANUP_INTERVAL_MS = this.config.opportunityCleanupIntervalMs!;
+    this.PAIR_TTL_MS = this.config.pairTtlMs!;
 
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
@@ -333,7 +359,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // The stateManager transitions to 'running' state after this callback completes
 
       // Start stream consumers (run even as standby for monitoring)
-      this.startStreamConsumers();
+      // FIX: Await the async method for proper error handling
+      await this.startStreamConsumers();
 
       // Start leader heartbeat
       this.startLeaderHeartbeat();
@@ -685,7 +712,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * - Redis commands: ~90% reduction (only call when messages exist)
    * - Architecture: Aligns with ADR-002 Redis Streams design
    */
-  private startStreamConsumers(): void {
+  /**
+   * FIX: Made async to properly await consumer.start() and catch initialization errors.
+   * Previously, errors in consumer.start() were silently lost.
+   */
+  private async startStreamConsumers(): Promise<void> {
     if (!this.streamsClient) return;
 
     // Handler map for each stream
@@ -721,13 +752,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
         }
       });
 
-      consumer.start();
-      this.streamConsumers.push(consumer);
+      // FIX: Wrap start() in try-catch to catch synchronous initialization errors
+      // Note: start() is synchronous but kicks off async polling loop internally
+      try {
+        consumer.start();
+        this.streamConsumers.push(consumer);
 
-      this.logger.info('Stream consumer started', {
-        stream: groupConfig.streamName,
-        blockMs: 1000
-      });
+        this.logger.info('Stream consumer started', {
+          stream: groupConfig.streamName,
+          blockMs: 1000
+        });
+      } catch (error) {
+        this.logger.error('Failed to start stream consumer', {
+          stream: groupConfig.streamName,
+          error: (error as Error).message
+        });
+        // Continue starting other consumers - don't fail completely
+      }
     }
   }
 
@@ -814,9 +855,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
-  private readonly MAX_OPPORTUNITIES = 1000;
-  private readonly OPPORTUNITY_TTL_MS = 60000; // 1 minute default TTL
-  private readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 10000; // 10 seconds
+  // FIX: Now configurable via CoordinatorConfig
+  private readonly MAX_OPPORTUNITIES: number;
+  private readonly OPPORTUNITY_TTL_MS: number;
+  private readonly OPPORTUNITY_CLEANUP_INTERVAL_MS: number;
 
   // P2 FIX: Use StreamMessage type instead of any
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
@@ -987,7 +1029,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // Track active pairs for volume monitoring (rolling window)
   private activePairs: Map<string, { lastSeen: number; chain: string; dex: string }> = new Map();
-  private static readonly PAIR_TTL_MS = 300000; // 5 minutes - pairs inactive longer are removed
+  // FIX: Now configurable via CoordinatorConfig (previously static)
+  private readonly PAIR_TTL_MS: number;
 
   /**
    * Handle swap event messages from stream:swap-events.
@@ -1163,7 +1206,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const toDelete: string[] = [];
 
     for (const [pairAddress, info] of this.activePairs) {
-      if (now - info.lastSeen > CoordinatorService.PAIR_TTL_MS) {
+      if (now - info.lastSeen > this.PAIR_TTL_MS) {
         toDelete.push(pairAddress);
       }
     }
@@ -1182,15 +1225,69 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
   }
 
+  /**
+   * Forward a pending opportunity to the execution engine via Redis Streams.
+   * FIX: Implemented actual stream publishing (was TODO stub).
+   *
+   * Only the leader coordinator should call this method to prevent
+   * duplicate execution attempts.
+   */
   private async forwardToExecutionEngine(opportunity: ArbitrageOpportunity): Promise<void> {
-    // In production, this would forward to the execution engine via streams
-    // For now, just log the intent
-    this.logger.info('Forwarding opportunity to execution engine', {
-      id: opportunity.id,
-      chain: opportunity.chain
-    });
+    if (!this.streamsClient) {
+      this.logger.warn('Cannot forward opportunity - streams client not initialized', {
+        id: opportunity.id
+      });
+      return;
+    }
 
-    // TODO: Publish to execution-requests stream when execution engine is ready
+    try {
+      // Publish to execution-requests stream for the execution engine to consume
+      await this.streamsClient.xadd(
+        RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        {
+          id: opportunity.id,
+          type: opportunity.type || 'simple',
+          chain: opportunity.chain || 'unknown',
+          buyDex: opportunity.buyDex || '',
+          sellDex: opportunity.sellDex || '',
+          profitPercentage: opportunity.profitPercentage?.toString() || '0',
+          confidence: opportunity.confidence?.toString() || '0',
+          timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
+          expiresAt: opportunity.expiresAt?.toString() || '',
+          // Include token info if available
+          tokenIn: opportunity.tokenIn || '',
+          tokenOut: opportunity.tokenOut || '',
+          amountIn: opportunity.amountIn || '',
+          // Source metadata
+          forwardedBy: this.config.leaderElection.instanceId,
+          forwardedAt: Date.now().toString()
+        }
+      );
+
+      this.logger.info('Forwarded opportunity to execution engine', {
+        id: opportunity.id,
+        chain: opportunity.chain,
+        profitPercentage: opportunity.profitPercentage
+      });
+
+      // Update metrics
+      this.systemMetrics.totalExecutions++;
+
+    } catch (error) {
+      this.logger.error('Failed to forward opportunity to execution engine', {
+        id: opportunity.id,
+        error: (error as Error).message
+      });
+
+      // Send alert for execution forwarding failures
+      this.sendAlert({
+        type: 'EXECUTION_FORWARD_FAILED',
+        message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
+        severity: 'high',
+        data: { opportunityId: opportunity.id, chain: opportunity.chain },
+        timestamp: Date.now()
+      });
+    }
   }
 
   // ===========================================================================
@@ -1321,6 +1418,87 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.systemMetrics.averageMemory = avgMemory;   // Track memory separately
     this.systemMetrics.lastUpdate = Date.now();
     this.systemMetrics.pendingOpportunities = this.opportunities.size;
+
+    // FIX: Evaluate degradation level after updating metrics (ADR-007)
+    this.evaluateDegradationLevel();
+  }
+
+  /**
+   * FIX: Evaluate system degradation level per ADR-007.
+   * Updates degradationLevel based on service health status.
+   */
+  private evaluateDegradationLevel(): void {
+    const previousLevel = this.degradationLevel;
+
+    // Check critical services
+    const executorHealthy = this.isServiceHealthy('execution-engine');
+    const hasHealthyDetectors = this.hasHealthyDetectors();
+    const hasAnyServices = this.serviceHealth.size > 0;
+
+    // Determine degradation level
+    if (!hasAnyServices || this.systemMetrics.systemHealth === 0) {
+      this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
+    } else if (!executorHealthy && !hasHealthyDetectors) {
+      this.degradationLevel = DegradationLevel.READ_ONLY;
+    } else if (!executorHealthy) {
+      this.degradationLevel = DegradationLevel.DETECTION_ONLY;
+    } else if (!this.hasAllDetectorsHealthy()) {
+      this.degradationLevel = DegradationLevel.REDUCED_CHAINS;
+    } else {
+      this.degradationLevel = DegradationLevel.FULL_OPERATION;
+    }
+
+    // Log degradation level changes
+    if (previousLevel !== this.degradationLevel) {
+      this.logger.warn('Degradation level changed', {
+        previous: DegradationLevel[previousLevel],
+        current: DegradationLevel[this.degradationLevel],
+        systemHealth: this.systemMetrics.systemHealth
+      });
+    }
+  }
+
+  /**
+   * Check if a specific service is healthy.
+   */
+  private isServiceHealthy(serviceName: string): boolean {
+    const health = this.serviceHealth.get(serviceName);
+    return health?.status === 'healthy';
+  }
+
+  /**
+   * Check if at least one detector is healthy.
+   */
+  private hasHealthyDetectors(): boolean {
+    for (const [name, health] of this.serviceHealth) {
+      if (name.includes('detector') && health.status === 'healthy') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if all detectors are healthy.
+   */
+  private hasAllDetectorsHealthy(): boolean {
+    let hasDetectors = false;
+    for (const [name, health] of this.serviceHealth) {
+      if (name.includes('detector')) {
+        hasDetectors = true;
+        if (health.status !== 'healthy') {
+          return false;
+        }
+      }
+    }
+    return hasDetectors; // Return false if no detectors are reporting
+  }
+
+  /**
+   * FIX: Get current degradation level (ADR-007).
+   */
+  getDegradationLevel(): DegradationLevel {
+    return this.degradationLevel;
   }
 
   /**
@@ -1379,9 +1557,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const alertKey = `${alert.type}_${alert.service || 'system'}`;
     const now = Date.now();
     const lastAlert = this.alertCooldowns.get(alertKey) || 0;
-    const cooldownMs = 300000; // 5 minutes
+    // FIX: Use configurable cooldown instead of hardcoded 5 minutes
+    const cooldownMs = this.config.alertCooldownMs!;
 
-    // 5 minute cooldown for same alert type
+    // Cooldown for same alert type (configurable, default 5 minutes)
     if (now - lastAlert > cooldownMs) {
       this.logger.warn('Alert triggered', alert);
       this.alertCooldowns.set(alertKey, now);
@@ -1504,8 +1683,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     return this.config.regionId;
   }
 
+  /**
+   * FIX: Updated to use Promise-based mutex check
+   */
   getIsActivating(): boolean {
-    return this.isActivating;
+    return this.activationPromise !== null;
   }
 
   /**
@@ -1514,6 +1696,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
    *
    * @returns Promise<boolean> - true if activation succeeded
    */
+  /**
+   * FIX: Refactored to use Promise-based mutex pattern.
+   * Previously used a boolean flag which had a race window between check and set.
+   * Now uses activationPromise to ensure only one activation runs at a time.
+   */
   async activateStandby(): Promise<boolean> {
     // Check if already leader
     if (this.isLeader) {
@@ -1521,10 +1708,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       return true;
     }
 
-    // Mutex to prevent concurrent activation attempts (ADR-007)
-    if (this.isActivating) {
-      this.logger.warn('Activation already in progress, skipping duplicate call');
-      return false;
+    // FIX: Promise-based mutex - if activation is in progress, wait for it
+    if (this.activationPromise) {
+      this.logger.warn('Activation already in progress, waiting for result');
+      return this.activationPromise;
     }
 
     if (!this.config.isStandby) {
@@ -1537,9 +1724,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
       return false;
     }
 
-    // Acquire activation mutex
-    this.isActivating = true;
+    // FIX: Create and store the activation promise BEFORE any await
+    // This ensures concurrent calls get the same promise
+    this.activationPromise = this.doActivateStandby();
 
+    try {
+      return await this.activationPromise;
+    } finally {
+      // Clear the promise when done (success or failure)
+      this.activationPromise = null;
+    }
+  }
+
+  /**
+   * Internal implementation of standby activation.
+   * Separated to allow Promise-based mutex in activateStandby().
+   */
+  private async doActivateStandby(): Promise<boolean> {
     this.logger.warn('🚀 ACTIVATING STANDBY COORDINATOR', {
       instanceId: this.config.leaderElection.instanceId,
       regionId: this.config.regionId,
@@ -1571,9 +1772,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.config.isStandby = originalIsStandby;
       this.logger.error('Error during standby activation', { error });
       return false;
-    } finally {
-      // Release activation mutex
-      this.isActivating = false;
     }
   }
 }

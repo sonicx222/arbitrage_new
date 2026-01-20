@@ -25,6 +25,15 @@ function escapeHtml(str: string): string {
   return str.replace(/[&<>"']/g, char => htmlEscapes[char]);
 }
 
+// FIX: Add simple HTML caching to reduce CPU usage for high-frequency polling
+interface DashboardCache {
+  html: string;
+  timestamp: number;
+}
+
+const CACHE_TTL_MS = 1000; // 1 second cache - dashboard auto-refreshes every 10s anyway
+let dashboardCache: DashboardCache | null = null;
+
 /**
  * Create dashboard router.
  *
@@ -37,8 +46,16 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
   /**
    * GET /
    * Returns HTML dashboard with system status.
+   * FIX: Added caching to reduce CPU usage for high-frequency polling.
    */
   router.get('/', (_req: Request, res: Response) => {
+    const now = Date.now();
+
+    // Return cached HTML if still fresh
+    if (dashboardCache && (now - dashboardCache.timestamp) < CACHE_TTL_MS) {
+      res.send(dashboardCache.html);
+      return;
+    }
     const isLeader = state.getIsLeader();
     const metrics = state.getSystemMetrics();
     const serviceHealth = state.getServiceHealthMap();
@@ -48,7 +65,8 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
       ? '<span style="background:green;color:white;padding:2px 8px;border-radius:3px;">LEADER</span>'
       : '<span style="background:orange;color:white;padding:2px 8px;border-radius:3px;">STANDBY</span>';
 
-    res.send(`
+    // Build HTML string
+    const html = `
       <!DOCTYPE html>
       <html>
       <head>
@@ -116,7 +134,11 @@ export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
         </script>
       </body>
       </html>
-    `);
+    `;
+
+    // FIX: Cache the HTML for subsequent requests
+    dashboardCache = { html, timestamp: now };
+    res.send(html);
   });
 
   return router;

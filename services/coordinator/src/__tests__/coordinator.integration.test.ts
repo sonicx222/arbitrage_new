@@ -275,6 +275,8 @@ describe('CoordinatorService Integration', () => {
 
     it('should not become leader when lock is held by another instance', async () => {
       mockRedisClient.setNx.mockResolvedValue(false);
+      // FIX: Also mock renewLockIfOwned to return false - the code falls back to this
+      mockRedisClient.renewLockIfOwned.mockResolvedValue(false);
       mockRedisClient.get.mockResolvedValue('other-instance-id');
 
       await coordinator.start(0);
@@ -786,6 +788,109 @@ describe('CoordinatorService Integration', () => {
       await coordinator.start(0);
 
       expect(mockDeps.getStreamHealthMonitor).toHaveBeenCalled();
+    });
+  });
+
+  // ===========================================================================
+  // Standby Activation Tests (ADR-007)
+  // ===========================================================================
+
+  describe('standby activation', () => {
+    let standbyCoordinator: CoordinatorService;
+
+    beforeEach(() => {
+      // Create a standby coordinator
+      standbyCoordinator = new CoordinatorService({
+        isStandby: true,
+        canBecomeLeader: true,
+        regionId: 'us-central1'
+      }, mockDeps);
+    });
+
+    afterEach(async () => {
+      if (standbyCoordinator) {
+        try {
+          await standbyCoordinator.stop();
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    });
+
+    it('should skip activation when already leader', async () => {
+      // Start coordinator and acquire leadership
+      mockRedisClient.setNx.mockResolvedValue(true);
+      await coordinator.start(0);
+      expect(coordinator.getIsLeader()).toBe(true);
+
+      // Attempt activation - should return true without changing state
+      const result = await coordinator.activateStandby();
+      expect(result).toBe(true);
+    });
+
+    it('should fail activation when canBecomeLeader is false', async () => {
+      // Create coordinator that cannot become leader
+      const noLeaderCoordinator = new CoordinatorService({
+        isStandby: true,
+        canBecomeLeader: false
+      }, mockDeps);
+
+      await noLeaderCoordinator.start(0);
+      const result = await noLeaderCoordinator.activateStandby();
+      expect(result).toBe(false);
+
+      await noLeaderCoordinator.stop();
+    });
+
+    it('should handle concurrent activation attempts with Promise mutex', async () => {
+      mockRedisClient.setNx.mockResolvedValue(true);
+      await standbyCoordinator.start(0);
+
+      // Simulate concurrent activation attempts
+      const [result1, result2] = await Promise.all([
+        standbyCoordinator.activateStandby(),
+        standbyCoordinator.activateStandby()
+      ]);
+
+      // Both should get the same result (either both true or both false)
+      expect(result1).toBe(result2);
+
+      // Only one should have actually executed the activation
+      // (the second one waits for the first)
+    });
+
+    it('should report isActivating correctly', async () => {
+      await standbyCoordinator.start(0);
+
+      // Not activating initially
+      expect(standbyCoordinator.getIsActivating()).toBe(false);
+    });
+
+    it('should successfully activate when lock is available', async () => {
+      mockRedisClient.setNx.mockResolvedValue(true);
+      await standbyCoordinator.start(0);
+
+      // Initially not leader (standby)
+      expect(standbyCoordinator.getIsLeader()).toBe(false);
+
+      // Activate
+      const result = await standbyCoordinator.activateStandby();
+      expect(result).toBe(true);
+      expect(standbyCoordinator.getIsLeader()).toBe(true);
+    });
+
+    it('should fail activation when lock is held by another instance', async () => {
+      // Mock both setNx and renewLockIfOwned to fail
+      mockRedisClient.setNx.mockResolvedValue(false);
+      // FIX: Also mock renewLockIfOwned to return false - the code falls back to this
+      mockRedisClient.renewLockIfOwned.mockResolvedValue(false);
+      mockRedisClient.get.mockResolvedValue('other-instance-id');
+
+      await standbyCoordinator.start(0);
+      const result = await standbyCoordinator.activateStandby();
+
+      expect(result).toBe(false);
+      expect(standbyCoordinator.getIsLeader()).toBe(false);
     });
   });
 });
