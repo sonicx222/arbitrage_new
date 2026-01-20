@@ -15,7 +15,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/failover-config.json"
+
+# Source shared health utilities if available
+if [ -f "$SCRIPT_DIR/lib/health-utils.sh" ]; then
+    # shellcheck source=./lib/health-utils.sh
+    source "$SCRIPT_DIR/lib/health-utils.sh"
+fi
 
 # Default configuration
 HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-10}

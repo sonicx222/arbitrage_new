@@ -76,16 +76,6 @@ primary_region = "sin"
     timeout = "5s"
     type = "http"
 
-# Statics are served from the CDN (if applicable)
-# [statics]
-#   guest_path = "/app/public"
-#   url_prefix = "/static/"
-
-# Mounts (not needed for stateless service)
-# [[mounts]]
-#   source = "data"
-#   destination = "/data"
-
 # Processes
 [processes]
   app = "node dist/index.js"

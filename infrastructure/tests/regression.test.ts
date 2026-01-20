@@ -73,9 +73,12 @@ describe('REGRESSION: Terraform Cross-Region Image References', () => {
     const content = readFile(mainTfPath);
 
     // asia_fast_partition should use Singapore image
-    expect(content).toMatch(
-      /resource\s+"oci_core_instance"\s+"asia_fast_partition"[^}]*oracle_linux_arm_singapore/s
+    // Match the resource block and verify it contains the Singapore image reference
+    const asiaFastBlock = content.match(
+      /resource\s+"oci_core_instance"\s+"asia_fast_partition"\s*\{[\s\S]*?^\}/m
     );
+    expect(asiaFastBlock).not.toBeNull();
+    expect(asiaFastBlock![0]).toContain('oracle_linux_arm_singapore');
   });
 
   it('should reference US-East image for high_value_partition (CRITICAL)', () => {
@@ -83,14 +86,14 @@ describe('REGRESSION: Terraform Cross-Region Image References', () => {
 
     // CRITICAL: high_value_partition MUST use US-East image, not Singapore
     // This was the original bug - using Singapore image in US-East region
-    expect(content).toMatch(
-      /resource\s+"oci_core_instance"\s+"high_value_partition"[^}]*oracle_linux_arm_us_east/s
+    // Match the resource block and verify it contains the US-East image reference
+    const highValueBlock = content.match(
+      /resource\s+"oci_core_instance"\s+"high_value_partition"\s*\{[\s\S]*?freeform_tags\s*=\s*merge/m
     );
-
+    expect(highValueBlock).not.toBeNull();
+    expect(highValueBlock![0]).toContain('oracle_linux_arm_us_east');
     // MUST NOT reference Singapore image
-    expect(content).not.toMatch(
-      /resource\s+"oci_core_instance"\s+"high_value_partition"[^}]*oracle_linux_arm_singapore/s
-    );
+    expect(highValueBlock![0]).not.toContain('oracle_linux_arm_singapore');
   });
 
   it('should define US-East AMD image for cross_chain_detector', () => {
@@ -230,16 +233,32 @@ describe('REGRESSION: Environment Variable Naming', () => {
 });
 
 // =============================================================================
-// REGRESSION TEST 4: Cloud-Init Docker Ready Wait
+// REGRESSION TEST 4: Cloud-Init Docker Ready Wait and Health Check
 // =============================================================================
 
-describe('REGRESSION: Cloud-Init Docker Ready Wait', () => {
+describe('REGRESSION: Cloud-Init Docker Ready Wait and Health Check', () => {
   const partitionInitPath = path.join(ORACLE_DIR, 'scripts', 'cloud-init-partition.yaml');
   const crossChainInitPath = path.join(ORACLE_DIR, 'scripts', 'cloud-init-cross-chain.yaml');
 
   beforeAll(() => {
     expect(fileExists(partitionInitPath)).toBe(true);
     expect(fileExists(crossChainInitPath)).toBe(true);
+  });
+
+  it('should use node-based health check in partition cloud-init (CRITICAL)', () => {
+    const content = readFile(partitionInitPath);
+
+    // CRITICAL: Must use node-based health check, NOT curl (not available in Alpine Node)
+    expect(content).toContain("require('http').get");
+    expect(content).not.toMatch(/test:.*\["CMD",\s*"curl"/);
+  });
+
+  it('should use node-based health check in cross-chain cloud-init (CRITICAL)', () => {
+    const content = readFile(crossChainInitPath);
+
+    // CRITICAL: Must use node-based health check, NOT curl (not available in Alpine Node)
+    expect(content).toContain("require('http').get");
+    expect(content).not.toMatch(/test:.*\["CMD",\s*"curl"/);
   });
 
   it('should wait for Docker to be ready in partition cloud-init', () => {

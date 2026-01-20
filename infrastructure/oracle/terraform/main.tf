@@ -1,8 +1,8 @@
 # Oracle Cloud Infrastructure Terraform Configuration
 #
 # Deploys arbitrage services on Oracle Cloud Free Tier:
-# - Asia-Fast partition (BSC, Polygon) - Singapore
-# - High-Value partition (Ethereum) - US-East
+# - Asia-Fast partition (BSC, Polygon, Avalanche, Fantom) - Singapore
+# - High-Value partition (Ethereum, zkSync, Linea) - US-East
 # - Cross-Chain Detector - US-East
 #
 # Free Tier Resources (as of 2025):
@@ -146,14 +146,16 @@ resource "oci_core_security_list" "singapore_public_sl" {
     }
   }
 
-  # Allow health check port (3011 for Asia-Fast)
+  # Allow health check ports (3011-3012 for partitions that may run in Singapore)
+  # 3011 = Asia-Fast partition
+  # 3012 = L2-Fast partition (if deployed to OCI instead of Fly.io)
   ingress_security_rules {
     protocol    = "6"
     source      = "0.0.0.0/0"
     source_type = "CIDR_BLOCK"
     tcp_options {
       min = 3011
-      max = 3011
+      max = 3012
     }
   }
 
@@ -310,19 +312,29 @@ resource "oci_core_instance" "asia_fast_partition" {
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
     user_data = base64encode(templatefile("${path.module}/scripts/cloud-init-partition.yaml", {
-      partition_id     = var.partition_asia_fast.name
-      chains           = join(",", var.partition_asia_fast.chains)
-      region_id        = "asia-southeast1"
-      health_port      = var.partition_asia_fast.health_port
-      redis_url        = var.redis_url
-      log_level        = var.log_level
-      bsc_ws_url       = var.bsc_ws_url
-      bsc_rpc_url      = var.bsc_rpc_url
-      polygon_ws_url   = var.polygon_ws_url
-      polygon_rpc_url  = var.polygon_rpc_url
-      ethereum_ws_url  = ""  # Not used for asia-fast partition
-      ethereum_rpc_url = ""  # Not used for asia-fast partition
-      docker_image     = var.docker_image_asia_fast
+      partition_id      = var.partition_asia_fast.name
+      chains            = join(",", var.partition_asia_fast.chains)
+      region_id         = "asia-southeast1"
+      health_port       = var.partition_asia_fast.health_port
+      redis_url         = var.redis_url
+      log_level         = var.log_level
+      docker_image      = var.docker_image_asia_fast
+      # Asia-fast partition chains
+      bsc_ws_url        = var.bsc_ws_url
+      bsc_rpc_url       = var.bsc_rpc_url
+      polygon_ws_url    = var.polygon_ws_url
+      polygon_rpc_url   = var.polygon_rpc_url
+      avalanche_ws_url  = var.avalanche_ws_url
+      avalanche_rpc_url = var.avalanche_rpc_url
+      fantom_ws_url     = var.fantom_ws_url
+      fantom_rpc_url    = var.fantom_rpc_url
+      # Not used for asia-fast partition
+      ethereum_ws_url   = ""
+      ethereum_rpc_url  = ""
+      zksync_ws_url     = ""
+      zksync_rpc_url    = ""
+      linea_ws_url      = ""
+      linea_rpc_url     = ""
     }))
   }
 
@@ -363,19 +375,29 @@ resource "oci_core_instance" "high_value_partition" {
   metadata = {
     ssh_authorized_keys = var.ssh_public_key
     user_data = base64encode(templatefile("${path.module}/scripts/cloud-init-partition.yaml", {
-      partition_id     = var.partition_high_value.name
-      chains           = join(",", var.partition_high_value.chains)
-      region_id        = "us-east1"
-      health_port      = var.partition_high_value.health_port
-      redis_url        = var.redis_url
-      log_level        = var.log_level
-      bsc_ws_url       = ""
-      bsc_rpc_url      = ""
-      polygon_ws_url   = ""
-      polygon_rpc_url  = ""
-      ethereum_ws_url  = var.ethereum_ws_url
-      ethereum_rpc_url = var.ethereum_rpc_url
-      docker_image     = var.docker_image_high_value
+      partition_id      = var.partition_high_value.name
+      chains            = join(",", var.partition_high_value.chains)
+      region_id         = "us-east1"
+      health_port       = var.partition_high_value.health_port
+      redis_url         = var.redis_url
+      log_level         = var.log_level
+      docker_image      = var.docker_image_high_value
+      # Not used for high-value partition
+      bsc_ws_url        = ""
+      bsc_rpc_url       = ""
+      polygon_ws_url    = ""
+      polygon_rpc_url   = ""
+      avalanche_ws_url  = ""
+      avalanche_rpc_url = ""
+      fantom_ws_url     = ""
+      fantom_rpc_url    = ""
+      # High-value partition chains
+      ethereum_ws_url   = var.ethereum_ws_url
+      ethereum_rpc_url  = var.ethereum_rpc_url
+      zksync_ws_url     = var.zksync_ws_url
+      zksync_rpc_url    = var.zksync_rpc_url
+      linea_ws_url      = var.linea_ws_url
+      linea_rpc_url     = var.linea_rpc_url
     }))
   }
 

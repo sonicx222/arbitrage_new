@@ -8,11 +8,23 @@
 #   ./health-check.sh              # Check all services
 #   ./health-check.sh --json       # Output as JSON
 #   ./health-check.sh --quiet      # Only exit code
+#   ./health-check.sh --parallel   # Check services in parallel
 #   ./health-check.sh <service>    # Check specific service
 #
 # @see ADR-007: Cross-Region Failover Strategy
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source shared health utilities if available (DRY principle)
+if [ -f "$SCRIPT_DIR/lib/health-utils.sh" ]; then
+    # shellcheck source=./lib/health-utils.sh
+    source "$SCRIPT_DIR/lib/health-utils.sh"
+    UTILS_SOURCED=true
+else
+    UTILS_SOURCED=false
+fi
 
 # Colors
 RED='\033[0;31m'
@@ -21,27 +33,69 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Configuration
-TIMEOUT=${TIMEOUT:-5}
-RETRIES=${RETRIES:-3}
-RETRY_DELAY=${RETRY_DELAY:-2}
+# Standard health check interval: 15s (consistent across all services per ADR-007)
+TIMEOUT=${TIMEOUT:-${HEALTH_TIMEOUT:-5}}
+RETRIES=${RETRIES:-${HEALTH_RETRIES:-3}}
+RETRY_DELAY=${RETRY_DELAY:-${HEALTH_RETRY_DELAY:-2}}
+
+# Parallel execution mode
+PARALLEL_MODE=false
 
 # Lock file for preventing concurrent execution
 LOCK_FILE="/tmp/arbitrage-health-check.lock"
 LOCK_FD=200
 
 # Acquire lock to prevent concurrent execution race conditions
+# Uses improved locking with stale lock detection
 acquire_lock() {
-    exec 200>"$LOCK_FILE"
-    if ! flock -n 200; then
-        echo "Another health check is already running" >&2
-        exit 1
+    # Use shared utility if available
+    if [ "$UTILS_SOURCED" = true ] && type acquire_lock_safe &>/dev/null; then
+        if ! acquire_lock_safe "$LOCK_FILE" "$LOCK_FD"; then
+            echo "Another health check is already running" >&2
+            exit 1
+        fi
+        trap release_lock EXIT
+        return 0
     fi
-    # Ensure lock is released on exit
+
+    # Fallback implementation with stale lock detection
+    mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || true
+    exec 200>"$LOCK_FILE"
+
+    if ! flock -n 200; then
+        # Check if the process holding the lock is still alive
+        local lock_pid
+        lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
+
+        if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
+            # Process is still running
+            echo "Another health check is already running (PID: $lock_pid)" >&2
+            exit 1
+        else
+            # Stale lock - try to remove and reacquire
+            rm -f "$LOCK_FILE" 2>/dev/null
+            exec 200>"$LOCK_FILE"
+            if ! flock -n 200; then
+                echo "Another health check is already running" >&2
+                exit 1
+            fi
+        fi
+    fi
+
+    # Write PID to lock file for stale detection
+    echo "$$" > "$LOCK_FILE"
     trap release_lock EXIT
 }
 
-# Release lock
+# Release lock safely
 release_lock() {
+    # Use shared utility if available
+    if [ "$UTILS_SOURCED" = true ] && type release_lock_safe &>/dev/null; then
+        release_lock_safe "$LOCK_FILE" "$LOCK_FD"
+        return 0
+    fi
+
+    # Fallback implementation
     flock -u 200 2>/dev/null || true
     rm -f "$LOCK_FILE" 2>/dev/null || true
 }
@@ -193,11 +247,60 @@ check_service() {
     fi
 }
 
-# Check all services
-check_all() {
+# Check all services (serial mode)
+check_all_serial() {
     for service in "${!SERVICES[@]}"; do
         check_service "$service" || true
     done
+}
+
+# Check all services (parallel mode - faster but more resource intensive)
+check_all_parallel() {
+    local pids=()
+    local services=()
+    local temp_dir=$(mktemp -d)
+
+    # Launch checks in parallel
+    for service in "${!SERVICES[@]}"; do
+        (
+            check_service "$service"
+            echo "${RESULTS[$service]:-unhealthy}|${RESPONSE_TIMES[$service]:-0}" > "$temp_dir/$service"
+        ) &
+        pids+=($!)
+        services+=("$service")
+    done
+
+    # Wait for all checks to complete
+    for pid in "${pids[@]}"; do
+        wait "$pid" 2>/dev/null || true
+    done
+
+    # Collect results from temp files
+    for service in "${services[@]}"; do
+        if [ -f "$temp_dir/$service" ]; then
+            local result
+            result=$(cat "$temp_dir/$service")
+            RESULTS[$service]="${result%|*}"
+            RESPONSE_TIMES[$service]="${result#*|}"
+            [ "${RESULTS[$service]}" = "unhealthy" ] && OVERALL_STATUS="unhealthy"
+        else
+            RESULTS[$service]="unhealthy"
+            RESPONSE_TIMES[$service]=0
+            OVERALL_STATUS="unhealthy"
+        fi
+    done
+
+    # Cleanup
+    rm -rf "$temp_dir"
+}
+
+# Check all services
+check_all() {
+    if [ "$PARALLEL_MODE" = true ]; then
+        check_all_parallel
+    else
+        check_all_serial
+    fi
 }
 
 # Output results as text
@@ -276,9 +379,10 @@ usage() {
     echo "Usage: $0 [options] [service]"
     echo ""
     echo "Options:"
-    echo "  --json        Output results as JSON"
-    echo "  --quiet, -q   Quiet mode (exit code only)"
-    echo "  -h, --help    Show this help"
+    echo "  --json           Output results as JSON"
+    echo "  --quiet, -q      Quiet mode (exit code only)"
+    echo "  --parallel, -p   Check services in parallel (faster)"
+    echo "  -h, --help       Show this help"
     echo ""
     echo "Services:"
     for service in "${!SERVICES[@]}"; do
@@ -291,7 +395,8 @@ usage() {
     echo "  RETRY_DELAY   Delay between retries (default: 2)"
     echo ""
     echo "Examples:"
-    echo "  $0                          # Check all services"
+    echo "  $0                          # Check all services (serial)"
+    echo "  $0 --parallel               # Check all services (parallel)"
     echo "  $0 coordinator              # Check coordinator only"
     echo "  $0 --json                   # JSON output"
     echo "  $0 --quiet && echo 'OK'     # Silent check"
@@ -310,6 +415,10 @@ main() {
                 ;;
             --quiet|-q)
                 QUIET=true
+                shift
+                ;;
+            --parallel|-p)
+                PARALLEL_MODE=true
                 shift
                 ;;
             -h|--help)
