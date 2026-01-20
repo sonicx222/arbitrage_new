@@ -107,17 +107,19 @@ interface CrossRegionHealthManager {
   }
 
   // Heartbeat to maintain leadership
+  // S4.1.2-FIX: Uses atomic Lua script to prevent TOCTOU race conditions
+  // The check-and-extend happens in a single atomic Redis operation
   async leaderHeartbeat(): Promise<void> {
     if (!this.isLeader) return;
 
     const lockKey = 'coordinator:leader:lock';
-    const currentValue = await redis.get(lockKey);
 
-    if (currentValue?.startsWith(this.instanceId)) {
-      // Extend lock
-      await redis.expire(lockKey, 30);
-    } else {
-      // Lost leadership
+    // Atomic check-and-extend using Lua script (prevents race condition)
+    // Script: IF redis.get(key) == instanceId THEN redis.expire(key, ttl) RETURN 1 ELSE RETURN 0
+    const renewed = await redis.renewLockIfOwned(lockKey, this.instanceId, 30);
+
+    if (!renewed) {
+      // Lost leadership (another instance took over or lock expired)
       this.isLeader = false;
       this.onLeadershipLost();
     }
