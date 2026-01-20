@@ -3,184 +3,79 @@
  * Local Development Status Script
  *
  * Checks the status of all arbitrage system services.
+ * Cross-platform compatible (Windows, macOS, Linux).
  *
  * Usage:
  *   npm run dev:status
  */
 
-const http = require('http');
-const { exec } = require('child_process');
-const path = require('path');
 const fs = require('fs');
 
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
-require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+const {
+  log,
+  colors,
+  checkHealth,
+  checkRedis,
+  checkDockerContainer,
+  checkTcpConnection,
+  loadPids,
+  getRedisMemoryConfig,
+  ROOT_DIR,
+  PID_FILE
+} = require('./lib/utils');
 
-const ROOT_DIR = path.join(__dirname, '..');
-const PID_FILE = path.join(ROOT_DIR, '.local-services.pid');
-const REDIS_MEMORY_CONFIG_FILE = path.join(ROOT_DIR, '.redis-memory-config.json');
+const { getStatusServices, PORTS } = require('./lib/services-config');
 
-// Service configurations (ports match .env.local defaults)
-const SERVICES = [
-  {
-    name: 'Redis',
-    type: 'redis',  // Special type to check both docker and memory
-    container: 'arbitrage-redis',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10)
-  },
-  {
-    name: 'Redis Commander',
-    type: 'docker',
-    container: 'arbitrage-redis-ui',
-    port: 8081,
-    optional: true
-  },
-  {
-    name: 'Coordinator',
-    type: 'node',
-    port: parseInt(process.env.COORDINATOR_PORT || '3000', 10),
-    healthEndpoint: '/api/health'
-  },
-  {
-    name: 'P1 Asia-Fast',
-    type: 'node',
-    port: parseInt(process.env.P1_ASIA_FAST_PORT || '3001', 10),
-    healthEndpoint: '/health'
-  },
-  {
-    name: 'P2 L2-Turbo',
-    type: 'node',
-    port: parseInt(process.env.P2_L2_TURBO_PORT || '3002', 10),
-    healthEndpoint: '/health'
-  },
-  {
-    name: 'P3 High-Value',
-    type: 'node',
-    port: parseInt(process.env.P3_HIGH_VALUE_PORT || '3003', 10),
-    healthEndpoint: '/health'
-  },
-  {
-    name: 'Cross-Chain Detector',
-    type: 'node',
-    port: parseInt(process.env.CROSS_CHAIN_DETECTOR_PORT || '3004', 10),
-    healthEndpoint: '/health'
-  },
-  {
-    name: 'Execution Engine',
-    type: 'node',
-    port: parseInt(process.env.EXECUTION_ENGINE_PORT || '3005', 10),
-    healthEndpoint: '/health'
-  }
-];
+// =============================================================================
+// Service Status Checking
+// =============================================================================
 
-const colors = {
-  reset: '\x1b[0m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-  cyan: '\x1b[36m',
-  dim: '\x1b[2m'
-};
-
-function log(message, color = 'reset') {
-  console.log(`${colors[color]}${message}${colors.reset}`);
-}
-
-async function checkDocker(containerName) {
-  return new Promise((resolve) => {
-    exec(`docker ps --filter "name=${containerName}" --format "{{.Status}}"`, (error, stdout) => {
-      if (error || !stdout.trim()) {
-        resolve({ running: false });
-      } else {
-        resolve({ running: true, status: stdout.trim() });
-      }
-    });
-  });
-}
-
-async function checkMemoryRedis() {
-  if (fs.existsSync(REDIS_MEMORY_CONFIG_FILE)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(REDIS_MEMORY_CONFIG_FILE, 'utf8'));
-      return new Promise((resolve) => {
-        const net = require('net');
-        const client = new net.Socket();
-        client.setTimeout(1000);
-        client.connect(config.port, config.host, () => {
-          client.destroy();
-          resolve({ running: true, status: 'In-memory server' });
-        });
-        client.on('error', () => {
-          client.destroy();
-          resolve({ running: false });
-        });
-        client.on('timeout', () => {
-          client.destroy();
-          resolve({ running: false });
-        });
-      });
-    } catch (e) {
-      return { running: false };
-    }
-  }
-  return { running: false };
-}
-
+/**
+ * Check Redis service status (Docker or In-Memory).
+ * @param {Object} service - Service configuration
+ * @returns {Promise<{running: boolean, status?: string}>}
+ */
 async function checkRedisService(service) {
   // First check Docker
-  const dockerStatus = await checkDocker(service.container);
+  const dockerStatus = await checkDockerContainer(service.container);
   if (dockerStatus.running) {
     return { running: true, status: `Docker: ${dockerStatus.status}` };
   }
 
   // Then check memory server
-  const memoryStatus = await checkMemoryRedis();
-  if (memoryStatus.running) {
-    return memoryStatus;
+  const redisConfig = getRedisMemoryConfig();
+  if (redisConfig) {
+    const isRunning = await checkTcpConnection(redisConfig.host, redisConfig.port);
+    if (isRunning) {
+      return { running: true, status: 'In-memory server' };
+    }
   }
 
   return { running: false };
 }
 
-async function checkHealth(port, endpoint, timeout = 3000) {
-  return new Promise((resolve) => {
-    const startTime = Date.now();
-    const req = http.get(`http://localhost:${port}${endpoint}`, { timeout }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        const latency = Date.now() - startTime;
-        try {
-          const json = JSON.parse(data);
-          resolve({
-            running: true,
-            status: json.status || 'ok',
-            latency,
-            details: json
-          });
-        } catch {
-          resolve({ running: true, status: 'ok', latency });
-        }
-      });
-    });
-    req.on('error', () => resolve({ running: false }));
-    req.on('timeout', () => {
-      req.destroy();
-      resolve({ running: false });
-    });
-  });
-}
-
+/**
+ * Get status for a service.
+ * @param {Object} service - Service configuration
+ * @returns {Promise<{running: boolean, status?: string, latency?: number}>}
+ */
 async function getServiceStatus(service) {
   if (service.type === 'redis') {
     return await checkRedisService(service);
   } else if (service.type === 'docker') {
-    return await checkDocker(service.container);
-  } else {
-    return await checkHealth(service.port, service.healthEndpoint);
+    return await checkDockerContainer(service.container);
+  } else if (service.type === 'node') {
+    return await checkHealth(service.port, service.healthEndpoint, 3000);
   }
+  return { running: false };
 }
 
+/**
+ * Format status for display.
+ * @param {Object} status - Status object
+ * @param {boolean} optional - Whether service is optional
+ * @returns {string}
+ */
 function formatStatus(status, optional = false) {
   if (status.running) {
     const latency = status.latency ? ` (${status.latency}ms)` : '';
@@ -193,13 +88,17 @@ function formatStatus(status, optional = false) {
   }
 }
 
+// =============================================================================
+// Main Status Logic
+// =============================================================================
+
 async function main() {
   console.log('\n' + '='.repeat(60));
   log('  Arbitrage System - Service Status', 'cyan');
   console.log('='.repeat(60) + '\n');
 
   // Check environment
-  const envFile = fs.existsSync(path.join(ROOT_DIR, '.env'));
+  const envFile = fs.existsSync(require('path').join(ROOT_DIR, '.env'));
   log(`Environment: ${envFile ? 'Configured (.env exists)' : 'Using defaults (.env.local)'}`, 'dim');
 
   // Check simulation modes
@@ -214,6 +113,9 @@ async function main() {
   }
   console.log('');
 
+  // Get services to check
+  const SERVICES = getStatusServices();
+
   // Check each service
   log('Service Status:', 'cyan');
   console.log('-'.repeat(60));
@@ -221,12 +123,19 @@ async function main() {
   let allRunning = true;
   let criticalDown = false;
 
-  for (const service of SERVICES) {
+  // Run all health checks in parallel for performance
+  const statusPromises = SERVICES.map(async (service) => {
     const status = await getServiceStatus(service);
+    return { service, status };
+  });
+
+  const results = await Promise.all(statusPromises);
+
+  for (const { service, status } of results) {
     const statusStr = formatStatus(status, service.optional);
     const portStr = `(port ${service.port})`.padEnd(12);
 
-    console.log(`  ${service.name.padEnd(20)} ${portStr} ${statusStr}`);
+    console.log(`  ${service.name.padEnd(22)} ${portStr} ${statusStr}`);
 
     if (!status.running && !service.optional) {
       allRunning = false;
@@ -242,7 +151,7 @@ async function main() {
   console.log('');
   if (allRunning) {
     log('All services are running!', 'green');
-    log('\nDashboard: http://localhost:' + (process.env.COORDINATOR_PORT || 3000), 'cyan');
+    log(`\nDashboard: http://localhost:${PORTS.COORDINATOR}`, 'cyan');
   } else if (criticalDown) {
     log('Redis is not running. Start it with one of:', 'red');
     log('  npm run dev:redis         # Docker (requires Docker Hub access)', 'yellow');
@@ -253,20 +162,20 @@ async function main() {
   }
 
   // Load PIDs if available
-  try {
-    if (fs.existsSync(PID_FILE)) {
-      const pids = JSON.parse(fs.readFileSync(PID_FILE, 'utf8'));
-      if (Object.keys(pids).length > 0) {
-        log('\nProcess IDs:', 'dim');
-        for (const [name, pid] of Object.entries(pids)) {
-          log(`  ${name}: ${pid}`, 'dim');
-        }
-      }
+  const pids = loadPids();
+  if (Object.keys(pids).length > 0) {
+    log('\nProcess IDs:', 'dim');
+    for (const [name, pid] of Object.entries(pids)) {
+      log(`  ${name}: ${pid}`, 'dim');
     }
-  } catch (e) {}
+  }
 
   console.log('');
 }
+
+// =============================================================================
+// Entry Point
+// =============================================================================
 
 main().catch(error => {
   log(`Error: ${error.message}`, 'red');
