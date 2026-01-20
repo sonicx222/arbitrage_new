@@ -49,11 +49,33 @@ check_prerequisites() {
         log_info "Using GCP project: $GCP_PROJECT"
     fi
 
+    # Update IMAGE_NAME with resolved GCP_PROJECT (needed if GCP_PROJECT was resolved from gcloud config)
+    IMAGE_NAME="gcr.io/${GCP_PROJECT}/arbitrage-coordinator"
+
     # Check if Cloud Run API is enabled
     if ! gcloud services list --enabled --filter="name:run.googleapis.com" --format="value(name)" | grep -q "run.googleapis.com"; then
         log_info "Enabling Cloud Run API..."
         gcloud services enable run.googleapis.com
     fi
+}
+
+# Generate Knative YAML with PROJECT_ID substitution
+# This is needed when deploying via kubectl apply instead of gcloud run deploy
+generate_knative_yaml() {
+    local output_file="${1:-/tmp/coordinator-standby-rendered.yaml}"
+
+    if [ -z "$GCP_PROJECT" ]; then
+        log_error "GCP_PROJECT must be set before generating Knative YAML"
+        return 1
+    fi
+
+    log_info "Generating Knative YAML with PROJECT_ID=$GCP_PROJECT..."
+
+    # Substitute PROJECT_ID placeholder in the YAML template
+    sed "s/PROJECT_ID/$GCP_PROJECT/g" "$SCRIPT_DIR/coordinator-standby.yaml" > "$output_file"
+
+    log_info "Generated: $output_file"
+    echo "$output_file"
 }
 
 build_image() {
@@ -184,6 +206,7 @@ usage() {
     echo "Commands:"
     echo "  deploy       Build and deploy the coordinator standby"
     echo "  build        Build and push Docker image only"
+    echo "  yaml [file]  Generate Knative YAML with PROJECT_ID substituted"
     echo "  status       Show service status"
     echo "  cleanup      Delete the service"
     echo "  secrets      Set up secrets"
@@ -205,6 +228,10 @@ main() {
         build)
             check_prerequisites
             build_image
+            ;;
+        yaml)
+            check_prerequisites
+            generate_knative_yaml "$2"
             ;;
         status)
             check_prerequisites

@@ -96,7 +96,7 @@ variable "arm_memory_gb" {
 # =============================================================================
 
 variable "partition_asia_fast" {
-  description = "Asia-Fast partition configuration"
+  description = "Asia-Fast partition configuration (BSC, Polygon, Avalanche, Fantom)"
   type = object({
     name          = string
     chains        = list(string)
@@ -107,8 +107,8 @@ variable "partition_asia_fast" {
   })
   default = {
     name          = "asia-fast"
-    chains        = ["bsc", "polygon"]
-    memory_mb     = 512
+    chains        = ["bsc", "polygon", "avalanche", "fantom"]
+    memory_mb     = 768
     ocpus         = 2
     region        = "ap-singapore-1"
     health_port   = 3011
@@ -116,7 +116,7 @@ variable "partition_asia_fast" {
 }
 
 variable "partition_high_value" {
-  description = "High-Value partition configuration"
+  description = "High-Value partition configuration (Ethereum, zkSync, Linea)"
   type = object({
     name          = string
     chains        = list(string)
@@ -127,8 +127,8 @@ variable "partition_high_value" {
   })
   default = {
     name          = "high-value"
-    chains        = ["ethereum"]
-    memory_mb     = 512
+    chains        = ["ethereum", "zksync", "linea"]
+    memory_mb     = 768
     ocpus         = 2
     region        = "us-ashburn-1"
     health_port   = 3013
@@ -239,6 +239,64 @@ variable "ethereum_rpc_url" {
   description = "Ethereum RPC URL"
   type        = string
   sensitive   = true
+}
+
+# Additional chains for asia-fast partition
+variable "avalanche_ws_url" {
+  description = "Avalanche C-Chain WebSocket URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "avalanche_rpc_url" {
+  description = "Avalanche C-Chain RPC URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "fantom_ws_url" {
+  description = "Fantom WebSocket URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "fantom_rpc_url" {
+  description = "Fantom RPC URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# Additional chains for high-value partition
+variable "zksync_ws_url" {
+  description = "zkSync Era WebSocket URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "zksync_rpc_url" {
+  description = "zkSync Era RPC URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "linea_ws_url" {
+  description = "Linea WebSocket URL"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "linea_rpc_url" {
+  description = "Linea RPC URL"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 # =============================================================================

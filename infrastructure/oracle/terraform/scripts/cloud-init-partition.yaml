@@ -37,14 +37,24 @@ write_files:
             - LOG_LEVEL=${log_level}
             - HEALTH_CHECK_PORT=3001
             - ENABLE_CROSS_REGION_HEALTH=true
+            # Chain-specific RPC URLs (empty string if not used by this partition)
             - BSC_WS_URL=${bsc_ws_url}
             - BSC_RPC_URL=${bsc_rpc_url}
             - POLYGON_WS_URL=${polygon_ws_url}
             - POLYGON_RPC_URL=${polygon_rpc_url}
+            - AVALANCHE_WS_URL=${avalanche_ws_url}
+            - AVALANCHE_RPC_URL=${avalanche_rpc_url}
+            - FANTOM_WS_URL=${fantom_ws_url}
+            - FANTOM_RPC_URL=${fantom_rpc_url}
             - ETHEREUM_WS_URL=${ethereum_ws_url}
             - ETHEREUM_RPC_URL=${ethereum_rpc_url}
+            - ZKSYNC_WS_URL=${zksync_ws_url}
+            - ZKSYNC_RPC_URL=${zksync_rpc_url}
+            - LINEA_WS_URL=${linea_ws_url}
+            - LINEA_RPC_URL=${linea_rpc_url}
           healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+            # Use node-based health check (curl not available in Alpine Node images)
+            test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
             interval: 15s
             timeout: 10s
             retries: 3
