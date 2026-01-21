@@ -10,7 +10,7 @@
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================
-// Alert Types (for API responses)
+// Alert Types (consolidated - single source of truth)
 // =============================================================================
 
 /**
@@ -19,9 +19,10 @@ import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 export type AlertSeverity = 'low' | 'high' | 'critical';
 
 /**
- * Alert structure for API responses.
+ * Alert structure - used throughout coordinator, notifier, and API responses.
+ * FIX: Consolidated from duplicate definitions in coordinator.ts and alerts/notifier.ts
  */
-export interface AlertResponse {
+export interface Alert {
   type: string;
   service?: string;
   message?: string;
@@ -29,6 +30,9 @@ export interface AlertResponse {
   data?: Record<string, unknown>;
   timestamp: number;
 }
+
+// FIX: Removed deprecated AlertResponse alias - use Alert directly
+// Migration: Replace AlertResponse with Alert in all consuming code
 
 // =============================================================================
 // System Metrics (extracted from coordinator.ts)
@@ -103,7 +107,7 @@ export interface CoordinatorStateProvider {
   getLogger(): RouteLogger;
 
   /** Get alert history for /api/alerts endpoint */
-  getAlertHistory(limit?: number): AlertResponse[];
+  getAlertHistory(limit?: number): Alert[];
 }
 
 /**

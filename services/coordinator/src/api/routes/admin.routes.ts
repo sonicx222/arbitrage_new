@@ -14,24 +14,48 @@ import type { CoordinatorStateProvider } from '../types';
 
 /**
  * Allowed services for restart operations.
- * FIX: Expanded to include both new partitioned names (ADR-003) and legacy names
- * for backwards compatibility during migration.
+ * FIX: Expanded to include all services from ARCHITECTURE_V2.md Section 4.2
+ * Includes partitioned architecture (ADR-003) and all chain-specific services.
  */
 const ALLOWED_SERVICES = [
-  // New partitioned architecture (ADR-003)
+  // Partitioned architecture (ADR-003) - ARCHITECTURE_V2.md Section 4.2
   'unified-detector',
-  'partition-asia-fast',
-  'partition-l2-turbo',
-  'partition-high-value',
+  'partition-asia-fast',    // P1: BSC, Polygon, Avalanche, Fantom
+  'partition-l2-turbo',     // P2: Arbitrum, Optimism, Base
+  'partition-high-value',   // P3: Ethereum, zkSync, Linea
+  'partition-solana',       // P4: Solana (non-EVM)
   'cross-chain-detector',
   'execution-engine',
-  // Legacy service names (deprecated but still supported)
+  'execution-engine-backup',
+
+  // Coordinator services
+  'coordinator',
+  'coordinator-standby',
+
+  // Analysis layer services (ARCHITECTURE_V2.md Section 4.1 Layer 2)
+  'ml-predictor',
+  'volume-aggregator',
+  'multi-leg-path-finder',
+  'whale-activity-tracker',
+  'liquidity-depth-analyzer',
+
+  // Decision layer services (ARCHITECTURE_V2.md Section 4.1 Layer 3)
+  'opportunity-scorer',
+  'mev-analyzer',
+  'execution-planner',
+
+  // Legacy service names (deprecated but still supported during migration)
   'bsc-detector',
   'ethereum-detector',
   'polygon-detector',
-  'solana-detector',
-  'coordinator',
-  'coordinator-standby'
+  'arbitrum-detector',
+  'optimism-detector',
+  'base-detector',
+  'avalanche-detector',
+  'fantom-detector',
+  'zksync-detector',
+  'linea-detector',
+  'solana-detector'
 ];
 
 /**

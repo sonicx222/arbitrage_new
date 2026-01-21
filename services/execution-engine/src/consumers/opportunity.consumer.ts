@@ -61,8 +61,10 @@ export class OpportunityConsumer {
     this.onOpportunityQueued = config.onOpportunityQueued;
 
     // Define consumer group configuration
+    // FIX: Consume from EXECUTION_REQUESTS (forwarded by coordinator leader)
+    // This ensures only leader-approved opportunities are executed (ARCHITECTURE_V2.md Section 4.1)
     this.consumerGroup = {
-      streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,
+      streamName: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
       groupName: 'execution-engine-group',
       consumerName: this.instanceId,
       startId: '$'
@@ -310,7 +312,7 @@ export class OpportunityConsumer {
     try {
       await this.streamsClient.xadd('stream:dead-letter-queue', {
         originalMessageId: message.id,
-        originalStream: RedisStreamsClient.STREAMS.OPPORTUNITIES,
+        originalStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         data: message.data,
         error: error.message,
         timestamp: Date.now(),
