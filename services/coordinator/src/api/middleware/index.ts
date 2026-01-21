@@ -60,14 +60,17 @@ export function configureMiddleware(app: Application, logger: RouteLogger): void
 
 /**
  * CORS middleware handler.
+ * FIX: Case-insensitive origin comparison per RFC 3986.
  */
 function configureCors(req: Request, res: Response, next: NextFunction): void {
   const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim().toLowerCase())
     : ['http://localhost:3000', 'http://localhost:3001'];
 
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
+  // FIX: Compare origins case-insensitively (RFC 3986 - scheme and host are case-insensitive)
+  if (origin && allowedOrigins.includes(origin.toLowerCase())) {
+    // Return the original origin (preserve case for the response)
     res.header('Access-Control-Allow-Origin', origin);
   }
 
