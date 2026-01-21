@@ -42,6 +42,20 @@ import {
   Logger
 } from './api';
 
+// Import alert notification system
+import { AlertNotifier } from './alerts';
+
+// Import type guard utilities
+import {
+  getString,
+  getNumber,
+  getNonNegativeNumber,
+  getOptionalString,
+  getOptionalNumber,
+  unwrapMessageData,
+  hasRequiredString
+} from './utils';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -191,6 +205,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private degradationLevel: DegradationLevel = DegradationLevel.FULL_OPERATION;
   private alertCooldowns: Map<string, number> = new Map();
   private opportunities: Map<string, ArbitrageOpportunity> = new Map();
+  // FIX: Alert notifier for sending alerts to Discord/Slack
+  private alertNotifier: AlertNotifier | null = null;
 
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
@@ -273,6 +289,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.OPPORTUNITY_TTL_MS = this.config.opportunityTtlMs!;
     this.OPPORTUNITY_CLEANUP_INTERVAL_MS = this.config.opportunityCleanupIntervalMs!;
     this.PAIR_TTL_MS = this.config.pairTtlMs!;
+
+    // FIX: Initialize alert notifier for sending alerts to external channels
+    this.alertNotifier = new AlertNotifier(this.logger);
 
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
@@ -815,28 +834,38 @@ export class CoordinatorService implements CoordinatorStateProvider {
     try {
       const data = message.data;
       // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
-      const serviceName = data?.name ?? data?.service;
-      if (!serviceName || typeof serviceName !== 'string') return;
+      const serviceName = getString(data as Record<string, unknown>, 'name', '') ||
+                          getString(data as Record<string, unknown>, 'service', '');
+      if (!serviceName) {
+        // FIX: Log debug warning for invalid messages instead of silent skip
+        this.logger.debug('Skipping health message - missing service name', {
+          messageId: message.id,
+          hasName: 'name' in (data || {}),
+          hasService: 'service' in (data || {})
+        });
+        return;
+      }
 
       // P3-2 FIX: Validate status includes new 'starting' and 'stopping' states
-      const statusValue = data.status;
+      const typedData = data as Record<string, unknown>;
+      const statusValue = getString(typedData, 'status', '');
       const validStatus: ServiceHealth['status'] =
         statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
           statusValue === 'starting' || statusValue === 'stopping'
           ? statusValue
           : 'unhealthy'; // Default to unhealthy for unknown status
 
-      // P3-2 FIX: Use unified ServiceHealth with 'name' field
+      // FIX: Use type guard utilities for cleaner extraction
       const health: ServiceHealth = {
         name: serviceName,
         status: validStatus,
-        uptime: typeof data.uptime === 'number' ? data.uptime : 0,
-        memoryUsage: typeof data.memoryUsage === 'number' ? data.memoryUsage : 0,
-        cpuUsage: typeof data.cpuUsage === 'number' ? data.cpuUsage : 0,
-        lastHeartbeat: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
+        uptime: getNonNegativeNumber(typedData, 'uptime', 0),
+        memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
+        cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
+        lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),
         // P3-2: Include optional recovery tracking fields if present
-        consecutiveFailures: typeof data.consecutiveFailures === 'number' ? data.consecutiveFailures : undefined,
-        restartCount: typeof data.restartCount === 'number' ? data.restartCount : undefined
+        consecutiveFailures: getOptionalNumber(typedData, 'consecutiveFailures'),
+        restartCount: getOptionalNumber(typedData, 'restartCount')
       };
 
       this.serviceHealth.set(serviceName, health);
@@ -863,27 +892,32 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // P2 FIX: Use StreamMessage type instead of any
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
     try {
-      const data = message.data;
-      // P2 FIX: Type guard for required id field
-      if (!data || typeof data.id !== 'string') return;
+      const data = message.data as Record<string, unknown>;
+      // FIX: Use type guard utility for required id field with better error logging
+      if (!hasRequiredString(data, 'id')) {
+        this.logger.debug('Skipping opportunity message - missing or invalid id', {
+          messageId: message.id
+        });
+        return;
+      }
 
-      // P2 FIX: Create ArbitrageOpportunity with proper type safety
+      // FIX: Use type guard utilities for cleaner type-safe extraction
       const opportunity: ArbitrageOpportunity = {
-        id: data.id,
-        confidence: typeof data.confidence === 'number' ? data.confidence : 0,
-        timestamp: typeof data.timestamp === 'number' ? data.timestamp : Date.now(),
-        // Optional fields
-        chain: typeof data.chain === 'string' ? data.chain : undefined,
-        buyDex: typeof data.buyDex === 'string' ? data.buyDex : undefined,
-        sellDex: typeof data.sellDex === 'string' ? data.sellDex : undefined,
-        profitPercentage: typeof data.profitPercentage === 'number' ? data.profitPercentage : undefined,
-        expiresAt: typeof data.expiresAt === 'number' ? data.expiresAt : undefined,
-        status: typeof data.status === 'string' ? data.status as ArbitrageOpportunity['status'] : undefined
+        id: getString(data, 'id'),
+        confidence: getNumber(data, 'confidence', 0),
+        timestamp: getNumber(data, 'timestamp', Date.now()),
+        // Optional fields using type guards
+        chain: getOptionalString(data, 'chain'),
+        buyDex: getOptionalString(data, 'buyDex'),
+        sellDex: getOptionalString(data, 'sellDex'),
+        profitPercentage: getOptionalNumber(data, 'profitPercentage'),
+        expiresAt: getOptionalNumber(data, 'expiresAt'),
+        status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
       };
 
       // Track opportunity (fast path - cleanup happens on separate interval)
       // REFACTOR: Removed inline cleanup to prevent race conditions with concurrent consumers
-      this.opportunities.set(data.id, opportunity);
+      this.opportunities.set(opportunity.id, opportunity);
       this.systemMetrics.totalOpportunities++;
       this.systemMetrics.pendingOpportunities = this.opportunities.size;
 
@@ -1044,17 +1078,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const data = message.data as Record<string, unknown>;
       if (!data) return;
 
-      // Extract swap event data with type checking
-      // Handle wrapped MessageEvent (type='swap-event', data={...}) or direct SwapEvent
-      const rawEvent = (data.data ?? data) as Record<string, unknown>;
-      const pairAddress = typeof rawEvent.pairAddress === 'string' ? rawEvent.pairAddress : '';
-      const chain = typeof rawEvent.chain === 'string' ? rawEvent.chain : 'unknown';
-      const dex = typeof rawEvent.dex === 'string' ? rawEvent.dex : 'unknown';
-      // Guard against negative values from malformed data
-      const rawUsdValue = typeof rawEvent.usdValue === 'number' ? rawEvent.usdValue : 0;
-      const usdValue = rawUsdValue >= 0 ? rawUsdValue : 0;
+      // FIX: Use unwrapMessageData utility for wrapped MessageEvent handling
+      const rawEvent = unwrapMessageData(data);
+      const pairAddress = getString(rawEvent, 'pairAddress', '');
+      const chain = getString(rawEvent, 'chain', 'unknown');
+      const dex = getString(rawEvent, 'dex', 'unknown');
+      // FIX: Use getNonNegativeNumber to guard against malformed negative values
+      const usdValue = getNonNegativeNumber(rawEvent, 'usdValue', 0);
 
-      if (!pairAddress) return;
+      if (!pairAddress) {
+        this.logger.debug('Skipping swap event - missing pairAddress', { messageId: message.id });
+        return;
+      }
 
       // Update metrics
       this.systemMetrics.totalSwapEvents++;
@@ -1102,18 +1137,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const data = message.data as Record<string, unknown>;
       if (!data) return;
 
-      // Extract volume aggregate data with type checking
-      // Handle wrapped MessageEvent (type='volume-aggregate', data={...}) or direct VolumeAggregate
-      const rawAggregate = (data.data ?? data) as Record<string, unknown>;
-      const pairAddress = typeof rawAggregate.pairAddress === 'string' ? rawAggregate.pairAddress : '';
-      const chain = typeof rawAggregate.chain === 'string' ? rawAggregate.chain : 'unknown';
-      const dex = typeof rawAggregate.dex === 'string' ? rawAggregate.dex : 'unknown';
-      const swapCount = typeof rawAggregate.swapCount === 'number' ? rawAggregate.swapCount : 0;
-      // Guard against negative values from malformed data
-      const rawVolume = typeof rawAggregate.totalUsdVolume === 'number' ? rawAggregate.totalUsdVolume : 0;
-      const totalUsdVolume = rawVolume >= 0 ? rawVolume : 0;
+      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
+      const rawAggregate = unwrapMessageData(data);
+      const pairAddress = getString(rawAggregate, 'pairAddress', '');
+      const chain = getString(rawAggregate, 'chain', 'unknown');
+      const dex = getString(rawAggregate, 'dex', 'unknown');
+      const swapCount = getNonNegativeNumber(rawAggregate, 'swapCount', 0);
+      const totalUsdVolume = getNonNegativeNumber(rawAggregate, 'totalUsdVolume', 0);
 
-      if (!pairAddress) return;
+      if (!pairAddress) {
+        this.logger.debug('Skipping volume aggregate - missing pairAddress', { messageId: message.id });
+        return;
+      }
 
       // Update metrics - always track aggregates, even if swapCount is 0
       // (swapCount=0 aggregates indicate monitored but quiet pairs)
@@ -1169,14 +1204,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const data = message.data as Record<string, unknown>;
       if (!data) return;
 
-      // Extract price update data with type checking
-      // Handle wrapped MessageEvent (type='price-update', data={...}) or direct PriceUpdate
-      const rawUpdate = (data.data ?? data) as Record<string, unknown>;
-      const chain = typeof rawUpdate.chain === 'string' ? rawUpdate.chain : 'unknown';
-      const dex = typeof rawUpdate.dex === 'string' ? rawUpdate.dex : 'unknown';
-      const pairKey = typeof rawUpdate.pairKey === 'string' ? rawUpdate.pairKey : '';
+      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
+      const rawUpdate = unwrapMessageData(data);
+      const chain = getString(rawUpdate, 'chain', 'unknown');
+      const dex = getString(rawUpdate, 'dex', 'unknown');
+      const pairKey = getString(rawUpdate, 'pairKey', '');
 
-      if (!pairKey) return;
+      if (!pairKey) {
+        this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
+        return;
+      }
 
       // Update metrics
       this.systemMetrics.priceUpdatesReceived++;
@@ -1392,31 +1429,35 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private updateSystemMetrics(): void {
-    const activeServices = Array.from(this.serviceHealth.values())
-      .filter(health => health.status === 'healthy').length;
+    // FIX: Single-pass calculation instead of iterating 3 times
+    // This improves performance when there are many services
+    const now = Date.now();
+    let activeServices = 0;
+    let totalMemory = 0;
+    let totalLatency = 0;
+
+    for (const health of this.serviceHealth.values()) {
+      // Count healthy services
+      if (health.status === 'healthy') {
+        activeServices++;
+      }
+      // Sum memory usage
+      totalMemory += health.memoryUsage || 0;
+      // Calculate latency - use explicit if available, else from heartbeat
+      const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
+      totalLatency += latency;
+    }
 
     const totalServices = Math.max(this.serviceHealth.size, 1);
     const systemHealth = (activeServices / totalServices) * 100;
-
-    // Calculate average memory usage
-    const avgMemory = Array.from(this.serviceHealth.values())
-      .reduce((sum, health) => sum + (health.memoryUsage || 0), 0) / totalServices;
-
-    // Calculate average latency from service health data
-    // P1-5 fix: Fixed operator precedence - now correctly uses health.latency if available,
-    // otherwise falls back to calculating from lastHeartbeat
-    const avgLatency = Array.from(this.serviceHealth.values())
-      .reduce((sum, health) => {
-        // Use explicit latency if available, otherwise calculate from heartbeat
-        const latency = health.latency ?? (health.lastHeartbeat ? Date.now() - health.lastHeartbeat : 0);
-        return sum + latency;
-      }, 0) / totalServices;
+    const avgMemory = totalMemory / totalServices;
+    const avgLatency = totalLatency / totalServices;
 
     this.systemMetrics.activeServices = activeServices;
     this.systemMetrics.systemHealth = systemHealth;
-    this.systemMetrics.averageLatency = avgLatency; // FIX: Use actual latency, not memory
-    this.systemMetrics.averageMemory = avgMemory;   // Track memory separately
-    this.systemMetrics.lastUpdate = Date.now();
+    this.systemMetrics.averageLatency = avgLatency;
+    this.systemMetrics.averageMemory = avgMemory;
+    this.systemMetrics.lastUpdate = now;
     this.systemMetrics.pendingOpportunities = this.opportunities.size;
 
     // FIX: Evaluate degradation level after updating metrics (ADR-007)
@@ -1552,6 +1593,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * P1-NEW-1 FIX: Send alert with cooldown and periodic cleanup
    * P2 FIX: Use Alert type for proper type safety
+   * FIX: Now sends to external channels via AlertNotifier
    */
   private sendAlert(alert: Alert): void {
     const alertKey = `${alert.type}_${alert.service || 'system'}`;
@@ -1570,7 +1612,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.cleanupAlertCooldowns(now);
       }
 
-      // TODO: Send to Discord/Telegram/email in production
+      // FIX: Send to external channels (Discord/Slack) via AlertNotifier
+      if (this.alertNotifier) {
+        // Fire and forget - don't await to avoid blocking
+        this.alertNotifier.notify(alert).catch(error => {
+          this.logger.error('Failed to send alert notification', { error: (error as Error).message });
+        });
+      }
     }
   }
 
@@ -1665,6 +1713,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   getLogger(): RouteLogger {
     return this.logger;
+  }
+
+  /**
+   * FIX: Get alert history from the notifier for /api/alerts endpoint.
+   * @param limit Maximum number of alerts to return (default: 100)
+   */
+  getAlertHistory(limit: number = 100): Alert[] {
+    return this.alertNotifier?.getAlertHistory(limit) ?? [];
   }
 
   // ===========================================================================

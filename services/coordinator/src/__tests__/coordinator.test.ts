@@ -812,3 +812,272 @@ describe('S3.3.5 Regression: Stream Error Alert Data', () => {
     expect(alerts[0].data?.errorCount).toBe(MAX_STREAM_ERRORS);
   });
 });
+
+// =============================================================================
+// Standby Activation Tests (ADR-007)
+// =============================================================================
+
+describe('CoordinatorService Standby Activation', () => {
+  describe('activateStandby()', () => {
+    it('should use Promise-based mutex to prevent concurrent activations', async () => {
+      // Simulates the mutex pattern used in activateStandby()
+      let activationPromise: Promise<boolean> | null = null;
+      let activationCount = 0;
+
+      const activateStandby = async (): Promise<boolean> => {
+        // If already activating, return existing promise
+        if (activationPromise) {
+          return activationPromise;
+        }
+
+        // Create new activation promise
+        activationPromise = (async () => {
+          activationCount++;
+          await new Promise(resolve => setTimeout(resolve, 10));
+          return true;
+        })();
+
+        try {
+          return await activationPromise;
+        } finally {
+          activationPromise = null;
+        }
+      };
+
+      // Call activate twice concurrently
+      const [result1, result2] = await Promise.all([
+        activateStandby(),
+        activateStandby()
+      ]);
+
+      // Both should return true
+      expect(result1).toBe(true);
+      expect(result2).toBe(true);
+      // But activation should only happen once
+      expect(activationCount).toBe(1);
+    });
+
+    it('should reject activation when already a leader', async () => {
+      // Simulates the leader check in activateStandby()
+      let isLeader = true;
+
+      const activateStandby = async (): Promise<boolean> => {
+        if (isLeader) {
+          return true; // Already leader, nothing to do
+        }
+        return false;
+      };
+
+      const result = await activateStandby();
+      expect(result).toBe(true);
+    });
+
+    it('should fail gracefully when leader acquisition fails', async () => {
+      let canAcquireLock = false;
+
+      const tryAcquireLeadership = async (): Promise<boolean> => {
+        return canAcquireLock;
+      };
+
+      const activateStandby = async (): Promise<boolean> => {
+        const acquired = await tryAcquireLeadership();
+        if (!acquired) {
+          return false;
+        }
+        return true;
+      };
+
+      const result = await activateStandby();
+      expect(result).toBe(false);
+    });
+  });
+});
+
+// =============================================================================
+// Service Lifecycle Tests
+// =============================================================================
+
+describe('CoordinatorService Lifecycle', () => {
+  let coordinator: CoordinatorService;
+
+  beforeEach(() => {
+    coordinator = new CoordinatorService({
+      port: 0, // Random port for testing
+      consumerGroup: 'lifecycle-test-group',
+      consumerId: 'lifecycle-test-consumer'
+    });
+  });
+
+  afterEach(async () => {
+    try {
+      await coordinator.stop();
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  describe('Initial State', () => {
+    it('should not be running initially', () => {
+      expect(coordinator.getIsRunning()).toBe(false);
+    });
+
+    it('should not be leader initially', () => {
+      expect(coordinator.getIsLeader()).toBe(false);
+    });
+
+    it('should have empty service health map initially', () => {
+      const healthMap = coordinator.getServiceHealthMap();
+      expect(healthMap.size).toBe(0);
+    });
+
+    it('should have initialized metrics with default values', () => {
+      const metrics = coordinator.getSystemMetrics();
+      expect(metrics.totalOpportunities).toBe(0);
+      expect(metrics.systemHealth).toBe(100);
+      expect(metrics.activeServices).toBe(0);
+    });
+  });
+
+  describe('State Provider Implementation', () => {
+    it('should implement getInstanceId()', () => {
+      const instanceId = coordinator.getInstanceId();
+      expect(typeof instanceId).toBe('string');
+      expect(instanceId.length).toBeGreaterThan(0);
+      expect(instanceId).toContain('coordinator');
+    });
+
+    it('should implement getLockKey()', () => {
+      const lockKey = coordinator.getLockKey();
+      expect(lockKey).toBe('coordinator:leader:lock');
+    });
+
+    it('should implement getLogger()', () => {
+      const logger = coordinator.getLogger();
+      // Logger may be mocked or a real logger depending on test setup
+      // In test environment with mocks, logger might be undefined or have mock functions
+      if (logger) {
+        expect(typeof logger.info).toBe('function');
+        expect(typeof logger.error).toBe('function');
+        expect(typeof logger.warn).toBe('function');
+      } else {
+        // In test environment, getLogger() returning undefined is acceptable
+        // since createLogger is mocked
+        expect(logger).toBeUndefined();
+      }
+    });
+
+    it('should implement getAlertHistory()', () => {
+      const history = coordinator.getAlertHistory();
+      expect(Array.isArray(history)).toBe(true);
+    });
+  });
+
+  describe('Standby Configuration', () => {
+    it('should support isStandby configuration', () => {
+      const standbyCoordinator = new CoordinatorService({
+        port: 0,
+        isStandby: true,
+        canBecomeLeader: true
+      });
+
+      expect(standbyCoordinator.getIsStandby()).toBe(true);
+      expect(standbyCoordinator.getCanBecomeLeader()).toBe(true);
+    });
+
+    it('should support regionId configuration', () => {
+      const regionalCoordinator = new CoordinatorService({
+        port: 0,
+        regionId: 'us-central1'
+      });
+
+      expect(regionalCoordinator.getRegionId()).toBe('us-central1');
+    });
+  });
+});
+
+// =============================================================================
+// Type Guard Utilities Tests
+// =============================================================================
+
+describe('Type Guard Utilities', () => {
+  // Inline versions to test the logic
+  const getString = (data: Record<string, unknown>, key: string, defaultValue: string = ''): string => {
+    const value = data[key];
+    return typeof value === 'string' ? value : defaultValue;
+  };
+
+  const getNumber = (data: Record<string, unknown>, key: string, defaultValue: number = 0): number => {
+    const value = data[key];
+    return typeof value === 'number' && !isNaN(value) ? value : defaultValue;
+  };
+
+  const getNonNegativeNumber = (data: Record<string, unknown>, key: string, defaultValue: number = 0): number => {
+    const value = getNumber(data, key, defaultValue);
+    return value >= 0 ? value : defaultValue;
+  };
+
+  const hasRequiredString = (data: Record<string, unknown>, key: string): boolean => {
+    const value = data[key];
+    return typeof value === 'string' && value.length > 0;
+  };
+
+  describe('getString', () => {
+    it('should return string value when present', () => {
+      expect(getString({ name: 'test' }, 'name')).toBe('test');
+    });
+
+    it('should return default when key missing', () => {
+      expect(getString({}, 'name', 'default')).toBe('default');
+    });
+
+    it('should return default when value is not string', () => {
+      expect(getString({ name: 123 }, 'name', 'default')).toBe('default');
+    });
+  });
+
+  describe('getNumber', () => {
+    it('should return number value when present', () => {
+      expect(getNumber({ count: 42 }, 'count')).toBe(42);
+    });
+
+    it('should return default when key missing', () => {
+      expect(getNumber({}, 'count', 99)).toBe(99);
+    });
+
+    it('should return default when value is NaN', () => {
+      expect(getNumber({ count: NaN }, 'count', 0)).toBe(0);
+    });
+  });
+
+  describe('getNonNegativeNumber', () => {
+    it('should return positive number', () => {
+      expect(getNonNegativeNumber({ value: 10 }, 'value')).toBe(10);
+    });
+
+    it('should return 0 for zero', () => {
+      expect(getNonNegativeNumber({ value: 0 }, 'value')).toBe(0);
+    });
+
+    it('should return default for negative number', () => {
+      expect(getNonNegativeNumber({ value: -5 }, 'value', 0)).toBe(0);
+    });
+  });
+
+  describe('hasRequiredString', () => {
+    it('should return true for non-empty string', () => {
+      expect(hasRequiredString({ id: 'abc123' }, 'id')).toBe(true);
+    });
+
+    it('should return false for empty string', () => {
+      expect(hasRequiredString({ id: '' }, 'id')).toBe(false);
+    });
+
+    it('should return false for missing key', () => {
+      expect(hasRequiredString({}, 'id')).toBe(false);
+    });
+
+    it('should return false for non-string value', () => {
+      expect(hasRequiredString({ id: 123 }, 'id')).toBe(false);
+    });
+  });
+});

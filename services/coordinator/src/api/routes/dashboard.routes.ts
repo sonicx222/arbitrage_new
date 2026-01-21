@@ -25,23 +25,27 @@ function escapeHtml(str: string): string {
   return str.replace(/[&<>"']/g, char => htmlEscapes[char]);
 }
 
-// FIX: Add simple HTML caching to reduce CPU usage for high-frequency polling
+// FIX: Cache interface moved inside factory for instance-scoping
 interface DashboardCache {
   html: string;
   timestamp: number;
 }
 
 const CACHE_TTL_MS = 1000; // 1 second cache - dashboard auto-refreshes every 10s anyway
-let dashboardCache: DashboardCache | null = null;
 
 /**
  * Create dashboard router.
+ * FIX: Cache is now instance-scoped (per router) instead of module-level.
+ * This prevents cache sharing between tests or multiple coordinator instances.
  *
  * @param state - Coordinator state provider
  * @returns Express router with dashboard endpoint
  */
 export function createDashboardRoutes(state: CoordinatorStateProvider): Router {
   const router = Router();
+
+  // FIX: Instance-scoped cache (was module-level, could cause issues in tests)
+  let dashboardCache: DashboardCache | null = null;
 
   /**
    * GET /

@@ -10,6 +10,27 @@
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================
+// Alert Types (for API responses)
+// =============================================================================
+
+/**
+ * Alert severity levels.
+ */
+export type AlertSeverity = 'low' | 'high' | 'critical';
+
+/**
+ * Alert structure for API responses.
+ */
+export interface AlertResponse {
+  type: string;
+  service?: string;
+  message?: string;
+  severity?: AlertSeverity;
+  data?: Record<string, unknown>;
+  timestamp: number;
+}
+
+// =============================================================================
 // System Metrics (extracted from coordinator.ts)
 // =============================================================================
 
@@ -80,6 +101,9 @@ export interface CoordinatorStateProvider {
 
   /** Logger for route handlers */
   getLogger(): RouteLogger;
+
+  /** Get alert history for /api/alerts endpoint */
+  getAlertHistory(limit?: number): AlertResponse[];
 }
 
 /**
