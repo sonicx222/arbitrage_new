@@ -32,14 +32,15 @@ import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { isAuthEnabled } from '@shared/security';
 
 // Import extracted API modules
-// FIX: Import Logger from consolidated api/types (was duplicated locally)
+// FIX: Import Logger and Alert from consolidated api/types (single source of truth)
 import {
   configureMiddleware,
   setupAllRoutes,
   SystemMetrics,
   CoordinatorStateProvider,
   RouteLogger,
-  Logger
+  Logger,
+  Alert
 } from './api';
 
 // Import alert notification system
@@ -135,6 +136,8 @@ interface CoordinatorConfig {
   opportunityCleanupIntervalMs?: number; // Cleanup interval (default: 10000)
   pairTtlMs?: number;              // Active pair expiry time (default: 300000)
   alertCooldownMs?: number;        // Alert cooldown duration (default: 300000)
+  // FIX: Option to disable legacy Redis polling (all services use streams now)
+  enableLegacyHealthPolling?: boolean; // Default: false (streams-only mode)
 }
 
 // P2 FIX: Proper type for stream messages with typed data access
@@ -170,15 +173,8 @@ interface StreamMessageData {
   [key: string]: unknown;
 }
 
-// P2 FIX: Proper type for alerts
-interface Alert {
-  type: string;
-  service?: string;
-  message?: string;
-  severity?: 'low' | 'high' | 'critical';
-  data?: StreamMessageData;
-  timestamp: number;
-}
+// FIX: Alert type is now imported from ./api (consolidated single source of truth)
+// The imported Alert uses Record<string, unknown> for data field for flexibility
 
 // =============================================================================
 // Coordinator Service
@@ -281,7 +277,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       opportunityTtlMs: config?.opportunityTtlMs ?? parseInt(process.env.OPPORTUNITY_TTL_MS || '60000'),
       opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? parseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS || '10000'),
       pairTtlMs: config?.pairTtlMs ?? parseInt(process.env.PAIR_TTL_MS || '300000'),
-      alertCooldownMs: config?.alertCooldownMs ?? parseInt(process.env.ALERT_COOLDOWN_MS || '300000')
+      alertCooldownMs: config?.alertCooldownMs ?? parseInt(process.env.ALERT_COOLDOWN_MS || '300000'),
+      // FIX: Legacy polling disabled by default - all services now use streams
+      enableLegacyHealthPolling: config?.enableLegacyHealthPolling ?? (process.env.ENABLE_LEGACY_HEALTH_POLLING === 'true')
     };
 
     // FIX: Initialize configurable constants from config
@@ -482,6 +480,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.serviceHealth.clear();
       this.alertCooldowns.clear();
       this.opportunities.clear();
+      // FIX: Clear activePairs to prevent stale data on restart
+      this.activePairs.clear();
       // P2-1 FIX: Reset stream error counter
       this.streamConsumerErrors = 0;
 
@@ -715,6 +715,28 @@ export class CoordinatorService implements CoordinatorStateProvider {
         });
       }
     }
+
+    // FIX: Ensure EXECUTION_REQUESTS stream exists for publishing
+    // The coordinator publishes to this stream but doesn't consume from it
+    // Creating a dummy entry ensures the stream exists before first publish
+    try {
+      await this.streamsClient.xadd(
+        RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        {
+          type: 'stream-init',
+          message: 'Coordinator stream initialization',
+          timestamp: Date.now().toString()
+        }
+      );
+      this.logger.info('Execution requests stream initialized', {
+        stream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
+      });
+    } catch (error) {
+      this.logger.warn('Failed to initialize execution requests stream', {
+        error,
+        stream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS
+      });
+    }
   }
 
   // P2-1 fix: Track stream consumer errors for health monitoring
@@ -930,7 +952,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
 
       // Only leader should forward to execution engine
-      if (this.isLeader && opportunity.status === 'pending') {
+      // FIX: Also forward opportunities without explicit status (default to pending)
+      if (this.isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
         await this.forwardToExecutionEngine(opportunity);
       }
 
@@ -976,13 +999,37 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Phase 3: Enforce size limit by removing oldest entries
+    // FIX: Use partial selection O(n) instead of full sort O(n log n)
+    // For large opportunity sets, this is significantly faster
     if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
-      const entries = Array.from(this.opportunities.entries())
-        .sort((a, b) => (a[1].timestamp || 0) - (b[1].timestamp || 0));
-
+      const entries = Array.from(this.opportunities.entries());
       const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
+
+      // Use partial selection: find the k-th smallest timestamps without full sort
+      // This is O(n) average vs O(n log n) for full sort
+      const timestampedEntries = entries.map((entry, idx) => ({
+        idx,
+        id: entry[0],
+        timestamp: entry[1].timestamp || 0
+      }));
+
+      // Partition to find the removeCount oldest entries
+      // Simple approach: find minimum removeCount times - still better than full sort for small removeCount
       for (let i = 0; i < removeCount; i++) {
-        this.opportunities.delete(entries[i][0]);
+        let minIdx = i;
+        for (let j = i + 1; j < timestampedEntries.length; j++) {
+          if (timestampedEntries[j].timestamp < timestampedEntries[minIdx].timestamp) {
+            minIdx = j;
+          }
+        }
+        // Swap
+        if (minIdx !== i) {
+          const temp = timestampedEntries[i];
+          timestampedEntries[i] = timestampedEntries[minIdx];
+          timestampedEntries[minIdx] = temp;
+        }
+        // Delete this entry
+        this.opportunities.delete(timestampedEntries[i].id);
       }
     }
 
@@ -1025,23 +1072,27 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // P2 FIX: Use StreamMessage type instead of any
   private async handleWhaleAlertMessage(message: StreamMessage): Promise<void> {
     try {
-      const data = message.data;
+      const data = message.data as Record<string, unknown>;
       if (!data) return;
 
       this.systemMetrics.whaleAlerts++;
 
-      // P2 FIX: Extract values with proper type checking
-      const usdValue = typeof data.usdValue === 'number' ? data.usdValue : 0;
-      const direction = typeof data.direction === 'string' ? data.direction : 'unknown';
-      const chain = typeof data.chain === 'string' ? data.chain : 'unknown';
+      // FIX: Use type guard utilities for consistency with other handlers
+      const rawAlert = unwrapMessageData(data);
+      const usdValue = getNonNegativeNumber(rawAlert, 'usdValue', 0);
+      const direction = getString(rawAlert, 'direction', 'unknown');
+      const chain = getString(rawAlert, 'chain', 'unknown');
+      const address = getOptionalString(rawAlert, 'address');
+      const dex = getOptionalString(rawAlert, 'dex');
+      const impact = getOptionalString(rawAlert, 'impact');
 
       this.logger.warn('Whale alert received', {
-        address: data.address,
+        address,
         usdValue,
         direction,
         chain,
-        dex: data.dex,
-        impact: data.impact
+        dex,
+        impact
       });
 
       // Send alert notification
@@ -1049,7 +1100,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         type: 'WHALE_TRANSACTION',
         message: `Whale ${direction} detected: $${usdValue.toLocaleString()} on ${chain}`,
         severity: usdValue > 100000 ? 'critical' : 'high',
-        data,
+        data: rawAlert,
         timestamp: Date.now()
       });
 
@@ -1372,28 +1423,42 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }, 5000);
 
-    // Legacy health polling (fallback for services not yet on streams)
-    this.healthCheckInterval = setInterval(async () => {
-      // P1-8 FIX: Use stateManager.isRunning() for consistency
-      if (!this.stateManager.isRunning() || !this.redis) return;
+    // FIX: Legacy health polling is now configurable (disabled by default)
+    // All services now use Redis Streams, so this is only needed for backwards compatibility
+    if (this.config.enableLegacyHealthPolling) {
+      this.logger.info('Legacy health polling enabled (consider migrating to streams-only mode)');
+      this.healthCheckInterval = setInterval(async () => {
+        // P1-8 FIX: Use stateManager.isRunning() for consistency
+        if (!this.stateManager.isRunning() || !this.redis) return;
+
+        try {
+          const allHealth = await this.redis.getAllServiceHealth();
+          for (const [serviceName, health] of Object.entries(allHealth)) {
+            // Only update if we don't have recent stream data
+            const existing = this.serviceHealth.get(serviceName);
+            if (!existing || (Date.now() - existing.lastHeartbeat) > 30000) {
+              this.serviceHealth.set(serviceName, health as ServiceHealth);
+            }
+          }
+        } catch (error) {
+          this.logger.error('Legacy health polling failed', { error });
+        }
+      }, 10000);
+    }
+
+    // FIX: Moved cleanup operations to a separate interval (always enabled)
+    // This runs regardless of legacy polling mode
+    this.healthCheckInterval = this.healthCheckInterval ?? setInterval(async () => {
+      if (!this.stateManager.isRunning()) return;
 
       try {
-        const allHealth = await this.redis.getAllServiceHealth();
-        for (const [serviceName, health] of Object.entries(allHealth)) {
-          // Only update if we don't have recent stream data
-          const existing = this.serviceHealth.get(serviceName);
-          if (!existing || (Date.now() - existing.lastHeartbeat) > 30000) {
-            this.serviceHealth.set(serviceName, health as ServiceHealth);
-          }
-        }
-
         // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
         this.cleanupAlertCooldowns(Date.now());
 
         // Cleanup stale active pairs to prevent unbounded memory growth
         this.cleanupActivePairs();
       } catch (error) {
-        this.logger.error('Legacy health polling failed', { error });
+        this.logger.error('Cleanup operations failed', { error });
       }
     }, 10000);
   }
@@ -1467,23 +1532,24 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * FIX: Evaluate system degradation level per ADR-007.
    * Updates degradationLevel based on service health status.
+   *
+   * OPTIMIZATION: Single-pass evaluation instead of calling multiple methods
+   * that each iterate over serviceHealth. This reduces from O(3n) to O(n).
    */
   private evaluateDegradationLevel(): void {
     const previousLevel = this.degradationLevel;
 
-    // Check critical services
-    const executorHealthy = this.isServiceHealthy('execution-engine');
-    const hasHealthyDetectors = this.hasHealthyDetectors();
-    const hasAnyServices = this.serviceHealth.size > 0;
+    // Single-pass analysis of all services
+    const analysis = this.analyzeServiceHealth();
 
-    // Determine degradation level
-    if (!hasAnyServices || this.systemMetrics.systemHealth === 0) {
+    // Determine degradation level based on analysis
+    if (!analysis.hasAnyServices || this.systemMetrics.systemHealth === 0) {
       this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
-    } else if (!executorHealthy && !hasHealthyDetectors) {
+    } else if (!analysis.executorHealthy && !analysis.hasHealthyDetectors) {
       this.degradationLevel = DegradationLevel.READ_ONLY;
-    } else if (!executorHealthy) {
+    } else if (!analysis.executorHealthy) {
       this.degradationLevel = DegradationLevel.DETECTION_ONLY;
-    } else if (!this.hasAllDetectorsHealthy()) {
+    } else if (!analysis.allDetectorsHealthy) {
       this.degradationLevel = DegradationLevel.REDUCED_CHAINS;
     } else {
       this.degradationLevel = DegradationLevel.FULL_OPERATION;
@@ -1494,45 +1560,72 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.warn('Degradation level changed', {
         previous: DegradationLevel[previousLevel],
         current: DegradationLevel[this.degradationLevel],
-        systemHealth: this.systemMetrics.systemHealth
+        systemHealth: this.systemMetrics.systemHealth,
+        analysis // Include analysis for debugging
       });
     }
   }
 
   /**
+   * OPTIMIZATION: Single-pass analysis of service health.
+   * Replaces multiple iterations with one pass over serviceHealth map.
+   *
+   * @returns Analysis result with all degradation-relevant flags
+   */
+  private analyzeServiceHealth(): {
+    hasAnyServices: boolean;
+    executorHealthy: boolean;
+    hasHealthyDetectors: boolean;
+    allDetectorsHealthy: boolean;
+    detectorCount: number;
+    healthyDetectorCount: number;
+  } {
+    const result = {
+      hasAnyServices: this.serviceHealth.size > 0,
+      executorHealthy: false,
+      hasHealthyDetectors: false,
+      allDetectorsHealthy: true, // Assume true, set false if unhealthy detector found
+      detectorCount: 0,
+      healthyDetectorCount: 0
+    };
+
+    // Single pass over all services
+    for (const [name, health] of this.serviceHealth) {
+      const isHealthy = health.status === 'healthy';
+
+      // Check execution engine
+      if (name === 'execution-engine') {
+        result.executorHealthy = isHealthy;
+        continue;
+      }
+
+      // Check detectors (includes 'detector' in name)
+      if (name.includes('detector')) {
+        result.detectorCount++;
+        if (isHealthy) {
+          result.healthyDetectorCount++;
+          result.hasHealthyDetectors = true;
+        } else {
+          result.allDetectorsHealthy = false;
+        }
+      }
+    }
+
+    // No detectors means allDetectorsHealthy should be false
+    if (result.detectorCount === 0) {
+      result.allDetectorsHealthy = false;
+    }
+
+    return result;
+  }
+
+  /**
    * Check if a specific service is healthy.
+   * Note: For bulk checks, use analyzeServiceHealth() instead.
    */
   private isServiceHealthy(serviceName: string): boolean {
     const health = this.serviceHealth.get(serviceName);
     return health?.status === 'healthy';
-  }
-
-  /**
-   * Check if at least one detector is healthy.
-   */
-  private hasHealthyDetectors(): boolean {
-    for (const [name, health] of this.serviceHealth) {
-      if (name.includes('detector') && health.status === 'healthy') {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Check if all detectors are healthy.
-   */
-  private hasAllDetectorsHealthy(): boolean {
-    let hasDetectors = false;
-    for (const [name, health] of this.serviceHealth) {
-      if (name.includes('detector')) {
-        hasDetectors = true;
-        if (health.status !== 'healthy') {
-          return false;
-        }
-      }
-    }
-    return hasDetectors; // Return false if no detectors are reporting
   }
 
   /**

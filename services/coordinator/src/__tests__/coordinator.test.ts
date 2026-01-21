@@ -66,7 +66,9 @@ jest.mock('@arbitrage/core', () => ({
       WHALE_ALERTS: 'stream:whale-alerts',
       SWAP_EVENTS: 'stream:swap-events',
       VOLUME_AGGREGATES: 'stream:volume-aggregates',
-      PRICE_UPDATES: 'stream:price-updates'
+      PRICE_UPDATES: 'stream:price-updates',
+      // FIX: Added EXECUTION_REQUESTS for coordinator → execution engine flow
+      EXECUTION_REQUESTS: 'stream:execution-requests'
     }
   })),
   RedisStreamsClient: {
@@ -76,7 +78,9 @@ jest.mock('@arbitrage/core', () => ({
       WHALE_ALERTS: 'stream:whale-alerts',
       SWAP_EVENTS: 'stream:swap-events',
       VOLUME_AGGREGATES: 'stream:volume-aggregates',
-      PRICE_UPDATES: 'stream:price-updates'
+      PRICE_UPDATES: 'stream:price-updates',
+      // FIX: Added EXECUTION_REQUESTS for coordinator → execution engine flow
+      EXECUTION_REQUESTS: 'stream:execution-requests'
     }
   },
   ValidationMiddleware: {
@@ -999,28 +1003,16 @@ describe('CoordinatorService Lifecycle', () => {
 // Type Guard Utilities Tests
 // =============================================================================
 
+// FIX: Import actual type guards from utils instead of reimplementing inline
+// This ensures tests verify the actual implementation, not a duplicate
+import {
+  getString,
+  getNumber,
+  getNonNegativeNumber,
+  hasRequiredString
+} from '../utils/type-guards';
+
 describe('Type Guard Utilities', () => {
-  // Inline versions to test the logic
-  const getString = (data: Record<string, unknown>, key: string, defaultValue: string = ''): string => {
-    const value = data[key];
-    return typeof value === 'string' ? value : defaultValue;
-  };
-
-  const getNumber = (data: Record<string, unknown>, key: string, defaultValue: number = 0): number => {
-    const value = data[key];
-    return typeof value === 'number' && !isNaN(value) ? value : defaultValue;
-  };
-
-  const getNonNegativeNumber = (data: Record<string, unknown>, key: string, defaultValue: number = 0): number => {
-    const value = getNumber(data, key, defaultValue);
-    return value >= 0 ? value : defaultValue;
-  };
-
-  const hasRequiredString = (data: Record<string, unknown>, key: string): boolean => {
-    const value = data[key];
-    return typeof value === 'string' && value.length > 0;
-  };
-
   describe('getString', () => {
     it('should return string value when present', () => {
       expect(getString({ name: 'test' }, 'name')).toBe('test');

@@ -134,3 +134,184 @@ No single source of truth for configuration.
 This project has significant potential and shows sophisticated domain knowledge in arbitrage detection. However, its current state does **not** justify production deployment. The broken test suite, god-object architectures, and overly optimistic self-assessments are red flags.
 
 **Recommended Action**: Pause feature development and invest 4-6 weeks in foundation repairs before resuming.
+
+---
+
+# Appendix A: Coordinator Service Deep Dive
+
+**Assessment Date:** 2026-01-21
+**Scope:** `services/coordinator/` vs `docs/architecture/ARCHITECTURE_V2.md`
+
+---
+
+## A.1 CRITICAL: Execution Request Stream Dead End
+
+**Severity:** CRITICAL
+**Location:** [coordinator.ts:1282-1302](services/coordinator/src/coordinator.ts#L1282-L1302)
+
+**The Problem:**
+The coordinator's `forwardToExecutionEngine()` publishes to `stream:execution-requests`:
+
+```typescript
+// coordinator.ts:1282
+await this.streamsClient.xadd(
+  RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,  // "stream:execution-requests"
+  { ... }
+);
+```
+
+However, the execution engine consumes from `stream:opportunities` DIRECTLY:
+
+```typescript
+// services/execution-engine/src/consumers/opportunity.consumer.ts:65
+this.consumerGroup = {
+  streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,  // "stream:opportunities"
+  ...
+};
+```
+
+**Impact:**
+- **Opportunities forwarded by the coordinator leader are NEVER executed**
+- The `forwardToExecutionEngine()` function is effectively dead code
+- `totalExecutions` metric is meaningless (counts forwards, not actual executions)
+- This breaks the leader-only execution guarantee described in ARCHITECTURE_V2.md Section 4.1
+
+**Root Cause:**
+The architecture design shows the coordinator should forward opportunities to the execution engine (Layer 3→4), but the execution engine was implemented to consume opportunities directly from detectors, bypassing the coordinator entirely.
+
+**Recommended Fix:**
+```typescript
+// Option A (preferred - matches architecture): In opportunity.consumer.ts:65
+this.consumerGroup = {
+  streamName: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,  // consume from coordinator
+  ...
+};
+```
+
+---
+
+## A.2 HIGH: Comment Syntax Error in redis-streams.ts
+
+**Location:** [redis-streams.ts:307](shared/core/src/redis-streams.ts#L307)
+
+```typescript
+static readonly STREAMS = {
+  ...
+  HEALTH: 'stream:health',
+  \ FIX: Added for coordinator...  // BROKEN COMMENT - backslash instead of //
+  EXECUTION_REQUESTS: 'stream:execution-requests'
+};
+```
+
+---
+
+## A.3 HIGH: Duplicate Alert Type Definitions
+
+**Location:** [coordinator.ts:173-181](services/coordinator/src/coordinator.ts#L173-L181) vs [alerts/notifier.ts:25-32](services/coordinator/src/alerts/notifier.ts#L25-L32)
+
+Two different `Alert` interfaces exist with slightly different `data` field types:
+- Internal: `data?: StreamMessageData`
+- Exported: `data?: Record<string, unknown>`
+
+**Fix:** Consolidate to single type in `api/types.ts`.
+
+---
+
+## A.4 MEDIUM: O(n) Alert History Cleanup
+
+**Location:** [alerts/notifier.ts:231-234](services/coordinator/src/alerts/notifier.ts#L231-L234)
+
+```typescript
+if (this.alertHistory.length > this.maxHistorySize) {
+  this.alertHistory.shift();  // O(n) on every alert once full
+}
+```
+
+For 1000 alerts, this causes unnecessary memory churn. Use a circular buffer instead.
+
+---
+
+## A.5 MEDIUM: Test Mocks Missing EXECUTION_REQUESTS
+
+**Location:** [coordinator.test.ts:63-80](services/coordinator/src/__tests__/coordinator.test.ts#L63-L80)
+
+The mock `STREAMS` object doesn't include `EXECUTION_REQUESTS`, which would have revealed the dead code issue if tests actually exercised the full flow.
+
+---
+
+## A.6 MEDIUM: Hardcoded Service Allowlist
+
+**Location:** [admin.routes.ts:20-35](services/coordinator/src/api/routes/admin.routes.ts#L20-L35)
+
+The `ALLOWED_SERVICES` list is hardcoded with specific service names. ARCHITECTURE_V2.md Section 9.1 lists 11 chains but the code only knows about a subset of detectors. This should be configurable or dynamically discovered.
+
+---
+
+## A.7 LOW: Type Guard Tests Reimplement Instead of Importing
+
+**Location:** [coordinator.test.ts:1002-1083](services/coordinator/src/__tests__/coordinator.test.ts#L1002-L1083)
+
+Tests re-implement the type guard functions inline instead of importing from `utils/type-guards.ts`. This means tests pass even if the actual implementation changes.
+
+---
+
+## A.8 Coordinator Service Strengths
+
+| Pattern | Implementation | Quality |
+|---------|----------------|---------|
+| **Leader Election** | Redis SET NX with atomic Lua renewal | Excellent |
+| **Graceful Degradation** | 5-level degradation enum per ADR-007 | Good |
+| **Dependency Injection** | Full DI for testability | Excellent |
+| **Stream Consumers** | Blocking read pattern, proper error tracking | Good |
+| **Promise-based Mutex** | activateStandby() prevents race conditions | Excellent |
+| **Separate Cleanup Intervals** | Prevents concurrent modification issues | Good |
+
+---
+
+## A.9 Priority Action Items for Coordinator
+
+| Priority | Issue | Impact | Effort |
+|----------|-------|--------|--------|
+| **P0** | Fix EXECUTION_REQUESTS flow | Opportunities never executed | Medium |
+| **P0** | Fix comment syntax in redis-streams.ts | Potential build failure | Trivial |
+| **P1** | Add integration test for opp flow | Missed critical bug | Medium |
+| **P1** | Consolidate Alert types | Type confusion | Low |
+| **P2** | Replace shift() with circular buffer | Performance | Low |
+| **P2** | Make service allowlist configurable | Maintainability | Low |
+
+---
+
+## A.10 Additional Fixes Applied (Session 2)
+
+### A.10.1 Memory Cleanup: activePairs Not Cleared on Stop
+
+**Location:** [coordinator.ts:475-480](services/coordinator/src/coordinator.ts#L475-L480)
+
+**Fix:** Added `this.activePairs.clear()` in `stop()` method to prevent stale data on restart.
+
+### A.10.2 Performance: Single-Pass Degradation Evaluation
+
+**Location:** [coordinator.ts:1463-1560](services/coordinator/src/coordinator.ts#L1463-L1560)
+
+**Fix:** Replaced multi-pass evaluation (`isServiceHealthy()`, `hasHealthyDetectors()`, `hasAllDetectorsHealthy()`) with single-pass `analyzeServiceHealth()` method. Reduces complexity from O(3n) to O(n).
+
+### A.10.3 Test Coverage: Type Guards Now Use Real Implementation
+
+**Location:** [coordinator.test.ts:1006-1015](services/coordinator/src/__tests__/coordinator.test.ts#L1006-L1015)
+
+**Fix:** Tests now import actual type guard functions from `../utils/type-guards` instead of reimplementing them inline. This ensures tests verify the real implementation.
+
+---
+
+## Files Reviewed for This Appendix
+
+1. `services/coordinator/src/coordinator.ts` (1834 lines)
+2. `services/coordinator/src/index.ts` (237 lines)
+3. `services/coordinator/src/api/types.ts` (127 lines)
+4. `services/coordinator/src/api/routes/*.ts` (all route files)
+5. `services/coordinator/src/alerts/notifier.ts` (290 lines)
+6. `services/coordinator/src/utils/type-guards.ts` (84 lines)
+7. `services/coordinator/src/__tests__/coordinator.test.ts` (1084 lines)
+8. `shared/core/src/redis-streams.ts` (streams definition)
+9. `services/execution-engine/src/consumers/opportunity.consumer.ts`
+10. `docs/architecture/ARCHITECTURE_V2.md`
