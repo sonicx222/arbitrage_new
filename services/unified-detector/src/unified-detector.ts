@@ -169,13 +169,11 @@ export class UnifiedChainDetector extends EventEmitter {
   private startTime: number = 0;
   private chainInstanceFactory: ChainInstanceFactory;
 
-  // DEPRECATED: These are only used by deprecated methods (kept for backward compatibility)
-  // FIX Bug 4.2: Declare properties that were used but never declared
-  private healthCheckInterval: NodeJS.Timeout | null = null;
-  private metricsInterval: NodeJS.Timeout | null = null;
-
   // PERF-FIX: Track CPU usage for health reporting
   private lastCpuUsage: { user: number; system: number; timestamp: number } | null = null;
+
+  // Track active opportunities for health reporting
+  private activeOpportunitiesCount: number = 0;
 
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
@@ -264,7 +262,11 @@ export class UnifiedChainDetector extends EventEmitter {
 
       // Forward events from chain instance manager
       this.chainInstanceManager.on('priceUpdate', (update) => this.emit('priceUpdate', update));
-      this.chainInstanceManager.on('opportunity', (opp) => this.emit('opportunity', opp));
+      this.chainInstanceManager.on('opportunity', (opp) => {
+        // Track active opportunities for health reporting
+        this.activeOpportunitiesCount++;
+        this.emit('opportunity', opp);
+      });
       this.chainInstanceManager.on('chainError', (event) => this.emit('chainError', event));
       this.chainInstanceManager.on('statusChange', (event) => this.emit('statusChange', event));
 
@@ -587,7 +589,7 @@ export class UnifiedChainDetector extends EventEmitter {
       cpuUsage: Math.round(cpuUsagePercent * 100) / 100, // Round to 2 decimal places
       uptimeSeconds,
       lastHealthCheck: Date.now(),
-      activeOpportunities: 0 // Would track from opportunities found
+      activeOpportunities: this.activeOpportunitiesCount
     };
   }
 }

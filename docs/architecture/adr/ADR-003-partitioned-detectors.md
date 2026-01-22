@@ -12,9 +12,9 @@ All single-chain detector services are now deprecated in favor of `unified-detec
 | Service | Status | Replacement |
 |---------|--------|-------------|
 | `services/ethereum-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=high-value |
-| `services/arbitrum-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
-| `services/optimism-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
-| `services/base-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-fast |
+| `services/arbitrum-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-turbo |
+| `services/optimism-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-turbo |
+| `services/base-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=l2-turbo |
 | `services/polygon-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=asia-fast |
 | `services/bsc-detector` | DEPRECATED | `unified-detector` with PARTITION_ID=asia-fast |
 
@@ -170,7 +170,7 @@ const PARTITIONS: PartitionConfig[] = [
 Chains with similar block times have similar event processing rhythms:
 
 ```
-Block Time < 1s (L2-Fast): Arbitrum (0.25s), Optimism (2s), Base (2s)
+Block Time < 1s (L2-Turbo): Arbitrum (0.25s), Optimism (2s), Base (2s)
   → High event frequency, need efficient event loop
   → Best on lightweight, low-latency instances
 
@@ -234,7 +234,7 @@ function assignChainToPartition(chain: ChainConfig): PartitionConfig {
 
   // Rule 2: L2 rollups with sub-1s blocks
   if (chain.blockTime < 1) {
-    return PARTITIONS.L2_FAST;  // P2
+    return PARTITIONS.L2_TURBO;  // P2
   }
 
   // Rule 3: High-value chains (Ethereum + ZK rollups)

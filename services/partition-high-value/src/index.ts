@@ -17,9 +17,13 @@
  *
  * Environment Variables:
  * - PARTITION_ID: Set to 'high-value' by default
- * - REDIS_URL: Redis connection URL
+ * - PARTITION_CHAINS: Override chains to monitor (comma-separated, default: ethereum,zksync,linea)
+ * - REDIS_URL: Redis connection URL (required)
  * - LOG_LEVEL: Logging level (default: info)
  * - HEALTH_CHECK_PORT: HTTP health check port (default: 3003)
+ * - INSTANCE_ID: Unique instance identifier (default: auto-generated)
+ * - REGION_ID: Deployment region (default: us-east1)
+ * - ENABLE_CROSS_REGION_HEALTH: Enable cross-region health reporting (default: true)
  *
  * @see IMPLEMENTATION_PLAN.md S3.1.5: Create P3 detector service
  * @see ADR-003: Partitioned Chain Detectors
@@ -80,7 +84,8 @@ if (!partitionConfig) {
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
-const P3_CHAINS: readonly string[] = partitionConfig.chains;
+// Note: partitionConfig.chains is already readonly string[] per PartitionConfig interface
+const P3_CHAINS = partitionConfig.chains;
 const P3_REGION = partitionConfig.region;
 
 // Service configuration for shared utilities (P12-P16 refactor)
@@ -145,8 +150,9 @@ async function main(): Promise<void> {
 
   try {
     // Start health check server first (P12-P14 refactor - Using shared utilities)
+    // Note: config.healthCheckPort is already guaranteed by parsePort() to have a valid value
     healthServerRef.current = createPartitionHealthServer({
-      port: config.healthCheckPort || P3_DEFAULT_PORT,
+      port: config.healthCheckPort!,
       config: serviceConfig,
       detector,
       logger

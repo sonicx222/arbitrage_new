@@ -30,10 +30,13 @@ services:
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-info}
 
-      # Region
+      # Region and instance configuration
       - REGION_ID=us-east1
+      - INSTANCE_ID=${INSTANCE_ID:-}
+      - ENABLE_CROSS_REGION_HEALTH=${ENABLE_CROSS_REGION_HEALTH:-true}
 
-      # RPC endpoints (provide your own keys)
+      # RPC endpoints (provide your own keys for production)
+      # Falls back to public RPCs if not provided (rate-limited)
       - ETHEREUM_RPC_URL=${ETHEREUM_RPC_URL:-}
       - ETHEREUM_WS_URL=${ETHEREUM_WS_URL:-}
       - ZKSYNC_RPC_URL=${ZKSYNC_RPC_URL:-}
@@ -41,9 +44,9 @@ services:
       - LINEA_RPC_URL=${LINEA_RPC_URL:-}
       - LINEA_WS_URL=${LINEA_WS_URL:-}
 
-      # Alchemy API key (for Ethereum mainnet)
+      # Alchemy API key for Ethereum mainnet
+      # Note: ALCHEMY_API_KEY is the primary key used by chain config
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
-      - ALCHEMY_ETHEREUM_KEY=${ALCHEMY_ETHEREUM_KEY:-}
 
     ports:
       - "3003:3003"
@@ -62,7 +65,12 @@ services:
       - "partition.chains=ethereum,zksync,linea"
       - "partition.region=us-east1"
 
+# Network configuration with fallback for isolated development
+# - If running standalone: network is created automatically
+# - If running with full stack: connects to existing arbitrage-network
+# To use external network: docker network create arbitrage-network
 networks:
   arbitrage-network:
-    external: true
     name: arbitrage-network
+    # Note: Remove 'external: true' to allow auto-creation for standalone development
+    # Set external: true when running with the full arbitrage stack
