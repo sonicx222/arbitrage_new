@@ -176,6 +176,51 @@ export function validateAndFilterChains(
 }
 
 // =============================================================================
+// Health Check Cache (PERF-FIX)
+// =============================================================================
+
+/** Cache TTL in milliseconds for health check results */
+const HEALTH_CACHE_TTL_MS = 1000;
+
+interface HealthCacheEntry {
+  data: {
+    status: string;
+    partitionId: string;
+    chainHealth: Map<string, unknown>;
+    uptimeSeconds: number;
+    totalEventsProcessed: number;
+    memoryUsage: number;
+  };
+  timestamp: number;
+}
+
+/**
+ * Simple in-memory cache for health check data.
+ * Prevents repetitive async calls on high-frequency health check requests.
+ * Each server instance has its own cache to avoid cross-service contamination.
+ */
+function createHealthCache() {
+  let cache: HealthCacheEntry | null = null;
+
+  return {
+    get(): HealthCacheEntry['data'] | null {
+      if (!cache) return null;
+      if (Date.now() - cache.timestamp > HEALTH_CACHE_TTL_MS) {
+        cache = null;
+        return null;
+      }
+      return cache.data;
+    },
+    set(data: HealthCacheEntry['data']): void {
+      cache = { data, timestamp: Date.now() };
+    },
+    clear(): void {
+      cache = null;
+    }
+  };
+}
+
+// =============================================================================
 // Health Server (P12-P14 Refactor)
 // =============================================================================
 
@@ -183,10 +228,15 @@ export function validateAndFilterChains(
  * Creates an HTTP health check server for partition services.
  * Provides consistent endpoints across all partitions.
  *
+ * Features:
+ * - Health check caching with 1s TTL (PERF-FIX)
+ * - Graceful error handling
+ * - EADDRINUSE/EACCES error handling
+ *
  * Endpoints:
  * - GET / - Service info
- * - GET /health, /healthz - Health status
- * - GET /ready - Readiness check
+ * - GET /health - Health status (Kubernetes liveness probe)
+ * - GET /ready - Readiness check (Kubernetes readiness probe)
  * - GET /stats - Detailed statistics
  *
  * @param options - Health server configuration
@@ -195,10 +245,18 @@ export function validateAndFilterChains(
 export function createPartitionHealthServer(options: HealthServerOptions): Server {
   const { port, config, detector, logger } = options;
 
+  // PERF-FIX: Create cache per server instance to avoid repetitive async calls
+  const healthCache = createHealthCache();
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (req.url === '/health') {
       try {
-        const health = await detector.getPartitionHealth();
+        // PERF-FIX: Use cached health data if available and fresh
+        let health = healthCache.get();
+        if (!health) {
+          health = await detector.getPartitionHealth();
+          healthCache.set(health);
+        }
         const statusCode = health.status === 'healthy' ? 200 :
                           health.status === 'degraded' ? 200 : 503;
 
@@ -261,7 +319,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         partitionId: config.partitionId,
         chains: config.defaultChains,
         region: config.region,
-        endpoints: ['/health', '/healthz', '/ready', '/stats']
+        endpoints: ['/health', '/ready', '/stats']
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -273,8 +331,35 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     logger.info(`${config.serviceName} health server listening on port ${port}`);
   });
 
-  server.on('error', (error) => {
-    logger.error('Health server error', { error });
+  // CRITICAL-FIX: Handle fatal server errors appropriately
+  // EADDRINUSE means another process is using this port - service cannot function without health endpoint
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    const errorCode = error.code;
+
+    if (errorCode === 'EADDRINUSE') {
+      logger.error('Health server port already in use - cannot start service', {
+        port,
+        service: config.serviceName,
+        error: error.message,
+        hint: `Another process is using port ${port}. Check for duplicate services or use a different HEALTH_CHECK_PORT.`
+      });
+      process.exit(1);
+    } else if (errorCode === 'EACCES') {
+      logger.error('Health server port requires elevated privileges', {
+        port,
+        service: config.serviceName,
+        error: error.message,
+        hint: `Port ${port} requires root/admin privileges. Use a port > 1024 or run with elevated permissions.`
+      });
+      process.exit(1);
+    } else {
+      // Non-fatal errors - log but continue (e.g., connection resets)
+      logger.error('Health server error', {
+        service: config.serviceName,
+        code: errorCode,
+        error: error.message
+      });
+    }
   });
 
   return server;
@@ -398,6 +483,37 @@ export function setupDetectorEventHandlers(
 
   detector.on('chainDisconnected', ({ chainId }: { chainId: string }) => {
     logger.warn(`Chain disconnected: ${chainId}`, { partition: partitionId });
+  });
+
+  // FIX: Handle statusChange event emitted by UnifiedChainDetector's chainInstanceManager
+  detector.on('statusChange', ({ chainId, oldStatus, newStatus }: {
+    chainId: string;
+    oldStatus: string;
+    newStatus: string;
+  }) => {
+    // Log status changes with appropriate severity based on transition
+    const isRecovery = oldStatus === 'error' || oldStatus === 'disconnected';
+    const isDegradation = newStatus === 'error' || newStatus === 'disconnected';
+
+    if (isDegradation) {
+      logger.warn(`Chain status degraded: ${chainId}`, {
+        partition: partitionId,
+        from: oldStatus,
+        to: newStatus
+      });
+    } else if (isRecovery) {
+      logger.info(`Chain status recovered: ${chainId}`, {
+        partition: partitionId,
+        from: oldStatus,
+        to: newStatus
+      });
+    } else {
+      logger.debug(`Chain status changed: ${chainId}`, {
+        partition: partitionId,
+        from: oldStatus,
+        to: newStatus
+      });
+    }
   });
 
   detector.on('failoverEvent', (event: unknown) => {

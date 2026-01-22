@@ -92,9 +92,8 @@ docker-compose down
 | Endpoint | Description |
 |----------|-------------|
 | `GET /` | Service info |
-| `GET /health` | Health status (Kubernetes liveness) |
-| `GET /healthz` | Health status (alternative) |
-| `GET /ready` | Readiness check (Kubernetes) |
+| `GET /health` | Health status (Kubernetes liveness probe) |
+| `GET /ready` | Readiness check (Kubernetes readiness probe) |
 | `GET /stats` | Detailed statistics |
 
 ### Example Health Response

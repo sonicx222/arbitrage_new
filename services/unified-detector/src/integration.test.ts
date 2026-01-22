@@ -554,7 +554,7 @@ describe('Phase 2: Cross-Partition Communication', () => {
 
 describe('Phase 2: Health Check Endpoint Consistency', () => {
   describe('health endpoint requirements', () => {
-    const expectedEndpoints = ['/health', '/healthz', '/ready', '/stats'];
+    const expectedEndpoints = ['/health', '/ready', '/stats'];
 
     it('should define all standard health endpoints', () => {
       expect(expectedEndpoints).toContain('/health');

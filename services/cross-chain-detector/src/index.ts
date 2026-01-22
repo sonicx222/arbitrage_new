@@ -15,7 +15,7 @@ let healthServer: Server | null = null;
  */
 function createHealthServer(detector: CrossChainDetectorService): Server {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (req.url === '/health') {
       const isRunning = detector.isRunning();
       const statusCode = isRunning ? 200 : 503;
       const status = isRunning ? 'healthy' : 'unhealthy';
@@ -40,7 +40,7 @@ function createHealthServer(detector: CrossChainDetectorService): Server {
       res.end(JSON.stringify({
         service: 'cross-chain-detector',
         description: 'Cross-Chain Arbitrage Detector Service',
-        endpoints: ['/health', '/healthz', '/ready']
+        endpoints: ['/health', '/ready']
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });

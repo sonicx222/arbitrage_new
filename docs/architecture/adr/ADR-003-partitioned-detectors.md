@@ -83,9 +83,9 @@ Adopt **Partitioned Chain Detectors** where multiple chains are grouped into a s
 | Partition | Chains | Rationale | Deployment |
 |-----------|--------|-----------|------------|
 | **P1: Asia-Fast** | BSC, Polygon, Avalanche, Fantom | Sub-5s blocks, Asia validators | Oracle Cloud Singapore |
-| **P2: L2-Fast** | Arbitrum, Optimism, Base | Sub-1s blocks, shared sequencers | Fly.io Singapore |
+| **P2: L2-Turbo** | Arbitrum, Optimism, Base | Sub-1s blocks, shared sequencers | Fly.io Singapore |
 | **P3: High-Value** | Ethereum, zkSync, Linea | Higher value, more analysis needed | Oracle Cloud US-East |
-| **P4: Solana** | Solana | Non-EVM, @solana/web3.js, 400ms blocks | Fly.io US-West |
+| **P4: Solana-Native** | Solana | Non-EVM, @solana/web3.js, 400ms blocks | Fly.io US-West |
 
 ### P4: Solana Partition Details
 
