@@ -84,8 +84,8 @@ if (!partitionConfig) {
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
-// Note: partitionConfig.chains is already readonly string[] per PartitionConfig interface
-const P3_CHAINS = partitionConfig.chains;
+// Note: Explicit type annotation for consistency with P1 partition service
+const P3_CHAINS: readonly string[] = partitionConfig.chains;
 const P3_REGION = partitionConfig.region;
 
 // Service configuration for shared utilities (P12-P16 refactor)
@@ -150,9 +150,9 @@ async function main(): Promise<void> {
 
   try {
     // Start health check server first (P12-P14 refactor - Using shared utilities)
-    // Note: config.healthCheckPort is already guaranteed by parsePort() to have a valid value
+    // P7-FIX: Use defensive fallback pattern for consistency with P1 partition
     healthServerRef.current = createPartitionHealthServer({
-      port: config.healthCheckPort!,
+      port: config.healthCheckPort || P3_DEFAULT_PORT,
       config: serviceConfig,
       detector,
       logger
