@@ -63,6 +63,9 @@ jest.mock('@arbitrage/core', () => ({
   }),
   setupDetectorEventHandlers: jest.fn(),
   setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()), // Returns cleanup function
+  exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
+    throw new Error(`Config error: ${msg}`);
+  }),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
@@ -84,6 +87,19 @@ jest.mock('@arbitrage/core', () => ({
     registerCapabilities: jest.fn(),
     triggerDegradation: jest.fn(),
   }),
+  // Centralized constants (P1-1/P1-2-FIX: Single source of truth)
+  PARTITION_PORTS: {
+    'asia-fast': 3001,
+    'l2-turbo': 3002,
+    'high-value': 3003,
+    'solana-native': 3004,
+  },
+  PARTITION_SERVICE_NAMES: {
+    'asia-fast': 'partition-asia-fast',
+    'l2-turbo': 'partition-l2-turbo',
+    'high-value': 'partition-high-value',
+    'solana-native': 'partition-solana',
+  },
 }));
 
 // Mock @arbitrage/config with P3 High-Value configuration
@@ -313,6 +329,23 @@ describe('P3 High-Value Partition Service', () => {
 
       // Detector is created but main() wasn't called (no auto-start)
       expect(detector).toBeDefined();
+    });
+  });
+
+  describe('Uses Shared Utilities', () => {
+    it('should use PARTITION_PORTS from @arbitrage/core', async () => {
+      const { PARTITION_PORTS } = jest.requireMock('@arbitrage/core');
+      expect(PARTITION_PORTS['high-value']).toBe(3003);
+    });
+
+    it('should use PARTITION_SERVICE_NAMES from @arbitrage/core', async () => {
+      const { PARTITION_SERVICE_NAMES } = jest.requireMock('@arbitrage/core');
+      expect(PARTITION_SERVICE_NAMES['high-value']).toBe('partition-high-value');
+    });
+
+    it('should use shared exitWithConfigError', async () => {
+      const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
+      expect(exitWithConfigError).toBeDefined();
     });
   });
 });

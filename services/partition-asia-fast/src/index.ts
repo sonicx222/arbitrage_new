@@ -28,7 +28,10 @@ import {
   createPartitionHealthServer,
   setupDetectorEventHandlers,
   setupProcessHandlers,
-  PartitionServiceConfig
+  exitWithConfigError,
+  PartitionServiceConfig,
+  PARTITION_PORTS,
+  PARTITION_SERVICE_NAMES
 } from '@arbitrage/core';
 import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 
@@ -37,7 +40,8 @@ import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 // =============================================================================
 
 const P1_PARTITION_ID = PARTITION_IDS.ASIA_FAST;
-const P1_DEFAULT_PORT = 3001;
+// Use centralized port constant (P1: 3001, P2: 3002, P3: 3003, P4: 3004)
+const P1_DEFAULT_PORT = PARTITION_PORTS[P1_PARTITION_ID] ?? 3001;
 
 // =============================================================================
 // Configuration
@@ -48,29 +52,21 @@ const logger = createLogger('partition-asia-fast:main');
 // =============================================================================
 // Critical Environment Validation
 // CRITICAL-FIX: Validate required environment variables early to fail fast
+// P2-FIX: Using shared exitWithConfigError from @arbitrage/core
 // =============================================================================
-
-/**
- * Validates critical environment variables and exits with clear error if missing.
- * Returns never to help TypeScript understand this terminates the process.
- */
-function exitWithConfigError(message: string, context: Record<string, unknown>): never {
-  logger.error(message, context);
-  process.exit(1);
-}
 
 // Validate REDIS_URL - required for all partition services
 if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
   exitWithConfigError('REDIS_URL environment variable is required', {
     partitionId: P1_PARTITION_ID,
     hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
-  });
+  }, logger);
 }
 
 // Single partition config retrieval (P5-FIX pattern)
 const partitionConfig = getPartition(P1_PARTITION_ID);
 if (!partitionConfig) {
-  exitWithConfigError('P1 partition configuration not found', { partitionId: P1_PARTITION_ID });
+  exitWithConfigError('P1 partition configuration not found', { partitionId: P1_PARTITION_ID }, logger);
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
@@ -80,7 +76,7 @@ const P1_REGION = partitionConfig.region;
 // Service configuration for shared utilities (P12-P16 refactor)
 const serviceConfig: PartitionServiceConfig = {
   partitionId: P1_PARTITION_ID,
-  serviceName: 'partition-asia-fast',
+  serviceName: PARTITION_SERVICE_NAMES[P1_PARTITION_ID] ?? 'partition-asia-fast',
   defaultChains: P1_CHAINS,
   defaultPort: P1_DEFAULT_PORT,
   region: P1_REGION,
@@ -160,14 +156,28 @@ async function main(): Promise<void> {
 
     // CRITICAL-FIX: Clean up health server if detector start failed
     // This prevents leaving port bound when process exits due to startup failure
+    // BUG-4.2-FIX: Await health server close before exiting to ensure port is released
     if (healthServerRef.current) {
-      try {
-        healthServerRef.current.close();
-        logger.info('Health server closed after startup failure');
-      } catch (closeError) {
-        logger.warn('Failed to close health server during cleanup', { closeError });
-      }
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          logger.warn('Health server close timed out after 1000ms');
+          resolve();
+        }, 1000);
+
+        healthServerRef.current!.close((err) => {
+          clearTimeout(timeout);
+          if (err) {
+            logger.warn('Failed to close health server during cleanup', { error: err });
+          } else {
+            logger.info('Health server closed after startup failure');
+          }
+          resolve();
+        });
+      });
     }
+
+    // BUG-4.1-FIX: Clean up process handlers before exit to prevent listener leaks
+    cleanupProcessHandlers();
 
     process.exit(1);
   }

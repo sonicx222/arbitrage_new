@@ -5,8 +5,10 @@ import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('cross-chain-detector');
 
-// Health check port (default: 3004)
-const HEALTH_CHECK_PORT = parseInt(process.env.HEALTH_CHECK_PORT || process.env.CROSS_CHAIN_DETECTOR_PORT || '3004', 10);
+// Health check port (default: 3006)
+// NOTE: Changed from 3004 to 3006 to avoid conflict with partition-solana (which uses 3004)
+// Port assignments: coordinator=3000, asia-fast=3001, l2-turbo=3002, high-value=3003, solana=3004, execution-engine=3005, cross-chain-detector=3006
+const HEALTH_CHECK_PORT = parseInt(process.env.HEALTH_CHECK_PORT || process.env.CROSS_CHAIN_DETECTOR_PORT || '3006', 10);
 
 let healthServer: Server | null = null;
 

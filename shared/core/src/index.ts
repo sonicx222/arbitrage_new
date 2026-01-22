@@ -664,7 +664,9 @@ export {
   warnIfDeprecated,
   // P1-1/P1-2-FIX: Export constants as single source of truth
   PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES
+  PARTITION_SERVICE_NAMES,
+  // P3-FIX: All service ports centralized
+  SERVICE_PORTS
 } from './partition-router';
 export type { PartitionEndpoint } from './partition-router';
 
