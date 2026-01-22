@@ -62,10 +62,18 @@ docker-compose logs -f
 | `PARTITION_ID` | Partition identifier | `high-value` |
 | `PARTITION_CHAINS` | Comma-separated chain IDs | `ethereum,zksync,linea` |
 | `HEALTH_CHECK_PORT` | HTTP health endpoint port | `3003` |
-| `REDIS_URL` | Redis connection URL | - |
+| `REDIS_URL` | Redis connection URL (required) | - |
 | `LOG_LEVEL` | Logging verbosity | `info` |
 | `REGION_ID` | Deployment region | `us-east1` |
+| `INSTANCE_ID` | Unique instance identifier | auto-generated |
+| `ENABLE_CROSS_REGION_HEALTH` | Enable cross-region health reporting | `true` |
 | `ALCHEMY_API_KEY` | Alchemy API key for Ethereum | - |
+| `ETHEREUM_RPC_URL` | Ethereum HTTP RPC endpoint | public RPC |
+| `ETHEREUM_WS_URL` | Ethereum WebSocket endpoint | public WS |
+| `ZKSYNC_RPC_URL` | zkSync Era HTTP RPC endpoint | public RPC |
+| `ZKSYNC_WS_URL` | zkSync Era WebSocket endpoint | public WS |
+| `LINEA_RPC_URL` | Linea HTTP RPC endpoint | public RPC |
+| `LINEA_WS_URL` | Linea WebSocket endpoint | public WS |
 
 ## API Endpoints
 

@@ -17,15 +17,24 @@ import { RecordingLogger, createLogger } from '@arbitrage/core';
 // Type alias for the logger type expected by partition-service-utils
 type PartitionLogger = ReturnType<typeof createLogger>;
 
-// Mock CHAINS for validation
+// Mock CHAINS for validation - includes all chains used across P1-P4 partitions
 jest.mock('@arbitrage/config', () => ({
   CHAINS: {
+    // P1: Asia-Fast chains
     bsc: { id: 56, name: 'BSC' },
     polygon: { id: 137, name: 'Polygon' },
+    avalanche: { id: 43114, name: 'Avalanche' },
+    fantom: { id: 250, name: 'Fantom' },
+    // P2: L2-Turbo chains
     arbitrum: { id: 42161, name: 'Arbitrum' },
     optimism: { id: 10, name: 'Optimism' },
     base: { id: 8453, name: 'Base' },
-    ethereum: { id: 1, name: 'Ethereum' }
+    // P3: High-Value chains
+    ethereum: { id: 1, name: 'Ethereum' },
+    zksync: { id: 324, name: 'zkSync Era' },
+    linea: { id: 59144, name: 'Linea' },
+    // P4: Solana-Native
+    solana: { id: 101, name: 'Solana', isEVM: false }
   }
 }));
 
@@ -491,6 +500,43 @@ describe('Partition Service Utilities', () => {
       // The function should have been called without errors
       // The P19-FIX adds the isShuttingDown flag internally
       expect(true).toBe(true); // Function executed without error
+    });
+  });
+
+  // ===========================================================================
+  // P3 High-Value Partition Chain Validation Tests
+  // ===========================================================================
+
+  describe('P3 High-Value partition chain validation', () => {
+    const highValueDefaultChains = ['ethereum', 'zksync', 'linea'] as const;
+
+    it('should validate all P3 high-value chains (ethereum, zksync, linea)', () => {
+      const chains = validateAndFilterChains('ethereum,zksync,linea', highValueDefaultChains);
+      expect(chains).toEqual(['ethereum', 'zksync', 'linea']);
+    });
+
+    it('should filter valid P3 chains from mixed input', () => {
+      const chains = validateAndFilterChains(
+        'ethereum,invalid,zksync,unknown,linea',
+        highValueDefaultChains,
+        logger as unknown as PartitionLogger
+      );
+      expect(chains).toEqual(['ethereum', 'zksync', 'linea']);
+      expect(logger.hasLogMatching('warn', 'Invalid chain IDs in PARTITION_CHAINS, ignoring')).toBe(true);
+    });
+
+    it('should return P3 defaults when no valid chains provided', () => {
+      const chains = validateAndFilterChains(
+        'invalid1,invalid2',
+        highValueDefaultChains,
+        logger as unknown as PartitionLogger
+      );
+      expect(chains).toEqual(['ethereum', 'zksync', 'linea']);
+    });
+
+    it('should handle single P3 chain override', () => {
+      const chains = validateAndFilterChains('ethereum', highValueDefaultChains);
+      expect(chains).toEqual(['ethereum']);
     });
   });
 });
