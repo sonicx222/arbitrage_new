@@ -323,11 +323,13 @@ export class L2SequencerProvider implements IMevProvider {
           'pending'
         );
 
+    // CONSISTENCY-FIX: Use explicit undefined check instead of || to be consistent
+    // with the nonce handling pattern above. Avoids treating chainId 0 as undefined.
     const preparedTx: ethers.TransactionRequest = {
       ...tx,
       from: this.config.wallet.address,
       nonce,
-      chainId: this.l2Config.chainId || undefined,
+      chainId: this.l2Config.chainId != null ? this.l2Config.chainId : undefined,
     };
 
     // Get fee data

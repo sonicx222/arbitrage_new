@@ -24,6 +24,7 @@ export type MevStrategy =
   | 'bloxroute'      // BSC: BloXroute private transaction
   | 'fastlane'       // Polygon: Fastlane MEV protection
   | 'sequencer'      // L2s: Direct sequencer (inherent protection)
+  | 'jito'           // Solana: Jito private bundles
   | 'standard';      // Fallback: Standard with gas optimization
 
 /**
@@ -220,6 +221,9 @@ export const CHAIN_MEV_STRATEGIES: Record<string, MevStrategy> = {
   ethereum: 'flashbots',
   bsc: 'bloxroute',
   polygon: 'fastlane',
+
+  // Solana with Jito MEV protection
+  solana: 'jito',
 
   // L2s with sequencer-based ordering (inherent MEV protection)
   arbitrum: 'sequencer',

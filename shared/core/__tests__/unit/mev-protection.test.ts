@@ -153,6 +153,12 @@ describe('MEV Protection', () => {
         expect(getRecommendedPriorityFee('polygon')).toBe(30.0);
         expect(getRecommendedPriorityFee('arbitrum')).toBe(0.01);
       });
+
+      it('should return 0 for Solana (uses lamports for tips, not gwei)', () => {
+        // Solana/Jito uses lamports for tips, not gwei priority fee
+        // Users should use JitoProvider directly with tipLamports option
+        expect(getRecommendedPriorityFee('solana')).toBe(0);
+      });
     });
 
     describe('isL2SequencerChain', () => {
@@ -499,6 +505,47 @@ describe('MEV Protection', () => {
 
       expect(healthResults.ethereum).toBeDefined();
       expect(healthResults.arbitrum).toBeDefined();
+    });
+
+    it('should throw error for Solana (jito strategy) - use JitoProvider directly', () => {
+      // Solana uses Jito which requires Solana-specific types (SolanaConnection, SolanaKeypair)
+      // not ethers.js types, so the EVM factory cannot create JitoProvider
+      expect(() => {
+        factory.createProvider({
+          chain: 'solana',
+          provider: mockProvider,
+          wallet: mockWallet,
+        });
+      }).toThrow('Jito MEV protection');
+
+      // Error message should guide user to use JitoProvider directly
+      expect(() => {
+        factory.createProvider({
+          chain: 'solana',
+          provider: mockProvider,
+          wallet: mockWallet,
+        });
+      }).toThrow('createJitoProvider');
+    });
+
+    it('should support async createProviderAsync for thread-safe creation', async () => {
+      const provider = await factory.createProviderAsync({
+        chain: 'ethereum',
+        provider: mockProvider,
+        wallet: mockWallet,
+      });
+
+      expect(provider.chain).toBe('ethereum');
+      expect(provider.strategy).toBe('flashbots');
+
+      // Should return cached provider on subsequent calls
+      const cachedProvider = await factory.createProviderAsync({
+        chain: 'ethereum',
+        provider: mockProvider,
+        wallet: mockWallet,
+      });
+
+      expect(cachedProvider).toBe(provider);
     });
   });
 
