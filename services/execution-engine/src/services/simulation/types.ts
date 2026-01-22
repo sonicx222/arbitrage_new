@@ -328,6 +328,9 @@ export const CHAIN_IDS: Record<string, number> = {
   base: 8453,
   bsc: 56,
   avalanche: 43114,
+  zksync: 324,
+  linea: 59144,
+  fantom: 250,
 };
 
 /**
@@ -360,81 +363,16 @@ export const ALCHEMY_CONFIG = {
 };
 
 // =============================================================================
-// Utilities
+// Re-export CircularBuffer from @arbitrage/core
 // =============================================================================
 
 /**
- * Circular buffer for O(1) rolling window operations
+ * CircularBuffer is now consolidated in @arbitrage/core.
+ * Re-exported here for backwards compatibility with existing imports.
  *
- * Used for tracking recent results in provider health scoring.
- * More efficient than array push/shift which is O(n).
+ * Note: Use `pushOverwrite()` for rolling window behavior (overwrites oldest)
+ * and `push()` for FIFO queue behavior (returns false when full).
+ *
+ * @see @arbitrage/core CircularBuffer
  */
-export class CircularBuffer<T> {
-  private readonly buffer: (T | undefined)[];
-  private head = 0;
-  private count = 0;
-
-  constructor(private readonly capacity: number) {
-    this.buffer = new Array(capacity);
-  }
-
-  /**
-   * Add an item to the buffer (O(1))
-   */
-  push(item: T): void {
-    this.buffer[this.head] = item;
-    this.head = (this.head + 1) % this.capacity;
-    if (this.count < this.capacity) {
-      this.count++;
-    }
-  }
-
-  /**
-   * Get all items in order from oldest to newest
-   */
-  toArray(): T[] {
-    if (this.count === 0) return [];
-
-    const result: T[] = [];
-    const start = this.count < this.capacity ? 0 : this.head;
-
-    for (let i = 0; i < this.count; i++) {
-      const index = (start + i) % this.capacity;
-      result.push(this.buffer[index] as T);
-    }
-
-    return result;
-  }
-
-  /**
-   * Get the number of items in the buffer
-   */
-  get length(): number {
-    return this.count;
-  }
-
-  /**
-   * Clear the buffer
-   */
-  clear(): void {
-    this.head = 0;
-    this.count = 0;
-  }
-
-  /**
-   * Count items matching a predicate
-   */
-  countWhere(predicate: (item: T) => boolean): number {
-    let matches = 0;
-    const start = this.count < this.capacity ? 0 : this.head;
-
-    for (let i = 0; i < this.count; i++) {
-      const index = (start + i) % this.capacity;
-      if (predicate(this.buffer[index] as T)) {
-        matches++;
-      }
-    }
-
-    return matches;
-  }
-}
+export { CircularBuffer, createRollingWindow } from '@arbitrage/core';

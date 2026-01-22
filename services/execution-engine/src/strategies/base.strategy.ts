@@ -25,6 +25,48 @@ import { TRANSACTION_TIMEOUT_MS } from '../types';
 import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
 
 /**
+ * Default fallback gas prices by chain (in gwei).
+ * Used when provider fails to return gas price or no provider available.
+ * These are conservative estimates - actual gas prices may be lower.
+ */
+const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
+  ethereum: 50,
+  arbitrum: 0.1,
+  optimism: 0.001,
+  base: 0.001,
+  polygon: 100,
+  bsc: 5,
+  avalanche: 25,
+  fantom: 100,
+  zksync: 0.25,
+  linea: 0.5,
+};
+
+/**
+ * Get fallback gas price for a chain.
+ * @param chain - Chain name
+ * @returns Gas price in wei
+ */
+function getFallbackGasPrice(chain: string): bigint {
+  const gasPriceGwei = DEFAULT_GAS_PRICES_GWEI[chain] ?? 50;
+  // Handle sub-gwei values (L2s) by using parseUnits with higher precision
+  if (gasPriceGwei < 1) {
+    return ethers.parseUnits(gasPriceGwei.toString(), 'gwei');
+  }
+  return ethers.parseUnits(gasPriceGwei.toString(), 'gwei');
+}
+
+/**
+ * Pre-computed BigInt multipliers for hot-path optimization.
+ * Avoids repeated Math.floor + BigInt conversion on every call.
+ *
+ * GAS_SPIKE_MULTIPLIER_BIGINT: Used for gas spike detection (e.g., 1.5x = 150)
+ * SLIPPAGE_BASIS_POINTS_BIGINT: Slippage tolerance in basis points (e.g., 0.5% = 50)
+ */
+const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100));
+const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
+
+/**
  * Base class for execution strategies.
  * Provides shared utility methods.
  */
@@ -56,13 +98,15 @@ export abstract class BaseExecutionStrategy {
     ctx: StrategyContext
   ): Promise<bigint> {
     const provider = ctx.providers.get(chain);
+    const fallbackPrice = getFallbackGasPrice(chain);
+
     if (!provider) {
-      return ethers.parseUnits('50', 'gwei');
+      return fallbackPrice;
     }
 
     try {
       const feeData = await provider.getFeeData();
-      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || ethers.parseUnits('50', 'gwei');
+      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || fallbackPrice;
 
       // Update baseline and check for spike
       this.updateGasBaseline(chain, currentPrice, ctx);
@@ -70,7 +114,7 @@ export abstract class BaseExecutionStrategy {
       if (ARBITRAGE_CONFIG.gasPriceSpikeEnabled) {
         const baselinePrice = this.getGasBaseline(chain, ctx);
         if (baselinePrice > 0n) {
-          const maxAllowedPrice = baselinePrice * BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100)) / 100n;
+          const maxAllowedPrice = baselinePrice * GAS_SPIKE_MULTIPLIER_BIGINT / 100n;
 
           if (currentPrice > maxAllowedPrice) {
             const currentGwei = Number(currentPrice / BigInt(1e9));
@@ -96,11 +140,12 @@ export abstract class BaseExecutionStrategy {
       if (getErrorMessage(error)?.includes('Gas price spike')) {
         throw error;
       }
-      this.logger.warn('Failed to get optimal gas price, using default', {
+      this.logger.warn('Failed to get optimal gas price, using chain-specific fallback', {
         chain,
+        fallbackGwei: Number(fallbackPrice / BigInt(1e9)),
         error
       });
-      return ethers.parseUnits('50', 'gwei');
+      return fallbackPrice;
     }
   }
 
@@ -357,10 +402,8 @@ export abstract class BaseExecutionStrategy {
       opportunity.expectedProfit.toFixed(18),
       18
     );
-    const slippageBasisPoints = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
-
     const expectedAmountOut = amountInBigInt + expectedProfitWei;
-    const minAmountOut = expectedAmountOut - (expectedAmountOut * slippageBasisPoints / 10000n);
+    const minAmountOut = expectedAmountOut - (expectedAmountOut * SLIPPAGE_BASIS_POINTS_BIGINT / 10000n);
 
     const flashParams: FlashLoanParams = {
       token: opportunity.tokenIn,

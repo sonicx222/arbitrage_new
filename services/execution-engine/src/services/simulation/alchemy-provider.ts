@@ -416,7 +416,7 @@ export class AlchemySimulationProvider implements ISimulationProvider {
     this.health.healthy = true;
     this.health.lastCheck = Date.now();
 
-    this.recentResults.push(true);
+    this.recentResults.pushOverwrite(true);
     this.updateSuccessRate();
   }
 
@@ -434,7 +434,7 @@ export class AlchemySimulationProvider implements ISimulationProvider {
       this.health.healthy = false;
     }
 
-    this.recentResults.push(false);
+    this.recentResults.pushOverwrite(false);
     this.updateSuccessRate();
   }
 

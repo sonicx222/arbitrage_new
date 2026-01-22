@@ -5,85 +5,34 @@
  * Implements water mark-based pausing/resuming to prevent memory exhaustion.
  *
  * Key features:
- * - O(1) enqueue/dequeue using circular buffer (optimized for hot-path)
+ * - O(1) enqueue/dequeue using CircularBuffer from @arbitrage/core
  * - Configurable queue size limits
  * - Hysteresis-based backpressure (high/low water marks)
  * - Pause state change notifications for stream consumer coupling
  * - Event signaling for efficient processing (avoids polling)
  *
  * @see engine.ts (parent service)
+ * @see @arbitrage/core CircularBuffer for O(1) FIFO implementation
  */
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import { CircularBuffer } from '@arbitrage/core';
 import type { Logger, QueueConfig, QueueService } from '../types';
 import { DEFAULT_QUEUE_CONFIG } from '../types';
 
+/**
+ * Configuration for QueueServiceImpl
+ */
 export interface QueueServiceConfig {
   logger: Logger;
   queueConfig?: Partial<QueueConfig>;
 }
 
 /**
- * Circular buffer implementation for O(1) FIFO operations.
- * Avoids the O(n) cost of Array.shift() on large queues.
+ * Queue service implementation using CircularBuffer from @arbitrage/core.
+ *
+ * @see CircularBuffer for O(1) FIFO operations
  */
-class CircularBuffer<T> {
-  private readonly buffer: (T | undefined)[];
-  private head = 0; // Next read position
-  private tail = 0; // Next write position
-  private count = 0;
-
-  constructor(private readonly capacity: number) {
-    this.buffer = new Array(capacity);
-  }
-
-  /**
-   * Add item to the end of the queue. O(1)
-   * @returns true if added, false if full
-   */
-  push(item: T): boolean {
-    if (this.count >= this.capacity) {
-      return false;
-    }
-    this.buffer[this.tail] = item;
-    this.tail = (this.tail + 1) % this.capacity;
-    this.count++;
-    return true;
-  }
-
-  /**
-   * Remove and return item from front of queue. O(1)
-   * @returns item or undefined if empty
-   */
-  shift(): T | undefined {
-    if (this.count === 0) {
-      return undefined;
-    }
-    const item = this.buffer[this.head];
-    this.buffer[this.head] = undefined; // Allow GC
-    this.head = (this.head + 1) % this.capacity;
-    this.count--;
-    return item;
-  }
-
-  /**
-   * Get current size. O(1)
-   */
-  get length(): number {
-    return this.count;
-  }
-
-  /**
-   * Clear the buffer. O(1)
-   */
-  clear(): void {
-    // Don't need to clear individual slots - just reset pointers
-    this.head = 0;
-    this.tail = 0;
-    this.count = 0;
-  }
-}
-
 export class QueueServiceImpl implements QueueService {
   private readonly logger: Logger;
   private readonly config: QueueConfig;

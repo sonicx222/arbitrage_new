@@ -40,3 +40,11 @@ export {
   createSimulationService,
   type SimulationServiceOptions,
 } from './simulation.service';
+
+// Metrics Collector (Phase 1.1.3)
+export {
+  createSimulationMetricsCollector,
+  type SimulationMetricsCollector,
+  type SimulationMetricsCollectorConfig,
+  type SimulationMetricsSnapshot,
+} from './simulation-metrics-collector';
