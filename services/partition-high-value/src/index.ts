@@ -51,11 +51,32 @@ const P3_DEFAULT_PORT = 3003; // Different port from P1 (3001) and P2 (3002)
 
 const logger = createLogger('partition-high-value:main');
 
+// =============================================================================
+// Critical Environment Validation
+// CRITICAL-FIX: Validate required environment variables early to fail fast
+// =============================================================================
+
+/**
+ * Validates critical environment variables and exits with clear error if missing.
+ * Returns never to help TypeScript understand this terminates the process.
+ */
+function exitWithConfigError(message: string, context: Record<string, unknown>): never {
+  logger.error(message, context);
+  process.exit(1);
+}
+
+// Validate REDIS_URL - required for all partition services
+if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
+  exitWithConfigError('REDIS_URL environment variable is required', {
+    partitionId: P3_PARTITION_ID,
+    hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
+  });
+}
+
 // Single partition config retrieval (P5-FIX pattern)
 const partitionConfig = getPartition(P3_PARTITION_ID);
 if (!partitionConfig) {
-  logger.error('P3 partition configuration not found', { partitionId: P3_PARTITION_ID });
-  process.exit(1);
+  exitWithConfigError('P3 partition configuration not found', { partitionId: P3_PARTITION_ID });
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
@@ -101,23 +122,23 @@ setupDetectorEventHandlers(detector, logger, P3_PARTITION_ID);
 // Process Handlers (P15/P19 refactor - Using shared utilities with shutdown guard)
 // =============================================================================
 
-setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
+// S3.2.3-FIX: Store cleanup function to prevent MaxListenersExceeded warnings
+// in test scenarios and allow proper handler cleanup
+const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
 
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
 async function main(): Promise<void> {
-  // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
-  if (!partitionConfig) {
-    throw new Error('Partition config unavailable - this should never happen');
-  }
+  // Note: serviceConfig captures all partition config values at module init time,
+  // after validation by exitWithConfigError(), so it's safe to use here
 
   logger.info('Starting P3 High-Value Partition Service', {
     partitionId: P3_PARTITION_ID,
     chains: config.chains,
     region: P3_REGION,
-    provider: partitionConfig.provider,
+    provider: serviceConfig.provider,
     nodeVersion: process.version,
     pid: process.pid
   });
@@ -142,18 +163,37 @@ async function main(): Promise<void> {
 
   } catch (error) {
     logger.error('Failed to start P3 High-Value Partition Service', { error });
+
+    // CRITICAL-FIX: Clean up health server if detector start failed
+    // This prevents leaving port bound when process exits due to startup failure
+    if (healthServerRef.current) {
+      try {
+        healthServerRef.current.close();
+        logger.info('Health server closed after startup failure');
+      } catch (closeError) {
+        logger.warn('Failed to close health server during cleanup', { closeError });
+      }
+    }
+
     process.exit(1);
   }
 }
 
-// Run
-main().catch((error) => {
-  logger.error('Fatal error in P3 High-Value partition main', { error });
-  process.exit(1);
-});
+// Run - only when this is the main entry point (not when imported by tests)
+// Check for Jest worker to prevent auto-start during test imports
+if (!process.env.JEST_WORKER_ID) {
+  main().catch((error) => {
+    if (logger) {
+      logger.error('Fatal error in P3 High-Value partition main', { error });
+    } else {
+      console.error('Fatal error in P3 High-Value partition main (logger unavailable):', error);
+    }
+    process.exit(1);
+  });
+}
 
 // =============================================================================
 // Exports
 // =============================================================================
 
-export { detector, config, P3_PARTITION_ID, P3_CHAINS, P3_REGION };
+export { detector, config, P3_PARTITION_ID, P3_CHAINS, P3_REGION, cleanupProcessHandlers };

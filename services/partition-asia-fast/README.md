@@ -55,10 +55,11 @@ AVALANCHE_RPC_URL=https://api.avax.network/ext/bc/C/rpc
 FANTOM_RPC_URL=https://rpc.ftm.tools
 
 # WebSocket URLs (override defaults)
-BSC_WS_URL=wss://bsc-ws-node.nariox.org:443
-POLYGON_WS_URL=wss://polygon-rpc.com
+# Note: Use reliable public WebSocket endpoints. Alchemy/Infura recommended for production.
+BSC_WS_URL=wss://bsc.publicnode.com
+POLYGON_WS_URL=wss://polygon-bor-rpc.publicnode.com
 AVALANCHE_WS_URL=wss://api.avax.network/ext/bc/C/ws
-FANTOM_WS_URL=wss://wsapi.fantom.network
+FANTOM_WS_URL=wss://fantom.publicnode.com
 ```
 
 ## Local Development
@@ -97,11 +98,12 @@ docker-compose down
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /` | Service info |
-| `GET /health` | Health status (Kubernetes liveness) |
-| `GET /healthz` | Health status (alternative) |
-| `GET /ready` | Readiness check (Kubernetes) |
-| `GET /stats` | Detailed statistics |
+| `GET /` | Service info (partition ID, chains, region, available endpoints) |
+| `GET /health` | Health status (Kubernetes liveness probe) |
+| `GET /ready` | Readiness check (Kubernetes readiness probe, returns 503 if not running) |
+| `GET /stats` | Detailed statistics (events processed, opportunities found, per-chain stats) |
+
+> **Note:** `/health` returns HTTP 200 for `healthy` or `degraded` status, and HTTP 503 for `unhealthy` status.
 
 ### Example Health Response
 

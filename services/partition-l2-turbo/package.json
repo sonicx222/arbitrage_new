@@ -6,9 +6,9 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node src/index.ts",
-    "start": "node dist/index.js",
-    "clean": "rm -rf dist"
+    "dev": "cross-env PARTITION_ID=l2-turbo ts-node src/index.ts",
+    "start": "cross-env PARTITION_ID=l2-turbo node dist/index.js",
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "@arbitrage/unified-detector": "*",
@@ -17,9 +17,11 @@
     "@arbitrage/types": "*"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "cross-env": "^7.0.3",
+    "rimraf": "^5.0.0",
     "ts-node": "^10.9.0",
-    "@types/node": "^20.0.0"
+    "typescript": "^5.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

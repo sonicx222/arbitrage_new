@@ -174,6 +174,9 @@ export class UnifiedChainDetector extends EventEmitter {
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
 
+  // PERF-FIX: Track CPU usage for health reporting
+  private lastCpuUsage: { user: number; system: number; timestamp: number } | null = null;
+
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
 
@@ -512,6 +515,10 @@ export class UnifiedChainDetector extends EventEmitter {
       }
     }
 
+    // FIX: Calculate uptime safely - if startTime is 0, service hasn't started yet
+    const uptimeMs = this.startTime > 0 ? Date.now() - this.startTime : 0;
+    const uptimeSeconds = uptimeMs / 1000;
+
     for (const [chainId, stats] of chainStats.entries()) {
       const health: ChainHealth = {
         chainId,
@@ -520,7 +527,8 @@ export class UnifiedChainDetector extends EventEmitter {
         blocksBehind: 0, // Would need chain sync status
         lastBlockTime: Date.now(),
         wsConnected: stats.status === 'connected',
-        eventsPerSecond: stats.eventsProcessed / Math.max(1, (Date.now() - this.startTime) / 1000),
+        // FIX: Avoid division by near-zero; if not started, eventsPerSecond is 0
+        eventsPerSecond: uptimeSeconds > 0 ? stats.eventsProcessed / uptimeSeconds : 0,
         errorCount: stats.status === 'error' ? 1 : 0
       };
       chainHealth.set(chainId, health);
@@ -531,6 +539,29 @@ export class UnifiedChainDetector extends EventEmitter {
     const memUsage = process.memoryUsage();
     const healthyChains = Array.from(chainHealth.values()).filter(h => h.status === 'healthy').length;
     const totalChains = chainHealth.size;
+
+    // PERF-FIX: Calculate actual CPU usage percentage using process.cpuUsage()
+    // CPU usage is measured as elapsed microseconds / wall clock time * 100
+    const currentCpu = process.cpuUsage();
+    const now = Date.now();
+    let cpuUsagePercent = 0;
+
+    if (this.lastCpuUsage) {
+      const elapsedMs = now - this.lastCpuUsage.timestamp;
+      if (elapsedMs > 0) {
+        // Calculate delta CPU time in microseconds
+        const userDelta = currentCpu.user - this.lastCpuUsage.user;
+        const systemDelta = currentCpu.system - this.lastCpuUsage.system;
+        const totalCpuMicros = userDelta + systemDelta;
+        // Convert elapsed wall time to microseconds for percentage calculation
+        const elapsedMicros = elapsedMs * 1000;
+        // CPU percentage (can exceed 100% on multi-core systems, so cap at reasonable value)
+        cpuUsagePercent = Math.min((totalCpuMicros / elapsedMicros) * 100, 400);
+      }
+    }
+
+    // Update last CPU reading for next call
+    this.lastCpuUsage = { user: currentCpu.user, system: currentCpu.system, timestamp: now };
 
     // Determine overall partition status
     // 'starting' is used when no chains are initialized yet (common during startup)
@@ -553,8 +584,8 @@ export class UnifiedChainDetector extends EventEmitter {
       totalEventsProcessed: totalEvents,
       avgEventLatencyMs: totalChains > 0 ? totalLatency / totalChains : 0,
       memoryUsage: memUsage.heapUsed,
-      cpuUsage: 0, // Would need OS-level metrics
-      uptimeSeconds: (Date.now() - this.startTime) / 1000,
+      cpuUsage: Math.round(cpuUsagePercent * 100) / 100, // Round to 2 decimal places
+      uptimeSeconds,
       lastHealthCheck: Date.now(),
       activeOpportunities: 0 // Would track from opportunities found
     };
