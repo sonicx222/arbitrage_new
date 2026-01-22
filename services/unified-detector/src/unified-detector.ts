@@ -34,7 +34,6 @@ import {
   getCrossRegionHealthManager,
   GracefulDegradationManager,
   getGracefulDegradationManager,
-  DegradationLevel,  // S4.1.3-FIX: Import canonical enum
   FailoverEvent
 } from '@arbitrage/core';
 
@@ -44,8 +43,7 @@ import {
   ChainHealth,
   getPartitionFromEnv,
   getChainsFromEnv,
-  getPartition,
-  CHAINS
+  getPartition
 } from '@arbitrage/config';
 
 import { ChainDetectorInstance } from './chain-instance';
@@ -56,18 +54,12 @@ import {
 } from './chain-instance-manager';
 import { HealthReporter, createHealthReporter } from './health-reporter';
 import { MetricsCollector, createMetricsCollector } from './metrics-collector';
+// REFACTOR: Import shared Logger type to eliminate duplication
+import type { Logger } from './types';
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/** Logger interface for dependency injection */
-interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
 
 /** Base config options (without DI) */
 interface BaseDetectorConfig {
@@ -164,12 +156,23 @@ export class UnifiedChainDetector extends EventEmitter {
 
   private config: Required<BaseDetectorConfig>;
   private partition: PartitionConfig | null = null;
+
+  // REFACTOR 9.1: Delegate to extracted modules instead of inline implementation
+  private chainInstanceManager: ChainInstanceManager | null = null;
+  private healthReporter: HealthReporter | null = null;
+  private metricsCollector: MetricsCollector | null = null;
+
+  // Legacy: Keep chainInstances for backward compatibility with getChainInstance()
+  // This is populated from chainInstanceManager for existing API consumers
   private chainInstances: Map<string, ChainDetectorInstance> = new Map();
 
   private startTime: number = 0;
+  private chainInstanceFactory: ChainInstanceFactory;
+
+  // DEPRECATED: These are only used by deprecated methods (kept for backward compatibility)
+  // FIX Bug 4.2: Declare properties that were used but never declared
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private metricsInterval: NodeJS.Timeout | null = null;
-  private chainInstanceFactory: ChainInstanceFactory;
 
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
@@ -245,21 +248,66 @@ export class UnifiedChainDetector extends EventEmitter {
       // Initialize degradation manager
       this.degradationManager = getGracefulDegradationManager();
 
-      // FIX: Register capabilities for graceful degradation
-      // This prevents "No capabilities registered" warnings when chain failures occur
-      this.registerChainCapabilities();
+      // REFACTOR 9.1: Use ChainInstanceManager for chain lifecycle
+      this.chainInstanceManager = createChainInstanceManager({
+        chains: this.config.chains,
+        partitionId: this.config.partitionId,
+        streamsClient: this.streamsClient,
+        perfLogger: this.perfLogger,
+        chainInstanceFactory: this.chainInstanceFactory,
+        logger: this.logger,
+        degradationManager: this.degradationManager,
+      });
 
-      // Start chain instances
-      await this.startChainInstances();
+      // Forward events from chain instance manager
+      this.chainInstanceManager.on('priceUpdate', (update) => this.emit('priceUpdate', update));
+      this.chainInstanceManager.on('opportunity', (opp) => this.emit('opportunity', opp));
+      this.chainInstanceManager.on('chainError', (event) => this.emit('chainError', event));
+      this.chainInstanceManager.on('statusChange', (event) => this.emit('statusChange', event));
 
-      // Start health monitoring
-      this.startHealthMonitoring();
+      // Start chain instances via manager
+      const startResult = await this.chainInstanceManager.startAll();
 
-      // Start metrics collection
-      this.startMetricsCollection();
+      // Update legacy chainInstances map for backward compatibility
+      for (const chainId of startResult.startedChains) {
+        const instance = this.chainInstanceManager.getChainInstance(chainId);
+        if (instance) {
+          this.chainInstances.set(chainId, instance);
+        }
+      }
+
+      // REFACTOR 9.1: Use HealthReporter for health monitoring
+      this.healthReporter = createHealthReporter({
+        partitionId: this.config.partitionId,
+        instanceId: this.config.instanceId,
+        regionId: this.config.regionId,
+        streamsClient: this.streamsClient,
+        stateManager: this.stateManager,
+        logger: this.logger,
+        getHealthData: () => this.getPartitionHealth(),
+        enableCrossRegionHealth: this.config.enableCrossRegionHealth,
+        partition: this.partition ?? undefined,
+      });
+
+      // Forward failover events from health reporter
+      this.healthReporter.on('failoverEvent', (event) => this.emit('failoverEvent', event));
+
+      await this.healthReporter.start();
+
+      // REFACTOR 9.1: Use MetricsCollector for metrics collection
+      this.metricsCollector = createMetricsCollector({
+        partitionId: this.config.partitionId,
+        perfLogger: this.perfLogger,
+        stateManager: this.stateManager,
+        logger: this.logger,
+        getStats: () => this.getStats(),
+      });
+
+      this.metricsCollector.start();
 
       this.logger.info('UnifiedChainDetector started successfully', {
-        chainsStarted: this.chainInstances.size
+        chainsStarted: startResult.chainsStarted,
+        chainsFailed: startResult.chainsFailed,
       });
     });
 
@@ -275,21 +323,33 @@ export class UnifiedChainDetector extends EventEmitter {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping UnifiedChainDetector');
 
-      // Clear intervals
-      if (this.healthCheckInterval) {
-        clearInterval(this.healthCheckInterval);
-        this.healthCheckInterval = null;
+      // REFACTOR 9.1: Stop extracted modules
+
+      // Stop metrics collection
+      if (this.metricsCollector) {
+        await this.metricsCollector.stop();
+        this.metricsCollector = null;
       }
 
-      if (this.metricsInterval) {
-        clearInterval(this.metricsInterval);
-        this.metricsInterval = null;
+      // Stop health reporter (includes cross-region health if enabled)
+      if (this.healthReporter) {
+        this.healthReporter.removeAllListeners();
+        await this.healthReporter.stop();
+        this.healthReporter = null;
       }
 
-      // Stop all chain instances
-      await this.stopChainInstances();
+      // Stop chain instance manager
+      if (this.chainInstanceManager) {
+        this.chainInstanceManager.removeAllListeners();
+        await this.chainInstanceManager.stop();
+        this.chainInstanceManager = null;
+      }
 
-      // Stop cross-region health (P1-1 fix: remove listeners before stopping)
+      // Clear legacy chainInstances map
+      this.chainInstances.clear();
+
+      // Stop cross-region health if not managed by health reporter
+      // (for backward compatibility with tests that inject crossRegionHealth directly)
       if (this.crossRegionHealth) {
         this.crossRegionHealth.removeAllListeners();
         await this.crossRegionHealth.stop();
@@ -318,123 +378,6 @@ export class UnifiedChainDetector extends EventEmitter {
   }
 
   // ===========================================================================
-  // Chain Instance Management
-  // ===========================================================================
-
-  private async startChainInstances(): Promise<void> {
-    // Verify streams client is available before starting chains
-    if (!this.streamsClient) {
-      throw new Error('StreamsClient not initialized - cannot start chain instances');
-    }
-
-    const startPromises: Promise<void>[] = [];
-
-    for (const chainId of this.config.chains) {
-      // Validate chain exists in configuration
-      if (!CHAINS[chainId]) {
-        this.logger.warn(`Chain ${chainId} not found in configuration, skipping`);
-        continue;
-      }
-
-      const instance = this.chainInstanceFactory({
-        chainId,
-        partitionId: this.config.partitionId,
-        streamsClient: this.streamsClient,
-        perfLogger: this.perfLogger
-      });
-
-      // Set up event handlers
-      instance.on('priceUpdate', (update) => {
-        this.emit('priceUpdate', update);
-      });
-
-      instance.on('opportunity', (opp) => {
-        this.emit('opportunity', opp);
-      });
-
-      instance.on('error', (error) => {
-        this.handleChainError(chainId, error);
-      });
-
-      instance.on('statusChange', (status) => {
-        this.logger.info(`Chain ${chainId} status changed to ${status}`);
-      });
-
-      this.chainInstances.set(chainId, instance);
-
-      // Start instances in parallel
-      startPromises.push(
-        instance.start().catch((error) => {
-          this.logger.error(`Failed to start chain instance: ${chainId}`, { error });
-          // Don't fail the entire startup for one chain
-          this.handleChainError(chainId, error);
-        })
-      );
-    }
-
-    // Wait for all chains to start (or fail gracefully)
-    await Promise.allSettled(startPromises);
-
-    const successfulChains = Array.from(this.chainInstances.values())
-      .filter(i => i.isConnected())
-      .map(i => i.getChainId());
-
-    this.logger.info('Chain instances started', {
-      requested: this.config.chains.length,
-      successful: successfulChains.length,
-      chains: successfulChains
-    });
-  }
-
-  // P1-8 FIX: Timeout for individual chain shutdown operations
-  private static readonly CHAIN_STOP_TIMEOUT_MS = 30000; // 30 seconds
-
-  private async stopChainInstances(): Promise<void> {
-    const stopPromises: Promise<void>[] = [];
-
-    // P1-7 FIX: Take snapshot of chainInstances to avoid iterator issues during modification
-    const instancesSnapshot = Array.from(this.chainInstances.entries());
-
-    for (const [chainId, instance] of instancesSnapshot) {
-      // P1-1 fix: Remove listeners before stopping to prevent memory leak
-      instance.removeAllListeners();
-
-      // P1-8 FIX: Wrap stop() with timeout to prevent indefinite hangs
-      const stopWithTimeout = Promise.race([
-        instance.stop(),
-        new Promise<void>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Chain ${chainId} stop timeout after ${UnifiedChainDetector.CHAIN_STOP_TIMEOUT_MS}ms`)),
-            UnifiedChainDetector.CHAIN_STOP_TIMEOUT_MS
-          )
-        )
-      ]).catch((error) => {
-        this.logger.error(`Error stopping chain instance: ${chainId}`, { error: (error as Error).message });
-      });
-
-      stopPromises.push(stopWithTimeout);
-    }
-
-    await Promise.allSettled(stopPromises);
-    this.chainInstances.clear();
-  }
-
-  private handleChainError(chainId: string, error: Error): void {
-    this.logger.error(`Chain error: ${chainId}`, { error: error.message });
-
-    // Trigger degradation if needed
-    if (this.degradationManager) {
-      this.degradationManager.triggerDegradation(
-        `unified-detector-${this.config.partitionId}`,
-        `chain_${chainId}_failure`,
-        error
-      );
-    }
-
-    this.emit('chainError', { chainId, error });
-  }
-
-  // ===========================================================================
   // Health Monitoring
   // ===========================================================================
 
@@ -458,109 +401,6 @@ export class UnifiedChainDetector extends EventEmitter {
     });
   }
 
-  /**
-   * FIX: Register chain capabilities for graceful degradation.
-   * This prevents "No capabilities registered" warnings when individual chains fail.
-   * Each chain is a non-required capability - the service can continue with partial chain coverage.
-   */
-  private registerChainCapabilities(): void {
-    if (!this.degradationManager || !this.config.chains) {
-      return;
-    }
-
-    const serviceName = `unified-detector-${this.config.partitionId}`;
-    const capabilities = this.config.chains.map(chainId => ({
-      name: `chain_${chainId}_failure`,
-      required: false,  // Individual chain failures don't require service shutdown
-      // S4.1.3-FIX: Use canonical DegradationLevel enum instead of string
-      degradationLevel: DegradationLevel.REDUCED_CHAINS  // Service continues with reduced chain coverage
-    }));
-
-    this.degradationManager.registerCapabilities(serviceName, capabilities);
-    this.logger.info('Registered chain capabilities for graceful degradation', {
-      serviceName,
-      chainCount: capabilities.length,
-      chains: this.config.chains
-    });
-  }
-
-  private startHealthMonitoring(): void {
-    const interval = this.partition?.healthCheckIntervalMs || 30000;
-
-    this.healthCheckInterval = setInterval(async () => {
-      // Skip health checks if service is stopping
-      if (!this.stateManager.isRunning()) {
-        return;
-      }
-
-      try {
-        const health = await this.getPartitionHealth();
-        await this.publishHealth(health);
-      } catch (error) {
-        this.logger.error('Health monitoring error', { error });
-      }
-    }, interval);
-
-    // Initial health report (fire-and-forget with proper error handling)
-    // P1-NEW-4 FIX: Check state before publishing
-    this.getPartitionHealth()
-      .then(health => {
-        if (this.stateManager.isRunning()) {
-          return this.publishHealth(health);
-        }
-      })
-      .catch(error => this.logger.error('Initial health report failed', { error }));
-  }
-
-  private async publishHealth(health: PartitionHealth): Promise<void> {
-    // P1-NEW-4 FIX: Also check state at publish time
-    if (!this.streamsClient || !this.stateManager.isRunning()) return;
-
-    const serviceName = `unified-detector-${this.config.partitionId}`;
-
-    try {
-      await this.streamsClient.xadd(
-        RedisStreamsClient.STREAMS.HEALTH,
-        {
-          // Use both 'name' (preferred) and 'service' (legacy) for compatibility
-          name: serviceName,
-          service: serviceName,
-          ...health,
-          chainHealth: Object.fromEntries(health.chainHealth)
-        }
-      );
-    } catch (error) {
-      this.logger.error('Failed to publish health', { error });
-    }
-  }
-
-  // ===========================================================================
-  // Metrics Collection
-  // ===========================================================================
-
-  private startMetricsCollection(): void {
-    this.metricsInterval = setInterval(() => {
-      // Skip metrics collection if service is stopping
-      if (!this.stateManager.isRunning()) {
-        return;
-      }
-
-      const stats = this.getStats();
-
-      this.perfLogger.logHealthCheck(
-        `unified-detector-${this.config.partitionId}`,
-        {
-          status: 'healthy',
-          uptime: stats.uptimeSeconds,
-          memoryUsage: stats.memoryUsageMB * 1024 * 1024,
-          chainsMonitored: stats.chains.length,
-          eventsProcessed: stats.totalEventsProcessed,
-          opportunitiesFound: stats.totalOpportunitiesFound
-        }
-      );
-    }, 60000); // Every minute
-  }
-
   // ===========================================================================
   // Public Getters
   // ===========================================================================
@@ -578,6 +418,10 @@ export class UnifiedChainDetector extends EventEmitter {
   }
 
   getChains(): string[] {
+    // REFACTOR 9.1: Delegate to chain instance manager when available
+    if (this.chainInstanceManager) {
+      return this.chainInstanceManager.getChains();
+    }
     return Array.from(this.chainInstances.keys());
   }
 
@@ -585,10 +429,14 @@ export class UnifiedChainDetector extends EventEmitter {
    * Returns list of chain IDs that are currently healthy (connected status)
    */
   getHealthyChains(): string[] {
-    // P9-FIX: Take snapshot to avoid iterator issues during concurrent modification
-    const instancesSnapshot = Array.from(this.chainInstances.entries());
+    // REFACTOR 9.1: Delegate to chain instance manager when available
+    if (this.chainInstanceManager) {
+      return this.chainInstanceManager.getHealthyChains();
+    }
+    // Fallback to legacy implementation
+    // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
     const healthyChains: string[] = [];
-    for (const [chainId, instance] of instancesSnapshot) {
+    for (const [chainId, instance] of this.chainInstances) {
       const stats = instance.getStats();
       if (stats.status === 'connected') {
         healthyChains.push(chainId);
@@ -598,19 +446,36 @@ export class UnifiedChainDetector extends EventEmitter {
   }
 
   getChainInstance(chainId: string): ChainDetectorInstance | undefined {
+    // REFACTOR 9.1: Delegate to chain instance manager when available
+    if (this.chainInstanceManager) {
+      return this.chainInstanceManager.getChainInstance(chainId);
+    }
     return this.chainInstances.get(chainId);
   }
 
   getStats(): UnifiedDetectorStats {
-    // P10-FIX: Take snapshot to avoid iterator issues during concurrent modification
-    const instancesSnapshot = Array.from(this.chainInstances.entries());
-    const chainStats = new Map<string, ChainStats>();
+    // REFACTOR 9.1: Use chain instance manager's stats when available
+    let chainStats: Map<string, ChainStats>;
+    let chains: string[];
+
+    if (this.chainInstanceManager) {
+      chainStats = this.chainInstanceManager.getStats();
+      chains = this.chainInstanceManager.getChains();
+    } else {
+      // Fallback to legacy implementation
+      // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
+      chainStats = new Map<string, ChainStats>();
+      chains = [];
+      for (const [chainId, instance] of this.chainInstances) {
+        chainStats.set(chainId, instance.getStats());
+        chains.push(chainId);
+      }
+    }
+
+    // Calculate totals from chain stats
     let totalEvents = 0;
     let totalOpportunities = 0;
-
-    for (const [chainId, instance] of instancesSnapshot) {
-      const stats = instance.getStats();
-      chainStats.set(chainId, stats);
+    for (const stats of chainStats.values()) {
       totalEvents += stats.eventsProcessed;
       totalOpportunities += stats.opportunitiesFound;
     }
@@ -619,7 +484,7 @@ export class UnifiedChainDetector extends EventEmitter {
 
     return {
       partitionId: this.config.partitionId,
-      chains: instancesSnapshot.map(([chainId]) => chainId),
+      chains,
       totalEventsProcessed: totalEvents,
       totalOpportunitiesFound: totalOpportunities,
       uptimeSeconds: (Date.now() - this.startTime) / 1000,
@@ -633,12 +498,21 @@ export class UnifiedChainDetector extends EventEmitter {
     let totalEvents = 0;
     let totalLatency = 0;
 
-    // P1-7 FIX: Take snapshot of chainInstances to avoid iterator errors
-    // during concurrent startup/shutdown operations
-    const instancesSnapshot = Array.from(this.chainInstances.entries());
+    // FIX Issue 1.1: Use chainInstanceManager stats instead of stale chainInstances map
+    // This ensures we have current chain status after reconnections/failures
+    let chainStats: Map<string, ChainStats>;
+    if (this.chainInstanceManager) {
+      chainStats = this.chainInstanceManager.getStats();
+    } else {
+      // Fallback to legacy chainInstances map for backward compatibility
+      // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
+      chainStats = new Map();
+      for (const [chainId, instance] of this.chainInstances) {
+        chainStats.set(chainId, instance.getStats());
+      }
+    }
 
-    for (const [chainId, instance] of instancesSnapshot) {
-      const stats = instance.getStats();
+    for (const [chainId, stats] of chainStats.entries()) {
       const health: ChainHealth = {
         chainId,
         status: stats.status === 'connected' ? 'healthy' :

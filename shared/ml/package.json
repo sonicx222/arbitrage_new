@@ -1,5 +1,5 @@
 {
-  "name": "@arbitrage/ml-engine",
+  "name": "@arbitrage/ml",
   "version": "1.0.0",
   "description": "Machine learning engine for price prediction and pattern recognition",
   "main": "dist/index.js",

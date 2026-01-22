@@ -23,7 +23,10 @@ npm install
 PARTITION_ID=asia-fast npm start
 
 # Or specify chains directly
-ENABLED_CHAINS=bsc,polygon npm start
+PARTITION_CHAINS=bsc,polygon npm start
+
+# Or run in simulation mode (no real blockchain connections)
+SIMULATION_MODE=true npm start
 ```
 
 ## Configuration
@@ -33,10 +36,13 @@ ENABLED_CHAINS=bsc,polygon npm start
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PARTITION_ID` | Partition to run (asia-fast, l2-fast, high-value) | `asia-fast` |
-| `ENABLED_CHAINS` | Comma-separated chain IDs to monitor | From partition config |
+| `PARTITION_CHAINS` | Comma-separated chain IDs to monitor (overrides partition) | From partition config |
 | `REGION_ID` | Region identifier for cross-region health | From partition config |
 | `HEALTH_CHECK_PORT` | Port for HTTP health endpoint | `3001` |
 | `ENABLE_CROSS_REGION_HEALTH` | Enable cross-region health reporting | `true` |
+| `SIMULATION_MODE` | Enable simulation mode (no real blockchain connections) | `false` |
+| `SIMULATION_UPDATE_INTERVAL_MS` | Interval between simulated price updates | `1000` |
+| `SIMULATION_VOLATILITY` | Price volatility factor for simulation (0-1) | `0.02` |
 
 ### Partitions
 
@@ -66,7 +72,7 @@ PARTITION_ID=l2-fast npm start
 
 ```bash
 # Monitor only BSC and Polygon
-ENABLED_CHAINS=bsc,polygon npm start
+PARTITION_CHAINS=bsc,polygon npm start
 ```
 
 ### Programmatic Usage
@@ -114,23 +120,54 @@ await detector.stop();
 ## Architecture
 
 ```
-UnifiedChainDetector
-├── ChainDetectorInstance (bsc)
-│   ├── WebSocket connection
-│   ├── Event processor
-│   └── Price publisher
-├── ChainDetectorInstance (polygon)
-│   └── ...
-└── ChainDetectorInstance (avalanche)
-    └── ...
+UnifiedChainDetector (Orchestrator)
+├── ChainInstanceManager (REFACTOR 9.1)
+│   ├── ChainDetectorInstance (bsc)
+│   │   ├── WebSocket connection
+│   │   ├── Event processor
+│   │   ├── WhaleAlertPublisher
+│   │   └── ChainSimulationHandler (dev mode)
+│   ├── ChainDetectorInstance (polygon)
+│   │   └── ...
+│   └── ChainDetectorInstance (avalanche)
+│       └── ...
+├── HealthReporter (REFACTOR 9.1)
+│   ├── Periodic health checks
+│   ├── Redis Streams publishing
+│   └── CrossRegionHealthManager integration
+└── MetricsCollector (REFACTOR 9.1)
+    └── PerformanceLogger integration
 ```
 
 ### Key Components
 
-- **UnifiedChainDetector**: Main orchestrator managing multiple chain instances
+- **UnifiedChainDetector**: Main orchestrator delegating to modular components
+- **ChainInstanceManager**: Manages chain detector lifecycle (start/stop/health)
 - **ChainDetectorInstance**: Per-chain WebSocket connection and event processing
+- **HealthReporter**: Publishes health data to Redis Streams with concurrency guards
+- **MetricsCollector**: Periodic metrics collection via PerformanceLogger
+- **WhaleAlertPublisher**: Publishes whale alerts and swap events
+- **ChainSimulationHandler**: Handles EVM/non-EVM simulation in dev mode
 - **ServiceStateManager**: Handles lifecycle states (starting, running, stopping)
 - **CrossRegionHealthManager**: Reports health for failover coordination
+
+### Modular Design (REFACTOR 9.1)
+
+The service follows a modular architecture with extracted components:
+
+```typescript
+// Factory functions for dependency injection
+import {
+  createChainInstanceManager,
+  createHealthReporter,
+  createMetricsCollector,
+} from '@arbitrage/unified-detector';
+
+// Use modules directly (for testing or custom implementations)
+const manager = createChainInstanceManager({ ... });
+const reporter = createHealthReporter({ ... });
+const collector = createMetricsCollector({ ... });
+```
 
 ## Events
 
@@ -140,6 +177,25 @@ UnifiedChainDetector
 | `opportunity` | `ArbitrageOpportunity` | Arbitrage opportunity found |
 | `chainError` | `{ chainId, error }` | Chain instance error |
 | `failoverEvent` | `FailoverEvent` | Cross-region failover triggered |
+
+## Arbitrage Detection
+
+The detector supports multiple arbitrage types:
+
+| Type | Description | Token Path |
+|------|-------------|------------|
+| `simple` | Cross-DEX arbitrage (same token pair, different DEXes) | A → B on DEX1, B → A on DEX2 |
+| `triangular` | 3-token cycle across DEXes | A → B → C → A |
+| `quadrilateral` | 4-token cycle | A → B → C → D → A |
+| `multi-leg` | 5-7 token paths (worker thread) | A → B → C → D → E → ... → A |
+
+### Arbitrage Opportunity Fields
+
+All opportunities include these execution-required fields:
+- `tokenIn`: Input token address
+- `tokenOut`: Output token address
+- `amountIn`: Trade amount (as string)
+- `expectedProfit`: Absolute profit value (not percentage)
 
 ## Health Monitoring
 

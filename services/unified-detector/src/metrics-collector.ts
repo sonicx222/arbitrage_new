@@ -19,6 +19,7 @@ import { PerformanceLogger, ServiceStateManager } from '@arbitrage/core';
 
 import { UnifiedDetectorStats } from './unified-detector';
 import { Logger } from './types';
+import { DEFAULT_METRICS_INTERVAL_MS } from './constants';
 
 // =============================================================================
 // Types
@@ -56,13 +57,6 @@ export interface MetricsCollector {
   /** Stop metrics collection (async for consistency with other modules) */
   stop(): Promise<void>;
 }
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-/** Default metrics collection interval (60 seconds) */
-const DEFAULT_METRICS_INTERVAL_MS = 60000;
 
 // =============================================================================
 // Implementation

@@ -193,9 +193,10 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
 
   /**
    * Start the health monitoring interval.
+   * FIX Race 5.3: Improved concurrency guard with proper error handling
    */
   function startHealthMonitoring(): void {
-    healthCheckInterval = setInterval(async () => {
+    healthCheckInterval = setInterval(() => {
       // FIX B2: Skip if already checking health (prevents concurrent executions)
       // or if service is stopping
       if (isCheckingHealth || !stateManager.isRunning()) {
@@ -203,26 +204,43 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
       }
 
       isCheckingHealth = true;
-      try {
-        const health = await getHealthData();
-        await publishHealth(health);
-      } catch (error) {
-        logger.error('Health monitoring error', { error: (error as Error).message });
-      } finally {
-        isCheckingHealth = false;
-      }
+
+      // FIX Race 5.3: Wrap in async IIFE to properly catch all errors
+      (async () => {
+        try {
+          const health = await getHealthData();
+          await publishHealth(health);
+        } catch (error) {
+          logger.error('Health monitoring error', { error: (error as Error).message });
+        } finally {
+          // Always reset the guard, even on error
+          isCheckingHealth = false;
+        }
+      })();
     }, healthCheckIntervalMs);
 
     // Initial health report (fire-and-forget with proper error handling)
-    getHealthData()
-      .then((health) => {
+    // FIX Race 5.3: Guard initialization moved inside the async operation
+    // to prevent the flag being stuck if getHealthData throws synchronously
+    (async () => {
+      // Set guard at the start of async operation
+      if (isCheckingHealth) {
+        return; // Another check is already in progress
+      }
+      isCheckingHealth = true;
+
+      try {
+        const health = await getHealthData();
         if (stateManager.isRunning()) {
-          return publishHealth(health);
+          await publishHealth(health);
         }
-      })
-      .catch((error) =>
-        logger.error('Initial health report failed', { error: (error as Error).message })
-      );
+      } catch (error) {
+        logger.error('Initial health report failed', { error: (error as Error).message });
+      } finally {
+        // CRITICAL: Always reset guard in finally to ensure it's always cleared
+        isCheckingHealth = false;
+      }
+    })();
   }
 
   // ===========================================================================

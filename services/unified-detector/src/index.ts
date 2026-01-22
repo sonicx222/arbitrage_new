@@ -256,4 +256,29 @@ export {
 } from './metrics-collector';
 
 // Shared types
-export { type Logger } from './types';
+export {
+  type Logger,
+  type FeeBasisPoints,
+  type FeeDecimal,
+  asLogger,
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+} from './types';
+
+// Constants - FIX Refactor 9.3: Export centralized configuration constants
+export {
+  DEFAULT_HEALTH_CHECK_PORT,
+  DEFAULT_METRICS_INTERVAL_MS,
+  DEFAULT_HEALTH_CHECK_INTERVAL_MS,
+  CHAIN_STOP_TIMEOUT_MS,
+  STATE_TRANSITION_TIMEOUT_MS,
+  SNAPSHOT_CACHE_TTL_MS,
+  DEX_POOL_CACHE_TTL_MS,
+  TRIANGULAR_CHECK_INTERVAL_MS,
+  MULTI_LEG_CHECK_INTERVAL_MS,
+  DEFAULT_OPPORTUNITY_EXPIRY_MS,
+  DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
+  DEFAULT_SIMULATION_VOLATILITY,
+  STABLECOIN_SYMBOLS,
+  DEFAULT_TOKEN_DECIMALS,
+} from './constants';
