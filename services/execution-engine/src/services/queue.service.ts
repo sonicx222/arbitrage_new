@@ -5,9 +5,11 @@
  * Implements water mark-based pausing/resuming to prevent memory exhaustion.
  *
  * Key features:
+ * - O(1) enqueue/dequeue using circular buffer (optimized for hot-path)
  * - Configurable queue size limits
  * - Hysteresis-based backpressure (high/low water marks)
  * - Pause state change notifications for stream consumer coupling
+ * - Event signaling for efficient processing (avoids polling)
  *
  * @see engine.ts (parent service)
  */
@@ -21,13 +23,81 @@ export interface QueueServiceConfig {
   queueConfig?: Partial<QueueConfig>;
 }
 
+/**
+ * Circular buffer implementation for O(1) FIFO operations.
+ * Avoids the O(n) cost of Array.shift() on large queues.
+ */
+class CircularBuffer<T> {
+  private readonly buffer: (T | undefined)[];
+  private head = 0; // Next read position
+  private tail = 0; // Next write position
+  private count = 0;
+
+  constructor(private readonly capacity: number) {
+    this.buffer = new Array(capacity);
+  }
+
+  /**
+   * Add item to the end of the queue. O(1)
+   * @returns true if added, false if full
+   */
+  push(item: T): boolean {
+    if (this.count >= this.capacity) {
+      return false;
+    }
+    this.buffer[this.tail] = item;
+    this.tail = (this.tail + 1) % this.capacity;
+    this.count++;
+    return true;
+  }
+
+  /**
+   * Remove and return item from front of queue. O(1)
+   * @returns item or undefined if empty
+   */
+  shift(): T | undefined {
+    if (this.count === 0) {
+      return undefined;
+    }
+    const item = this.buffer[this.head];
+    this.buffer[this.head] = undefined; // Allow GC
+    this.head = (this.head + 1) % this.capacity;
+    this.count--;
+    return item;
+  }
+
+  /**
+   * Get current size. O(1)
+   */
+  get length(): number {
+    return this.count;
+  }
+
+  /**
+   * Clear the buffer. O(1)
+   */
+  clear(): void {
+    // Don't need to clear individual slots - just reset pointers
+    this.head = 0;
+    this.tail = 0;
+    this.count = 0;
+  }
+}
+
 export class QueueServiceImpl implements QueueService {
   private readonly logger: Logger;
   private readonly config: QueueConfig;
 
-  private queue: ArbitrageOpportunity[] = [];
+  // O(1) circular buffer instead of O(n) array.shift()
+  private queue: CircularBuffer<ArbitrageOpportunity>;
   private paused = false;
   private pauseCallback: ((isPaused: boolean) => void) | null = null;
+
+  // Event signaling for efficient processing (replaces polling)
+  private itemAvailableCallback: (() => void) | null = null;
+
+  // Manual pause state for standby mode (ADR-007)
+  private manuallyPaused = false;
 
   constructor(config: QueueServiceConfig) {
     this.logger = config.logger;
@@ -36,24 +106,32 @@ export class QueueServiceImpl implements QueueService {
       highWaterMark: config.queueConfig?.highWaterMark ?? DEFAULT_QUEUE_CONFIG.highWaterMark,
       lowWaterMark: config.queueConfig?.lowWaterMark ?? DEFAULT_QUEUE_CONFIG.lowWaterMark
     };
+
+    // Initialize circular buffer with max capacity
+    this.queue = new CircularBuffer<ArbitrageOpportunity>(this.config.maxSize);
   }
 
   /**
    * Add opportunity to queue if possible.
    * Returns false if queue is at capacity or paused.
+   * Signals item availability for event-driven processing.
    */
   enqueue(opportunity: ArbitrageOpportunity): boolean {
     if (!this.canEnqueue()) {
       return false;
     }
 
-    this.queue.push(opportunity);
-    this.updateBackpressure();
-    return true;
+    const added = this.queue.push(opportunity);
+    if (added) {
+      this.updateBackpressure();
+      // Signal that an item is available for processing
+      this.signalItemAvailable();
+    }
+    return added;
   }
 
   /**
-   * Get next opportunity from queue.
+   * Get next opportunity from queue. O(1) operation.
    */
   dequeue(): ArbitrageOpportunity | undefined {
     const item = this.queue.shift();
@@ -85,9 +163,6 @@ export class QueueServiceImpl implements QueueService {
     return this.paused || this.manuallyPaused;
   }
 
-  // Manual pause state for standby mode (ADR-007)
-  private manuallyPaused = false;
-
   /**
    * Manually pause the queue (for standby mode).
    * Unlike backpressure pause, this doesn't auto-release.
@@ -114,6 +189,10 @@ export class QueueServiceImpl implements QueueService {
       if (this.pauseCallback && !this.paused) {
         this.pauseCallback(false);
       }
+      // Signal if items are waiting to be processed
+      if (this.queue.length > 0) {
+        this.signalItemAvailable();
+      }
     }
   }
 
@@ -128,7 +207,7 @@ export class QueueServiceImpl implements QueueService {
    * Clear the queue.
    */
   clear(): void {
-    this.queue = [];
+    this.queue.clear();
     this.paused = false;
     this.manuallyPaused = false;
   }
@@ -142,6 +221,26 @@ export class QueueServiceImpl implements QueueService {
   }
 
   /**
+   * Set callback for when an item becomes available.
+   * Enables event-driven processing instead of polling.
+   * @param callback Function to call when item is available
+   */
+  onItemAvailable(callback: () => void): void {
+    this.itemAvailableCallback = callback;
+  }
+
+  /**
+   * Signal that an item is available for processing.
+   * Uses setImmediate to avoid blocking the enqueue call.
+   */
+  private signalItemAvailable(): void {
+    if (this.itemAvailableCallback && !this.isPaused()) {
+      // Use setImmediate to signal asynchronously without blocking
+      setImmediate(this.itemAvailableCallback);
+    }
+  }
+
+  /**
    * Update backpressure state based on queue size.
    * Uses hysteresis to prevent thrashing:
    * - Pause at high water mark
@@ -150,6 +249,7 @@ export class QueueServiceImpl implements QueueService {
   private updateBackpressure(): void {
     const queueSize = this.queue.length;
     const prevPaused = this.paused;
+    const prevEffectivePause = prevPaused || this.manuallyPaused;
 
     // Update backpressure state atomically
     if (this.paused) {
@@ -164,7 +264,7 @@ export class QueueServiceImpl implements QueueService {
       }
     }
 
-    // Notify on state change
+    // Log backpressure state changes
     if (prevPaused !== this.paused) {
       if (this.paused) {
         this.logger.warn('Queue backpressure engaged', {
@@ -177,11 +277,13 @@ export class QueueServiceImpl implements QueueService {
           lowWaterMark: this.config.lowWaterMark
         });
       }
+    }
 
-      // Notify callback (for stream consumer coupling)
-      if (this.pauseCallback) {
-        this.pauseCallback(this.paused);
-      }
+    // Notify callback on EFFECTIVE pause state change (backpressure OR manual)
+    // This ensures stream consumer only resumes when BOTH are false
+    const currentEffectivePause = this.paused || this.manuallyPaused;
+    if (prevEffectivePause !== currentEffectivePause && this.pauseCallback) {
+      this.pauseCallback(currentEffectivePause);
     }
   }
 

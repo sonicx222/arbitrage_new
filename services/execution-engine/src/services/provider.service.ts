@@ -34,11 +34,22 @@ export class ProviderServiceImpl implements IProviderService {
   private providerHealth: Map<string, ProviderHealth> = new Map();
   private healthCheckInterval: NodeJS.Timeout | null = null;
 
+  // Callback for provider reconnection (allows engine to clear stale state)
+  private onProviderReconnectCallback: ((chainName: string) => void) | null = null;
+
   constructor(config: ProviderServiceConfig) {
     this.logger = config.logger;
     this.stateManager = config.stateManager;
     this.nonceManager = config.nonceManager;
     this.stats = config.stats;
+  }
+
+  /**
+   * Set callback for provider reconnection events.
+   * Used by engine to clear stale gas baseline data.
+   */
+  onProviderReconnect(callback: (chainName: string) => void): void {
+    this.onProviderReconnectCallback = callback;
   }
 
   /**
@@ -260,6 +271,11 @@ export class ProviderServiceImpl implements IProviderService {
           await this.nonceManager.resetChain(chainName);
           this.nonceManager.registerWallet(chainName, wallet);
         }
+      }
+
+      // Notify engine to clear stale state (e.g., gas baselines)
+      if (this.onProviderReconnectCallback) {
+        this.onProviderReconnectCallback(chainName);
       }
 
       this.logger.info(`Provider reconnection successful for ${chainName}`);

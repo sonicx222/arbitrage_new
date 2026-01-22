@@ -103,8 +103,14 @@ export abstract class BaseExecutionStrategy {
     }
   }
 
+  // Cached median for performance optimization
+  private medianCache: Map<string, { median: bigint; validUntil: number }> = new Map();
+  private readonly MEDIAN_CACHE_TTL_MS = 5000; // Cache median for 5 seconds
+  private readonly MAX_GAS_HISTORY = 100;
+
   /**
    * Update gas price baseline for spike detection.
+   * Optimized to avoid O(n) shift operations.
    */
   protected updateGasBaseline(
     chain: string,
@@ -123,21 +129,30 @@ export abstract class BaseExecutionStrategy {
     // Add current price
     history.push({ price, timestamp: now });
 
-    // Remove entries older than window
-    const cutoff = now - windowMs;
-    while (history.length > 0 && history[0].timestamp < cutoff) {
-      history.shift();
-    }
+    // Invalidate median cache when data changes
+    this.medianCache.delete(chain);
 
-    // Keep maximum 100 entries to prevent memory growth
-    if (history.length > 100) {
-      history.splice(0, history.length - 100);
+    // Remove old entries and cap size
+    // Use filter instead of shift/splice for cleaner code (still O(n) but simpler)
+    // For 100 entries max, this is acceptable
+    const cutoff = now - windowMs;
+    if (history.length > this.MAX_GAS_HISTORY || history[0]?.timestamp < cutoff) {
+      const filtered = history.filter(h => h.timestamp >= cutoff);
+      // Keep only the most recent MAX_GAS_HISTORY entries
+      const kept = filtered.length > this.MAX_GAS_HISTORY
+        ? filtered.slice(-this.MAX_GAS_HISTORY)
+        : filtered;
+
+      // Replace array contents in place to maintain reference
+      history.length = 0;
+      history.push(...kept);
     }
   }
 
   /**
    * Calculate baseline gas price from recent history.
    * Uses median to avoid outlier influence.
+   * Caches result for 5 seconds to avoid repeated sorting.
    */
   protected getGasBaseline(chain: string, ctx: StrategyContext): bigint {
     const history = ctx.gasBaselines.get(chain);
@@ -152,7 +167,14 @@ export abstract class BaseExecutionStrategy {
       return avg * 3n / 2n;
     }
 
-    // Sort by price and get median
+    // Check cache first
+    const now = Date.now();
+    const cached = this.medianCache.get(chain);
+    if (cached && now < cached.validUntil) {
+      return cached.median;
+    }
+
+    // Compute median (only when cache is stale)
     const sorted = [...history].sort((a, b) => {
       if (a.price < b.price) return -1;
       if (a.price > b.price) return 1;
@@ -160,7 +182,15 @@ export abstract class BaseExecutionStrategy {
     });
 
     const midIndex = Math.floor(sorted.length / 2);
-    return sorted[midIndex].price;
+    const median = sorted[midIndex].price;
+
+    // Cache the result
+    this.medianCache.set(chain, {
+      median,
+      validUntil: now + this.MEDIAN_CACHE_TTL_MS
+    });
+
+    return median;
   }
 
   // ===========================================================================

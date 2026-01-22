@@ -73,23 +73,34 @@ export const DEFAULT_QUEUE_CONFIG: QueueConfig = {
 // =============================================================================
 
 export interface ExecutionStats {
+  /** Total opportunities received from stream (before validation) */
   opportunitiesReceived: number;
-  opportunitiesExecuted: number;
+  /** Opportunities that started execution (attempts, not completions) */
+  executionAttempts: number;
+  /** Opportunities rejected during validation (bad format, low profit, etc.) */
   opportunitiesRejected: number;
+  /** Executions that completed successfully */
   successfulExecutions: number;
+  /** Executions that failed after being attempted */
   failedExecutions: number;
+  /** Opportunities rejected due to queue full/paused */
   queueRejects: number;
+  /** Executions skipped due to another instance holding the lock */
   lockConflicts: number;
+  /** Executions that timed out */
   executionTimeouts: number;
+  /** Errors during message processing (parse errors, etc.) */
   messageProcessingErrors: number;
+  /** Provider reconnection attempts */
   providerReconnections: number;
+  /** Provider health check failures */
   providerHealthCheckFailures: number;
 }
 
 export function createInitialStats(): ExecutionStats {
   return {
     opportunitiesReceived: 0,
-    opportunitiesExecuted: 0,
+    executionAttempts: 0,
     opportunitiesRejected: 0,
     successfulExecutions: 0,
     failedExecutions: 0,
@@ -254,6 +265,8 @@ export interface QueueService {
   clear(): void;
   /** Set pause state change callback */
   onPauseStateChange(callback: (isPaused: boolean) => void): void;
+  /** Set callback for when item becomes available (enables event-driven processing) */
+  onItemAvailable(callback: () => void): void;
   /** Manually pause the queue (for standby mode - ADR-007) */
   pause(): void;
   /** Resume a manually paused queue (for standby activation - ADR-007) */
