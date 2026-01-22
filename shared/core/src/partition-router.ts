@@ -72,6 +72,26 @@ export const PARTITION_PORTS: Readonly<Record<string, number>> = {
 } as const;
 
 /**
+ * Default ports for all services in the arbitrage system.
+ * Single source of truth to prevent port conflicts in development.
+ *
+ * Port assignments:
+ * - 3000: coordinator (system orchestration)
+ * - 3001-3004: partition detectors (chain detection)
+ * - 3005: execution-engine (trade execution)
+ * - 3006: cross-chain-detector (cross-chain arbitrage)
+ */
+export const SERVICE_PORTS: Readonly<Record<string, number>> = {
+  'coordinator': 3000,
+  'partition-asia-fast': 3001,
+  'partition-l2-turbo': 3002,
+  'partition-high-value': 3003,
+  'partition-solana': 3004,
+  'execution-engine': 3005,
+  'cross-chain-detector': 3006
+} as const;
+
+/**
  * Service names for each partition.
  * Maps partition IDs to their service directory names.
  *

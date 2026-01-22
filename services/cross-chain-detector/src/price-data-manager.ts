@@ -76,6 +76,10 @@ export interface PriceDataManager {
 const DEFAULT_CLEANUP_FREQUENCY = 100;
 const DEFAULT_MAX_PRICE_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
+// P2-FIX: Maximum size for normalizedPairCache to prevent unbounded memory growth
+// This limits memory usage in long-running services with many unique pairs
+const MAX_NORMALIZED_PAIR_CACHE_SIZE = 10000;
+
 // =============================================================================
 // Implementation
 // =============================================================================
@@ -104,7 +108,35 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
   let cachedSnapshotVersion = -1;
 
   // FIX 10.1: Cache normalized token pairs to avoid repeated normalization
+  // P2-FIX: Use bounded Map with LRU-style eviction when exceeding MAX_NORMALIZED_PAIR_CACHE_SIZE
   const normalizedPairCache = new Map<string, string | null>();
+
+  /**
+   * P2-FIX: Evict oldest entries from normalizedPairCache when it exceeds max size.
+   * Uses simple FIFO eviction (Map maintains insertion order).
+   * Evicts 20% of oldest entries to amortize eviction cost.
+   */
+  function pruneNormalizedPairCache(): void {
+    if (normalizedPairCache.size <= MAX_NORMALIZED_PAIR_CACHE_SIZE) return;
+
+    const evictionCount = Math.ceil(MAX_NORMALIZED_PAIR_CACHE_SIZE * 0.2);
+    const keysToDelete: string[] = [];
+
+    // Get oldest entries (Map iterates in insertion order)
+    for (const key of normalizedPairCache.keys()) {
+      keysToDelete.push(key);
+      if (keysToDelete.length >= evictionCount) break;
+    }
+
+    for (const key of keysToDelete) {
+      normalizedPairCache.delete(key);
+    }
+
+    logger.debug('Pruned normalizedPairCache', {
+      evicted: keysToDelete.length,
+      remaining: normalizedPairCache.size,
+    });
+  }
 
   // ===========================================================================
   // Price Data Management
@@ -346,6 +378,9 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         }
       }
     }
+
+    // P2-FIX: Prune cache if it has grown too large during processing
+    pruneNormalizedPairCache();
 
     // PERF 10.2: Filter out token pairs with only single-chain data
     // Cross-chain arbitrage requires at least 2 chains with different prices

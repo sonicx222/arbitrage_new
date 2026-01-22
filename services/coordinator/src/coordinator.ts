@@ -484,6 +484,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.activePairs.clear();
       // P2-1 FIX: Reset stream error counter
       this.streamConsumerErrors = 0;
+      // P4-FIX: Reset stream warning counter
+      this.streamConsumerWarnings = 0;
 
       this.logger.info('Coordinator Service stopped successfully');
     });
@@ -744,6 +746,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private readonly MAX_STREAM_ERRORS = 10;
   private alertSentForCurrentErrorBurst = false; // P1-NEW-2: Prevent duplicate alerts
 
+  // P4-FIX: Track stream consumer warnings for monitoring parity with errors
+  private streamConsumerWarnings = 0;
+  private readonly MAX_STREAM_WARNINGS = 50; // Higher threshold since warnings are less severe
+
   /**
    * Start stream consumers using blocking reads pattern.
    * Replaces setInterval polling for better latency and reduced Redis command usage.
@@ -845,6 +851,32 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.streamConsumerErrors = 0;
       this.alertSentForCurrentErrorBurst = false;
     }
+  }
+
+  /**
+   * P4-FIX: Track stream consumer warnings for monitoring parity.
+   * Sends a warning alert after accumulating MAX_STREAM_WARNINGS.
+   */
+  private trackStreamWarning(streamName: string, message: string): void {
+    this.streamConsumerWarnings++;
+
+    // Log accumulated warnings periodically
+    if (this.streamConsumerWarnings >= this.MAX_STREAM_WARNINGS) {
+      this.logger.warn('Stream consumer accumulated warnings', {
+        streamName,
+        warningCount: this.streamConsumerWarnings,
+        lastWarning: message
+      });
+      // Reset counter after logging (don't send alerts for warnings, just log)
+      this.streamConsumerWarnings = 0;
+    }
+  }
+
+  /**
+   * P4-FIX: Reset stream warning tracking.
+   */
+  private resetStreamWarnings(): void {
+    this.streamConsumerWarnings = 0;
   }
 
   // ===========================================================================
