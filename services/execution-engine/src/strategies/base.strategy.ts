@@ -22,6 +22,7 @@ import type {
   FlashLoanParams
 } from '../types';
 import { TRANSACTION_TIMEOUT_MS } from '../types';
+import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
 
 /**
  * Base class for execution strategies.
@@ -110,7 +111,8 @@ export abstract class BaseExecutionStrategy {
 
   /**
    * Update gas price baseline for spike detection.
-   * Optimized to avoid O(n) shift operations.
+   * Optimized for hot-path: uses in-place array compaction to avoid
+   * temporary array allocations (filter/slice create new arrays).
    */
   protected updateGasBaseline(
     chain: string,
@@ -132,20 +134,32 @@ export abstract class BaseExecutionStrategy {
     // Invalidate median cache when data changes
     this.medianCache.delete(chain);
 
-    // Remove old entries and cap size
-    // Use filter instead of shift/splice for cleaner code (still O(n) but simpler)
-    // For 100 entries max, this is acceptable
+    // Remove old entries and cap size using in-place compaction
+    // This avoids creating temporary arrays on every call (hot-path optimization)
     const cutoff = now - windowMs;
     if (history.length > this.MAX_GAS_HISTORY || history[0]?.timestamp < cutoff) {
-      const filtered = history.filter(h => h.timestamp >= cutoff);
-      // Keep only the most recent MAX_GAS_HISTORY entries
-      const kept = filtered.length > this.MAX_GAS_HISTORY
-        ? filtered.slice(-this.MAX_GAS_HISTORY)
-        : filtered;
+      // In-place compaction: single pass, no temporary arrays
+      let writeIdx = 0;
+      for (let readIdx = 0; readIdx < history.length; readIdx++) {
+        if (history[readIdx].timestamp >= cutoff) {
+          if (writeIdx !== readIdx) {
+            history[writeIdx] = history[readIdx];
+          }
+          writeIdx++;
+        }
+      }
 
-      // Replace array contents in place to maintain reference
-      history.length = 0;
-      history.push(...kept);
+      // If still over limit, keep only most recent entries
+      if (writeIdx > this.MAX_GAS_HISTORY) {
+        const offset = writeIdx - this.MAX_GAS_HISTORY;
+        for (let i = 0; i < this.MAX_GAS_HISTORY; i++) {
+          history[i] = history[i + offset];
+        }
+        writeIdx = this.MAX_GAS_HISTORY;
+      }
+
+      // Truncate to valid entries
+      history.length = writeIdx;
     }
   }
 
@@ -457,5 +471,103 @@ export abstract class BaseExecutionStrategy {
     const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
     const expectedProfit = opportunity.expectedProfit || 0;
     return expectedProfit - gasCost;
+  }
+
+  // ===========================================================================
+  // Pre-flight Simulation (Phase 1.1)
+  // ===========================================================================
+
+  /**
+   * Perform pre-flight simulation of the transaction.
+   *
+   * Checks:
+   * 1. If simulation service is available
+   * 2. If simulation should be performed (profit threshold, time-critical bypass)
+   * 3. Simulates the transaction
+   * 4. Returns result or null (graceful degradation on errors)
+   *
+   * @param opportunity - The arbitrage opportunity
+   * @param transaction - The prepared transaction
+   * @param chain - Chain identifier
+   * @param ctx - Strategy context
+   * @returns SimulationResult or null if simulation was skipped/failed
+   */
+  protected async performSimulation(
+    opportunity: ArbitrageOpportunity,
+    transaction: ethers.TransactionRequest,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<SimulationResult | null> {
+    // Check if simulation service is available
+    if (!ctx.simulationService) {
+      ctx.stats.simulationsSkipped++;
+      return null;
+    }
+
+    // Calculate opportunity age for time-critical bypass
+    const opportunityAge = Date.now() - opportunity.timestamp;
+    const expectedProfit = opportunity.expectedProfit || 0;
+
+    // Check if we should simulate this opportunity
+    // shouldSimulate() checks: profit threshold, time-critical bypass, provider availability
+    if (!ctx.simulationService.shouldSimulate(expectedProfit, opportunityAge)) {
+      ctx.stats.simulationsSkipped++;
+      this.logger.debug('Skipping simulation', {
+        opportunityId: opportunity.id,
+        expectedProfit,
+        opportunityAge,
+      });
+      return null;
+    }
+
+    // Prepare simulation request
+    const simulationRequest: SimulationRequest = {
+      chain,
+      transaction: {
+        from: transaction.from,
+        to: transaction.to,
+        data: transaction.data,
+        value: transaction.value,
+        gasLimit: transaction.gasLimit,
+      },
+      includeStateChanges: false, // Not needed for pre-flight check
+      includeLogs: false,
+    };
+
+    try {
+      const result = await ctx.simulationService.simulate(simulationRequest);
+      ctx.stats.simulationsPerformed++;
+
+      this.logger.debug('Simulation completed', {
+        opportunityId: opportunity.id,
+        success: result.success,
+        wouldRevert: result.wouldRevert,
+        revertReason: result.revertReason,
+        gasUsed: result.gasUsed?.toString(),
+        provider: result.provider,
+        latencyMs: result.latencyMs,
+      });
+
+      // If simulation itself failed (service error), log and proceed with execution
+      if (!result.success) {
+        ctx.stats.simulationErrors++;
+        this.logger.warn('Simulation service error, proceeding with execution', {
+          opportunityId: opportunity.id,
+          error: result.error,
+          provider: result.provider,
+        });
+        return null; // Graceful degradation - proceed without simulation
+      }
+
+      return result;
+    } catch (error) {
+      // Handle unexpected errors gracefully
+      ctx.stats.simulationErrors++;
+      this.logger.warn('Simulation failed unexpectedly, proceeding with execution', {
+        opportunityId: opportunity.id,
+        error: getErrorMessage(error),
+      });
+      return null; // Graceful degradation - proceed without simulation
+    }
   }
 }

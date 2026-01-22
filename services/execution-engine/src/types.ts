@@ -17,6 +17,7 @@ import type {
   BridgeRouterFactory,
 } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { ISimulationService } from './services/simulation/types';
 
 // =============================================================================
 // Execution Result
@@ -95,6 +96,15 @@ export interface ExecutionStats {
   providerReconnections: number;
   /** Provider health check failures */
   providerHealthCheckFailures: number;
+  // Simulation metrics (Phase 1.1.3)
+  /** Simulations performed before execution */
+  simulationsPerformed: number;
+  /** Simulations skipped (below threshold, time-critical, no provider) */
+  simulationsSkipped: number;
+  /** Executions aborted due to simulation predicting revert */
+  simulationPredictedReverts: number;
+  /** Simulation service errors (proceeded with execution) */
+  simulationErrors: number;
 }
 
 export function createInitialStats(): ExecutionStats {
@@ -109,7 +119,12 @@ export function createInitialStats(): ExecutionStats {
     executionTimeouts: 0,
     messageProcessingErrors: 0,
     providerReconnections: 0,
-    providerHealthCheckFailures: 0
+    providerHealthCheckFailures: 0,
+    // Simulation metrics
+    simulationsPerformed: 0,
+    simulationsSkipped: 0,
+    simulationPredictedReverts: 0,
+    simulationErrors: 0,
   };
 }
 
@@ -235,6 +250,8 @@ export interface StrategyContext {
   stateManager: ServiceStateManager;
   gasBaselines: Map<string, { price: bigint; timestamp: number }[]>;
   stats: ExecutionStats;
+  /** Simulation service for pre-flight transaction validation (Phase 1.1) */
+  simulationService?: ISimulationService;
 }
 
 /**

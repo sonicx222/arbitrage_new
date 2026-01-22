@@ -63,6 +63,10 @@ import { IntraChainStrategy } from './strategies/intra-chain.strategy';
 import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
+import type { ISimulationService, ISimulationProvider, SimulationProviderConfig } from './services/simulation/types';
+import { SimulationService } from './services/simulation/simulation.service';
+import { TenderlyProvider, createTenderlyProvider } from './services/simulation/tenderly-provider';
+import { AlchemySimulationProvider, createAlchemyProvider } from './services/simulation/alchemy-provider';
 
 // Re-export types for consumers
 export type {
@@ -103,6 +107,9 @@ export class ExecutionEngineService {
   private crossChainStrategy: CrossChainStrategy | null = null;
   private simulationStrategy: SimulationStrategy | null = null;
 
+  // Transaction simulation service (Phase 1.1)
+  private txSimulationService: ISimulationService | null = null;
+
   // Infrastructure
   private readonly logger: Logger;
   private readonly perfLogger: PerformanceLogger;
@@ -122,6 +129,7 @@ export class ExecutionEngineService {
   private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
   private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions = 5; // Limit parallel executions
+  private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
 
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
@@ -466,6 +474,111 @@ export class ExecutionEngineService {
     this.intraChainStrategy = new IntraChainStrategy(this.logger);
     this.crossChainStrategy = new CrossChainStrategy(this.logger);
     this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
+
+    // Initialize transaction simulation service (Phase 1.1) if not in dev simulation mode
+    // Note: Actual providers (Tenderly, Alchemy) require API keys from environment
+    if (!this.isSimulationMode) {
+      this.initializeTransactionSimulationService();
+    }
+  }
+
+  /**
+   * Initialize the transaction simulation service (Phase 1.1).
+   *
+   * Initializes simulation providers from environment variables:
+   * - TENDERLY_API_KEY, TENDERLY_ACCOUNT_SLUG, TENDERLY_PROJECT_SLUG
+   * - ALCHEMY_API_KEY (with chain-specific URLs)
+   *
+   * @see services/simulation/ for provider implementations.
+   */
+  private initializeTransactionSimulationService(): void {
+    const providers: ISimulationProvider[] = [];
+    const configuredChains = Array.from(this.providerService?.getProviders().keys() ?? []);
+
+    // Initialize Tenderly provider if configured
+    const tenderlyApiKey = process.env.TENDERLY_API_KEY;
+    const tenderlyAccountSlug = process.env.TENDERLY_ACCOUNT_SLUG;
+    const tenderlyProjectSlug = process.env.TENDERLY_PROJECT_SLUG;
+
+    if (tenderlyApiKey && tenderlyAccountSlug && tenderlyProjectSlug) {
+      try {
+        // Create Tenderly provider for each chain
+        for (const chain of configuredChains) {
+          const provider = this.providerService?.getProvider(chain);
+          if (provider) {
+            const tenderlyProvider = createTenderlyProvider({
+              type: 'tenderly',
+              chain,
+              provider,
+              enabled: true,
+              apiKey: tenderlyApiKey,
+              accountSlug: tenderlyAccountSlug,
+              projectSlug: tenderlyProjectSlug,
+            });
+            providers.push(tenderlyProvider);
+            this.logger.debug('Tenderly provider initialized', { chain });
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Failed to initialize Tenderly provider', {
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
+    // Initialize Alchemy provider if configured (fallback)
+    const alchemyApiKey = process.env.ALCHEMY_API_KEY;
+    if (alchemyApiKey && providers.length === 0) {
+      try {
+        for (const chain of configuredChains) {
+          const provider = this.providerService?.getProvider(chain);
+          if (provider) {
+            const alchemyProvider = createAlchemyProvider({
+              type: 'alchemy',
+              chain,
+              provider,
+              enabled: true,
+              apiKey: alchemyApiKey,
+            });
+            providers.push(alchemyProvider);
+            this.logger.debug('Alchemy provider initialized', { chain });
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Failed to initialize Alchemy provider', {
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
+    if (providers.length === 0) {
+      this.logger.info('Transaction simulation service not initialized - no providers configured', {
+        hint: 'Set TENDERLY_API_KEY/TENDERLY_ACCOUNT_SLUG/TENDERLY_PROJECT_SLUG or ALCHEMY_API_KEY',
+      });
+      return;
+    }
+
+    // Read config from environment with defaults
+    const minProfitForSimulation = parseInt(process.env.SIMULATION_MIN_PROFIT || '50', 10);
+    const timeCriticalThresholdMs = parseInt(process.env.SIMULATION_TIME_CRITICAL_MS || '2000', 10);
+
+    this.txSimulationService = new SimulationService({
+      providers,
+      logger: this.logger,
+      config: {
+        minProfitForSimulation,
+        bypassForTimeCritical: true,
+        timeCriticalThresholdMs,
+        useFallback: true,
+      },
+    });
+
+    this.logger.info('Transaction simulation service initialized', {
+      providerCount: providers.length,
+      chains: configuredChains,
+      minProfitForSimulation,
+      timeCriticalThresholdMs,
+    });
   }
 
   // ===========================================================================
@@ -495,33 +608,45 @@ export class ExecutionEngineService {
   /**
    * Process available queue items up to concurrency limit.
    * Called both by event callback and fallback interval.
+   *
+   * Uses a processing guard to prevent race conditions from concurrent calls.
+   * This ensures activeExecutionCount is accurately tracked.
    */
   private processQueueItems(): void {
     // Check preconditions: running, queue exists
     if (!this.stateManager.isRunning()) return;
     if (!this.queueService) return;
 
-    // Process multiple items if under concurrency limit
-    while (
-      this.queueService.size() > 0 &&
-      this.activeExecutionCount < this.maxConcurrentExecutions
-    ) {
-      const opportunity = this.queueService.dequeue();
-      if (!opportunity) break;
+    // Guard against concurrent entry - prevents race condition where multiple
+    // callers could each increment activeExecutionCount past the limit
+    if (this.isProcessingQueue) return;
+    this.isProcessingQueue = true;
 
-      // Increment counter before async operation
-      this.activeExecutionCount++;
+    try {
+      // Process multiple items if under concurrency limit
+      while (
+        this.queueService.size() > 0 &&
+        this.activeExecutionCount < this.maxConcurrentExecutions
+      ) {
+        const opportunity = this.queueService.dequeue();
+        if (!opportunity) break;
 
-      // Execute and decrement counter when done (success or failure)
-      // Also trigger another processing cycle to handle queued items
-      this.executeOpportunityWithLock(opportunity)
-        .finally(() => {
-          this.activeExecutionCount--;
-          // Process more items if available (avoids waiting for next event/interval)
-          if (this.queueService && this.queueService.size() > 0) {
-            setImmediate(() => this.processQueueItems());
-          }
-        });
+        // Increment counter before async operation
+        this.activeExecutionCount++;
+
+        // Execute and decrement counter when done (success or failure)
+        // Also trigger another processing cycle to handle queued items
+        this.executeOpportunityWithLock(opportunity)
+          .finally(() => {
+            this.activeExecutionCount--;
+            // Process more items if available (avoids waiting for next event/interval)
+            if (this.queueService && this.queueService.size() > 0) {
+              setImmediate(() => this.processQueueItems());
+            }
+          });
+      }
+    } finally {
+      this.isProcessingQueue = false;
     }
   }
 
@@ -688,6 +813,7 @@ export class ExecutionEngineService {
       stateManager: this.stateManager,
       gasBaselines: this.gasBaselines,
       stats: this.stats,
+      simulationService: this.txSimulationService ?? undefined,
     };
   }
 
