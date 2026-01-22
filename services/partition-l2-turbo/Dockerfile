@@ -24,19 +24,20 @@ COPY services/partition-l2-turbo/ ./services/partition-l2-turbo/
 # Install dependencies
 RUN npm install
 
-# Build shared packages first
+# Build shared packages in dependency order (fail fast on build errors)
+# Note: Proper build order is types -> config -> core -> unified-detector -> partition
 WORKDIR /app/shared/types
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/config
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/core
-RUN npm run build || true
+RUN npm run build
 
 # Build unified-detector (dependency)
 WORKDIR /app/services/unified-detector
-RUN npm run build || true
+RUN npm run build
 
 # Build partition service
 WORKDIR /app/services/partition-l2-turbo
@@ -57,17 +58,28 @@ COPY --from=builder /app/shared ./shared
 # Install production dependencies only
 RUN npm install --production
 
-# Set P2 partition environment variables
+# =====================================================================
+# P2 L2-Turbo Partition Environment Variables
+# =====================================================================
+# REQUIRED AT RUNTIME (set via Fly.io secrets or deployment config):
+#   - REDIS_URL: Redis connection string
+#   - ARBITRUM_WS_URL: WebSocket URL for Arbitrum (Alchemy/Infura/QuickNode)
+#   - OPTIMISM_WS_URL: WebSocket URL for Optimism
+#   - BASE_WS_URL: WebSocket URL for Base
+#
+# L2 chains have ~250ms blocks; WebSocket connections are critical for
+# real-time price feeds required for competitive arbitrage trading.
+# =====================================================================
+
 ENV NODE_ENV=production
 ENV LOG_LEVEL=info
 ENV PARTITION_ID=l2-turbo
 ENV REGION_ID=asia-southeast1
 
-# P2 partition configuration
 # Chains: Arbitrum (42161), Optimism (10), Base (8453)
 ENV PARTITION_CHAINS=arbitrum,optimism,base
 
-# Health check port (different from P1)
+# Health check port (P1: 3001, P2: 3002, P3: 3003, P4: 3004)
 ENV HEALTH_CHECK_PORT=3002
 
 # Health check - faster interval for L2 chains
