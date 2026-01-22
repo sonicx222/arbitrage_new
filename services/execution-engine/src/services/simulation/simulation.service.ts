@@ -51,6 +51,9 @@ export interface SimulationServiceOptions {
 // Cache TTL for provider ordering (1 second for hot-path optimization)
 const PROVIDER_ORDER_CACHE_TTL_MS = 1000;
 
+// Maximum cache size to prevent unbounded memory growth
+const MAX_CACHE_SIZE = 500;
+
 /** Cache entry for simulation results */
 interface CacheEntry {
   result: SimulationResult;
@@ -436,7 +439,8 @@ export class SimulationService implements ISimulationService {
   /**
    * Add result to cache
    *
-   * Only caches successful results (not errors)
+   * Only caches successful results (not errors).
+   * Enforces a hard limit on cache size to prevent memory leaks.
    */
   private addToCache(key: string, result: SimulationResult): void {
     if (!result.success) return; // Don't cache failures
@@ -448,9 +452,15 @@ export class SimulationService implements ISimulationService {
 
     this.simulationCache.set(key, entry);
 
-    // Periodic cleanup of expired entries (every 100 cache adds)
-    if (this.simulationCache.size > 100 && Math.random() < 0.1) {
+    // Deterministic cleanup when cache exceeds threshold
+    // Cleanup at 80% capacity to avoid cleanup on every add
+    if (this.simulationCache.size >= MAX_CACHE_SIZE * 0.8) {
       this.cleanupCache();
+    }
+
+    // Hard limit: if still over max after cleanup, evict oldest entries
+    if (this.simulationCache.size >= MAX_CACHE_SIZE) {
+      this.evictOldestEntries(this.simulationCache.size - MAX_CACHE_SIZE + 50);
     }
   }
 
@@ -463,6 +473,19 @@ export class SimulationService implements ISimulationService {
       if (now > entry.expiresAt) {
         this.simulationCache.delete(key);
       }
+    }
+  }
+
+  /**
+   * Evict oldest entries when cache is at capacity.
+   * Uses insertion order (Map guarantees iteration order).
+   */
+  private evictOldestEntries(count: number): void {
+    let evicted = 0;
+    for (const key of this.simulationCache.keys()) {
+      if (evicted >= count) break;
+      this.simulationCache.delete(key);
+      evicted++;
     }
   }
 }

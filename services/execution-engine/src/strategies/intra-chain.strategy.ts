@@ -2,6 +2,7 @@
  * Intra-Chain Execution Strategy
  *
  * Executes arbitrage opportunities within a single chain using:
+ * - Pre-flight simulation to detect reverts (Phase 1.1)
  * - Flash loans from Aave/Uniswap
  * - MEV protection via Flashbots (on supported chains)
  * - Atomic nonce management
@@ -60,6 +61,30 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
     // Prepare flash loan transaction
     const flashLoanTx = await this.prepareFlashLoanTransaction(opportunity, chain, ctx);
+
+    // ==========================================================================
+    // Phase 1.1: Pre-flight Simulation
+    // ==========================================================================
+    const simulationResult = await this.performSimulation(opportunity, flashLoanTx, chain, ctx);
+
+    if (simulationResult?.wouldRevert) {
+      ctx.stats.simulationPredictedReverts++;
+      this.logger.warn('Aborting execution: simulation predicted revert', {
+        opportunityId: opportunity.id,
+        revertReason: simulationResult.revertReason,
+        simulationLatencyMs: simulationResult.latencyMs,
+        provider: simulationResult.provider,
+      });
+
+      return {
+        opportunityId: opportunity.id,
+        success: false,
+        error: `Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+        timestamp: Date.now(),
+        chain,
+        dex: opportunity.buyDex || 'unknown',
+      };
+    }
 
     // Apply MEV protection
     const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);

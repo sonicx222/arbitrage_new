@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
-import { getErrorMessage, BRIDGE_DEFAULTS } from '@arbitrage/core';
+import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
@@ -117,20 +117,26 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // Validate profit still viable after bridge fees
+      // Convert bridge fee from ETH to USD for consistent comparison
+      // (expectedProfit is in USD, bridgeQuote.totalFee is in wei)
       const bridgeFeeEth = parseFloat(ethers.formatEther(bridgeQuote.totalFee));
+      const ethPriceUsd = getDefaultPrice('ETH');
+      const bridgeFeeUsd = bridgeFeeEth * ethPriceUsd;
       const expectedProfit = opportunity.expectedProfit || 0;
 
-      if (bridgeFeeEth >= expectedProfit * 0.5) {
+      if (bridgeFeeUsd >= expectedProfit * 0.5) {
         this.logger.warn('Cross-chain profit too low after bridge fees', {
           opportunityId: opportunity.id,
-          bridgeFee: bridgeFeeEth,
+          bridgeFeeEth,
+          bridgeFeeUsd,
+          ethPriceUsd,
           expectedProfit,
         });
 
         return {
           opportunityId: opportunity.id,
           success: false,
-          error: `Bridge fees (${bridgeFeeEth.toFixed(4)} ETH) exceed 50% of profit`,
+          error: `Bridge fees ($${bridgeFeeUsd.toFixed(2)}) exceed 50% of expected profit ($${expectedProfit.toFixed(2)})`,
           timestamp: Date.now(),
           chain: sourceChain,
           dex: opportunity.buyDex || 'unknown',
@@ -178,6 +184,54 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           chain: sourceChain,
           dex: opportunity.buyDex || 'unknown',
         };
+      }
+
+      // ==========================================================================
+      // Phase 1.1: Pre-flight Simulation for Destination Sell Transaction
+      // ==========================================================================
+      // Note: Bridge transaction simulation is skipped because the bridge router
+      // internally builds the transaction during execute(). We simulate the
+      // destination sell transaction instead to catch potential issues early.
+      const destWalletForSim = ctx.wallets.get(destChain);
+      if (destWalletForSim && ctx.providers.get(destChain)) {
+        // Prepare sell transaction for simulation
+        try {
+          const sellSimTx = await this.prepareFlashLoanTransaction(opportunity, destChain, ctx);
+          sellSimTx.from = await destWalletForSim.getAddress();
+
+          const simulationResult = await this.performSimulation(opportunity, sellSimTx, destChain, ctx);
+
+          if (simulationResult?.wouldRevert) {
+            ctx.stats.simulationPredictedReverts++;
+
+            if (ctx.nonceManager && bridgeNonce !== undefined) {
+              ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, 'Simulation predicted revert on destination');
+            }
+
+            this.logger.warn('Aborting cross-chain execution: destination sell simulation predicted revert', {
+              opportunityId: opportunity.id,
+              revertReason: simulationResult.revertReason,
+              simulationLatencyMs: simulationResult.latencyMs,
+              provider: simulationResult.provider,
+              destChain,
+            });
+
+            return {
+              opportunityId: opportunity.id,
+              success: false,
+              error: `Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+              timestamp: Date.now(),
+              chain: sourceChain,
+              dex: opportunity.buyDex || 'unknown',
+            };
+          }
+        } catch (simError) {
+          // Log but continue - simulation preparation failure shouldn't block execution
+          this.logger.debug('Could not prepare destination sell for simulation, proceeding', {
+            opportunityId: opportunity.id,
+            error: getErrorMessage(simError),
+          });
+        }
       }
 
       // Step 3: Execute bridge
@@ -401,27 +455,36 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Step 6: Calculate final results
       const executionTimeMs = Date.now() - startTime;
 
-      // Calculate total gas costs (bridge + sell)
-      const bridgeGasCost = bridgeResult.gasUsed
-        ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * 30000000000n))
+      // Get source chain gas price for bridge cost calculation
+      const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
+
+      // Calculate total gas costs in ETH (bridge + sell)
+      const bridgeGasCostEth = bridgeResult.gasUsed
+        ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
         : 0;
-      const sellGasCost = sellReceipt
+      const sellGasCostEth = sellReceipt
         ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
         : 0;
-      const totalGasCost = bridgeGasCost + sellGasCost;
+      const totalGasCostEth = bridgeGasCostEth + sellGasCostEth;
 
-      // Calculate actual profit (expected - bridge fees - gas costs)
-      const actualProfit = expectedProfit - bridgeFeeEth - totalGasCost;
+      // Convert all costs to USD for consistent profit calculation
+      // (expectedProfit is already in USD)
+      const totalGasCostUsd = totalGasCostEth * ethPriceUsd;
+
+      // Calculate actual profit in USD (expected - bridge fees - gas costs)
+      const actualProfit = expectedProfit - bridgeFeeUsd - totalGasCostUsd;
 
       this.logger.info('Cross-chain arbitrage completed', {
         opportunityId: opportunity.id,
         executionTimeMs,
-        bridgeFee: bridgeFeeEth,
-        bridgeGasCost,
-        sellGasCost,
-        totalGasCost,
+        bridgeFeeEth,
+        bridgeFeeUsd,
+        bridgeGasCostEth,
+        sellGasCostEth,
+        totalGasCostUsd,
         expectedProfit,
         actualProfit,
+        ethPriceUsd,
       });
 
       return {
@@ -430,7 +493,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         transactionHash: sellTxHash || bridgeResult.sourceTxHash,
         actualProfit,
         gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
-        gasCost: totalGasCost,
+        gasCost: totalGasCostUsd, // Gas cost in USD for consistency with actualProfit
         timestamp: Date.now(),
         chain: destChain, // Report final chain where sell occurred
         dex: opportunity.sellDex || 'unknown',
