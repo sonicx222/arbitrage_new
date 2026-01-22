@@ -137,6 +137,7 @@ const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
   FTM: 0.80,
   OP: 3.00,
   ARB: 1.50,
+  SOL: 200,  // Solana native token
 
   // Stablecoins
   USDT: 1.00,
