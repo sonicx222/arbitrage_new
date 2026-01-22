@@ -35,7 +35,13 @@ if (process.env.NODE_ENV !== 'test') {
 // =============================================================================
 // CHAIN CONFIGURATIONS
 // =============================================================================
-export { CHAINS } from './chains';
+export {
+  CHAINS,
+  MAINNET_CHAIN_IDS,
+  MainnetChainId,
+  TESTNET_CHAINS,
+  getAllChains
+} from './chains';
 
 // =============================================================================
 // DEX CONFIGURATIONS
@@ -76,6 +82,7 @@ export {
   BRIDGE_COSTS,
   BridgeCostConfig,
   getBridgeCost,
+  getAllBridgeOptions,
   calculateBridgeCostUsd
 } from './service-config';
 
@@ -86,6 +93,7 @@ export {
   CROSS_CHAIN_TOKEN_ALIASES,
   normalizeTokenForCrossChain,
   findCommonTokensBetweenChains,
+  preWarmCommonTokensCache,
   getChainSpecificTokenSymbol,
   // Refactored from detector.ts - chain-specific quote tokens
   DEFAULT_QUOTE_TOKENS,

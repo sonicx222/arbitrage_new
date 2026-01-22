@@ -26,7 +26,7 @@ export const ARBITRAGE_CONFIG = {
   confidenceThreshold: 0.75,
   maxTradeSize: '1000000000000000000', // 1 ETH equivalent
   triangularEnabled: true,
-  crossChainEnabled: false, // Enable in Phase 2
+  crossChainEnabled: true,  // FIX: Enabled - cross-chain-detector service is implemented
   predictiveEnabled: false, // Enable in Phase 3
   // Additional config properties for opportunity calculation
   defaultAmount: 1000, // Default trade amount in USD

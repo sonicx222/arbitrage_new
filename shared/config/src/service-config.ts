@@ -62,7 +62,32 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',  // PancakeSwap V3 Router
     protocol: 'pancakeswap_v3',
     fee: 25  // 0.25% flash swap fee
+  },
+  // S3.2.1-FIX: Added Avalanche Aave V3 flash loan provider
+  avalanche: {
+    address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',  // Aave V3 Pool on Avalanche
+    protocol: 'aave_v3',
+    fee: 9  // 0.09% flash loan fee
+  },
+  // S3.2.2-FIX: Fantom uses SpookySwap flash swaps (Aave V3 not deployed on Fantom)
+  fantom: {
+    address: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',  // SpookySwap Router
+    protocol: 'spookyswap',
+    fee: 30  // 0.3% flash swap fee
+  },
+  // S3.1.2-FIX: zkSync Era - SyncSwap provides flash swaps (no Aave V3 yet)
+  zksync: {
+    address: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',  // SyncSwap Router
+    protocol: 'syncswap',
+    fee: 30  // 0.3% flash swap fee
+  },
+  // S3.1.2-FIX: Linea - SyncSwap provides flash swaps (no Aave V3 yet)
+  linea: {
+    address: '0x80e38291e06339d10AAB483C65695D004dBD5C69',  // SyncSwap Router on Linea
+    protocol: 'syncswap',
+    fee: 30  // 0.3% flash swap fee
   }
+  // Note: Solana doesn't use traditional flash loans - uses Jupiter swap routes instead
 };
 
 // =============================================================================
@@ -115,10 +140,75 @@ export const BRIDGE_COSTS: BridgeCostConfig[] = [
   { bridge: 'native', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
   { bridge: 'native', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
   { bridge: 'native', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
+
+  // S3.2.1-FIX: Avalanche bridge routes (Stargate supports Avalanche)
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'avalanche', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'ethereum', feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'avalanche', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+
+  // S3.2.2-FIX: Fantom bridge routes (Stargate supports Fantom)
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'fantom', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'ethereum', feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'fantom', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+
+  // S3.1.2-FIX: zkSync bridge routes (native bridge + Across)
+  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'zksync', feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 900, reliability: 0.99 }, // ~15 min
+  { bridge: 'native', sourceChain: 'zksync', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 86400, reliability: 0.99 }, // ~24 hours
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'zksync', feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
+  { bridge: 'across', sourceChain: 'zksync', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
+
+  // S3.1.2-FIX: Linea bridge routes (native bridge + Across)
+  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'linea', feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 1200, reliability: 0.99 }, // ~20 min
+  { bridge: 'native', sourceChain: 'linea', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 28800, reliability: 0.99 }, // ~8 hours
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'linea', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'linea', targetChain: 'ethereum', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+
+  // S3.3.7-FIX: Solana bridge routes (Wormhole is primary Solana ↔ EVM bridge)
+  { bridge: 'wormhole', sourceChain: 'ethereum', targetChain: 'solana', feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'ethereum', feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'arbitrum', targetChain: 'solana', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'arbitrum', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
 ];
+
+// =============================================================================
+// BRIDGE COST LOOKUP CACHE (Performance Optimization)
+// Pre-computed Map for O(1) lookups instead of O(n) filter operations
+// =============================================================================
+type BridgeCostKey = `${string}:${string}`; // sourceChain:targetChain
+type BridgeCostKeyWithBridge = `${string}:${string}:${string}`; // sourceChain:targetChain:bridge
+
+// Pre-computed map: route -> all bridge options for that route
+const BRIDGE_COST_BY_ROUTE = new Map<BridgeCostKey, BridgeCostConfig[]>();
+// Pre-computed map: route+bridge -> specific bridge config
+const BRIDGE_COST_BY_ROUTE_AND_BRIDGE = new Map<BridgeCostKeyWithBridge, BridgeCostConfig>();
+// Pre-computed map: route -> best (lowest fee) bridge option
+const BEST_BRIDGE_BY_ROUTE = new Map<BridgeCostKey, BridgeCostConfig>();
+
+// Initialize lookup maps at module load time (runs once)
+for (const config of BRIDGE_COSTS) {
+  const routeKey: BridgeCostKey = `${config.sourceChain}:${config.targetChain}`;
+  const fullKey: BridgeCostKeyWithBridge = `${config.sourceChain}:${config.targetChain}:${config.bridge}`;
+
+  // Build route -> options map
+  const existing = BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
+  existing.push(config);
+  BRIDGE_COST_BY_ROUTE.set(routeKey, existing);
+
+  // Build route+bridge -> config map
+  BRIDGE_COST_BY_ROUTE_AND_BRIDGE.set(fullKey, config);
+
+  // Track best (lowest fee) bridge per route
+  const currentBest = BEST_BRIDGE_BY_ROUTE.get(routeKey);
+  if (!currentBest || config.feePercentage < currentBest.feePercentage) {
+    BEST_BRIDGE_BY_ROUTE.set(routeKey, config);
+  }
+}
 
 /**
  * P1-5 FIX: Get bridge cost for a specific route
+ * Performance optimized with O(1) Map lookup instead of O(n) filter
  */
 export function getBridgeCost(
   sourceChain: string,
@@ -127,25 +217,30 @@ export function getBridgeCost(
 ): BridgeCostConfig | undefined {
   const normalizedSource = sourceChain.toLowerCase();
   const normalizedTarget = targetChain.toLowerCase();
+  const routeKey: BridgeCostKey = `${normalizedSource}:${normalizedTarget}`;
 
   if (bridge) {
-    return BRIDGE_COSTS.find(
-      b => b.sourceChain === normalizedSource &&
-           b.targetChain === normalizedTarget &&
-           b.bridge === bridge.toLowerCase()
-    );
+    const fullKey: BridgeCostKeyWithBridge = `${normalizedSource}:${normalizedTarget}:${bridge.toLowerCase()}`;
+    return BRIDGE_COST_BY_ROUTE_AND_BRIDGE.get(fullKey);
   }
 
-  // Find best bridge (lowest fee)
-  const options = BRIDGE_COSTS.filter(
-    b => b.sourceChain === normalizedSource && b.targetChain === normalizedTarget
-  );
+  // Return pre-computed best bridge (lowest fee)
+  return BEST_BRIDGE_BY_ROUTE.get(routeKey);
+}
 
-  if (options.length === 0) return undefined;
+/**
+ * Get all bridge options for a route (for comparison/display)
+ * Performance optimized with O(1) Map lookup
+ */
+export function getAllBridgeOptions(
+  sourceChain: string,
+  targetChain: string
+): BridgeCostConfig[] {
+  const normalizedSource = sourceChain.toLowerCase();
+  const normalizedTarget = targetChain.toLowerCase();
+  const routeKey: BridgeCostKey = `${normalizedSource}:${normalizedTarget}`;
 
-  return options.reduce((best, current) =>
-    current.feePercentage < best.feePercentage ? current : best
-  );
+  return BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
 }
 
 /**

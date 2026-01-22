@@ -97,8 +97,15 @@ export const CHAINS: Record<string, Chain> = {
   optimism: {
     id: 10,
     name: 'Optimism',
-    rpcUrl: process.env.OPTIMISM_RPC_URL || 'https://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
-    wsUrl: process.env.OPTIMISM_WS_URL || 'wss://opt-mainnet.g.alchemy.com/v2/' + (process.env.ALCHEMY_OPTIMISM_KEY || ''),
+    // FIX: Use public RPC as default when Alchemy key not configured (prevents malformed URL)
+    rpcUrl: process.env.OPTIMISM_RPC_URL ||
+      (process.env.ALCHEMY_OPTIMISM_KEY
+        ? `https://opt-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_OPTIMISM_KEY}`
+        : 'https://mainnet.optimism.io'),
+    wsUrl: process.env.OPTIMISM_WS_URL ||
+      (process.env.ALCHEMY_OPTIMISM_KEY
+        ? `wss://opt-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_OPTIMISM_KEY}`
+        : 'wss://optimism.publicnode.com'),
     wsFallbackUrls: [
       'wss://mainnet.optimism.io',
       'wss://optimism.publicnode.com',
@@ -255,7 +262,26 @@ export const CHAINS: Record<string, Chain> = {
     blockTime: 0.4,
     nativeToken: 'SOL',
     isEVM: false
-  },
+  }
+};
+
+// =============================================================================
+// MAINNET CHAIN IDS
+// List of production mainnet chain identifiers for filtering
+// =============================================================================
+export const MAINNET_CHAIN_IDS = [
+  'arbitrum', 'bsc', 'base', 'polygon', 'optimism',
+  'ethereum', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+] as const;
+
+export type MainnetChainId = typeof MAINNET_CHAIN_IDS[number];
+
+// =============================================================================
+// TESTNET CHAINS
+// Separated from production CHAINS to prevent test/prod data mixing
+// Import from here for testing purposes only
+// =============================================================================
+export const TESTNET_CHAINS: Record<string, Chain> = {
   // S3.3.7: Solana Devnet for testing
   // Priority order: 1. Explicit URL, 2. Helius, 3. Triton, 4. Public RPC
   'solana-devnet': {
@@ -298,3 +324,11 @@ export const CHAINS: Record<string, Chain> = {
     isEVM: false
   }
 };
+
+/**
+ * Get all chains including testnets.
+ * Use this only for test environments or when explicitly needing testnet access.
+ */
+export function getAllChains(): Record<string, Chain> {
+  return { ...CHAINS, ...TESTNET_CHAINS };
+}

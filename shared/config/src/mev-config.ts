@@ -104,9 +104,16 @@ export const MEV_CONFIG = {
       priorityFeeGwei: 100.0,
       minProfitForProtection: 50, // 50 FTM minimum
     },
+    // S3.3.7-FIX: Added Solana MEV protection via Jito bundles
+    solana: {
+      enabled: true,
+      strategy: 'jito' as const,  // Jito bundles for Solana MEV protection
+      priorityFeeGwei: 0,         // Solana uses lamports, not gwei (handled by Solana executor)
+      minProfitForProtection: 0.1, // 0.1 SOL minimum for Jito bundle submission
+    },
   } as Record<string, {
     enabled: boolean;
-    strategy: 'flashbots' | 'bloxroute' | 'fastlane' | 'sequencer' | 'standard';
+    strategy: 'flashbots' | 'bloxroute' | 'fastlane' | 'sequencer' | 'standard' | 'jito';
     priorityFeeGwei: number;
     minProfitForProtection: number;
   }>,
