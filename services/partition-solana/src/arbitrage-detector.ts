@@ -16,23 +16,21 @@
  * Architecture:
  * This module provides arbitrage-specific detection logic that can be:
  * 1. Used standalone for testing with mock pools (current implementation)
- * 2. Composed with SolanaDetector for production use
+ * 2. Composed with SolanaDetector or UnifiedChainDetector for production use
  *
- * The base SolanaDetector (shared/core/src/solana/solana-detector.ts) handles:
- * - Connection pooling and RPC management
- * - Program account subscriptions
- * - Redis Streams integration for price updates
- * - Health monitoring
+ * Pool Discovery Note (Issue 1.2):
+ * This detector does NOT discover pools automatically. Pools must be provided via:
+ * - connectToSolanaDetector() for integration with UnifiedChainDetector
+ * - addPool() for manual/test injection
+ * - importPools() for batch initialization
+ * The base SolanaDetector (shared/core/src/solana/solana-detector.ts) handles actual
+ * program account subscriptions and pool discovery.
  *
- * This module adds:
- * - Multi-DEX arbitrage detection
- * - Triangular path finding
- * - Cross-chain price comparison
- * - Priority fee estimation
- *
- * Integration Note:
- * SolanaPoolInfo is compatible with SolanaPool from solana-detector.ts.
- * Pools can be passed from SolanaDetector to this detector for processing.
+ * Token Normalization Note (Issue 6.1):
+ * This module uses normalizeTokenForCrossChain() from @arbitrage/config for
+ * cross-chain matching (e.g., MSOL→SOL, WETH.e→WETH). This is DIFFERENT from
+ * price-oracle's normalization which maps wrapped→native for pricing (WETH→ETH).
+ * The different strategies serve different purposes and are intentional.
  *
  * @see IMPLEMENTATION_PLAN.md S3.3.6
  * @see shared/core/src/solana/solana-detector.ts - Base infrastructure
@@ -41,8 +39,10 @@
 import { EventEmitter } from 'events';
 import { normalizeTokenForCrossChain } from '@arbitrage/config';
 import {
+  AsyncMutex,
   basisPointsToDecimal,
   meetsThreshold,
+  getDefaultPrice,
 } from '@arbitrage/core';
 
 // =============================================================================
@@ -68,12 +68,23 @@ export interface SolanaArbitrageLogger {
  */
 export interface SolanaArbitrageConfig {
   /**
-   * Solana RPC endpoint URL (required for identification/logging).
-   * Note: Actual RPC connections are managed by SolanaDetector, not this class.
+   * Solana RPC endpoint URL.
+   * Used for logging and identification purposes only.
+   * Actual RPC connections are managed by the upstream SolanaDetector.
+   *
+   * @deprecated Consider removing this requirement in future versions
+   *             since connections are managed externally.
    */
-  rpcUrl: string;
+  rpcUrl?: string;
 
-  /** Minimum profit threshold in percent (default: 0.3 = 0.3%) */
+  /**
+   * Chain identifier (default: 'solana').
+   * Used in opportunity records for cross-chain matching.
+   * Fix for Issue 1.3: Chain identifier should be configurable.
+   */
+  chainId?: string;
+
+  /** Minimum profit threshold in percentage points (default: 0.3 = 0.3%) */
   minProfitThreshold?: number;
 
   /** Priority fee multiplier (default: 1.0) */
@@ -93,6 +104,19 @@ export interface SolanaArbitrageConfig {
 
   /** Opportunity expiry time in ms (default: 1000 = 1s) */
   opportunityExpiryMs?: number;
+
+  /**
+   * Price staleness threshold in ms (default: 5000 = 5s).
+   * Pools with prices older than this are excluded from detection.
+   * Fix for Issue 10.7: Missing price staleness check.
+   */
+  priceStalenessMs?: number;
+
+  /**
+   * Default trade value in USD for gas cost estimation (default: 1000).
+   * Fix for Issue 4.4: Hardcoded trade value.
+   */
+  defaultTradeValueUsd?: number;
 }
 
 /**
@@ -127,6 +151,11 @@ export interface SolanaTokenInfo {
  * Compatibility: This interface is designed to be compatible with
  * SolanaPool from shared/core/src/solana/solana-detector.ts.
  * Pools from SolanaDetector can be passed directly to SolanaArbitrageDetector.
+ *
+ * Fee Documentation (Issue 6.2):
+ * The `fee` field is in basis points (1 basis point = 0.01%).
+ * Example: fee=25 means 0.25% trading fee.
+ * Use basisPointsToDecimal(fee) to convert to decimal (25 → 0.0025).
  */
 export interface SolanaPoolInfo {
   address: string;
@@ -134,20 +163,59 @@ export interface SolanaPoolInfo {
   dex: string;
   token0: SolanaTokenInfo;
   token1: SolanaTokenInfo;
-  fee: number; // Basis points (e.g., 25 = 0.25%)
+  /** Trading fee in basis points (e.g., 25 = 0.25% = 25/10000) */
+  fee: number;
   reserve0?: string;
   reserve1?: string;
   price?: number;
   lastSlot?: number;
+  /** Timestamp when price was last updated (ms since epoch) */
+  lastUpdated?: number;
+}
+
+/**
+ * Internal pool representation with pre-computed normalized tokens.
+ * Performance optimization (Issue 10.2): Pre-normalize on pool add.
+ */
+interface InternalPoolInfo extends SolanaPoolInfo {
+  /** Pre-normalized token0 symbol */
+  normalizedToken0: string;
+  /** Pre-normalized token1 symbol */
+  normalizedToken1: string;
+  /** Pre-computed pair key for fast lookup */
+  pairKey: string;
 }
 
 /**
  * EVM price update for cross-chain comparison.
+ *
+ * Event Type Adapter (Issue 1.1):
+ * UnifiedChainDetector emits PriceUpdate events with this shape.
+ * The connectToSolanaDetector() method adapts these to pool updates.
  */
 export interface EvmPriceUpdate {
   pairKey: string;
   chain: string;
   dex: string;
+  token0: string;
+  token1: string;
+  price: number;
+  reserve0: string;
+  reserve1: string;
+  blockNumber: number;
+  timestamp: number;
+  latency: number;
+  fee?: number;
+}
+
+/**
+ * Generic price update from UnifiedChainDetector.
+ * Issue 1.1 Fix: Define the actual interface emitted by UnifiedChainDetector.
+ */
+export interface UnifiedPriceUpdate {
+  chain: string;
+  dex: string;
+  pairKey: string;
   token0: string;
   token1: string;
   price: number;
@@ -236,17 +304,22 @@ export interface CrossChainPriceComparison {
   quoteToken: string;
   solanaPrice: number;
   solanaDex: string;
-  solanaPoolAddress: string; // Solana pool address for opportunity tracking
+  solanaPoolAddress: string;
   evmChain: string;
   evmDex: string;
   evmPrice: number;
-  evmPairKey: string; // EVM pair key for opportunity tracking
+  evmPairKey: string;
   priceDifferencePercent: number;
   timestamp: number;
 }
 
 /**
  * Priority fee estimation.
+ *
+ * Limitation Note (Issue 7.3):
+ * This is a calculated estimate based on config parameters.
+ * For production use, consider fetching live priority fees from
+ * getRecentPrioritizationFees() RPC method.
  */
 export interface PriorityFeeEstimate {
   baseFee: number;
@@ -274,6 +347,10 @@ export interface SolanaArbitrageStats {
   crossChainOpportunities: number;
   poolsTracked: number;
   lastDetectionTime: number;
+  /** Number of pools skipped due to stale prices */
+  stalePoolsSkipped: number;
+  /** Average detection latency in ms */
+  avgDetectionLatencyMs: number;
 }
 
 // =============================================================================
@@ -281,6 +358,7 @@ export interface SolanaArbitrageStats {
 // =============================================================================
 
 const DEFAULT_CONFIG = {
+  chainId: 'solana',
   minProfitThreshold: 0.3, // 0.3%
   priorityFeeMultiplier: 1.0,
   basePriorityFeeLamports: 10000, // 0.00001 SOL
@@ -288,21 +366,379 @@ const DEFAULT_CONFIG = {
   triangularEnabled: true,
   maxTriangularDepth: 3,
   opportunityExpiryMs: 1000, // 1 second (Solana is fast)
-};
+  priceStalenessMs: 5000, // 5 seconds
+  defaultTradeValueUsd: 1000,
+} as const;
 
 // Compute unit estimates for different operations
 const COMPUTE_UNITS = {
   SIMPLE_SWAP: 150000,
   CLMM_SWAP: 300000,
   TRIANGULAR_BASE: 400000,
-};
+} as const;
 
 // Urgency multipliers for priority fees
 const URGENCY_MULTIPLIERS = {
   low: 0.5,
   medium: 1.0,
   high: 2.0,
-};
+} as const;
+
+/**
+ * Confidence scores for different arbitrage types.
+ *
+ * These values represent the estimated reliability of the arbitrage opportunity:
+ * - INTRA_SOLANA (0.85): Highest confidence - same chain, fast execution
+ * - TRIANGULAR (0.75): Medium confidence - multiple hops increase slippage risk
+ * - CROSS_CHAIN (0.6): Lower confidence - bridge delays, price volatility
+ */
+const CONFIDENCE_SCORES = {
+  INTRA_SOLANA: 0.85,
+  TRIANGULAR: 0.75,
+  CROSS_CHAIN: 0.6,
+} as const;
+
+/**
+ * Cross-chain opportunities need longer expiry due to bridge delays.
+ * Standard expiry is ~1s for Solana, cross-chain gets 10s (10x multiplier).
+ */
+const CROSS_CHAIN_EXPIRY_MULTIPLIER = 10;
+
+/**
+ * Maximum paths to explore per level during triangular path finding.
+ * Prevents exponential blowup in dense liquidity graphs.
+ */
+const MAX_PATHS_PER_LEVEL = 100;
+
+/**
+ * Maximum size for memoization cache in path finding.
+ * Issue 4.5 Fix: Bound memoization cache to prevent memory leaks.
+ */
+const MAX_MEMO_CACHE_SIZE = 10000;
+
+/**
+ * Minimum valid price value.
+ * Issue 4.3 Fix: Prevent division by zero and precision issues.
+ */
+const MIN_VALID_PRICE = 1e-12;
+
+/**
+ * LRU cache size for normalized tokens.
+ */
+const MAX_TOKEN_CACHE_SIZE = 10000;
+
+// =============================================================================
+// LRU Cache Implementation
+// =============================================================================
+
+/**
+ * Simple LRU (Least Recently Used) cache.
+ * Issue 4.2 Fix: Proper cache eviction based on usage.
+ */
+class LRUCache<K, V> {
+  private cache = new Map<K, V>();
+  private readonly maxSize: number;
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
+
+  get(key: K): V | undefined {
+    const value = this.cache.get(key);
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+    return value;
+  }
+
+  set(key: K, value: V): void {
+    // If key exists, delete to update position
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      // Evict oldest (first entry)
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.cache.delete(firstKey);
+      }
+    }
+    this.cache.set(key, value);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
+// =============================================================================
+// Versioned Pool Store
+// =============================================================================
+
+/**
+ * Versioned pool store for efficient snapshotting.
+ * Issue 10.1 Fix: Avoid deep copying on every detection.
+ *
+ * Uses a version counter to track changes. Detection methods
+ * work on a "logical snapshot" by checking version at start.
+ */
+class VersionedPoolStore {
+  private pools = new Map<string, InternalPoolInfo>();
+  private poolsByPair = new Map<string, Set<string>>();
+  private version = 0;
+
+  getVersion(): number {
+    return this.version;
+  }
+
+  set(pool: InternalPoolInfo): void {
+    const existing = this.pools.get(pool.address);
+    this.pools.set(pool.address, pool);
+
+    // Update pair index
+    if (!existing || existing.pairKey !== pool.pairKey) {
+      // Remove from old pair index if different
+      if (existing && existing.pairKey !== pool.pairKey) {
+        this.poolsByPair.get(existing.pairKey)?.delete(pool.address);
+      }
+      // Add to new pair index
+      if (!this.poolsByPair.has(pool.pairKey)) {
+        this.poolsByPair.set(pool.pairKey, new Set());
+      }
+      this.poolsByPair.get(pool.pairKey)!.add(pool.address);
+    }
+
+    this.version++;
+  }
+
+  get(address: string): InternalPoolInfo | undefined {
+    return this.pools.get(address);
+  }
+
+  delete(address: string): boolean {
+    const pool = this.pools.get(address);
+    if (!pool) return false;
+
+    this.poolsByPair.get(pool.pairKey)?.delete(address);
+    this.pools.delete(address);
+    this.version++;
+    return true;
+  }
+
+  get size(): number {
+    return this.pools.size;
+  }
+
+  /**
+   * Get pools iterator for a pair key.
+   * Returns current pools - caller should handle concurrency.
+   */
+  getPoolsForPair(pairKey: string): InternalPoolInfo[] {
+    const addresses = this.poolsByPair.get(pairKey);
+    if (!addresses) return [];
+
+    const result: InternalPoolInfo[] = [];
+    for (const addr of addresses) {
+      const pool = this.pools.get(addr);
+      if (pool) result.push(pool);
+    }
+    return result;
+  }
+
+  /**
+   * Get all pair keys.
+   */
+  getPairKeys(): string[] {
+    return Array.from(this.poolsByPair.keys());
+  }
+
+  /**
+   * Get all pools.
+   */
+  getAllPools(): InternalPoolInfo[] {
+    return Array.from(this.pools.values());
+  }
+}
+
+// =============================================================================
+// Async Event Queue
+// =============================================================================
+
+/**
+ * Simple async event queue for serial processing.
+ * Issue 5.1 Fix: Event handlers process in order.
+ */
+class AsyncEventQueue {
+  private queue: Array<() => Promise<void>> = [];
+  private processing = false;
+
+  async enqueue(task: () => Promise<void>): Promise<void> {
+    this.queue.push(task);
+    if (!this.processing) {
+      await this.process();
+    }
+  }
+
+  private async process(): Promise<void> {
+    if (this.processing) return;
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const task = this.queue.shift();
+      if (task) {
+        try {
+          await task();
+        } catch {
+          // Error handled by individual task
+        }
+      }
+    }
+
+    this.processing = false;
+  }
+}
+
+// =============================================================================
+// ID Generator
+// =============================================================================
+
+/**
+ * Fast ID generator using pre-allocated buffer.
+ * Issue 10.6 Fix: Avoid Math.random() in hot path.
+ */
+class IdGenerator {
+  private counter = 0;
+  private prefix: string;
+
+  constructor(prefix: string = '') {
+    // Use process.pid and timestamp for uniqueness across instances
+    this.prefix = prefix || `${process.pid}-${Date.now().toString(36)}`;
+  }
+
+  next(type: string): string {
+    return `sol-${type}-${this.prefix}-${(++this.counter).toString(36)}`;
+  }
+}
+
+// =============================================================================
+// Opportunity Factory
+// =============================================================================
+
+/**
+ * Factory for creating arbitrage opportunities.
+ * Issue 9.4 Fix: Centralize opportunity creation.
+ */
+class OpportunityFactory {
+  private idGen: IdGenerator;
+  private chainId: string;
+  private expiryMs: number;
+
+  constructor(chainId: string, expiryMs: number) {
+    this.idGen = new IdGenerator();
+    this.chainId = chainId;
+    this.expiryMs = expiryMs;
+  }
+
+  createIntraSolana(
+    buyPool: InternalPoolInfo,
+    sellPool: InternalPoolInfo,
+    netProfit: number,
+    gasCost: number
+  ): SolanaArbitrageOpportunity {
+    const timestamp = Date.now();
+    return {
+      id: this.idGen.next('arb'),
+      type: 'intra-solana',
+      chain: this.chainId,
+      buyDex: buyPool.dex,
+      sellDex: sellPool.dex,
+      buyPair: buyPool.address,
+      sellPair: sellPool.address,
+      token0: buyPool.normalizedToken0,
+      token1: buyPool.normalizedToken1,
+      buyPrice: buyPool.price!,
+      sellPrice: sellPool.price!,
+      profitPercentage: netProfit * 100,
+      expectedProfit: netProfit,
+      estimatedGasCost: gasCost,
+      netProfitAfterGas: netProfit - gasCost,
+      confidence: CONFIDENCE_SCORES.INTRA_SOLANA,
+      timestamp,
+      expiresAt: timestamp + this.expiryMs,
+      status: 'pending',
+    };
+  }
+
+  createTriangular(path: TriangularPath): SolanaArbitrageOpportunity {
+    const timestamp = Date.now();
+    return {
+      id: this.idGen.next('tri'),
+      type: 'triangular',
+      chain: this.chainId,
+      buyDex: path.steps[0]?.dex || 'unknown',
+      sellDex: path.steps[path.steps.length - 1]?.dex || 'unknown',
+      buyPair: path.steps[0]?.pool || '',
+      sellPair: path.steps[path.steps.length - 1]?.pool || '',
+      token0: path.inputToken,
+      token1: path.outputToken,
+      buyPrice: path.steps[0]?.price || 0,
+      sellPrice: path.steps[path.steps.length - 1]?.price || 0,
+      profitPercentage: path.profitPercentage,
+      expectedProfit: path.profitPercentage / 100,
+      estimatedOutput: path.estimatedOutput,
+      path: path.steps,
+      confidence: CONFIDENCE_SCORES.TRIANGULAR,
+      timestamp,
+      expiresAt: timestamp + this.expiryMs,
+      status: 'pending',
+    };
+  }
+
+  createCrossChain(
+    comparison: CrossChainPriceComparison,
+    direction: 'buy-solana-sell-evm' | 'buy-evm-sell-solana',
+    profit: number,
+    crossChainExpiryMultiplier: number
+  ): SolanaArbitrageOpportunity {
+    const timestamp = Date.now();
+    const buyPair = direction === 'buy-solana-sell-evm'
+      ? comparison.solanaPoolAddress
+      : comparison.evmPairKey;
+    const sellPair = direction === 'buy-solana-sell-evm'
+      ? comparison.evmPairKey
+      : comparison.solanaPoolAddress;
+
+    return {
+      id: this.idGen.next('xchain'),
+      type: 'cross-chain',
+      chain: this.chainId,
+      sourceChain: this.chainId,
+      targetChain: comparison.evmChain,
+      direction,
+      buyDex: direction === 'buy-solana-sell-evm' ? comparison.solanaDex : comparison.evmDex,
+      sellDex: direction === 'buy-solana-sell-evm' ? comparison.evmDex : comparison.solanaDex,
+      buyPair,
+      sellPair,
+      token0: comparison.token,
+      token1: comparison.quoteToken,
+      token: comparison.token,
+      quoteToken: comparison.quoteToken,
+      buyPrice: direction === 'buy-solana-sell-evm' ? comparison.solanaPrice : comparison.evmPrice,
+      sellPrice: direction === 'buy-solana-sell-evm' ? comparison.evmPrice : comparison.solanaPrice,
+      profitPercentage: profit * 100,
+      expectedProfit: profit,
+      confidence: CONFIDENCE_SCORES.CROSS_CHAIN,
+      timestamp,
+      expiresAt: timestamp + this.expiryMs * crossChainExpiryMultiplier,
+      status: 'pending',
+    };
+  }
+}
 
 // =============================================================================
 // SolanaArbitrageDetector Class
@@ -314,18 +750,29 @@ const URGENCY_MULTIPLIERS = {
  */
 export class SolanaArbitrageDetector extends EventEmitter {
   // Configuration
-  private config: Required<SolanaArbitrageConfig>;
-  private logger: SolanaArbitrageLogger;
+  private readonly config: Required<Omit<SolanaArbitrageConfig, 'rpcUrl'>> & { rpcUrl?: string };
+  private readonly logger: SolanaArbitrageLogger;
 
   // Redis Streams client for opportunity publishing
   private streamsClient?: SolanaArbitrageStreamsClient;
   private static readonly OPPORTUNITY_STREAM = 'arbitrage:opportunities';
 
-  // Pool management
-  private pools: Map<string, SolanaPoolInfo> = new Map();
-  private poolsByTokenPair: Map<string, Set<string>> = new Map();
+  // Pool management with versioned store (Issue 10.1)
+  private readonly poolStore = new VersionedPoolStore();
 
-  // Statistics
+  // Normalized token cache with LRU eviction (Issue 4.2)
+  private readonly tokenCache = new LRUCache<string, string>(MAX_TOKEN_CACHE_SIZE);
+
+  // Async event queue for serial processing (Issue 5.1)
+  private readonly eventQueue = new AsyncEventQueue();
+
+  // Opportunity factory (Issue 9.4)
+  private opportunityFactory!: OpportunityFactory;
+
+  // Mutex for write operations only (Issue 10.4)
+  private readonly writeMutex = new AsyncMutex();
+
+  // Statistics with atomic-like updates (Issue 5.2)
   private stats: SolanaArbitrageStats = {
     totalDetections: 0,
     intraSolanaOpportunities: 0,
@@ -333,26 +780,25 @@ export class SolanaArbitrageDetector extends EventEmitter {
     crossChainOpportunities: 0,
     poolsTracked: 0,
     lastDetectionTime: 0,
+    stalePoolsSkipped: 0,
+    avgDetectionLatencyMs: 0,
   };
-
-  // Performance optimization: Cache normalized token symbols
-  // Avoids repeated normalizeTokenForCrossChain calls in hot paths
-  private normalizedTokenCache: Map<string, string> = new Map();
+  private detectionLatencies: number[] = [];
+  private static readonly MAX_LATENCY_SAMPLES = 100;
 
   // State
   private running = false;
 
-  constructor(config: SolanaArbitrageConfig, deps?: SolanaArbitrageDeps) {
+  constructor(config: SolanaArbitrageConfig = {}, deps?: SolanaArbitrageDeps) {
     super();
 
-    // Validate required config
-    if (!config.rpcUrl || config.rpcUrl.trim() === '') {
-      throw new Error('rpcUrl is required for SolanaArbitrageDetector');
-    }
+    // Validate config (Issue 3.2)
+    this.validateConfig(config);
 
     // Set defaults
     this.config = {
       rpcUrl: config.rpcUrl,
+      chainId: config.chainId ?? DEFAULT_CONFIG.chainId,
       minProfitThreshold: config.minProfitThreshold ?? DEFAULT_CONFIG.minProfitThreshold,
       priorityFeeMultiplier: config.priorityFeeMultiplier ?? DEFAULT_CONFIG.priorityFeeMultiplier,
       basePriorityFeeLamports: config.basePriorityFeeLamports ?? DEFAULT_CONFIG.basePriorityFeeLamports,
@@ -360,7 +806,15 @@ export class SolanaArbitrageDetector extends EventEmitter {
       triangularEnabled: config.triangularEnabled ?? DEFAULT_CONFIG.triangularEnabled,
       maxTriangularDepth: config.maxTriangularDepth ?? DEFAULT_CONFIG.maxTriangularDepth,
       opportunityExpiryMs: config.opportunityExpiryMs ?? DEFAULT_CONFIG.opportunityExpiryMs,
+      priceStalenessMs: config.priceStalenessMs ?? DEFAULT_CONFIG.priceStalenessMs,
+      defaultTradeValueUsd: config.defaultTradeValueUsd ?? DEFAULT_CONFIG.defaultTradeValueUsd,
     };
+
+    // Initialize factory
+    this.opportunityFactory = new OpportunityFactory(
+      this.config.chainId,
+      this.config.opportunityExpiryMs
+    );
 
     // Setup logger
     this.logger = deps?.logger ?? {
@@ -370,16 +824,38 @@ export class SolanaArbitrageDetector extends EventEmitter {
       debug: () => {},
     };
 
-    // Store optional Redis Streams client for opportunity publishing
+    // Store optional Redis Streams client
     this.streamsClient = deps?.streamsClient;
 
     this.logger.info('SolanaArbitrageDetector initialized', {
-      rpcUrl: this.config.rpcUrl,
+      chainId: this.config.chainId,
       minProfitThreshold: this.config.minProfitThreshold,
       crossChainEnabled: this.config.crossChainEnabled,
       triangularEnabled: this.config.triangularEnabled,
       hasStreamsClient: !!this.streamsClient,
     });
+  }
+
+  /**
+   * Validate configuration values.
+   * Issue 3.2 Fix: Validate environment variable values.
+   */
+  private validateConfig(config: SolanaArbitrageConfig): void {
+    if (config.minProfitThreshold !== undefined) {
+      if (isNaN(config.minProfitThreshold) || config.minProfitThreshold < 0) {
+        throw new Error(`Invalid minProfitThreshold: ${config.minProfitThreshold}. Must be >= 0.`);
+      }
+    }
+    if (config.maxTriangularDepth !== undefined) {
+      if (!Number.isInteger(config.maxTriangularDepth) || config.maxTriangularDepth < 2) {
+        throw new Error(`Invalid maxTriangularDepth: ${config.maxTriangularDepth}. Must be integer >= 2.`);
+      }
+    }
+    if (config.opportunityExpiryMs !== undefined) {
+      if (!Number.isInteger(config.opportunityExpiryMs) || config.opportunityExpiryMs <= 0) {
+        throw new Error(`Invalid opportunityExpiryMs: ${config.opportunityExpiryMs}. Must be positive integer.`);
+      }
+    }
   }
 
   // ===========================================================================
@@ -404,6 +880,10 @@ export class SolanaArbitrageDetector extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;
+
+    // Clear caches to prevent memory leaks
+    this.tokenCache.clear();
+
     this.logger.info('SolanaArbitrageDetector stopped');
     this.emit('stopped');
   }
@@ -416,91 +896,142 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // Pool Management
   // ===========================================================================
 
-  addPool(pool: SolanaPoolInfo): void {
-    this.pools.set(pool.address, pool);
+  /**
+   * Add a pool to tracking. Thread-safe via mutex.
+   * Pre-normalizes tokens for performance (Issue 10.2).
+   */
+  async addPool(pool: SolanaPoolInfo): Promise<void> {
+    const release = await this.writeMutex.acquire();
+    try {
+      // Pre-normalize tokens (Issue 10.2)
+      const normalizedToken0 = this.getNormalizedToken(pool.token0.symbol);
+      const normalizedToken1 = this.getNormalizedToken(pool.token1.symbol);
+      const pairKey = this.createPairKeyFromNormalized(normalizedToken0, normalizedToken1);
 
-    // Index by token pair (normalized for cross-chain matching)
-    const pairKey = this.createPairKey(pool.token0.symbol, pool.token1.symbol);
-    if (!this.poolsByTokenPair.has(pairKey)) {
-      this.poolsByTokenPair.set(pairKey, new Set());
+      const internalPool: InternalPoolInfo = {
+        ...pool,
+        normalizedToken0,
+        normalizedToken1,
+        pairKey,
+        lastUpdated: pool.lastUpdated ?? Date.now(),
+      };
+
+      this.poolStore.set(internalPool);
+      this.updatePoolStats();
+
+      this.logger.debug('Pool added', { address: pool.address, dex: pool.dex, pairKey });
+    } finally {
+      release();
     }
-    this.poolsByTokenPair.get(pairKey)!.add(pool.address);
-
-    this.stats.poolsTracked = this.pools.size;
-
-    this.logger.debug('Pool added', { address: pool.address, dex: pool.dex, pairKey });
   }
 
-  removePool(address: string): void {
-    const pool = this.pools.get(address);
-    if (!pool) return;
-
-    // Remove from token pair index
-    const pairKey = this.createPairKey(pool.token0.symbol, pool.token1.symbol);
-    this.poolsByTokenPair.get(pairKey)?.delete(address);
-
-    // Remove from main map
-    this.pools.delete(address);
-    this.stats.poolsTracked = this.pools.size;
+  /**
+   * Remove a pool from tracking. Thread-safe via mutex.
+   */
+  async removePool(address: string): Promise<void> {
+    const release = await this.writeMutex.acquire();
+    try {
+      this.poolStore.delete(address);
+      this.updatePoolStats();
+    } finally {
+      release();
+    }
   }
 
   getPool(address: string): SolanaPoolInfo | undefined {
-    return this.pools.get(address);
+    return this.poolStore.get(address);
   }
 
   getPoolCount(): number {
-    return this.pools.size;
+    return this.poolStore.size;
   }
 
   getPoolsByTokenPair(token0: string, token1: string): SolanaPoolInfo[] {
     const pairKey = this.createPairKey(token0, token1);
-    const addresses = this.poolsByTokenPair.get(pairKey);
-    if (!addresses) return [];
-
-    return Array.from(addresses)
-      .map(addr => this.pools.get(addr))
-      .filter((p): p is SolanaPoolInfo => p !== undefined);
+    return this.poolStore.getPoolsForPair(pairKey);
   }
 
-  updatePoolPrice(address: string, newPrice: number): void {
-    const pool = this.pools.get(address);
-    if (!pool) {
-      this.logger.warn('Cannot update price for non-existent pool', { address });
-      return;
+  /**
+   * Update a pool's price. Thread-safe via mutex.
+   */
+  async updatePoolPrice(address: string, newPrice: number, lastSlot?: number): Promise<void> {
+    const release = await this.writeMutex.acquire();
+    try {
+      const pool = this.poolStore.get(address);
+      if (!pool) {
+        this.logger.warn('Cannot update price for non-existent pool', { address });
+        return;
+      }
+
+      const oldPrice = pool.price;
+
+      // Create updated pool (immutable update)
+      const updatedPool: InternalPoolInfo = {
+        ...pool,
+        price: newPrice,
+        lastUpdated: Date.now(),
+        lastSlot: lastSlot ?? pool.lastSlot,
+      };
+
+      this.poolStore.set(updatedPool);
+
+      this.emit('price-update', {
+        poolAddress: address,
+        oldPrice,
+        newPrice,
+        dex: pool.dex,
+        token0: pool.token0.symbol,
+        token1: pool.token1.symbol,
+      });
+    } finally {
+      release();
     }
-
-    const oldPrice = pool.price;
-    pool.price = newPrice;
-
-    this.emit('price-update', {
-      poolAddress: address,
-      oldPrice,
-      newPrice,
-      dex: pool.dex,
-      token0: pool.token0.symbol,
-      token1: pool.token1.symbol,
-    });
   }
 
   /**
    * Get cached normalized token symbol.
-   * Performance optimization: Caches results to avoid repeated lookups.
+   * Performance optimization with LRU cache (Issue 4.2).
    */
   private getNormalizedToken(symbol: string): string {
-    let normalized = this.normalizedTokenCache.get(symbol);
-    if (!normalized) {
+    let normalized = this.tokenCache.get(symbol);
+    if (normalized === undefined) {
       normalized = normalizeTokenForCrossChain(symbol);
-      this.normalizedTokenCache.set(symbol, normalized);
+      this.tokenCache.set(symbol, normalized);
     }
     return normalized;
   }
 
   private createPairKey(token0: string, token1: string): string {
-    // Normalize tokens for cross-chain matching and sort for consistency
     const normalized0 = this.getNormalizedToken(token0);
     const normalized1 = this.getNormalizedToken(token1);
-    const sorted = [normalized0, normalized1].sort();
+    return this.createPairKeyFromNormalized(normalized0, normalized1);
+  }
+
+  private createPairKeyFromNormalized(token0: string, token1: string): string {
+    // Sort for consistency
+    const sorted = token0 < token1 ? [token0, token1] : [token1, token0];
     return `${sorted[0]}-${sorted[1]}`;
+  }
+
+  private updatePoolStats(): void {
+    this.stats.poolsTracked = this.poolStore.size;
+  }
+
+  /**
+   * Check if a pool's price is stale.
+   * Issue 10.7 Fix: Add price staleness check.
+   */
+  private isPriceStale(pool: InternalPoolInfo): boolean {
+    if (!pool.lastUpdated) return false; // No timestamp = assume fresh
+    return Date.now() - pool.lastUpdated > this.config.priceStalenessMs;
+  }
+
+  /**
+   * Check if price is valid (non-zero, not too small).
+   * Issue 4.3 Fix: Prevent division by zero.
+   */
+  private isValidPrice(price: number | undefined): price is number {
+    return price !== undefined && price >= MIN_VALID_PRICE && isFinite(price);
   }
 
   // ===========================================================================
@@ -508,27 +1039,32 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // ===========================================================================
 
   async detectIntraSolanaArbitrage(): Promise<SolanaArbitrageOpportunity[]> {
+    const startTime = Date.now();
     const opportunities: SolanaArbitrageOpportunity[] = [];
     const thresholdDecimal = this.config.minProfitThreshold / 100;
+    let staleSkipped = 0;
 
-    // Iterate over all token pairs
-    for (const [pairKey, poolAddresses] of this.poolsByTokenPair) {
-      if (poolAddresses.size < 2) continue;
+    // Get pair keys - no mutex needed for reads (Issue 10.4)
+    const pairKeys = this.poolStore.getPairKeys();
 
-      // Get pools with valid prices
-      const pools = Array.from(poolAddresses)
-        .map(addr => this.pools.get(addr))
-        .filter((p): p is SolanaPoolInfo => p !== undefined && p.price !== undefined);
+    for (const pairKey of pairKeys) {
+      // Get pools for this pair
+      const pools = this.poolStore.getPoolsForPair(pairKey)
+        .filter(p => {
+          if (!this.isValidPrice(p.price)) return false;
+          if (this.isPriceStale(p)) {
+            staleSkipped++;
+            return false;
+          }
+          return true;
+        });
 
       if (pools.length < 2) continue;
 
       // Compare all pool pairs
       for (let i = 0; i < pools.length; i++) {
         for (let j = i + 1; j < pools.length; j++) {
-          const pool1 = pools[i];
-          const pool2 = pools[j];
-
-          const opportunity = this.calculateOpportunity(pool1, pool2, thresholdDecimal);
+          const opportunity = this.calculateOpportunity(pools[i], pools[j], thresholdDecimal);
           if (opportunity) {
             opportunities.push(opportunity);
             this.emit('opportunity', opportunity);
@@ -537,19 +1073,19 @@ export class SolanaArbitrageDetector extends EventEmitter {
       }
     }
 
-    this.stats.totalDetections++;
-    this.stats.intraSolanaOpportunities += opportunities.length;
-    this.stats.lastDetectionTime = Date.now();
+    // Update stats atomically (Issue 5.2)
+    this.updateDetectionStats('intra', opportunities.length, staleSkipped, Date.now() - startTime);
 
     return opportunities;
   }
 
   private calculateOpportunity(
-    pool1: SolanaPoolInfo,
-    pool2: SolanaPoolInfo,
+    pool1: InternalPoolInfo,
+    pool2: InternalPoolInfo,
     thresholdDecimal: number
   ): SolanaArbitrageOpportunity | null {
-    if (!pool1.price || !pool2.price) return null;
+    // Issue 4.3: Already validated in caller, but double-check
+    if (!this.isValidPrice(pool1.price) || !this.isValidPrice(pool2.price)) return null;
 
     // Calculate price difference
     const minPrice = Math.min(pool1.price, pool2.price);
@@ -573,46 +1109,22 @@ export class SolanaArbitrageDetector extends EventEmitter {
     const buyPool = pool1.price < pool2.price ? pool1 : pool2;
     const sellPool = pool1.price < pool2.price ? pool2 : pool1;
 
-    // Estimate gas cost
-    const gasCost = this.estimateGasCost(COMPUTE_UNITS.SIMPLE_SWAP);
+    // Estimate gas cost (Issue 4.4: Use configurable trade value)
+    const gasCost = this.estimateGasCost(COMPUTE_UNITS.SIMPLE_SWAP, this.config.defaultTradeValueUsd);
 
-    // Generate unique ID
-    const timestamp = Date.now();
-    const randomSuffix = Math.random().toString(36).slice(2, 11);
-
-    // Use normalized symbols for consistency with triangular and cross-chain opportunities
-    const normalizedToken0 = this.getNormalizedToken(buyPool.token0.symbol);
-    const normalizedToken1 = this.getNormalizedToken(buyPool.token1.symbol);
-
-    return {
-      id: `sol-arb-${buyPool.address.slice(0, 8)}-${sellPool.address.slice(0, 8)}-${timestamp}-${randomSuffix}`,
-      type: 'intra-solana',
-      chain: 'solana',
-      buyDex: buyPool.dex,
-      sellDex: sellPool.dex,
-      buyPair: buyPool.address,
-      sellPair: sellPool.address,
-      token0: normalizedToken0,
-      token1: normalizedToken1,
-      buyPrice: buyPool.price!,
-      sellPrice: sellPool.price!,
-      profitPercentage: netProfit * 100,
-      expectedProfit: netProfit,
-      estimatedGasCost: gasCost,
-      netProfitAfterGas: netProfit - gasCost,
-      confidence: 0.85,
-      timestamp,
-      expiresAt: timestamp + this.config.opportunityExpiryMs,
-      status: 'pending',
-    };
+    return this.opportunityFactory.createIntraSolana(buyPool, sellPool, netProfit, gasCost);
   }
 
-  private estimateGasCost(computeUnits: number): number {
-    // Estimate gas cost as a fraction of trade value
-    // In reality, this would be based on SOL price and priority fees
+  /**
+   * Estimate gas cost as a decimal fraction of trade value.
+   * Issue 4.4 Fix: Accept trade value parameter.
+   */
+  private estimateGasCost(computeUnits: number, tradeValueUsd: number): number {
     const feeEstimate = this.calculatePriorityFeeInternal(computeUnits, 'medium');
-    // Return as a percentage (assuming 1 SOL = $100 and typical trade value)
-    return (feeEstimate.totalFee / 1e9) * 100 / 1000; // Very rough estimate
+    const feeInSol = feeEstimate.totalFee / 1e9;
+    const solPriceUsd = getDefaultPrice('SOL');
+    const feeInUsd = feeInSol * solPriceUsd;
+    return feeInUsd / tradeValueUsd;
   }
 
   // ===========================================================================
@@ -624,119 +1136,194 @@ export class SolanaArbitrageDetector extends EventEmitter {
       return [];
     }
 
+    const startTime = Date.now();
     const opportunities: SolanaArbitrageOpportunity[] = [];
     const thresholdDecimal = this.config.minProfitThreshold / 100;
 
-    // Find all triangular paths
-    const paths = this.findTriangularPaths();
+    // Build adjacency graph for efficient path finding (Issue 10.3)
+    const adjacencyGraph = this.buildAdjacencyGraph();
+
+    // Find triangular paths
+    const paths = this.findTriangularPathsOptimized(adjacencyGraph);
 
     for (const path of paths) {
-      const opportunity = this.evaluateTriangularPath(path, thresholdDecimal);
-      if (opportunity) {
+      if (path.profitPercentage / 100 >= thresholdDecimal) {
+        const opportunity = this.opportunityFactory.createTriangular(path);
         opportunities.push(opportunity);
         this.emit('opportunity', opportunity);
       }
     }
 
-    this.stats.triangularOpportunities += opportunities.length;
-    this.stats.lastDetectionTime = Date.now();
+    this.updateDetectionStats('triangular', opportunities.length, 0, Date.now() - startTime);
 
     return opportunities;
   }
 
-  private findTriangularPaths(): TriangularPath[] {
+  /**
+   * Build adjacency graph for efficient path finding.
+   * Issue 10.3 Fix: Pre-compute graph structure.
+   */
+  private buildAdjacencyGraph(): Map<string, Array<{
+    nextToken: string;
+    pool: InternalPoolInfo;
+    effectivePrice: number;
+    fee: number;
+  }>> {
+    const graph = new Map<string, Array<{
+      nextToken: string;
+      pool: InternalPoolInfo;
+      effectivePrice: number;
+      fee: number;
+    }>>();
+
+    for (const pool of this.poolStore.getAllPools()) {
+      if (!this.isValidPrice(pool.price) || this.isPriceStale(pool)) continue;
+
+      const token0 = pool.normalizedToken0;
+      const token1 = pool.normalizedToken1;
+      const fee = basisPointsToDecimal(pool.fee);
+
+      // Add edge token0 -> token1
+      if (!graph.has(token0)) graph.set(token0, []);
+      graph.get(token0)!.push({
+        nextToken: token1,
+        pool,
+        effectivePrice: pool.price!,
+        fee,
+      });
+
+      // Add edge token1 -> token0 (inverse price)
+      if (!graph.has(token1)) graph.set(token1, []);
+      graph.get(token1)!.push({
+        nextToken: token0,
+        pool,
+        effectivePrice: 1 / pool.price!,
+        fee,
+      });
+    }
+
+    return graph;
+  }
+
+  /**
+   * Optimized triangular path finding using BFS with bounded search.
+   * Issue 4.1 Fix: Check for valid completion at any depth.
+   * Issue 10.3 Fix: Use pre-computed adjacency graph.
+   */
+  private findTriangularPathsOptimized(
+    graph: Map<string, Array<{
+      nextToken: string;
+      pool: InternalPoolInfo;
+      effectivePrice: number;
+      fee: number;
+    }>>
+  ): TriangularPath[] {
     const paths: TriangularPath[] = [];
-    const visitedPairs = new Set<string>();
+    const startTokens = Array.from(graph.keys());
 
-    // Start from each token pair
-    for (const [pairKey, poolAddresses] of this.poolsByTokenPair) {
-      if (visitedPairs.has(pairKey)) continue;
-      visitedPairs.add(pairKey);
+    // Bounded memoization cache (Issue 4.5)
+    const visited = new Set<string>();
+    let pathsFound = 0;
 
-      const [token0, token1] = pairKey.split('-');
+    for (const startToken of startTokens) {
+      if (pathsFound >= MAX_PATHS_PER_LEVEL * 10) break; // Global limit
 
-      // Try to find paths that start with token0 and return to token0
-      const triangularPaths = this.findPathsFromToken(token0, token0, []);
-      paths.push(...triangularPaths);
+      // DFS from each start token
+      const found = this.dfsPathFinding(
+        graph,
+        startToken,
+        startToken,
+        [],
+        new Set<string>(),
+        0,
+        visited
+      );
+
+      paths.push(...found);
+      pathsFound += found.length;
     }
 
     return paths;
   }
 
-  private findPathsFromToken(
+  private dfsPathFinding(
+    graph: Map<string, Array<{
+      nextToken: string;
+      pool: InternalPoolInfo;
+      effectivePrice: number;
+      fee: number;
+    }>>,
     startToken: string,
     currentToken: string,
     currentPath: TriangularPathStep[],
-    depth: number = 0
+    visitedPools: Set<string>,
+    depth: number,
+    globalVisited: Set<string>
   ): TriangularPath[] {
     const paths: TriangularPath[] = [];
 
+    // Issue 4.1 Fix: Check for valid completion at ANY depth >= 3
+    if (currentToken === startToken && currentPath.length >= 3) {
+      const profitResult = this.calculateTriangularProfit(currentPath);
+      if (profitResult && profitResult.profitPercentage > 0) {
+        paths.push({
+          steps: [...currentPath],
+          inputToken: startToken,
+          outputToken: startToken,
+          profitPercentage: profitResult.profitPercentage,
+          estimatedOutput: profitResult.estimatedOutput,
+        });
+      }
+    }
+
     // Max depth check
     if (depth >= this.config.maxTriangularDepth) {
-      // Check if we're back at start
-      if (currentToken === startToken && currentPath.length >= 3) {
-        const profitResult = this.calculateTriangularProfit(currentPath);
-        if (profitResult) {
-          paths.push({
-            steps: currentPath,
-            inputToken: startToken,
-            outputToken: startToken,
-            profitPercentage: profitResult.profitPercentage,
-            estimatedOutput: profitResult.estimatedOutput,
-          });
-        }
-      }
       return paths;
     }
 
-    // Find pools containing currentToken (using cached normalization for performance)
-    const normalizedCurrent = this.getNormalizedToken(currentToken);
+    // Issue 4.5: Limit global visited to prevent memory leak
+    if (globalVisited.size >= MAX_MEMO_CACHE_SIZE) {
+      return paths;
+    }
 
-    for (const [_pairKey, poolAddresses] of this.poolsByTokenPair) {
-      // Try each pool for this pair
-      for (const poolAddr of poolAddresses) {
-        const pool = this.pools.get(poolAddr);
-        if (!pool || !pool.price || pool.price === 0) continue;
+    const edges = graph.get(currentToken) || [];
+    let pathsAtLevel = 0;
 
-        // Check if pool contains currentToken and determine swap direction
-        // Use pool's actual token symbols, not the sorted pair key
-        const poolToken0 = this.getNormalizedToken(pool.token0.symbol);
-        const poolToken1 = this.getNormalizedToken(pool.token1.symbol);
+    for (const edge of edges) {
+      if (pathsAtLevel >= MAX_PATHS_PER_LEVEL) break;
+      if (visitedPools.has(edge.pool.address)) continue;
 
-        let nextToken: string | null = null;
-        let effectivePrice: number;
+      // Allow returning to start, but not other revisits
+      const tokenVisited = currentPath.some(s => s.token === edge.nextToken);
+      if (tokenVisited && edge.nextToken !== startToken) continue;
 
-        if (poolToken0 === normalizedCurrent) {
-          // Swapping token0 → token1
-          // Price is typically token1/token0 (output/input), use directly
-          nextToken = poolToken1;
-          effectivePrice = pool.price;
-        } else if (poolToken1 === normalizedCurrent) {
-          // Swapping token1 → token0
-          // Need inverse of price
-          nextToken = poolToken0;
-          effectivePrice = 1 / pool.price;
-        } else {
-          continue;
-        }
+      const step: TriangularPathStep = {
+        token: edge.nextToken,
+        pool: edge.pool.address,
+        dex: edge.pool.dex,
+        price: edge.effectivePrice,
+        fee: edge.fee,
+      };
 
-        // Avoid cycles except returning to start
-        const tokenVisited = currentPath.some(step => step.token === nextToken);
-        if (tokenVisited && nextToken !== startToken) continue;
+      const newVisited = new Set(visitedPools);
+      newVisited.add(edge.pool.address);
 
-        const step: TriangularPathStep = {
-          token: nextToken,
-          pool: pool.address,
-          dex: pool.dex,
-          price: effectivePrice,
-          fee: basisPointsToDecimal(pool.fee),
-        };
+      const cacheKey = `${startToken}-${edge.nextToken}-${depth}-${edge.pool.address}`;
+      if (!globalVisited.has(cacheKey)) {
+        globalVisited.add(cacheKey);
 
-        const newPath = [...currentPath, step];
+        const found = this.dfsPathFinding(
+          graph,
+          startToken,
+          edge.nextToken,
+          [...currentPath, step],
+          newVisited,
+          depth + 1,
+          globalVisited
+        );
 
-        // Recurse
-        const foundPaths = this.findPathsFromToken(startToken, nextToken, newPath, depth + 1);
-        paths.push(...foundPaths);
+        paths.push(...found);
+        pathsAtLevel += found.length;
       }
     }
 
@@ -748,59 +1335,19 @@ export class SolanaArbitrageDetector extends EventEmitter {
   ): { profitPercentage: number; estimatedOutput: number } | null {
     if (path.length < 3) return null;
 
-    // Start with 1 unit
     let amount = 1.0;
 
     for (const step of path) {
-      // Apply swap (simplified - assumes price is output/input)
       amount = amount * step.price;
-      // Apply fee (already included in amount calculation)
       amount = amount * (1 - step.fee);
     }
 
-    // Calculate profit (should end up with more than 1)
-    // Fees are already accounted for in the amount calculation above
     const profit = amount - 1;
-
     if (profit <= 0) return null;
 
     return {
       profitPercentage: profit * 100,
       estimatedOutput: amount,
-    };
-  }
-
-  private evaluateTriangularPath(
-    path: TriangularPath,
-    thresholdDecimal: number
-  ): SolanaArbitrageOpportunity | null {
-    if (path.profitPercentage / 100 < thresholdDecimal) {
-      return null;
-    }
-
-    const timestamp = Date.now();
-    const randomSuffix = Math.random().toString(36).slice(2, 11);
-
-    return {
-      id: `sol-tri-${path.inputToken}-${timestamp}-${randomSuffix}`,
-      type: 'triangular',
-      chain: 'solana',
-      buyDex: path.steps[0]?.dex || 'unknown',
-      sellDex: path.steps[path.steps.length - 1]?.dex || 'unknown',
-      buyPair: path.steps[0]?.pool || '',
-      sellPair: path.steps[path.steps.length - 1]?.pool || '',
-      token0: path.inputToken,
-      token1: path.outputToken,
-      buyPrice: path.steps[0]?.price || 0,
-      sellPrice: path.steps[path.steps.length - 1]?.price || 0,
-      profitPercentage: path.profitPercentage,
-      expectedProfit: path.profitPercentage / 100,
-      estimatedOutput: path.estimatedOutput,
-      path: path.steps,
-      confidence: 0.75, // Lower confidence for triangular
-      timestamp,
-      expiresAt: timestamp + this.config.opportunityExpiryMs,
-      status: 'pending',
     };
   }
 
@@ -816,22 +1363,19 @@ export class SolanaArbitrageDetector extends EventEmitter {
     const comparisons: CrossChainPriceComparison[] = [];
 
     for (const evmPrice of evmPrices) {
-      // Normalize EVM tokens (using cached normalization for performance)
       const evmToken0 = this.getNormalizedToken(evmPrice.token0);
       const evmToken1 = this.getNormalizedToken(evmPrice.token1);
-      const evmPairKey = this.createPairKey(evmToken0, evmToken1);
+      const evmPairKey = this.createPairKeyFromNormalized(evmToken0, evmToken1);
 
-      // Find matching Solana pools
-      const solanaPools = Array.from(this.poolsByTokenPair.get(evmPairKey) || [])
-        .map(addr => this.pools.get(addr))
-        .filter((p): p is SolanaPoolInfo => p !== undefined && p.price !== undefined);
+      const solanaPools = this.poolStore.getPoolsForPair(evmPairKey)
+        .filter(p => this.isValidPrice(p.price) && !this.isPriceStale(p));
 
       for (const solanaPool of solanaPools) {
         const priceDiff = ((evmPrice.price - solanaPool.price!) / solanaPool.price!) * 100;
 
         comparisons.push({
-          token: normalizeTokenForCrossChain(solanaPool.token0.symbol),
-          quoteToken: normalizeTokenForCrossChain(solanaPool.token1.symbol),
+          token: solanaPool.normalizedToken0,
+          quoteToken: solanaPool.normalizedToken1,
           solanaPrice: solanaPool.price!,
           solanaDex: solanaPool.dex,
           solanaPoolAddress: solanaPool.address,
@@ -853,6 +1397,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
       return [];
     }
 
+    const startTime = Date.now();
     const opportunities: SolanaArbitrageOpportunity[] = [];
     const thresholdDecimal = this.config.minProfitThreshold / 100;
 
@@ -865,51 +1410,22 @@ export class SolanaArbitrageDetector extends EventEmitter {
         continue;
       }
 
-      const timestamp = Date.now();
-      const randomSuffix = Math.random().toString(36).slice(2, 11);
-
       const direction = comparison.solanaPrice < comparison.evmPrice
         ? 'buy-solana-sell-evm'
         : 'buy-evm-sell-solana';
 
-      // Determine buy/sell pair addresses based on direction
-      const buyPair = direction === 'buy-solana-sell-evm'
-        ? comparison.solanaPoolAddress
-        : comparison.evmPairKey;
-      const sellPair = direction === 'buy-solana-sell-evm'
-        ? comparison.evmPairKey
-        : comparison.solanaPoolAddress;
-
-      opportunities.push({
-        id: `sol-xchain-${comparison.token}-${comparison.evmChain}-${timestamp}-${randomSuffix}`,
-        type: 'cross-chain',
-        chain: 'solana',
-        sourceChain: 'solana',
-        targetChain: comparison.evmChain,
+      const opportunity = this.opportunityFactory.createCrossChain(
+        comparison,
         direction,
-        buyDex: direction === 'buy-solana-sell-evm' ? comparison.solanaDex : comparison.evmDex,
-        sellDex: direction === 'buy-solana-sell-evm' ? comparison.evmDex : comparison.solanaDex,
-        buyPair,
-        sellPair,
-        token0: comparison.token,
-        token1: comparison.quoteToken,
-        token: comparison.token,       // Cross-chain base token
-        quoteToken: comparison.quoteToken, // Cross-chain quote token
-        buyPrice: direction === 'buy-solana-sell-evm' ? comparison.solanaPrice : comparison.evmPrice,
-        sellPrice: direction === 'buy-solana-sell-evm' ? comparison.evmPrice : comparison.solanaPrice,
-        profitPercentage: absDiff * 100,
-        expectedProfit: absDiff,
-        confidence: 0.6, // Lower confidence for cross-chain
-        timestamp,
-        expiresAt: timestamp + this.config.opportunityExpiryMs * 10, // Longer expiry for cross-chain
-        status: 'pending',
-      });
+        absDiff,
+        CROSS_CHAIN_EXPIRY_MULTIPLIER
+      );
 
-      this.emit('opportunity', opportunities[opportunities.length - 1]);
+      opportunities.push(opportunity);
+      this.emit('opportunity', opportunity);
     }
 
-    this.stats.crossChainOpportunities += opportunities.length;
-    this.stats.lastDetectionTime = Date.now();
+    this.updateDetectionStats('crossChain', opportunities.length, 0, Date.now() - startTime);
 
     return opportunities;
   }
@@ -929,8 +1445,6 @@ export class SolanaArbitrageDetector extends EventEmitter {
     const urgencyMultiplier = URGENCY_MULTIPLIERS[urgency];
     const baseFee = this.config.basePriorityFeeLamports;
 
-    // Calculate priority fee based on compute units and urgency
-    // microLamports per CU = base fee / compute unit estimate * urgency * multiplier
     const microLamportsPerCu = Math.ceil(
       (baseFee * 1e6 / COMPUTE_UNITS.SIMPLE_SWAP) *
       urgencyMultiplier *
@@ -953,6 +1467,38 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // Statistics
   // ===========================================================================
 
+  private updateDetectionStats(
+    type: 'intra' | 'triangular' | 'crossChain',
+    count: number,
+    staleSkipped: number,
+    latencyMs: number
+  ): void {
+    // Atomic-like update (Issue 5.2)
+    this.stats.totalDetections++;
+    this.stats.lastDetectionTime = Date.now();
+    this.stats.stalePoolsSkipped += staleSkipped;
+
+    switch (type) {
+      case 'intra':
+        this.stats.intraSolanaOpportunities += count;
+        break;
+      case 'triangular':
+        this.stats.triangularOpportunities += count;
+        break;
+      case 'crossChain':
+        this.stats.crossChainOpportunities += count;
+        break;
+    }
+
+    // Update rolling average latency
+    this.detectionLatencies.push(latencyMs);
+    if (this.detectionLatencies.length > SolanaArbitrageDetector.MAX_LATENCY_SAMPLES) {
+      this.detectionLatencies.shift();
+    }
+    this.stats.avgDetectionLatencyMs =
+      this.detectionLatencies.reduce((a, b) => a + b, 0) / this.detectionLatencies.length;
+  }
+
   getStats(): SolanaArbitrageStats {
     return { ...this.stats };
   }
@@ -963,39 +1509,27 @@ export class SolanaArbitrageDetector extends EventEmitter {
       intraSolanaOpportunities: 0,
       triangularOpportunities: 0,
       crossChainOpportunities: 0,
-      poolsTracked: this.pools.size,
+      poolsTracked: this.poolStore.size,
       lastDetectionTime: 0,
+      stalePoolsSkipped: 0,
+      avgDetectionLatencyMs: 0,
     };
+    this.detectionLatencies = [];
   }
 
   // ===========================================================================
   // Redis Streams Integration
   // ===========================================================================
 
-  /**
-   * Set the Redis Streams client for opportunity publishing.
-   * Allows late initialization when the detector is used without DI.
-   *
-   * @param client - Redis Streams client instance
-   */
   setStreamsClient(client: SolanaArbitrageStreamsClient): void {
     this.streamsClient = client;
     this.logger.info('Redis Streams client attached');
   }
 
-  /**
-   * Check if Redis Streams client is available.
-   */
   hasStreamsClient(): boolean {
     return !!this.streamsClient;
   }
 
-  /**
-   * Publish an opportunity to Redis Streams.
-   * Called automatically when opportunities are detected if streams client is set.
-   *
-   * @param opportunity - The arbitrage opportunity to publish
-   */
   async publishOpportunity(opportunity: SolanaArbitrageOpportunity): Promise<void> {
     if (!this.streamsClient) {
       this.logger.debug('No streams client, skipping opportunity publish', {
@@ -1040,55 +1574,98 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // ===========================================================================
 
   /**
-   * Connect to a SolanaDetector instance for pool updates.
-   * The SolanaDetector handles RPC connections, program subscriptions, and health monitoring.
-   * This detector handles arbitrage-specific detection logic.
+   * Connect to a SolanaDetector or UnifiedChainDetector for pool updates.
    *
-   * Usage:
-   * ```typescript
-   * const baseDetector = new SolanaDetector(config);
-   * const arbDetector = new SolanaArbitrageDetector(config);
+   * Issue 1.1 Fix: Properly adapt UnifiedPriceUpdate to SolanaPoolInfo.
+   * The UnifiedChainDetector emits PriceUpdate events with a different schema.
+   * This method handles both SolanaPoolInfo (direct) and UnifiedPriceUpdate (adapted).
    *
-   * // Connect for pool updates
-   * arbDetector.connectToSolanaDetector(baseDetector);
-   *
-   * await baseDetector.start();
-   * ```
-   *
-   * @param solanaDetector - SolanaDetector-compatible EventEmitter with 'poolUpdate' events
+   * @param detector - EventEmitter that emits pool/price update events
    */
-  connectToSolanaDetector(solanaDetector: EventEmitter): void {
-    // Listen for pool updates from the base detector
-    solanaDetector.on('poolUpdate', (pool: SolanaPoolInfo) => {
-      const existingPool = this.pools.get(pool.address);
-      if (existingPool) {
-        // Update existing pool
-        if (pool.price !== undefined) {
-          this.updatePoolPrice(pool.address, pool.price);
-        }
-      } else {
-        // Add new pool
-        this.addPool(pool);
+  connectToSolanaDetector(detector: EventEmitter): void {
+    /**
+     * Adapter for UnifiedPriceUpdate -> SolanaPoolInfo.
+     * Issue 1.1 Fix: Handle schema differences.
+     */
+    const adaptPriceUpdate = (update: UnifiedPriceUpdate | SolanaPoolInfo): SolanaPoolInfo | null => {
+      // If it already has token0.symbol, it's SolanaPoolInfo
+      if ('token0' in update && typeof update.token0 === 'object' && 'symbol' in update.token0) {
+        return update as SolanaPoolInfo;
       }
-    });
+
+      // It's a UnifiedPriceUpdate - adapt it
+      const priceUpdate = update as UnifiedPriceUpdate;
+
+      // Skip non-Solana chains
+      if (priceUpdate.chain !== this.config.chainId && priceUpdate.chain !== 'solana') {
+        return null;
+      }
+
+      return {
+        // Use pairKey as address (unique identifier)
+        address: priceUpdate.pairKey,
+        programId: 'unknown', // Not available in UnifiedPriceUpdate
+        dex: priceUpdate.dex,
+        token0: {
+          mint: priceUpdate.token0,
+          symbol: priceUpdate.token0,
+          decimals: 9, // Default, not available in update
+        },
+        token1: {
+          mint: priceUpdate.token1,
+          symbol: priceUpdate.token1,
+          decimals: 6, // Default, not available in update
+        },
+        fee: priceUpdate.fee ?? 30, // Default 0.3% if not provided
+        reserve0: priceUpdate.reserve0,
+        reserve1: priceUpdate.reserve1,
+        price: priceUpdate.price,
+        lastUpdated: priceUpdate.timestamp,
+      };
+    };
+
+    /**
+     * Handler for pool/price updates with async queuing.
+     * Issue 5.1 Fix: Process events in order using queue.
+     */
+    const handleUpdate = (update: UnifiedPriceUpdate | SolanaPoolInfo): void => {
+      this.eventQueue.enqueue(async () => {
+        const pool = adaptPriceUpdate(update);
+        if (!pool) return;
+
+        const existing = this.poolStore.get(pool.address);
+        if (existing) {
+          if (pool.price !== undefined) {
+            await this.updatePoolPrice(pool.address, pool.price);
+          }
+        } else {
+          await this.addPool(pool);
+        }
+      });
+    };
+
+    // Listen for both event types for compatibility
+    detector.on('poolUpdate', handleUpdate);
+    detector.on('priceUpdate', handleUpdate);
 
     // Listen for pool removals
-    solanaDetector.on('poolRemoved', (address: string) => {
-      this.removePool(address);
+    detector.on('poolRemoved', (address: string) => {
+      this.eventQueue.enqueue(async () => {
+        await this.removePool(address);
+      });
     });
 
-    this.logger.info('Connected to SolanaDetector for pool updates');
+    this.logger.info('Connected to detector for pool updates', {
+      chainId: this.config.chainId,
+    });
   }
 
   /**
    * Batch import pools from a SolanaDetector or other source.
-   * Useful for initial synchronization.
-   *
-   * @param pools - Array of pools to import
    */
-  importPools(pools: SolanaPoolInfo[]): void {
+  async importPools(pools: SolanaPoolInfo[]): Promise<void> {
     for (const pool of pools) {
-      this.addPool(pool);
+      await this.addPool(pool);
     }
     this.logger.info('Imported pools', { count: pools.length });
   }
