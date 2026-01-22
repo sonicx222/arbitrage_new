@@ -16,6 +16,7 @@
 import { RedisStreamsClient, WhaleAlert } from '@arbitrage/core';
 import { SwapEvent, Token } from '@arbitrage/types';
 import type { Logger } from '../types';
+import { STABLECOIN_SYMBOLS, DEFAULT_TOKEN_DECIMALS } from '../constants';
 
 // =============================================================================
 // Types
@@ -46,12 +47,20 @@ export class WhaleAlertPublisher {
   private readonly chainId: string;
   private readonly streamsClient: RedisStreamsClient;
   private readonly tokens: Token[];
+  // PERF-OPT: O(1) token lookup by address (instead of O(N) array.find)
+  private readonly tokensByAddress: Map<string, Token>;
 
   constructor(config: WhaleAlertPublisherConfig) {
     this.chainId = config.chainId;
     this.logger = config.logger;
     this.streamsClient = config.streamsClient;
     this.tokens = config.tokens;
+
+    // PERF-OPT: Build O(1) token lookup map at construction time
+    this.tokensByAddress = new Map();
+    for (const token of this.tokens) {
+      this.tokensByAddress.set(token.address.toLowerCase(), token);
+    }
   }
 
   // ===========================================================================
@@ -110,6 +119,24 @@ export class WhaleAlertPublisher {
   // ===========================================================================
 
   /**
+   * Estimate USD value from a SwapEvent and pair info.
+   * Convenience wrapper around estimateSwapUsdValue for cleaner API.
+   *
+   * @param swap - The swap event containing amounts
+   * @param pair - Extended pair info with reserves
+   * @returns Estimated USD value
+   */
+  estimateUsdValue(swap: SwapEvent, pair: ExtendedPairInfo): number {
+    return this.estimateSwapUsdValue(
+      pair,
+      swap.amount0In,
+      swap.amount1In,
+      swap.amount0Out,
+      swap.amount1Out
+    );
+  }
+
+  /**
    * Estimate USD value of a swap for whale detection.
    * Uses stablecoin amounts directly or estimates via reserve ratios.
    */
@@ -143,23 +170,33 @@ export class WhaleAlertPublisher {
       }
 
       // Neither token is a stablecoin - estimate using reserve ratios
-      const reserve0 = Number(BigInt(pair.reserve0)) / Math.pow(10, token0Decimals);
-      const reserve1 = Number(BigInt(pair.reserve1)) / Math.pow(10, token1Decimals);
-
-      if (reserve0 > 0 && reserve1 > 0) {
-        // Estimate token values based on reserve ratio
-        const token0MaxAmount = Math.max(amt0In, amt0Out);
-        const token1MaxAmount = Math.max(amt1In, amt1Out);
-
-        // Use the larger of the two estimates
-        const estimate0 = token0MaxAmount * (reserve1 / reserve0);
-        const estimate1 = token1MaxAmount * (reserve0 / reserve1);
-
-        return Math.max(estimate0, estimate1);
+      // CRITICAL FIX: Guard against zero/invalid reserves to prevent division by zero
+      let reserve0: number;
+      let reserve1: number;
+      try {
+        reserve0 = Number(BigInt(pair.reserve0)) / Math.pow(10, token0Decimals);
+        reserve1 = Number(BigInt(pair.reserve1)) / Math.pow(10, token1Decimals);
+      } catch {
+        // Invalid reserve format (not a valid BigInt string)
+        return 0;
       }
 
-      // Fallback: return 0 if we can't estimate
-      return 0;
+      // CRITICAL FIX: Explicit check for zero, NaN, Infinity before division
+      if (!reserve0 || !reserve1 || !Number.isFinite(reserve0) || !Number.isFinite(reserve1)) {
+        return 0;
+      }
+
+      // Estimate token values based on reserve ratio
+      const token0MaxAmount = Math.max(amt0In, amt0Out);
+      const token1MaxAmount = Math.max(amt1In, amt1Out);
+
+      // Use the larger of the two estimates
+      const estimate0 = token0MaxAmount * (reserve1 / reserve0);
+      const estimate1 = token1MaxAmount * (reserve0 / reserve1);
+
+      // Guard against NaN/Infinity results
+      const maxEstimate = Math.max(estimate0, estimate1);
+      return Number.isFinite(maxEstimate) ? maxEstimate : 0;
     } catch (error) {
       this.logger.debug('USD value estimation failed', { error: (error as Error).message });
       return 0;
@@ -174,7 +211,8 @@ export class WhaleAlertPublisher {
    * Get token symbol from address.
    */
   private getTokenSymbol(address: string): string {
-    const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+    // PERF-OPT: O(1) lookup instead of O(N) array.find()
+    const token = this.tokensByAddress.get(address.toLowerCase());
     return token?.symbol || address.slice(0, 8);
   }
 
@@ -182,15 +220,16 @@ export class WhaleAlertPublisher {
    * Get token decimals for accurate amount conversion.
    */
   private getTokenDecimals(address: string): number {
-    const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
-    return token?.decimals ?? 18; // Default to 18 decimals
+    // PERF-OPT: O(1) lookup instead of O(N) array.find()
+    const token = this.tokensByAddress.get(address.toLowerCase());
+    return token?.decimals ?? DEFAULT_TOKEN_DECIMALS;
   }
 
   /**
    * Check if a token symbol represents a stablecoin.
+   * FIX Refactor 9.3: Use centralized STABLECOIN_SYMBOLS constant
    */
   private isStablecoin(symbol: string): boolean {
-    const stableSymbols = ['USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'];
-    return stableSymbols.includes(symbol.toUpperCase());
+    return (STABLECOIN_SYMBOLS as readonly string[]).includes(symbol.toUpperCase());
   }
 }

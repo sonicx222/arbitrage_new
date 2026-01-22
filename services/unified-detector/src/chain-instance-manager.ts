@@ -30,6 +30,7 @@ import { CHAINS } from '@arbitrage/config';
 import { ChainDetectorInstance } from './chain-instance';
 import { ChainStats } from './unified-detector';
 import { Logger } from './types';
+import { CHAIN_STOP_TIMEOUT_MS } from './constants';
 
 // =============================================================================
 // Types
@@ -113,13 +114,6 @@ export interface ChainInstanceManager extends EventEmitter {
 }
 
 // =============================================================================
-// Constants
-// =============================================================================
-
-/** Default timeout for stopping individual chains */
-const DEFAULT_STOP_TIMEOUT_MS = 30000;
-
-// =============================================================================
 // Implementation
 // =============================================================================
 
@@ -140,7 +134,7 @@ export function createChainInstanceManager(
     chainInstanceFactory,
     logger,
     degradationManager,
-    stopTimeoutMs = DEFAULT_STOP_TIMEOUT_MS,
+    stopTimeoutMs = CHAIN_STOP_TIMEOUT_MS,
     chainValidator = (chainId) => !!CHAINS[chainId as keyof typeof CHAINS],
   } = config;
 
@@ -314,20 +308,31 @@ export function createChainInstanceManager(
       // Remove listeners before stopping to prevent memory leak
       instance.removeAllListeners();
 
-      // Wrap stop() with timeout to prevent indefinite hangs
-      const stopWithTimeout = Promise.race([
-        instance.stop(),
-        new Promise<void>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Chain ${chainId} stop timeout after ${stopTimeoutMs}ms`)),
-            stopTimeoutMs
-          )
-        ),
-      ]).catch((error) => {
-        logger.error(`Error stopping chain instance: ${chainId}`, {
-          error: (error as Error).message,
-        });
-      });
+      // FIX Bug 4.3: Wrap stop() with timeout and properly clear timer to prevent memory leak
+      const stopWithTimeout = (async () => {
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        try {
+          await Promise.race([
+            instance.stop(),
+            new Promise<void>((_, reject) => {
+              timeoutId = setTimeout(
+                () => reject(new Error(`Chain ${chainId} stop timeout after ${stopTimeoutMs}ms`)),
+                stopTimeoutMs
+              );
+            }),
+          ]);
+        } catch (error) {
+          logger.error(`Error stopping chain instance: ${chainId}`, {
+            error: (error as Error).message,
+          });
+        } finally {
+          // Always clear the timeout to prevent memory leak
+          if (timeoutId !== null) {
+            clearTimeout(timeoutId);
+          }
+        }
+      })();
 
       stopPromises.push(stopWithTimeout);
     }
@@ -342,13 +347,12 @@ export function createChainInstanceManager(
 
   /**
    * Get list of currently healthy (connected) chain IDs.
+   * FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
    */
   function getHealthyChains(): string[] {
-    // Take snapshot to avoid iterator issues
-    const instancesSnapshot = Array.from(chainInstances.entries());
     const healthyChains: string[] = [];
 
-    for (const [chainId, instance] of instancesSnapshot) {
+    for (const [chainId, instance] of chainInstances) {
       const stats = instance.getStats();
       if (stats.status === 'connected') {
         healthyChains.push(chainId);
@@ -360,13 +364,12 @@ export function createChainInstanceManager(
 
   /**
    * Get stats for all chain instances.
+   * FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
    */
   function getStats(): Map<string, ChainStats> {
-    // Take snapshot to avoid iterator issues
-    const instancesSnapshot = Array.from(chainInstances.entries());
     const stats = new Map<string, ChainStats>();
 
-    for (const [chainId, instance] of instancesSnapshot) {
+    for (const [chainId, instance] of chainInstances) {
       stats.set(chainId, instance.getStats());
     }
 

@@ -23,10 +23,7 @@ import {
   calculatePriceFromBigIntReserves,
   // Simulation mode support
   isSimulationMode,
-  ChainSimulator,
-  getChainSimulator,
-  stopChainSimulator,
-  SimulatedPairConfig,
+  // REFACTOR: ChainSimulator imports moved to ./simulation module
   // Triangular/Quadrilateral arbitrage detection
   CrossDexTriangularArbitrage,
   DexPool,
@@ -68,6 +65,32 @@ import {
 
 import { ChainStats } from './unified-detector';
 import { WhaleAlertPublisher, ExtendedPairInfo } from './publishers';
+// REFACTOR: Import simulation handler for modular simulation logic
+import {
+  ChainSimulationHandler,
+  PairForSimulation,
+  SimulationCallbacks
+} from './simulation';
+// FIX Config 3.1/3.2: Import utility functions and constants
+import {
+  parseIntEnvVar,
+  parseFloatEnvVar,
+  toWebSocketUrl,
+  isUnstableChain,
+} from './types';
+import {
+  DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
+  MIN_SIMULATION_UPDATE_INTERVAL_MS,
+  MAX_SIMULATION_UPDATE_INTERVAL_MS,
+  DEFAULT_SIMULATION_VOLATILITY,
+  MIN_SIMULATION_VOLATILITY,
+  MAX_SIMULATION_VOLATILITY,
+  UNSTABLE_WEBSOCKET_CHAINS,
+  DEFAULT_WS_CONNECTION_TIMEOUT_MS,
+  EXTENDED_WS_CONNECTION_TIMEOUT_MS,
+  WS_DISCONNECT_TIMEOUT_MS,
+  SNAPSHOT_CACHE_TTL_MS,
+} from './constants';
 
 // =============================================================================
 // Types
@@ -93,6 +116,9 @@ interface ExtendedPair extends Pair {
  * Snapshot of pair data for thread-safe arbitrage detection.
  * Captures reserve values at a point in time to avoid race conditions
  * when reserves are updated by concurrent Sync events.
+ *
+ * PERF 10.1: Includes cached BigInt values to avoid repeated conversions
+ * during arbitrage calculations.
  */
 interface PairSnapshot {
   address: string;
@@ -103,6 +129,9 @@ interface PairSnapshot {
   reserve1: string;
   fee: number;
   blockNumber: number;
+  // PERF 10.1: Cached BigInt values for hot-path calculations
+  reserve0BigInt: bigint;
+  reserve1BigInt: bigint;
 }
 
 // P2 FIX: Proper type for Ethereum RPC log events
@@ -157,6 +186,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private dexes: Dex[];
   private tokens: Token[];
+  // PERF-OPT: O(1) token lookup by address (instead of O(N) array.find)
+  // Key: lowercase address, Value: Token object
+  private tokensByAddress: Map<string, Token> = new Map();
   // P2 FIX: Use TokenMetadata type instead of any
   private tokenMetadata: TokenMetadata | undefined;
 
@@ -185,7 +217,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
   // Simulation mode support
   private readonly simulationMode: boolean;
-  private chainSimulator: ChainSimulator | null = null;
+  // REFACTOR: Use ChainSimulationHandler instead of inline simulation code
+  private simulationHandler: ChainSimulationHandler | null = null;
 
   // Triangular/Quadrilateral arbitrage detection
   private triangularDetector: CrossDexTriangularArbitrage;
@@ -208,6 +241,17 @@ export class ChainDetectorInstance extends EventEmitter {
   // Hot pairs (high update frequency) bypass time-based throttling
   private activityTracker: PairActivityTracker;
 
+  // PERF-OPT: Snapshot caching to avoid O(N) iteration on every check
+  // When multiple pairs update within a short window, reuse the cached snapshot
+  private snapshotCache: Map<string, PairSnapshot> | null = null;
+  // PERF 10.3: Cache DexPool[] array to avoid O(N) conversion on every triangular check
+  private dexPoolCache: DexPool[] | null = null;
+  private snapshotCacheTimestamp: number = 0;
+  // FIX Perf 10.3: Version-based cache invalidation for accurate DexPool caching
+  // Incremented when any pair is updated, used to detect stale DexPool cache
+  private snapshotVersion: number = 0;
+  private dexPoolCacheVersion: number = -1;
+
   constructor(config: ChainInstanceConfig) {
     super();
 
@@ -228,6 +272,12 @@ export class ChainDetectorInstance extends EventEmitter {
     this.dexes = getEnabledDexes(this.chainId);
     this.tokens = CORE_TOKENS[this.chainId as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chainId as keyof typeof TOKEN_METADATA] || {};
+
+    // PERF-OPT: Build O(1) token lookup map at construction time
+    // This avoids O(N) array.find() on every getTokenSymbol() call in hot path
+    for (const token of this.tokens) {
+      this.tokensByAddress.set(token.address.toLowerCase(), token);
+    }
 
     // Override URLs if provided
     if (config.wsUrl) {
@@ -265,14 +315,20 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
 
   async start(): Promise<void> {
-    // P0-NEW-3 FIX: Return existing promise if start is already in progress
+    // FIX Race 5.1: Use synchronous mutex pattern to prevent race conditions
+    // The check and assignment must happen atomically (no awaits between)
+
+    // If already starting, return existing promise
     if (this.startPromise) {
       return this.startPromise;
     }
 
-    // P0-NEW-4 FIX: Wait for any pending stop operation to complete
+    // If stop is in progress, wait for it first, then re-enter
     if (this.stopPromise) {
-      await this.stopPromise;
+      const pendingStop = this.stopPromise;
+      await pendingStop;
+      // Re-enter start() to get proper mutex handling after stop completes
+      return this.start();
     }
 
     // Guard against starting while stopping or already running
@@ -286,7 +342,8 @@ export class ChainDetectorInstance extends EventEmitter {
       return;
     }
 
-    // P0-NEW-3 FIX: Create and store the start promise for concurrent callers
+    // CRITICAL: Create and store the start promise SYNCHRONOUSLY (no awaits above this point after checks)
+    // This ensures no other caller can slip through between check and assignment
     this.startPromise = this.performStart();
 
     try {
@@ -323,8 +380,8 @@ export class ChainDetectorInstance extends EventEmitter {
       this.status = 'connected';
       this.isRunning = true;
       this.emit('statusChange', this.status);
-      // Start simplified non-EVM simulation (generates periodic price updates)
-      await this.initializeNonEvmSimulation();
+      // REFACTOR: Start non-EVM simulation via extracted handler
+      await this.initializeNonEvmSimulationViaHandler();
       return;
     }
 
@@ -367,8 +424,8 @@ export class ChainDetectorInstance extends EventEmitter {
       });
 
       if (this.simulationMode) {
-        // SIMULATION MODE: Use ChainSimulator instead of real connections
-        await this.initializeSimulation();
+        // REFACTOR: SIMULATION MODE via extracted handler
+        await this.initializeEvmSimulationViaHandler();
       } else {
         // PRODUCTION MODE: Use real WebSocket and RPC connections
         // Initialize RPC provider
@@ -400,10 +457,19 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    // P0-NEW-4 FIX: Return existing promise if stop is already in progress
-    // This allows concurrent callers to await the same stop operation
+    // FIX Race 5.1: Use synchronous mutex pattern to prevent race conditions
+
+    // If already stopping, return existing promise
     if (this.stopPromise) {
       return this.stopPromise;
+    }
+
+    // If start is in progress, wait for it first, then re-enter
+    if (this.startPromise) {
+      const pendingStart = this.startPromise;
+      await pendingStart;
+      // Re-enter stop() to get proper mutex handling after start completes
+      return this.stop();
     }
 
     // Guard: Can't stop if not running and not stopping
@@ -411,7 +477,7 @@ export class ChainDetectorInstance extends EventEmitter {
       return;
     }
 
-    // P0-NEW-4 FIX: Create and store the stop promise for concurrent callers
+    // CRITICAL: Create and store the stop promise SYNCHRONOUSLY (no awaits above this point after checks)
     this.stopPromise = this.performStop();
 
     try {
@@ -431,19 +497,11 @@ export class ChainDetectorInstance extends EventEmitter {
     this.isStopping = true;
     this.isRunning = false;
 
-    // Stop non-EVM simulation interval if running
-    if (this.nonEvmSimulationInterval) {
-      clearInterval(this.nonEvmSimulationInterval);
-      this.nonEvmSimulationInterval = null;
-    }
-
-    // Stop chain simulator if running
-    if (this.chainSimulator) {
-      this.chainSimulator.removeAllListeners();
-      this.chainSimulator.stop();
-      this.chainSimulator = null;
-      // Also cleanup the global simulator for this chain
-      stopChainSimulator(this.chainId);
+    // REFACTOR: Stop simulation via extracted handler (handles both EVM and non-EVM)
+    // FIX Inconsistency 6.1: Await async stop for consistency
+    if (this.simulationHandler) {
+      await this.simulationHandler.stop();
+      this.simulationHandler = null;
     }
 
     // P0-NEW-6 FIX: Disconnect WebSocket with timeout to prevent indefinite hangs
@@ -454,7 +512,7 @@ export class ChainDetectorInstance extends EventEmitter {
         await Promise.race([
           this.wsManager.disconnect(),
           new Promise<void>((_, reject) =>
-            setTimeout(() => reject(new Error('WebSocket disconnect timeout')), 5000)
+            setTimeout(() => reject(new Error('WebSocket disconnect timeout')), WS_DISCONNECT_TIMEOUT_MS)
           )
         ]);
       } catch (error) {
@@ -481,10 +539,17 @@ export class ChainDetectorInstance extends EventEmitter {
     // PHASE-3.3: Clean up extracted publisher
     this.whaleAlertPublisher = null;
 
-    // Clear pairs
+    // Clear pairs and caches
     this.pairs.clear();
     this.pairsByAddress.clear();
     this.pairsByTokens.clear();
+    // PERF-OPT: Clear snapshot cache to free memory
+    this.snapshotCache = null;
+    this.snapshotCacheTimestamp = 0;
+    // FIX Perf 10.3: Reset version counters for clean restart
+    this.snapshotVersion = 0;
+    this.dexPoolCacheVersion = -1;
+    this.dexPoolCache = null;
 
     // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
     this.blockLatencies = [];
@@ -504,159 +569,78 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   // ===========================================================================
-  // Simulation Mode
+  // Simulation Mode (REFACTORED to use ChainSimulationHandler)
   // ===========================================================================
 
-  // Non-EVM simulation interval reference for cleanup
-  private nonEvmSimulationInterval: NodeJS.Timeout | null = null;
-
   /**
-   * Initialize simplified simulation for non-EVM chains (like Solana).
-   * Generates periodic price updates without using EVM-specific Sync events.
-   * This allows simulation mode to work across all chain types.
+   * Initialize non-EVM simulation via the extracted ChainSimulationHandler.
+   * Replaces inline initializeNonEvmSimulation() for cleaner separation.
    */
-  private async initializeNonEvmSimulation(): Promise<void> {
-    this.logger.info('Initializing non-EVM simulation mode', {
-      chainId: this.chainId
-    });
+  private async initializeNonEvmSimulationViaHandler(): Promise<void> {
+    // Create handler instance
+    this.simulationHandler = new ChainSimulationHandler(this.chainId, this.logger);
 
-    // Get configured DEXes and tokens for this non-EVM chain
+    // Get configured DEXes and tokens
     const dexNames = this.dexes.map(d => d.name);
     const tokenSymbols = this.tokens.map(t => t.symbol);
 
-    // If no tokens configured, use default Solana tokens
-    const effectiveTokens = tokenSymbols.length > 0 ? tokenSymbols : ['SOL', 'USDC', 'RAY', 'JUP'];
-    const effectiveDexes = dexNames.length > 0 ? dexNames : ['raydium', 'orca'];
+    // FIX Config 3.1: Validate simulation env vars to prevent unsafe values (e.g., interval=1ms causing CPU overload)
+    const updateIntervalMs = parseIntEnvVar(
+      process.env.SIMULATION_UPDATE_INTERVAL_MS,
+      DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
+      MIN_SIMULATION_UPDATE_INTERVAL_MS,
+      MAX_SIMULATION_UPDATE_INTERVAL_MS
+    );
+    const volatility = parseFloatEnvVar(
+      process.env.SIMULATION_VOLATILITY,
+      DEFAULT_SIMULATION_VOLATILITY,
+      MIN_SIMULATION_VOLATILITY,
+      MAX_SIMULATION_VOLATILITY
+    );
 
-    // Start periodic simulation updates
-    const updateIntervalMs = parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS || '1000', 10);
-    let slotNumber = 250000000; // Starting slot for Solana-like chains
-
-    this.nonEvmSimulationInterval = setInterval(() => {
-      if (this.isStopping || !this.isRunning) {
-        return;
-      }
-
-      slotNumber++;
-      this.lastBlockNumber = slotNumber;
-      this.lastBlockTimestamp = Date.now();
-
-      // Generate synthetic price updates for token pairs across DEXes
-      for (let i = 0; i < effectiveTokens.length; i++) {
-        for (let j = i + 1; j < effectiveTokens.length; j++) {
-          const token0 = effectiveTokens[i];
-          const token1 = effectiveTokens[j];
-
-          // Generate price with some volatility
-          const basePrice = this.getBaseTokenPrice(token0) / this.getBaseTokenPrice(token1);
-          const volatility = parseFloat(process.env.SIMULATION_VOLATILITY || '0.02');
-          const priceVariation = 1 + (Math.random() * 2 - 1) * volatility;
-          const price = basePrice * priceVariation;
-
-          // Emit price update for each DEX
-          for (const dex of effectiveDexes) {
-            const dexPriceVariation = 1 + (Math.random() * 2 - 1) * 0.005; // Small DEX-to-DEX variation
-            const dexPrice = price * dexPriceVariation;
-
-            const priceUpdate: PriceUpdate = {
-              chain: this.chainId,
-              dex,
-              pairKey: `${dex}_${token0}_${token1}`,
-              token0,
-              token1,
-              price: dexPrice,
-              reserve0: '0',  // Non-EVM chains may not have reserve-based AMMs
-              reserve1: '0',
-              blockNumber: slotNumber,
-              timestamp: Date.now(),
-              latency: 0
-            };
-
-            this.emit('priceUpdate', priceUpdate);
-            this.eventsProcessed++;
-          }
-
-          // Occasionally detect arbitrage opportunity
-          if (effectiveDexes.length >= 2 && Math.random() < 0.03) { // 3% chance
-            const dex1 = effectiveDexes[0];
-            const dex2 = effectiveDexes[1];
-            const priceDiff = 0.003 + Math.random() * 0.007; // 0.3% to 1% profit
-
-            // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
-            // For simulation, use 1 token as trade size (1e9 lamports for Solana)
-            const simulatedAmountIn = '1000000000'; // 1 SOL in lamports
-            const simulatedAmountInNum = 1.0; // 1 token for calculation
-            // expectedProfit must be ABSOLUTE value (not percentage) per engine.ts
-            const expectedProfitAbsolute = simulatedAmountInNum * priceDiff;
-
-            const opportunity: ArbitrageOpportunity = {
-              id: `${this.chainId}-sim-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-              type: 'simple',
-              chain: this.chainId,
-              buyDex: dex1,
-              sellDex: dex2,
-              buyPair: `${dex1}_${token0}_${token1}`,
-              sellPair: `${dex2}_${token0}_${token1}`,
-              token0,
-              token1,
-              // CRITICAL FIX: Required fields for execution engine validation
-              tokenIn: token0,
-              tokenOut: token1,
-              amountIn: simulatedAmountIn,
-              buyPrice: price * (1 - priceDiff / 2),
-              sellPrice: price * (1 + priceDiff / 2),
-              profitPercentage: priceDiff * 100,
-              // CRITICAL FIX: expectedProfit as ABSOLUTE value (token amount, not percentage)
-              expectedProfit: expectedProfitAbsolute,
-              confidence: 0.85,
-              timestamp: Date.now(),
-              expiresAt: Date.now() + 1000, // Fast expiry for Solana
-              status: 'pending'
-            };
-
-            this.opportunitiesFound++;
-            this.emit('opportunity', opportunity);
-          }
-        }
-      }
-    }, updateIntervalMs);
-
-    this.logger.info('Non-EVM simulation initialized', {
-      chainId: this.chainId,
-      dexes: effectiveDexes,
-      tokens: effectiveTokens,
-      updateIntervalMs
-    });
+    // Initialize via handler with callbacks
+    await this.simulationHandler.initializeNonEvmSimulation(
+      {
+        chainId: this.chainId,
+        dexes: dexNames,
+        tokens: tokenSymbols,
+        updateIntervalMs,
+        volatility,
+        logger: this.logger
+      },
+      this.createSimulationCallbacks()
+    );
   }
 
   /**
-   * Get base token price for simulation (in USD).
-   * Note: Keep in sync with BASE_PRICES in shared/core/src/simulation-mode.ts
+   * Initialize EVM simulation via the extracted ChainSimulationHandler.
+   * Replaces inline initializeSimulation() for cleaner separation.
    */
-  private getBaseTokenPrice(symbol: string): number {
-    const basePrices: Record<string, number> = {
-      // Solana-specific tokens
-      SOL: 175, USDC: 1, USDT: 1, RAY: 4.5, JUP: 0.85, ORCA: 3.2,
-      BONK: 0.000025, WIF: 2.5, mSOL: 185, JitoSOL: 180,
-      // Common cross-chain tokens (for non-EVM chains that may support bridged assets)
-      WETH: 3200, WBTC: 65000, LINK: 15, ARB: 1.15, OP: 2.5
-    };
-    return basePrices[symbol.toUpperCase()] ?? 1;
+  private async initializeEvmSimulationViaHandler(): Promise<void> {
+    // Create handler instance
+    this.simulationHandler = new ChainSimulationHandler(this.chainId, this.logger);
+
+    // Build pairs for simulation from initialized pairs
+    const pairsForSimulation = this.buildPairsForSimulation();
+
+    if (pairsForSimulation.length === 0) {
+      this.logger.warn('No pairs available for simulation', { chainId: this.chainId });
+      return;
+    }
+
+    // Initialize via handler with callbacks
+    await this.simulationHandler.initializeEvmSimulation(
+      pairsForSimulation,
+      this.createSimulationCallbacks()
+    );
   }
 
   /**
-   * Initialize the chain simulator for simulation mode.
-   * Creates simulated pairs from the initialized pairs and starts generating
-   * fake Sync events that mimic real blockchain events.
+   * Build PairForSimulation array from initialized pairs.
+   * Used by EVM simulation to configure the ChainSimulator.
    */
-  private async initializeSimulation(): Promise<void> {
-    this.logger.info('Initializing simulation mode', {
-      chainId: this.chainId,
-      pairs: this.pairs.size
-    });
-
-    // Build simulated pair configs from our initialized pairs
-    const simulatedPairs: SimulatedPairConfig[] = [];
+  private buildPairsForSimulation(): PairForSimulation[] {
+    const pairsForSimulation: PairForSimulation[] = [];
 
     for (const [pairKey, pair] of this.pairs) {
       // Extract token symbols from pair key (format: dex_TOKEN0_TOKEN1)
@@ -666,62 +650,65 @@ export class ChainDetectorInstance extends EventEmitter {
       const token0Symbol = parts[1];
       const token1Symbol = parts[2];
 
-      // Get token decimals from config (default to 18 for most tokens)
-      const token0 = this.tokens.find(t => t.symbol === token0Symbol);
-      const token1 = this.tokens.find(t => t.symbol === token1Symbol);
+      // PERF-OPT: Use O(1) Map lookup instead of O(N) array.find()
+      const token0 = this.tokensByAddress.get(pair.token0.toLowerCase());
+      const token1 = this.tokensByAddress.get(pair.token1.toLowerCase());
 
-      simulatedPairs.push({
+      pairsForSimulation.push({
+        key: pairKey,
         address: pair.address,
+        dex: pair.dex,
         token0Symbol,
         token1Symbol,
         token0Decimals: token0?.decimals ?? 18,
         token1Decimals: token1?.decimals ?? 18,
-        dex: pair.dex,
         fee: pair.fee ?? 0.003  // Default 0.3% fee
       });
     }
 
-    if (simulatedPairs.length === 0) {
-      this.logger.warn('No pairs available for simulation', { chainId: this.chainId });
-      return;
-    }
-
-    // Get or create the chain simulator
-    this.chainSimulator = getChainSimulator(this.chainId, simulatedPairs);
-
-    // Set up event handlers for simulated events
-    this.chainSimulator.on('syncEvent', (event) => {
-      this.handleSimulatedSyncEvent(event);
-    });
-
-    this.chainSimulator.on('blockUpdate', (data) => {
-      this.lastBlockNumber = data.blockNumber;
-      this.lastBlockTimestamp = Date.now();
-    });
-
-    this.chainSimulator.on('opportunity', (opportunity) => {
-      this.opportunitiesFound++;
-      this.emit('opportunity', opportunity);
-      this.logger.debug('Simulated opportunity detected', {
-        id: opportunity.id,
-        profit: `${opportunity.profitPercentage.toFixed(2)}%`
-      });
-    });
-
-    // Start the simulator
-    this.chainSimulator.start();
-
-    this.logger.info('Simulation mode initialized', {
-      chainId: this.chainId,
-      simulatedPairs: simulatedPairs.length
-    });
+    return pairsForSimulation;
   }
 
   /**
-   * Handle simulated Sync events from the ChainSimulator.
-   * Processes them the same way as real Sync events from WebSocket.
+   * Create simulation callbacks that update instance state.
+   * These callbacks bridge the ChainSimulationHandler to this instance's state.
    */
-  private handleSimulatedSyncEvent(event: { address: string; data: string; blockNumber: string }): void {
+  private createSimulationCallbacks(): SimulationCallbacks {
+    return {
+      onPriceUpdate: (update: PriceUpdate) => {
+        this.emit('priceUpdate', update);
+      },
+
+      onOpportunity: (opportunity: ArbitrageOpportunity) => {
+        this.opportunitiesFound++;
+        this.emit('opportunity', opportunity);
+        this.logger.debug('Simulated opportunity detected', {
+          id: opportunity.id,
+          profit: `${(opportunity.profitPercentage ?? 0).toFixed(2)}%`
+        });
+      },
+
+      onBlockUpdate: (blockNumber: number) => {
+        this.lastBlockNumber = blockNumber;
+        this.lastBlockTimestamp = Date.now();
+      },
+
+      onEventProcessed: () => {
+        this.eventsProcessed++;
+      },
+
+      // EVM simulation: Handle sync events through pair state management
+      onSyncEvent: (event) => {
+        this.handleSimulatedSyncEvent(event);
+      }
+    };
+  }
+
+  /**
+   * Handle simulated Sync events from the ChainSimulationHandler.
+   * Updates pair state and emits price updates (same as real Sync events).
+   */
+  private handleSimulatedSyncEvent(event: { address: string; reserve0: string; reserve1: string; blockNumber: number }): void {
     const pairAddress = event.address.toLowerCase();
     const pair = this.pairsByAddress.get(pairAddress);
 
@@ -730,15 +717,7 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     try {
-      // Decode reserves from the simulated data
-      // Data format: 0x + 64 hex chars for reserve0 + 64 hex chars for reserve1
-      const data = event.data.slice(2); // Remove '0x'
-      const reserve0Hex = data.slice(0, 64);
-      const reserve1Hex = data.slice(64, 128);
-
-      const reserve0 = BigInt('0x' + reserve0Hex).toString();
-      const reserve1 = BigInt('0x' + reserve1Hex).toString();
-      const blockNumber = parseInt(event.blockNumber, 16);
+      const { reserve0, reserve1, blockNumber } = event;
 
       // Update pair reserves (using Object.assign for atomicity)
       Object.assign(pair, {
@@ -748,9 +727,8 @@ export class ChainDetectorInstance extends EventEmitter {
         lastUpdate: Date.now()
       });
 
-      this.lastBlockNumber = blockNumber;
-      this.lastBlockTimestamp = Date.now();
-      this.eventsProcessed++;
+      // FIX Bug 4.2: Invalidate snapshot cache when pair is updated
+      this.snapshotCache = null;
 
       // Calculate price and emit price update
       const price = calculatePriceFromBigIntReserves(
@@ -770,8 +748,8 @@ export class ChainDetectorInstance extends EventEmitter {
         token0: pair.token0,
         token1: pair.token1,
         price,
-        reserve0,  // Already a string
-        reserve1,  // Already a string
+        reserve0,
+        reserve1,
         blockNumber,
         timestamp: Date.now(),
         latency: 0  // Simulated events have zero latency
@@ -789,13 +767,33 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
 
   private async initializeWebSocket(): Promise<void> {
-    // Use wsUrl, fallback to rpcUrl if not available
-    const primaryWsUrl = this.chainConfig.wsUrl || this.chainConfig.rpcUrl;
+    // FIX Refactor 9.1: Use extracted utility for WebSocket URL validation
+    let primaryWsUrl: string;
 
-    // FIX: Pass chainId for proper staleness thresholds and health tracking
-    // Use extended timeout for known unstable chains (BSC, Fantom)
-    const unstableChains = ['bsc', 'fantom'];
-    const connectionTimeout = unstableChains.includes(this.chainId.toLowerCase()) ? 15000 : 10000;
+    if (this.chainConfig.wsUrl) {
+      // Validate existing WebSocket URL
+      const result = toWebSocketUrl(this.chainConfig.wsUrl);
+      primaryWsUrl = result.url;
+    } else {
+      // Try to convert RPC URL to WebSocket
+      try {
+        const result = toWebSocketUrl(this.chainConfig.rpcUrl);
+        primaryWsUrl = result.url;
+        if (result.converted) {
+          this.logger.warn('Converting RPC URL to WebSocket URL', {
+            original: result.originalUrl,
+            converted: result.url
+          });
+        }
+      } catch (error) {
+        throw new Error(`No valid WebSocket URL available for chain ${this.chainId}. wsUrl: ${this.chainConfig.wsUrl}, rpcUrl: ${this.chainConfig.rpcUrl}`);
+      }
+    }
+
+    // FIX Config 3.2: Use centralized UNSTABLE_WEBSOCKET_CHAINS constant
+    const connectionTimeout = isUnstableChain(this.chainId, UNSTABLE_WEBSOCKET_CHAINS)
+      ? EXTENDED_WS_CONNECTION_TIMEOUT_MS
+      : DEFAULT_WS_CONNECTION_TIMEOUT_MS;
 
     const wsConfig: WebSocketConfig = {
       url: primaryWsUrl,
@@ -869,7 +867,8 @@ export class ChainDetectorInstance extends EventEmitter {
           // Convert fee from basis points to percentage for pair storage
           // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
           // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
-          const feePercentage = dexFeeToPercentage(dex.fee ?? 30);
+          // Validate fee at source to catch config errors early
+          const feePercentage = this.validateFee(dexFeeToPercentage(dex.fee ?? 30));
 
           const pair: ExtendedPair = {
             address: pairAddress,
@@ -998,13 +997,14 @@ export class ChainDetectorInstance extends EventEmitter {
       // Decode reserves from log data
       const data = log.data;
       if (data && data.length >= 130) {
-        // BUG-FIX: Record activity AFTER validating data, not before
-        // This prevents inflating activity scores for malformed events
-        // Use chain:address format to avoid cross-chain address collisions in shared tracker
-        this.activityTracker.recordUpdate(`${this.chainId}:${pairAddress}`);
-
+        // CRITICAL FIX: Parse reserves BEFORE recording activity to prevent
+        // inflating activity scores for malformed events (if BigInt throws)
         const reserve0 = BigInt('0x' + data.slice(2, 66)).toString();
         const reserve1 = BigInt('0x' + data.slice(66, 130)).toString();
+
+        // Record activity AFTER successful parsing (race condition fix)
+        // Use chain:address format to avoid cross-chain address collisions in shared tracker
+        this.activityTracker.recordUpdate(`${this.chainId}:${pairAddress}`);
 
         // P1-9 FIX: Use Object.assign for atomic pair updates
         // This prevents partial updates if concurrent access occurs during
@@ -1015,6 +1015,12 @@ export class ChainDetectorInstance extends EventEmitter {
           blockNumber: parseInt(log.blockNumber, 16),
           lastUpdate: Date.now()
         });
+
+        // FIX Bug 4.2: Invalidate snapshot cache when pair is updated
+        // This ensures arbitrage detection uses fresh data
+        this.snapshotCache = null;
+        // FIX Perf 10.3: Increment version for accurate DexPool cache invalidation
+        this.snapshotVersion++;
 
         this.eventsProcessed++;
 
@@ -1058,6 +1064,12 @@ export class ChainDetectorInstance extends EventEmitter {
         reserve1: pair.reserve1
       };
 
+      // FIX Bug 4.2: Ensure USD value estimation is available for whale detection
+      // If whaleAlertPublisher is null but swapEventFilter is not, whale detection won't work properly
+      const usdValue = this.whaleAlertPublisher
+        ? this.whaleAlertPublisher.estimateSwapUsdValue(pairInfo, amount0In, amount1In, amount0Out, amount1Out)
+        : 0;
+
       const swapEvent: SwapEvent = {
         chain: this.chainId,
         dex: pair.dex,
@@ -1072,19 +1084,20 @@ export class ChainDetectorInstance extends EventEmitter {
         amount0Out,
         amount1Out,
         to: '',
-        // BUG-3 FIX: Calculate USD value for accurate whale detection
-        // PHASE-3.3: Use extracted publisher's estimation method
-        usdValue: this.whaleAlertPublisher?.estimateSwapUsdValue(pairInfo, amount0In, amount1In, amount0Out, amount1Out) ?? 0
+        usdValue
       };
 
+      // FIX Bug 4.2: Skip whale detection if publisher is not available (usdValue will always be 0)
       // Process through filter (handles whale detection via registered handler)
-      if (this.swapEventFilter) {
+      if (this.swapEventFilter && this.whaleAlertPublisher) {
         const result = this.swapEventFilter.processEvent(swapEvent);
         if (!result.passed) return;
       }
 
-      // PHASE-3.3: Publish to Redis Streams using extracted publisher
-      this.whaleAlertPublisher?.publishSwapEvent(swapEvent);
+      // Publish to Redis Streams using extracted publisher (if available)
+      if (this.whaleAlertPublisher) {
+        this.whaleAlertPublisher.publishSwapEvent(swapEvent);
+      }
 
       // Local emit for any listeners
       this.emit('swapEvent', swapEvent);
@@ -1164,12 +1177,19 @@ export class ChainDetectorInstance extends EventEmitter {
   /**
    * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
    * Captures all mutable values at a point in time.
+   *
+   * PERF 10.1: Pre-computes BigInt values during snapshot creation to avoid
+   * repeated conversions during hot-path arbitrage calculations.
    */
   private createPairSnapshot(pair: ExtendedPair): PairSnapshot | null {
     // Skip pairs without initialized reserves
     if (!pair.reserve0 || !pair.reserve1 || pair.reserve0 === '0' || pair.reserve1 === '0') {
       return null;
     }
+
+    // PERF 10.1: Convert to BigInt once during snapshot creation
+    const reserve0BigInt = BigInt(pair.reserve0);
+    const reserve1BigInt = BigInt(pair.reserve1);
 
     return {
       address: pair.address,
@@ -1178,8 +1198,11 @@ export class ChainDetectorInstance extends EventEmitter {
       token1: pair.token1,
       reserve0: pair.reserve0,
       reserve1: pair.reserve1,
-      fee: pair.fee ?? 0.003, // Default 0.3% fee if undefined
-      blockNumber: pair.blockNumber
+      fee: this.validateFee(pair.fee), // Validate fee for safe calculations
+      blockNumber: pair.blockNumber,
+      // PERF 10.1: Cached BigInt values
+      reserve0BigInt,
+      reserve1BigInt,
     };
   }
 
@@ -1187,8 +1210,20 @@ export class ChainDetectorInstance extends EventEmitter {
    * Create deep snapshots of all pairs for thread-safe iteration.
    * This prevents race conditions where concurrent Sync events could
    * modify pair reserves while we're iterating for arbitrage detection.
+   *
+   * PERF-OPT: Uses time-based caching to avoid O(N) iteration when
+   * multiple pairs update within a short window (100ms). This significantly
+   * reduces CPU overhead for high-frequency update scenarios.
    */
   private createPairsSnapshot(): Map<string, PairSnapshot> {
+    const now = Date.now();
+
+    // PERF-OPT: Return cached snapshot if still valid
+    if (this.snapshotCache && (now - this.snapshotCacheTimestamp) < SNAPSHOT_CACHE_TTL_MS) {
+      return this.snapshotCache;
+    }
+
+    // Cache expired or missing - create new snapshot
     const snapshots = new Map<string, PairSnapshot>();
 
     for (const [key, pair] of this.pairs.entries()) {
@@ -1197,6 +1232,10 @@ export class ChainDetectorInstance extends EventEmitter {
         snapshots.set(key, snapshot);
       }
     }
+
+    // Update cache
+    this.snapshotCache = snapshots;
+    this.snapshotCacheTimestamp = now;
 
     return snapshots;
   }
@@ -1320,10 +1359,11 @@ export class ChainDetectorInstance extends EventEmitter {
     pair1: PairSnapshot,
     pair2: PairSnapshot
   ): ArbitrageOpportunity | null {
-    const reserve1_0 = BigInt(pair1.reserve0);
-    const reserve1_1 = BigInt(pair1.reserve1);
-    const reserve2_0 = BigInt(pair2.reserve0);
-    const reserve2_1 = BigInt(pair2.reserve1);
+    // PERF 10.1: Use pre-cached BigInt values from snapshot instead of converting
+    const reserve1_0 = pair1.reserve0BigInt;
+    const reserve1_1 = pair1.reserve1BigInt;
+    const reserve2_0 = pair2.reserve0BigInt;
+    const reserve2_1 = pair2.reserve1BigInt;
 
     if (reserve1_0 === 0n || reserve1_1 === 0n || reserve2_0 === 0n || reserve2_1 === 0n) {
       return null;
@@ -1344,16 +1384,22 @@ export class ChainDetectorInstance extends EventEmitter {
     const isReversed = this.isReverseOrder(pair1, pair2);
     let price2 = isReversed && price2Raw !== 0 ? 1 / price2Raw : price2Raw;
 
+    // FIX Bug 4.4: Guard against zero prices to prevent division by zero
+    const minPrice = Math.min(price1, price2);
+    if (minPrice <= 0 || !Number.isFinite(minPrice)) {
+      return null;
+    }
+
     // Calculate price difference as a percentage of the lower price
-    const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
+    const priceDiff = Math.abs(price1 - price2) / minPrice;
 
     // Use config-based profit threshold (not hardcoded)
     const minProfitThreshold = this.getMinProfitThreshold();
 
     // Calculate fee-adjusted profit
     // Fees are stored as decimals (e.g., 0.003 for 0.3%)
-    // Use ?? instead of || to correctly handle fee: 0 (if a DEX ever has 0% fee)
-    const totalFees = (pair1.fee ?? 0.003) + (pair2.fee ?? 0.003);
+    // Use validateFee for defensive validation in case snapshots come from external sources
+    const totalFees = this.validateFee(pair1.fee) + this.validateFee(pair2.fee);
     const netProfitPct = priceDiff - totalFees;
 
     // Check if profitable after fees
@@ -1464,7 +1510,7 @@ export class ChainDetectorInstance extends EventEmitter {
       token1: snapshot.token1,
       reserve0: snapshot.reserve0,
       reserve1: snapshot.reserve1,
-      fee: Math.round((snapshot.fee ?? 0.003) * 10000), // Convert to basis points
+      fee: Math.round(this.validateFee(snapshot.fee) * 10000), // Convert to basis points
       liquidity,
       price
     };
@@ -1491,8 +1537,17 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (pairsSnapshot.size < 3) return;
 
-    const pools: DexPool[] = Array.from(pairsSnapshot.values())
-      .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+    // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
+    // This prevents stale cache when individual pools change but size remains same
+    let pools: DexPool[];
+    if (this.dexPoolCache && this.dexPoolCacheVersion === this.snapshotVersion) {
+      pools = this.dexPoolCache;
+    } else {
+      pools = Array.from(pairsSnapshot.values())
+        .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+      this.dexPoolCache = pools;
+      this.dexPoolCacheVersion = this.snapshotVersion;
+    }
 
     // BUG-1 FIX: Use token addresses instead of symbols
     // DexPool.token0/token1 contain addresses, so baseTokens must also be addresses
@@ -1597,8 +1652,17 @@ export class ChainDetectorInstance extends EventEmitter {
     if (pairsSnapshot.size < 5 || !this.multiLegPathFinder) return;
     this.lastMultiLegCheck = now;
 
-    const pools: DexPool[] = Array.from(pairsSnapshot.values())
-      .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+    // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
+    // This prevents stale cache when individual pools change but size remains same
+    let pools: DexPool[];
+    if (this.dexPoolCache && this.dexPoolCacheVersion === this.snapshotVersion) {
+      pools = this.dexPoolCache;
+    } else {
+      pools = Array.from(pairsSnapshot.values())
+        .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
+      this.dexPoolCache = pools;
+      this.dexPoolCacheVersion = this.snapshotVersion;
+    }
 
     // BUG-1 FIX: Use token addresses instead of symbols (same fix as triangular)
     const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
@@ -1676,8 +1740,36 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   private getTokenSymbol(address: string): string {
-    const token = this.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+    // PERF-OPT: O(1) lookup instead of O(N) array.find()
+    const token = this.tokensByAddress.get(address.toLowerCase());
     return token?.symbol || address.slice(0, 8);
+  }
+
+  /**
+   * Validate and sanitize fee value for safe calculations.
+   * Returns the fee if valid, or the default (0.003 = 0.3%) if invalid.
+   *
+   * Guards against:
+   * - NaN (from invalid conversions)
+   * - Infinity (from division errors)
+   * - Negative values (invalid fees)
+   * - Fees > 100% (clearly incorrect)
+   */
+  private validateFee(fee: number | undefined, defaultFee: number = 0.003): number {
+    if (fee === undefined || fee === null) {
+      return defaultFee;
+    }
+    if (!Number.isFinite(fee) || fee < 0 || fee > 1) {
+      // Log warning for debugging if fee was provided but invalid
+      if (fee !== undefined) {
+        this.logger.warn('Invalid fee detected, using default', {
+          providedFee: fee,
+          defaultFee
+        });
+      }
+      return defaultFee;
+    }
+    return fee;
   }
 
   // ===========================================================================

@@ -11,7 +11,6 @@ import {
   HealthReporterConfig,
 } from '../../health-reporter';
 import { ChainStats } from '../../unified-detector';
-import { Logger } from '../../types';
 import { PartitionHealth, ChainHealth } from '@arbitrage/config';
 import { RecordingLogger } from '@arbitrage/core';
 
@@ -23,10 +22,6 @@ interface MockCrossRegionHealthManager extends EventEmitter {
   start: jest.Mock;
   stop: jest.Mock;
 }
-
-/** Helper function to cast RecordingLogger as Logger for type compatibility */
-const asLogger = (recordingLogger: RecordingLogger): Logger =>
-  recordingLogger as unknown as Logger;
 
 // =============================================================================
 // Tests
@@ -76,7 +71,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: jest.fn(),
       });
 
@@ -112,7 +107,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: jest.fn().mockResolvedValue(mockHealthData),
         enableCrossRegionHealth: true,
         getCrossRegionHealthManager: mockGetCrossRegionHealthManager,
@@ -136,7 +131,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: jest.fn().mockResolvedValue(mockHealthData),
         enableCrossRegionHealth: false,
       });
@@ -166,7 +161,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: mockGetHealthData,
         healthCheckIntervalMs: 1000,
       });
@@ -187,7 +182,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: jest.fn().mockResolvedValue(mockHealthData),
         enableCrossRegionHealth: true,
         getCrossRegionHealthManager: mockGetCrossRegionHealthManager,
@@ -229,7 +224,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: mockGetHealthData,
         healthCheckIntervalMs: 100, // Short interval
       });
@@ -294,7 +289,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: getHealthDataMock,
         healthCheckIntervalMs: 1000,
       });
@@ -318,7 +313,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: jest.fn().mockResolvedValue(mockHealthData),
         enableCrossRegionHealth: true,
         getCrossRegionHealthManager: mockGetCrossRegionHealthManager,
@@ -368,7 +363,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: mockGetHealthData,
         healthCheckIntervalMs: 1000,
       });
@@ -398,7 +393,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: mockGetHealthData,
         healthCheckIntervalMs: 1000,
       });
@@ -435,7 +430,7 @@ describe('HealthReporter', () => {
         regionId: 'us-east1',
         streamsClient: mockStreamsClient as any,
         stateManager: mockStateManager as any,
-        logger: asLogger(logger),
+        logger: logger as any,
         getHealthData: mockGetHealthData,
         healthCheckIntervalMs: 1000,
       });

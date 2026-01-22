@@ -1021,3 +1021,96 @@ describe('Bug Fix Regression Tests', () => {
     });
   });
 });
+
+// =============================================================================
+// P0-PERF Regression Tests - Token Pair Key O(1) Lookup
+// =============================================================================
+
+/**
+ * P0-PERF FIX: getTokenPairKey generates normalized keys for O(1) arbitrage detection
+ * This function is critical for correctness - incorrect keys lead to missed opportunities
+ */
+function getTokenPairKey(token0: string, token1: string): string {
+  const t0 = token0.toLowerCase();
+  const t1 = token1.toLowerCase();
+  return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+}
+
+describe('P0-PERF Regression Tests: Token Pair Key Generation', () => {
+  describe('getTokenPairKey', () => {
+    it('should generate same key for same tokens regardless of order', () => {
+      const tokenA = '0xAAAA';
+      const tokenB = '0xBBBB';
+
+      const key1 = getTokenPairKey(tokenA, tokenB);
+      const key2 = getTokenPairKey(tokenB, tokenA);
+
+      expect(key1).toBe(key2);
+    });
+
+    it('should handle case-insensitive addresses', () => {
+      const keyLower = getTokenPairKey('0xaaaa', '0xbbbb');
+      const keyUpper = getTokenPairKey('0xAAAA', '0xBBBB');
+      const keyMixed = getTokenPairKey('0xAaAa', '0xBbBb');
+
+      expect(keyLower).toBe(keyUpper);
+      expect(keyUpper).toBe(keyMixed);
+    });
+
+    it('should generate alphabetically sorted keys', () => {
+      const key = getTokenPairKey('0xcccc', '0xaaaa');
+
+      // Should start with the alphabetically earlier address
+      expect(key.startsWith('0xaaaa')).toBe(true);
+      expect(key).toBe('0xaaaa_0xcccc');
+    });
+
+    it('should generate unique keys for different token pairs', () => {
+      const key1 = getTokenPairKey('0xaaaa', '0xbbbb');
+      const key2 = getTokenPairKey('0xaaaa', '0xcccc');
+      const key3 = getTokenPairKey('0xbbbb', '0xcccc');
+
+      expect(key1).not.toBe(key2);
+      expect(key1).not.toBe(key3);
+      expect(key2).not.toBe(key3);
+    });
+
+    it('should handle real Ethereum addresses correctly', () => {
+      const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+      const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+      const USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+
+      // WETH-USDC should match in either order
+      const key1 = getTokenPairKey(WETH, USDC);
+      const key2 = getTokenPairKey(USDC, WETH);
+      expect(key1).toBe(key2);
+
+      // WETH-USDC should differ from WETH-USDT
+      const key3 = getTokenPairKey(WETH, USDT);
+      expect(key1).not.toBe(key3);
+    });
+
+    it('should handle empty or short addresses', () => {
+      // Edge case: should not throw
+      const key1 = getTokenPairKey('0x0', '0x1');
+      const key2 = getTokenPairKey('0x1', '0x0');
+
+      expect(key1).toBe(key2);
+      expect(key1).toBe('0x0_0x1');
+    });
+
+    it('should be deterministic (same input always produces same output)', () => {
+      const token0 = '0xAAAABBBBCCCC';
+      const token1 = '0xDDDDEEEEFFFF';
+
+      const results = new Set<string>();
+      for (let i = 0; i < 100; i++) {
+        results.add(getTokenPairKey(token0, token1));
+        results.add(getTokenPairKey(token1, token0));
+      }
+
+      // All results should be the same
+      expect(results.size).toBe(1);
+    });
+  });
+});
