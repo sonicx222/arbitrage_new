@@ -137,7 +137,7 @@ export class StandardProvider implements IMevProvider {
 
       // Try private RPC first if available
       if (this.privateRpcUrl) {
-        const result = await this.sendViaPrivateRpc(preparedTx);
+        const result = await this.sendViaPrivateRpc(preparedTx, startTime);
         if (result.success) {
           return result;
         }
@@ -241,12 +241,14 @@ export class StandardProvider implements IMevProvider {
    *
    * NONCE-CONSISTENCY-FIX: Now accepts already-prepared transaction to ensure
    * consistent nonce across private and fallback paths.
+   *
+   * LATENCY-FIX: Now accepts startTime from caller for accurate latency tracking
+   * across the entire operation (simulation + private RPC + confirmation).
    */
   private async sendViaPrivateRpc(
-    preparedTx: ethers.TransactionRequest
+    preparedTx: ethers.TransactionRequest,
+    startTime: number
   ): Promise<MevSubmissionResult> {
-    const startTime = Date.now();
-
     try {
       const signedTx = await this.config.wallet.signTransaction(preparedTx);
 

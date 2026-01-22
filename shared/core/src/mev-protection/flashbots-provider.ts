@@ -440,6 +440,9 @@ export class FlashbotsProvider implements IMevProvider {
 
   /**
    * Wait for bundle inclusion in a block
+   *
+   * FIX: Now properly verifies the transaction is actually in the block,
+   * not just that the block exists with some transactions.
    */
   private async waitForInclusion(
     bundleHash: string,
@@ -461,16 +464,31 @@ export class FlashbotsProvider implements IMevProvider {
         const response = await this.sendRelayRequest(body);
 
         if (response.result?.isSimulated && response.result?.isHighPriority !== false) {
-          // Bundle was processed
+          // Bundle was processed by relay
           if (response.result?.receivedAt) {
-            // Check if transaction is in the block
-            const block = await this.config.provider.getBlock(targetBlock, true);
-            if (block && block.transactions) {
-              // Bundle was included if block exists and has our transactions
-              return {
-                included: true,
-                transactionHash: response.result?.transactions?.[0]?.hash,
-              };
+            // Get transaction hash from bundle stats
+            const bundleTxHash = response.result?.transactions?.[0]?.hash;
+
+            if (bundleTxHash) {
+              // Verify transaction is actually in the block
+              const block = await this.config.provider.getBlock(targetBlock, true);
+
+              if (block && block.transactions && block.transactions.length > 0) {
+                // Check if our transaction is in the block's transaction list
+                // When called with prefetch=true, block.transactions contains TransactionResponse[]
+                // When called with prefetch=false, it contains string[] (hashes)
+                const txInBlock = block.transactions.some((tx: string | ethers.TransactionResponse) => {
+                  const txHash = typeof tx === 'string' ? tx : tx.hash;
+                  return txHash.toLowerCase() === bundleTxHash.toLowerCase();
+                });
+
+                if (txInBlock) {
+                  return {
+                    included: true,
+                    transactionHash: bundleTxHash,
+                  };
+                }
+              }
             }
           }
         }

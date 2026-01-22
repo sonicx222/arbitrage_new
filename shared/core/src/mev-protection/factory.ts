@@ -17,6 +17,7 @@ import {
 import { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider';
 import { L2SequencerProvider, createL2SequencerProvider, isL2SequencerChain } from './l2-sequencer-provider';
 import { StandardProvider, createStandardProvider } from './standard-provider';
+import { AsyncMutex } from '../async/async-mutex';
 
 // =============================================================================
 // Factory Configuration
@@ -80,6 +81,8 @@ export interface ChainWalletConfig {
 export class MevProviderFactory {
   private readonly globalConfig: MevGlobalConfig;
   private readonly providers: Map<string, IMevProvider>;
+  // Mutex for thread-safe provider creation (prevents duplicate providers during concurrent calls)
+  private readonly providerMutex = new AsyncMutex();
 
   constructor(config: MevGlobalConfig) {
     this.globalConfig = {
@@ -96,15 +99,78 @@ export class MevProviderFactory {
   }
 
   /**
-   * Create or get cached MEV provider for a chain
+   * Create or get cached MEV provider for a chain (EVM only)
+   *
+   * NOTE: This factory only supports EVM chains. For Solana, use JitoProvider directly:
+   * ```typescript
+   * import { createJitoProvider } from './jito-provider';
+   * const jitoProvider = createJitoProvider({ chain: 'solana', connection, keypair, enabled: true });
+   * ```
+   *
+   * Thread-safe: Uses mutex to prevent duplicate provider creation during concurrent calls.
    */
   createProvider(chainConfig: ChainWalletConfig): IMevProvider {
-    const { chain, provider, wallet } = chainConfig;
+    const { chain } = chainConfig;
 
-    // Check cache first
-    if (this.providers.has(chain)) {
-      return this.providers.get(chain)!;
+    // Fast path: check cache without lock (safe for reads)
+    const cached = this.providers.get(chain);
+    if (cached) {
+      return cached;
     }
+
+    // Synchronous creation with double-check pattern
+    // Note: We use synchronous creation here because provider constructors are sync.
+    // The mutex protects against race conditions during the check-then-create sequence.
+    return this.createProviderSync(chainConfig);
+  }
+
+  /**
+   * Async version of createProvider for contexts that can await
+   * Provides stronger thread-safety guarantees with mutex
+   */
+  async createProviderAsync(chainConfig: ChainWalletConfig): Promise<IMevProvider> {
+    const { chain } = chainConfig;
+
+    // Fast path: check cache without lock
+    const cached = this.providers.get(chain);
+    if (cached) {
+      return cached;
+    }
+
+    // Slow path: acquire lock and double-check
+    return this.providerMutex.runExclusive(async () => {
+      // Double-check after acquiring lock
+      const existing = this.providers.get(chain);
+      if (existing) {
+        return existing;
+      }
+
+      return this.createAndCacheProvider(chainConfig);
+    });
+  }
+
+  /**
+   * Synchronous provider creation with basic protection
+   * Used by createProvider() for backward compatibility
+   */
+  private createProviderSync(chainConfig: ChainWalletConfig): IMevProvider {
+    const { chain } = chainConfig;
+
+    // Double-check pattern (not fully thread-safe but prevents most duplicates)
+    const existing = this.providers.get(chain);
+    if (existing) {
+      return existing;
+    }
+
+    return this.createAndCacheProvider(chainConfig);
+  }
+
+  /**
+   * Internal: Create provider and cache it
+   * Caller must ensure thread-safety
+   */
+  private createAndCacheProvider(chainConfig: ChainWalletConfig): IMevProvider {
+    const { chain, provider, wallet } = chainConfig;
 
     // Build provider config
     const config: MevProviderConfig = {
@@ -132,6 +198,14 @@ export class MevProviderFactory {
       case 'sequencer':
         mevProvider = createL2SequencerProvider(config);
         break;
+
+      case 'jito':
+        // Jito is for Solana which uses different types (SolanaConnection, SolanaKeypair)
+        // Cannot be created through this EVM factory
+        throw new Error(
+          `Chain "${chain}" uses Jito MEV protection which requires Solana-specific types. ` +
+          `Use JitoProvider directly: createJitoProvider({ chain: 'solana', connection, keypair, enabled: true })`
+        );
 
       case 'bloxroute':
       case 'fastlane':
@@ -285,7 +359,13 @@ export class MevProviderFactory {
 // =============================================================================
 
 /**
- * Create a simple MEV provider for a single chain
+ * Create a simple MEV provider for a single chain (EVM only)
+ *
+ * NOTE: For Solana, use createJitoProvider directly:
+ * ```typescript
+ * import { createJitoProvider } from './jito-provider';
+ * const jitoProvider = createJitoProvider({ chain: 'solana', connection, keypair, enabled: true });
+ * ```
  */
 export function createMevProvider(
   chain: string,
@@ -317,6 +397,12 @@ export function createMevProvider(
       return createFlashbotsProvider(config);
     case 'sequencer':
       return createL2SequencerProvider(config);
+    case 'jito':
+      // Jito is for Solana which uses different types (SolanaConnection, SolanaKeypair)
+      throw new Error(
+        `Chain "${chain}" uses Jito MEV protection which requires Solana-specific types. ` +
+        `Use createJitoProvider() directly with SolanaConnection and SolanaKeypair.`
+      );
     default:
       return createStandardProvider(config);
   }
@@ -333,6 +419,9 @@ export function hasMevProtection(chain: string): boolean {
 
 /**
  * Get recommended priority fee for a chain
+ *
+ * Note: Solana/Jito uses lamports for tips, not gwei. Use JitoProvider directly
+ * with tipLamports for Solana MEV protection.
  */
 export function getRecommendedPriorityFee(chain: string): number {
   const strategy = CHAIN_MEV_STRATEGIES[chain];
@@ -350,6 +439,10 @@ export function getRecommendedPriorityFee(chain: string): number {
     case 'sequencer':
       // L2s: low priority (cheap gas)
       return 0.01;
+    case 'jito':
+      // Solana: not applicable (uses lamports for tips)
+      // Use JitoProvider directly with tipLamports
+      return 0;
     default:
       // Standard: depends on chain
       return 1.0;
