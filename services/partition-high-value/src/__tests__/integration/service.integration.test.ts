@@ -1,0 +1,392 @@
+/**
+ * Integration Tests for P3 High-Value Partition Service
+ *
+ * Tests service configuration, environment variable handling, and module behavior.
+ * Note: Health server tests are simplified since Jest module caching makes it
+ * difficult to test actual HTTP server creation across test cases.
+ *
+ * P3 High-Value Partition:
+ * - Chains: Ethereum (1), zkSync Era (324), Linea (59144)
+ * - Region: Oracle Cloud US-East (us-east1)
+ * - Port: 3003
+ * - Health Check Interval: 30s (longer for Ethereum's ~12s blocks)
+ */
+
+import { EventEmitter } from 'events';
+
+// =============================================================================
+// Mocks - Must be defined before imports
+// =============================================================================
+
+const mockLogger = {
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  debug: jest.fn(),
+};
+
+const mockStateManager = {
+  executeStart: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error };
+    }
+  }),
+  executeStop: jest.fn().mockImplementation(async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error };
+    }
+  }),
+  isRunning: jest.fn().mockReturnValue(true),
+  getState: jest.fn().mockReturnValue('running'),
+};
+
+const mockHealthServer = {
+  close: jest.fn((cb) => cb && cb()),
+  on: jest.fn(),
+  listen: jest.fn(),
+};
+
+jest.mock('@arbitrage/core', () => ({
+  createLogger: jest.fn().mockReturnValue(mockLogger),
+  parsePort: jest.fn().mockImplementation((portEnv, defaultPort) => {
+    if (!portEnv) return defaultPort;
+    const parsed = parseInt(portEnv, 10);
+    return isNaN(parsed) ? defaultPort : parsed;
+  }),
+  validateAndFilterChains: jest.fn().mockImplementation((chainsEnv, defaultChains) => {
+    if (!chainsEnv) return [...defaultChains];
+    return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
+  }),
+  createPartitionHealthServer: jest.fn().mockReturnValue(mockHealthServer),
+  setupDetectorEventHandlers: jest.fn(),
+  setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()),
+  getRedisClient: jest.fn().mockResolvedValue({
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  }),
+  getRedisStreamsClient: jest.fn().mockResolvedValue({
+    xadd: jest.fn().mockResolvedValue('stream-id'),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  }),
+  createServiceState: jest.fn().mockReturnValue(mockStateManager),
+  getPerformanceLogger: jest.fn().mockReturnValue({
+    logHealthCheck: jest.fn(),
+  }),
+  getCrossRegionHealthManager: jest.fn().mockReturnValue({
+    start: jest.fn().mockResolvedValue(undefined),
+    stop: jest.fn().mockResolvedValue(undefined),
+    on: jest.fn(),
+    removeAllListeners: jest.fn(),
+  }),
+  getGracefulDegradationManager: jest.fn().mockReturnValue({
+    registerCapabilities: jest.fn(),
+    triggerDegradation: jest.fn(),
+  }),
+}));
+
+jest.mock('@arbitrage/config', () => ({
+  getPartition: jest.fn().mockImplementation((partitionId: string) => ({
+    partitionId,
+    name: 'High Value Chains',
+    chains: ['ethereum', 'zksync', 'linea'],
+    region: 'us-east1',
+    provider: 'oracle',
+    resourceProfile: 'heavy',
+    priority: 2,
+    maxMemoryMB: 768,
+    enabled: true,
+    healthCheckIntervalMs: 30000, // 30s for Ethereum's ~12s blocks
+    failoverTimeoutMs: 60000,
+    standbyRegion: 'eu-west1',
+    standbyProvider: 'gcp',
+  })),
+  PARTITION_IDS: {
+    ASIA_FAST: 'asia-fast',
+    L2_TURBO: 'l2-turbo',
+    HIGH_VALUE: 'high-value',
+    SOLANA_NATIVE: 'solana-native',
+  },
+}));
+
+// Mock UnifiedChainDetector
+class MockUnifiedChainDetector extends EventEmitter {
+  private _config: Record<string, unknown>;
+  private _started = false;
+
+  constructor(config: Record<string, unknown>) {
+    super();
+    this._config = config;
+  }
+
+  async start(): Promise<void> {
+    this._started = true;
+  }
+
+  async stop(): Promise<void> {
+    this._started = false;
+  }
+
+  getPartitionId(): string {
+    return this._config.partitionId as string;
+  }
+
+  getChains(): string[] {
+    return this._config.chains as string[];
+  }
+
+  getHealthyChains(): string[] {
+    return this._started ? (this._config.chains as string[]) : [];
+  }
+
+  isRunning(): boolean {
+    return this._started;
+  }
+
+  getStats() {
+    return {
+      partitionId: this._config.partitionId,
+      chains: this._config.chains,
+      totalEventsProcessed: 0,
+      totalOpportunitiesFound: 0,
+      uptimeSeconds: 0,
+      memoryUsageMB: 0,
+      chainStats: new Map(),
+    };
+  }
+
+  async getPartitionHealth() {
+    return {
+      status: this._started ? 'healthy' : 'starting',
+      partitionId: this._config.partitionId,
+      chainHealth: new Map(),
+      totalEventsProcessed: 0,
+      avgEventLatencyMs: 0,
+      memoryUsage: 0,
+      cpuUsage: 0,
+      uptimeSeconds: 0,
+      lastHealthCheck: Date.now(),
+      activeOpportunities: 0,
+    };
+  }
+}
+
+jest.mock('@arbitrage/unified-detector', () => ({
+  UnifiedChainDetector: MockUnifiedChainDetector,
+}));
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+describe('P3 High-Value Partition Service Integration', () => {
+  const originalEnv = process.env;
+  let cleanupFn: (() => void) | null = null;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env = {
+      ...originalEnv,
+      JEST_WORKER_ID: 'test',
+      REDIS_URL: 'redis://localhost:6379',
+      NODE_ENV: 'test',
+    };
+  });
+
+  afterEach(() => {
+    if (cleanupFn) {
+      cleanupFn();
+      cleanupFn = null;
+    }
+    process.env = originalEnv;
+  });
+
+  describe('Health Server Configuration', () => {
+    // Note: createPartitionHealthServer is called inside main(), which doesn't run
+    // during test imports (JEST_WORKER_ID guard). These tests verify the config
+    // that would be passed to createPartitionHealthServer.
+
+    it('should configure default health check port of 3003', async () => {
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.healthCheckPort).toBe(3003);
+    });
+
+    it('should use custom port from HEALTH_CHECK_PORT environment variable', async () => {
+      process.env.HEALTH_CHECK_PORT = '4003';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.healthCheckPort).toBe(4003);
+    });
+
+    it('should use default port when HEALTH_CHECK_PORT is invalid', async () => {
+      process.env.HEALTH_CHECK_PORT = 'invalid';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      // parsePort mock returns defaultPort for invalid input
+      expect(config.healthCheckPort).toBe(3003);
+    });
+  });
+
+  describe('Detector Configuration', () => {
+    it('should create detector with correct partition ID', async () => {
+      jest.resetModules();
+      const { detector, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(detector.getPartitionId()).toBe('high-value');
+    });
+
+    it('should configure detector with all 3 chains by default', async () => {
+      jest.resetModules();
+      const { detector, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(detector.getChains()).toEqual(['ethereum', 'zksync', 'linea']);
+    });
+
+    it('should use custom chains from PARTITION_CHAINS environment variable', async () => {
+      process.env.PARTITION_CHAINS = 'ethereum,zksync';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.chains).toEqual(['ethereum', 'zksync']);
+    });
+  });
+
+  describe('Service Configuration', () => {
+    it('should use custom INSTANCE_ID from environment', async () => {
+      process.env.INSTANCE_ID = 'custom-instance-123';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.instanceId).toBe('custom-instance-123');
+    });
+
+    it('should use custom REGION_ID from environment', async () => {
+      process.env.REGION_ID = 'eu-west1';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.regionId).toBe('eu-west1');
+    });
+
+    it('should disable cross-region health when ENABLE_CROSS_REGION_HEALTH=false', async () => {
+      process.env.ENABLE_CROSS_REGION_HEALTH = 'false';
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.enableCrossRegionHealth).toBe(false);
+    });
+
+    it('should enable cross-region health by default', async () => {
+      delete process.env.ENABLE_CROSS_REGION_HEALTH;
+
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.enableCrossRegionHealth).toBe(true);
+    });
+  });
+
+  describe('Event Handler Setup', () => {
+    it('should call setupDetectorEventHandlers with correct parameters', async () => {
+      jest.resetModules();
+      const { setupDetectorEventHandlers } = await import('@arbitrage/core');
+      const { detector, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(setupDetectorEventHandlers).toHaveBeenCalledWith(
+        detector,
+        expect.anything(), // logger
+        'high-value'
+      );
+    });
+  });
+
+  describe('Process Handler Setup', () => {
+    it('should call setupProcessHandlers with correct parameters', async () => {
+      jest.resetModules();
+      const { setupProcessHandlers } = await import('@arbitrage/core');
+      await import('../../index');
+
+      expect(setupProcessHandlers).toHaveBeenCalled();
+      const callArgs = (setupProcessHandlers as jest.Mock).mock.calls[0];
+      expect(callArgs[3]).toBe('partition-high-value'); // serviceName
+    });
+
+    it('should export cleanup function that can be called multiple times', async () => {
+      jest.resetModules();
+      const { cleanupProcessHandlers } = await import('../../index');
+
+      expect(typeof cleanupProcessHandlers).toBe('function');
+      expect(() => {
+        cleanupProcessHandlers();
+        cleanupProcessHandlers();
+      }).not.toThrow();
+    });
+  });
+
+  describe('Module Exports', () => {
+    it('should export all required members', async () => {
+      jest.resetModules();
+      const exports = await import('../../index');
+
+      expect(exports.detector).toBeDefined();
+      expect(exports.config).toBeDefined();
+      expect(exports.P3_PARTITION_ID).toBe('high-value');
+      expect(exports.P3_CHAINS).toContain('ethereum');
+      expect(exports.P3_REGION).toBe('us-east1');
+      expect(exports.cleanupProcessHandlers).toBeDefined();
+    });
+  });
+
+  describe('P3-Specific: High-Value Chain Characteristics', () => {
+    it('should use us-east1 region for proximity to Ethereum infrastructure', async () => {
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      // US-East is optimal for Ethereum mainnet due to validator distribution
+      expect(config.regionId).toBe('us-east1');
+    });
+
+    it('should include Ethereum mainnet for high-value arbitrage', async () => {
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.chains).toContain('ethereum');
+    });
+
+    it('should include ZK rollups (zkSync, Linea) for L1-L2 bridge opportunities', async () => {
+      jest.resetModules();
+      const { config, cleanupProcessHandlers } = await import('../../index');
+      cleanupFn = cleanupProcessHandlers;
+
+      expect(config.chains).toContain('zksync');
+      expect(config.chains).toContain('linea');
+    });
+  });
+});

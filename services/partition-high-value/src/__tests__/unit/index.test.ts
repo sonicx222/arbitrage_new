@@ -260,25 +260,48 @@ describe('P3 High-Value Partition Service', () => {
   });
 
   describe('Initialization', () => {
-    it('should have called createLogger with correct namespace', async () => {
-      const { createLogger } = jest.requireMock('@arbitrage/core');
-      expect(createLogger).toBeDefined();
+    it('should call createLogger with correct namespace', async () => {
+      jest.resetModules();
+      const { createLogger } = await import('@arbitrage/core');
+      await import('../../index');
+
+      expect(createLogger).toHaveBeenCalledWith('partition-high-value:main');
     });
 
-    it('should have called getPartition with high-value ID', async () => {
-      const { getPartition } = jest.requireMock('@arbitrage/config');
-      expect(getPartition).toBeDefined();
+    it('should call getPartition with high-value partition ID', async () => {
+      jest.resetModules();
+      const { getPartition } = await import('@arbitrage/config');
+      await import('../../index');
+
+      expect(getPartition).toHaveBeenCalledWith('high-value');
     });
 
-    it('should have setup detector event handlers', async () => {
+    it('should call setupDetectorEventHandlers with detector and partition ID', async () => {
+      jest.resetModules();
+      const { setupDetectorEventHandlers } = await import('@arbitrage/core');
       const { detector } = await import('../../index');
-      expect(typeof detector.on).toBe('function');
-      expect(typeof detector.emit).toBe('function');
+
+      expect(setupDetectorEventHandlers).toHaveBeenCalledWith(
+        detector,
+        expect.objectContaining({
+          info: expect.any(Function),
+          error: expect.any(Function),
+          warn: expect.any(Function),
+          debug: expect.any(Function),
+        }),
+        'high-value'
+      );
     });
 
-    it('should have setup process handlers and store cleanup function', async () => {
-      const { cleanupProcessHandlers } = await import('../../index');
-      expect(typeof cleanupProcessHandlers).toBe('function');
+    it('should call setupProcessHandlers with correct service name', async () => {
+      jest.resetModules();
+      const { setupProcessHandlers } = await import('@arbitrage/core');
+      await import('../../index');
+
+      expect(setupProcessHandlers).toHaveBeenCalled();
+      const callArgs = (setupProcessHandlers as jest.Mock).mock.calls[0];
+      // Verify the service name argument (4th parameter)
+      expect(callArgs[3]).toBe('partition-high-value');
     });
   });
 
