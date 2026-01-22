@@ -84,7 +84,7 @@ function getStandbyConfigFromEnv() {
  */
 function createHealthServer(engine: ExecutionEngineService): Server {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (req.url === '/health') {
       const isRunning = engine.isRunning();
       const stats = engine.getStats();
       const healthyProviders = engine.getHealthyProvidersCount();
@@ -132,7 +132,7 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         service: 'execution-engine',
         description: 'Arbitrage Execution Engine Service',
         simulationMode: engine.getIsSimulationMode(),
-        endpoints: ['/health', '/healthz', '/ready', '/stats']
+        endpoints: ['/health', '/ready', '/stats']
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });

@@ -49,7 +49,7 @@ const detector = new UnifiedChainDetector(config);
 
 function createHealthServer(port: number): Server {
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (req.url === '/health') {
       try {
         const health = await detector.getPartitionHealth();
         const statusCode = health.status === 'healthy' ? 200 :
