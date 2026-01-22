@@ -6,12 +6,13 @@
  * S2.2.2: Base DEXs (5 → 7)
  * S2.2.3: BSC DEXs (5 → 8)
  *
+ * FIX: Converted from CommonJS require() to ES modules for TypeScript type safety
+ *
  * @see docs/IMPLEMENTATION_PLAN.md S2.2
  */
 
-// Use require to avoid ts-jest transformation caching issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { DEXES } = require('.');
+import { describe, it, expect } from '@jest/globals';
+import { DEXES, CHAINS, CORE_TOKENS, PHASE_METRICS } from './index';
 import { Dex } from '../../types';
 
 // Helper to validate Ethereum address format
@@ -20,7 +21,7 @@ const isValidAddress = (address: string): boolean => {
 };
 
 describe('S2.2.1: Arbitrum DEX Expansion (6 → 9)', () => {
-  const arbitrumDexes = DEXES.arbitrum;
+  const arbitrumDexes: Dex[] = DEXES.arbitrum;
 
   describe('DEX Count', () => {
     it('should have exactly 9 DEXs configured', () => {
@@ -170,13 +171,30 @@ describe('DEX Priority Classification', () => {
 
 describe('PHASE_METRICS Alignment', () => {
   it('should match current DEX count with PHASE_METRICS', () => {
-    // Import PHASE_METRICS
-    const { PHASE_METRICS } = require('./index');
-
     const totalDexes = Object.values(DEXES).flat().length;
 
-    // After S2.2.1, we should have 25 + 3 = 28 DEXs
-    // (Phase 1 target was 25, adding 3 Arbitrum DEXs)
-    expect(totalDexes).toBeGreaterThanOrEqual(28);
+    // Current state after S3.3.3:
+    // - 11 chains (arbitrum:9, bsc:8, base:7, polygon:4, optimism:3, ethereum:2,
+    //              avalanche:6, fantom:4, zksync:2, linea:2, solana:7)
+    // - Total DEXes: 54 (with 49 enabled, 5 disabled including jupiter)
+    // - Phase 1 target: 49 enabled DEXes
+    expect(totalDexes).toBeGreaterThanOrEqual(49);
+    expect(PHASE_METRICS.current.dexes).toBe(totalDexes);
+  });
+
+  it('should match current chain count with PHASE_METRICS', () => {
+    const chainCount = Object.keys(CHAINS).length;
+
+    // Phase 1: 11 mainnet chains (no devnet)
+    expect(chainCount).toBe(11);
+    expect(PHASE_METRICS.current.chains).toBe(chainCount);
+  });
+
+  it('should match current token count with PHASE_METRICS', () => {
+    const tokenCount = Object.values(CORE_TOKENS).flat().length;
+
+    // Phase 1: 112 tokens across 11 chains
+    expect(tokenCount).toBe(112);
+    expect(PHASE_METRICS.current.tokens).toBe(tokenCount);
   });
 });

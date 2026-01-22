@@ -472,16 +472,27 @@ export const DEXES: Record<string, Dex[]> = {
 // =============================================================================
 
 /**
+ * PERFORMANCE FIX: Pre-computed enabled DEXes cache.
+ * Computed once at module load instead of filtering on every getEnabledDexes() call.
+ * This is a hot-path optimization for arbitrage detection.
+ */
+const ENABLED_DEXES_CACHE: Record<string, Dex[]> = Object.fromEntries(
+  Object.entries(DEXES).map(([chainId, dexes]) => [
+    chainId,
+    dexes.filter(dex => dex.enabled !== false)
+  ])
+);
+
+/**
  * Get enabled DEXs for a chain.
- * Filters out DEXs with enabled === false (enabled defaults to true if not specified).
+ * Returns pre-computed filtered list (enabled !== false).
+ * Uses cached result for performance in hot-path code.
  *
  * @param chainId - The chain identifier (e.g., 'arbitrum', 'bsc')
- * @returns Array of enabled Dex objects for the chain
+ * @returns Array of enabled Dex objects for the chain (read-only reference)
  */
 export function getEnabledDexes(chainId: string): Dex[] {
-  const chainDexes = DEXES[chainId as keyof typeof DEXES];
-  if (!chainDexes) return [];
-  return chainDexes.filter(dex => dex.enabled !== false);
+  return ENABLED_DEXES_CACHE[chainId] || [];
 }
 
 /**

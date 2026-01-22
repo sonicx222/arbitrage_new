@@ -11,22 +11,22 @@
 import { describe, it, expect } from '@jest/globals';
 import { CHAINS } from './index';
 
+// Production mainnet chains (excludes devnet/testnet)
+const MAINNET_CHAIN_IDS = [
+  'arbitrum', 'bsc', 'base', 'polygon', 'optimism',
+  'ethereum', 'avalanche', 'fantom', 'zksync', 'linea', 'solana'
+];
+
 describe('WebSocket Resilience Configuration (S3.3)', () => {
   describe('Fallback URL Coverage', () => {
-    it('should have all 11 chains configured', () => {
+    it('should have all 11 mainnet chains configured', () => {
       const chainIds = Object.keys(CHAINS);
-      expect(chainIds).toHaveLength(11);
-      expect(chainIds).toContain('arbitrum');
-      expect(chainIds).toContain('bsc');
-      expect(chainIds).toContain('base');
-      expect(chainIds).toContain('polygon');
-      expect(chainIds).toContain('optimism');
-      expect(chainIds).toContain('ethereum');
-      expect(chainIds).toContain('avalanche');
-      expect(chainIds).toContain('fantom');
-      expect(chainIds).toContain('zksync');
-      expect(chainIds).toContain('linea');
-      expect(chainIds).toContain('solana');
+      // FIX: Use >= to allow for devnet/testnet chains in CHAINS config
+      expect(chainIds.length).toBeGreaterThanOrEqual(11);
+      // Verify all mainnet chains are present
+      for (const mainnetChain of MAINNET_CHAIN_IDS) {
+        expect(chainIds).toContain(mainnetChain);
+      }
     });
 
     it('should have wsFallbackUrls configured for all chains', () => {

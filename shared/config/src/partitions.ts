@@ -268,6 +268,13 @@ export const PARTITIONS: PartitionConfig[] = [
 
 /**
  * Future partition configurations (Phase 2+).
+ *
+ * NOTE: These are disabled templates for planned Phase 2 expansion.
+ * - All partitions have `enabled: false`
+ * - Used in tests to verify disabled partitions are excluded from getEnabledPartitions()
+ * - Will be activated when Phase 2 chains are added (e.g., Scroll)
+ *
+ * @see partitions.test.ts - Tests verify these remain disabled
  */
 export const FUTURE_PARTITIONS: PartitionConfig[] = [
   {
@@ -395,10 +402,14 @@ export function createChainInstance(chainId: string): ChainInstance | null {
   const dexes = getEnabledDexes(chainId);
   const tokens = CORE_TOKENS[chainId] || [];
 
+  // FIX: Use wsFallbackUrls if primary wsUrl is missing (rpcUrl won't work for WebSocket)
+  const effectiveWsUrl = chain.wsUrl ||
+    (chain.wsFallbackUrls && chain.wsFallbackUrls.length > 0 ? chain.wsFallbackUrls[0] : '');
+
   return {
     chainId,
     numericId: chain.id,
-    wsUrl: chain.wsUrl || chain.rpcUrl, // Fallback to RPC URL if WS not configured
+    wsUrl: effectiveWsUrl,
     rpcUrl: chain.rpcUrl,
     blockTime: chain.blockTime,
     nativeToken: chain.nativeToken,
@@ -601,3 +612,63 @@ export function getChainsFromEnv(): string[] {
   // S3.2.3-FIX: Return array copy to prevent mutation (consistent with getChainsForPartition)
   return partition?.chains ? [...partition.chains] : [];
 }
+
+// =============================================================================
+// PHASE METRICS (Consolidated from partition-config.ts)
+// Track progress against targets from ADR-008
+// =============================================================================
+
+/**
+ * Phase metrics for tracking implementation progress.
+ * Dynamically calculates current counts from actual configuration.
+ *
+ * S3.1.2: Updated for 4-partition architecture (11 chains, 44 DEXes, 94 tokens)
+ * S3.2.2: Updated for Fantom expansion (11 chains, 46 DEXes, 98 tokens)
+ * S3.3.3: Updated for Solana token expansion (11 chains, 49 DEXes, 112 tokens)
+ * Phase 1 Adapters: Added vault-model DEX adapters (GMX, Platypus, Beethoven X)
+ *
+ * @see ADR-008: Phase metrics and targets
+ */
+export const PHASE_METRICS = {
+  current: {
+    phase: 1,
+    chains: Object.keys(CHAINS).length,
+    dexes: Object.values(DEXES).flat().length,
+    tokens: Object.values(CORE_TOKENS).flat().length,
+    targetOpportunities: 500  // Increased with more chains/DEXes
+  },
+  targets: {
+    // Phase 1 with vault-model adapters:
+    // - 11 chains (original 6 + avalanche, fantom, zksync, linea, solana)
+    // - 49 DEXes (46 + 3 newly enabled: GMX, Platypus, Beethoven X with adapters)
+    // - 112 tokens breakdown:
+    //   Original 6 chains: 60 (arb:12 + bsc:10 + base:10 + poly:10 + opt:10 + eth:8)
+    //   S3.1.2 new chains: 12 (zksync:6 + linea:6)
+    //   S3.2.1 Avalanche: 15, S3.2.2 Fantom: 10, S3.3.3 Solana: 15
+    phase1: { chains: 11, dexes: 49, tokens: 112, opportunities: 500 },
+    phase2: { chains: 15, dexes: 60, tokens: 145, opportunities: 750 },
+    phase3: { chains: 20, dexes: 80, tokens: 200, opportunities: 1000 }
+  }
+};
+
+// =============================================================================
+// PARTITION_CONFIG (Backward compatibility - derived from PARTITIONS)
+// Use getChainsForPartition() for runtime access instead
+// =============================================================================
+
+/**
+ * Partition chain assignments - S3.1.2 configuration.
+ * Derived from PARTITIONS array for backward compatibility.
+ *
+ * @deprecated Use getChainsForPartition() from partitions.ts for runtime access.
+ */
+export const PARTITION_CONFIG = {
+  // P1: Asia-Fast - EVM high-throughput chains
+  P1_ASIA_FAST: getChainsForPartition(PARTITION_IDS.ASIA_FAST) as readonly string[],
+  // P2: L2-Turbo - Ethereum L2 rollups
+  P2_L2_TURBO: getChainsForPartition(PARTITION_IDS.L2_TURBO) as readonly string[],
+  // P3: High-Value - Ethereum mainnet + ZK rollups
+  P3_HIGH_VALUE: getChainsForPartition(PARTITION_IDS.HIGH_VALUE) as readonly string[],
+  // P4: Solana-Native - Non-EVM chains
+  P4_SOLANA_NATIVE: getChainsForPartition(PARTITION_IDS.SOLANA_NATIVE) as readonly string[]
+} as const;
