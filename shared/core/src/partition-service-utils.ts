@@ -85,6 +85,34 @@ export interface PartitionDetectorInterface extends EventEmitter {
 }
 
 // =============================================================================
+// Critical Configuration Validation (Shared across all partitions)
+// =============================================================================
+
+/**
+ * Logs a critical configuration error and exits the process.
+ * Use this for fatal configuration issues that prevent service startup.
+ *
+ * Returns `never` to help TypeScript understand this terminates the process,
+ * allowing proper control flow analysis.
+ *
+ * @param message - Error message to log
+ * @param context - Additional context for the error
+ * @param logger - Logger instance (uses console.error as fallback)
+ */
+export function exitWithConfigError(
+  message: string,
+  context: Record<string, unknown>,
+  logger?: ReturnType<typeof createLogger>
+): never {
+  if (logger) {
+    logger.error(message, context);
+  } else {
+    console.error(message, context);
+  }
+  process.exit(1);
+}
+
+// =============================================================================
 // Port Validation (P7-FIX Pattern)
 // =============================================================================
 

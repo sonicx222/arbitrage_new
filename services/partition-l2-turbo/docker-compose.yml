@@ -5,8 +5,8 @@
 #   docker-compose up -d        # Start service with Redis
 #   docker-compose logs -f      # View logs
 #   docker-compose down         # Stop service
-
-version: '3.8'
+#
+# Note: 'version' key is omitted (deprecated in Docker Compose V2)
 
 services:
   partition-l2-turbo:
@@ -28,15 +28,31 @@ services:
       # Redis connection
       - REDIS_URL=redis://redis:6379
 
-      # RPC URLs (override with production endpoints)
+      # =================================================================
+      # RPC/WebSocket Configuration
+      # =================================================================
+      # IMPORTANT FOR PRODUCTION:
+      # - Public RPCs (defaults below) have rate limits unsuitable for trading
+      # - Use private RPC providers (Alchemy, Infura, QuickNode, etc.) for prod
+      # - WebSocket URLs are critical for real-time price feeds on L2 chains
+      # - L2 chains have sub-second blocks; low-latency connections are essential
+      #
+      # Recommended providers for L2:
+      # - Alchemy: wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+      # - Infura: wss://arbitrum-mainnet.infura.io/ws/v3/YOUR_KEY
+      # - QuickNode: wss://YOUR_ENDPOINT.arbitrum.quiknode.pro/YOUR_KEY
+      # =================================================================
+
+      # HTTP RPC URLs (fallback for HTTP calls)
       - ARBITRUM_RPC_URL=${ARBITRUM_RPC_URL:-https://arb1.arbitrum.io/rpc}
       - OPTIMISM_RPC_URL=${OPTIMISM_RPC_URL:-https://mainnet.optimism.io}
       - BASE_RPC_URL=${BASE_RPC_URL:-https://mainnet.base.org}
 
-      # WebSocket URLs
-      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:-wss://arb1.arbitrum.io/feed}
-      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-wss://mainnet.optimism.io}
-      - BASE_WS_URL=${BASE_WS_URL:-wss://mainnet.base.org}
+      # WebSocket URLs (required for real-time event streaming)
+      # CRITICAL: Set these for production - public endpoints do NOT support WS
+      - ARBITRUM_WS_URL=${ARBITRUM_WS_URL:-}
+      - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-}
+      - BASE_WS_URL=${BASE_WS_URL:-}
     ports:
       - "3002:3002"
     depends_on:

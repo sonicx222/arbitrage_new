@@ -6,12 +6,19 @@
  * - Arbitrum, Optimism, Base
  *
  * Tests verify:
- * - Service configuration and startup
- * - Health endpoint functionality
- * - Chain-specific event handling
- * - Resource allocation for 3 chains
- * - Graceful degradation when chains fail
- * - Fast health checks for sub-second block times
+ * - Partition configuration (from @arbitrage/config)
+ * - Chain configurations (from @arbitrage/config)
+ * - Shared utilities (from @arbitrage/core)
+ * - Service exports and constants
+ *
+ * NOTE: Tests S3.1.4.3-S3.1.4.9 use PartitionedDetector from @arbitrage/core for
+ * testing detector behavior patterns. The actual partition-l2-turbo service uses
+ * UnifiedChainDetector from @arbitrage/unified-detector, which has a different
+ * internal implementation but exposes similar functionality through dependency
+ * injection and the shared partition utilities.
+ *
+ * For testing the actual UnifiedChainDetector behavior, see:
+ * - services/unified-detector/src/*.test.ts
  *
  * @see IMPLEMENTATION_PLAN.md S3.1.4: Create P2 detector service
  * @see ADR-003: Partitioned Chain Detectors
@@ -1278,5 +1285,309 @@ describe('S3.1.4.16: P19-FIX Shutdown Guard', () => {
         'partition-l2-turbo'
       );
     }).not.toThrow();
+  });
+});
+
+// =============================================================================
+// S3.1.4.17: Error Path Tests (exitWithConfigError)
+// =============================================================================
+
+describe('S3.1.4.17: Error Path Tests', () => {
+  let exitWithConfigError: typeof import('../../shared/core/src').exitWithConfigError;
+  let mockProcessExit: jest.SpiedFunction<typeof process.exit>;
+  let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
+
+  beforeAll(async () => {
+    const module = await import('../../shared/core/src');
+    exitWithConfigError = module.exitWithConfigError;
+  });
+
+  beforeEach(() => {
+    mockLogger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    };
+
+    // Mock process.exit to prevent test termination
+    mockProcessExit = jest.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as () => never);
+  });
+
+  afterEach(() => {
+    mockProcessExit.mockRestore();
+  });
+
+  it('should log error and call process.exit(1) with logger', () => {
+    expect(() => {
+      exitWithConfigError('Test error message', { partitionId: 'l2-turbo' }, mockLogger as any);
+    }).toThrow('process.exit called');
+
+    expect(mockLogger.error).toHaveBeenCalledWith('Test error message', { partitionId: 'l2-turbo' });
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+  });
+
+  it('should use console.error fallback without logger', () => {
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => {
+      exitWithConfigError('Test error message', { partitionId: 'l2-turbo' });
+    }).toThrow('process.exit called');
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Test error message', { partitionId: 'l2-turbo' });
+    expect(mockProcessExit).toHaveBeenCalledWith(1);
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('should include context in error log', () => {
+    const context = {
+      partitionId: 'l2-turbo',
+      hint: 'Set REDIS_URL=redis://localhost:6379',
+      chains: ['arbitrum', 'optimism', 'base']
+    };
+
+    expect(() => {
+      exitWithConfigError('REDIS_URL environment variable is required', context, mockLogger as any);
+    }).toThrow('process.exit called');
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'REDIS_URL environment variable is required',
+      context
+    );
+  });
+});
+
+// =============================================================================
+// S3.1.4.18: parsePort Error Path Tests
+// =============================================================================
+
+describe('S3.1.4.18: parsePort Error Path Tests', () => {
+  let parsePort: typeof import('../../shared/core/src').parsePort;
+  let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
+
+  beforeAll(async () => {
+    const module = await import('../../shared/core/src');
+    parsePort = module.parsePort;
+  });
+
+  beforeEach(() => {
+    mockLogger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    };
+  });
+
+  it('should log warning for invalid port string', () => {
+    const result = parsePort('not-a-number', 3002, mockLogger as any);
+
+    expect(result).toBe(3002);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Invalid HEALTH_CHECK_PORT, using default',
+      expect.objectContaining({ provided: 'not-a-number', default: 3002 })
+    );
+  });
+
+  it('should log warning for port below valid range', () => {
+    const result = parsePort('0', 3002, mockLogger as any);
+
+    expect(result).toBe(3002);
+    expect(mockLogger.warn).toHaveBeenCalled();
+  });
+
+  it('should log warning for port above valid range', () => {
+    const result = parsePort('70000', 3002, mockLogger as any);
+
+    expect(result).toBe(3002);
+    expect(mockLogger.warn).toHaveBeenCalled();
+  });
+
+  it('should accept valid port in range', () => {
+    const result = parsePort('8080', 3002, mockLogger as any);
+
+    expect(result).toBe(8080);
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// S3.1.4.19: validateAndFilterChains Error Path Tests
+// =============================================================================
+
+describe('S3.1.4.19: validateAndFilterChains Error Path Tests', () => {
+  let validateAndFilterChains: typeof import('../../shared/core/src').validateAndFilterChains;
+  let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
+  const P2_CHAINS = ['arbitrum', 'optimism', 'base'] as const;
+
+  beforeAll(async () => {
+    const module = await import('../../shared/core/src');
+    validateAndFilterChains = module.validateAndFilterChains;
+  });
+
+  beforeEach(() => {
+    mockLogger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    };
+  });
+
+  it('should log warning for invalid chain IDs', () => {
+    const result = validateAndFilterChains('arbitrum,invalid-chain,base', P2_CHAINS, mockLogger as any);
+
+    expect(result).toEqual(['arbitrum', 'base']);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Invalid chain IDs in PARTITION_CHAINS, ignoring',
+      expect.objectContaining({
+        invalidChains: ['invalid-chain'],
+        validChains: ['arbitrum', 'base']
+      })
+    );
+  });
+
+  it('should log warning when all chains invalid and use defaults', () => {
+    const result = validateAndFilterChains('invalid1,invalid2,invalid3', P2_CHAINS, mockLogger as any);
+
+    expect(result).toEqual([...P2_CHAINS]);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'No valid chains in PARTITION_CHAINS, using defaults',
+      expect.objectContaining({ defaults: P2_CHAINS })
+    );
+  });
+
+  it('should handle mixed valid/invalid chains', () => {
+    const result = validateAndFilterChains('ARBITRUM,not-a-chain,OPTIMISM', P2_CHAINS, mockLogger as any);
+
+    // Should convert to lowercase and filter out invalid
+    expect(result).toEqual(['arbitrum', 'optimism']);
+    expect(mockLogger.warn).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// S3.1.4.20: Process Handler Cleanup Tests (BUG-4.1-FIX)
+// =============================================================================
+
+describe('S3.1.4.20: Process Handler Cleanup Tests', () => {
+  let setupProcessHandlers: typeof import('../../shared/core/src').setupProcessHandlers;
+  let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockDetector: any;
+
+  beforeAll(async () => {
+    const module = await import('../../shared/core/src');
+    setupProcessHandlers = module.setupProcessHandlers;
+  });
+
+  beforeEach(() => {
+    mockLogger = {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    };
+
+    const emitter = new EventEmitter();
+    mockDetector = Object.assign(emitter, {
+      isRunning: jest.fn(() => true),
+      stop: jest.fn(() => Promise.resolve()),
+      getPartitionHealth: jest.fn(() => Promise.resolve({ status: 'healthy' })),
+      getHealthyChains: jest.fn(() => ['arbitrum', 'optimism', 'base']),
+      getStats: jest.fn(() => ({})),
+      getPartitionId: jest.fn(() => 'l2-turbo'),
+      getChains: jest.fn(() => ['arbitrum', 'optimism', 'base']),
+      start: jest.fn(() => Promise.resolve())
+    });
+
+    // Clean up any existing listeners
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('uncaughtException');
+    process.removeAllListeners('unhandledRejection');
+  });
+
+  afterEach(() => {
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('uncaughtException');
+    process.removeAllListeners('unhandledRejection');
+  });
+
+  it('should return cleanup function that removes all handlers (BUG-4.1-FIX)', () => {
+    const healthServerRef = { current: null };
+
+    const cleanup = setupProcessHandlers(
+      healthServerRef,
+      mockDetector as any,
+      mockLogger as any,
+      'partition-l2-turbo'
+    );
+
+    // Verify handlers were registered
+    expect(process.listenerCount('SIGTERM')).toBeGreaterThanOrEqual(1);
+    expect(process.listenerCount('SIGINT')).toBeGreaterThanOrEqual(1);
+
+    // Call cleanup
+    cleanup();
+
+    // Verify handlers were removed
+    expect(process.listenerCount('SIGTERM')).toBe(0);
+    expect(process.listenerCount('SIGINT')).toBe(0);
+    expect(process.listenerCount('uncaughtException')).toBe(0);
+    expect(process.listenerCount('unhandledRejection')).toBe(0);
+  });
+
+  it('should not accumulate listeners on multiple setupProcessHandlers calls', () => {
+    const healthServerRef = { current: null };
+
+    // First setup
+    const cleanup1 = setupProcessHandlers(
+      healthServerRef,
+      mockDetector as any,
+      mockLogger as any,
+      'partition-l2-turbo'
+    );
+
+    // Cleanup first
+    cleanup1();
+
+    // Second setup
+    const cleanup2 = setupProcessHandlers(
+      healthServerRef,
+      mockDetector as any,
+      mockLogger as any,
+      'partition-l2-turbo'
+    );
+
+    // Should only have 1 listener, not accumulated
+    expect(process.listenerCount('SIGTERM')).toBe(1);
+    expect(process.listenerCount('SIGINT')).toBe(1);
+
+    cleanup2();
+  });
+});
+
+// =============================================================================
+// S3.1.4.21: Export Cleanup Handler Tests
+// =============================================================================
+
+describe('S3.1.4.21: Service Exports cleanupProcessHandlers', () => {
+  it('should export cleanupProcessHandlers function from partition-l2-turbo', async () => {
+    const p2Module = await import('../../services/partition-l2-turbo/src/index');
+
+    expect(p2Module.cleanupProcessHandlers).toBeDefined();
+    expect(typeof p2Module.cleanupProcessHandlers).toBe('function');
+  });
+
+  it('cleanupProcessHandlers should be callable without errors', async () => {
+    const { cleanupProcessHandlers } = await import('../../services/partition-l2-turbo/src/index');
+
+    // Should not throw
+    expect(() => cleanupProcessHandlers()).not.toThrow();
   });
 });

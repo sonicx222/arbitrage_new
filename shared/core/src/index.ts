@@ -645,6 +645,7 @@ export {
   shutdownPartitionService,
   setupDetectorEventHandlers,
   setupProcessHandlers,
+  exitWithConfigError,
   SHUTDOWN_TIMEOUT_MS
 } from './partition-service-utils';
 export type {

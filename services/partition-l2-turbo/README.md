@@ -37,23 +37,28 @@ Partition detector service for Ethereum Layer 2 rollup networks.
 # Required
 REDIS_URL=redis://localhost:6379
 
+# Required for Production (WebSocket URLs for real-time price feeds)
+# Public RPCs don't support WebSocket - use Alchemy/Infura/QuickNode
+ARBITRUM_WS_URL=wss://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+OPTIMISM_WS_URL=wss://opt-mainnet.g.alchemy.com/v2/YOUR_KEY
+BASE_WS_URL=wss://base-mainnet.g.alchemy.com/v2/YOUR_KEY
+
+# Optional HTTP RPC URLs (fallback)
+ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
+OPTIMISM_RPC_URL=https://mainnet.optimism.io
+BASE_RPC_URL=https://mainnet.base.org
+
 # Optional (have defaults)
 PARTITION_ID=l2-turbo
 PARTITION_CHAINS=arbitrum,optimism,base
 REGION_ID=asia-southeast1
 LOG_LEVEL=info
 HEALTH_CHECK_PORT=3002
-
-# RPC URLs (override defaults)
-ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
-OPTIMISM_RPC_URL=https://mainnet.optimism.io
-BASE_RPC_URL=https://mainnet.base.org
-
-# WebSocket URLs (override defaults)
-ARBITRUM_WS_URL=wss://arb1.arbitrum.io/feed
-OPTIMISM_WS_URL=wss://mainnet.optimism.io
-BASE_WS_URL=wss://mainnet.base.org
+INSTANCE_ID=p2-l2-turbo-{hostname}-{timestamp}  # Auto-generated if not set
+ENABLE_CROSS_REGION_HEALTH=true                  # Enable cross-region health reporting
 ```
+
+**Important**: For production arbitrage trading, WebSocket URLs are critical. L2 chains have sub-second blocks, and HTTP polling is too slow for competitive trading. Chain URLs are configured in `@arbitrage/config/chains.ts` but can be overridden via environment variables.
 
 ## Local Development
 
@@ -128,11 +133,22 @@ docker-compose down
 4. Set secrets: `fly secrets set REDIS_URL=... ARBITRUM_RPC_URL=...`
 5. Deploy: `fly deploy`
 
-## L2-Specific Optimizations
+## L2-Specific Configuration
 
-- **Faster Health Checks (10s)**: L2 chains have sub-second to 2-second block times, requiring more frequent health monitoring
-- **Shorter Failover Timeout (45s)**: Quick recovery is critical for high-throughput L2 chains
-- **High Event Throughput**: Optimized for handling the higher transaction volume of L2 networks
+The L2-Turbo partition has configuration optimized for Ethereum L2 rollups:
+
+- **Faster Health Checks (10s)**: L2 chains have sub-second to 2-second block times, requiring more frequent health monitoring than Ethereum mainnet
+- **Shorter Failover Timeout (45s)**: Quick failover is critical for L2 chains where blocks arrive every ~250ms-2s
+- **WebSocket Requirements**: L2 chains require WebSocket connections for real-time event streaming. Public RPC endpoints typically don't support WebSocket; use Alchemy, Infura, or QuickNode.
+
+> **Note**: The underlying `UnifiedChainDetector` processes all chains equally. The "L2-specific" optimizations are configuration parameters (health check intervals, failover timeouts) defined in `@arbitrage/config/partitions.ts`. There is no special L2-specific code path in the detector itself.
+
+### DEX Configuration
+
+DEXes monitored are defined in `@arbitrage/config/dexes.ts`. The lists above reflect the current configuration but may change. The actual DEXes monitored at runtime depend on:
+1. Chain-specific DEX configuration in `@arbitrage/config`
+2. Whether the DEX is marked as `enabled: true`
+3. Whether required pool addresses are configured
 
 ## Failover Configuration
 
