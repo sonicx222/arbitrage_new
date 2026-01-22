@@ -836,3 +836,18 @@ export type {
   RepositoryStats,
   PairChangeCallback,
 } from './components/pair-repository';
+
+// =============================================================================
+// Data Structures - High-performance structures for hot-path operations
+// =============================================================================
+
+export {
+  CircularBuffer,
+  createFifoBuffer,
+  createRollingWindow,
+} from './data-structures';
+
+export type {
+  CircularBufferConfig,
+  CircularBufferStats,
+} from './data-structures';

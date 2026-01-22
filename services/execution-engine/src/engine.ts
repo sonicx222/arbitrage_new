@@ -62,11 +62,17 @@ import { QueueServiceImpl } from './services/queue.service';
 import { IntraChainStrategy } from './strategies/intra-chain.strategy';
 import { CrossChainStrategy } from './strategies/cross-chain.strategy';
 import { SimulationStrategy } from './strategies/simulation.strategy';
+import { ExecutionStrategyFactory, createStrategyFactory } from './strategies/strategy-factory';
 import { OpportunityConsumer } from './consumers/opportunity.consumer';
 import type { ISimulationService, ISimulationProvider, SimulationProviderConfig } from './services/simulation/types';
 import { SimulationService } from './services/simulation/simulation.service';
 import { TenderlyProvider, createTenderlyProvider } from './services/simulation/tenderly-provider';
 import { AlchemySimulationProvider, createAlchemyProvider } from './services/simulation/alchemy-provider';
+import {
+  createSimulationMetricsCollector,
+  SimulationMetricsCollector,
+  SimulationMetricsSnapshot,
+} from './services/simulation/simulation-metrics-collector';
 
 // Re-export types for consumers
 export type {
@@ -77,6 +83,9 @@ export type {
   QueueConfig,
   ProviderHealth,
 };
+
+// Re-export simulation metrics type (Phase 1.1.3)
+export type { SimulationMetricsSnapshot };
 
 /**
  * Execution Engine Service - Composition Root
@@ -102,13 +111,17 @@ export class ExecutionEngineService {
   private queueService: QueueServiceImpl | null = null;
   private opportunityConsumer: OpportunityConsumer | null = null;
 
-  // Execution strategies
+  // Execution strategies (using factory pattern for clean dispatch)
+  private strategyFactory: ExecutionStrategyFactory | null = null;
   private intraChainStrategy: IntraChainStrategy | null = null;
   private crossChainStrategy: CrossChainStrategy | null = null;
   private simulationStrategy: SimulationStrategy | null = null;
 
   // Transaction simulation service (Phase 1.1)
   private txSimulationService: ISimulationService | null = null;
+
+  // Simulation metrics collector (Phase 1.1.3)
+  private simulationMetricsCollector: SimulationMetricsCollector | null = null;
 
   // Infrastructure
   private readonly logger: Logger;
@@ -123,6 +136,7 @@ export class ExecutionEngineService {
   private readonly standbyConfig: StandbyConfig;
   private isActivated = false; // Track if standby has been activated
   private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
+  private isInitializingProviders = false; // Guard against concurrent provider initialization
 
   // State
   private stats: ExecutionStats;
@@ -280,6 +294,9 @@ export class ExecutionEngineService {
       // Start health monitoring
       this.startHealthMonitoring();
 
+      // Start simulation metrics collector (Phase 1.1.3)
+      this.startSimulationMetricsCollection();
+
       this.logger.info('Execution Engine Service started successfully');
     });
 
@@ -297,6 +314,12 @@ export class ExecutionEngineService {
 
       // Clear intervals
       this.clearIntervals();
+
+      // Stop simulation metrics collector (Phase 1.1.3)
+      if (this.simulationMetricsCollector) {
+        this.simulationMetricsCollector.stop();
+        this.simulationMetricsCollector = null;
+      }
 
       // Stop consumer
       if (this.opportunityConsumer) {
@@ -471,9 +494,27 @@ export class ExecutionEngineService {
   }
 
   private initializeStrategies(): void {
+    // Create strategy instances
     this.intraChainStrategy = new IntraChainStrategy(this.logger);
     this.crossChainStrategy = new CrossChainStrategy(this.logger);
     this.simulationStrategy = new SimulationStrategy(this.logger, this.simulationConfig);
+
+    // Create strategy factory and register strategies
+    this.strategyFactory = createStrategyFactory({
+      logger: this.logger,
+      isSimulationMode: this.isSimulationMode,
+    });
+
+    this.strategyFactory.registerStrategies({
+      simulation: this.simulationStrategy,
+      crossChain: this.crossChainStrategy,
+      intraChain: this.intraChainStrategy,
+    });
+
+    this.logger.info('Strategy factory initialized', {
+      registeredTypes: this.strategyFactory.getRegisteredTypes(),
+      simulationMode: this.isSimulationMode,
+    });
 
     // Initialize transaction simulation service (Phase 1.1) if not in dev simulation mode
     // Note: Actual providers (Tenderly, Alchemy) require API keys from environment
@@ -640,7 +681,13 @@ export class ExecutionEngineService {
           .finally(() => {
             this.activeExecutionCount--;
             // Process more items if available (avoids waiting for next event/interval)
-            if (this.queueService && this.queueService.size() > 0) {
+            // Guard: only trigger if service is still running and not already processing
+            if (
+              this.stateManager.isRunning() &&
+              this.queueService &&
+              this.queueService.size() > 0 &&
+              !this.isProcessingQueue
+            ) {
               setImmediate(() => this.processQueueItems());
             }
           });
@@ -749,18 +796,12 @@ export class ExecutionEngineService {
       // Build strategy context
       const ctx = this.buildStrategyContext();
 
-      let result: ExecutionResult;
-
-      // Select and execute strategy
-      if (this.isSimulationMode && this.simulationStrategy) {
-        result = await this.simulationStrategy.execute(opportunity, ctx);
-      } else if (opportunity.type === 'cross-chain' && this.crossChainStrategy) {
-        result = await this.crossChainStrategy.execute(opportunity, ctx);
-      } else if (this.intraChainStrategy) {
-        result = await this.intraChainStrategy.execute(opportunity, ctx);
-      } else {
-        throw new Error('No execution strategy available');
+      // Use strategy factory for clean dispatch (replaces if/else chain)
+      if (!this.strategyFactory) {
+        throw new Error('Strategy factory not initialized');
       }
+
+      const result = await this.strategyFactory.execute(opportunity, ctx);
 
       // Publish result
       await this.publishExecutionResult(result);
@@ -848,6 +889,9 @@ export class ExecutionEngineService {
           error: undefined
         };
 
+        // Get simulation metrics snapshot (Phase 1.1.3)
+        const simulationMetrics = this.simulationMetricsCollector?.getSnapshot();
+
         if (this.streamsClient) {
           await this.streamsClient.xadd(
             RedisStreamsClient.STREAMS.HEALTH,
@@ -856,7 +900,9 @@ export class ExecutionEngineService {
               queueSize: this.queueService?.size() ?? 0,
               queuePaused: this.queueService?.isPaused() ?? false,
               activeExecutions: this.opportunityConsumer?.getActiveCount() ?? 0,
-              stats: this.stats
+              stats: this.stats,
+              // Include simulation metrics (Phase 1.1.3)
+              simulationMetrics: simulationMetrics ?? null,
             }
           );
         }
@@ -870,6 +916,27 @@ export class ExecutionEngineService {
         this.logger.error('Execution engine health monitoring failed', { error });
       }
     }, 30000);
+  }
+
+  /**
+   * Start simulation metrics collection (Phase 1.1.3)
+   *
+   * Creates and starts the simulation metrics collector to track:
+   * - Simulation success rate
+   * - Simulation latency
+   * - Transactions skipped due to simulation failure
+   */
+  private startSimulationMetricsCollection(): void {
+    this.simulationMetricsCollector = createSimulationMetricsCollector({
+      logger: this.logger,
+      perfLogger: this.perfLogger,
+      getStats: () => this.stats,
+      simulationService: this.txSimulationService,
+      stateManager: this.stateManager,
+      collectionIntervalMs: 30000, // Collect every 30 seconds
+    });
+
+    this.simulationMetricsCollector.start();
   }
 
   // ===========================================================================
@@ -914,6 +981,19 @@ export class ExecutionEngineService {
 
   getSimulationConfig(): Readonly<ResolvedSimulationConfig> {
     return this.simulationConfig;
+  }
+
+  /**
+   * Get current simulation metrics snapshot (Phase 1.1.3)
+   *
+   * Returns metrics including:
+   * - Simulation success rate
+   * - Average latency
+   * - Transactions skipped due to simulation failure
+   * - Provider health status
+   */
+  getSimulationMetrics(): SimulationMetricsSnapshot | null {
+    return this.simulationMetricsCollector?.getSnapshot() ?? null;
   }
 
   getIsStandby(): boolean {
@@ -989,28 +1069,36 @@ export class ExecutionEngineService {
       // Step 1: Disable simulation mode if configured
       if (this.standbyConfig.activationDisablesSimulation && this.isSimulationMode) {
         this.isSimulationMode = false;
+        // Sync strategy factory with new simulation mode state
+        this.strategyFactory?.setSimulationMode(false);
         this.logger.warn('SIMULATION MODE DISABLED - Real transactions will now execute');
 
         // Initialize real blockchain providers if not already done
-        if (this.providerService && !this.providerService.getHealthyCount()) {
-          this.logger.info('Initializing blockchain providers for real execution');
-          await this.providerService.initialize();
-          this.providerService.initializeWallets();
+        // Guard against concurrent initialization (race condition prevention)
+        if (this.providerService && !this.providerService.getHealthyCount() && !this.isInitializingProviders) {
+          this.isInitializingProviders = true;
+          try {
+            this.logger.info('Initializing blockchain providers for real execution');
+            await this.providerService.initialize();
+            this.providerService.initializeWallets();
 
-          // Initialize MEV protection
-          this.initializeMevProviders();
+            // Initialize MEV protection
+            this.initializeMevProviders();
 
-          // Initialize bridge router
-          this.initializeBridgeRouter();
+            // Initialize bridge router
+            this.initializeBridgeRouter();
 
-          // Start nonce manager
-          if (this.nonceManager) {
-            this.nonceManager.start();
+            // Start nonce manager
+            if (this.nonceManager) {
+              this.nonceManager.start();
+            }
+
+            // Validate and start health monitoring
+            await this.providerService.validateConnectivity();
+            this.providerService.startHealthChecks();
+          } finally {
+            this.isInitializingProviders = false;
           }
-
-          // Validate and start health monitoring
-          await this.providerService.validateConnectivity();
-          this.providerService.startHealthChecks();
         }
       }
 

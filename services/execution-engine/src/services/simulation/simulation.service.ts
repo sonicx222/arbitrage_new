@@ -9,6 +9,7 @@
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
  */
 
+import { getErrorMessage } from '@arbitrage/core';
 import type { Logger } from '../../types';
 import {
   ISimulationService,
@@ -291,7 +292,7 @@ export class SimulationService implements ISimulationService {
     try {
       return await provider.simulate(request);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = getErrorMessage(error);
       this.logger.error('Provider simulation error', {
         provider: provider.type,
         error: errorMessage,
