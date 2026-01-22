@@ -103,9 +103,9 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         healthyProviders,
         queueSize: engine.getQueueSize(),
         activeExecutions: engine.getActiveExecutionsCount(),
-        totalExecuted: stats.opportunitiesExecuted,
-        successRate: stats.opportunitiesExecuted > 0
-          ? (stats.successfulExecutions / stats.opportunitiesExecuted * 100).toFixed(2) + '%'
+        executionAttempts: stats.executionAttempts,
+        successRate: stats.executionAttempts > 0
+          ? (stats.successfulExecutions / stats.executionAttempts * 100).toFixed(2) + '%'
           : 'N/A',
         uptime: process.uptime(),
         memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),

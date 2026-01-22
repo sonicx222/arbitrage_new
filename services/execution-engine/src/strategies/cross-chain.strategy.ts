@@ -300,32 +300,140 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         };
       }
 
-      // Step 5: Calculate results
-      const executionTimeMs = Date.now() - startTime;
-      const estimatedProfit = expectedProfit - bridgeFeeEth;
+      // Step 5: Execute sell on destination chain
+      const destWallet = ctx.wallets.get(destChain);
+      const destProvider = ctx.providers.get(destChain);
 
-      const actualGasCost = bridgeResult.gasUsed
+      if (!destWallet || !destProvider) {
+        // Bridge succeeded but can't execute sell - funds are on dest chain
+        this.logger.error('Cannot execute sell - no wallet/provider for destination chain', {
+          opportunityId: opportunity.id,
+          destChain,
+          bridgeTxHash: bridgeResult.sourceTxHash,
+        });
+
+        return {
+          opportunityId: opportunity.id,
+          success: false,
+          error: `No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
+          transactionHash: bridgeResult.sourceTxHash,
+          timestamp: Date.now(),
+          chain: destChain,
+          dex: opportunity.sellDex || 'unknown',
+        };
+      }
+
+      // Get nonce for sell transaction on destination chain
+      let sellNonce: number | undefined;
+      if (ctx.nonceManager) {
+        try {
+          sellNonce = await ctx.nonceManager.getNextNonce(destChain);
+        } catch (error) {
+          this.logger.error('Failed to get nonce for destination sell', {
+            error: getErrorMessage(error),
+          });
+        }
+      }
+
+      // Prepare and execute sell transaction on destination chain
+      // TODO: Full implementation requires DEX router integration
+      // For now, we prepare a flash loan style transaction that executes the sell
+      const sellTx = await this.prepareFlashLoanTransaction(opportunity, destChain, ctx);
+
+      // Apply gas settings for destination chain
+      const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
+      sellTx.gasPrice = destGasPrice;
+      if (sellNonce !== undefined) {
+        sellTx.nonce = sellNonce;
+      }
+
+      let sellReceipt: ethers.TransactionReceipt | null = null;
+      let sellTxHash: string | undefined;
+
+      try {
+        const sellTxResponse = await this.withTransactionTimeout(
+          () => destWallet.sendTransaction(sellTx),
+          'destinationSell'
+        );
+
+        sellTxHash = sellTxResponse.hash;
+
+        sellReceipt = await this.withTransactionTimeout(
+          () => sellTxResponse.wait(),
+          'waitForSellReceipt'
+        );
+
+        // Confirm sell nonce
+        if (ctx.nonceManager && sellNonce !== undefined) {
+          ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
+        }
+
+        this.logger.info('Destination sell executed', {
+          opportunityId: opportunity.id,
+          destChain,
+          sellTxHash,
+          gasUsed: sellReceipt?.gasUsed?.toString(),
+        });
+      } catch (sellError) {
+        // Sell failed - bridge succeeded but profit not captured
+        if (ctx.nonceManager && sellNonce !== undefined) {
+          ctx.nonceManager.failTransaction(destChain, sellNonce, getErrorMessage(sellError));
+        }
+
+        this.logger.error('Destination sell failed', {
+          opportunityId: opportunity.id,
+          destChain,
+          bridgeTxHash: bridgeResult.sourceTxHash,
+          error: getErrorMessage(sellError),
+        });
+
+        return {
+          opportunityId: opportunity.id,
+          success: false,
+          error: `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
+          transactionHash: bridgeResult.sourceTxHash,
+          timestamp: Date.now(),
+          chain: destChain,
+          dex: opportunity.sellDex || 'unknown',
+        };
+      }
+
+      // Step 6: Calculate final results
+      const executionTimeMs = Date.now() - startTime;
+
+      // Calculate total gas costs (bridge + sell)
+      const bridgeGasCost = bridgeResult.gasUsed
         ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * 30000000000n))
         : 0;
+      const sellGasCost = sellReceipt
+        ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
+        : 0;
+      const totalGasCost = bridgeGasCost + sellGasCost;
+
+      // Calculate actual profit (expected - bridge fees - gas costs)
+      const actualProfit = expectedProfit - bridgeFeeEth - totalGasCost;
 
       this.logger.info('Cross-chain arbitrage completed', {
         opportunityId: opportunity.id,
         executionTimeMs,
         bridgeFee: bridgeFeeEth,
-        gasUsed: bridgeResult.gasUsed?.toString(),
-        estimatedProfit,
+        bridgeGasCost,
+        sellGasCost,
+        totalGasCost,
+        expectedProfit,
+        actualProfit,
       });
 
       return {
         opportunityId: opportunity.id,
         success: true,
-        transactionHash: bridgeResult.sourceTxHash,
-        actualProfit: estimatedProfit,
-        gasUsed: bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined,
-        gasCost: actualGasCost,
+        transactionHash: sellTxHash || bridgeResult.sourceTxHash,
+        actualProfit,
+        gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
+        gasCost: totalGasCost,
         timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
+        chain: destChain, // Report final chain where sell occurred
+        dex: opportunity.sellDex || 'unknown',
       };
 
     } catch (error) {

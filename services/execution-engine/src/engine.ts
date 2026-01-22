@@ -115,7 +115,7 @@ export class ExecutionEngineService {
   private readonly queueConfig: QueueConfig;
   private readonly standbyConfig: StandbyConfig;
   private isActivated = false; // Track if standby has been activated
-  private isActivating = false; // Mutex to prevent concurrent activation (ADR-007)
+  private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
 
   // State
   private stats: ExecutionStats;
@@ -206,6 +206,12 @@ export class ExecutionEngineService {
         stateManager: this.stateManager,
         nonceManager: this.nonceManager,
         stats: this.stats
+      });
+
+      // Clear stale gas baseline when provider reconnects (prevents memory leak)
+      this.providerService.onProviderReconnect((chainName: string) => {
+        this.gasBaselines.delete(chainName);
+        this.logger.debug('Cleared gas baseline after provider reconnect', { chainName });
       });
 
       // Initialize queue service
@@ -466,25 +472,57 @@ export class ExecutionEngineService {
   // Execution Processing
   // ===========================================================================
 
+  /**
+   * Start execution processing with event-driven approach.
+   * Uses queue's onItemAvailable callback for immediate processing.
+   * Keeps a low-frequency fallback interval (1s) for edge cases.
+   */
   private startExecutionProcessing(): void {
+    // Event-driven: process immediately when item is enqueued
+    if (this.queueService) {
+      this.queueService.onItemAvailable(() => {
+        this.processQueueItems();
+      });
+    }
+
+    // Fallback interval (1s) for edge cases and recovery
+    // This catches any items that might be missed due to timing
     this.executionProcessingInterval = setInterval(() => {
-      // Check preconditions: running, queue exists, items available, under concurrency limit
-      if (!this.stateManager.isRunning()) return;
-      if (!this.queueService || this.queueService.size() === 0) return;
-      if (this.activeExecutionCount >= this.maxConcurrentExecutions) return;
+      this.processQueueItems();
+    }, 1000);
+  }
 
+  /**
+   * Process available queue items up to concurrency limit.
+   * Called both by event callback and fallback interval.
+   */
+  private processQueueItems(): void {
+    // Check preconditions: running, queue exists
+    if (!this.stateManager.isRunning()) return;
+    if (!this.queueService) return;
+
+    // Process multiple items if under concurrency limit
+    while (
+      this.queueService.size() > 0 &&
+      this.activeExecutionCount < this.maxConcurrentExecutions
+    ) {
       const opportunity = this.queueService.dequeue();
-      if (opportunity) {
-        // Increment counter before async operation
-        this.activeExecutionCount++;
+      if (!opportunity) break;
 
-        // Execute and decrement counter when done (success or failure)
-        this.executeOpportunityWithLock(opportunity)
-          .finally(() => {
-            this.activeExecutionCount--;
-          });
-      }
-    }, 50);
+      // Increment counter before async operation
+      this.activeExecutionCount++;
+
+      // Execute and decrement counter when done (success or failure)
+      // Also trigger another processing cycle to handle queued items
+      this.executeOpportunityWithLock(opportunity)
+        .finally(() => {
+          this.activeExecutionCount--;
+          // Process more items if available (avoids waiting for next event/interval)
+          if (this.queueService && this.queueService.size() > 0) {
+            setImmediate(() => this.processQueueItems());
+          }
+        });
+    }
   }
 
   private async executeOpportunityWithLock(opportunity: ArbitrageOpportunity): Promise<void> {
@@ -504,27 +542,35 @@ export class ExecutionEngineService {
       }
     );
 
-    // ACK the message after execution
-    await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
-
     if (!lockResult.success) {
       if (lockResult.reason === 'lock_not_acquired') {
+        // Another instance is executing this opportunity - DO NOT ACK
+        // Let Redis redeliver to the instance that holds the lock
         this.stats.lockConflicts++;
         this.logger.debug('Opportunity skipped - already being executed by another instance', {
           id: opportunity.id
         });
+        return; // Don't ACK - another instance will handle it
       } else if (lockResult.reason === 'redis_error') {
+        // Redis unavailable - can't reliably ACK anyway
         this.logger.error('Opportunity skipped - Redis unavailable', {
           id: opportunity.id,
           error: lockResult.error?.message
         });
+        return; // Don't ACK - Redis is down
       } else if (lockResult.reason === 'execution_error') {
+        // We had the lock, execution failed - ACK to prevent infinite redelivery
         this.logger.error('Opportunity execution failed', {
           id: opportunity.id,
           error: lockResult.error
         });
+        // Fall through to ACK below
       }
     }
+
+    // ACK the message only after we've processed it (success or execution_error)
+    // This ensures messages aren't lost when lock conflicts occur
+    await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
   }
 
   private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
@@ -563,7 +609,7 @@ export class ExecutionEngineService {
 
     try {
       this.opportunityConsumer?.markActive(opportunity.id);
-      this.stats.opportunitiesExecuted++;
+      this.stats.executionAttempts++;
 
       this.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
@@ -769,6 +815,8 @@ export class ExecutionEngineService {
    * 2. Resumes the paused queue
    * 3. Initializes real blockchain providers if not already done
    *
+   * Uses Promise-based mutex to prevent race conditions in concurrent activation.
+   *
    * @returns Promise<boolean> - true if activation succeeded
    */
   async activate(): Promise<boolean> {
@@ -778,10 +826,11 @@ export class ExecutionEngineService {
       return true;
     }
 
-    // Mutex to prevent concurrent activation attempts (ADR-007)
-    if (this.isActivating) {
-      this.logger.warn('Activation already in progress, skipping duplicate call');
-      return false;
+    // Atomic mutex: if activation is in progress, wait for it to complete
+    // This prevents race conditions where two callers could both pass the check
+    if (this.activationPromise) {
+      this.logger.warn('Activation already in progress, waiting for completion');
+      return this.activationPromise;
     }
 
     if (!this.stateManager.isRunning()) {
@@ -789,10 +838,22 @@ export class ExecutionEngineService {
       return false;
     }
 
-    // Acquire activation mutex
-    this.isActivating = true;
+    // Create the activation promise atomically - this is the mutex
+    this.activationPromise = this.performActivation();
 
-    this.logger.warn('🚀 ACTIVATING STANDBY EXECUTOR', {
+    try {
+      return await this.activationPromise;
+    } finally {
+      // Clear the mutex after activation completes (success or failure)
+      this.activationPromise = null;
+    }
+  }
+
+  /**
+   * Internal activation logic, separated for mutex pattern.
+   */
+  private async performActivation(): Promise<boolean> {
+    this.logger.warn('ACTIVATING STANDBY EXECUTOR', {
       previousSimulationMode: this.isSimulationMode,
       queuePaused: this.queueService?.isPaused() ?? false,
       regionId: this.standbyConfig.regionId
@@ -802,7 +863,7 @@ export class ExecutionEngineService {
       // Step 1: Disable simulation mode if configured
       if (this.standbyConfig.activationDisablesSimulation && this.isSimulationMode) {
         this.isSimulationMode = false;
-        this.logger.warn('⚠️ SIMULATION MODE DISABLED - Real transactions will now execute');
+        this.logger.warn('SIMULATION MODE DISABLED - Real transactions will now execute');
 
         // Initialize real blockchain providers if not already done
         if (this.providerService && !this.providerService.getHealthyCount()) {
@@ -836,7 +897,7 @@ export class ExecutionEngineService {
       // Mark as activated
       this.isActivated = true;
 
-      this.logger.warn('✅ STANDBY EXECUTOR ACTIVATED SUCCESSFULLY', {
+      this.logger.warn('STANDBY EXECUTOR ACTIVATED SUCCESSFULLY', {
         simulationMode: this.isSimulationMode,
         queuePaused: this.queueService?.isPaused() ?? false,
         healthyProviders: this.providerService?.getHealthyCount() ?? 0
@@ -862,9 +923,6 @@ export class ExecutionEngineService {
         error: getErrorMessage(error)
       });
       return false;
-    } finally {
-      // Release activation mutex
-      this.isActivating = false;
     }
   }
 }

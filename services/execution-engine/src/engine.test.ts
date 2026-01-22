@@ -61,14 +61,15 @@ describe('ExecutionEngineService', () => {
     expect(engine).toBeDefined();
   });
 
-  // PHASE-3.2: validateOpportunity and buildSwapPath methods were moved to OpportunityConsumer
+  // PHASE-3.2: validateOpportunity was moved to OpportunityConsumer
+  // buildSwapPath is in BaseExecutionStrategy
   // See consumers/opportunity.consumer.test.ts for consumer-specific tests
 
   test('should provide stats correctly', () => {
     const stats = engine.getStats();
     expect(stats).toBeDefined();
     expect(stats.opportunitiesReceived).toBe(0);
-    expect(stats.opportunitiesExecuted).toBe(0);
+    expect(stats.executionAttempts).toBe(0);
     expect(stats.successfulExecutions).toBe(0);
     expect(stats.failedExecutions).toBe(0);
   });
