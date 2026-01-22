@@ -54,11 +54,32 @@ const P4_DEFAULT_PORT = 3004; // Different port from P1 (3001), P2 (3002), P3 (3
 
 const logger = createLogger('partition-solana:main');
 
+// =============================================================================
+// Critical Environment Validation
+// CRITICAL-FIX: Validate required environment variables early to fail fast
+// =============================================================================
+
+/**
+ * Validates critical environment variables and exits with clear error if missing.
+ * Returns never to help TypeScript understand this terminates the process.
+ */
+function exitWithConfigError(message: string, context: Record<string, unknown>): never {
+  logger.error(message, context);
+  process.exit(1);
+}
+
+// Validate REDIS_URL - required for all partition services
+if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
+  exitWithConfigError('REDIS_URL environment variable is required', {
+    partitionId: P4_PARTITION_ID,
+    hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
+  });
+}
+
 // Single partition config retrieval (P5-FIX pattern)
 const partitionConfig = getPartition(P4_PARTITION_ID);
 if (!partitionConfig) {
-  logger.error('P4 partition configuration not found', { partitionId: P4_PARTITION_ID });
-  process.exit(1);
+  exitWithConfigError('P4 partition configuration not found', { partitionId: P4_PARTITION_ID });
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
@@ -104,23 +125,23 @@ setupDetectorEventHandlers(detector, logger, P4_PARTITION_ID);
 // Process Handlers (P15/P19 refactor - Using shared utilities with shutdown guard)
 // =============================================================================
 
-setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
+// S3.2.3-FIX: Store cleanup function to prevent MaxListenersExceeded warnings
+// in test scenarios and allow proper handler cleanup
+const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
 
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
 async function main(): Promise<void> {
-  // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
-  if (!partitionConfig) {
-    throw new Error('Partition config unavailable - this should never happen');
-  }
+  // Note: serviceConfig captures all partition config values at module init time,
+  // after validation by exitWithConfigError(), so it's safe to use here
 
   logger.info('Starting P4 Solana-Native Partition Service', {
     partitionId: P4_PARTITION_ID,
     chains: config.chains,
     region: P4_REGION,
-    provider: partitionConfig.provider,
+    provider: serviceConfig.provider,
     nodeVersion: process.version,
     pid: process.pid,
     nonEvm: true // P4 is the only non-EVM partition
@@ -146,22 +167,41 @@ async function main(): Promise<void> {
 
   } catch (error) {
     logger.error('Failed to start P4 Solana-Native Partition Service', { error });
+
+    // CRITICAL-FIX: Clean up health server if detector start failed
+    // This prevents leaving port bound when process exits due to startup failure
+    if (healthServerRef.current) {
+      try {
+        healthServerRef.current.close();
+        logger.info('Health server closed after startup failure');
+      } catch (closeError) {
+        logger.warn('Failed to close health server during cleanup', { closeError });
+      }
+    }
+
     process.exit(1);
   }
 }
 
-// Run
-main().catch((error) => {
-  logger.error('Fatal error in P4 Solana-Native partition main', { error });
-  process.exit(1);
-});
+// Run - only when this is the main entry point (not when imported by tests)
+// Check for Jest worker to prevent auto-start during test imports
+if (!process.env.JEST_WORKER_ID) {
+  main().catch((error) => {
+    if (logger) {
+      logger.error('Fatal error in P4 Solana-Native partition main', { error });
+    } else {
+      console.error('Fatal error in P4 Solana-Native partition main (logger unavailable):', error);
+    }
+    process.exit(1);
+  });
+}
 
 // =============================================================================
 // Exports
 // =============================================================================
 
 // Runtime exports
-export { detector, config, P4_PARTITION_ID, P4_CHAINS, P4_REGION };
+export { detector, config, P4_PARTITION_ID, P4_CHAINS, P4_REGION, cleanupProcessHandlers };
 
 // S3.3.6: Re-export Solana arbitrage detector for external use
 export {

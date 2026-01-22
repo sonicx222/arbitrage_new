@@ -34,11 +34,11 @@ services:
       - AVALANCHE_RPC_URL=${AVALANCHE_RPC_URL:-https://api.avax.network/ext/bc/C/rpc}
       - FANTOM_RPC_URL=${FANTOM_RPC_URL:-https://rpc.ftm.tools}
 
-      # WebSocket URLs
-      - BSC_WS_URL=${BSC_WS_URL:-wss://bsc-ws-node.nariox.org:443}
-      - POLYGON_WS_URL=${POLYGON_WS_URL:-wss://polygon-rpc.com}
+      # WebSocket URLs (use reliable public WebSocket endpoints)
+      - BSC_WS_URL=${BSC_WS_URL:-wss://bsc.publicnode.com}
+      - POLYGON_WS_URL=${POLYGON_WS_URL:-wss://polygon-bor-rpc.publicnode.com}
       - AVALANCHE_WS_URL=${AVALANCHE_WS_URL:-wss://api.avax.network/ext/bc/C/ws}
-      - FANTOM_WS_URL=${FANTOM_WS_URL:-wss://wsapi.fantom.network}
+      - FANTOM_WS_URL=${FANTOM_WS_URL:-wss://fantom.publicnode.com}
     ports:
       - "3001:3001"
     depends_on:

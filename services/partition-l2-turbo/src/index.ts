@@ -16,7 +16,7 @@
  *
  * Environment Variables:
  * - PARTITION_ID: Set to 'l2-turbo' by default
- * - REDIS_URL: Redis connection URL
+ * - REDIS_URL: Redis connection URL (required)
  * - LOG_LEVEL: Logging level (default: info)
  * - HEALTH_CHECK_PORT: HTTP health check port (default: 3002)
  *
@@ -50,11 +50,32 @@ const P2_DEFAULT_PORT = 3002; // Different port from P1
 
 const logger = createLogger('partition-l2-turbo:main');
 
+// =============================================================================
+// Critical Environment Validation
+// CRITICAL-FIX: Validate required environment variables early to fail fast
+// =============================================================================
+
+/**
+ * Validates critical environment variables and exits with clear error if missing.
+ * Returns never to help TypeScript understand this terminates the process.
+ */
+function exitWithConfigError(message: string, context: Record<string, unknown>): never {
+  logger.error(message, context);
+  process.exit(1);
+}
+
+// Validate REDIS_URL - required for all partition services
+if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
+  exitWithConfigError('REDIS_URL environment variable is required', {
+    partitionId: P2_PARTITION_ID,
+    hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
+  });
+}
+
 // Single partition config retrieval (P5-FIX pattern)
 const partitionConfig = getPartition(P2_PARTITION_ID);
 if (!partitionConfig) {
-  logger.error('P2 partition configuration not found', { partitionId: P2_PARTITION_ID });
-  process.exit(1);
+  exitWithConfigError('P2 partition configuration not found', { partitionId: P2_PARTITION_ID });
 }
 
 // Derive chains and region from partition config (P3-FIX pattern)
@@ -100,23 +121,23 @@ setupDetectorEventHandlers(detector, logger, P2_PARTITION_ID);
 // Process Handlers (P15/P19 refactor - Using shared utilities with shutdown guard)
 // =============================================================================
 
-setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
+// S3.2.3-FIX: Store cleanup function to prevent MaxListenersExceeded warnings
+// in test scenarios and allow proper handler cleanup
+const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
 
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
 async function main(): Promise<void> {
-  // S3.2.3-FIX: Explicit guard for TypeScript type narrowing
-  if (!partitionConfig) {
-    throw new Error('Partition config unavailable - this should never happen');
-  }
+  // Note: serviceConfig captures all partition config values at module init time,
+  // after validation by exitWithConfigError(), so it's safe to use here
 
   logger.info('Starting P2 L2-Turbo Partition Service', {
     partitionId: P2_PARTITION_ID,
     chains: config.chains,
     region: P2_REGION,
-    provider: partitionConfig.provider,
+    provider: serviceConfig.provider,
     nodeVersion: process.version,
     pid: process.pid
   });
@@ -141,6 +162,18 @@ async function main(): Promise<void> {
 
   } catch (error) {
     logger.error('Failed to start P2 L2-Turbo Partition Service', { error });
+
+    // CRITICAL-FIX: Clean up health server if detector start failed
+    // This prevents leaving port bound when process exits due to startup failure
+    if (healthServerRef.current) {
+      try {
+        healthServerRef.current.close();
+        logger.info('Health server closed after startup failure');
+      } catch (closeError) {
+        logger.warn('Failed to close health server during cleanup', { closeError });
+      }
+    }
+
     process.exit(1);
   }
 }
@@ -162,4 +195,4 @@ if (!process.env.JEST_WORKER_ID) {
 // Exports
 // =============================================================================
 
-export { detector, config, P2_PARTITION_ID, P2_CHAINS, P2_REGION };
+export { detector, config, P2_PARTITION_ID, P2_CHAINS, P2_REGION, cleanupProcessHandlers };
