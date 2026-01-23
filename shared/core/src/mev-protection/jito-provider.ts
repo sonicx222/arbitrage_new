@@ -17,7 +17,7 @@ import {
   BundleSimulationResult,
   MevMetrics,
 } from './types';
-import { AsyncMutex } from '../async/async-mutex';
+import { MevMetricsManager } from './metrics-manager';
 
 // =============================================================================
 // Jito Configuration
@@ -79,6 +79,13 @@ export interface JitoProviderConfig {
   jitoEndpoint?: string;
   /** Tip amount in lamports */
   tipLamports?: number;
+  /**
+   * Custom tip accounts (optional)
+   * CONFIG-FIX: Allows overriding hardcoded tip accounts without code changes.
+   * If Jito changes their tip accounts, you can update via config.
+   * Defaults to JITO_TIP_ACCOUNTS if not provided.
+   */
+  tipAccounts?: string[];
   /** Status polling interval in ms */
   statusPollIntervalMs?: number;
   /** Status polling timeout in ms */
@@ -150,8 +157,17 @@ export class JitoProvider {
   private readonly config: JitoProviderConfig;
   private readonly jitoEndpoint: string;
   private readonly tipLamports: number;
-  private metrics: MevMetrics;
-  private readonly metricsMutex = new AsyncMutex();
+  /**
+   * CONFIG-FIX: Configurable tip accounts with fallback to defaults.
+   * Allows updating tip accounts without code changes if Jito modifies them.
+   */
+  private readonly tipAccounts: string[];
+
+  /**
+   * REFACTOR: Metrics management delegated to MevMetricsManager
+   * to share code with BaseMevProvider and ensure consistent behavior.
+   */
+  private readonly metricsManager: MevMetricsManager;
 
   constructor(config: JitoProviderConfig) {
     if (config.chain !== 'solana') {
@@ -161,7 +177,11 @@ export class JitoProvider {
     this.config = config;
     this.jitoEndpoint = config.jitoEndpoint || JITO_DEFAULTS.mainnetEndpoint;
     this.tipLamports = config.tipLamports || JITO_DEFAULTS.defaultTipLamports;
-    this.metrics = this.createEmptyMetrics();
+    // CONFIG-FIX: Use custom tip accounts if provided, otherwise use defaults
+    this.tipAccounts = config.tipAccounts && config.tipAccounts.length > 0
+      ? config.tipAccounts
+      : JITO_TIP_ACCOUNTS;
+    this.metricsManager = new MevMetricsManager();
   }
 
   /**
@@ -182,8 +202,10 @@ export class JitoProvider {
     }
   ): Promise<MevSubmissionResult> {
     const startTime = Date.now();
-    await this.incrementMetric('totalSubmissions');
 
+    // METRICS-FIX: Check enabled BEFORE incrementing totalSubmissions.
+    // When disabled, return immediately without affecting metrics.
+    // This ensures totalSubmissions = successfulSubmissions + failedSubmissions + fallbackSubmissions.
     if (!this.isEnabled()) {
       return {
         success: false,
@@ -194,6 +216,8 @@ export class JitoProvider {
       };
     }
 
+    await this.metricsManager.increment('totalSubmissions');
+
     // PERFORMANCE-FIX: Serialize transaction once at the top, outside try block.
     // This ensures we can use the serialized version in the catch block,
     // avoiding re-serialization (which is expensive for Solana transactions).
@@ -202,7 +226,7 @@ export class JitoProvider {
       serializedTx = tx.serialize();
     } catch (serializeError) {
       // Serialization failed - cannot proceed with any submission
-      await this.incrementMetric('failedSubmissions');
+      await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
         error: `Transaction serialization failed: ${serializeError instanceof Error ? serializeError.message : String(serializeError)}`,
@@ -218,11 +242,12 @@ export class JitoProvider {
 
       const base64Tx = Buffer.from(serializedTx).toString('base64');
 
-      // Optionally simulate before submission (enabled by default, like FlashbotsProvider)
+      // Optionally simulate before submission (enabled by default for safety)
       if (options?.simulate !== false) {
-        const simResult = await this.simulateTransaction(tx);
+        // PERFORMANCE-FIX: Use pre-serialized base64 to avoid double serialization
+        const simResult = await this.simulateTransactionFromBase64(base64Tx);
         if (!simResult.success) {
-          await this.incrementMetric('bundlesReverted');
+          await this.metricsManager.increment('bundlesReverted');
           return this.fallbackToPublicWithSerialized(
             serializedTx,
             startTime,
@@ -239,9 +264,11 @@ export class JitoProvider {
         const inclusion = await this.waitForBundleInclusion(bundleResult.bundleId);
 
         if (inclusion.included) {
-          await this.incrementMetric('successfulSubmissions');
-          await this.incrementMetric('bundlesIncluded');
-          await this.updateLatencySafe(startTime);
+          // PERF: Single mutex acquisition instead of 3 separate awaits
+          await this.metricsManager.batchUpdate({
+            successfulSubmissions: 1,
+            bundlesIncluded: 1,
+          }, startTime);
 
           return {
             success: true,
@@ -279,6 +306,9 @@ export class JitoProvider {
 
   /**
    * Simulate a transaction without submitting
+   *
+   * This is the public API that accepts a SolanaTransaction.
+   * Internally serializes and delegates to simulateTransactionFromBase64.
    */
   async simulateTransaction(
     tx: SolanaTransaction
@@ -286,7 +316,25 @@ export class JitoProvider {
     try {
       const serializedTx = tx.serialize();
       const base64Tx = Buffer.from(serializedTx).toString('base64');
+      return this.simulateTransactionFromBase64(base64Tx);
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
 
+  /**
+   * Simulate a transaction from pre-serialized base64 string
+   *
+   * PERFORMANCE-OPTIMIZATION: Use this when you already have the serialized
+   * transaction to avoid redundant serialization on the hot path.
+   */
+  async simulateTransactionFromBase64(
+    base64Tx: string
+  ): Promise<BundleSimulationResult> {
+    try {
       const body = {
         jsonrpc: '2.0',
         id: 1,
@@ -326,20 +374,18 @@ export class JitoProvider {
 
   /**
    * Get current metrics
+   * Delegates to MevMetricsManager for thread-safe access.
    */
   getMetrics(): MevMetrics {
-    return { ...this.metrics };
+    return this.metricsManager.getMetrics();
   }
 
   /**
    * Reset metrics
-   *
-   * Note: This is synchronous to match IMevProvider interface.
-   * Object assignment is atomic in JS, so this is safe without mutex.
-   * The previous async version was overly cautious for a rare operation.
+   * Delegates to MevMetricsManager.
    */
   resetMetrics(): void {
-    this.metrics = this.createEmptyMetrics();
+    this.metricsManager.resetMetrics();
   }
 
   /**
@@ -391,9 +437,9 @@ export class JitoProvider {
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // Select random tip account
-        const tipAccount = JITO_TIP_ACCOUNTS[
-          Math.floor(Math.random() * JITO_TIP_ACCOUNTS.length)
+        // Select random tip account from configured accounts
+        const tipAccount = this.tipAccounts[
+          Math.floor(Math.random() * this.tipAccounts.length)
         ];
 
         const body = {
@@ -449,15 +495,23 @@ export class JitoProvider {
 
   /**
    * Wait for bundle inclusion in a slot
+   *
+   * PERF: Uses exponential backoff starting from configured interval,
+   * doubling up to 4s max. This reduces RPC load while maintaining
+   * responsiveness for fast confirmations.
    */
   private async waitForBundleInclusion(
     bundleId: string
   ): Promise<{ included: boolean; signature?: string; slot?: number }> {
-    const pollInterval =
+    const basePollInterval =
       this.config.statusPollIntervalMs || JITO_DEFAULTS.statusPollIntervalMs;
     const timeout =
       this.config.statusPollTimeoutMs || JITO_DEFAULTS.statusPollTimeoutMs;
     const startTime = Date.now();
+
+    // PERF: Exponential backoff - start aggressive, back off over time
+    let currentInterval = basePollInterval;
+    const maxInterval = Math.max(4000, basePollInterval * 8); // Cap at 4s or 8x base
 
     while (Date.now() - startTime < timeout) {
       try {
@@ -482,7 +536,7 @@ export class JitoProvider {
           }
 
           if (status.status === 'Failed') {
-            await this.incrementMetric('bundlesReverted');
+            await this.metricsManager.increment('bundlesReverted');
             return {
               included: false,
             };
@@ -491,10 +545,13 @@ export class JitoProvider {
           // Status is 'Pending' or 'Processing', continue polling
         }
 
-        await this.sleep(pollInterval);
+        await this.sleep(currentInterval);
+        // Exponential backoff: double interval, but cap at maxInterval
+        currentInterval = Math.min(currentInterval * 2, maxInterval);
       } catch {
         // Continue polling on errors
-        await this.sleep(pollInterval);
+        await this.sleep(currentInterval);
+        currentInterval = Math.min(currentInterval * 2, maxInterval);
       }
     }
 
@@ -550,7 +607,7 @@ export class JitoProvider {
       this.config.fallbackToPublic ?? JITO_DEFAULTS.fallbackToPublic;
 
     if (!fallbackEnabled) {
-      await this.incrementMetric('failedSubmissions');
+      await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
         error: `Jito submission failed: ${reason}. Fallback disabled.`,
@@ -561,7 +618,7 @@ export class JitoProvider {
     }
 
     try {
-      await this.incrementMetric('fallbackSubmissions');
+      await this.metricsManager.increment('fallbackSubmissions');
 
       // Submit directly to Solana RPC (use pre-serialized tx)
       const signature = await this.config.connection.sendRawTransaction(
@@ -573,8 +630,10 @@ export class JitoProvider {
       const confirmation = await this.waitForConfirmation(signature);
 
       if (confirmation.confirmed) {
-        await this.incrementMetric('successfulSubmissions');
-        await this.updateLatencySafe(startTime);
+        // PERF: Single mutex acquisition instead of 2 separate awaits
+        await this.metricsManager.batchUpdate({
+          successfulSubmissions: 1,
+        }, startTime);
 
         return {
           success: true,
@@ -586,7 +645,7 @@ export class JitoProvider {
         };
       }
 
-      await this.incrementMetric('failedSubmissions');
+      await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
         error: `Jito failed: ${reason}. Fallback transaction not confirmed.`,
@@ -595,7 +654,7 @@ export class JitoProvider {
         usedFallback: true,
       };
     } catch (error) {
-      await this.incrementMetric('failedSubmissions');
+      await this.metricsManager.increment('failedSubmissions');
       return {
         success: false,
         error: `Jito and fallback both failed. Original: ${reason}. Fallback: ${error instanceof Error ? error.message : String(error)}`,
@@ -645,66 +704,10 @@ export class JitoProvider {
   }
 
   /**
-   * Create empty metrics object
-   */
-  private createEmptyMetrics(): MevMetrics {
-    return {
-      totalSubmissions: 0,
-      successfulSubmissions: 0,
-      failedSubmissions: 0,
-      fallbackSubmissions: 0,
-      averageLatencyMs: 0,
-      bundlesIncluded: 0,
-      bundlesReverted: 0,
-      lastUpdated: Date.now(),
-    };
-  }
-
-  /**
    * Sleep helper
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  // ===========================================================================
-  // Thread-Safe Metrics Helpers
-  // ===========================================================================
-
-  /**
-   * Thread-safe metric increment
-   */
-  private async incrementMetric(
-    field:
-      | 'totalSubmissions'
-      | 'successfulSubmissions'
-      | 'failedSubmissions'
-      | 'fallbackSubmissions'
-      | 'bundlesIncluded'
-      | 'bundlesReverted'
-  ): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      this.metrics[field]++;
-    });
-  }
-
-  /**
-   * Thread-safe latency update
-   */
-  private async updateLatencySafe(startTime: number): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      const latency = Date.now() - startTime;
-      const total = this.metrics.successfulSubmissions;
-
-      if (total === 1) {
-        this.metrics.averageLatencyMs = latency;
-      } else if (total > 1) {
-        this.metrics.averageLatencyMs =
-          (this.metrics.averageLatencyMs * (total - 1) + latency) / total;
-      }
-
-      this.metrics.lastUpdated = Date.now();
-    });
   }
 }
 

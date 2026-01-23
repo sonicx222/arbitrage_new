@@ -10,16 +10,13 @@
 
 import { ethers } from 'ethers';
 import {
-  IMevProvider,
   MevStrategy,
   MevSubmissionResult,
   MevProviderConfig,
   BundleSimulationResult,
-  MevMetrics,
-  FlashbotsBundle,
   MEV_DEFAULTS,
 } from './types';
-import { AsyncMutex } from '../async/async-mutex';
+import { BaseMevProvider } from './base-provider';
 
 // =============================================================================
 // Flashbots Provider Implementation
@@ -31,24 +28,50 @@ import { AsyncMutex } from '../async/async-mutex';
  * Uses Flashbots relay to submit private transaction bundles that are
  * included atomically without being visible in the public mempool.
  */
-export class FlashbotsProvider implements IMevProvider {
+export class FlashbotsProvider extends BaseMevProvider {
   readonly chain = 'ethereum';
   readonly strategy: MevStrategy = 'flashbots';
 
-  private readonly config: MevProviderConfig;
   private readonly authSigner: ethers.Wallet | ethers.HDNodeWallet;
   private readonly relayUrl: string;
-  private metrics: MevMetrics;
-  // Thread-safe metrics updates for concurrent submissions
-  private readonly metricsMutex = new AsyncMutex();
+
+  /**
+   * Cache for auth signatures to avoid blocking signMessageSync calls.
+   * Maps body hash -> { signature, timestamp }
+   * Cache entries expire after 5 minutes to handle key rotation.
+   */
+  private readonly signatureCache = new Map<string, { signature: string; timestamp: number }>();
+  private readonly SIGNATURE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly SIGNATURE_CACHE_MAX_SIZE = 1000; // Hard cap to prevent memory leak
+
+  /**
+   * Cached chain ID - fetched once from provider if not in config.
+   * CONFIG-FIX: Supports testnets (Sepolia=11155111, Holesky=17000) in addition to mainnet.
+   */
+  private cachedChainId: number | null = null;
+
+  /**
+   * Guard flag to prevent concurrent cache cleanup.
+   * RACE-FIX: Ensures only one cleanup runs at a time.
+   */
+  private isCleaningCache = false;
 
   constructor(config: MevProviderConfig) {
+    super(config);
+
     if (config.chain !== 'ethereum') {
-      throw new Error('FlashbotsProvider is only for Ethereum mainnet');
+      // DOC-FIX: Error message now reflects testnet support (Sepolia, Holesky)
+      throw new Error(
+        'FlashbotsProvider is only for Ethereum (mainnet and testnets like Sepolia, Holesky)'
+      );
     }
 
-    this.config = config;
     this.relayUrl = config.flashbotsRelayUrl || MEV_DEFAULTS.flashbotsRelayUrl;
+
+    // Use provided chainId if available
+    if (config.chainId !== undefined) {
+      this.cachedChainId = config.chainId;
+    }
 
     // Create auth signer for Flashbots reputation
     // If no auth key provided, generate a random one (lower reputation)
@@ -57,8 +80,20 @@ export class FlashbotsProvider implements IMevProvider {
     } else {
       this.authSigner = ethers.Wallet.createRandom();
     }
+  }
 
-    this.metrics = this.createEmptyMetrics();
+  /**
+   * Get chain ID, caching after first fetch for performance.
+   * Uses config value if provided, otherwise fetches from provider.
+   */
+  private async getChainId(): Promise<number> {
+    if (this.cachedChainId !== null) {
+      return this.cachedChainId;
+    }
+
+    const network = await this.config.provider.getNetwork();
+    this.cachedChainId = Number(network.chainId);
+    return this.cachedChainId;
   }
 
   /**
@@ -70,6 +105,9 @@ export class FlashbotsProvider implements IMevProvider {
 
   /**
    * Send a transaction with Flashbots MEV protection
+   *
+   * Simulation is enabled by default for safety. Set options.simulate = false
+   * to skip simulation (not recommended for production).
    */
   async sendProtectedTransaction(
     tx: ethers.TransactionRequest,
@@ -80,11 +118,15 @@ export class FlashbotsProvider implements IMevProvider {
     }
   ): Promise<MevSubmissionResult> {
     const startTime = Date.now();
-    await this.incrementMetric('totalSubmissions');
 
+    // METRICS-FIX: Check enabled BEFORE incrementing totalSubmissions.
+    // When disabled, return failure directly (consistent with L2SequencerProvider, StandardProvider, JitoProvider).
+    // Don't attempt fallback - disabled means the user doesn't want any submission via this provider.
     if (!this.isEnabled()) {
-      return this.fallbackToPublic(tx, startTime, 'MEV protection disabled');
+      return this.createFailureResult('MEV protection disabled', startTime, false);
     }
+
+    await this.incrementMetric('totalSubmissions');
 
     // NONCE-CONSISTENCY-FIX: Track prepared transaction for fallback.
     // Use preparedTx (with nonce) for fallback instead of original tx.
@@ -103,7 +145,7 @@ export class FlashbotsProvider implements IMevProvider {
       // Sign the transaction
       const signedTx = await this.config.wallet.signTransaction(preparedTx);
 
-      // Optionally simulate before submission
+      // Simulate before submission (enabled by default for safety)
       if (options?.simulate !== false) {
         const simResult = await this.simulateBundle([signedTx], targetBlock);
         if (!simResult.success) {
@@ -120,19 +162,18 @@ export class FlashbotsProvider implements IMevProvider {
       const bundleResult = await this.submitBundle([signedTx], targetBlock);
 
       if (bundleResult.success) {
-        await this.incrementMetric('successfulSubmissions');
-        await this.incrementMetric('bundlesIncluded');
-        await this.updateLatencySafe(startTime);
+        // PERF: Single mutex acquisition instead of 3 separate awaits
+        await this.batchUpdateMetrics({
+          successfulSubmissions: 1,
+          bundlesIncluded: 1,
+        }, startTime);
 
-        return {
-          success: true,
-          transactionHash: bundleResult.transactionHash,
-          bundleHash: bundleResult.bundleHash,
-          blockNumber: targetBlock,
-          strategy: 'flashbots',
-          latencyMs: Date.now() - startTime,
-          usedFallback: false,
-        };
+        return this.createSuccessResult(
+          startTime,
+          bundleResult.transactionHash!,
+          targetBlock,
+          bundleResult.bundleHash
+        );
       }
 
       // Bundle submission failed, try fallback if enabled
@@ -142,7 +183,9 @@ export class FlashbotsProvider implements IMevProvider {
         bundleResult.error || 'Bundle submission failed'
       );
     } catch (error) {
-      await this.incrementMetric('failedSubmissions');
+      // METRICS-FIX: Don't increment failedSubmissions here - fallbackToPublic handles it.
+      // This prevents double-counting when fallback is disabled or when fallback also fails.
+      // Matches JitoProvider pattern for consistent metrics across all providers.
       const errorMessage = error instanceof Error ? error.message : String(error);
       // Use preparedTx if available (preserves nonce), otherwise fall back to original tx
       return this.fallbackToPublic(preparedTx || tx, startTime, errorMessage);
@@ -170,37 +213,31 @@ export class FlashbotsProvider implements IMevProvider {
   }
 
   /**
-   * Get current metrics
-   */
-  getMetrics(): MevMetrics {
-    return { ...this.metrics };
-  }
-
-  /**
-   * Reset metrics
-   */
-  resetMetrics(): void {
-    this.metrics = this.createEmptyMetrics();
-  }
-
-  /**
    * Check health of Flashbots relay connection
+   *
+   * Uses eth_blockNumber JSON-RPC call to verify relay is responding.
+   * This is more reliable than GET requests which may not be supported.
    */
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
     try {
-      // Try to get relay status
-      const response = await fetch(`${this.relayUrl}/`, {
-        method: 'GET',
-        headers: this.getAuthHeaders(''),
-      });
+      // Use JSON-RPC call to check relay health (Flashbots relay expects POST)
+      const body = {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_blockNumber',
+        params: [],
+      };
 
-      if (response.ok) {
-        return { healthy: true, message: 'Flashbots relay is reachable' };
+      const response = await this.sendRelayRequest(body, 5000); // 5s timeout for health check
+
+      // Check if we got a valid response (even an error response means relay is reachable)
+      if (response.result || response.error) {
+        return { healthy: true, message: 'Flashbots relay is reachable and responding' };
       }
 
       return {
         healthy: false,
-        message: `Flashbots relay returned status ${response.status}`,
+        message: 'Flashbots relay returned unexpected response',
       };
     } catch (error) {
       return {
@@ -217,27 +254,18 @@ export class FlashbotsProvider implements IMevProvider {
   /**
    * Prepare transaction with proper gas settings for Flashbots
    *
-   * NOTE: Nonce Management Architecture
-   * The execution engine's NonceManager allocates nonces atomically to prevent
-   * race conditions during concurrent executions. If a nonce is already set in
-   * the incoming transaction, we respect it. Only fetch from chain if not set.
-   * This ensures compatibility with both engine-managed and standalone usage.
+   * CONFIG-FIX: Now uses dynamic chainId instead of hardcoded 1.
+   * Supports Ethereum mainnet (1), Sepolia (11155111), Holesky (17000).
    */
   private async prepareTransaction(
     tx: ethers.TransactionRequest,
     priorityFeeGwei?: number
   ): Promise<ethers.TransactionRequest> {
-    // Respect pre-allocated nonce from NonceManager if provided
-    // Only fetch from chain if no nonce is set (standalone usage)
-    const nonce = tx.nonce !== undefined && tx.nonce !== null
-      ? tx.nonce
-      : await this.config.provider.getTransactionCount(
-          this.config.wallet.address,
-          'pending'
-        );
-
-    // Get current fee data
-    const feeData = await this.config.provider.getFeeData();
+    const [nonce, feeData, chainId] = await Promise.all([
+      this.getNonce(tx),
+      this.getFeeData(),
+      this.getChainId(),
+    ]);
 
     // Use EIP-1559 transaction format
     const preparedTx: ethers.TransactionRequest = {
@@ -245,7 +273,7 @@ export class FlashbotsProvider implements IMevProvider {
       from: this.config.wallet.address,
       nonce,
       type: 2, // EIP-1559
-      chainId: 1, // Ethereum mainnet
+      chainId, // Dynamic: supports mainnet and testnets
     };
 
     // Set gas fees
@@ -271,14 +299,7 @@ export class FlashbotsProvider implements IMevProvider {
 
     // Estimate gas if not provided
     if (!preparedTx.gasLimit) {
-      try {
-        const gasEstimate = await this.config.provider.estimateGas(preparedTx);
-        // Add 20% buffer for safety
-        preparedTx.gasLimit = (gasEstimate * 120n) / 100n;
-      } catch {
-        // Use reasonable default for swap transactions
-        preparedTx.gasLimit = 500000n;
-      }
+      preparedTx.gasLimit = await this.estimateGasWithBuffer(preparedTx, 20, 500000n);
     }
 
     return preparedTx;
@@ -396,7 +417,6 @@ export class FlashbotsProvider implements IMevProvider {
           const response = await this.sendRelayRequest(body, timeout);
 
           if (response.error) {
-            // Track error for debugging
             lastError = `Block ${targetBlock}, retry ${retry}: ${response.error.message || 'Relay error'}`;
             continue;
           }
@@ -412,6 +432,7 @@ export class FlashbotsProvider implements IMevProvider {
           // Wait for bundle to be included
           const inclusion = await this.waitForInclusion(
             bundleHash,
+            signedTransactions,
             targetBlock,
             timeout
           );
@@ -426,7 +447,6 @@ export class FlashbotsProvider implements IMevProvider {
 
           lastError = `Block ${targetBlock}, retry ${retry}: Bundle not included`;
         } catch (error) {
-          // Track error for debugging
           lastError = `Block ${targetBlock}, retry ${retry}: ${error instanceof Error ? error.message : String(error)}`;
         }
       }
@@ -441,19 +461,59 @@ export class FlashbotsProvider implements IMevProvider {
   /**
    * Wait for bundle inclusion in a block
    *
-   * FIX: Now properly verifies the transaction is actually in the block,
-   * not just that the block exists with some transactions.
+   * FIX: Now properly verifies the transaction is actually in the block
+   * by computing tx hash from signed transaction and checking block contents.
+   *
+   * PERF-FIX: Removed redundant receipt fetches - single fetch checks both
+   * target block and target+1 with one RPC call.
+   *
+   * PERF: Uses exponential backoff starting at 500ms, doubling up to 4s max.
+   * This reduces RPC load while maintaining responsiveness for fast blocks.
    */
   private async waitForInclusion(
     bundleHash: string,
+    signedTransactions: string[],
     targetBlock: number,
     timeoutMs: number
   ): Promise<{ included: boolean; transactionHash?: string }> {
     const startTime = Date.now();
-    const pollInterval = 1000; // 1 second
+
+    // PERF: Exponential backoff - start aggressive (500ms), back off over time
+    const basePollInterval = 500;
+    const maxPollInterval = 4000; // Cap at 4 seconds
+    let currentInterval = basePollInterval;
+
+    // Pre-compute expected transaction hash from the first signed tx
+    // This is more reliable than waiting for the API to return it
+    const expectedTxHash = ethers.keccak256(signedTransactions[0]);
 
     while (Date.now() - startTime < timeoutMs) {
       try {
+        // First check if our transaction is already in the target block
+        const currentBlock = await this.config.provider.getBlockNumber();
+
+        if (currentBlock >= targetBlock) {
+          // Block has been mined, check if our tx is in it
+          // PERF-FIX: Single receipt fetch - reuse for both target and target+1 check
+          const receipt = await this.config.provider.getTransactionReceipt(expectedTxHash);
+
+          if (receipt) {
+            // Accept if in target block or target+1 (timing tolerance)
+            if (receipt.blockNumber <= targetBlock + 1) {
+              return {
+                included: true,
+                transactionHash: expectedTxHash,
+              };
+            }
+          }
+
+          // Check if target block has passed without our tx
+          if (currentBlock > targetBlock + 1) {
+            return { included: false };
+          }
+        }
+
+        // Also poll Flashbots API for bundle status as backup
         const body = {
           jsonrpc: '2.0',
           id: 1,
@@ -463,47 +523,29 @@ export class FlashbotsProvider implements IMevProvider {
 
         const response = await this.sendRelayRequest(body);
 
-        if (response.result?.isSimulated && response.result?.isHighPriority !== false) {
-          // Bundle was processed by relay
-          if (response.result?.receivedAt) {
-            // Get transaction hash from bundle stats
-            const bundleTxHash = response.result?.transactions?.[0]?.hash;
+        // Check if bundle was marked as included by Flashbots
+        if (response.result?.isSimulated) {
+          const bundleStatus = response.result;
 
-            if (bundleTxHash) {
-              // Verify transaction is actually in the block
-              const block = await this.config.provider.getBlock(targetBlock, true);
-
-              if (block && block.transactions && block.transactions.length > 0) {
-                // Check if our transaction is in the block's transaction list
-                // When called with prefetch=true, block.transactions contains TransactionResponse[]
-                // When called with prefetch=false, it contains string[] (hashes)
-                const txInBlock = block.transactions.some((tx: string | ethers.TransactionResponse) => {
-                  const txHash = typeof tx === 'string' ? tx : tx.hash;
-                  return txHash.toLowerCase() === bundleTxHash.toLowerCase();
-                });
-
-                if (txInBlock) {
-                  return {
-                    included: true,
-                    transactionHash: bundleTxHash,
-                  };
-                }
-              }
+          // If Flashbots says it's included, verify on-chain
+          if (bundleStatus.consideredByBuildersAt && bundleStatus.consideredByBuildersAt.length > 0) {
+            const receipt = await this.config.provider.getTransactionReceipt(expectedTxHash);
+            if (receipt) {
+              return {
+                included: true,
+                transactionHash: expectedTxHash,
+              };
             }
           }
         }
 
-        // Wait before next poll
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
-
-        // Check if target block has passed
-        const currentBlock = await this.config.provider.getBlockNumber();
-        if (currentBlock > targetBlock) {
-          return { included: false };
-        }
+        // Wait before next poll with exponential backoff
+        await new Promise((resolve) => setTimeout(resolve, currentInterval));
+        currentInterval = Math.min(currentInterval * 2, maxPollInterval);
       } catch {
-        // Continue polling
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        // Continue polling on errors with backoff
+        await new Promise((resolve) => setTimeout(resolve, currentInterval));
+        currentInterval = Math.min(currentInterval * 2, maxPollInterval);
       }
     }
 
@@ -512,13 +554,16 @@ export class FlashbotsProvider implements IMevProvider {
 
   /**
    * Send request to Flashbots relay with authentication
+   *
+   * PERFORMANCE-FIX: Uses async signature with caching to avoid
+   * blocking the event loop on the hot path.
    */
   private async sendRelayRequest(
     body: object,
     timeoutMs?: number
   ): Promise<any> {
     const bodyString = JSON.stringify(body);
-    const headers = this.getAuthHeaders(bodyString);
+    const headers = await this.getAuthHeaders(bodyString);
 
     const controller = new AbortController();
     const timeout = timeoutMs || MEV_DEFAULTS.submissionTimeoutMs;
@@ -540,16 +585,84 @@ export class FlashbotsProvider implements IMevProvider {
 
   /**
    * Get authentication headers for Flashbots relay
+   *
+   * PERFORMANCE-FIX: Uses async signMessage with caching instead of
+   * blocking signMessageSync. Signatures are cached for 5 minutes
+   * to avoid repeated signing of the same payload.
    */
-  private getAuthHeaders(body: string): Record<string, string> {
-    const signature = this.authSigner.signMessageSync(
-      ethers.id(body)
-    );
+  private async getAuthHeaders(body: string): Promise<Record<string, string>> {
+    const bodyHash = ethers.id(body);
+
+    // Check cache first
+    const cached = this.signatureCache.get(bodyHash);
+    const now = Date.now();
+
+    if (cached && (now - cached.timestamp) < this.SIGNATURE_CACHE_TTL_MS) {
+      return {
+        'Content-Type': 'application/json',
+        'X-Flashbots-Signature': `${this.authSigner.address}:${cached.signature}`,
+      };
+    }
+
+    // Sign asynchronously (non-blocking)
+    const signature = await this.authSigner.signMessage(bodyHash);
+
+    // Cache the signature
+    this.signatureCache.set(bodyHash, { signature, timestamp: now });
+
+    // PERF-FIX: Schedule cleanup asynchronously to not block hot path.
+    // RACE-FIX: Check guard flag BEFORE size to prevent unnecessary calls.
+    // MEMORY-FIX: Trigger cleanup at soft limit (100) or if hard cap exceeded.
+    if (!this.isCleaningCache && (this.signatureCache.size > 100 || this.signatureCache.size >= this.SIGNATURE_CACHE_MAX_SIZE)) {
+      this.scheduleSignatureCacheCleanup();
+    }
 
     return {
       'Content-Type': 'application/json',
       'X-Flashbots-Signature': `${this.authSigner.address}:${signature}`,
     };
+  }
+
+  /**
+   * Schedule signature cache cleanup on next tick (non-blocking)
+   *
+   * PERF-FIX: Uses setImmediate to defer cleanup off the hot path.
+   * RACE-FIX: Guard flag prevents concurrent cleanups and is set before
+   * yielding to event loop.
+   * MEMORY-FIX: Enforces hard cap by evicting oldest entries.
+   */
+  private scheduleSignatureCacheCleanup(): void {
+    // Set guard flag synchronously before yielding
+    this.isCleaningCache = true;
+
+    setImmediate(() => {
+      try {
+        const now = Date.now();
+
+        // First pass: remove expired entries
+        for (const [key, value] of this.signatureCache.entries()) {
+          if (now - value.timestamp >= this.SIGNATURE_CACHE_TTL_MS) {
+            this.signatureCache.delete(key);
+          }
+        }
+
+        // Second pass: if still over hard cap, evict oldest entries
+        if (this.signatureCache.size >= this.SIGNATURE_CACHE_MAX_SIZE) {
+          // Convert to array, sort by timestamp, and evict oldest until under 80% of cap
+          const entries = Array.from(this.signatureCache.entries())
+            .sort((a, b) => a[1].timestamp - b[1].timestamp);
+
+          const targetSize = Math.floor(this.SIGNATURE_CACHE_MAX_SIZE * 0.8);
+          const entriesToRemove = entries.length - targetSize;
+
+          for (let i = 0; i < entriesToRemove && i < entries.length; i++) {
+            this.signatureCache.delete(entries[i][0]);
+          }
+        }
+      } finally {
+        this.isCleaningCache = false;
+      }
+    });
   }
 
   /**
@@ -560,99 +673,41 @@ export class FlashbotsProvider implements IMevProvider {
     startTime: number,
     reason: string
   ): Promise<MevSubmissionResult> {
-    if (!this.config.fallbackToPublic) {
+    if (!this.isFallbackEnabled()) {
       await this.incrementMetric('failedSubmissions');
-      return {
-        success: false,
-        error: `Protected submission failed: ${reason}. Fallback disabled.`,
-        strategy: 'flashbots',
-        latencyMs: Date.now() - startTime,
-        usedFallback: false,
-      };
+      return this.createFailureResult(
+        `Protected submission failed: ${reason}. Fallback disabled.`,
+        startTime,
+        false
+      );
     }
 
     try {
-      await this.incrementMetric('fallbackSubmissions');
-
       // Submit to public mempool
       const response = await this.config.wallet.sendTransaction(tx);
       const receipt = await response.wait();
 
-      await this.incrementMetric('successfulSubmissions');
-      await this.updateLatencySafe(startTime);
+      // PERF: Single mutex acquisition for all metric updates
+      await this.batchUpdateMetrics({
+        fallbackSubmissions: 1,
+        successfulSubmissions: 1,
+      }, startTime);
 
-      return {
-        success: true,
-        transactionHash: receipt?.hash,
-        blockNumber: receipt?.blockNumber,
-        strategy: 'flashbots',
-        latencyMs: Date.now() - startTime,
-        usedFallback: true,
-      };
+      return this.createSuccessResult(
+        startTime,
+        receipt?.hash || response.hash,
+        receipt?.blockNumber,
+        undefined,
+        true // usedFallback
+      );
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
-      return {
-        success: false,
-        error: `Protected and fallback both failed. Original: ${reason}. Fallback: ${error instanceof Error ? error.message : String(error)}`,
-        strategy: 'flashbots',
-        latencyMs: Date.now() - startTime,
-        usedFallback: true,
-      };
+      return this.createFailureResult(
+        `Protected and fallback both failed. Original: ${reason}. Fallback: ${error instanceof Error ? error.message : String(error)}`,
+        startTime,
+        true
+      );
     }
-  }
-
-  /**
-   * Create empty metrics object
-   */
-  private createEmptyMetrics(): MevMetrics {
-    return {
-      totalSubmissions: 0,
-      successfulSubmissions: 0,
-      failedSubmissions: 0,
-      fallbackSubmissions: 0,
-      averageLatencyMs: 0,
-      bundlesIncluded: 0,
-      bundlesReverted: 0,
-      lastUpdated: Date.now(),
-    };
-  }
-
-  // ===========================================================================
-  // Thread-Safe Metrics Helpers
-  // ===========================================================================
-
-  /**
-   * Thread-safe metric increment
-   * Uses mutex to prevent race conditions during concurrent submissions
-   */
-  private async incrementMetric(
-    field: 'totalSubmissions' | 'successfulSubmissions' | 'failedSubmissions' |
-           'fallbackSubmissions' | 'bundlesIncluded' | 'bundlesReverted'
-  ): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      this.metrics[field]++;
-    });
-  }
-
-  /**
-   * Thread-safe latency update
-   * Must complete atomically since it reads and writes multiple metrics fields
-   */
-  private async updateLatencySafe(startTime: number): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      const latency = Date.now() - startTime;
-      const total = this.metrics.successfulSubmissions;
-
-      if (total === 1) {
-        this.metrics.averageLatencyMs = latency;
-      } else if (total > 1) {
-        // Running average based on successful submissions only
-        this.metrics.averageLatencyMs =
-          (this.metrics.averageLatencyMs * (total - 1) + latency) / total;
-      }
-
-      this.metrics.lastUpdated = Date.now();
-    });
   }
 }
 

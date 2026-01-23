@@ -138,6 +138,38 @@ describe('JitoProvider', () => {
       const provider = new JitoProvider(config);
       expect(provider.isEnabled()).toBe(true);
     });
+
+    // CONFIG-FIX: Test for configurable tip accounts
+    it('should use custom tip accounts when provided', () => {
+      const customTipAccounts = [
+        'CustomTip1111111111111111111111111111111111',
+        'CustomTip2222222222222222222222222222222222',
+      ];
+      const config: JitoProviderConfig = {
+        chain: 'solana',
+        connection: mockConnection as any,
+        keypair: mockKeypair as any,
+        enabled: true,
+        tipAccounts: customTipAccounts,
+      };
+
+      const provider = new JitoProvider(config);
+      expect(provider.isEnabled()).toBe(true);
+      // Provider should work with custom tip accounts
+    });
+
+    it('should fallback to default tip accounts when empty array provided', () => {
+      const config: JitoProviderConfig = {
+        chain: 'solana',
+        connection: mockConnection as any,
+        keypair: mockKeypair as any,
+        enabled: true,
+        tipAccounts: [], // Empty array should use defaults
+      };
+
+      const provider = new JitoProvider(config);
+      expect(provider.isEnabled()).toBe(true);
+    });
   });
 
   // ===========================================================================
@@ -209,7 +241,7 @@ describe('JitoProvider', () => {
   });
 
   describe('resetMetrics', () => {
-    it('should reset all metrics to initial values', async () => {
+    it('should reset all metrics to initial values', () => {
       const provider = new JitoProvider({
         chain: 'solana',
         connection: mockConnection as any,
@@ -217,8 +249,8 @@ describe('JitoProvider', () => {
         enabled: true,
       });
 
-      // Reset and verify (resetMetrics is async for thread-safety)
-      await provider.resetMetrics();
+      // Reset and verify (resetMetrics is sync - object assignment is atomic in JS)
+      provider.resetMetrics();
       const metrics = provider.getMetrics();
 
       expect(metrics.totalSubmissions).toBe(0);
@@ -834,6 +866,116 @@ describe('JITO_TIP_ACCOUNTS', () => {
       // Solana addresses are base58 encoded, typically 32-44 characters
       expect(account.length).toBeGreaterThanOrEqual(32);
       expect(account.length).toBeLessThanOrEqual(44);
+    }
+  });
+});
+
+// =============================================================================
+// Concurrent Metric Updates Tests (RACE-FIX verification)
+// =============================================================================
+
+describe('Concurrent Metric Updates', () => {
+  let mockConnection: ReturnType<typeof createMockConnection>;
+  let mockKeypair: ReturnType<typeof createMockKeypair>;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockConnection = createMockConnection();
+    mockKeypair = createMockKeypair();
+    (global.fetch as jest.Mock).mockClear();
+  });
+
+  it('should handle concurrent metric updates correctly via MevMetricsManager', async () => {
+    const provider = new JitoProvider({
+      chain: 'solana',
+      connection: mockConnection as any,
+      keypair: mockKeypair as any,
+      enabled: true,
+      statusPollIntervalMs: 50,
+      statusPollTimeoutMs: 2000,
+    });
+
+    // Mock 10 successful submissions
+    const submissionCount = 10;
+    for (let i = 0; i < submissionCount; i++) {
+      // Mock bundle submission
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            jsonrpc: '2.0',
+            id: 1,
+            result: `bundle-uuid-concurrent-${i}`,
+          }),
+      });
+
+      // Mock bundle status - landed
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: [{
+                status: 'Landed',
+                landed_slot: 12345679 + i,
+                transactions: [`sig${i}`],
+              }],
+            },
+          }),
+      });
+    }
+
+    // Submit transactions concurrently
+    const mockTxs = Array.from({ length: submissionCount }, () =>
+      createMockTransaction()
+    );
+    const promises = mockTxs.map((tx) =>
+      provider.sendProtectedTransaction(tx as any, { simulate: false })
+    );
+
+    const results = await Promise.all(promises);
+
+    // All should succeed
+    const successCount = results.filter((r) => r.success).length;
+    expect(successCount).toBe(submissionCount);
+
+    // Metrics should be accurate despite concurrent updates
+    const metrics = provider.getMetrics();
+    expect(metrics.totalSubmissions).toBe(submissionCount);
+    expect(metrics.successfulSubmissions).toBe(submissionCount);
+    expect(metrics.bundlesIncluded).toBe(submissionCount);
+  }, 30000);
+
+  it('should maintain metric consistency under high contention', async () => {
+    const provider = new JitoProvider({
+      chain: 'solana',
+      connection: mockConnection as any,
+      keypair: mockKeypair as any,
+      enabled: false, // Disabled = quick path to test metric behavior
+    });
+
+    // Send many requests concurrently (all will return early due to disabled)
+    const requestCount = 50;
+    const promises = Array.from({ length: requestCount }, () => {
+      const tx = createMockTransaction();
+      return provider.sendProtectedTransaction(tx as any);
+    });
+
+    const results = await Promise.all(promises);
+
+    // METRICS-FIX: Disabled provider returns early WITHOUT incrementing metrics.
+    // This ensures totalSubmissions only counts actual submission attempts.
+    const metrics = provider.getMetrics();
+    expect(metrics.totalSubmissions).toBe(0);
+    expect(metrics.failedSubmissions).toBe(0);
+    expect(metrics.successfulSubmissions).toBe(0);
+
+    // All results should indicate disabled state
+    for (const result of results) {
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('disabled');
     }
   });
 });

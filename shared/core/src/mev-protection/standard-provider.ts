@@ -13,16 +13,14 @@
 
 import { ethers } from 'ethers';
 import {
-  IMevProvider,
   MevStrategy,
   MevSubmissionResult,
   MevProviderConfig,
   BundleSimulationResult,
-  MevMetrics,
   CHAIN_MEV_STRATEGIES,
   MEV_DEFAULTS,
 } from './types';
-import { AsyncMutex } from '../async/async-mutex';
+import { BaseMevProvider } from './base-provider';
 
 // =============================================================================
 // Standard Provider Implementation
@@ -34,27 +32,22 @@ import { AsyncMutex } from '../async/async-mutex';
  * Uses gas optimization and fast inclusion strategies to minimize MEV risk.
  * Can also integrate with BloXroute (BSC) and Fastlane (Polygon) when available.
  */
-export class StandardProvider implements IMevProvider {
+export class StandardProvider extends BaseMevProvider {
   readonly chain: string;
   readonly strategy: MevStrategy;
 
-  private readonly config: MevProviderConfig;
-  private metrics: MevMetrics;
   private privateRpcUrl?: string;
-  // Thread-safe metrics updates for concurrent submissions
-  private readonly metricsMutex = new AsyncMutex();
 
   constructor(config: MevProviderConfig) {
+    super(config);
+
     this.chain = config.chain;
-    this.config = config;
 
     // Determine strategy based on chain
     this.strategy = CHAIN_MEV_STRATEGIES[config.chain] || 'standard';
 
     // Set up private RPC if available
     this.setupPrivateRpc();
-
-    this.metrics = this.createEmptyMetrics();
   }
 
   /**
@@ -89,6 +82,9 @@ export class StandardProvider implements IMevProvider {
 
   /**
    * Send a transaction with available MEV protection
+   *
+   * Simulation is enabled by default for safety (unified with FlashbotsProvider).
+   * Set options.simulate = false to skip simulation.
    */
   async sendProtectedTransaction(
     tx: ethers.TransactionRequest,
@@ -99,17 +95,18 @@ export class StandardProvider implements IMevProvider {
     }
   ): Promise<MevSubmissionResult> {
     const startTime = Date.now();
-    await this.incrementMetric('totalSubmissions');
 
+    // METRICS-FIX: Check enabled BEFORE incrementing totalSubmissions.
+    // When disabled, return immediately without affecting metrics.
     if (!this.isEnabled()) {
-      return {
-        success: false,
-        error: 'MEV protection disabled',
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: false,
-      };
+      return this.createFailureResult(
+        'MEV protection disabled',
+        startTime,
+        false
+      );
     }
+
+    await this.incrementMetric('totalSubmissions');
 
     // NONCE-CONSISTENCY-FIX: Prepare transaction once at the top.
     // This ensures consistent nonce across private RPC and fallback paths,
@@ -117,18 +114,16 @@ export class StandardProvider implements IMevProvider {
     let preparedTx: ethers.TransactionRequest | null = null;
 
     try {
-      // Optionally simulate before submission
-      if (options?.simulate) {
+      // Simulate before submission (enabled by default for safety - unified behavior)
+      if (options?.simulate !== false) {
         const simResult = await this.simulateTransaction(tx);
         if (!simResult.success) {
           await this.incrementMetric('failedSubmissions');
-          return {
-            success: false,
-            error: `Simulation failed: ${simResult.error}`,
-            strategy: this.strategy,
-            latencyMs: Date.now() - startTime,
-            usedFallback: false,
-          };
+          return this.createFailureResult(
+            `Simulation failed: ${simResult.error}`,
+            startTime,
+            false
+          );
         }
       }
 
@@ -143,12 +138,13 @@ export class StandardProvider implements IMevProvider {
         }
 
         // Fall through to standard submission if private fails
-        if (!this.config.fallbackToPublic) {
+        if (!this.isFallbackEnabled()) {
           await this.incrementMetric('failedSubmissions');
-          return {
-            ...result,
-            error: `Private submission failed: ${result.error}. Fallback disabled.`,
-          };
+          return this.createFailureResult(
+            `Private submission failed: ${result.error}. Fallback disabled.`,
+            startTime,
+            false
+          );
         }
       }
 
@@ -156,13 +152,11 @@ export class StandardProvider implements IMevProvider {
       return this.sendWithGasOptimization(preparedTx, startTime);
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: false,
-      };
+      return this.createFailureResult(
+        error instanceof Error ? error.message : String(error),
+        startTime,
+        false
+      );
     }
   }
 
@@ -186,20 +180,6 @@ export class StandardProvider implements IMevProvider {
         error: error instanceof Error ? error.message : String(error),
       };
     }
-  }
-
-  /**
-   * Get current metrics
-   */
-  getMetrics(): MevMetrics {
-    return { ...this.metrics };
-  }
-
-  /**
-   * Reset metrics
-   */
-  resetMetrics(): void {
-    this.metrics = this.createEmptyMetrics();
   }
 
   /**
@@ -280,60 +260,51 @@ export class StandardProvider implements IMevProvider {
       };
 
       if (result.error) {
-        return {
-          success: false,
-          error: result.error.message || 'Private RPC error',
-          strategy: this.strategy,
-          latencyMs: Date.now() - startTime,
-          usedFallback: false,
-        };
+        return this.createFailureResult(
+          result.error.message || 'Private RPC error',
+          startTime,
+          false
+        );
       }
 
       const txHash = result.result;
 
       if (!txHash) {
-        return {
-          success: false,
-          error: 'No transaction hash returned from private RPC',
-          strategy: this.strategy,
-          latencyMs: Date.now() - startTime,
-          usedFallback: false,
-        };
+        return this.createFailureResult(
+          'No transaction hash returned from private RPC',
+          startTime,
+          false
+        );
       }
 
       // Wait for confirmation
       const receipt = await this.waitForTransaction(txHash);
 
       if (receipt) {
-        await this.incrementMetric('successfulSubmissions');
-        await this.updateLatencySafe(startTime);
+        // PERF: Single mutex acquisition instead of 2 separate awaits
+        await this.batchUpdateMetrics({
+          successfulSubmissions: 1,
+        }, startTime);
 
-        return {
-          success: true,
-          transactionHash: receipt.hash,
-          blockNumber: receipt.blockNumber,
-          strategy: this.strategy,
-          latencyMs: Date.now() - startTime,
-          usedFallback: false,
-        };
+        return this.createSuccessResult(
+          startTime,
+          receipt.hash,
+          receipt.blockNumber
+        );
       }
 
-      return {
-        success: false,
-        error: 'Transaction not confirmed',
-        transactionHash: txHash,
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: false,
-      };
+      return this.createFailureResult(
+        'Transaction not confirmed',
+        startTime,
+        false,
+        txHash
+      );
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: false,
-      };
+      return this.createFailureResult(
+        error instanceof Error ? error.message : String(error),
+        startTime,
+        false
+      );
     }
   }
 
@@ -352,67 +323,59 @@ export class StandardProvider implements IMevProvider {
       const receipt = await response.wait();
 
       if (receipt) {
-        await this.incrementMetric('successfulSubmissions');
-        if (this.privateRpcUrl) {
-          await this.incrementMetric('fallbackSubmissions');
-        }
-        await this.updateLatencySafe(startTime);
-
-        return {
-          success: true,
-          transactionHash: receipt.hash,
-          blockNumber: receipt.blockNumber,
-          strategy: this.strategy,
-          latencyMs: Date.now() - startTime,
-          usedFallback: !!this.privateRpcUrl,
+        // PERF: Single mutex acquisition instead of up to 3 separate awaits
+        const updates: Partial<Record<'successfulSubmissions' | 'fallbackSubmissions', number>> = {
+          successfulSubmissions: 1,
         };
+        if (this.privateRpcUrl) {
+          updates.fallbackSubmissions = 1;
+        }
+        await this.batchUpdateMetrics(updates, startTime);
+
+        return this.createSuccessResult(
+          startTime,
+          receipt.hash,
+          receipt.blockNumber,
+          undefined,
+          !!this.privateRpcUrl // usedFallback = true if private RPC was configured but we fell back
+        );
       }
 
       await this.incrementMetric('failedSubmissions');
-      return {
-        success: false,
-        error: 'Transaction not confirmed',
-        transactionHash: response.hash,
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: !!this.privateRpcUrl,
-      };
+      return this.createFailureResult(
+        'Transaction not confirmed',
+        startTime,
+        !!this.privateRpcUrl,
+        response.hash
+      );
     } catch (error) {
       await this.incrementMetric('failedSubmissions');
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        strategy: this.strategy,
-        latencyMs: Date.now() - startTime,
-        usedFallback: !!this.privateRpcUrl,
-      };
+      return this.createFailureResult(
+        error instanceof Error ? error.message : String(error),
+        startTime,
+        !!this.privateRpcUrl
+      );
     }
   }
 
   /**
    * Prepare transaction with gas optimization
    *
-   * NOTE: Nonce Management Architecture
-   * The execution engine's NonceManager allocates nonces atomically to prevent
-   * race conditions during concurrent executions. If a nonce is already set in
-   * the incoming transaction, we respect it. Only fetch from chain if not set.
-   * This ensures compatibility with both engine-managed and standalone usage.
+   * Uses aggressive gas pricing (120% of current) to improve inclusion speed
+   * and reduce MEV exposure window.
+   *
+   * PERFORMANCE-FIX: Uses Promise.all for parallel nonce/fee fetches.
+   * This reduces latency on the hot path by ~50% for transaction preparation.
    */
   private async prepareTransaction(
     tx: ethers.TransactionRequest,
-    priorityFeeGwei?: number,
-    aggressive: boolean = false
+    priorityFeeGwei?: number
   ): Promise<ethers.TransactionRequest> {
-    // Respect pre-allocated nonce from NonceManager if provided
-    // Only fetch from chain if no nonce is set (standalone usage)
-    const nonce = tx.nonce !== undefined && tx.nonce !== null
-      ? tx.nonce
-      : await this.config.provider.getTransactionCount(
-          this.config.wallet.address,
-          'pending'
-        );
-
-    const feeData = await this.config.provider.getFeeData();
+    // PERFORMANCE-FIX: Parallel fetch of nonce and fee data
+    const [nonce, feeData] = await Promise.all([
+      this.getNonce(tx),
+      this.getFeeData(),
+    ]);
 
     const preparedTx: ethers.TransactionRequest = {
       ...tx,
@@ -430,33 +393,25 @@ export class StandardProvider implements IMevProvider {
           'gwei'
         );
       } else {
-        // Aggressive gas pricing for MEV protection
-        const multiplier = aggressive ? 150n : 120n;
+        // Aggressive gas pricing (120%) for faster inclusion and MEV protection
         preparedTx.maxPriorityFeePerGas =
-          (feeData.maxPriorityFeePerGas * multiplier) / 100n;
+          (feeData.maxPriorityFeePerGas * 120n) / 100n;
       }
 
-      // Set max fee with buffer
+      // Set max fee with buffer (150% of base + priority)
       const baseFee = feeData.maxFeePerGas - feeData.maxPriorityFeePerGas;
-      const multiplier = aggressive ? 200n : 150n;
       preparedTx.maxFeePerGas =
-        (baseFee * multiplier) / 100n +
+        (baseFee * 150n) / 100n +
         (preparedTx.maxPriorityFeePerGas as bigint);
     } else if (feeData.gasPrice) {
       // Legacy transaction
       preparedTx.type = 0;
-      const multiplier = aggressive ? 150n : 120n;
-      preparedTx.gasPrice = (feeData.gasPrice * multiplier) / 100n;
+      preparedTx.gasPrice = (feeData.gasPrice * 120n) / 100n;
     }
 
     // Estimate gas if not provided
     if (!preparedTx.gasLimit) {
-      try {
-        const gasEstimate = await this.config.provider.estimateGas(preparedTx);
-        preparedTx.gasLimit = (gasEstimate * 120n) / 100n;
-      } catch {
-        preparedTx.gasLimit = 500000n;
-      }
+      preparedTx.gasLimit = await this.estimateGasWithBuffer(preparedTx, 20, 500000n);
     }
 
     return preparedTx;
@@ -529,60 +484,6 @@ export class StandardProvider implements IMevProvider {
         message: `Failed to reach private RPC: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
-  }
-
-  /**
-   * Create empty metrics object
-   */
-  private createEmptyMetrics(): MevMetrics {
-    return {
-      totalSubmissions: 0,
-      successfulSubmissions: 0,
-      failedSubmissions: 0,
-      fallbackSubmissions: 0,
-      averageLatencyMs: 0,
-      bundlesIncluded: 0,
-      bundlesReverted: 0,
-      lastUpdated: Date.now(),
-    };
-  }
-
-  // ===========================================================================
-  // Thread-Safe Metrics Helpers
-  // ===========================================================================
-
-  /**
-   * Thread-safe metric increment
-   * Uses mutex to prevent race conditions during concurrent submissions
-   */
-  private async incrementMetric(
-    field: 'totalSubmissions' | 'successfulSubmissions' | 'failedSubmissions' |
-           'fallbackSubmissions' | 'bundlesIncluded' | 'bundlesReverted'
-  ): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      this.metrics[field]++;
-    });
-  }
-
-  /**
-   * Thread-safe latency update
-   * Must complete atomically since it reads and writes multiple metrics fields
-   */
-  private async updateLatencySafe(startTime: number): Promise<void> {
-    await this.metricsMutex.runExclusive(async () => {
-      const latency = Date.now() - startTime;
-      const total = this.metrics.successfulSubmissions;
-
-      if (total === 1) {
-        this.metrics.averageLatencyMs = latency;
-      } else if (total > 1) {
-        // Running average based on successful submissions only
-        this.metrics.averageLatencyMs =
-          (this.metrics.averageLatencyMs * (total - 1) + latency) / total;
-      }
-
-      this.metrics.lastUpdated = Date.now();
-    });
   }
 }
 

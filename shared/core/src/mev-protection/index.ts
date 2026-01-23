@@ -14,9 +14,22 @@
  * ## Usage
  *
  * ```typescript
- * import { MevProviderFactory, createMevProvider } from './mev-protection';
+ * import {
+ *   MevProviderFactory,
+ *   MevRiskAnalyzer,
+ *   MempoolRecommendation,
+ * } from './mev-protection';
  *
- * // Option 1: Factory for managing multiple EVM chains
+ * // Step 1: Analyze MEV risk before submission
+ * const analyzer = new MevRiskAnalyzer();
+ * const assessment = analyzer.assessRisk({
+ *   chain: 'ethereum',
+ *   valueUsd: 10000,
+ *   slippageBps: 50,
+ *   poolLiquidityUsd: 1_000_000,
+ * });
+ *
+ * // Step 2: Create provider and send based on recommendation
  * const factory = new MevProviderFactory({
  *   enabled: true,
  *   flashbotsAuthKey: process.env.FLASHBOTS_AUTH_KEY,
@@ -29,28 +42,23 @@
  *   wallet: signer,
  * });
  *
- * const result = await provider.sendProtectedTransaction(tx);
+ * if (assessment.mempoolRecommendation === MempoolRecommendation.PRIVATE) {
+ *   // Use private bundle submission
+ *   const result = await provider.sendProtectedTransaction(tx, {
+ *     priorityFeeGwei: assessment.recommendedPriorityFeeGwei,
+ *   });
+ * }
  *
- * // Option 2: Direct provider creation for EVM chains
- * const ethereumProvider = createMevProvider(
- *   'ethereum',
- *   ethersProvider,
- *   signer,
- *   { flashbotsAuthKey: process.env.FLASHBOTS_AUTH_KEY }
- * );
- *
- * // Option 3: Jito provider for Solana (uses Solana-specific types)
- * import { JitoProvider, createJitoProvider } from './mev-protection';
+ * // For Solana (uses Solana-specific types)
+ * import { createJitoProvider } from './mev-protection';
  *
  * const jitoProvider = createJitoProvider({
  *   chain: 'solana',
  *   connection: solanaConnection,
  *   keypair: solanaKeypair,
  *   enabled: true,
- *   tipLamports: 1_000_000, // 0.001 SOL
+ *   tipLamports: assessment.recommendedTipLamports, // From analyzer
  * });
- *
- * const result = await jitoProvider.sendProtectedTransaction(solanaTx);
  * ```
  *
  * @module mev-protection
@@ -69,6 +77,16 @@ export {
   hasMevProtection,
   getRecommendedPriorityFee,
 } from './factory';
+
+// Base class for custom provider implementations
+export { BaseMevProvider } from './base-provider';
+
+// Metrics manager for custom providers (REFACTOR: extracted common logic)
+export {
+  MevMetricsManager,
+  createMevMetricsManager,
+} from './metrics-manager';
+export type { IncrementableMetricField } from './metrics-manager';
 
 // Provider implementations
 export { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider';
@@ -95,8 +113,28 @@ export type {
   SolanaTransaction,
 } from './jito-provider';
 
+// MEV Risk Analyzer (Phase 1.2.3)
+export {
+  MevRiskAnalyzer,
+  createMevRiskAnalyzer,
+  SandwichRiskLevel,
+  MempoolRecommendation,
+  MEV_RISK_DEFAULTS,
+  // Config synchronization utilities
+  validateConfigSync,
+  getLocalChainPriorityFees,
+} from './mev-risk-analyzer';
+export type {
+  TransactionContext,
+  MevRiskAssessment,
+  MevRiskAnalyzerConfig,
+  ConfigSyncValidationResult,
+  ConfigMismatch,
+} from './mev-risk-analyzer';
+
 // Types
 export {
+  // EVM types
   IMevProvider,
   MevStrategy,
   MevSubmissionResult,
@@ -106,4 +144,7 @@ export {
   MevMetrics,
   CHAIN_MEV_STRATEGIES,
   MEV_DEFAULTS,
+  // Solana types (for type-safe Jito usage)
+  ISolanaMevProvider,
+  SolanaTransactionLike,
 } from './types';
