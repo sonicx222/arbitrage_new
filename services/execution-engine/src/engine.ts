@@ -51,6 +51,8 @@ import {
   ResolvedSimulationConfig,
   QueueConfig,
   StandbyConfig,
+  CircuitBreakerConfig,
+  DEFAULT_CIRCUIT_BREAKER_CONFIG,
   EXECUTION_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_MS,
   createInitialStats,
@@ -73,6 +75,12 @@ import {
   SimulationMetricsCollector,
   SimulationMetricsSnapshot,
 } from './services/simulation/simulation-metrics-collector';
+import {
+  createCircuitBreaker,
+  CircuitBreaker,
+  CircuitBreakerEvent,
+  CircuitBreakerStatus,
+} from './services/circuit-breaker';
 
 // Re-export types for consumers
 export type {
@@ -82,10 +90,14 @@ export type {
   SimulationConfig,
   QueueConfig,
   ProviderHealth,
+  CircuitBreakerConfig,
 };
 
 // Re-export simulation metrics type (Phase 1.1.3)
 export type { SimulationMetricsSnapshot };
+
+// Re-export circuit breaker status type (Phase 1.3.1)
+export type { CircuitBreakerStatus };
 
 /**
  * Execution Engine Service - Composition Root
@@ -123,6 +135,9 @@ export class ExecutionEngineService {
   // Simulation metrics collector (Phase 1.1.3)
   private simulationMetricsCollector: SimulationMetricsCollector | null = null;
 
+  // Circuit breaker for execution protection (Phase 1.3.1)
+  private circuitBreaker: CircuitBreaker | null = null;
+
   // Infrastructure
   private readonly logger: Logger;
   private readonly perfLogger: PerformanceLogger;
@@ -134,6 +149,7 @@ export class ExecutionEngineService {
   private isSimulationMode: boolean; // Mutable for activation (ADR-007)
   private readonly queueConfig: QueueConfig;
   private readonly standbyConfig: StandbyConfig;
+  private readonly circuitBreakerConfig: Required<CircuitBreakerConfig>;
   private isActivated = false; // Track if standby has been activated
   private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
   private isInitializingProviders = false; // Guard against concurrent provider initialization
@@ -166,6 +182,14 @@ export class ExecutionEngineService {
       queuePausedOnStart: config.standbyConfig?.queuePausedOnStart ?? false,
       activationDisablesSimulation: config.standbyConfig?.activationDisablesSimulation ?? true,
       regionId: config.standbyConfig?.regionId
+    };
+
+    // Initialize circuit breaker config (Phase 1.3.1)
+    this.circuitBreakerConfig = {
+      enabled: config.circuitBreakerConfig?.enabled ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.enabled,
+      failureThreshold: config.circuitBreakerConfig?.failureThreshold ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.failureThreshold,
+      cooldownPeriodMs: config.circuitBreakerConfig?.cooldownPeriodMs ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.cooldownPeriodMs,
+      halfOpenMaxAttempts: config.circuitBreakerConfig?.halfOpenMaxAttempts ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts,
     };
 
     // Use injected dependencies or defaults
@@ -230,9 +254,15 @@ export class ExecutionEngineService {
         stats: this.stats
       });
 
-      // Clear stale gas baseline when provider reconnects (prevents memory leak)
+      // Clear stale gas baseline when provider reconnects
+      // NOTE: We clear the array contents instead of deleting the Map entry to avoid
+      // race conditions with strategies that may hold a reference to the array.
+      // This ensures in-flight operations see empty data rather than orphaned arrays.
       this.providerService.onProviderReconnect((chainName: string) => {
-        this.gasBaselines.delete(chainName);
+        const history = this.gasBaselines.get(chainName);
+        if (history) {
+          history.length = 0; // Clear contents, keep array reference valid
+        }
         this.logger.debug('Cleared gas baseline after provider reconnect', { chainName });
       });
 
@@ -274,6 +304,9 @@ export class ExecutionEngineService {
 
       // Initialize execution strategies
       this.initializeStrategies();
+
+      // Initialize circuit breaker (Phase 1.3.1)
+      this.initializeCircuitBreaker();
 
       // Initialize opportunity consumer
       this.opportunityConsumer = new OpportunityConsumer({
@@ -319,6 +352,12 @@ export class ExecutionEngineService {
       if (this.simulationMetricsCollector) {
         this.simulationMetricsCollector.stop();
         this.simulationMetricsCollector = null;
+      }
+
+      // Stop circuit breaker (Phase 1.3.1)
+      if (this.circuitBreaker) {
+        this.circuitBreaker.stop();
+        this.circuitBreaker = null;
       }
 
       // Stop consumer
@@ -524,6 +563,99 @@ export class ExecutionEngineService {
   }
 
   /**
+   * Initialize circuit breaker for execution protection (Phase 1.3.1)
+   *
+   * Creates a circuit breaker that:
+   * - Halts execution after consecutive failures (prevents capital drain)
+   * - Emits state change events to Redis Stream for monitoring
+   * - Uses configurable threshold and cooldown period
+   *
+   * @see services/circuit-breaker.ts for implementation details
+   */
+  private initializeCircuitBreaker(): void {
+    if (!this.circuitBreakerConfig.enabled) {
+      this.logger.info('Circuit breaker disabled by configuration');
+      return;
+    }
+
+    this.circuitBreaker = createCircuitBreaker({
+      logger: this.logger,
+      failureThreshold: this.circuitBreakerConfig.failureThreshold,
+      cooldownPeriodMs: this.circuitBreakerConfig.cooldownPeriodMs,
+      halfOpenMaxAttempts: this.circuitBreakerConfig.halfOpenMaxAttempts,
+      enabled: this.circuitBreakerConfig.enabled,
+      onStateChange: (event: CircuitBreakerEvent) => {
+        this.handleCircuitBreakerStateChange(event);
+      },
+    });
+
+    this.logger.info('Circuit breaker initialized', {
+      failureThreshold: this.circuitBreakerConfig.failureThreshold,
+      cooldownPeriodMs: this.circuitBreakerConfig.cooldownPeriodMs,
+      halfOpenMaxAttempts: this.circuitBreakerConfig.halfOpenMaxAttempts,
+    });
+  }
+
+  /**
+   * Handle circuit breaker state change events.
+   *
+   * Publishes events to Redis Stream for monitoring and alerting.
+   * Logs state transitions for operational visibility.
+   */
+  private handleCircuitBreakerStateChange(event: CircuitBreakerEvent): void {
+    // Log state change
+    if (event.newState === 'OPEN') {
+      this.logger.warn('Circuit breaker OPENED - halting executions', {
+        reason: event.reason,
+        consecutiveFailures: event.consecutiveFailures,
+        cooldownRemainingMs: event.cooldownRemainingMs,
+      });
+      this.stats.circuitBreakerTrips++;
+    } else if (event.newState === 'CLOSED') {
+      this.logger.info('Circuit breaker CLOSED - resuming executions', {
+        reason: event.reason,
+      });
+    } else if (event.newState === 'HALF_OPEN') {
+      this.logger.info('Circuit breaker HALF_OPEN - testing recovery', {
+        reason: event.reason,
+      });
+    }
+
+    // Publish event to Redis Stream for monitoring
+    this.publishCircuitBreakerEvent(event);
+  }
+
+  /**
+   * Publish circuit breaker event to Redis Stream.
+   *
+   * Events are published to stream:circuit-breaker for:
+   * - Monitoring dashboards
+   * - Alerting systems
+   * - Audit trail
+   */
+  private async publishCircuitBreakerEvent(event: CircuitBreakerEvent): Promise<void> {
+    if (!this.streamsClient) return;
+
+    try {
+      await this.streamsClient.xadd('stream:circuit-breaker', {
+        service: 'execution-engine',
+        instanceId: this.instanceId,
+        previousState: event.previousState,
+        newState: event.newState,
+        reason: event.reason,
+        timestamp: event.timestamp,
+        consecutiveFailures: event.consecutiveFailures,
+        cooldownRemainingMs: event.cooldownRemainingMs,
+      });
+    } catch (error) {
+      this.logger.error('Failed to publish circuit breaker event', {
+        error: getErrorMessage(error),
+        event,
+      });
+    }
+  }
+
+  /**
    * Initialize the transaction simulation service (Phase 1.1).
    *
    * Initializes simulation providers from environment variables:
@@ -652,6 +784,11 @@ export class ExecutionEngineService {
    *
    * Uses a processing guard to prevent race conditions from concurrent calls.
    * This ensures activeExecutionCount is accurately tracked.
+   *
+   * Circuit breaker integration (Phase 1.3.1):
+   * - Checks `canExecute()` before processing
+   * - Blocks processing when circuit is OPEN
+   * - Tracks blocked executions in stats
    */
   private processQueueItems(): void {
     // Check preconditions: running, queue exists
@@ -669,6 +806,23 @@ export class ExecutionEngineService {
         this.queueService.size() > 0 &&
         this.activeExecutionCount < this.maxConcurrentExecutions
       ) {
+        // Check circuit breaker BEFORE each dequeue (not just once at start)
+        // This is critical for HALF_OPEN state where only N attempts are allowed.
+        // Without this check, we could dequeue multiple items when only one
+        // execution is authorized, violating the circuit breaker contract.
+        if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
+          const queueSize = this.queueService.size();
+          if (queueSize > 0) {
+            this.stats.circuitBreakerBlocks++;
+            this.logger.debug('Circuit breaker blocking execution', {
+              state: this.circuitBreaker.getState(),
+              cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
+              queueSize,
+            });
+          }
+          break; // Exit loop - circuit is blocking
+        }
+
         const opportunity = this.queueService.dequeue();
         if (!opportunity) break;
 
@@ -809,8 +963,12 @@ export class ExecutionEngineService {
 
       if (result.success) {
         this.stats.successfulExecutions++;
+        // Record success with circuit breaker (resets consecutive failures)
+        this.circuitBreaker?.recordSuccess();
       } else {
         this.stats.failedExecutions++;
+        // Record failure with circuit breaker (may trip circuit)
+        this.circuitBreaker?.recordFailure();
       }
 
       const latency = performance.now() - startTime;
@@ -821,6 +979,9 @@ export class ExecutionEngineService {
 
     } catch (error) {
       this.stats.failedExecutions++;
+      // Record failure with circuit breaker (may trip circuit)
+      this.circuitBreaker?.recordFailure();
+
       this.logger.error('Failed to execute opportunity', {
         error,
         opportunityId: opportunity.id
@@ -1006,6 +1167,57 @@ export class ExecutionEngineService {
 
   getStandbyConfig(): Readonly<StandbyConfig> {
     return this.standbyConfig;
+  }
+
+  // ===========================================================================
+  // Circuit Breaker Getters (Phase 1.3.1)
+  // ===========================================================================
+
+  /**
+   * Get circuit breaker status snapshot.
+   *
+   * Returns null if circuit breaker is disabled.
+   */
+  getCircuitBreakerStatus(): CircuitBreakerStatus | null {
+    return this.circuitBreaker?.getStatus() ?? null;
+  }
+
+  /**
+   * Check if circuit breaker is currently open (blocking executions).
+   */
+  isCircuitBreakerOpen(): boolean {
+    return this.circuitBreaker?.isOpen() ?? false;
+  }
+
+  /**
+   * Get circuit breaker configuration.
+   */
+  getCircuitBreakerConfig(): Readonly<Required<CircuitBreakerConfig>> {
+    return this.circuitBreakerConfig;
+  }
+
+  /**
+   * Force close the circuit breaker (manual override).
+   *
+   * Use with caution - this bypasses the protection mechanism.
+   */
+  forceCloseCircuitBreaker(): void {
+    if (this.circuitBreaker) {
+      this.logger.warn('Manually force-closing circuit breaker');
+      this.circuitBreaker.forceClose();
+    }
+  }
+
+  /**
+   * Force open the circuit breaker (manual override).
+   *
+   * Useful for emergency stops or maintenance.
+   */
+  forceOpenCircuitBreaker(reason = 'manual override'): void {
+    if (this.circuitBreaker) {
+      this.logger.warn('Manually force-opening circuit breaker', { reason });
+      this.circuitBreaker.forceOpen(reason);
+    }
   }
 
   // ===========================================================================

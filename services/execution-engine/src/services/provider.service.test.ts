@@ -45,6 +45,8 @@ const createMockStats = (): ExecutionStats => ({
   simulationsSkipped: 0,
   simulationPredictedReverts: 0,
   simulationErrors: 0,
+  circuitBreakerTrips: 0,
+  circuitBreakerBlocks: 0,
 });
 
 const createMockConfig = (overrides: Partial<ProviderServiceConfig> = {}): ProviderServiceConfig => ({

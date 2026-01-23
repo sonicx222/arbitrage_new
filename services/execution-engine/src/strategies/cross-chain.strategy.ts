@@ -95,6 +95,34 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     });
 
     try {
+      // Step 0: Check for gas spike on source chain BEFORE getting bridge quote
+      // This avoids wasting bridge API calls if gas is too expensive
+      try {
+        await this.getOptimalGasPrice(sourceChain, ctx);
+      } catch (gasSpikeError) {
+        // Gas spike detected - abort early
+        const errorMessage = getErrorMessage(gasSpikeError);
+        if (errorMessage?.includes('Gas price spike')) {
+          this.logger.warn('Cross-chain execution aborted due to gas spike', {
+            opportunityId: opportunity.id,
+            sourceChain,
+            error: errorMessage,
+          });
+          return {
+            opportunityId: opportunity.id,
+            success: false,
+            error: `Gas spike on ${sourceChain}: ${errorMessage}`,
+            timestamp: Date.now(),
+            chain: sourceChain,
+            dex: opportunity.buyDex || 'unknown',
+          };
+        }
+        // Non-spike error - log and continue (fallback gas price will be used)
+        this.logger.debug('Gas price check failed, will use fallback', {
+          error: errorMessage,
+        });
+      }
+
       // Step 1: Get bridge quote
       const bridgeAmount = opportunity.amountIn || '0';
       const bridgeQuote = await bridgeRouter.quote({
@@ -328,14 +356,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       if (!bridgeCompleted) {
-        // Confirm nonce since source tx was submitted
-        if (ctx.nonceManager && bridgeNonce !== undefined) {
-          ctx.nonceManager.confirmTransaction(
-            sourceChain,
-            bridgeNonce,
-            bridgeResult.sourceTxHash || 'bridge-timeout'
-          );
-        }
+        // NOTE: Nonce was already confirmed at line 265-267 after bridge execution succeeded.
+        // We don't need to confirm again here - the source chain transaction was submitted
+        // successfully, we're just waiting for the destination chain to receive it.
 
         this.logger.warn('Bridge timeout - funds may still be in transit', {
           opportunityId: opportunity.id,

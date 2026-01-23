@@ -61,6 +61,8 @@ const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStat
   simulationsSkipped: 20,
   simulationPredictedReverts: 8,
   simulationErrors: 2,
+  circuitBreakerTrips: 0,
+  circuitBreakerBlocks: 0,
   ...overrides,
 });
 
