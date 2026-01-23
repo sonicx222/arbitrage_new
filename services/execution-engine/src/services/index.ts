@@ -12,6 +12,18 @@ export type { ProviderServiceConfig } from './provider.service';
 export { QueueServiceImpl } from './queue.service';
 export type { QueueServiceConfig } from './queue.service';
 
+// Circuit breaker module (Phase 1.3)
+export {
+  createCircuitBreaker,
+  type CircuitBreaker,
+  type CircuitBreakerOptions,
+  type CircuitBreakerEvent,
+  type CircuitBreakerMetrics,
+  type CircuitBreakerStatus,
+  type CircuitBreakerState,
+  type ResolvedCircuitBreakerConfig,
+} from './circuit-breaker';
+
 // Simulation module (Phase 1.1)
 export {
   // Types

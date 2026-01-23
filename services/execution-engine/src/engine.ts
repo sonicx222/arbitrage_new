@@ -58,6 +58,7 @@ import {
   createInitialStats,
   resolveSimulationConfig,
   DEFAULT_QUEUE_CONFIG,
+  createErrorResult,
 } from './types';
 import { ProviderServiceImpl } from './services/provider.service';
 import { QueueServiceImpl } from './services/queue.service';
@@ -810,6 +811,13 @@ export class ExecutionEngineService {
         // This is critical for HALF_OPEN state where only N attempts are allowed.
         // Without this check, we could dequeue multiple items when only one
         // execution is authorized, violating the circuit breaker contract.
+        //
+        // NOTE: canExecute() has a side effect in HALF_OPEN - it increments the
+        // attempt counter. If the subsequent dequeue() returns null (rare race
+        // condition with distributed queue), we "waste" a HALF_OPEN attempt.
+        // This is acceptable because: (1) queue size is checked before loop,
+        // (2) single-process deployment has no race, (3) wasted attempt just
+        // means slightly longer recovery time, not correctness issue.
         if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
           const queueSize = this.queueService.size();
           if (queueSize > 0) {
@@ -993,14 +1001,12 @@ export class ExecutionEngineService {
         opportunityId: opportunity.id
       });
 
-      const errorResult: ExecutionResult = {
-        opportunityId: opportunity.id,
-        success: false,
-        error: getErrorMessage(error),
-        timestamp: Date.now(),
-        chain: opportunity.buyChain || 'unknown',
-        dex: opportunity.buyDex || 'unknown'
-      };
+      const errorResult = createErrorResult(
+        opportunity.id,
+        getErrorMessage(error),
+        opportunity.buyChain || 'unknown',
+        opportunity.buyDex || 'unknown'
+      );
 
       await this.publishExecutionResult(errorResult);
     } finally {

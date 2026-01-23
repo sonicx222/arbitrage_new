@@ -316,7 +316,9 @@ export interface StandbyConfig {
 // =============================================================================
 
 /**
- * Execution timeout - must be less than lock TTL (60s).
+ * Execution timeout - must be less than lock TTL (120s per-opportunity lock).
+ * The distributed lock manager uses 60s default TTL, but withLock() in engine.ts
+ * uses 120s for opportunity locks (2x execution timeout for safety margin).
  * Environment: EXECUTION_TIMEOUT_MS (default: 55000)
  */
 export const EXECUTION_TIMEOUT_MS = parseInt(
@@ -339,6 +341,33 @@ export const TRANSACTION_TIMEOUT_MS = parseInt(
  */
 export const SHUTDOWN_TIMEOUT_MS = parseInt(
   process.env.SHUTDOWN_TIMEOUT_MS || '5000',
+  10
+);
+
+/**
+ * Provider connectivity check timeout (quick check).
+ * Environment: PROVIDER_CONNECTIVITY_TIMEOUT_MS (default: 5000)
+ */
+export const PROVIDER_CONNECTIVITY_TIMEOUT_MS = parseInt(
+  process.env.PROVIDER_CONNECTIVITY_TIMEOUT_MS || '5000',
+  10
+);
+
+/**
+ * Provider health check timeout (periodic check).
+ * Environment: PROVIDER_HEALTH_CHECK_TIMEOUT_MS (default: 5000)
+ */
+export const PROVIDER_HEALTH_CHECK_TIMEOUT_MS = parseInt(
+  process.env.PROVIDER_HEALTH_CHECK_TIMEOUT_MS || '5000',
+  10
+);
+
+/**
+ * Provider reconnection timeout (longer for new connection establishment).
+ * Environment: PROVIDER_RECONNECTION_TIMEOUT_MS (default: 10000)
+ */
+export const PROVIDER_RECONNECTION_TIMEOUT_MS = parseInt(
+  process.env.PROVIDER_RECONNECTION_TIMEOUT_MS || '10000',
   10
 );
 
