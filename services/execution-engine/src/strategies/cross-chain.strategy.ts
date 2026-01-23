@@ -386,6 +386,35 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Prepare and execute sell transaction on destination chain using DEX router
       const sellTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
 
+      // Ensure token approval for DEX router before swap
+      // This is critical for cross-chain swaps where tokens were just bridged
+      if (opportunity.tokenIn && sellTx.to) {
+        try {
+          const amountIn = BigInt(opportunity.amountIn || '0');
+          const approvalNeeded = await this.ensureTokenAllowance(
+            opportunity.tokenIn,
+            sellTx.to as string,
+            amountIn,
+            destChain,
+            ctx
+          );
+          if (approvalNeeded) {
+            this.logger.info('Token approval granted for destination sell', {
+              opportunityId: opportunity.id,
+              token: opportunity.tokenIn,
+              router: sellTx.to,
+              destChain,
+            });
+          }
+        } catch (approvalError) {
+          this.logger.warn('Token approval failed, proceeding with sell attempt', {
+            opportunityId: opportunity.id,
+            error: getErrorMessage(approvalError),
+          });
+          // Continue anyway - approval might already exist or swap might still work
+        }
+      }
+
       // Apply gas settings for destination chain
       const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
       sellTx.gasPrice = destGasPrice;

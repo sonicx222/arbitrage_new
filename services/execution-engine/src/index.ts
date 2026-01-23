@@ -55,6 +55,24 @@ function getSimulationConfigFromEnv(): SimulationConfig | undefined {
 }
 
 /**
+ * Parse circuit breaker configuration from environment variables (Phase 1.3).
+ *
+ * Environment Variables:
+ * - CIRCUIT_BREAKER_ENABLED: Whether circuit breaker is enabled (default: true)
+ * - CIRCUIT_BREAKER_FAILURE_THRESHOLD: Consecutive failures before tripping (default: 5)
+ * - CIRCUIT_BREAKER_COOLDOWN_MS: Cooldown period in ms (default: 300000 = 5 min)
+ * - CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS: Max attempts in HALF_OPEN (default: 1)
+ */
+function getCircuitBreakerConfigFromEnv() {
+  return {
+    enabled: process.env.CIRCUIT_BREAKER_ENABLED !== 'false', // Default: true
+    failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD || '5', 10),
+    cooldownPeriodMs: parseInt(process.env.CIRCUIT_BREAKER_COOLDOWN_MS || '300000', 10),
+    halfOpenMaxAttempts: parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_ATTEMPTS || '1', 10),
+  };
+}
+
+/**
  * Parse standby configuration from environment variables (ADR-007).
  */
 function getStandbyConfigFromEnv() {
@@ -182,13 +200,16 @@ async function main() {
   try {
     const simulationConfig = getSimulationConfigFromEnv();
     const standbyConfig = getStandbyConfigFromEnv();
+    const circuitBreakerConfig = getCircuitBreakerConfigFromEnv();
 
     logger.info('Starting Execution Engine Service', {
       simulationMode: simulationConfig?.enabled ?? false,
       isStandby: standbyConfig.isStandby,
       queuePausedOnStart: standbyConfig.queuePausedOnStart,
       regionId: standbyConfig.regionId,
-      healthCheckPort: HEALTH_CHECK_PORT
+      healthCheckPort: HEALTH_CHECK_PORT,
+      circuitBreakerEnabled: circuitBreakerConfig.enabled,
+      circuitBreakerThreshold: circuitBreakerConfig.failureThreshold,
     });
 
     // Generate unique instance ID
@@ -201,7 +222,8 @@ async function main() {
         queuePausedOnStart: standbyConfig.queuePausedOnStart,
         activationDisablesSimulation: true, // Default behavior for standby activation
         regionId: standbyConfig.regionId
-      }
+      },
+      circuitBreakerConfig,
     });
 
     // Initialize CrossRegionHealthManager for cross-region failover (ADR-007)

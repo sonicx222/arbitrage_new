@@ -166,6 +166,18 @@ export class OpportunityConsumer {
 
       const opportunity = message.data as unknown as ArbitrageOpportunity;
 
+      // Runtime validation: verify required fields exist to catch malformed data early
+      // This prevents cryptic runtime errors later in the execution pipeline
+      if (!opportunity || typeof opportunity !== 'object') {
+        throw new Error('Invalid opportunity: message data is not an object');
+      }
+      if (!opportunity.id || typeof opportunity.id !== 'string') {
+        throw new Error('Invalid opportunity: missing or invalid id');
+      }
+      if (!opportunity.type || typeof opportunity.type !== 'string') {
+        throw new Error('Invalid opportunity: missing or invalid type');
+      }
+
       // Handle the opportunity - returns true if successfully queued
       const wasQueued = this.handleArbitrageOpportunity(opportunity);
 

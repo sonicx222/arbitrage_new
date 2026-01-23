@@ -32,10 +32,14 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       throw new Error('No chain specified for opportunity');
     }
 
-    // Verify wallet exists early
-    if (!ctx.wallets.has(chain)) {
+    // Verify wallet exists early and store reference (avoids repeated lookups)
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
       throw new Error(`No wallet available for chain: ${chain}`);
     }
+
+    // Store provider reference for later use (MEV receipt fetch)
+    const provider = ctx.providers.get(chain);
 
     // Get optimal gas price
     const gasPrice = await this.getOptimalGasPrice(chain, ctx);
@@ -136,14 +140,11 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         txHash = mevResult.transactionHash;
 
         // Get receipt if we have a transaction hash
-        if (txHash) {
-          const provider = ctx.providers.get(chain);
-          if (provider) {
-            receipt = await this.withTransactionTimeout(
-              () => provider.getTransactionReceipt(txHash!),
-              'getReceipt'
-            );
-          }
+        if (txHash && provider) {
+          receipt = await this.withTransactionTimeout(
+            () => provider.getTransactionReceipt(txHash!),
+            'getReceipt'
+          );
         }
 
         this.logger.info('MEV protected transaction successful', {
@@ -155,11 +156,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         });
       } else {
         // Standard transaction submission (no MEV protection)
-        const wallet = ctx.wallets.get(chain);
-        if (!wallet) {
-          throw new Error(`Wallet became unavailable for chain: ${chain}`);
-        }
-
+        // Note: wallet was already verified and stored at function entry
         const txResponse = await this.withTransactionTimeout(
           () => wallet.sendTransaction(protectedTx),
           'sendTransaction'

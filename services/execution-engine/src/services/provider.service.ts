@@ -15,6 +15,11 @@ import { CHAINS } from '@arbitrage/config';
 import { getErrorMessage, NonceManager } from '@arbitrage/core';
 import type { ServiceStateManager } from '@arbitrage/core';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
+import {
+  PROVIDER_CONNECTIVITY_TIMEOUT_MS,
+  PROVIDER_HEALTH_CHECK_TIMEOUT_MS,
+  PROVIDER_RECONNECTION_TIMEOUT_MS,
+} from '../types';
 
 export interface ProviderServiceConfig {
   logger: Logger;
@@ -96,7 +101,7 @@ export class ProviderServiceImpl implements IProviderService {
         await Promise.race([
           provider.getBlockNumber(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Connectivity check timeout')), 5000)
+            setTimeout(() => reject(new Error('Connectivity check timeout')), PROVIDER_CONNECTIVITY_TIMEOUT_MS)
           )
         ]);
 
@@ -190,7 +195,7 @@ export class ProviderServiceImpl implements IProviderService {
       await Promise.race([
         provider.getBlockNumber(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), 5000)
+          setTimeout(() => reject(new Error('Health check timeout')), PROVIDER_HEALTH_CHECK_TIMEOUT_MS)
         )
       ]);
 
@@ -247,7 +252,7 @@ export class ProviderServiceImpl implements IProviderService {
       await Promise.race([
         newProvider.getBlockNumber(),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Reconnection timeout')), 10000)
+          setTimeout(() => reject(new Error('Reconnection timeout')), PROVIDER_RECONNECTION_TIMEOUT_MS)
         )
       ]);
 
@@ -296,6 +301,18 @@ export class ProviderServiceImpl implements IProviderService {
       // Skip if no private key configured
       if (!privateKey) {
         this.logger.debug(`No private key configured for ${chainName}`);
+        continue;
+      }
+
+      // Validate private key format before attempting wallet creation
+      // Valid format: 64 hex chars (without 0x) or 66 chars (with 0x prefix)
+      const keyWithoutPrefix = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+      if (!/^[0-9a-fA-F]{64}$/.test(keyWithoutPrefix)) {
+        this.logger.error(`Invalid private key format for ${chainName}`, {
+          hint: 'Private key must be 64 hex characters (or 66 with 0x prefix)',
+          envVar: `${chainName.toUpperCase()}_PRIVATE_KEY`,
+          keyLength: privateKey.length,
+        });
         continue;
       }
 
