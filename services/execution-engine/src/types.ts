@@ -343,6 +343,69 @@ export const SHUTDOWN_TIMEOUT_MS = parseInt(
 );
 
 // =============================================================================
+// Timeout Utility
+// =============================================================================
+
+/**
+ * Error thrown when an operation times out.
+ */
+export class TimeoutError extends Error {
+  constructor(operationName: string, timeoutMs: number) {
+    super(`Operation "${operationName}" timed out after ${timeoutMs}ms`);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Wrap a promise with a timeout.
+ * Uses cancellable timeout pattern to prevent timer leaks.
+ *
+ * @param operation - Function that returns a promise to execute
+ * @param operationName - Name of the operation for error messages
+ * @param timeoutMs - Timeout in milliseconds (defaults to TRANSACTION_TIMEOUT_MS)
+ * @returns The result of the operation or throws TimeoutError
+ *
+ * @example
+ * const result = await withTimeout(
+ *   () => wallet.sendTransaction(tx),
+ *   'sendTransaction',
+ *   30000
+ * );
+ */
+export async function withTimeout<T>(
+  operation: () => Promise<T>,
+  operationName: string,
+  timeoutMs: number = TRANSACTION_TIMEOUT_MS
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new TimeoutError(operationName, timeoutMs));
+      }
+    }, timeoutMs);
+
+    operation()
+      .then((result) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve(result);
+        }
+      })
+      .catch((error) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(error);
+        }
+      });
+  });
+}
+
+// =============================================================================
 // Strategy Context
 // =============================================================================
 

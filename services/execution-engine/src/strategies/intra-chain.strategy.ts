@@ -15,6 +15,7 @@ import { MEV_CONFIG } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import { createErrorResult } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
@@ -49,14 +50,12 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         currentProfit: priceVerification.currentProfit
       });
 
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `Price verification failed: ${priceVerification.reason}`,
-        timestamp: Date.now(),
+      return createErrorResult(
+        opportunity.id,
+        `Price verification failed: ${priceVerification.reason}`,
         chain,
-        dex: opportunity.buyDex || 'unknown'
-      };
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     // Prepare flash loan transaction
@@ -76,14 +75,12 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         provider: simulationResult.provider,
       });
 
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
-        timestamp: Date.now(),
+      return createErrorResult(
+        opportunity.id,
+        `Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
         chain,
-        dex: opportunity.buyDex || 'unknown',
-      };
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     // Apply MEV protection

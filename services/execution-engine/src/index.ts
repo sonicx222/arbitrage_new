@@ -20,6 +20,10 @@ import {
   resetCrossRegionHealthManager
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
+import {
+  createCircuitBreakerApiHandler,
+  isCircuitBreakerRoute,
+} from './api';
 
 const logger = createLogger('execution-engine');
 
@@ -81,9 +85,28 @@ function getStandbyConfigFromEnv() {
 
 /**
  * Create and start HTTP health check server for the Execution Engine.
+ *
+ * Endpoints:
+ * - GET /health - Health check with detailed status
+ * - GET /ready - Readiness check
+ * - GET /stats - Execution statistics
+ * - GET / - Service info
+ * - GET /circuit-breaker - Circuit breaker status (Phase 1.3.2)
+ * - POST /circuit-breaker/close - Force close circuit breaker (requires API key)
+ * - POST /circuit-breaker/open - Force open circuit breaker (requires API key)
  */
 function createHealthServer(engine: ExecutionEngineService): Server {
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  // Create circuit breaker API handler
+  const circuitBreakerHandler = createCircuitBreakerApiHandler(engine);
+
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url || '';
+
+    // Route circuit breaker endpoints to dedicated handler (Phase 1.3.2)
+    if (isCircuitBreakerRoute(url)) {
+      return circuitBreakerHandler(req, res);
+    }
+
     if (req.url === '/health') {
       const isRunning = engine.isRunning();
       const stats = engine.getStats();
@@ -132,7 +155,15 @@ function createHealthServer(engine: ExecutionEngineService): Server {
         service: 'execution-engine',
         description: 'Arbitrage Execution Engine Service',
         simulationMode: engine.getIsSimulationMode(),
-        endpoints: ['/health', '/ready', '/stats']
+        circuitBreakerEnabled: engine.getCircuitBreakerStatus() !== null,
+        endpoints: [
+          '/health',
+          '/ready',
+          '/stats',
+          '/circuit-breaker',
+          '/circuit-breaker/close (POST, requires API key)',
+          '/circuit-breaker/open (POST, requires API key)',
+        ]
       }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });

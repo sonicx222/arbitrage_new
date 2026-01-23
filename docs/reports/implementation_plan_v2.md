@@ -2,7 +2,7 @@
 
 **Date:** January 22, 2026
 **Based On:** Consolidated Analysis Report
-**Status:** Phase 1.1 COMPLETE, Phase 1.2 COMPLETE, Phase 1.3 In Progress (Task 1.3.1 COMPLETE)
+**Status:** Phase 1.1 COMPLETE, Phase 1.2 COMPLETE, Phase 1.3 In Progress (Tasks 1.3.1, 1.3.2 COMPLETE)
 **Confidence:** 92%
 **Last Updated:** January 23, 2026
 
@@ -161,13 +161,16 @@ Location: services/execution-engine/src/services/circuit-breaker.ts
 Completed: January 23, 2026
 
 Task 1.3.2: Add Manual Override
-Location: services/execution-engine/src/engine.ts
+Location: services/execution-engine/src/engine.ts, services/execution-engine/src/api/
 - [x] Add forceCloseCircuitBreaker() method
 - [x] Add forceOpenCircuitBreaker() method
 - [x] Log all circuit breaker state changes (via onStateChange callback)
-- [ ] Add API endpoint to expose circuit breaker controls (external)
-- [ ] Add dashboard controls (external/infrastructure)
-Partially Complete: January 23, 2026 (core methods implemented, API/dashboard pending)
+- [x] Add API endpoint to expose circuit breaker controls
+      - GET /circuit-breaker - Get status
+      - POST /circuit-breaker/close - Force close (requires CIRCUIT_BREAKER_API_KEY)
+      - POST /circuit-breaker/open - Force open (requires CIRCUIT_BREAKER_API_KEY)
+- [ ] Add dashboard controls (external/infrastructure - out of scope for core service)
+Completed: January 23, 2026
 
 Task 1.3.3: Testing
 - [x] Unit tests for circuit breaker logic (38 tests in circuit-breaker.test.ts)
@@ -411,7 +414,12 @@ Based on the consolidated analysis, the following are **not included** in this p
 
 ```
 services/execution-engine/src/
+├── api/                               # ✅ COMPLETE Phase 1.3.2
+│   ├── index.ts                       # Module exports
+│   ├── circuit-breaker-api.ts         # Circuit breaker HTTP endpoints
+│   └── circuit-breaker-api.test.ts    # API endpoint tests (19 tests)
 ├── services/
+│   ├── circuit-breaker.ts             # ✅ COMPLETE Phase 1.3.1
 │   ├── simulation/                    # ✅ COMPLETE Phase 1.1
 │   │   ├── types.ts
 │   │   ├── simulation.service.ts

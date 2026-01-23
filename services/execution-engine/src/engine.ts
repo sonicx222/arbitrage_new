@@ -835,14 +835,20 @@ export class ExecutionEngineService {
           .finally(() => {
             this.activeExecutionCount--;
             // Process more items if available (avoids waiting for next event/interval)
-            // Guard: only trigger if service is still running and not already processing
+            // FIX: Check isProcessingQueue INSIDE setImmediate to prevent race condition
+            // where multiple .finally() callbacks could each check the flag before any
+            // of them had a chance to set it, resulting in multiple processQueueItems calls
             if (
               this.stateManager.isRunning() &&
               this.queueService &&
-              this.queueService.size() > 0 &&
-              !this.isProcessingQueue
+              this.queueService.size() > 0
             ) {
-              setImmediate(() => this.processQueueItems());
+              setImmediate(() => {
+                // Double-check guard inside callback to prevent concurrent processing
+                if (!this.isProcessingQueue) {
+                  this.processQueueItems();
+                }
+              });
             }
           });
       }
