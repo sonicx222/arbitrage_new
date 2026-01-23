@@ -422,7 +422,7 @@ describe('CrossChainStrategy - Simulation Integration', () => {
    * Helper to mock protected methods for unit testing
    */
   const mockStrategyMethods = (strat: CrossChainStrategy) => {
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,
@@ -493,8 +493,8 @@ describe('CrossChainStrategy - Simulation Integration', () => {
       shouldSimulate: jest.fn().mockReturnValue(true),
     });
 
-    // Make prepareFlashLoanTransaction throw
-    jest.spyOn(strategy as any, 'prepareFlashLoanTransaction').mockRejectedValue(
+    // Make prepareDexSwapTransaction throw (was prepareFlashLoanTransaction)
+    jest.spyOn(strategy as any, 'prepareDexSwapTransaction').mockRejectedValue(
       new Error('Failed to prepare transaction')
     );
 
@@ -525,7 +525,7 @@ describe('CrossChainStrategy - Bridge Execution', () => {
   let mockLogger: Logger;
 
   const mockStrategyMethods = (strat: CrossChainStrategy) => {
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,
@@ -577,7 +577,7 @@ describe('CrossChainStrategy - Nonce Management', () => {
   let mockLogger: Logger;
 
   const mockStrategyMethods = (strat: CrossChainStrategy) => {
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,
@@ -637,7 +637,7 @@ describe('CrossChainStrategy - Successful Execution', () => {
   let mockLogger: Logger;
 
   const mockStrategyMethods = (strat: CrossChainStrategy) => {
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,

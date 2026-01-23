@@ -21,6 +21,7 @@ import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/co
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import { createErrorResult } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
@@ -38,37 +39,31 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
     // Validate chains
     if (!sourceChain || !destChain) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Missing source or destination chain',
-        timestamp: Date.now(),
-        chain: sourceChain || 'unknown',
-        dex: opportunity.buyDex || 'unknown',
-      };
+      return createErrorResult(
+        opportunity.id,
+        'Missing source or destination chain',
+        sourceChain || 'unknown',
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     if (sourceChain === destChain) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Cross-chain arbitrage requires different chains',
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
+      return createErrorResult(
+        opportunity.id,
+        'Cross-chain arbitrage requires different chains',
+        sourceChain,
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     // Validate bridge router is available
     if (!ctx.bridgeRouterFactory) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: 'Bridge router not initialized',
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
+      return createErrorResult(
+        opportunity.id,
+        'Bridge router not initialized',
+        sourceChain,
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     // Find suitable bridge router
@@ -76,14 +71,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const bridgeRouter = ctx.bridgeRouterFactory.findBestRouter(sourceChain, destChain, bridgeToken);
 
     if (!bridgeRouter) {
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
+      return createErrorResult(
+        opportunity.id,
+        `No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
+        sourceChain,
+        opportunity.buyDex || 'unknown'
+      );
     }
 
     this.logger.info('Starting cross-chain arbitrage execution', {
@@ -108,14 +101,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
             sourceChain,
             error: errorMessage,
           });
-          return {
-            opportunityId: opportunity.id,
-            success: false,
-            error: `Gas spike on ${sourceChain}: ${errorMessage}`,
-            timestamp: Date.now(),
-            chain: sourceChain,
-            dex: opportunity.buyDex || 'unknown',
-          };
+          return createErrorResult(
+            opportunity.id,
+            `Gas spike on ${sourceChain}: ${errorMessage}`,
+            sourceChain,
+            opportunity.buyDex || 'unknown'
+          );
         }
         // Non-spike error - log and continue (fallback gas price will be used)
         this.logger.debug('Gas price check failed, will use fallback', {
@@ -134,14 +125,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
 
       if (!bridgeQuote.valid) {
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge quote failed: ${bridgeQuote.error}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `Bridge quote failed: ${bridgeQuote.error}`,
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // Validate profit still viable after bridge fees
@@ -161,14 +150,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           expectedProfit,
         });
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge fees ($${bridgeFeeUsd.toFixed(2)}) exceed 50% of expected profit ($${expectedProfit.toFixed(2)})`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `Bridge fees ($${bridgeFeeUsd.toFixed(2)}) exceed 50% of expected profit ($${expectedProfit.toFixed(2)})`,
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // Step 2: Get wallet and provider for source chain
@@ -176,14 +163,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const sourceProvider = ctx.providers.get(sourceChain);
 
       if (!sourceWallet || !sourceProvider) {
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `No wallet/provider for source chain: ${sourceChain}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `No wallet/provider for source chain: ${sourceChain}`,
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // Get nonce for bridge transaction
@@ -204,14 +189,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, 'Quote expired');
         }
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: 'Bridge quote expired before execution',
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          'Bridge quote expired before execution',
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // ==========================================================================
@@ -222,9 +205,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // destination sell transaction instead to catch potential issues early.
       const destWalletForSim = ctx.wallets.get(destChain);
       if (destWalletForSim && ctx.providers.get(destChain)) {
-        // Prepare sell transaction for simulation
+        // Prepare sell transaction for simulation (using proper DEX swap, not flash loan)
         try {
-          const sellSimTx = await this.prepareFlashLoanTransaction(opportunity, destChain, ctx);
+          const sellSimTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
           sellSimTx.from = await destWalletForSim.getAddress();
 
           const simulationResult = await this.performSimulation(opportunity, sellSimTx, destChain, ctx);
@@ -244,14 +227,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
               destChain,
             });
 
-            return {
-              opportunityId: opportunity.id,
-              success: false,
-              error: `Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
-              timestamp: Date.now(),
-              chain: sourceChain,
-              dex: opportunity.buyDex || 'unknown',
-            };
+            return createErrorResult(
+              opportunity.id,
+              `Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+              sourceChain,
+              opportunity.buyDex || 'unknown'
+            );
           }
         } catch (simError) {
           // Log but continue - simulation preparation failure shouldn't block execution
@@ -279,14 +260,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           ctx.nonceManager.failTransaction(sourceChain, bridgeNonce, bridgeResult.error || 'Bridge failed');
         }
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge execution failed: ${bridgeResult.error}`,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `Bridge execution failed: ${bridgeResult.error}`,
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // Confirm nonce usage
@@ -315,15 +294,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
             opportunityId: opportunity.id,
             bridgeId,
           });
-          return {
-            opportunityId: opportunity.id,
-            success: false,
-            error: 'Execution interrupted by shutdown',
-            transactionHash: bridgeResult.sourceTxHash,
-            timestamp: Date.now(),
-            chain: sourceChain,
-            dex: opportunity.buyDex || 'unknown',
-          };
+          return createErrorResult(
+            opportunity.id,
+            'Execution interrupted by shutdown',
+            sourceChain,
+            opportunity.buyDex || 'unknown',
+            bridgeResult.sourceTxHash
+          );
         }
 
         const bridgeStatus: BridgeStatusResult = await bridgeRouter.getStatus(bridgeId);
@@ -340,15 +317,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
 
         if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
-          return {
-            opportunityId: opportunity.id,
-            success: false,
-            error: `Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
-            transactionHash: bridgeResult.sourceTxHash,
-            timestamp: Date.now(),
-            chain: sourceChain,
-            dex: opportunity.buyDex || 'unknown',
-          };
+          return createErrorResult(
+            opportunity.id,
+            `Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
+            sourceChain,
+            opportunity.buyDex || 'unknown',
+            bridgeResult.sourceTxHash
+          );
         }
 
         // Wait before next poll
@@ -366,15 +341,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           elapsedMs: Date.now() - bridgeStartTime,
         });
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: 'Bridge timeout - transaction may still complete',
-          transactionHash: bridgeResult.sourceTxHash,
-          timestamp: Date.now(),
-          chain: sourceChain,
-          dex: opportunity.buyDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          'Bridge timeout - transaction may still complete',
+          sourceChain,
+          opportunity.buyDex || 'unknown',
+          bridgeResult.sourceTxHash
+        );
       }
 
       // Step 5: Execute sell on destination chain
@@ -389,15 +362,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           bridgeTxHash: bridgeResult.sourceTxHash,
         });
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
-          transactionHash: bridgeResult.sourceTxHash,
-          timestamp: Date.now(),
-          chain: destChain,
-          dex: opportunity.sellDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
+          destChain,
+          opportunity.sellDex || 'unknown',
+          bridgeResult.sourceTxHash
+        );
       }
 
       // Get nonce for sell transaction on destination chain
@@ -412,10 +383,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
       }
 
-      // Prepare and execute sell transaction on destination chain
-      // TODO: Full implementation requires DEX router integration
-      // For now, we prepare a flash loan style transaction that executes the sell
-      const sellTx = await this.prepareFlashLoanTransaction(opportunity, destChain, ctx);
+      // Prepare and execute sell transaction on destination chain using DEX router
+      const sellTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
 
       // Apply gas settings for destination chain
       const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
@@ -464,15 +433,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           error: getErrorMessage(sellError),
         });
 
-        return {
-          opportunityId: opportunity.id,
-          success: false,
-          error: `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
-          transactionHash: bridgeResult.sourceTxHash,
-          timestamp: Date.now(),
-          chain: destChain,
-          dex: opportunity.sellDex || 'unknown',
-        };
+        return createErrorResult(
+          opportunity.id,
+          `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
+          destChain,
+          opportunity.sellDex || 'unknown',
+          bridgeResult.sourceTxHash
+        );
       }
 
       // Step 6: Calculate final results
@@ -530,14 +497,12 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         error: getErrorMessage(error),
       });
 
-      return {
-        opportunityId: opportunity.id,
-        success: false,
-        error: `Cross-chain execution error: ${getErrorMessage(error)}`,
-        timestamp: Date.now(),
-        chain: sourceChain,
-        dex: opportunity.buyDex || 'unknown',
-      };
+      return createErrorResult(
+        opportunity.id,
+        `Cross-chain execution error: ${getErrorMessage(error)}`,
+        sourceChain,
+        opportunity.buyDex || 'unknown'
+      );
     }
   }
 }

@@ -12,7 +12,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG, DEXES } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
@@ -21,8 +21,25 @@ import type {
   ExecutionResult,
   FlashLoanParams
 } from '../types';
-import { TRANSACTION_TIMEOUT_MS } from '../types';
+import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
 import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
+
+/**
+ * Standard Uniswap V2 Router ABI for swapExactTokensForTokens.
+ * Compatible with most DEX routers (SushiSwap, PancakeSwap, etc.)
+ */
+const UNISWAP_V2_ROUTER_ABI = [
+  'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+  'function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts)',
+];
+
+/**
+ * Standard ERC20 approve ABI for token allowances.
+ */
+const ERC20_APPROVE_ABI = [
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+];
 
 /**
  * Default fallback gas prices by chain (in gwei).
@@ -163,6 +180,9 @@ export abstract class BaseExecutionStrategy {
   private medianCache: Map<string, { median: bigint; validUntil: number }> = new Map();
   private readonly MEDIAN_CACHE_TTL_MS = 5000; // Cache median for 5 seconds
   private readonly MAX_GAS_HISTORY = 100;
+  private readonly MAX_MEDIAN_CACHE_SIZE = 50; // Cap cache size to prevent unbounded growth
+  private lastMedianCacheCleanup = 0;
+  private readonly MEDIAN_CACHE_CLEANUP_INTERVAL_MS = 60000; // Cleanup expired entries every 60s
 
   /**
    * Update gas price baseline for spike detection.
@@ -243,6 +263,9 @@ export abstract class BaseExecutionStrategy {
       return cached.median;
     }
 
+    // Periodic cleanup of expired cache entries (prevents memory leak)
+    this.cleanupMedianCacheIfNeeded(now);
+
     // Compute median (only when cache is stale)
     const sorted = [...history].sort((a, b) => {
       if (a.price < b.price) return -1;
@@ -260,6 +283,37 @@ export abstract class BaseExecutionStrategy {
     });
 
     return median;
+  }
+
+  /**
+   * Clean up expired median cache entries periodically.
+   * Called during getGasBaseline to avoid memory leaks from stale chain entries.
+   * Also enforces a hard cap on cache size for safety.
+   */
+  private cleanupMedianCacheIfNeeded(now: number): void {
+    // Only run cleanup periodically to avoid overhead on every call
+    if (now - this.lastMedianCacheCleanup < this.MEDIAN_CACHE_CLEANUP_INTERVAL_MS) {
+      return;
+    }
+    this.lastMedianCacheCleanup = now;
+
+    // Remove expired entries
+    for (const [key, value] of this.medianCache) {
+      if (now >= value.validUntil) {
+        this.medianCache.delete(key);
+      }
+    }
+
+    // Hard cap: if still over limit, evict oldest entries (by validUntil)
+    if (this.medianCache.size > this.MAX_MEDIAN_CACHE_SIZE) {
+      const entries = Array.from(this.medianCache.entries())
+        .sort((a, b) => a[1].validUntil - b[1].validUntil);
+
+      const toRemove = entries.slice(0, entries.length - this.MAX_MEDIAN_CACHE_SIZE);
+      for (const [key] of toRemove) {
+        this.medianCache.delete(key);
+      }
+    }
   }
 
   // ===========================================================================
@@ -473,43 +527,178 @@ export abstract class BaseExecutionStrategy {
   }
 
   // ===========================================================================
+  // DEX Swap Transaction (for cross-chain sell after bridge)
+  // ===========================================================================
+
+  /**
+   * Prepare a direct DEX swap transaction.
+   *
+   * Used for cross-chain arbitrage where tokens have been bridged and need
+   * to be swapped on the destination chain (not using flash loans).
+   *
+   * @param opportunity - The arbitrage opportunity
+   * @param chain - Target chain for the swap
+   * @param ctx - Strategy context with providers
+   * @param recipientAddress - Address to receive swap output (defaults to wallet address)
+   * @returns Prepared transaction request
+   */
+  protected async prepareDexSwapTransaction(
+    opportunity: ArbitrageOpportunity,
+    chain: string,
+    ctx: StrategyContext,
+    recipientAddress?: string
+  ): Promise<ethers.TransactionRequest> {
+    if (!opportunity.tokenIn || !opportunity.tokenOut || !opportunity.amountIn) {
+      throw new Error('Invalid opportunity: missing required fields (tokenIn, tokenOut, amountIn)');
+    }
+
+    const provider = ctx.providers.get(chain);
+    if (!provider) {
+      throw new Error(`No provider for chain: ${chain}`);
+    }
+
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
+      throw new Error(`No wallet for chain: ${chain}`);
+    }
+
+    // Find DEX router for the chain (use sellDex if specified, otherwise first available)
+    const chainDexes = DEXES[chain];
+    if (!chainDexes || chainDexes.length === 0) {
+      throw new Error(`No DEX configured for chain: ${chain}`);
+    }
+
+    // Find the specific DEX or use the first one
+    const targetDex = opportunity.sellDex
+      ? chainDexes.find(d => d.name === opportunity.sellDex)
+      : chainDexes[0];
+
+    if (!targetDex || !targetDex.routerAddress) {
+      throw new Error(`No router address for DEX on chain: ${chain}`);
+    }
+
+    // Calculate minAmountOut with slippage protection
+    const amountIn = BigInt(opportunity.amountIn);
+    const expectedProfit = opportunity.expectedProfit || 0;
+    const expectedProfitWei = ethers.parseUnits(
+      Math.max(0, expectedProfit).toFixed(18),
+      18
+    );
+    const expectedAmountOut = amountIn + expectedProfitWei;
+    const minAmountOut = expectedAmountOut - (expectedAmountOut * SLIPPAGE_BASIS_POINTS_BIGINT / 10000n);
+
+    // Build swap path
+    const path = this.buildSwapPath(opportunity);
+
+    // Create router contract interface
+    const routerContract = new ethers.Contract(
+      targetDex.routerAddress,
+      UNISWAP_V2_ROUTER_ABI,
+      provider
+    );
+
+    // Set deadline (5 minutes from now)
+    const deadline = Math.floor(Date.now() / 1000) + 300;
+
+    // Recipient is wallet address by default
+    const recipient = recipientAddress || await wallet.getAddress();
+
+    // Build the swap transaction
+    const tx = await routerContract.swapExactTokensForTokens.populateTransaction(
+      amountIn,
+      minAmountOut,
+      path,
+      recipient,
+      deadline
+    );
+
+    this.logger.debug('DEX swap transaction prepared', {
+      chain,
+      dex: targetDex.name,
+      router: targetDex.routerAddress,
+      tokenIn: opportunity.tokenIn,
+      tokenOut: opportunity.tokenOut,
+      amountIn: amountIn.toString(),
+      minAmountOut: minAmountOut.toString(),
+      slippageTolerance: ARBITRAGE_CONFIG.slippageTolerance,
+      deadline,
+    });
+
+    return tx;
+  }
+
+  /**
+   * Check and approve token allowance for DEX router if needed.
+   *
+   * @param tokenAddress - Token to approve
+   * @param spenderAddress - Router address to approve
+   * @param amount - Amount to approve
+   * @param chain - Chain identifier
+   * @param ctx - Strategy context
+   * @returns True if approval was needed and succeeded, false if already approved
+   */
+  protected async ensureTokenAllowance(
+    tokenAddress: string,
+    spenderAddress: string,
+    amount: bigint,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<boolean> {
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
+      throw new Error(`No wallet for chain: ${chain}`);
+    }
+
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      ERC20_APPROVE_ABI,
+      wallet
+    );
+
+    const ownerAddress = await wallet.getAddress();
+    const currentAllowance = await tokenContract.allowance(ownerAddress, spenderAddress);
+
+    if (currentAllowance >= amount) {
+      this.logger.debug('Token allowance sufficient', {
+        token: tokenAddress,
+        spender: spenderAddress,
+        currentAllowance: currentAllowance.toString(),
+        required: amount.toString(),
+      });
+      return false;
+    }
+
+    // Approve max uint256 for efficiency (fewer future approvals)
+    const maxApproval = ethers.MaxUint256;
+    const approveTx = await tokenContract.approve(spenderAddress, maxApproval);
+    await approveTx.wait();
+
+    this.logger.info('Token approval granted', {
+      token: tokenAddress,
+      spender: spenderAddress,
+      chain,
+    });
+
+    return true;
+  }
+
+  // ===========================================================================
   // Transaction Timeout
   // ===========================================================================
 
   /**
    * Wrap blockchain operations with timeout.
-   * Uses cancellable timeout pattern to prevent timer leaks.
+   * Delegates to the shared withTimeout utility from types.ts.
+   *
+   * @param operation - Async operation to execute with timeout
+   * @param operationName - Name for error messages
+   * @returns Result of the operation or throws TimeoutError
    */
   protected async withTransactionTimeout<T>(
     operation: () => Promise<T>,
     operationName: string
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      let settled = false;
-
-      const timeoutId = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error(`Transaction ${operationName} timeout after ${TRANSACTION_TIMEOUT_MS}ms`));
-        }
-      }, TRANSACTION_TIMEOUT_MS);
-
-      operation()
-        .then((result) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeoutId);
-            resolve(result);
-          }
-        })
-        .catch((error) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timeoutId);
-            reject(error);
-          }
-        });
-    });
+    return withTimeout(operation, operationName, TRANSACTION_TIMEOUT_MS);
   }
 
   // ===========================================================================
