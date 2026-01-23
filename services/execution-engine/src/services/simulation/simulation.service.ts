@@ -187,12 +187,14 @@ export class SimulationService implements ISimulationService {
   }
 
   /**
-   * Check if simulation should be performed for an opportunity
+   * Check if simulation should be performed for an opportunity.
+   *
+   * Hot-path optimization: Uses hasEnabledProvider() instead of getOrderedProviders()
+   * to avoid full provider scoring on every call.
    */
   shouldSimulate(expectedProfit: number, opportunityAge: number): boolean {
-    // Check if any providers are available
-    const availableProviders = this.getOrderedProviders();
-    if (availableProviders.length === 0) {
+    // Check if any providers are available (fast check, no sorting)
+    if (!this.hasEnabledProvider()) {
       return false;
     }
 
@@ -213,6 +215,19 @@ export class SimulationService implements ISimulationService {
     }
 
     return true;
+  }
+
+  /**
+   * Fast check if any provider is enabled.
+   * Used by shouldSimulate() to avoid expensive getOrderedProviders() call.
+   */
+  private hasEnabledProvider(): boolean {
+    for (const provider of this.providers.values()) {
+      if (provider.isEnabled()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

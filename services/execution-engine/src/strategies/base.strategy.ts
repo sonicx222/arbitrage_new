@@ -43,17 +43,27 @@ const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
 };
 
 /**
- * Get fallback gas price for a chain.
+ * Pre-computed fallback gas prices in wei for hot-path optimization.
+ * Avoids repeated ethers.parseUnits() calls on every getOptimalGasPrice() call.
+ * Computed once at module load time.
+ */
+const FALLBACK_GAS_PRICES_WEI: Record<string, bigint> = Object.fromEntries(
+  Object.entries(DEFAULT_GAS_PRICES_GWEI).map(([chain, gwei]) => [
+    chain,
+    ethers.parseUnits(gwei.toString(), 'gwei'),
+  ])
+);
+
+/** Default fallback price when chain is unknown (50 gwei) */
+const DEFAULT_FALLBACK_GAS_PRICE_WEI = ethers.parseUnits('50', 'gwei');
+
+/**
+ * Get fallback gas price for a chain (O(1) lookup, no computation).
  * @param chain - Chain name
  * @returns Gas price in wei
  */
 function getFallbackGasPrice(chain: string): bigint {
-  const gasPriceGwei = DEFAULT_GAS_PRICES_GWEI[chain] ?? 50;
-  // Handle sub-gwei values (L2s) by using parseUnits with higher precision
-  if (gasPriceGwei < 1) {
-    return ethers.parseUnits(gasPriceGwei.toString(), 'gwei');
-  }
-  return ethers.parseUnits(gasPriceGwei.toString(), 'gwei');
+  return FALLBACK_GAS_PRICES_WEI[chain] ?? DEFAULT_FALLBACK_GAS_PRICE_WEI;
 }
 
 /**

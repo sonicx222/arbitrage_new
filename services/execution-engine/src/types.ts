@@ -37,6 +37,60 @@ export interface ExecutionResult {
 }
 
 // =============================================================================
+// ExecutionResult Factory Helpers
+// =============================================================================
+
+/**
+ * Create a failed ExecutionResult.
+ * Consolidates error result creation pattern used across strategies.
+ */
+export function createErrorResult(
+  opportunityId: string,
+  error: string,
+  chain: string,
+  dex: string,
+  transactionHash?: string
+): ExecutionResult {
+  return {
+    opportunityId,
+    success: false,
+    error,
+    timestamp: Date.now(),
+    chain,
+    dex,
+    transactionHash,
+  };
+}
+
+/**
+ * Create a successful ExecutionResult.
+ * Consolidates success result creation pattern used across strategies.
+ */
+export function createSuccessResult(
+  opportunityId: string,
+  transactionHash: string,
+  chain: string,
+  dex: string,
+  options?: {
+    actualProfit?: number;
+    gasUsed?: number;
+    gasCost?: number;
+  }
+): ExecutionResult {
+  return {
+    opportunityId,
+    success: true,
+    transactionHash,
+    timestamp: Date.now(),
+    chain,
+    dex,
+    actualProfit: options?.actualProfit,
+    gasUsed: options?.gasUsed,
+    gasCost: options?.gasCost,
+  };
+}
+
+// =============================================================================
 // Flash Loan Parameters
 // =============================================================================
 
@@ -105,6 +159,11 @@ export interface ExecutionStats {
   simulationPredictedReverts: number;
   /** Simulation service errors (proceeded with execution) */
   simulationErrors: number;
+  // Circuit breaker metrics (Phase 1.3)
+  /** Number of times circuit breaker has tripped */
+  circuitBreakerTrips: number;
+  /** Executions blocked due to circuit breaker being open */
+  circuitBreakerBlocks: number;
 }
 
 export function createInitialStats(): ExecutionStats {
@@ -125,6 +184,9 @@ export function createInitialStats(): ExecutionStats {
     simulationsSkipped: 0,
     simulationPredictedReverts: 0,
     simulationErrors: 0,
+    // Circuit breaker metrics (Phase 1.3)
+    circuitBreakerTrips: 0,
+    circuitBreakerBlocks: 0,
   };
 }
 
@@ -186,6 +248,36 @@ export function resolveSimulationConfig(config?: SimulationConfig): ResolvedSimu
 }
 
 // =============================================================================
+// Circuit Breaker Configuration (Phase 1.3)
+// =============================================================================
+
+/**
+ * Circuit breaker configuration for execution engine.
+ *
+ * The circuit breaker halts execution after consecutive failures to prevent
+ * capital drain during systemic issues (network problems, liquidity events).
+ *
+ * @see implementation_plan_v2.md Task 1.3.1
+ */
+export interface CircuitBreakerConfig {
+  /** Whether circuit breaker is enabled (default: true) */
+  enabled?: boolean;
+  /** Number of consecutive failures before tripping (default: 5) */
+  failureThreshold?: number;
+  /** Cooldown period in ms before attempting recovery (default: 5 minutes) */
+  cooldownPeriodMs?: number;
+  /** Max attempts in HALF_OPEN state before fully closing (default: 1) */
+  halfOpenMaxAttempts?: number;
+}
+
+export const DEFAULT_CIRCUIT_BREAKER_CONFIG: Required<CircuitBreakerConfig> = {
+  enabled: true,
+  failureThreshold: 5,
+  cooldownPeriodMs: 5 * 60 * 1000, // 5 minutes
+  halfOpenMaxAttempts: 1,
+};
+
+// =============================================================================
 // Engine Configuration
 // =============================================================================
 
@@ -201,6 +293,8 @@ export interface ExecutionEngineConfig {
   simulationConfig?: SimulationConfig;
   /** Standby mode configuration (ADR-007) */
   standbyConfig?: StandbyConfig;
+  /** Circuit breaker configuration (Phase 1.3) */
+  circuitBreakerConfig?: CircuitBreakerConfig;
 }
 
 /**
@@ -218,17 +312,35 @@ export interface StandbyConfig {
 }
 
 // =============================================================================
-// Timeouts
+// Timeouts (configurable via environment variables)
 // =============================================================================
 
-/** Execution timeout - must be less than lock TTL (60s) */
-export const EXECUTION_TIMEOUT_MS = 55000;
+/**
+ * Execution timeout - must be less than lock TTL (60s).
+ * Environment: EXECUTION_TIMEOUT_MS (default: 55000)
+ */
+export const EXECUTION_TIMEOUT_MS = parseInt(
+  process.env.EXECUTION_TIMEOUT_MS || '55000',
+  10
+);
 
-/** Transaction timeout for blockchain operations */
-export const TRANSACTION_TIMEOUT_MS = 50000;
+/**
+ * Transaction timeout for blockchain operations.
+ * Environment: TRANSACTION_TIMEOUT_MS (default: 50000)
+ */
+export const TRANSACTION_TIMEOUT_MS = parseInt(
+  process.env.TRANSACTION_TIMEOUT_MS || '50000',
+  10
+);
 
-/** Shutdown timeout for graceful cleanup */
-export const SHUTDOWN_TIMEOUT_MS = 5000;
+/**
+ * Shutdown timeout for graceful cleanup.
+ * Environment: SHUTDOWN_TIMEOUT_MS (default: 5000)
+ */
+export const SHUTDOWN_TIMEOUT_MS = parseInt(
+  process.env.SHUTDOWN_TIMEOUT_MS || '5000',
+  10
+);
 
 // =============================================================================
 // Strategy Context
