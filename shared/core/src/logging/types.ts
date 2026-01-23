@@ -7,6 +7,9 @@
  * 2. Dependency injection for testability
  * 3. Type-safe logging across the codebase
  *
+ * P0-FIX: Added ServiceLogger interface to consolidate duplicate logger interfaces
+ * (BaseDetectorLogger, FactorySubscriptionLogger) into a single shared type.
+ *
  * @see docs/logger_implementation_plan.md
  */
 
@@ -20,6 +23,36 @@ export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
  * Supports BigInt via serialization.
  */
 export type LogMeta = Record<string, unknown>;
+
+/**
+ * Minimal logger interface for dependency injection in services.
+ *
+ * P0-FIX: Consolidated interface replacing duplicate definitions in:
+ * - base-detector.ts (BaseDetectorLogger)
+ * - factory-subscription.ts (FactorySubscriptionLogger)
+ *
+ * Use this type for service constructor parameters when you only need
+ * basic logging methods without child loggers or performance features.
+ *
+ * @example
+ * ```typescript
+ * class MyService {
+ *   constructor(private logger: ServiceLogger) {}
+ * }
+ *
+ * // Production
+ * new MyService(createLogger('my-service'));
+ *
+ * // Test
+ * new MyService(new RecordingLogger());
+ * ```
+ */
+export interface ServiceLogger {
+  info: (message: string, meta?: LogMeta) => void;
+  warn: (message: string, meta?: LogMeta) => void;
+  error: (message: string, meta?: LogMeta) => void;
+  debug: (message: string, meta?: LogMeta) => void;
+}
 
 /**
  * Core logger interface.

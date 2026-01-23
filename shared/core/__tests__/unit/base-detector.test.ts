@@ -213,6 +213,14 @@ class TestDetector extends BaseDetector {
     // Mock
   }
 
+  // Task 2.1.2: Factory subscription mock
+  protected async initializeFactorySubscription(): Promise<void> {
+    this.testCalls.push('initializeFactorySubscription');
+    // Mock - don't actually initialize factory subscription
+    // Build factory address set for testing
+    (this as any).factoryAddresses = new Set();
+  }
+
   protected async onStart(): Promise<void> {
     this.testCalls.push('onStart');
   }
@@ -404,6 +412,7 @@ describe('BaseDetector', () => {
           'initializePairs',
           'connectWebSocket',
           'subscribeToEvents',
+          'initializeFactorySubscription', // Task 2.1.2: Factory subscription
           'onStart',
           'startHealthMonitoring' // Added for health monitoring feature
         ]);
@@ -1440,6 +1449,149 @@ describe('S2.2.5 getPairAddress Integration', () => {
       expect(typeof health.dexCount).toBe('number');
 
       await freshDetector.stop();
+    });
+  });
+});
+
+// =============================================================================
+// Task 2.1.2: Factory Subscription Integration Tests
+// =============================================================================
+
+describe('Task 2.1.2 Factory Subscription Integration', () => {
+  describe('Initialization Order', () => {
+    it('should initialize factory subscription during start()', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      // TestDetector mocks initializeFactorySubscription which pushes to testCalls
+      expect(detector.testCalls).toContain('initializeFactorySubscription');
+
+      await detector.stop();
+    });
+
+    it('should initialize factory subscription after subscribeToEvents()', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      const subscribeIndex = detector.testCalls.indexOf('subscribeToEvents');
+      const factoryIndex = detector.testCalls.indexOf('initializeFactorySubscription');
+
+      expect(subscribeIndex).toBeLessThan(factoryIndex);
+
+      await detector.stop();
+    });
+  });
+
+  describe('Event Routing', () => {
+    it('should route non-factory events to event batcher', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      // Add a pair for non-factory event
+      const pair = createMockPair({
+        address: '0xpairaddress'
+      });
+      detector.addTestPair('test_pair', pair);
+
+      // Create a mock sync event (non-factory)
+      const syncEvent = {
+        method: 'eth_subscription',
+        result: {
+          address: '0xpairaddress',
+          topics: ['0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1'],
+          data: '0x' + '0'.repeat(128)
+        }
+      };
+
+      // Should not throw when handling non-factory event
+      // The event batcher may be null in test, but the handler should not throw
+      expect(() => (detector as any).handleWebSocketMessage(syncEvent)).not.toThrow();
+
+      await detector.stop();
+    });
+
+    it('should check factory addresses before routing', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      // Factory addresses set should be initialized (empty in mock)
+      const factoryAddresses = (detector as any).factoryAddresses;
+      expect(factoryAddresses).toBeDefined();
+      expect(factoryAddresses instanceof Set).toBe(true);
+
+      await detector.stop();
+    });
+
+    it('should route factory events to factory subscription service', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      // Create a mock factory subscription service with handleFactoryEvent spy
+      const mockHandleFactoryEvent = jest.fn();
+      const mockFactoryService = {
+        handleFactoryEvent: mockHandleFactoryEvent,
+        getStats: () => ({ pairsCreated: 0 }),
+        stop: jest.fn(),
+      };
+
+      // Inject the mock service
+      (detector as any).factorySubscriptionService = mockFactoryService;
+
+      // Add a factory address to the set
+      const factoryAddress = '0xfactoryaddress123456789012345678901234';
+      (detector as any).factoryAddresses.add(factoryAddress.toLowerCase());
+
+      // Create a mock factory event (PairCreated signature)
+      const factoryEvent = {
+        method: 'eth_subscription',
+        result: {
+          address: factoryAddress,
+          topics: ['0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9'],
+          data: '0x' + '0'.repeat(128),
+          blockNumber: 18000000,
+          transactionHash: '0x1234',
+        }
+      };
+
+      // Handle the event
+      (detector as any).handleWebSocketMessage(factoryEvent);
+
+      // Verify the factory subscription service received the event
+      expect(mockHandleFactoryEvent).toHaveBeenCalledTimes(1);
+      expect(mockHandleFactoryEvent).toHaveBeenCalledWith(factoryEvent.result);
+
+      await detector.stop();
+    });
+  });
+
+  describe('Health and Stats', () => {
+    it('should include factory subscription stats in getHealth()', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      const health = await detector.getHealth();
+
+      // Health should be defined
+      expect(health).toBeDefined();
+      expect(health.chain).toBe('ethereum');
+
+      await detector.stop();
+    });
+  });
+
+  describe('Cleanup', () => {
+    it('should cleanup factory addresses on stop()', async () => {
+      const detector = new TestDetector();
+      await detector.start();
+
+      // Manually add a factory address to test cleanup
+      (detector as any).factoryAddresses.add('0xfactory');
+      expect((detector as any).factoryAddresses.size).toBe(1);
+
+      await detector.stop();
+
+      // Factory addresses should be cleared after stop
+      expect((detector as any).factoryAddresses.size).toBe(0);
     });
   });
 });

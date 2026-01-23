@@ -205,6 +205,9 @@ export class AsyncMutex {
  * Named mutex registry for coordinating access across different parts of the codebase.
  * Useful when multiple components need to coordinate on the same resource.
  *
+ * P0-FIX (Memory Leak): Added TTL tracking and automatic cleanup for unused mutexes.
+ * Mutexes are automatically removed after being idle for the cleanup interval (default 5 min).
+ *
  * @example
  * ```ts
  * // In component A
@@ -218,15 +221,74 @@ export class AsyncMutex {
  * });
  * ```
  */
-const namedMutexes = new Map<string, AsyncMutex>();
+
+interface MutexEntry {
+  mutex: AsyncMutex;
+  lastUsed: number;
+}
+
+const namedMutexes = new Map<string, MutexEntry>();
+
+/** Cleanup interval in milliseconds (default: 5 minutes) */
+const MUTEX_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+/** TTL for unused mutexes in milliseconds (default: 10 minutes) */
+const MUTEX_IDLE_TTL_MS = 10 * 60 * 1000;
+
+let cleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Start the automatic cleanup interval if not already running.
+ */
+function ensureCleanupRunning(): void {
+  if (cleanupIntervalId !== null) return;
+
+  cleanupIntervalId = setInterval(() => {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+
+    for (const [name, entry] of namedMutexes.entries()) {
+      // Don't delete mutexes that are currently locked or have waiters
+      if (entry.mutex.isLocked()) continue;
+      if (entry.mutex.getStats().waitingCount > 0) continue;
+
+      // Delete if idle for too long
+      if (now - entry.lastUsed > MUTEX_IDLE_TTL_MS) {
+        keysToDelete.push(name);
+      }
+    }
+
+    for (const key of keysToDelete) {
+      namedMutexes.delete(key);
+    }
+
+    // Stop cleanup interval if no mutexes remain
+    if (namedMutexes.size === 0 && cleanupIntervalId !== null) {
+      clearInterval(cleanupIntervalId);
+      cleanupIntervalId = null;
+    }
+  }, MUTEX_CLEANUP_INTERVAL_MS);
+
+  // Ensure interval doesn't prevent process exit
+  if (cleanupIntervalId.unref) {
+    cleanupIntervalId.unref();
+  }
+}
 
 export function namedMutex(name: string): AsyncMutex {
-  let mutex = namedMutexes.get(name);
-  if (!mutex) {
-    mutex = new AsyncMutex();
-    namedMutexes.set(name, mutex);
+  let entry = namedMutexes.get(name);
+  if (!entry) {
+    entry = {
+      mutex: new AsyncMutex(),
+      lastUsed: Date.now()
+    };
+    namedMutexes.set(name, entry);
+    ensureCleanupRunning();
+  } else {
+    // Update last used timestamp
+    entry.lastUsed = Date.now();
   }
-  return mutex;
+  return entry.mutex;
 }
 
 /**
@@ -241,4 +303,15 @@ export function clearNamedMutex(name: string): void {
  */
 export function clearAllNamedMutexes(): void {
   namedMutexes.clear();
+  if (cleanupIntervalId !== null) {
+    clearInterval(cleanupIntervalId);
+    cleanupIntervalId = null;
+  }
+}
+
+/**
+ * Get the current count of named mutexes (useful for monitoring/testing).
+ */
+export function getNamedMutexCount(): number {
+  return namedMutexes.size;
 }

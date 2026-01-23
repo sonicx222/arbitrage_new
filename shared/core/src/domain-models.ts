@@ -47,8 +47,9 @@ export interface RichArbitrageOpportunity {
   metadata: OpportunityMetadata;
 }
 
-// Legacy aliases for backward compatibility with repositories.ts
-// TODO: Migrate repositories.ts to use RichArbitrageOpportunity directly
+// Legacy aliases for backward compatibility
+// NOTE: These aliases exist for backward compatibility with existing code.
+// New code should use the "Rich" prefixed types directly.
 export type TradingPair = RichTradingPair;
 export type ArbitrageOpportunity = RichArbitrageOpportunity;
 
@@ -324,8 +325,62 @@ export class ConfigurationError extends Error {
 }
 
 // Utility Types
-export type ChainId = 1 | 56 | 137 | 42161 | 8453 | 10; // Ethereum, BSC, Polygon, Arbitrum, Base, Optimism
-export type DexName = 'uniswap_v2' | 'uniswap_v3' | 'pancake' | 'sushiswap' | 'quickswap';
+/**
+ * P0-6 FIX: Updated ChainId to include all supported EVM chains.
+ *
+ * Chain ID Reference:
+ * - 1: Ethereum Mainnet
+ * - 56: BNB Smart Chain (BSC)
+ * - 137: Polygon
+ * - 42161: Arbitrum One
+ * - 8453: Base
+ * - 10: Optimism
+ * - 43114: Avalanche C-Chain
+ * - 250: Fantom Opera
+ * - 324: zkSync Era
+ * - 59144: Linea
+ *
+ * Note: Solana is non-EVM and uses string identifiers, not numeric chain IDs.
+ * For Solana, use the chain name 'solana' directly.
+ */
+export type ChainId =
+  | 1      // Ethereum
+  | 56     // BSC
+  | 137    // Polygon
+  | 42161  // Arbitrum
+  | 8453   // Base
+  | 10     // Optimism
+  | 43114  // Avalanche
+  | 250    // Fantom
+  | 324    // zkSync
+  | 59144; // Linea
+
+/**
+ * P0-6 FIX: Updated DexName to include all supported DEXes.
+ */
+export type DexName =
+  | 'uniswap_v2'
+  | 'uniswap_v3'
+  | 'pancakeswap_v2'
+  | 'pancakeswap_v3'
+  | 'sushiswap'
+  | 'quickswap'
+  | 'quickswap_v3'
+  | 'camelot'
+  | 'camelot_v3'
+  | 'trader_joe'
+  | 'trader_joe_v2'
+  | 'aerodrome'
+  | 'velodrome'
+  | 'balancer_v2'
+  | 'curve'
+  | 'gmx'
+  | 'platypus'
+  | 'spookyswap'
+  | 'spiritswap'
+  | 'syncswap'
+  | 'mute';
+
 export type ArbitrageStrategy = 'simple' | 'triangular' | 'cross_chain' | 'statistical';
 
 export type DeepPartial<T> = {

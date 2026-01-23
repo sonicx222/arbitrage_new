@@ -79,7 +79,9 @@ const NORMALIZE_CACHE_MAX_SIZE = 1000; // Prevent unbounded growth
  * Performance optimized:
  * - Uses memoization cache to avoid repeated toUpperCase() calls
  * - Pre-computed alias Map for O(1) lookup
- * - Cache bounded to prevent memory leaks
+ * - FIFO eviction: When cache is full, oldest entries are evicted
+ *   (Map iteration order is insertion order in JS)
+ * - Thread-safe: No non-atomic read-modify-write sequences
  *
  * Examples:
  * - normalizeTokenForCrossChain('WETH.e') → 'WETH'  (Avalanche bridged ETH)
@@ -93,17 +95,32 @@ const NORMALIZE_CACHE_MAX_SIZE = 1000; // Prevent unbounded growth
  */
 export function normalizeTokenForCrossChain(symbol: string): string {
   // Check memoization cache first (most common case)
-  let cached = NORMALIZE_CACHE.get(symbol);
-  if (cached !== undefined) return cached;
+  const cached = NORMALIZE_CACHE.get(symbol);
+  if (cached !== undefined) {
+    // P0-5 FIX: Removed LRU refresh (delete/set) to prevent race condition.
+    // The delete/set sequence was not atomic - under high concurrency, another
+    // caller could evict our entry between delete and set operations.
+    // Since token symbols are finite (~200) and cache is large (1000), eviction
+    // is rare and LRU ordering is not critical for correctness. Simple FIFO eviction
+    // on insert is sufficient for memory bounds.
+    return cached;
+  }
 
   // Compute normalized value
   const upper = symbol.includes(' ') ? symbol.toUpperCase().trim() : symbol.toUpperCase();
   const result = NORMALIZED_ALIASES.get(upper) ?? upper;
 
-  // Cache result (with size limit to prevent memory leaks)
-  if (NORMALIZE_CACHE.size < NORMALIZE_CACHE_MAX_SIZE) {
-    NORMALIZE_CACHE.set(symbol, result);
+  // FIFO eviction: Remove oldest entry (first in iteration order) when at capacity
+  // This is safe because Map insertion order is guaranteed in JS
+  if (NORMALIZE_CACHE.size >= NORMALIZE_CACHE_MAX_SIZE) {
+    const oldestKey = NORMALIZE_CACHE.keys().next().value;
+    if (oldestKey !== undefined) {
+      NORMALIZE_CACHE.delete(oldestKey);
+    }
   }
+
+  // Cache result
+  NORMALIZE_CACHE.set(symbol, result);
 
   return result;
 }
