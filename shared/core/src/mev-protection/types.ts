@@ -3,9 +3,17 @@
  *
  * Provides abstractions for MEV protection across different chains:
  * - Flashbots for Ethereum mainnet
+ * - Jito for Solana (private bundles with validator tips)
  * - BloXroute for BSC
+ * - Fastlane for Polygon
  * - Direct sequencer submission for L2s (inherent MEV protection)
  * - Standard submission with optimizations for other chains
+ *
+ * Architecture:
+ * - IMevProvider: Interface for EVM-based chains (ethers.js types)
+ * - ISolanaMevProvider: Interface for Solana (Solana-specific types)
+ * - MevProviderFactory: Factory for creating EVM providers
+ * - JitoProvider: Solana provider (use createJitoProvider directly)
  *
  * @see Phase 2: MEV Protection in implementation plan
  */
@@ -73,6 +81,8 @@ export interface MevProviderConfig {
   maxRetries?: number;
   /** Whether to fallback to public mempool on failure */
   fallbackToPublic?: boolean;
+  /** Chain ID override (fetched from provider if not specified) */
+  chainId?: number;
 }
 
 /**
@@ -141,12 +151,15 @@ export interface MevMetrics {
 // =============================================================================
 
 /**
- * Interface for MEV protection providers
+ * Interface for EVM MEV protection providers
  *
  * Implementations handle chain-specific MEV protection strategies:
  * - FlashbotsProvider: Ethereum private bundles
  * - L2SequencerProvider: Direct sequencer submission for L2s
- * - StandardProvider: Optimized standard submission
+ * - StandardProvider: Optimized standard submission (BSC, Polygon, others)
+ *
+ * NOTE: For Solana, use ISolanaMevProvider / JitoProvider instead.
+ * Solana uses different transaction types (not ethers.TransactionRequest).
  */
 export interface IMevProvider {
   /**
@@ -248,3 +261,86 @@ export const MEV_DEFAULTS = {
   bloxrouteUrl: 'https://mev.api.blxrbdn.com',
   fastlaneUrl: 'https://fastlane-rpc.polygon.technology',
 };
+
+// =============================================================================
+// Solana Interface
+// =============================================================================
+
+/**
+ * Generic transaction type for Solana
+ *
+ * This is a minimal interface - the actual Solana transaction type from
+ * @solana/web3.js has more properties, but this captures what JitoProvider needs.
+ */
+export interface SolanaTransactionLike {
+  serialize(): Buffer | Uint8Array;
+}
+
+/**
+ * Interface for Solana MEV protection providers
+ *
+ * Separate from IMevProvider because Solana uses fundamentally different
+ * transaction and connection types (not ethers.js).
+ *
+ * Implementations:
+ * - JitoProvider: Jito private bundles with validator tips
+ */
+export interface ISolanaMevProvider {
+  /**
+   * Get the chain this provider handles (always 'solana')
+   */
+  readonly chain: string;
+
+  /**
+   * Get the MEV strategy used (always 'jito')
+   */
+  readonly strategy: MevStrategy;
+
+  /**
+   * Check if MEV protection is available and enabled
+   */
+  isEnabled(): boolean;
+
+  /**
+   * Send a Solana transaction with Jito MEV protection
+   *
+   * @param tx - Solana transaction to send
+   * @param options - Optional parameters for submission
+   * @returns Submission result with transaction details
+   */
+  sendProtectedTransaction(
+    tx: SolanaTransactionLike,
+    options?: {
+      /** Tip amount in lamports for Jito validators */
+      tipLamports?: number;
+      /** Whether to simulate before submission */
+      simulate?: boolean;
+    }
+  ): Promise<MevSubmissionResult>;
+
+  /**
+   * Simulate a Solana transaction without submitting
+   *
+   * @param tx - Transaction to simulate
+   * @returns Simulation result
+   */
+  simulateTransaction(
+    tx: SolanaTransactionLike
+  ): Promise<BundleSimulationResult>;
+
+  /**
+   * Get current metrics for this provider
+   */
+  getMetrics(): MevMetrics;
+
+  /**
+   * Reset metrics
+   * Note: Sync to match IMevProvider interface. Object assignment is atomic in JS.
+   */
+  resetMetrics(): void;
+
+  /**
+   * Check connection/health of the Jito provider
+   */
+  healthCheck(): Promise<{ healthy: boolean; message: string }>;
+}

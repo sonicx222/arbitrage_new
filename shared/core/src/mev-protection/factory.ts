@@ -83,6 +83,8 @@ export class MevProviderFactory {
   private readonly providers: Map<string, IMevProvider>;
   // Mutex for thread-safe provider creation (prevents duplicate providers during concurrent calls)
   private readonly providerMutex = new AsyncMutex();
+  // Track pending provider creation to prevent race conditions in createProvider (sync path)
+  private readonly pendingCreations: Map<string, Promise<IMevProvider>> = new Map();
 
   constructor(config: MevGlobalConfig) {
     this.globalConfig = {
@@ -107,26 +109,35 @@ export class MevProviderFactory {
    * const jitoProvider = createJitoProvider({ chain: 'solana', connection, keypair, enabled: true });
    * ```
    *
-   * Thread-safe: Uses mutex to prevent duplicate provider creation during concurrent calls.
+   * Thread-safe: Provider constructors are synchronous, and JavaScript's single-threaded
+   * execution model ensures atomic creation within synchronous code blocks.
+   *
+   * IMPORTANT: For concurrent async contexts, prefer createProviderAsync() which uses
+   * mutex-based locking for guaranteed thread safety.
    */
   createProvider(chainConfig: ChainWalletConfig): IMevProvider {
     const { chain } = chainConfig;
 
-    // Fast path: check cache without lock (safe for reads)
+    // Fast path: check cache (safe - Map.get is atomic in JS)
     const cached = this.providers.get(chain);
     if (cached) {
       return cached;
     }
 
-    // Synchronous creation with double-check pattern
-    // Note: We use synchronous creation here because provider constructors are sync.
-    // The mutex protects against race conditions during the check-then-create sequence.
-    return this.createProviderSync(chainConfig);
+    // Synchronous creation - atomic in JS single-threaded execution
+    // The entire create-and-cache sequence runs without yielding to event loop
+    return this.createAndCacheProviderAtomic(chainConfig);
   }
 
   /**
    * Async version of createProvider for contexts that can await
-   * Provides stronger thread-safety guarantees with mutex
+   *
+   * RACE-CONDITION-FIX: Uses mutex to prevent duplicate provider creation when
+   * multiple async operations concurrently try to create providers for the same chain.
+   * This is the recommended method for use in async code paths.
+   *
+   * RACE-FIX-V2: Check-and-set pendingCreations atomically (in same sync block)
+   * to prevent multiple promises being created for the same chain.
    */
   async createProviderAsync(chainConfig: ChainWalletConfig): Promise<IMevProvider> {
     const { chain } = chainConfig;
@@ -137,39 +148,73 @@ export class MevProviderFactory {
       return cached;
     }
 
-    // Slow path: acquire lock and double-check
-    return this.providerMutex.runExclusive(async () => {
-      // Double-check after acquiring lock
-      const existing = this.providers.get(chain);
-      if (existing) {
-        return existing;
-      }
+    // RACE-FIX-V2: Check AND set pendingCreations atomically (same sync block).
+    // This prevents the race where multiple callers both see pending as null
+    // and both create separate promises.
+    let pending = this.pendingCreations.get(chain);
+    if (!pending) {
+      // Create and register the promise in the same sync block (before any await)
+      pending = this.createProviderAsyncInternal(chainConfig);
+      this.pendingCreations.set(chain, pending);
+    }
 
-      return this.createAndCacheProvider(chainConfig);
-    });
+    return pending;
   }
 
   /**
-   * Synchronous provider creation with basic protection
-   * Used by createProvider() for backward compatibility
+   * Internal async provider creation with mutex protection and cleanup
    */
-  private createProviderSync(chainConfig: ChainWalletConfig): IMevProvider {
+  private async createProviderAsyncInternal(chainConfig: ChainWalletConfig): Promise<IMevProvider> {
     const { chain } = chainConfig;
 
-    // Double-check pattern (not fully thread-safe but prevents most duplicates)
+    try {
+      // Use mutex to prevent duplicate creation
+      return await this.providerMutex.runExclusive(async () => {
+        // Double-check after acquiring lock
+        const existing = this.providers.get(chain);
+        if (existing) {
+          return existing;
+        }
+
+        return this.createAndCacheProviderAtomic(chainConfig);
+      });
+    } finally {
+      // Clean up pending creation tracker
+      this.pendingCreations.delete(chain);
+    }
+  }
+
+  /**
+   * Atomic provider creation and caching
+   *
+   * This method is synchronous and runs atomically in JavaScript's single-threaded
+   * execution model. The entire sequence (create provider -> cache it) completes
+   * before any other code can run.
+   */
+  private createAndCacheProviderAtomic(chainConfig: ChainWalletConfig): IMevProvider {
+    const { chain } = chainConfig;
+
+    // Final check before creation (handles edge case where provider was cached
+    // between our initial check and this call)
     const existing = this.providers.get(chain);
     if (existing) {
       return existing;
     }
 
-    return this.createAndCacheProvider(chainConfig);
+    // Create and cache - this entire block is atomic in JS
+    const provider = this.createProviderInstance(chainConfig);
+    this.providers.set(chain, provider);
+
+    return provider;
   }
 
   /**
-   * Internal: Create provider and cache it
-   * Caller must ensure thread-safety
+   * Internal: Create provider instance without caching
+   *
+   * This is a pure factory method - caching is handled by the caller.
+   * Separated to keep the atomic caching logic isolated.
    */
-  private createAndCacheProvider(chainConfig: ChainWalletConfig): IMevProvider {
+  private createProviderInstance(chainConfig: ChainWalletConfig): IMevProvider {
     const { chain, provider, wallet } = chainConfig;
 
     // Build provider config
@@ -187,17 +232,14 @@ export class MevProviderFactory {
     };
 
     // Create appropriate provider based on chain strategy
-    let mevProvider: IMevProvider;
     const strategy = CHAIN_MEV_STRATEGIES[chain] || 'standard';
 
     switch (strategy) {
       case 'flashbots':
-        mevProvider = createFlashbotsProvider(config);
-        break;
+        return createFlashbotsProvider(config);
 
       case 'sequencer':
-        mevProvider = createL2SequencerProvider(config);
-        break;
+        return createL2SequencerProvider(config);
 
       case 'jito':
         // Jito is for Solana which uses different types (SolanaConnection, SolanaKeypair)
@@ -211,14 +253,8 @@ export class MevProviderFactory {
       case 'fastlane':
       case 'standard':
       default:
-        mevProvider = createStandardProvider(config);
-        break;
+        return createStandardProvider(config);
     }
-
-    // Cache provider
-    this.providers.set(chain, mevProvider);
-
-    return mevProvider;
   }
 
   /**
@@ -418,34 +454,65 @@ export function hasMevProtection(chain: string): boolean {
 }
 
 /**
+ * Chain-specific priority fees in gwei
+ *
+ * CONFIG-SYNC: These values are kept in sync with:
+ * - MEV_CONFIG.chainSettings in shared/config/src/mev-config.ts
+ * - chainBasePriorityFees in mev-risk-analyzer.ts
+ *
+ * If you update these values, update the other locations too.
+ */
+const CHAIN_PRIORITY_FEES: Record<string, number> = {
+  // Ethereum/Flashbots
+  ethereum: 2.0,
+  // BSC/BloXroute
+  bsc: 3.0,
+  // Polygon/Fastlane
+  polygon: 30.0,
+  // L2s/Sequencer (cheap gas)
+  arbitrum: 0.01,
+  optimism: 0.01,
+  base: 0.01,
+  zksync: 0.01,
+  linea: 0.01,
+  // Standard chains
+  avalanche: 25.0,
+  fantom: 100.0,
+  // Solana uses lamports, not gwei
+  solana: 0,
+};
+
+/**
  * Get recommended priority fee for a chain
  *
  * Note: Solana/Jito uses lamports for tips, not gwei. Use JitoProvider directly
  * with tipLamports for Solana MEV protection.
+ *
+ * CONFIG-FIX: Now uses chain-specific lookup instead of strategy-based defaults,
+ * ensuring consistency with MEV_CONFIG and mev-risk-analyzer.
  */
 export function getRecommendedPriorityFee(chain: string): number {
-  const strategy = CHAIN_MEV_STRATEGIES[chain];
+  // Check chain-specific fee first
+  const chainFee = CHAIN_PRIORITY_FEES[chain];
+  if (chainFee !== undefined) {
+    return chainFee;
+  }
 
+  // Fallback based on strategy for unknown chains
+  const strategy = CHAIN_MEV_STRATEGIES[chain];
   switch (strategy) {
     case 'flashbots':
-      // Ethereum mainnet: higher priority for better inclusion
       return 2.0;
     case 'bloxroute':
-      // BSC: moderate priority
       return 3.0;
     case 'fastlane':
-      // Polygon: moderate priority
       return 30.0;
     case 'sequencer':
-      // L2s: low priority (cheap gas)
       return 0.01;
     case 'jito':
-      // Solana: not applicable (uses lamports for tips)
-      // Use JitoProvider directly with tipLamports
       return 0;
     default:
-      // Standard: depends on chain
-      return 1.0;
+      return 1.0; // Default for unknown standard chains
   }
 }
 
@@ -453,6 +520,7 @@ export function getRecommendedPriorityFee(chain: string): number {
 // Re-exports
 // =============================================================================
 
+export { BaseMevProvider } from './base-provider';
 export { FlashbotsProvider } from './flashbots-provider';
 export { L2SequencerProvider, isL2SequencerChain, getL2ChainConfig } from './l2-sequencer-provider';
 export { StandardProvider } from './standard-provider';

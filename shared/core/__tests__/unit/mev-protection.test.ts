@@ -202,7 +202,7 @@ describe('MEV Protection', () => {
     it('should throw error for non-Ethereum chain', () => {
       expect(() => {
         new FlashbotsProvider({ ...flashbotsConfig, chain: 'arbitrum' });
-      }).toThrow('FlashbotsProvider is only for Ethereum mainnet');
+      }).toThrow('FlashbotsProvider is only for Ethereum');
     });
 
     it('should report enabled status correctly', () => {
@@ -547,6 +547,68 @@ describe('MEV Protection', () => {
 
       expect(cachedProvider).toBe(provider);
     });
+
+    // RACE-FIX: Test concurrent provider creation doesn't create duplicates
+    it('should not create duplicate providers under concurrent createProviderAsync calls', async () => {
+      const concurrentCalls = 20;
+
+      // Fire off many concurrent createProviderAsync calls
+      const promises = Array.from({ length: concurrentCalls }, () =>
+        factory.createProviderAsync({
+          chain: 'ethereum',
+          provider: mockProvider,
+          wallet: mockWallet,
+        })
+      );
+
+      const results = await Promise.all(promises);
+
+      // All calls should return the same instance
+      const uniqueProviders = new Set(results);
+      expect(uniqueProviders.size).toBe(1);
+
+      // Verify it's a valid provider
+      const provider = results[0];
+      expect(provider.chain).toBe('ethereum');
+      expect(provider.strategy).toBe('flashbots');
+    });
+
+    it('should handle concurrent creation across different chains', async () => {
+      const chains = ['ethereum', 'arbitrum', 'bsc', 'polygon'];
+      const callsPerChain = 5;
+
+      // Fire off concurrent calls for multiple chains
+      const promises: Promise<IMevProvider>[] = [];
+      for (const chain of chains) {
+        for (let i = 0; i < callsPerChain; i++) {
+          promises.push(
+            factory.createProviderAsync({
+              chain,
+              provider: mockProvider,
+              wallet: mockWallet,
+            })
+          );
+        }
+      }
+
+      const results = await Promise.all(promises);
+
+      // Group results by chain
+      const byChain = new Map<string, IMevProvider[]>();
+      for (const provider of results) {
+        const existing = byChain.get(provider.chain) || [];
+        existing.push(provider);
+        byChain.set(provider.chain, existing);
+      }
+
+      // Each chain should have only one unique instance
+      for (const chain of chains) {
+        const providers = byChain.get(chain) || [];
+        expect(providers.length).toBe(callsPerChain);
+        const uniqueProviders = new Set(providers);
+        expect(uniqueProviders.size).toBe(1);
+      }
+    });
   });
 
   // ===========================================================================
@@ -561,6 +623,85 @@ describe('MEV Protection', () => {
       expect(MEV_DEFAULTS.flashbotsRelayUrl).toBe('https://relay.flashbots.net');
       expect(MEV_DEFAULTS.bloxrouteUrl).toBe('https://mev.api.blxrbdn.com');
       expect(MEV_DEFAULTS.fastlaneUrl).toBe('https://fastlane-rpc.polygon.technology');
+    });
+  });
+
+  // ===========================================================================
+  // METRICS-FIX Tests: Disabled provider metrics
+  // ===========================================================================
+
+  describe('Disabled Provider Metrics', () => {
+    it('should NOT increment totalSubmissions when FlashbotsProvider is disabled', async () => {
+      const provider = new FlashbotsProvider({
+        chain: 'ethereum',
+        provider: mockProvider,
+        wallet: mockWallet,
+        enabled: false,
+        fallbackToPublic: false, // Also disable fallback to get clean metrics
+      });
+
+      // Attempt to send - should return failure without incrementing
+      const tx = { to: '0x1234', value: 0n };
+      await provider.sendProtectedTransaction(tx);
+
+      // Metrics should be untouched (disabled returns early before increment)
+      const metrics = provider.getMetrics();
+      expect(metrics.totalSubmissions).toBe(0);
+    });
+
+    it('should NOT increment totalSubmissions when L2SequencerProvider is disabled', async () => {
+      const provider = new L2SequencerProvider({
+        chain: 'arbitrum',
+        provider: mockProvider,
+        wallet: mockWallet,
+        enabled: false,
+      });
+
+      const tx = { to: '0x1234', value: 0n };
+      await provider.sendProtectedTransaction(tx);
+
+      const metrics = provider.getMetrics();
+      expect(metrics.totalSubmissions).toBe(0);
+    });
+
+    it('should NOT increment totalSubmissions when StandardProvider is disabled', async () => {
+      const provider = new StandardProvider({
+        chain: 'avalanche',
+        provider: mockProvider,
+        wallet: mockWallet,
+        enabled: false,
+      });
+
+      const tx = { to: '0x1234', value: 0n };
+      await provider.sendProtectedTransaction(tx);
+
+      const metrics = provider.getMetrics();
+      expect(metrics.totalSubmissions).toBe(0);
+    });
+  });
+
+  // ===========================================================================
+  // CONFIG-FIX Tests: Chain-specific priority fees
+  // ===========================================================================
+
+  describe('getRecommendedPriorityFee', () => {
+    it('should return correct priority fees for standard chains', () => {
+      // These chains use 'standard' strategy but have different fees
+      expect(getRecommendedPriorityFee('avalanche')).toBe(25);
+      expect(getRecommendedPriorityFee('fantom')).toBe(100);
+    });
+
+    it('should return correct priority fees for L2 chains', () => {
+      expect(getRecommendedPriorityFee('arbitrum')).toBe(0.01);
+      expect(getRecommendedPriorityFee('optimism')).toBe(0.01);
+      expect(getRecommendedPriorityFee('base')).toBe(0.01);
+      expect(getRecommendedPriorityFee('zksync')).toBe(0.01);
+      expect(getRecommendedPriorityFee('linea')).toBe(0.01);
+    });
+
+    it('should return default for unknown chains', () => {
+      const unknownFee = getRecommendedPriorityFee('unknownchain');
+      expect(unknownFee).toBe(1.0); // Default for unknown standard chains
     });
   });
 });
