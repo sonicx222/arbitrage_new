@@ -117,6 +117,7 @@ export type {
   LogLevel,
   LogMeta,
   LogEntry,
+  ServiceLogger,  // P0-FIX: Consolidated logger interface for DI
 } from './logging';
 
 // REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
@@ -851,3 +852,30 @@ export type {
   CircularBufferConfig,
   CircularBufferStats,
 } from './data-structures';
+
+// =============================================================================
+// Factory Subscription Service (Phase 2.1.2)
+// Factory-level event subscriptions for 40-50x RPC reduction
+// =============================================================================
+
+export {
+  FactorySubscriptionService,
+  createFactorySubscriptionService,
+  getFactoryEventSignature,
+  parseV2PairCreatedEvent,
+  parseV3PoolCreatedEvent,
+  parseSolidlyPairCreatedEvent,
+  parseAlgebraPoolCreatedEvent,
+  parseTraderJoePairCreatedEvent,
+  FactoryEventSignatures,
+} from './factory-subscription';
+
+export type {
+  FactorySubscriptionConfig,
+  FactorySubscriptionStats,
+  FactorySubscriptionLogger,
+  FactoryWebSocketManager,
+  FactorySubscriptionDeps,
+  PairCreatedEvent,
+  PairCreatedCallback,
+} from './factory-subscription';

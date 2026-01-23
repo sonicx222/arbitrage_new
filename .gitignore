@@ -22,6 +22,7 @@ services/*/dist
 logs
 *.log
 npm-debug.log*
+**shared/core/logs/*
 
 # OS files
 nul

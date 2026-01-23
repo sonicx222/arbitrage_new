@@ -167,13 +167,33 @@ export interface ChainHealth {
  * Check if a chain is EVM-compatible.
  * Non-EVM chains (like Solana) require different connection handling.
  *
+ * SAFETY FIX: Unknown chains now throw an error instead of defaulting to EVM.
+ * This prevents silent failures when misconfigured chains are used.
+ *
  * @param chainId - The chain identifier
- * @returns true if EVM-compatible, false otherwise
+ * @returns true if EVM-compatible, false for non-EVM chains
+ * @throws Error if chainId is not found in CHAINS configuration
  */
 export function isEvmChain(chainId: string): boolean {
   const chain = CHAINS[chainId];
-  if (!chain) return true; // Default to EVM for unknown chains (safe default)
+  if (!chain) {
+    throw new Error(`Unknown chain "${chainId}" - not found in CHAINS configuration`);
+  }
   return chain.isEVM !== false; // Explicitly check for false (undefined = EVM)
+}
+
+/**
+ * Check if a chain is EVM-compatible (safe version).
+ * Returns false for unknown chains instead of throwing.
+ * Use this when you want to silently handle unknown chains.
+ *
+ * @param chainId - The chain identifier
+ * @returns true if EVM-compatible, false for non-EVM or unknown chains
+ */
+export function isEvmChainSafe(chainId: string): boolean {
+  const chain = CHAINS[chainId];
+  if (!chain) return false; // Unknown chains are not EVM
+  return chain.isEVM !== false;
 }
 
 /**
@@ -660,15 +680,42 @@ export const PHASE_METRICS = {
  * Partition chain assignments - S3.1.2 configuration.
  * Derived from PARTITIONS array for backward compatibility.
  *
+ * IMMUTABILITY FIX: Arrays are frozen at runtime to prevent accidental mutation.
+ * The `as const` TypeScript assertion only provides compile-time checks;
+ * Object.freeze() provides actual runtime protection against mutation.
+ *
  * @deprecated Use getChainsForPartition() from partitions.ts for runtime access.
+ *             This export will be removed in a future version.
  */
-export const PARTITION_CONFIG = {
+const _PARTITION_CONFIG_INTERNAL = Object.freeze({
   // P1: Asia-Fast - EVM high-throughput chains
-  P1_ASIA_FAST: getChainsForPartition(PARTITION_IDS.ASIA_FAST) as readonly string[],
+  P1_ASIA_FAST: Object.freeze(getChainsForPartition(PARTITION_IDS.ASIA_FAST)),
   // P2: L2-Turbo - Ethereum L2 rollups
-  P2_L2_TURBO: getChainsForPartition(PARTITION_IDS.L2_TURBO) as readonly string[],
+  P2_L2_TURBO: Object.freeze(getChainsForPartition(PARTITION_IDS.L2_TURBO)),
   // P3: High-Value - Ethereum mainnet + ZK rollups
-  P3_HIGH_VALUE: getChainsForPartition(PARTITION_IDS.HIGH_VALUE) as readonly string[],
+  P3_HIGH_VALUE: Object.freeze(getChainsForPartition(PARTITION_IDS.HIGH_VALUE)),
   // P4: Solana-Native - Non-EVM chains
-  P4_SOLANA_NATIVE: getChainsForPartition(PARTITION_IDS.SOLANA_NATIVE) as readonly string[]
-} as const;
+  P4_SOLANA_NATIVE: Object.freeze(getChainsForPartition(PARTITION_IDS.SOLANA_NATIVE))
+}) as {
+  readonly P1_ASIA_FAST: readonly string[];
+  readonly P2_L2_TURBO: readonly string[];
+  readonly P3_HIGH_VALUE: readonly string[];
+  readonly P4_SOLANA_NATIVE: readonly string[];
+};
+
+// P0-7 FIX: Runtime deprecation warning for PARTITION_CONFIG
+// Logs a warning once on first access to help identify code that needs updating
+let _partitionConfigWarningShown = false;
+export const PARTITION_CONFIG = new Proxy(_PARTITION_CONFIG_INTERNAL, {
+  get(target, prop, receiver) {
+    if (!_partitionConfigWarningShown && process.env.NODE_ENV !== 'test') {
+      _partitionConfigWarningShown = true;
+      console.warn(
+        '[DEPRECATED] PARTITION_CONFIG is deprecated. ' +
+        'Use getChainsForPartition(partitionId) or getPartitionFromEnv() instead. ' +
+        'This export will be removed in a future version.'
+      );
+    }
+    return Reflect.get(target, prop, receiver);
+  }
+});

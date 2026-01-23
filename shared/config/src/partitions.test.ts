@@ -13,6 +13,7 @@
 import {
   PARTITIONS,
   FUTURE_PARTITIONS,
+  PARTITION_CONFIG,
   PartitionConfig,
   ChainInstance,
   assignChainToPartition,
@@ -26,7 +27,10 @@ import {
   validateAllPartitions,
   getPartitionIdFromEnv,
   getPartitionFromEnv,
-  getChainsFromEnv
+  getChainsFromEnv,
+  isEvmChain,
+  isEvmChainSafe,
+  getNonEvmChains
 } from './partitions';
 
 describe('PartitionConfig', () => {
@@ -145,6 +149,77 @@ describe('assignChainToPartition', () => {
   it('should return null for unknown chain', () => {
     const partition = assignChainToPartition('unknown-chain');
     expect(partition).toBeNull();
+  });
+});
+
+describe('isEvmChain', () => {
+  it('should return true for EVM chains', () => {
+    expect(isEvmChain('ethereum')).toBe(true);
+    expect(isEvmChain('arbitrum')).toBe(true);
+    expect(isEvmChain('bsc')).toBe(true);
+    expect(isEvmChain('polygon')).toBe(true);
+  });
+
+  it('should return false for non-EVM chains', () => {
+    expect(isEvmChain('solana')).toBe(false);
+  });
+
+  it('should throw error for unknown chains', () => {
+    expect(() => isEvmChain('unknown-chain')).toThrow('Unknown chain "unknown-chain"');
+    expect(() => isEvmChain('')).toThrow('Unknown chain ""');
+  });
+});
+
+describe('isEvmChainSafe', () => {
+  it('should return true for EVM chains', () => {
+    expect(isEvmChainSafe('ethereum')).toBe(true);
+    expect(isEvmChainSafe('arbitrum')).toBe(true);
+  });
+
+  it('should return false for non-EVM chains', () => {
+    expect(isEvmChainSafe('solana')).toBe(false);
+  });
+
+  it('should return false for unknown chains (not throw)', () => {
+    expect(isEvmChainSafe('unknown-chain')).toBe(false);
+    expect(isEvmChainSafe('')).toBe(false);
+  });
+});
+
+describe('getNonEvmChains', () => {
+  it('should return Solana as non-EVM chain', () => {
+    const nonEvm = getNonEvmChains();
+    expect(nonEvm).toContain('solana');
+    expect(nonEvm.length).toBeGreaterThan(0);
+  });
+
+  it('should not include EVM chains', () => {
+    const nonEvm = getNonEvmChains();
+    expect(nonEvm).not.toContain('ethereum');
+    expect(nonEvm).not.toContain('arbitrum');
+    expect(nonEvm).not.toContain('bsc');
+  });
+});
+
+describe('PARTITION_CONFIG immutability', () => {
+  it('should have frozen arrays that cannot be mutated', () => {
+    // Attempting to mutate should either throw (strict mode) or silently fail
+    const originalLength = PARTITION_CONFIG.P1_ASIA_FAST.length;
+
+    // Try to push - should throw or be ignored
+    expect(() => {
+      (PARTITION_CONFIG.P1_ASIA_FAST as string[]).push('test');
+    }).toThrow();
+
+    // Length should be unchanged
+    expect(PARTITION_CONFIG.P1_ASIA_FAST.length).toBe(originalLength);
+  });
+
+  it('should have frozen object that cannot have properties reassigned', () => {
+    // Try to reassign - should throw or be ignored
+    expect(() => {
+      (PARTITION_CONFIG as any).P1_ASIA_FAST = [];
+    }).toThrow();
   });
 });
 

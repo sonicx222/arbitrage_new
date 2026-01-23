@@ -575,11 +575,16 @@ export class HierarchicalCache {
 
   // L2 Cache Implementation (Redis)
   // P0-FIX-3: All L2 methods now use explicit redisPromise with null check
+  // P0-FIX (Double Serialization): Use redis.getRaw()/setex() to avoid double JSON serialization.
+  // RedisClient.get()/set() already do JSON.parse/stringify internally, so we use raw methods
+  // and handle serialization explicitly here for clarity and correctness.
   private async getFromL2(key: string): Promise<any> {
     if (!this.redisPromise) return null;
     try {
       const redis = await this.redisPromise;
-      const data = await redis.get(`${this.l2Prefix}${key}`);
+      // P0-FIX: Use getRaw() to get the raw string, then parse ourselves.
+      // This avoids double-parsing since redis.get() already does JSON.parse().
+      const data = await redis.getRaw(`${this.l2Prefix}${key}`);
       return data ? JSON.parse(data) : null;
     } catch (error) {
       logger.error('L2 cache get error', { error, key });
@@ -592,8 +597,12 @@ export class HierarchicalCache {
     try {
       const redis = await this.redisPromise;
       const redisKey = `${this.l2Prefix}${key}`;
-      // P0-FIX-3: Use RedisClient.set() which handles serialization and TTL internally
-      await redis.set(redisKey, value, ttl || this.config.l2Ttl);
+      // P0-FIX: Use setex() with explicit serialization to match getRaw() usage.
+      // This avoids the double-serialization bug where redis.set() would stringify
+      // and then getFromL2() would try to parse the already-parsed object.
+      const serialized = JSON.stringify(value);
+      const ttlSeconds = ttl || this.config.l2Ttl;
+      await redis.setex(redisKey, ttlSeconds, serialized);
     } catch (error) {
       logger.error('L2 cache set error', { error, key });
     }

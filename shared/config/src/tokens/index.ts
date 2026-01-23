@@ -215,6 +215,48 @@ export const CORE_TOKENS: Record<string, Token[]> = {
 };
 
 // =============================================================================
+// FALLBACK TOKEN PRICES
+// P0-FIX: Extracted from base-detector.ts to configuration for maintainability
+// Used for USD value estimation when price oracle is unavailable
+// =============================================================================
+/**
+ * Fallback token prices for USD estimation when price oracle is unavailable.
+ * These prices are approximations and should only be used as fallbacks.
+ *
+ * @see base-detector.ts estimateSwapUsdValue()
+ * @see price-oracle.ts DEFAULT_FALLBACK_PRICES (keep in sync)
+ */
+export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
+  // Native tokens and wrappers
+  ETH: 3500, WETH: 3500,
+  BNB: 600, WBNB: 600,
+  MATIC: 1.00, WMATIC: 1.00,
+  AVAX: 40, WAVAX: 40,
+  FTM: 0.80, WFTM: 0.80,
+  SOL: 150, WSOL: 150, // Solana
+  // L2 tokens
+  ARB: 1.50,
+  OP: 3.00,
+  // Major tokens
+  BTC: 100000, WBTC: 100000, BTCB: 100000, tBTC: 100000,
+  // Stablecoins (default to 1.00)
+  USDT: 1.00, USDC: 1.00, DAI: 1.00, BUSD: 1.00,
+  FRAX: 1.00, LUSD: 1.00, TUSD: 1.00, USDP: 1.00, GUSD: 1.00,
+  USDbC: 1.00, fUSDT: 1.00, // Bridged stables
+  // DeFi tokens
+  UNI: 10.00, AAVE: 250.00, LINK: 15.00, CRV: 1.00,
+  MKR: 2000.00, COMP: 60.00, SNX: 3.00, SUSHI: 1.50, YFI: 10000.00,
+  // Liquid staking
+  STETH: 3500, WSTETH: 4000, RETH: 3700, CBETH: 3600,
+  stETH: 3500, wstETH: 4000, rETH: 3700, cbETH: 3600, // lowercase variants
+  // Solana LSTs
+  mSOL: 160, jitoSOL: 160, BSOL: 155,
+  // DEX/Protocol tokens
+  GMX: 40, CAKE: 3.00, JOE: 0.50, VELO: 0.15, AERO: 1.50,
+  RAY: 2.00, ORCA: 3.00, JUP: 0.80,
+});
+
+// =============================================================================
 // TOKEN METADATA - Chain-specific token addresses and categories
 // Used for USD value estimation and price calculations
 // =============================================================================

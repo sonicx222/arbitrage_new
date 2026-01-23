@@ -21,6 +21,7 @@ export type {
   LoggerConfig,
   LogLevel,
   LogMeta,
+  ServiceLogger,
 } from './types';
 
 // Pino implementation (production)

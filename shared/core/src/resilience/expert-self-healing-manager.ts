@@ -1,18 +1,21 @@
 // Expert Self-Healing Manager
 // Implements enterprise-grade automatic recovery patterns with intelligent decision making
 //
-// P0-10 FIX (Partial): Migrating from Pub/Sub to Redis Streams for critical system control messages
+// P0-10 FIX: Migrated from Pub/Sub to Redis Streams for critical system control messages
 // This ensures guaranteed delivery per ADR-002.
 //
 // Migration Status:
 // - [DONE] Added streams client for publishing to streams
 // - [DONE] Created helper for dual publish (streams + pub/sub for backward compatibility)
-// - [TODO] Add consumer groups for stream consumption
-// - [TODO] Remove Pub/Sub after all consumers migrated
+// - [DONE] Added consumer groups for stream consumption
+// - [DONE] Migration flag to disable Pub/Sub when all consumers migrated
+//
+// To complete migration: Set DISABLE_PUBSUB_FALLBACK=true in environment after verifying
+// all consumers are reading from streams.
 
 import { createLogger } from '../logger';
 import { getRedisClient } from '../redis';
-import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
+import { getRedisStreamsClient, RedisStreamsClient, StreamConsumer, ConsumerGroupConfig } from '../redis-streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
 import { getDeadLetterQueue } from './dead-letter-queue';
 import { getEnhancedHealthMonitor } from '../monitoring/enhanced-health-monitor';
@@ -27,6 +30,16 @@ const SYSTEM_STREAMS = {
   FAILOVER: 'stream:system-failover',
   SCALING: 'stream:system-scaling'
 } as const;
+
+// P0-10 FIX: Consumer group configuration for self-healing manager
+const CONSUMER_GROUP_NAME = 'self-healing-manager';
+const CONSUMER_NAME = `shm-${process.pid || 'default'}`;
+
+/**
+ * P0-10 FIX: Migration flag to disable Pub/Sub fallback.
+ * Set DISABLE_PUBSUB_FALLBACK=true after all consumers are confirmed migrated to streams.
+ */
+const DISABLE_PUBSUB_FALLBACK = process.env.DISABLE_PUBSUB_FALLBACK === 'true';
 
 export enum FailureSeverity {
   LOW = 'low',           // Temporary glitch, self-correcting
@@ -96,6 +109,9 @@ export class ExpertSelfHealingManager {
   private isRunning = false;
   private monitoringInterval: NodeJS.Timeout | null = null;
 
+  // P0-10 FIX: Stream consumers for ADR-002 compliant message consumption
+  private failureStreamConsumer: StreamConsumer | null = null;
+
   constructor() {
     this.initializeDefaultStates();
   }
@@ -110,8 +126,41 @@ export class ExpertSelfHealingManager {
   }
 
   /**
-   * P0-10 FIX: Publish to both Redis Streams (for guaranteed delivery) and Pub/Sub (for backward compatibility)
+   * P0-10 FIX: Initialize consumer groups for all system streams.
+   * Consumer groups provide guaranteed message delivery and distributed processing.
+   */
+  private async initializeConsumerGroups(): Promise<void> {
+    if (!this.streamsClient) {
+      logger.warn('Streams client not initialized, skipping consumer group creation');
+      return;
+    }
+
+    // Create consumer groups for all system streams
+    const streams = Object.values(SYSTEM_STREAMS);
+    for (const streamName of streams) {
+      try {
+        await this.streamsClient.createConsumerGroup({
+          streamName,
+          groupName: CONSUMER_GROUP_NAME,
+          consumerName: CONSUMER_NAME,
+          startId: '$' // Only consume new messages (use '0' to process all existing)
+        });
+        logger.debug('Consumer group initialized', { streamName, groupName: CONSUMER_GROUP_NAME });
+      } catch (error) {
+        // createConsumerGroup already handles BUSYGROUP (group exists), so this is a real error
+        logger.error('Failed to create consumer group', {
+          streamName,
+          error: (error as Error).message
+        });
+      }
+    }
+  }
+
+  /**
+   * P0-10 FIX: Publish to Redis Streams (guaranteed delivery) and optionally Pub/Sub (for backward compatibility).
    * This ensures messages are not lost even if the target service is temporarily unavailable.
+   *
+   * Migration: Set DISABLE_PUBSUB_FALLBACK=true after all consumers have migrated to streams.
    */
   private async publishControlMessage(
     streamName: string,
@@ -134,13 +183,16 @@ export class ExpertSelfHealingManager {
     }
 
     // Secondary: Publish to Pub/Sub (backward compatibility during migration)
-    try {
-      await redis.publish(pubsubChannel, message as any);
-    } catch (error) {
-      logger.error('Failed to publish to pub/sub', {
-        channel: pubsubChannel,
-        error: (error as Error).message
-      });
+    // P0-10 FIX: Skip Pub/Sub if migration flag is set (all consumers on streams)
+    if (!DISABLE_PUBSUB_FALLBACK) {
+      try {
+        await redis.publish(pubsubChannel, message as any);
+      } catch (error) {
+        logger.error('Failed to publish to pub/sub', {
+          channel: pubsubChannel,
+          error: (error as Error).message
+        });
+      }
     }
   }
 
@@ -154,15 +206,20 @@ export class ExpertSelfHealingManager {
     // P0-10 FIX: Initialize streams client for ADR-002 compliant messaging
     await this.initializeStreamsClient();
 
+    // P0-10 FIX: Initialize consumer groups for all system streams
+    await this.initializeConsumerGroups();
+
     // Start monitoring and recovery loops
     this.startHealthMonitoring();
     this.startFailureDetection();
     this.startRecoveryOrchestration();
 
-    // Subscribe to failure events
+    // Subscribe to failure events (uses streams consumer group + optional pub/sub fallback)
     await this.subscribeToFailureEvents();
 
-    logger.info('Expert Self-Healing Manager started successfully');
+    logger.info('Expert Self-Healing Manager started successfully', {
+      pubsubFallbackEnabled: !DISABLE_PUBSUB_FALLBACK
+    });
   }
 
   async stop(): Promise<void> {
@@ -176,6 +233,12 @@ export class ExpertSelfHealingManager {
     if (this.monitoringInterval) {
       clearInterval(this.monitoringInterval);
       this.monitoringInterval = null;
+    }
+
+    // P0-10 FIX: Stop stream consumers gracefully
+    if (this.failureStreamConsumer) {
+      await this.failureStreamConsumer.stop();
+      this.failureStreamConsumer = null;
     }
 
     // Cancel all active recovery actions
@@ -774,13 +837,79 @@ export class ExpertSelfHealingManager {
     // Could be enhanced with predictive recovery
   }
 
-  // Subscribe to failure events from services
+  /**
+   * P0-10 FIX: Subscribe to failure events using Redis Streams consumer group.
+   * Falls back to Pub/Sub during migration period unless DISABLE_PUBSUB_FALLBACK is set.
+   *
+   * Consumer groups provide:
+   * - Guaranteed message delivery (messages persist until acknowledged)
+   * - Distributed processing (multiple consumers share the workload)
+   * - At-least-once semantics (failed messages can be reprocessed)
+   */
   private async subscribeToFailureEvents(): Promise<void> {
-    const redis = await this.redis;
-    await redis.subscribe('system:failures', (event) => {
-      // Handle incoming failure reports
-      logger.debug('Received failure event', event);
-    });
+    // Primary: Stream consumer group (guaranteed delivery)
+    if (this.streamsClient) {
+      const consumerConfig: ConsumerGroupConfig = {
+        streamName: SYSTEM_STREAMS.FAILURES,
+        groupName: CONSUMER_GROUP_NAME,
+        consumerName: CONSUMER_NAME
+      };
+
+      this.failureStreamConsumer = new StreamConsumer(this.streamsClient, {
+        config: consumerConfig,
+        handler: async (message) => {
+          try {
+            const event = message.data as any;
+            logger.debug('Received failure event from stream', {
+              messageId: message.id,
+              eventType: event.type,
+              serviceName: event.data?.serviceName
+            });
+
+            // Process the failure event
+            if (event.type === 'failure_reported' && event.data) {
+              // Note: External failure events are logged but not re-analyzed
+              // to avoid infinite loops (we already reported this failure)
+              logger.info('External failure event received', {
+                serviceName: event.data.serviceName,
+                component: event.data.component,
+                severity: event.data.severity
+              });
+            }
+          } catch (error) {
+            logger.error('Error processing failure event from stream', {
+              error: (error as Error).message,
+              messageId: message.id
+            });
+          }
+        },
+        batchSize: 10,
+        blockMs: 5000, // Block for 5 seconds waiting for messages
+        autoAck: true,
+        logger: {
+          error: (msg, ctx) => logger.error(msg, ctx),
+          debug: (msg, ctx) => logger.debug(msg, ctx)
+        }
+      });
+
+      this.failureStreamConsumer.start();
+      logger.info('Started failure event stream consumer', {
+        streamName: SYSTEM_STREAMS.FAILURES,
+        groupName: CONSUMER_GROUP_NAME,
+        consumerName: CONSUMER_NAME
+      });
+    }
+
+    // Secondary: Pub/Sub fallback during migration period
+    // P0-10 FIX: Skip Pub/Sub subscription if migration flag is set
+    if (!DISABLE_PUBSUB_FALLBACK) {
+      const redis = await this.redis;
+      await redis.subscribe('system:failures', (event) => {
+        // Handle incoming failure reports from legacy Pub/Sub
+        logger.debug('Received failure event from pub/sub (legacy)', event);
+      });
+      logger.debug('Subscribed to pub/sub failure channel (legacy fallback)');
+    }
   }
 
   // Perform periodic health checks

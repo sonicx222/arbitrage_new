@@ -10,7 +10,7 @@ import {
   createLogger,
   getPerformanceLogger,
   PerformanceLogger,
-  Logger,  // P2-FIX: Import Logger type
+  ServiceLogger,  // P0-FIX: Use consolidated ServiceLogger type
   EventBatcher,
   BatchedEvent,
   createEventBatcher,
@@ -32,9 +32,14 @@ import {
   getPairCacheService,
   // Phase 2: Dynamic gas pricing
   getGasPriceCache,
-  GAS_UNITS
+  GAS_UNITS,
+  // Task 2.1.2: Factory Subscription Service
+  FactorySubscriptionService,
+  createFactorySubscriptionService,
+  PairCreatedEvent,
+  FactoryEventSignatures,
 } from './index';
-import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, getEnabledDexes, dexFeeToPercentage } from '../../config/src';
+import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, FALLBACK_TOKEN_PRICES, getEnabledDexes, dexFeeToPercentage, getAllFactoryAddresses, getFactoryByAddress, validateFactoryRegistry } from '../../config/src';
 import {
   calculatePriceFromReserves,
   calculateSpreadSafe,
@@ -106,13 +111,10 @@ export interface PairSnapshot {
 
 /**
  * Logger interface for BaseDetector DI.
+ * P0-FIX: Now uses the consolidated ServiceLogger type from logging module.
+ * @deprecated Use ServiceLogger from './logging' directly instead.
  */
-export interface BaseDetectorLogger {
-  info: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+export type BaseDetectorLogger = ServiceLogger;
 
 /**
  * Dependencies that can be injected into BaseDetector.
@@ -120,7 +122,7 @@ export interface BaseDetectorLogger {
  */
 export interface BaseDetectorDeps {
   /** Logger instance - if provided, used instead of createLogger() */
-  logger?: BaseDetectorLogger;
+  logger?: ServiceLogger;
   /** Performance logger instance - if provided, used instead of getPerformanceLogger() */
   perfLogger?: PerformanceLogger;
 }
@@ -130,8 +132,8 @@ export abstract class BaseDetector {
   protected wsManager: WebSocketManager | null = null;
   protected redis: RedisClient | null = null;
   protected streamsClient: RedisStreamsClient | null = null;
-  // P2-FIX: Use proper Logger type (changed to interface for DI support)
-  protected logger: BaseDetectorLogger;
+  // P0-FIX: Use consolidated ServiceLogger type
+  protected logger: ServiceLogger;
   protected perfLogger: PerformanceLogger;
   // P2-FIX: Use proper EventBatcher type instead of any
   protected eventBatcher: EventBatcher | null = null;
@@ -148,7 +150,14 @@ export abstract class BaseDetector {
   protected pairDiscoveryService: PairDiscoveryService | null = null;
   protected pairCacheService: PairCacheService | null = null;
 
+  // Task 2.1.2: Factory Subscription Service for dynamic pair discovery
+  protected factorySubscriptionService: FactorySubscriptionService | null = null;
+  // Pre-computed set of factory addresses for O(1) lookup in event routing
+  protected factoryAddresses: Set<string> = new Set();
+
   protected dexes: Dex[];
+  // O(1) DEX lookup by name (performance optimization for registerPairFromFactory)
+  protected dexesByName: Map<string, Dex> = new Map();
   protected tokens: Token[];
   protected pairs: Map<string, Pair> = new Map();
   protected monitoredPairs: Set<string> = new Set();
@@ -201,6 +210,10 @@ export abstract class BaseDetector {
 
     // Initialize chain-specific data (using getEnabledDexes to filter disabled DEXs)
     this.dexes = getEnabledDexes(this.chain);
+    // Build O(1) DEX lookup map (keys are lowercase for case-insensitive matching)
+    for (const dex of this.dexes) {
+      this.dexesByName.set(dex.name.toLowerCase(), dex);
+    }
     this.tokens = CORE_TOKENS[this.chain as keyof typeof CORE_TOKENS] || [];
     this.tokenMetadata = TOKEN_METADATA[this.chain as keyof typeof TOKEN_METADATA] || {};
 
@@ -365,6 +378,211 @@ export abstract class BaseDetector {
     }
   }
 
+  /**
+   * Task 2.1.2: Initialize factory subscription service for dynamic pair discovery.
+   * Subscribes to PairCreated events from factory contracts to detect new pairs
+   * as they are deployed, enabling 40-50x RPC subscription reduction.
+   */
+  protected async initializeFactorySubscription(): Promise<void> {
+    try {
+      // P0-FIX: Validate factory registry at startup to catch configuration errors early
+      const validationErrors = validateFactoryRegistry();
+      if (validationErrors.length > 0) {
+        this.logger.warn('Factory registry validation warnings', {
+          chain: this.chain,
+          errors: validationErrors,
+          count: validationErrors.length,
+        });
+        // Continue despite warnings - these may be expected for certain DEXes
+      }
+
+      // Build factory address set for O(1) event routing lookup
+      const factoryAddrs = getAllFactoryAddresses(this.chain);
+      this.factoryAddresses = new Set(factoryAddrs.map(addr => addr.toLowerCase()));
+
+      if (this.factoryAddresses.size === 0) {
+        this.logger.info('No factories configured for chain, skipping factory subscription', {
+          chain: this.chain
+        });
+        return;
+      }
+
+      // Create factory subscription service
+      // P0-FIX: Added unsubscribe method to WebSocket adapter for bidirectional subscription management
+      // P1-2 FIX: Added null checks inside closures to handle wsManager becoming null during shutdown
+      this.factorySubscriptionService = createFactorySubscriptionService(
+        {
+          chain: this.chain,
+          enabled: true,
+        },
+        {
+          logger: this.logger,
+          wsManager: this.wsManager ? {
+            subscribe: (params) => {
+              // P1-2 FIX: Check wsManager is still valid (could be nullified during shutdown)
+              if (!this.wsManager) {
+                this.logger.debug('WebSocket manager unavailable for subscribe');
+                return 0; // Return dummy subscription ID
+              }
+              return this.wsManager.subscribe(params);
+            },
+            unsubscribe: (subscriptionId: string) => {
+              // P1-2 FIX: Check wsManager is still valid before unsubscribing
+              if (!this.wsManager) {
+                this.logger.debug('WebSocket manager unavailable for unsubscribe');
+                return;
+              }
+              // Convert string ID to number for WebSocketManager
+              const numId = parseInt(subscriptionId, 10);
+              if (!isNaN(numId)) {
+                this.wsManager.unsubscribe(numId);
+              }
+            },
+            isConnected: () => {
+              // P1-2 FIX: Safe check - return false if wsManager is null
+              return this.wsManager?.isWebSocketConnected() ?? false;
+            },
+          } : undefined,
+        }
+      );
+
+      // Register callback for new pair discovery
+      this.factorySubscriptionService.onPairCreated((event: PairCreatedEvent) => {
+        this.registerPairFromFactory(event);
+      });
+
+      // Subscribe to factory events
+      await this.factorySubscriptionService.subscribeToFactories();
+
+      this.logger.info('Factory subscription service initialized', {
+        chain: this.chain,
+        factories: this.factoryAddresses.size,
+        stats: this.factorySubscriptionService.getStats(),
+      });
+    } catch (error) {
+      this.logger.error('Failed to initialize factory subscription service', { error });
+      // Non-fatal: existing pairs will still work, just no dynamic discovery
+      this.logger.warn('Dynamic pair discovery disabled');
+    }
+  }
+
+  /**
+   * Task 2.1.2: Register a new pair from a PairCreated factory event.
+   * Called when a factory emits a PairCreated event to register the new pair
+   * for monitoring.
+   *
+   * P0-2 FIX: Added shutdown guard to prevent race condition where late-arriving
+   * factory events modify shared state during cleanup.
+   */
+  protected registerPairFromFactory(event: PairCreatedEvent): void {
+    // P0-2 FIX: Guard against registration during shutdown
+    // This prevents race conditions where factory events arrive during stop()
+    if (this.isStopping || !this.isRunning) {
+      this.logger.debug('Ignoring factory event during shutdown', {
+        pair: event.pairAddress,
+        dex: event.dexName,
+      });
+      return;
+    }
+
+    try {
+      const pairAddressLower = event.pairAddress.toLowerCase();
+
+      // Skip if pair already registered
+      if (this.pairsByAddress.has(pairAddressLower)) {
+        this.logger.debug('Pair already registered, skipping', {
+          pair: event.pairAddress,
+          dex: event.dexName,
+        });
+        return;
+      }
+
+      // Look up DEX configuration to get fee (O(1) lookup via dexesByName map)
+      const dexConfig = this.dexesByName.get(event.dexName.toLowerCase());
+      const fee = dexConfig ? dexFeeToPercentage(dexConfig.fee ?? 30) : 0.003;
+
+      // Create pair object
+      const pair: Pair = {
+        name: `${event.token0.slice(0, 6)}.../${event.token1.slice(0, 6)}...`,
+        address: event.pairAddress,
+        token0: event.token0,
+        token1: event.token1,
+        dex: event.dexName,
+        fee,
+      };
+
+      // Register in all indices
+      const pairKey = `${event.dexName}_${pair.name}`;
+      this.pairs.set(pairKey, pair);
+      this.pairsByAddress.set(pairAddressLower, pair);
+      this.addPairToTokenIndex(pair);
+      this.monitoredPairs.add(pairAddressLower);
+
+      // Subscribe to Sync/Swap events for new pair
+      this.subscribeToNewPair(pair);
+
+      this.logger.info('Registered new pair from factory', {
+        pair: event.pairAddress,
+        dex: event.dexName,
+        token0: event.token0.slice(0, 10) + '...',
+        token1: event.token1.slice(0, 10) + '...',
+        blockNumber: event.blockNumber,
+      });
+    } catch (error) {
+      this.logger.error('Failed to register pair from factory', {
+        error,
+        pairAddress: event.pairAddress,
+        dex: event.dexName,
+      });
+    }
+  }
+
+  /**
+   * Task 2.1.2: Subscribe to Sync/Swap events for a newly discovered pair.
+   * Called when a new pair is registered from a factory event.
+   */
+  protected subscribeToNewPair(pair: Pair): void {
+    if (!this.wsManager) {
+      this.logger.warn('WebSocket manager not available for new pair subscription');
+      return;
+    }
+
+    const pairAddress = pair.address.toLowerCase();
+
+    // Subscribe to Sync events (reserve changes)
+    if (EVENT_CONFIG.syncEvents.enabled) {
+      this.wsManager.subscribe({
+        method: 'eth_subscribe',
+        params: [
+          'logs',
+          {
+            topics: [EVENT_SIGNATURES.SYNC],
+            address: [pairAddress],
+          },
+        ],
+      });
+    }
+
+    // Subscribe to Swap events (trading activity)
+    if (EVENT_CONFIG.swapEvents.enabled) {
+      this.wsManager.subscribe({
+        method: 'eth_subscribe',
+        params: [
+          'logs',
+          {
+            topics: [EVENT_SIGNATURES.SWAP_V2],
+            address: [pairAddress],
+          },
+        ],
+      });
+    }
+
+    this.logger.debug('Subscribed to events for new pair', {
+      pair: pair.address,
+      dex: pair.dex,
+    });
+  }
+
   // ===========================================================================
   // Lifecycle Methods (Concrete with hooks for subclass customization)
   // Uses ServiceStateManager to prevent race conditions
@@ -411,6 +629,9 @@ export abstract class BaseDetector {
 
       // Subscribe to Sync and Swap events
       await this.subscribeToEvents();
+
+      // Task 2.1.2: Initialize factory subscription service for dynamic pair discovery
+      await this.initializeFactorySubscription();
 
       // Hook for chain-specific initialization
       await this.onStart();
@@ -498,6 +719,17 @@ export abstract class BaseDetector {
     // Clean up Redis Streams batchers (ADR-002, S1.1.4)
     await this.cleanupStreamBatchers();
 
+    // Task 2.1.2: Clean up factory subscription service
+    if (this.factorySubscriptionService) {
+      try {
+        this.factorySubscriptionService.stop();
+      } catch (error) {
+        this.logger.warn('Error stopping factory subscription service', { error });
+      }
+      this.factorySubscriptionService = null;
+    }
+    this.factoryAddresses.clear();
+
     // Disconnect WebSocket manager
     if (this.wsManager) {
       try {
@@ -565,6 +797,7 @@ export abstract class BaseDetector {
   async getHealth(): Promise<any> {
     const batcherStats = this.eventBatcher ? this.eventBatcher.getStats() : null;
     const wsStats = this.wsManager ? this.wsManager.getConnectionStats() : null;
+    const factoryStats = this.factorySubscriptionService?.getStats() || null;
 
     return {
       service: `${this.chain}-detector`,
@@ -578,7 +811,9 @@ export abstract class BaseDetector {
       batcherStats,
       chain: this.chain,
       dexCount: this.dexes.length,
-      tokenCount: this.tokens.length
+      tokenCount: this.tokens.length,
+      // Task 2.1.2: Factory subscription health
+      factorySubscription: factoryStats
     };
   }
 
@@ -937,30 +1172,8 @@ export abstract class BaseDetector {
     amount0Out: string,
     amount1Out: string
   ): Promise<number> {
-    // Default prices (fallback) - MUST stay in sync with price-oracle.ts DEFAULT_FALLBACK_PRICES
-    // Last updated: 2026-01-18 (Phase 2)
-    // Used for USD value estimation in whale alerts when price oracle is unavailable
-    const defaultPrices: Record<string, number> = {
-      // Native tokens and wrappers
-      ETH: 3500, WETH: 3500,
-      BNB: 600, WBNB: 600,
-      MATIC: 1.00, WMATIC: 1.00,
-      AVAX: 40, WAVAX: 40,
-      FTM: 0.80, WFTM: 0.80,
-      // L2 tokens
-      ARB: 1.50,
-      OP: 3.00,
-      // Major tokens
-      BTC: 100000, WBTC: 100000,
-      // Stablecoins (default to 1.00)
-      USDT: 1.00, USDC: 1.00, DAI: 1.00, BUSD: 1.00,
-      FRAX: 1.00, LUSD: 1.00, TUSD: 1.00, USDP: 1.00, GUSD: 1.00,
-      // DeFi tokens
-      UNI: 10.00, AAVE: 250.00, LINK: 15.00, CRV: 1.00,
-      MKR: 2000.00, COMP: 60.00, SNX: 3.00, SUSHI: 1.50, YFI: 10000.00,
-      // Liquid staking
-      STETH: 3500, WSTETH: 4000, RETH: 3700, CBETH: 3600,
-    };
+    // P0-FIX: Use FALLBACK_TOKEN_PRICES from configuration instead of hardcoded values
+    // These prices are approximations used when price oracle is unavailable
 
     const token0Lower = pair.token0.toLowerCase();
     const token1Lower = pair.token1.toLowerCase();
@@ -976,9 +1189,11 @@ export abstract class BaseDetector {
           ? Math.max(parseFloat(amount0In), parseFloat(amount0Out))
           : Math.max(parseFloat(amount1In), parseFloat(amount1Out));
 
-        // Get chain-specific native token price
-        const nativeSymbol = this.chain === 'bsc' ? 'BNB' : this.chain === 'polygon' ? 'MATIC' : 'ETH';
-        const price = defaultPrices[nativeSymbol] || 3500; // Default to ETH price
+        // Get chain-specific native token price from FALLBACK_TOKEN_PRICES
+        const nativeSymbol = this.chain === 'bsc' ? 'BNB' : this.chain === 'polygon' ? 'MATIC' :
+          this.chain === 'avalanche' ? 'AVAX' : this.chain === 'fantom' ? 'FTM' :
+          this.chain === 'solana' ? 'SOL' : 'ETH';
+        const price = FALLBACK_TOKEN_PRICES[nativeSymbol] || 3500; // Default to ETH price
         return (amount / 1e18) * price;
       }
     }
@@ -1331,6 +1546,15 @@ export abstract class BaseDetector {
     try {
       if (message.method === 'eth_subscription') {
         const { result } = message;
+
+        // Task 2.1.2: Route factory events to factory subscription service
+        // Check if this is a factory event based on log address
+        const logAddress = result?.address?.toLowerCase();
+        if (logAddress && this.factoryAddresses.has(logAddress) && this.factorySubscriptionService) {
+          this.factorySubscriptionService.handleFactoryEvent(result);
+          return; // Factory events are handled by the subscription service
+        }
+
         // P2-FIX: Add null check for eventBatcher
         if (this.eventBatcher) {
           this.eventBatcher.addEvent(result);
@@ -1707,7 +1931,9 @@ export abstract class BaseDetector {
       isRunning: this.isRunning,
       config: this.config,
       // Include stream/batcher stats (ADR-002)
-      streaming: this.getBatcherStats()
+      streaming: this.getBatcherStats(),
+      // Task 2.1.2: Factory subscription stats
+      factorySubscription: this.factorySubscriptionService?.getStats() || null
     };
   }
 

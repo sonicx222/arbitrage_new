@@ -161,17 +161,29 @@ export class NonceManager {
   /**
    * P0-FIX-2: Acquire lock using queue-based mutex.
    * Guarantees mutual exclusion even under concurrent access.
+   *
+   * P0-FIX-3: Fixed TOCTOU race condition in lock acquisition.
+   * Previous implementation had a race where two concurrent callers could both
+   * pass the `!state.isLocked` check before either set `isLocked = true`.
+   *
+   * New implementation: Always queue, process synchronously.
+   * The first caller to queue triggers immediate resolution if lock is free.
    */
-  private async acquireLock(state: ChainNonceState): Promise<void> {
-    // If lock is free, acquire immediately
-    if (!state.isLocked) {
-      state.isLocked = true;
-      return;
-    }
-
-    // Otherwise, wait in queue
+  private acquireLock(state: ChainNonceState): Promise<void> {
     return new Promise<void>((resolve) => {
+      // Always add to queue first (atomic operation)
       state.lockQueue.push(resolve);
+
+      // If we're the only one in queue and lock is free, acquire immediately
+      // This check is safe because JS is single-threaded - by the time we check,
+      // our resolve is already in the queue, so no one else can "steal" the lock
+      if (state.lockQueue.length === 1 && !state.isLocked) {
+        state.isLocked = true;
+        // Resolve synchronously - we're first and lock is ours
+        state.lockQueue.shift();
+        resolve();
+      }
+      // Otherwise, releaseLock will wake us up when it's our turn
     });
   }
 

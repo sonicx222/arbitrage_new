@@ -431,4 +431,80 @@ describe('P0-2: NonceManager', () => {
       expect(allNonces.sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
     });
   });
+
+  // ===========================================================================
+  // P0-FIX-3: TOCTOU Race Condition Regression Tests
+  // Validates the queue-based mutex pattern fixes the check-then-set race
+  // ===========================================================================
+
+  describe('P0-FIX-3: TOCTOU Race Condition Prevention', () => {
+    it('should prevent TOCTOU race when lock check and set are non-atomic', async () => {
+      // This test validates that the queue-based mutex pattern prevents
+      // the race condition where:
+      // - Thread A checks !isLocked (false)
+      // - Thread B checks !isLocked (false) - BEFORE A sets isLocked
+      // - Both A and B think they have the lock
+      //
+      // The fix uses queue-based locking where all callers queue first,
+      // then check if they're first in queue AND lock is free.
+
+      const highCapacityManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 300000,
+        maxPendingPerChain: 200
+      });
+      highCapacityManager.registerWallet('ethereum', mockWallet);
+
+      // Launch many concurrent requests immediately (not staggered)
+      // This maximizes the chance of triggering a TOCTOU race
+      const concurrentRequests = 100;
+      const promises: Promise<number>[] = [];
+
+      for (let i = 0; i < concurrentRequests; i++) {
+        promises.push(highCapacityManager.getNextNonce('ethereum'));
+      }
+
+      const nonces = await Promise.all(promises);
+
+      // Critical assertion: All nonces must be unique
+      // If there was a TOCTOU race, we'd see duplicate nonces
+      const uniqueNonces = new Set(nonces);
+      expect(uniqueNonces.size).toBe(concurrentRequests);
+
+      // Verify sequential allocation (order may vary due to async scheduling)
+      const sortedNonces = [...nonces].sort((a, b) => a - b);
+      for (let i = 0; i < concurrentRequests; i++) {
+        expect(sortedNonces[i]).toBe(i);
+      }
+
+      highCapacityManager.stop();
+    });
+
+    it('should maintain lock ordering under rapid sequential requests', async () => {
+      // Test that rapid back-to-back requests maintain strict ordering
+      // This ensures the queue-based pattern doesn't reorder requests
+
+      // Use a high-capacity manager for this test (default has maxPendingPerChain: 5)
+      const highCapacityManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 300000,
+        maxPendingPerChain: 100
+      });
+      highCapacityManager.registerWallet('ethereum', mockWallet);
+
+      const results: number[] = [];
+
+      // Fire off requests in rapid succession (but awaiting each)
+      // This tests that lock acquisition respects request order
+      for (let i = 0; i < 20; i++) {
+        const nonce = await highCapacityManager.getNextNonce('ethereum');
+        results.push(nonce);
+      }
+
+      // Results should be strictly sequential
+      expect(results).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+
+      highCapacityManager.stop();
+    });
+  });
 });
