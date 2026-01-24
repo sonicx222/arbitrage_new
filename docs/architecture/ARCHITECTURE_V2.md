@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.1
-> **Last Updated:** 2025-01-12
+> **Document Version:** 2.2
+> **Last Updated:** 2026-01-24
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -168,7 +168,8 @@ The architecture combines two patterns:
 │  ├── Chain Detector Partition 1 (Asia-Fast: BSC, Polygon, Avalanche, Fantom)    │
 │  ├── Chain Detector Partition 2 (L2-Fast: Arbitrum, Optimism, Base)             │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
-│  └── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
+│  ├── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
+│  └── Factory Subscription Manager (ADR-019: 40x RPC reduction) ✅ NEW           │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
 │  ├── Cross-Chain Analyzer (Multi-chain opportunity detection)                   │
@@ -176,17 +177,23 @@ The architecture combines two patterns:
 │  ├── Volume Aggregator (Swap event intelligence)                                │
 │  ├── Multi-Leg Path Finder (T3.11: 5-7 token cycle detection)                   │
 │  ├── Whale Activity Tracker (T3.12: Pattern detection & signals)                │
-│  └── Liquidity Depth Analyzer (T3.15: Slippage prediction)                      │
+│  ├── Liquidity Depth Analyzer (T3.15: Slippage prediction)                      │
+│  └── Correlation Analyzer (Predictive cache warming) ✅ NEW                     │
 │                                                                                  │
 │  LAYER 3: DECISION                                                               │
 │  ├── Opportunity Scorer (Profit/risk evaluation)                                │
+│  ├── MEV Risk Analyzer (Sandwich risk, tip recommendations) ✅ NEW              │
 │  ├── MEV Analyzer (Bot detection, avoidance)                                    │
 │  └── Execution Planner (Route optimization)                                     │
 │                                                                                  │
 │  LAYER 4: EXECUTION                                                              │
 │  ├── Execution Engine Primary (MEV-protected trades)                            │
+│  │   ├── Transaction Simulation (Tenderly/Alchemy pre-flight) ✅ NEW            │
+│  │   ├── Circuit Breaker (Consecutive failure protection) ✅ NEW                │
+│  │   └── Strategy Factory (Intra-chain, Cross-chain, Flash Loan)                │
 │  ├── Execution Engine Backup (Failover)                                         │
-│  ├── Flash Loan Manager (Capital efficiency)                                    │
+│  ├── Flash Loan Strategy (Aave V3 integration) ✅ NEW                           │
+│  ├── Flash Loan Contract (FlashLoanArbitrage.sol) ✅ NEW                        │
 │  └── Solana Executor (Jito bundles, priority fees)                              │
 │                                                                                  │
 │  LAYER 5: COORDINATION                                                           │
@@ -196,8 +203,9 @@ The architecture combines two patterns:
 │                                                                                  │
 │  SHARED INFRASTRUCTURE                                                           │
 │  ├── Redis Streams (Event backbone)                                             │
-│  ├── Hierarchical Cache (L1/L2/L3)                                              │
-│  ├── Circuit Breaker Registry                                                   │
+│  ├── Hierarchical Cache (L1/L2/L3 + Predictive Warming) ✅ ENHANCED             │
+│  ├── Circuit Breaker (Execution protection) ✅ NEW                              │
+│  ├── MEV Provider Factory (Flashbots, Jito, L2 Sequencer) ✅ ENHANCED           │
 │  └── RPC Provider Pool (EVM + Solana)                                           │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -541,10 +549,83 @@ All phases remain within Upstash 10K/day limit due to batching.
 
 ---
 
-## 10. Related ADRs
+## 10. Phase 1-3 Implementation Details (January 2026)
+
+This section documents the major enhancements implemented in January 2026.
+
+### 10.1 Transaction Simulation (Phase 1.1) ✅ COMPLETE
+
+**Problem**: Transactions sent without simulation result in failed txs consuming gas.
+
+**Solution**: Pre-flight simulation using Tenderly and Alchemy providers.
+
+| Component | Purpose |
+|-----------|---------|
+| SimulationService | Orchestrates simulation with provider fallback |
+| TenderlyProvider | Primary simulation via Tenderly API |
+| AlchemyProvider | Fallback simulation via Alchemy |
+| SimulationMetricsCollector | Tracks success rates and latency |
+
+**Key Files**: `services/execution-engine/src/services/simulation/`
+
+### 10.2 MEV Protection Enhancement (Phase 1.2) ✅ COMPLETE
+
+**Problem**: Limited MEV protection (Flashbots only), no Solana support.
+
+**Solution**: Chain-aware MEV provider factory with Jito integration and risk analyzer.
+
+| Chain Type | MEV Strategy | Provider |
+|------------|--------------|----------|
+| Ethereum | Flashbots bundles | FlashbotsProvider |
+| Solana | Jito bundles | JitoProvider |
+| L2 Rollups | Sequencer protection | L2SequencerProvider |
+| BSC/Polygon | Private pools | StandardProvider |
+
+**Key Files**: `shared/core/src/mev-protection/`
+
+### 10.3 Execution Circuit Breaker (Phase 1.3) ✅ COMPLETE
+
+**Problem**: Consecutive failures can drain capital during systemic issues.
+
+**Solution**: Circuit breaker pattern (CLOSED → OPEN → HALF_OPEN → CLOSED).
+
+**Configuration**: 5 failures threshold, 5 min cooldown, API controls.
+
+**Key Files**: `services/execution-engine/src/services/circuit-breaker.ts`
+
+### 10.4 Factory-Level Event Subscriptions (Phase 2.1) ✅ COMPLETE
+
+**Problem**: 1000+ individual pair subscriptions overwhelm RPC rate limits.
+
+**Solution**: Subscribe to ~25 factory contracts instead (40x reduction).
+
+**Key Files**: `shared/config/src/dex-factories.ts`, `shared/core/src/factory-subscription.ts`
+
+### 10.5 Predictive Cache Warming (Phase 2.2) ✅ COMPLETE
+
+**Problem**: Cache misses on correlated pairs reduce detection speed.
+
+**Solution**: Track correlations and pre-warm cache for related pairs.
+
+**Key Files**: `shared/core/src/caching/correlation-analyzer.ts`
+
+### 10.6 Flash Loan Integration (Phase 3.1) ✅ PARTIAL
+
+**Problem**: Capital lockup limits arbitrage capacity.
+
+**Solution**: Aave V3 flash loan integration (0.09% fee).
+
+**Status**: Contract and strategy complete, testnet deployment pending.
+
+**Key Files**: `contracts/src/FlashLoanArbitrage.sol`, `services/execution-engine/src/strategies/flash-loan.strategy.ts`
+
+---
+
+## 11. Related ADRs
 
 The following Architecture Decision Records document key decisions:
 
+### Core Architecture (ADR-001 to ADR-008)
 - [ADR-001: Hybrid Architecture Pattern](./adr/ADR-001-hybrid-architecture.md)
 - [ADR-002: Redis Streams over Pub/Sub](./adr/ADR-002-redis-streams.md)
 - [ADR-003: Partitioned Chain Detectors](./adr/ADR-003-partitioned-detectors.md)
@@ -553,6 +634,19 @@ The following Architecture Decision Records document key decisions:
 - [ADR-006: Free Hosting Provider Selection](./adr/ADR-006-free-hosting.md)
 - [ADR-007: Cross-Region Failover](./adr/ADR-007-failover-strategy.md)
 - [ADR-008: Chain/DEX/Token Selection](./adr/ADR-008-chain-dex-token-selection.md)
+
+### Extended Architecture (ADR-009 to ADR-015)
+- [ADR-009: Test Architecture](./adr/ADR-009-test-architecture.md)
+- [ADR-010: WebSocket Connection Resilience](./adr/ADR-010-websocket-resilience.md)
+- [ADR-014: Modular Detector Components](./adr/ADR-014-modular-detector-components.md)
+- [ADR-015: Pino Logger Migration](./adr/ADR-015-pino-logger-migration.md)
+
+### Phase 1-3 Enhancements (ADR-016 to ADR-020) ✅ NEW
+- [ADR-016: Transaction Simulation Integration](./adr/ADR-016-transaction-simulation.md)
+- [ADR-017: MEV Protection Enhancement](./adr/ADR-017-mev-protection.md)
+- [ADR-018: Execution Circuit Breaker](./adr/ADR-018-circuit-breaker.md)
+- [ADR-019: Factory-Level Event Subscriptions](./adr/ADR-019-factory-subscriptions.md)
+- [ADR-020: Flash Loan Integration](./adr/ADR-020-flash-loan.md)
 
 ---
 
@@ -563,6 +657,7 @@ The following Architecture Decision Records document key decisions:
 | 1.0 | 2024-XX-XX | Original | Initial microservices design |
 | 2.0 | 2025-01-10 | Analysis Session | Hybrid architecture, scaling strategy, swap filtering |
 | 2.1 | 2025-01-12 | Architecture Update | Added Solana as P4 partition, 11 chains, 62 DEXs, 165 tokens |
+| 2.2 | 2026-01-24 | Phase 1-3 Update | Added simulation, MEV protection, circuit breaker, factory subscriptions, flash loans |
 
 ---
 

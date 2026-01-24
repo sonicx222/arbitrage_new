@@ -94,6 +94,83 @@ function checkStaleDtsFiles() {
 }
 
 /**
+ * Check for compiled files at package roots (should only exist in dist/)
+ * These cause TypeScript to use stale compiled output instead of source
+ */
+function checkStaleRootCompiledFiles() {
+  log('\nChecking for stale compiled files at package roots...', 'cyan');
+
+  const issues = [];
+  const workspaces = ['shared', 'services', 'infrastructure'];
+  const compiledPatterns = [/\.js$/, /\.js\.map$/, /\.d\.ts$/, /\.d\.ts\.map$/];
+
+  for (const workspace of workspaces) {
+    const dir = path.join(ROOT_DIR, workspace);
+    if (!fs.existsSync(dir)) continue;
+
+    const packages = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name);
+
+    for (const pkg of packages) {
+      const pkgDir = path.join(dir, pkg);
+
+      // Check for compiled files at package root (not in src/ or dist/)
+      const files = fs.readdirSync(pkgDir, { withFileTypes: true })
+        .filter(f => f.isFile())
+        .map(f => f.name);
+
+      for (const file of files) {
+        // Skip config files that are legitimately JS
+        if (file.endsWith('.config.js') || file === 'jest.config.js') continue;
+
+        const hasCompiledExt = compiledPatterns.some(p => p.test(file));
+        if (hasCompiledExt) {
+          // Check if there's a source .ts file
+          const baseName = file.replace(/\.(js|d\.ts)(\.map)?$/, '');
+          const tsFile = path.join(pkgDir, `${baseName}.ts`);
+
+          if (fs.existsSync(tsFile)) {
+            issues.push({
+              type: 'stale-root-compiled',
+              file: path.relative(ROOT_DIR, path.join(pkgDir, file)),
+              message: `Compiled file at package root (should be in dist/): ${workspace}/${pkg}/${file}`
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Check for tsbuildinfo cache files that may cause incremental build issues
+ */
+function checkTsBuildInfoFiles() {
+  log('\nChecking for TypeScript build cache files...', 'cyan');
+
+  const issues = [];
+  const exclude = ['node_modules'];
+  const tsbuildFiles = findFiles(ROOT_DIR, /tsconfig\.tsbuildinfo$/, exclude);
+
+  if (tsbuildFiles.length > 0) {
+    // Only warn, don't fail - these are normal but can cause issues
+    for (const file of tsbuildFiles) {
+      issues.push({
+        type: 'tsbuildinfo-warning',
+        severity: 'warning',
+        file: path.relative(ROOT_DIR, file),
+        message: `TypeScript cache file found: ${path.relative(ROOT_DIR, file)} (may cause stale type issues)`
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
  * Check for node_modules in workspace directories (should use hoisted deps)
  */
 function checkNestedNodeModules() {
@@ -206,49 +283,79 @@ function validate() {
 
   // Run all checks
   allIssues.push(...checkStaleDtsFiles());
+  allIssues.push(...checkStaleRootCompiledFiles());
   allIssues.push(...checkNestedNodeModules());
   allIssues.push(...checkPackageJsonIssues());
+  allIssues.push(...checkTsBuildInfoFiles());
+
+  // Separate errors from warnings
+  const errors = allIssues.filter(i => i.severity !== 'warning');
+  const warnings = allIssues.filter(i => i.severity === 'warning');
 
   // Report results
   console.log('\n' + '-'.repeat(60));
 
-  if (allIssues.length === 0) {
+  if (errors.length === 0 && warnings.length === 0) {
     log('\n✓ All checks passed! Build should be platform-independent.', 'green');
     console.log('');
     return 0;
   }
 
-  log(`\n✗ Found ${allIssues.length} issue(s) that may cause cross-platform build failures:\n`, 'red');
-
-  for (const issue of allIssues) {
-    log(`  [${issue.type}] ${issue.message}`, 'yellow');
-  }
-
-  console.log('\n' + '-'.repeat(60));
-  log('\nTo fix these issues:', 'cyan');
-
-  // Group fixes by type
-  const staleDts = allIssues.filter(i => i.type === 'stale-dts');
-  if (staleDts.length > 0) {
-    log('\n1. Delete stale .d.ts files:', 'yellow');
-    for (const issue of staleDts) {
-      log(`   rm "${issue.dtsFile}"`, 'reset');
+  // Show warnings first (non-blocking)
+  if (warnings.length > 0) {
+    log(`\n⚠ ${warnings.length} warning(s):`, 'yellow');
+    for (const warning of warnings) {
+      log(`  [${warning.type}] ${warning.message}`, 'yellow');
     }
+    log('\n  Tip: Run "npm run clean:cache" to clear TypeScript build cache', 'cyan');
   }
 
-  const nestedMods = allIssues.filter(i => i.type === 'nested-node-modules');
-  if (nestedMods.length > 0) {
-    log('\n2. Clean nested node_modules and reinstall:', 'yellow');
-    log('   npm run clean:all && npm install', 'reset');
+  // Show errors (blocking)
+  if (errors.length > 0) {
+    log(`\n✗ Found ${errors.length} issue(s) that may cause cross-platform build failures:\n`, 'red');
+
+    for (const issue of errors) {
+      log(`  [${issue.type}] ${issue.message}`, 'red');
+    }
+
+    console.log('\n' + '-'.repeat(60));
+    log('\nTo fix these issues:', 'cyan');
+
+    // Group fixes by type
+    const staleDts = errors.filter(i => i.type === 'stale-dts');
+    if (staleDts.length > 0) {
+      log('\n1. Delete stale .d.ts files:', 'yellow');
+      for (const issue of staleDts) {
+        log(`   rm "${issue.dtsFile}"`, 'reset');
+      }
+    }
+
+    const staleRoot = errors.filter(i => i.type === 'stale-root-compiled');
+    if (staleRoot.length > 0) {
+      log('\n2. Delete stale compiled files at package roots:', 'yellow');
+      for (const issue of staleRoot) {
+        log(`   rm "${issue.file}"`, 'reset');
+      }
+    }
+
+    const nestedMods = errors.filter(i => i.type === 'nested-node-modules');
+    if (nestedMods.length > 0) {
+      log('\n3. Clean nested node_modules and reinstall:', 'yellow');
+      log('   npm run clean:all && npm install', 'reset');
+    }
+
+    const tsMismatch = errors.filter(i => i.type === 'ts-version-mismatch');
+    if (tsMismatch.length > 0) {
+      log('\n4. Sync TypeScript versions across workspaces', 'yellow');
+    }
+
+    console.log('');
+    return 1;
   }
 
-  const tsMismatch = allIssues.filter(i => i.type === 'ts-version-mismatch');
-  if (tsMismatch.length > 0) {
-    log('\n3. Sync TypeScript versions across workspaces', 'yellow');
-  }
-
+  // Only warnings, still pass
   console.log('');
-  return 1;
+  return 0;
 }
 
 // Run validation
