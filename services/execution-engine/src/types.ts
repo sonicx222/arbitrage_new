@@ -37,12 +37,73 @@ export interface ExecutionResult {
 }
 
 // =============================================================================
+// Error Codes (Fix 9.3 & 6.1: Type-safe error codes)
+// =============================================================================
+
+/**
+ * Standardized error codes for execution strategies.
+ * Fix 9.3: Type-safe enum to ensure consistent error reporting.
+ * Fix 6.1: All error codes now follow the [ERR_*] pattern.
+ *
+ * Usage:
+ * ```typescript
+ * return createErrorResult(id, ExecutionErrorCode.NO_CHAIN, chain, dex);
+ * // Or with details:
+ * return createErrorResult(id, `${ExecutionErrorCode.GAS_SPIKE} on ${chain}`, chain, dex);
+ * ```
+ */
+export enum ExecutionErrorCode {
+  // Chain/Provider errors
+  NO_CHAIN = '[ERR_NO_CHAIN] No chain specified for opportunity',
+  NO_WALLET = '[ERR_NO_WALLET] No wallet available for chain',
+  NO_PROVIDER = '[ERR_NO_PROVIDER] No provider available for chain',
+  NO_BRIDGE = '[ERR_NO_BRIDGE] Bridge router not initialized',
+  NO_ROUTE = '[ERR_NO_ROUTE] No bridge route available',
+
+  // Configuration errors
+  CONFIG_ERROR = '[ERR_CONFIG] Configuration error',
+  ZERO_ADDRESS = '[ERR_ZERO_ADDRESS] Zero address is invalid',
+
+  // Validation errors
+  INVALID_OPPORTUNITY = '[ERR_INVALID_OPPORTUNITY] Invalid opportunity format',
+  CROSS_CHAIN_MISMATCH = '[ERR_CROSS_CHAIN] Strategy mismatch for cross-chain opportunity',
+  SAME_CHAIN = '[ERR_SAME_CHAIN] Cross-chain arbitrage requires different chains',
+  PRICE_VERIFICATION = '[ERR_PRICE_VERIFICATION] Price verification failed',
+
+  // Transaction errors
+  NONCE_ERROR = '[ERR_NONCE] Failed to get nonce',
+  GAS_SPIKE = '[ERR_GAS_SPIKE] Gas price spike detected',
+  APPROVAL_FAILED = '[ERR_APPROVAL] Token approval failed',
+  SIMULATION_REVERT = '[ERR_SIMULATION_REVERT] Simulation predicted revert',
+
+  // Bridge errors
+  BRIDGE_QUOTE = '[ERR_BRIDGE_QUOTE] Bridge quote failed',
+  BRIDGE_EXEC = '[ERR_BRIDGE_EXEC] Bridge execution failed',
+  BRIDGE_FAILED = '[ERR_BRIDGE_FAILED] Bridge failed',
+  BRIDGE_TIMEOUT = '[ERR_BRIDGE_TIMEOUT] Bridge timeout',
+  QUOTE_EXPIRED = '[ERR_QUOTE_EXPIRED] Quote expired before execution',
+
+  // Execution errors
+  EXECUTION_ERROR = '[ERR_EXECUTION] Execution error',
+  SELL_FAILED = '[ERR_SELL_FAILED] Sell transaction failed',
+  HIGH_FEES = '[ERR_HIGH_FEES] Fees exceed expected profit',
+  SHUTDOWN = '[ERR_SHUTDOWN] Execution interrupted by shutdown',
+
+  // Flash loan errors
+  NO_STRATEGY = '[ERR_NO_STRATEGY] Required strategy not registered',
+  FLASH_LOAN_ERROR = '[ERR_FLASH_LOAN] Flash loan error',
+  UNSUPPORTED_PROTOCOL = '[ERR_UNSUPPORTED_PROTOCOL] Protocol not implemented',
+}
+
+// =============================================================================
 // ExecutionResult Factory Helpers
 // =============================================================================
 
 /**
  * Create a failed ExecutionResult.
  * Consolidates error result creation pattern used across strategies.
+ *
+ * @param error - Error message. Prefer using ExecutionErrorCode enum for consistency.
  */
 export function createErrorResult(
   opportunityId: string,

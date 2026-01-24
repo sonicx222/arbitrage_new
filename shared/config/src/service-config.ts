@@ -8,6 +8,66 @@
  */
 
 // =============================================================================
+// FLASH LOAN CONSTANTS (Fix 1.1: Centralized constants)
+// =============================================================================
+
+/**
+ * Aave V3 flash loan fee in basis points (0.09% = 9 bps)
+ * Used by both FlashLoanStrategy and AaveV3FlashLoanProvider
+ *
+ * @see https://docs.aave.com/developers/guides/flash-loans
+ */
+export const AAVE_V3_FEE_BPS = 9;
+
+/**
+ * Basis points denominator (10000 = 100%)
+ * Used for fee calculations: feeAmount = amount * feeBps / BPS_DENOMINATOR
+ */
+export const BPS_DENOMINATOR = 10000;
+
+/**
+ * Pre-computed BigInt versions for hot-path optimization
+ * Avoids repeated BigInt conversion in performance-critical code
+ */
+export const AAVE_V3_FEE_BPS_BIGINT = BigInt(AAVE_V3_FEE_BPS);
+export const BPS_DENOMINATOR_BIGINT = BigInt(BPS_DENOMINATOR);
+
+/**
+ * FlashLoanArbitrage contract ABI (minimal for execution)
+ * Fix 9.2: Consolidated to single location for reuse
+ *
+ * ## Function Documentation
+ *
+ * ### executeArbitrage
+ * Executes flash loan arbitrage with provided swap path.
+ * Reverts if profit < minProfit or if any swap fails.
+ *
+ * ### calculateExpectedProfit (Fix 2.1: Enhanced documentation)
+ * Returns `(uint256 expectedProfit, uint256 flashLoanFee)`:
+ * - `expectedProfit`: Expected profit in asset units (0 if unprofitable or invalid path)
+ * - `flashLoanFee`: Flash loan fee (0.09% of loan amount)
+ *
+ * **When `expectedProfit` returns 0, check these common causes:**
+ * 1. Invalid swap path (tokenIn/tokenOut mismatch between steps)
+ * 2. Router's getAmountsOut() call failed (pair doesn't exist, low liquidity)
+ * 3. Final token doesn't match the starting asset (path doesn't loop back)
+ * 4. Expected output is less than loan repayment amount (unprofitable)
+ *
+ * **Important distinction:**
+ * - The function returns 0 for BOTH invalid paths AND valid-but-unprofitable paths
+ * - To distinguish: a valid path with 0 profit means the swap would succeed but not be profitable
+ * - An invalid path means the swap would revert on-chain
+ *
+ * @see contracts/src/FlashLoanArbitrage.sol
+ */
+export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
+  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit) external',
+  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+  'function isApprovedRouter(address router) external view returns (bool)',
+  'function POOL() external view returns (address)',
+];
+
+// =============================================================================
 // SERVICE CONFIGURATIONS
 // =============================================================================
 export const SERVICE_CONFIGS = {
@@ -32,8 +92,9 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   fee: number;  // Basis points (100 = 1%)
 }> = {
   // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
+  // FIX 3.1.3-1: Corrected Ethereum Aave V3 Pool address (was 0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF)
   ethereum: {
-    address: '0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF',
+    address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
     protocol: 'aave_v3',
     fee: 9  // 0.09% flash loan fee
   },

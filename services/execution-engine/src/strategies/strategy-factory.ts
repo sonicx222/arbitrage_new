@@ -182,8 +182,12 @@ export class ExecutionStrategyFactory {
    * Strategy selection order:
    * 1. Simulation strategy (if simulation mode enabled)
    * 2. Flash loan strategy (if opportunity.type === 'flash-loan' or opportunity.useFlashLoan)
-   * 3. Cross-chain strategy (if opportunity.type === 'cross-chain')
+   * 3. Cross-chain strategy (if opportunity.type === 'cross-chain' OR buyChain !== sellChain)
    * 4. Intra-chain strategy (default)
+   *
+   * Fix 1.3: Added implicit cross-chain detection based on buyChain/sellChain mismatch.
+   * This ensures opportunities with different buy/sell chains are correctly routed
+   * even without explicit type annotation.
    *
    * @param opportunity - The opportunity to execute
    * @returns Strategy resolution with selected strategy and reason
@@ -193,7 +197,7 @@ export class ExecutionStrategyFactory {
     // Priority 1: Simulation mode overrides everything
     if (this.isSimulationMode) {
       if (!this.strategies.simulation) {
-        throw new Error('Simulation mode enabled but no simulation strategy registered');
+        throw new Error('[ERR_NO_STRATEGY] Simulation mode enabled but no simulation strategy registered');
       }
       return {
         type: 'simulation',
@@ -210,7 +214,7 @@ export class ExecutionStrategyFactory {
 
     if (isFlashLoanOpportunity) {
       if (!this.strategies.flashLoan) {
-        throw new Error('Flash loan opportunity but no flash-loan strategy registered');
+        throw new Error('[ERR_NO_STRATEGY] Flash loan opportunity but no flash-loan strategy registered');
       }
       return {
         type: 'flash-loan',
@@ -220,20 +224,29 @@ export class ExecutionStrategyFactory {
     }
 
     // Priority 3: Cross-chain opportunities
-    if (opportunity.type === 'cross-chain') {
+    // Fix 1.3: Detect cross-chain implicitly from buyChain/sellChain mismatch
+    const isExplicitCrossChain = opportunity.type === 'cross-chain';
+    const isImplicitCrossChain =
+      opportunity.buyChain &&
+      opportunity.sellChain &&
+      opportunity.buyChain !== opportunity.sellChain;
+
+    if (isExplicitCrossChain || isImplicitCrossChain) {
       if (!this.strategies.crossChain) {
-        throw new Error('Cross-chain opportunity but no cross-chain strategy registered');
+        throw new Error('[ERR_NO_STRATEGY] Cross-chain opportunity but no cross-chain strategy registered');
       }
       return {
         type: 'cross-chain',
         strategy: this.strategies.crossChain,
-        reason: 'Opportunity type is cross-chain',
+        reason: isExplicitCrossChain
+          ? 'Opportunity type is cross-chain'
+          : `Implicit cross-chain detected: buyChain (${opportunity.buyChain}) !== sellChain (${opportunity.sellChain})`,
       };
     }
 
     // Priority 4: Default to intra-chain
     if (!this.strategies.intraChain) {
-      throw new Error('No intra-chain strategy registered');
+      throw new Error('[ERR_NO_STRATEGY] No intra-chain strategy registered');
     }
     return {
       type: 'intra-chain',

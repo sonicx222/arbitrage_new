@@ -25,6 +25,42 @@ import "./interfaces/IFlashLoanReceiver.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
  *
+ * ## Performance Optimization Roadmap (Fix 10.4 & 10.2.3)
+ *
+ * ### Current Limitation
+ * calculateExpectedProfit() makes sequential getAmountsOut() calls to DEX routers.
+ * For an N-hop path, this requires N external calls, adding latency in competitive
+ * MEV environments where every millisecond counts.
+ *
+ * ### Proposed Solution: MultiPathQuoter Contract
+ * Deploy a separate quoter contract that batches getAmountsOut() calls:
+ *
+ * ```solidity
+ * contract MultiPathQuoter {
+ *     struct QuoteRequest {
+ *         address router;
+ *         address tokenIn;
+ *         address tokenOut;
+ *         uint256 amountIn;
+ *     }
+ *
+ *     function getBatchedQuotes(QuoteRequest[] calldata requests)
+ *         external view returns (uint256[] memory amountsOut);
+ * }
+ * ```
+ *
+ * Benefits:
+ * - Single RPC call instead of N calls (reduces network latency)
+ * - Atomic state snapshot (quotes are from the same block)
+ * - Can be combined with multicall for maximum efficiency
+ *
+ * Implementation Notes:
+ * 1. Deploy MultiPathQuoter on each supported chain
+ * 2. Update flash-loan.strategy.ts to use batched quotes for profitability checks
+ * 3. Keep calculateExpectedProfit() as fallback for on-chain verification
+ *
+ * Estimated Impact: 50-200ms latency reduction for 3-hop paths
+ *
  * See implementation_plan_v2.md Task 3.1.1
  */
 contract FlashLoanArbitrage is

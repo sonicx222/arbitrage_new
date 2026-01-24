@@ -242,7 +242,14 @@ export {
   BridgeCostConfig,
   getBridgeCost,
   getAllBridgeOptions,
-  calculateBridgeCostUsd
+  calculateBridgeCostUsd,
+  // Fix 1.1: Centralized flash loan constants
+  AAVE_V3_FEE_BPS,
+  BPS_DENOMINATOR,
+  AAVE_V3_FEE_BPS_BIGINT,
+  BPS_DENOMINATOR_BIGINT,
+  // Fix 9.2: Consolidated ABI
+  FLASH_LOAN_ARBITRAGE_ABI,
 } from './service-config';
 
 // =============================================================================
