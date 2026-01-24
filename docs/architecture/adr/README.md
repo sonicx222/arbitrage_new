@@ -25,6 +25,11 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-009](./ADR-009-test-architecture.md) | Test Architecture | Accepted | 2025-01-12 | 90% |
 | [ADR-010](./ADR-010-websocket-resilience.md) | WebSocket Connection Resilience | Accepted | 2026-01-15 | 95% |
 | [ADR-014](./ADR-014-modular-detector-components.md) | Modular Detector Components | Accepted | 2026-01-18 | 92% |
+| [ADR-016](./ADR-016-transaction-simulation.md) | Transaction Simulation Integration | Accepted | 2026-01-22 | 92% |
+| [ADR-017](./ADR-017-mev-protection.md) | MEV Protection Enhancement | Accepted | 2026-01-23 | 90% |
+| [ADR-018](./ADR-018-circuit-breaker.md) | Execution Circuit Breaker | Accepted | 2026-01-23 | 95% |
+| [ADR-019](./ADR-019-factory-subscriptions.md) | Factory-Level Event Subscriptions | Accepted | 2026-01-23 | 92% |
+| [ADR-020](./ADR-020-flash-loan.md) | Flash Loan Integration | Accepted | 2026-01-24 | 85% |
 
 ## Decision Summary
 
@@ -95,6 +100,37 @@ An Architecture Decision Record captures an important architectural decision mad
     - HealthReporter for health monitoring
     - MetricsCollector for metrics logging
     - Factory functions for dependency injection
+
+### Execution Reliability (Phase 1)
+
+11. **Transaction Simulation** (ADR-016)
+    - Pre-flight simulation via Tenderly/Alchemy
+    - 30%+ reduction in failed transactions
+    - Configurable threshold and bypass options
+
+12. **MEV Protection Enhancement** (ADR-017)
+    - Chain-aware MEV providers (Flashbots, Jito, L2)
+    - MEV risk analyzer with recommendations
+    - Jito bundles for Solana protection
+
+13. **Execution Circuit Breaker** (ADR-018)
+    - Consecutive failure protection
+    - Automatic recovery with HALF_OPEN testing
+    - API controls for manual override
+
+### Detection Optimization (Phase 2)
+
+14. **Factory-Level Event Subscriptions** (ADR-019)
+    - 40x subscription reduction
+    - Subscribe to ~25 factories vs 1000+ pairs
+    - Dynamic pair discovery
+
+### Capital Efficiency (Phase 3)
+
+15. **Flash Loan Integration** (ADR-020)
+    - Aave V3 flash loans (0.09% fee)
+    - Zero-capital arbitrage
+    - Custom FlashLoanArbitrage.sol contract
 
 ## How to Use These ADRs
 
