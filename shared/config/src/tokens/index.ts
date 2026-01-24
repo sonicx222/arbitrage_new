@@ -534,3 +534,108 @@ export const TOKEN_METADATA: Record<string, {
     ]
   }
 };
+
+// =============================================================================
+// TOKEN DECIMALS LOOKUP
+// Finding 7.1 Fix: Provide fast token decimals lookup from config
+// Used by flash-loan strategy for accurate amount calculations
+// =============================================================================
+
+/**
+ * Pre-built lookup map for O(1) token decimals lookup.
+ * Built once at module load time from CORE_TOKENS and TOKEN_METADATA.
+ *
+ * Key format: lowercase(chain):lowercase(address)
+ */
+const TOKEN_DECIMALS_LOOKUP: Map<string, number> = (() => {
+  const lookup = new Map<string, number>();
+
+  // Add all tokens from CORE_TOKENS
+  for (const [chain, tokens] of Object.entries(CORE_TOKENS)) {
+    for (const token of tokens) {
+      const key = `${chain.toLowerCase()}:${token.address.toLowerCase()}`;
+      lookup.set(key, token.decimals);
+    }
+  }
+
+  // Add stablecoins from TOKEN_METADATA (may have duplicates, that's ok)
+  for (const [chain, metadata] of Object.entries(TOKEN_METADATA)) {
+    for (const stable of metadata.stablecoins) {
+      const key = `${chain.toLowerCase()}:${stable.address.toLowerCase()}`;
+      lookup.set(key, stable.decimals);
+    }
+  }
+
+  return lookup;
+})();
+
+/**
+ * Common token decimals by symbol (fallback when address not found).
+ * These are well-known standards that rarely change.
+ */
+const COMMON_TOKEN_DECIMALS: Record<string, number> = {
+  // 6-decimal stablecoins
+  usdc: 6,
+  usdt: 6,
+  // 8-decimal tokens
+  wbtc: 8,
+  btcb: 8,
+  // 18-decimal tokens (most ERC-20 default)
+  weth: 18,
+  eth: 18,
+  dai: 18,
+};
+
+/**
+ * Get token decimals from config.
+ *
+ * Finding 7.1 Fix: Provides fast O(1) token decimals lookup.
+ * Uses pre-built lookup map from CORE_TOKENS and TOKEN_METADATA.
+ *
+ * Resolution order:
+ * 1. Exact match by chain:address in lookup map
+ * 2. Match by common token symbol (case-insensitive)
+ * 3. Default fallback (18 for most ERC-20 tokens)
+ *
+ * @param chain - Chain name (e.g., 'ethereum', 'arbitrum')
+ * @param address - Token contract address
+ * @param symbol - Optional token symbol for fallback matching
+ * @returns Token decimals (defaults to 18 if not found)
+ */
+export function getTokenDecimals(
+  chain: string,
+  address: string,
+  symbol?: string
+): number {
+  // Try exact match first (O(1) lookup)
+  const key = `${chain.toLowerCase()}:${address.toLowerCase()}`;
+  const exactMatch = TOKEN_DECIMALS_LOOKUP.get(key);
+  if (exactMatch !== undefined) {
+    return exactMatch;
+  }
+
+  // Try matching by symbol if provided
+  if (symbol) {
+    const symbolLower = symbol.toLowerCase();
+    const commonDecimals = COMMON_TOKEN_DECIMALS[symbolLower];
+    if (commonDecimals !== undefined) {
+      return commonDecimals;
+    }
+  }
+
+  // Default to 18 (most common for ERC-20)
+  return 18;
+}
+
+/**
+ * Check if a token's decimals are known in config.
+ * Useful for deciding whether to query on-chain.
+ *
+ * @param chain - Chain name
+ * @param address - Token contract address
+ * @returns True if decimals are known
+ */
+export function hasKnownDecimals(chain: string, address: string): boolean {
+  const key = `${chain.toLowerCase()}:${address.toLowerCase()}`;
+  return TOKEN_DECIMALS_LOOKUP.has(key);
+}

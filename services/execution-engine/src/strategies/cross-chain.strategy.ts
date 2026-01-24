@@ -16,7 +16,7 @@
  */
 
 import { ethers } from 'ethers';
-import { ARBITRAGE_CONFIG } from '@arbitrage/config';
+import { ARBITRAGE_CONFIG, getNativeTokenPrice } from '@arbitrage/config';
 import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -37,11 +37,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const destChain = opportunity.sellChain;
     const startTime = Date.now();
 
-    // Validate chains
+    // Fix 6.1: Validate chains with error codes
     if (!sourceChain || !destChain) {
       return createErrorResult(
         opportunity.id,
-        'Missing source or destination chain',
+        '[ERR_NO_CHAIN] Missing source or destination chain',
         sourceChain || 'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -50,7 +50,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (sourceChain === destChain) {
       return createErrorResult(
         opportunity.id,
-        'Cross-chain arbitrage requires different chains',
+        '[ERR_SAME_CHAIN] Cross-chain arbitrage requires different chains',
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -60,7 +60,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!ctx.bridgeRouterFactory) {
       return createErrorResult(
         opportunity.id,
-        'Bridge router not initialized',
+        '[ERR_NO_BRIDGE] Bridge router not initialized',
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -73,7 +73,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!bridgeRouter) {
       return createErrorResult(
         opportunity.id,
-        `No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
+        `[ERR_NO_ROUTE] No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -171,15 +171,26 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         );
       }
 
-      // Get nonce for bridge transaction
+      // Fix 4.3: Get nonce for bridge transaction with proper error handling
+      // If NonceManager is available but fails, we should abort rather than continue without a nonce
+      // (which could cause transaction conflicts or unpredictable behavior)
       let bridgeNonce: number | undefined;
       if (ctx.nonceManager) {
         try {
           bridgeNonce = await ctx.nonceManager.getNextNonce(sourceChain);
         } catch (error) {
-          this.logger.error('Failed to get nonce for bridge', {
-            error: getErrorMessage(error),
+          const errorMessage = getErrorMessage(error);
+          this.logger.error('Failed to get nonce for bridge transaction', {
+            sourceChain,
+            error: errorMessage,
           });
+          // Fix 4.3: Return error instead of continuing with undefined nonce
+          return createErrorResult(
+            opportunity.id,
+            `[ERR_NONCE] Failed to get nonce for bridge transaction: ${errorMessage}`,
+            sourceChain,
+            opportunity.buyDex || 'unknown'
+          );
         }
       }
 
@@ -280,12 +291,14 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
 
       // Step 4: Wait for bridge completion
+      // Fix 5.2: Enhanced polling with transition handling
       const bridgeId = bridgeResult.bridgeId!;
       const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
       const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
       const bridgeStartTime = Date.now();
 
       let bridgeCompleted = false;
+      let lastSeenStatus = 'pending';
 
       while (Date.now() - bridgeStartTime < maxWaitTime) {
         // Check for shutdown
@@ -296,7 +309,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           });
           return createErrorResult(
             opportunity.id,
-            'Execution interrupted by shutdown',
+            '[ERR_SHUTDOWN] Execution interrupted by shutdown',
             sourceChain,
             opportunity.buyDex || 'unknown',
             bridgeResult.sourceTxHash
@@ -304,6 +317,18 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         }
 
         const bridgeStatus: BridgeStatusResult = await bridgeRouter.getStatus(bridgeId);
+
+        // Fix 5.2: Log status transitions for debugging race conditions
+        if (bridgeStatus.status !== lastSeenStatus) {
+          this.logger.debug('Bridge status changed', {
+            opportunityId: opportunity.id,
+            bridgeId,
+            previousStatus: lastSeenStatus,
+            newStatus: bridgeStatus.status,
+            elapsedMs: Date.now() - bridgeStartTime,
+          });
+          lastSeenStatus = bridgeStatus.status;
+        }
 
         if (bridgeStatus.status === 'completed') {
           bridgeCompleted = true;
@@ -319,15 +344,22 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
           return createErrorResult(
             opportunity.id,
-            `Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
+            `[ERR_BRIDGE_FAILED] Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
             sourceChain,
             opportunity.buyDex || 'unknown',
             bridgeResult.sourceTxHash
           );
         }
 
+        // Fix 5.2: Add exponential backoff for long-running bridges
+        // Reduces RPC load during extended waiting periods
+        const elapsedMs = Date.now() - bridgeStartTime;
+        const dynamicPollInterval = elapsedMs > 60000
+          ? Math.min(pollInterval * 2, 30000) // Double interval after 1 minute, cap at 30s
+          : pollInterval;
+
         // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
+        await new Promise(resolve => setTimeout(resolve, dynamicPollInterval));
       }
 
       if (!bridgeCompleted) {
@@ -371,19 +403,32 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         );
       }
 
-      // Get nonce for sell transaction on destination chain
+      // Fix 4.3: Get nonce for sell transaction with proper error handling
+      // At this point, bridge already succeeded - we need to log but continue if nonce fails
+      // (returning error here would leave funds on destination chain without executing sell)
       let sellNonce: number | undefined;
       if (ctx.nonceManager) {
         try {
           sellNonce = await ctx.nonceManager.getNextNonce(destChain);
         } catch (error) {
-          this.logger.error('Failed to get nonce for destination sell', {
+          // Unlike bridge nonce, we log warning but continue - bridge already succeeded
+          // The sell attempt should still be made even without managed nonce
+          this.logger.warn('Failed to get nonce for destination sell, will let wallet decide', {
+            destChain,
+            bridgeTxHash: bridgeResult.sourceTxHash,
             error: getErrorMessage(error),
           });
         }
       }
 
       // Prepare and execute sell transaction on destination chain using DEX router
+      // TODO (Fix 7.2): Evaluate using flash loans on destination chain for improved capital efficiency.
+      // Current implementation uses direct DEX swap after bridge completion.
+      // Flash loans could:
+      // 1. Allow larger position sizes without holding capital on dest chain
+      // 2. Provide atomic execution guarantees (revert if unprofitable)
+      // 3. Reduce capital lockup during bridge waiting period
+      // Trade-off: Additional flash loan fees (~0.09% on Aave V3) must be weighed against benefits.
       const sellTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
 
       // Ensure token approval for DEX router before swap
@@ -477,18 +522,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Get source chain gas price for bridge cost calculation
       const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
 
-      // Calculate total gas costs in ETH (bridge + sell)
-      const bridgeGasCostEth = bridgeResult.gasUsed
+      // Fix 3.3: Use chain-specific native token prices for accurate gas cost calculation
+      // Different chains have different native tokens (ETH, MATIC, BNB, etc.)
+      const sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
+      const destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
+
+      // Calculate bridge gas cost in source chain's native token, then convert to USD
+      const bridgeGasCostNative = bridgeResult.gasUsed
         ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
         : 0;
-      const sellGasCostEth = sellReceipt
+      const bridgeGasCostUsd = bridgeGasCostNative * sourceNativeTokenPriceUsd;
+
+      // Calculate sell gas cost in destination chain's native token, then convert to USD
+      const sellGasCostNative = sellReceipt
         ? parseFloat(ethers.formatEther(sellReceipt.gasUsed * (sellReceipt.gasPrice || destGasPrice)))
         : 0;
-      const totalGasCostEth = bridgeGasCostEth + sellGasCostEth;
+      const sellGasCostUsd = sellGasCostNative * destNativeTokenPriceUsd;
 
-      // Convert all costs to USD for consistent profit calculation
-      // (expectedProfit is already in USD)
-      const totalGasCostUsd = totalGasCostEth * ethPriceUsd;
+      // Total gas cost in USD
+      const totalGasCostUsd = bridgeGasCostUsd + sellGasCostUsd;
 
       // Calculate actual profit in USD (expected - bridge fees - gas costs)
       const actualProfit = expectedProfit - bridgeFeeUsd - totalGasCostUsd;
@@ -498,12 +550,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         executionTimeMs,
         bridgeFeeEth,
         bridgeFeeUsd,
-        bridgeGasCostEth,
-        sellGasCostEth,
+        bridgeGasCostUsd,
+        sellGasCostUsd,
         totalGasCostUsd,
+        sourceNativeTokenPriceUsd,
+        destNativeTokenPriceUsd,
         expectedProfit,
         actualProfit,
-        ethPriceUsd,
       });
 
       return {

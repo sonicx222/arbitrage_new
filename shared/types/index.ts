@@ -88,7 +88,7 @@ export interface PriceUpdate {
 
 export interface ArbitrageOpportunity {
   id: string;
-  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex';
+  type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan';
   chain?: string;        // Single chain for same-chain arbitrage
   buyDex?: string;
   sellDex?: string;
@@ -115,6 +115,8 @@ export interface ArbitrageOpportunity {
   path?: string[];       // For triangular arbitrage
   bridgeRequired?: boolean;
   bridgeCost?: number;
+  /** Flag to force flash loan execution (Task 3.1.2) */
+  useFlashLoan?: boolean;
   // Additional fields for base-detector compatibility
   sourceChain?: string;
   targetChain?: string;

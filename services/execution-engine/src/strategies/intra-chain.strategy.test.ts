@@ -171,16 +171,23 @@ describe('IntraChainStrategy - Simulation Integration', () => {
   /**
    * Helper to mock protected methods that require external dependencies.
    * This allows unit testing the simulation integration without needing
-   * real blockchain providers or flash loan contracts.
+   * real blockchain providers or DEX contracts.
+   *
+   * Note: IntraChainStrategy now uses prepareDexSwapTransaction (not flash loans).
+   * For flash loan execution, use FlashLoanStrategy instead.
    */
   const mockStrategyMethods = (strat: IntraChainStrategy) => {
-    // Mock prepareFlashLoanTransaction to return a valid transaction request
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    // Mock prepareDexSwapTransaction to return a valid transaction request
+    // (Fix 10.1: Updated from prepareFlashLoanTransaction to match architecture change)
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,
       from: '0x1234567890123456789012345678901234567890',
     });
+
+    // Mock ensureTokenAllowance to avoid approval transactions
+    jest.spyOn(strat as any, 'ensureTokenAllowance').mockResolvedValue(true);
 
     // Mock verifyOpportunityPrices to always pass
     jest.spyOn(strat as any, 'verifyOpportunityPrices').mockResolvedValue({
@@ -507,14 +514,16 @@ describe('IntraChainStrategy - Edge Cases', () => {
 
   /**
    * Helper to mock protected methods that require external dependencies.
+   * (Fix 10.1: Updated to use prepareDexSwapTransaction)
    */
   const mockStrategyMethods = (strat: IntraChainStrategy) => {
-    jest.spyOn(strat as any, 'prepareFlashLoanTransaction').mockResolvedValue({
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
       to: '0x1234567890123456789012345678901234567890',
       data: '0xabcdef',
       value: 0n,
       from: '0x1234567890123456789012345678901234567890',
     });
+    jest.spyOn(strat as any, 'ensureTokenAllowance').mockResolvedValue(true);
     jest.spyOn(strat as any, 'verifyOpportunityPrices').mockResolvedValue({
       valid: true,
       currentProfit: 100,
@@ -569,6 +578,7 @@ describe('IntraChainStrategy - Edge Cases', () => {
 
     const opportunity = createMockOpportunity({
       buyChain: 'arbitrum',
+      sellChain: 'arbitrum', // Fix: sellChain must match buyChain for intra-chain strategy
       expectedProfit: 150,
     });
 

@@ -70,7 +70,8 @@ export class SimulationStrategy extends BaseExecutionStrategy {
 
     // Log simulated execution if enabled
     if (this.config.logSimulatedExecutions) {
-      this.logger.info('📊 SIMULATED execution completed', {
+      // Finding 6.2 Fix: Removed emoji per code conventions
+      this.logger.info('SIMULATED execution completed', {
         opportunityId: opportunity.id,
         success: isSuccess,
         expectedProfit,

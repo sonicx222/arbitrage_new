@@ -29,7 +29,7 @@ import type {
 /**
  * Strategy type identifiers
  */
-export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain';
+export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan';
 
 /**
  * Strategy resolution result
@@ -60,6 +60,7 @@ export interface RegisteredStrategies {
   simulation?: ExecutionStrategy;
   crossChain?: ExecutionStrategy;
   intraChain?: ExecutionStrategy;
+  flashLoan?: ExecutionStrategy;
 }
 
 // =============================================================================
@@ -69,10 +70,13 @@ export interface RegisteredStrategies {
 /**
  * Factory for selecting and executing the appropriate strategy.
  *
- * Strategy selection order:
- * 1. Simulation strategy (if simulation mode enabled)
- * 2. Cross-chain strategy (if opportunity.type === 'cross-chain')
- * 3. Intra-chain strategy (default)
+ * Strategy selection order (priority high to low):
+ * 1. Simulation strategy - if simulation mode is enabled (overrides all)
+ * 2. Flash loan strategy - if opportunity.type === 'flash-loan' or opportunity.useFlashLoan === true
+ * 3. Cross-chain strategy - if opportunity.type === 'cross-chain'
+ * 4. Intra-chain strategy - default fallback for same-chain opportunities
+ *
+ * @see resolve() method for implementation details
  */
 export class ExecutionStrategyFactory {
   private readonly logger: Logger;
@@ -114,6 +118,14 @@ export class ExecutionStrategyFactory {
   }
 
   /**
+   * Register the flash loan strategy.
+   */
+  registerFlashLoanStrategy(strategy: ExecutionStrategy): void {
+    this.strategies.flashLoan = strategy;
+    this.logger.debug('Registered flash-loan strategy');
+  }
+
+  /**
    * Register multiple strategies at once.
    */
   registerStrategies(strategies: RegisteredStrategies): void {
@@ -125,6 +137,9 @@ export class ExecutionStrategyFactory {
     }
     if (strategies.intraChain) {
       this.registerIntraChainStrategy(strategies.intraChain);
+    }
+    if (strategies.flashLoan) {
+      this.registerFlashLoanStrategy(strategies.flashLoan);
     }
   }
 
@@ -164,6 +179,12 @@ export class ExecutionStrategyFactory {
   /**
    * Resolve the appropriate strategy for an opportunity.
    *
+   * Strategy selection order:
+   * 1. Simulation strategy (if simulation mode enabled)
+   * 2. Flash loan strategy (if opportunity.type === 'flash-loan' or opportunity.useFlashLoan)
+   * 3. Cross-chain strategy (if opportunity.type === 'cross-chain')
+   * 4. Intra-chain strategy (default)
+   *
    * @param opportunity - The opportunity to execute
    * @returns Strategy resolution with selected strategy and reason
    * @throws Error if no suitable strategy is available
@@ -181,7 +202,24 @@ export class ExecutionStrategyFactory {
       };
     }
 
-    // Priority 2: Cross-chain opportunities
+    // Priority 2: Flash loan opportunities
+    // Check for explicit flash-loan type or useFlashLoan flag
+    const isFlashLoanOpportunity =
+      opportunity.type === 'flash-loan' ||
+      opportunity.useFlashLoan === true;
+
+    if (isFlashLoanOpportunity) {
+      if (!this.strategies.flashLoan) {
+        throw new Error('Flash loan opportunity but no flash-loan strategy registered');
+      }
+      return {
+        type: 'flash-loan',
+        strategy: this.strategies.flashLoan,
+        reason: 'Opportunity requires flash loan execution',
+      };
+    }
+
+    // Priority 3: Cross-chain opportunities
     if (opportunity.type === 'cross-chain') {
       if (!this.strategies.crossChain) {
         throw new Error('Cross-chain opportunity but no cross-chain strategy registered');
@@ -193,7 +231,7 @@ export class ExecutionStrategyFactory {
       };
     }
 
-    // Priority 3: Default to intra-chain
+    // Priority 4: Default to intra-chain
     if (!this.strategies.intraChain) {
       throw new Error('No intra-chain strategy registered');
     }
@@ -243,6 +281,8 @@ export class ExecutionStrategyFactory {
         return !!this.strategies.crossChain;
       case 'intra-chain':
         return !!this.strategies.intraChain;
+      case 'flash-loan':
+        return !!this.strategies.flashLoan;
       default:
         return false;
     }
@@ -256,6 +296,7 @@ export class ExecutionStrategyFactory {
     if (this.strategies.simulation) types.push('simulation');
     if (this.strategies.crossChain) types.push('cross-chain');
     if (this.strategies.intraChain) types.push('intra-chain');
+    if (this.strategies.flashLoan) types.push('flash-loan');
     return types;
   }
 

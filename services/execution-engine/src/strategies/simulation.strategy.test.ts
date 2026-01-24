@@ -233,6 +233,76 @@ describe('SimulationStrategy', () => {
 
         expect(result.success).toBe(false);
       });
+
+      // Fix 8.2: Test for successRate = 1 (always succeed)
+      it('should always succeed when successRate is 1', async () => {
+        Math.random = jest.fn()
+          .mockReturnValueOnce(0.99999) // Even near 1 should succeed with 100% success rate
+          .mockReturnValueOnce(0.5);
+
+        const config = createDefaultConfig({ successRate: 1 });
+        const strategy = new SimulationStrategy(logger, config);
+        const opportunity = createMockOpportunity();
+
+        const executePromise = strategy.execute(opportunity, ctx);
+        jest.advanceTimersByTime(100);
+        const result = await executePromise;
+
+        expect(result.success).toBe(true);
+        expect(result.error).toBeUndefined();
+      });
+
+      // Fix 8.2: Test for extremely large profitVariance
+      it('should handle extremely large profitVariance', async () => {
+        Math.random = jest.fn()
+          .mockReturnValueOnce(0.5) // success check
+          .mockReturnValueOnce(0.99); // variance should produce large value
+
+        const config = createDefaultConfig({
+          successRate: 1,
+          profitVariance: 100, // 10000% variance
+        });
+        const strategy = new SimulationStrategy(logger, config);
+        const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+        const executePromise = strategy.execute(opportunity, ctx);
+        jest.advanceTimersByTime(100);
+        const result = await executePromise;
+
+        expect(result.success).toBe(true);
+        // With 100x variance and 0.99 random, profit could be very high
+        // The formula is: expectedProfit * (1 + (random * 2 - 1) * variance)
+        // = 100 * (1 + (0.99 * 2 - 1) * 100) = 100 * (1 + 0.98 * 100) = 9900
+        expect(result.actualProfit).toBeDefined();
+        expect(typeof result.actualProfit).toBe('number');
+      });
+
+      // Fix 8.2: Test for zero profitVariance handling
+      it('should handle zero profitVariance (exact expected profit)', async () => {
+        // Mock Math.random: first for latency variance, then successRate, then profitVariance
+        Math.random = jest.fn()
+          .mockReturnValueOnce(0.5) // latency variance
+          .mockReturnValueOnce(0.5) // success check (0.5 < 1.0 = success)
+          .mockReturnValueOnce(0.123) // profit variance (ignored when profitVariance=0)
+          .mockReturnValue(0.5); // for tx hash generation
+
+        const config = createDefaultConfig({
+          successRate: 1,
+          profitVariance: 0, // No variance
+        });
+        const strategy = new SimulationStrategy(logger, config);
+        const opportunity = createMockOpportunity({ expectedProfit: 50 });
+
+        const executePromise = strategy.execute(opportunity, ctx);
+        jest.advanceTimersByTime(100);
+        const result = await executePromise;
+
+        expect(result.success).toBe(true);
+        // With 0 variance, actual profit = expected - gas cost
+        // Gas cost = expectedProfit * gasCostMultiplier = 50 * 0.1 = 5
+        // Actual profit = 50 - 5 = 45
+        expect(result.actualProfit).toBeCloseTo(45, 1);
+      });
     });
 
     describe('default values', () => {
@@ -293,8 +363,9 @@ describe('SimulationStrategy', () => {
         jest.advanceTimersByTime(100);
         await executePromise;
 
+        // Finding 6.2 Fix: Removed emoji from log message
         expect(logger.info).toHaveBeenCalledWith(
-          '📊 SIMULATED execution completed',
+          'SIMULATED execution completed',
           expect.objectContaining({
             opportunityId: opportunity.id,
             success: true,

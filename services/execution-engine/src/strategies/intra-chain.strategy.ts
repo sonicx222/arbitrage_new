@@ -3,11 +3,20 @@
  *
  * Executes arbitrage opportunities within a single chain using:
  * - Pre-flight simulation to detect reverts (Phase 1.1)
- * - Flash loans from Aave/Uniswap
+ * - Direct DEX swap execution (for users with capital)
  * - MEV protection via Flashbots (on supported chains)
  * - Atomic nonce management
  *
+ * NOTE: For flash loan execution (capital-free), use FlashLoanStrategy instead.
+ * This strategy is for direct DEX arbitrage where user has sufficient capital.
+ *
+ * Architecture Decision:
+ * - IntraChainStrategy: Direct swaps with user's own capital
+ * - FlashLoanStrategy: Flash loan-based execution (no capital required)
+ * - StrategyFactory routes based on opportunity.type or opportunity.useFlashLoan
+ *
  * @see engine.ts (parent service)
+ * @see flash-loan.strategy.ts (for flash loan execution)
  */
 
 import { ethers } from 'ethers';
@@ -15,7 +24,7 @@ import { MEV_CONFIG } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult } from '../types';
+import { createErrorResult, createSuccessResult } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
@@ -29,179 +38,193 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
   ): Promise<ExecutionResult> {
     const chain = opportunity.buyChain;
     if (!chain) {
-      throw new Error('No chain specified for opportunity');
+      return createErrorResult(
+        opportunity.id,
+        '[ERR_NO_CHAIN] No chain specified for opportunity',
+        'unknown',
+        opportunity.buyDex || 'unknown'
+      );
     }
 
-    // Verify wallet exists early and store reference (avoids repeated lookups)
+    // Validate this is actually an intra-chain opportunity
+    // sellChain should either be undefined (same as buyChain) or equal to buyChain
+    if (opportunity.sellChain && opportunity.sellChain !== chain) {
+      return createErrorResult(
+        opportunity.id,
+        `[ERR_CROSS_CHAIN] IntraChainStrategy cannot execute cross-chain opportunity (buy: ${chain}, sell: ${opportunity.sellChain}). Use CrossChainStrategy instead.`,
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
+    // Validate required fields for DEX swap
+    if (!opportunity.tokenIn || !opportunity.tokenOut || !opportunity.amountIn) {
+      return createErrorResult(
+        opportunity.id,
+        '[ERR_INVALID_OPPORTUNITY] Missing required fields (tokenIn, tokenOut, amountIn)',
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
+    // Verify wallet exists early and store reference
     const wallet = ctx.wallets.get(chain);
     if (!wallet) {
-      throw new Error(`No wallet available for chain: ${chain}`);
+      return createErrorResult(
+        opportunity.id,
+        `[ERR_NO_WALLET] No wallet available for chain: ${chain}`,
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
     }
 
-    // Store provider reference for later use (MEV receipt fetch)
+    // Verify provider exists
     const provider = ctx.providers.get(chain);
-
-    // Get optimal gas price
-    const gasPrice = await this.getOptimalGasPrice(chain, ctx);
-
-    // Re-verify prices before execution
-    const priceVerification = await this.verifyOpportunityPrices(opportunity, chain);
-    if (!priceVerification.valid) {
-      this.logger.warn('Price re-verification failed, aborting execution', {
-        opportunityId: opportunity.id,
-        reason: priceVerification.reason,
-        originalProfit: opportunity.expectedProfit,
-        currentProfit: priceVerification.currentProfit
-      });
-
+    if (!provider) {
       return createErrorResult(
         opportunity.id,
-        `Price verification failed: ${priceVerification.reason}`,
+        `[ERR_NO_PROVIDER] No provider available for chain: ${chain}`,
         chain,
         opportunity.buyDex || 'unknown'
       );
-    }
-
-    // Prepare flash loan transaction
-    const flashLoanTx = await this.prepareFlashLoanTransaction(opportunity, chain, ctx);
-
-    // ==========================================================================
-    // Phase 1.1: Pre-flight Simulation
-    // ==========================================================================
-    const simulationResult = await this.performSimulation(opportunity, flashLoanTx, chain, ctx);
-
-    if (simulationResult?.wouldRevert) {
-      ctx.stats.simulationPredictedReverts++;
-      this.logger.warn('Aborting execution: simulation predicted revert', {
-        opportunityId: opportunity.id,
-        revertReason: simulationResult.revertReason,
-        simulationLatencyMs: simulationResult.latencyMs,
-        provider: simulationResult.provider,
-      });
-
-      return createErrorResult(
-        opportunity.id,
-        `Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
-        chain,
-        opportunity.buyDex || 'unknown'
-      );
-    }
-
-    // Apply MEV protection
-    const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);
-
-    // Get nonce from NonceManager for atomic allocation
-    let nonce: number | undefined;
-    if (ctx.nonceManager) {
-      try {
-        nonce = await ctx.nonceManager.getNextNonce(chain);
-        protectedTx.nonce = nonce;
-        this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
-      } catch (error) {
-        this.logger.error('Failed to get nonce from NonceManager', {
-          chain,
-          error: getErrorMessage(error)
-        });
-        throw error;
-      }
     }
 
     try {
-      // Check if MEV protection should be used
-      const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
-      const chainSettings = MEV_CONFIG.chainSettings[chain];
-      const shouldUseMevProtection = mevProvider?.isEnabled() &&
-        chainSettings?.enabled !== false &&
-        (opportunity.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
+      // Get optimal gas price (may throw on gas spike)
+      const gasPrice = await this.getOptimalGasPrice(chain, ctx);
 
-      let receipt: ethers.TransactionReceipt | null = null;
-      let txHash: string | undefined;
-
-      if (shouldUseMevProtection && mevProvider) {
-        // Use MEV provider for protected transaction submission
-        this.logger.info('Using MEV protected submission', {
-          chain,
-          strategy: mevProvider.strategy,
+      // Re-verify prices before execution
+      const priceVerification = await this.verifyOpportunityPrices(opportunity, chain);
+      if (!priceVerification.valid) {
+        this.logger.warn('Price re-verification failed, aborting execution', {
           opportunityId: opportunity.id,
+          reason: priceVerification.reason,
+          originalProfit: opportunity.expectedProfit,
+          currentProfit: priceVerification.currentProfit
         });
 
-        const mevResult = await this.withTransactionTimeout(
-          () => mevProvider.sendProtectedTransaction(protectedTx, {
-            simulate: MEV_CONFIG.simulateBeforeSubmit,
-            priorityFeeGwei: chainSettings?.priorityFeeGwei,
-          }),
-          'mevProtectedSubmission'
+        return createErrorResult(
+          opportunity.id,
+          `[ERR_PRICE_VERIFICATION] ${priceVerification.reason}`,
+          chain,
+          opportunity.buyDex || 'unknown'
         );
+      }
 
-        if (!mevResult.success) {
-          throw new Error(`MEV protected submission failed: ${mevResult.error}`);
-        }
+      // Prepare DEX swap transaction (uses the base strategy's prepareDexSwapTransaction)
+      const swapTx = await this.prepareDexSwapTransaction(opportunity, chain, ctx);
 
-        txHash = mevResult.transactionHash;
-
-        // Get receipt if we have a transaction hash
-        if (txHash && provider) {
-          receipt = await this.withTransactionTimeout(
-            () => provider.getTransactionReceipt(txHash!),
-            'getReceipt'
+      // Ensure token allowance for the DEX router
+      if (swapTx.to) {
+        const amountIn = BigInt(opportunity.amountIn);
+        try {
+          await this.ensureTokenAllowance(
+            opportunity.tokenIn,
+            swapTx.to as string,
+            amountIn,
+            chain,
+            ctx
+          );
+        } catch (approvalError) {
+          return createErrorResult(
+            opportunity.id,
+            `[ERR_APPROVAL] Token approval failed: ${getErrorMessage(approvalError)}`,
+            chain,
+            opportunity.buyDex || 'unknown'
           );
         }
+      }
 
-        this.logger.info('MEV protected transaction successful', {
-          chain,
-          strategy: mevResult.strategy,
-          txHash,
-          usedFallback: mevResult.usedFallback,
-          latencyMs: mevResult.latencyMs,
+      // ==========================================================================
+      // Phase 1.1: Pre-flight Simulation
+      // ==========================================================================
+      const simulationResult = await this.performSimulation(opportunity, swapTx, chain, ctx);
+
+      if (simulationResult?.wouldRevert) {
+        ctx.stats.simulationPredictedReverts++;
+        this.logger.warn('Aborting execution: simulation predicted revert', {
+          opportunityId: opportunity.id,
+          revertReason: simulationResult.revertReason,
+          simulationLatencyMs: simulationResult.latencyMs,
+          provider: simulationResult.provider,
         });
-      } else {
-        // Standard transaction submission (no MEV protection)
-        // Note: wallet was already verified and stored at function entry
-        const txResponse = await this.withTransactionTimeout(
-          () => wallet.sendTransaction(protectedTx),
-          'sendTransaction'
-        );
 
-        txHash = txResponse.hash;
-
-        receipt = await this.withTransactionTimeout(
-          () => txResponse.wait(),
-          'waitForReceipt'
+        return createErrorResult(
+          opportunity.id,
+          `[ERR_SIMULATION_REVERT] Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+          chain,
+          opportunity.buyDex || 'unknown'
         );
       }
 
-      if (!receipt) {
-        if (ctx.nonceManager && nonce !== undefined) {
-          ctx.nonceManager.failTransaction(chain, nonce, 'No receipt received');
+      // Apply MEV protection
+      const protectedTx = await this.applyMEVProtection(swapTx, chain, ctx);
+
+      // Get nonce from NonceManager for atomic allocation
+      let nonce: number | undefined;
+      if (ctx.nonceManager) {
+        try {
+          nonce = await ctx.nonceManager.getNextNonce(chain);
+          protectedTx.nonce = nonce;
+          this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
+        } catch (error) {
+          return createErrorResult(
+            opportunity.id,
+            `[ERR_NONCE] Failed to get nonce: ${getErrorMessage(error)}`,
+            chain,
+            opportunity.buyDex || 'unknown'
+          );
         }
-        throw new Error('Transaction receipt not received');
       }
 
-      // Confirm transaction with NonceManager
-      if (ctx.nonceManager && nonce !== undefined) {
-        ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
+      // Submit transaction using base class method
+      const submitResult = await this.submitTransaction(protectedTx, chain, ctx, {
+        opportunityId: opportunity.id,
+        expectedProfit: opportunity.expectedProfit,
+        initialGasPrice: gasPrice,
+      });
+
+      if (!submitResult.success) {
+        return createErrorResult(
+          opportunity.id,
+          submitResult.error || 'Transaction submission failed',
+          chain,
+          opportunity.buyDex || 'unknown'
+        );
       }
 
       // Calculate actual profit
-      const actualProfit = await this.calculateActualProfit(receipt, opportunity);
+      const actualProfit = submitResult.receipt
+        ? await this.calculateActualProfit(submitResult.receipt, opportunity)
+        : undefined;
 
-      return {
-        opportunityId: opportunity.id,
-        success: true,
-        transactionHash: receipt.hash,
-        actualProfit,
-        gasUsed: Number(receipt.gasUsed),
-        gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
-        timestamp: Date.now(),
+      return createSuccessResult(
+        opportunity.id,
+        submitResult.txHash || submitResult.receipt?.hash || '',
         chain,
-        dex: opportunity.buyDex || 'unknown'
-      };
+        opportunity.buyDex || 'unknown',
+        {
+          actualProfit,
+          gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
+          gasCost: submitResult.receipt
+            ? parseFloat(ethers.formatEther(submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice || gasPrice)))
+            : undefined,
+        }
+      );
     } catch (error) {
-      // Mark transaction as failed in NonceManager
-      if (ctx.nonceManager && nonce !== undefined) {
-        ctx.nonceManager.failTransaction(chain, nonce, getErrorMessage(error));
-      }
-      throw error;
+      const errorMessage = getErrorMessage(error);
+      this.logger.error('Intra-chain arbitrage execution failed', {
+        opportunityId: opportunity.id,
+        chain,
+        error: errorMessage,
+      });
+
+      return createErrorResult(
+        opportunity.id,
+        errorMessage || 'Unknown error during execution',
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
     }
   }
 }
