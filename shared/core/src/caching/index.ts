@@ -14,11 +14,18 @@
  */
 
 // Hierarchical Cache (L1/L2/L3)
+// Issue 6.1: Added resetHierarchicalCache for standardized singleton pattern
 export {
   HierarchicalCache,
   createHierarchicalCache,
   getHierarchicalCache,
+  resetHierarchicalCache,
   LRUQueue
+} from './hierarchical-cache';
+export type {
+  CacheConfig,
+  CacheEntry,
+  PredictiveWarmingConfig
 } from './hierarchical-cache';
 
 // Shared Memory Cache (SharedArrayBuffer)

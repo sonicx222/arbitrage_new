@@ -120,8 +120,27 @@ const DEFAULT_CONFIG: GasPriceCacheConfig = {
 };
 
 /**
+ * Metadata for fallback gas price tracking.
+ * Issue 3.2 FIX: Track staleness to prevent using outdated fallback values.
+ */
+const FALLBACK_GAS_PRICE_METADATA = {
+  /** ISO date string of last update */
+  lastUpdated: '2026-01-18',
+  /** Maximum age in days before considered stale */
+  maxAgeDays: 7,
+  /** Source for updating values */
+  dataSource: 'Chain explorers (Etherscan, BSCScan, etc.) or RPC getFeeData()',
+};
+
+/**
  * Static fallback gas prices (in gwei) per chain.
  * Used when RPC fails or before first fetch.
+ *
+ * IMPORTANT: These are FALLBACK values. The GasPriceCache fetches real-time
+ * gas prices from RPC providers. Fallbacks are only used when RPC is unavailable.
+ *
+ * Last updated: 2026-01-18
+ * @see FALLBACK_GAS_PRICE_METADATA for staleness info
  */
 const FALLBACK_GAS_PRICES: Record<string, number> = {
   ethereum: 30,    // ~30 gwei average
@@ -607,9 +626,17 @@ export class GasPriceCache {
 // =============================================================================
 
 let gasPriceCacheInstance: GasPriceCache | null = null;
+let gasPriceCacheInstanceConfig: Partial<GasPriceCacheConfig> | undefined = undefined;
+// P0-FIX Issue 4.3: Store logger for warning messages
+const singletonLogger = createLogger('gas-price-cache-singleton');
 
 /**
  * Get the singleton GasPriceCache instance.
+ *
+ * Note: The configuration is only used on first initialization. If called with
+ * different config after the singleton exists, a warning is logged and the
+ * existing instance is returned unchanged. Use resetGasPriceCache() first
+ * if you need to change configuration.
  *
  * @param config - Optional configuration (only used on first initialization)
  * @returns The singleton GasPriceCache instance
@@ -617,6 +644,15 @@ let gasPriceCacheInstance: GasPriceCache | null = null;
 export function getGasPriceCache(config?: Partial<GasPriceCacheConfig>): GasPriceCache {
   if (!gasPriceCacheInstance) {
     gasPriceCacheInstance = new GasPriceCache(config);
+    gasPriceCacheInstanceConfig = config;
+  } else if (config !== undefined && config !== gasPriceCacheInstanceConfig) {
+    // P0-FIX Issue 4.3: Warn if config differs from initial
+    // This prevents silent config being ignored which can cause subtle bugs
+    singletonLogger.warn(
+      'getGasPriceCache called with different config after initialization. ' +
+      'Config is ignored. Use resetGasPriceCache() first if reconfiguration is needed.',
+      { providedConfig: config, existingConfig: gasPriceCacheInstanceConfig }
+    );
   }
   return gasPriceCacheInstance;
 }
@@ -630,4 +666,5 @@ export async function resetGasPriceCache(): Promise<void> {
     await gasPriceCacheInstance.stop();
   }
   gasPriceCacheInstance = null;
+  gasPriceCacheInstanceConfig = undefined;
 }

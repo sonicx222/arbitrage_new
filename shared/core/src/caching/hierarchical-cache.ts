@@ -2,9 +2,12 @@
 // L1: SharedArrayBuffer for ultra-fast cross-worker access
 // L2: Redis for distributed caching
 // L3: Persistent storage for long-term data
+// Task 2.2.2: Predictive cache warming using CorrelationAnalyzer
 
 import { getRedisClient } from '../redis';
 import { createLogger } from '../logger';
+import { getCorrelationAnalyzer } from './correlation-analyzer';
+import type { CorrelationAnalyzer } from './correlation-analyzer';
 
 // P2-2-FIX: Import config with fallback for test environment
 let SYSTEM_CONSTANTS: typeof import('../../../config/src').SYSTEM_CONSTANTS | undefined;
@@ -198,6 +201,19 @@ export class LRUQueue {
   }
 }
 
+/**
+ * Task 2.2.2: Predictive warming configuration
+ * Controls how correlated pairs are pre-warmed when a price update occurs.
+ */
+export interface PredictiveWarmingConfig {
+  /** Enable predictive warming (default: false) */
+  enabled: boolean;
+  /** Maximum number of correlated pairs to warm per update (default: 3) */
+  maxPairsToWarm?: number;
+  /** Optional callback invoked when pairs are warmed (useful for testing/monitoring) */
+  onWarm?: (pairAddresses: string[]) => void;
+}
+
 export interface CacheConfig {
   l1Enabled: boolean;
   l1Size: number; // Size in MB for SharedArrayBuffer
@@ -208,6 +224,8 @@ export interface CacheConfig {
   l3MaxSize: number;
   enablePromotion: boolean; // Auto-promote frequently accessed data
   enableDemotion: boolean; // Auto-demote rarely accessed data
+  /** Task 2.2.2: Predictive cache warming configuration */
+  predictiveWarming?: PredictiveWarmingConfig;
 }
 
 export interface CacheEntry {
@@ -259,6 +277,25 @@ export class HierarchicalCache {
     demotions: 0
   };
 
+  // Task 2.2.2: Predictive warming state
+  private predictiveWarmingConfig: PredictiveWarmingConfig | null = null;
+  private correlationAnalyzer: CorrelationAnalyzer | null = null;
+  private isClearing: boolean = false;
+  private predictiveWarmingStats = {
+    warmingTriggeredCount: 0,        // Times warming found correlated pairs to warm
+    pairsWarmedCount: 0,             // Pairs successfully promoted from L2/L3 to L1
+    warmingHitCount: 0,              // Pairs already in L1 when warming requested (cache was "warm")
+    deduplicatedCount: 0,            // PERF-3: Warming requests skipped due to pending operation
+    // Task 2.2.3: Measure Impact metrics
+    totalWarmingLatencyMs: 0,        // Sum of all warming latencies
+    warmingLatencyCount: 0,          // Count for calculating average
+    lastWarmingLatencyMs: 0,         // Most recent warming latency
+    noCorrelationsCount: 0           // FIX: Triggers with no correlated pairs (early exit)
+  };
+  // PERF-3: Track pairs with pending warming requests to avoid duplicate callbacks
+  // When rapid updates occur for the same pair, only the first warming runs
+  private pendingWarmingPairs: Set<string> = new Set();
+
   // P1-PERF: Cache compiled RegExp patterns to avoid repeated compilation
   // Pattern matching is called frequently during invalidation operations
   // Pre-compiled patterns provide significant performance improvement
@@ -292,11 +329,27 @@ export class HierarchicalCache {
       this.redisPromise = getRedisClient();
     }
 
+    // Task 2.2.2: Initialize predictive warming if enabled
+    if (config.predictiveWarming?.enabled) {
+      this.predictiveWarmingConfig = {
+        enabled: true,
+        maxPairsToWarm: config.predictiveWarming.maxPairsToWarm ?? 3,
+        onWarm: config.predictiveWarming.onWarm
+      };
+      this.correlationAnalyzer = getCorrelationAnalyzer();
+
+      // FIX DOC-1: Populate correlation cache on startup so warming works immediately
+      // Per implementation_plan_v2.md: "Consider calling updateCorrelations() on startup"
+      // Without this, getPairsToWarm() returns empty for 1 hour (default interval)
+      this.correlationAnalyzer.updateCorrelations();
+    }
+
     logger.info('Hierarchical cache initialized', {
       l1Enabled: this.config.l1Enabled,
       l2Enabled: this.config.l2Enabled,
       l3Enabled: this.config.l3Enabled,
-      l1Size: this.config.l1Size
+      l1Size: this.config.l1Size,
+      predictiveWarmingEnabled: !!this.predictiveWarmingConfig
     });
   }
 
@@ -420,6 +473,15 @@ export class HierarchicalCache {
       this.setInL3(key, entry);
     }
 
+    // Task 2.2.2: Trigger predictive warming for pair keys
+    // Uses setImmediate for non-blocking operation
+    if (this.predictiveWarmingConfig?.enabled && !this.isClearing) {
+      const pairAddress = this.extractPairAddress(key);
+      if (pairAddress) {
+        setImmediate(() => this.triggerPredictiveWarming(pairAddress));
+      }
+    }
+
     this.recordAccessTime('cache_set', performance.now() - startTime);
   }
 
@@ -441,18 +503,24 @@ export class HierarchicalCache {
   }
 
   async clear(): Promise<void> {
-    if (this.config.l1Enabled) {
-      this.l1Metadata.clear();
-      // T1.4: Use LRUQueue.clear() instead of reassigning to empty array
-      this.l1EvictionQueue.clear();
-    }
-    if (this.config.l2Enabled) {
-      await this.invalidateL2Pattern('*');
-    }
-    if (this.config.l3Enabled) {
-      this.l3Storage.clear();
-      // T2.10: Clear L3 eviction queue
-      this.l3EvictionQueue.clear();
+    // Task 2.2.2: Prevent predictive warming during clear
+    this.isClearing = true;
+    try {
+      if (this.config.l1Enabled) {
+        this.l1Metadata.clear();
+        // T1.4: Use LRUQueue.clear() instead of reassigning to empty array
+        this.l1EvictionQueue.clear();
+      }
+      if (this.config.l2Enabled) {
+        await this.invalidateL2Pattern('*');
+      }
+      if (this.config.l3Enabled) {
+        this.l3Storage.clear();
+        // T2.10: Clear L3 eviction queue
+        this.l3EvictionQueue.clear();
+      }
+    } finally {
+      this.isClearing = false;
     }
   }
 
@@ -489,7 +557,25 @@ export class HierarchicalCache {
         utilization: this.l3MaxSize > 0
           ? this.l3Storage.size / this.l3MaxSize
           : 0 // 0 utilization for unlimited cache
-      }
+      },
+      // Task 2.2.2: Predictive warming stats
+      predictiveWarming: this.predictiveWarmingConfig ? {
+        enabled: this.predictiveWarmingConfig.enabled,
+        maxPairsToWarm: this.predictiveWarmingConfig.maxPairsToWarm,
+        ...this.predictiveWarmingStats,
+        // Task 2.2.3: Computed metrics for measurement
+        avgWarmingLatencyMs: this.predictiveWarmingStats.warmingLatencyCount > 0
+          ? this.predictiveWarmingStats.totalWarmingLatencyMs / this.predictiveWarmingStats.warmingLatencyCount
+          : 0,
+        // warmingHitRate: Ratio of correlated pairs already in L1 vs warming attempts
+        // High rate = cache is pre-warmed effectively (or pairs accessed directly)
+        // Low rate = warming is actively promoting pairs from L2/L3
+        warmingHitRate: this.predictiveWarmingStats.warmingTriggeredCount > 0
+          ? this.predictiveWarmingStats.warmingHitCount / this.predictiveWarmingStats.warmingTriggeredCount
+          : 0,
+        // Include correlation analyzer stats for monitoring memory usage
+        correlationStats: this.correlationAnalyzer?.getStats() ?? null
+      } : undefined
     };
   }
 
@@ -816,6 +902,140 @@ export class HierarchicalCache {
     return regex.test(key);
   }
 
+  // ===========================================================================
+  // Task 2.2.2: Predictive Warming Methods
+  // ===========================================================================
+
+  /** Cache key prefix for pair data */
+  private static readonly PAIR_KEY_PREFIX = 'pair:';
+
+  /**
+   * Extract pair address from cache key.
+   * Only recognizes keys in the format: pair:<address>
+   * Normalizes address to lowercase for consistent correlation tracking.
+   *
+   * @param key - Cache key to extract from
+   * @returns Pair address (lowercase) or null if not a pair key
+   */
+  private extractPairAddress(key: string): string | null {
+    if (!key.startsWith(HierarchicalCache.PAIR_KEY_PREFIX)) {
+      return null;
+    }
+    // FIX INCON-1: Normalize to lowercase for consistency with CorrelationAnalyzer
+    return key.substring(HierarchicalCache.PAIR_KEY_PREFIX.length).toLowerCase();
+  }
+
+  /**
+   * Trigger predictive warming for correlated pairs.
+   * This method runs asynchronously via setImmediate to avoid blocking.
+   *
+   * Performance optimizations:
+   * - Skips pairs already in L1 (no redundant warming)
+   * - Uses Promise.allSettled for parallel warming (faster than sequential)
+   * - Tracks warmingHitCount for pairs already in L1
+   *
+   * @param pairAddress - The pair that was just updated
+   */
+  private async triggerPredictiveWarming(pairAddress: string): Promise<void> {
+    if (!this.correlationAnalyzer || !this.predictiveWarmingConfig) {
+      return;
+    }
+
+    // PERF-3: Deduplication - skip if warming already pending for this pair
+    // This prevents redundant warming when rapid updates occur for the same pair
+    if (this.pendingWarmingPairs.has(pairAddress)) {
+      this.predictiveWarmingStats.deduplicatedCount++;
+      // Still record the price update for correlation tracking
+      this.correlationAnalyzer.recordPriceUpdate(pairAddress);
+      return;
+    }
+
+    // Mark as pending before any async operations
+    this.pendingWarmingPairs.add(pairAddress);
+
+    // Task 2.2.3: Track warming latency
+    const warmingStartTime = performance.now();
+
+    try {
+      // Record the price update for correlation tracking
+      this.correlationAnalyzer.recordPriceUpdate(pairAddress);
+
+      // Get correlated pairs to warm
+      const pairsToWarm = this.correlationAnalyzer.getPairsToWarm(pairAddress);
+
+      if (pairsToWarm.length === 0) {
+        // FIX: Track when no correlations exist (helps identify cold-start vs effective warming)
+        this.predictiveWarmingStats.noCorrelationsCount++;
+        return;
+      }
+
+      // Limit to configured maximum
+      const limitedPairs = pairsToWarm.slice(0, this.predictiveWarmingConfig.maxPairsToWarm);
+
+      // Track that warming was triggered
+      this.predictiveWarmingStats.warmingTriggeredCount++;
+
+      // FIX PERF-1 & PERF-2: Warm pairs in parallel, skip if already in L1
+      const warmingPromises = limitedPairs.map(async (correlatedPair) => {
+        const key = `${HierarchicalCache.PAIR_KEY_PREFIX}${correlatedPair}`;
+
+        // FIX PERF-2: Check if already in L1 (already warmed)
+        if (this.config.l1Enabled && this.l1Metadata.has(key)) {
+          // Already in L1 - count as a warming hit (predictive warming was valuable)
+          this.predictiveWarmingStats.warmingHitCount++;
+          return { pair: correlatedPair, warmed: false, hit: true };
+        }
+
+        try {
+          // Try to get from L2/L3 and promote to L1
+          const value = await this.get(key);
+          if (value !== null) {
+            this.predictiveWarmingStats.pairsWarmedCount++;
+            return { pair: correlatedPair, warmed: true, hit: false };
+          }
+          return { pair: correlatedPair, warmed: false, hit: false };
+        } catch (error) {
+          logger.error('Failed to warm correlated pair', { correlatedPair, error });
+          return { pair: correlatedPair, warmed: false, hit: false, error };
+        }
+      });
+
+      // FIX PERF-1: Run warming in parallel using Promise.allSettled
+      const results = await Promise.allSettled(warmingPromises);
+
+      // Collect successfully warmed pairs for callback
+      const warmedPairs: string[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value.warmed) {
+          warmedPairs.push(result.value.pair);
+        }
+      }
+
+      // Invoke callback if configured (useful for testing/monitoring)
+      if (warmedPairs.length > 0 && this.predictiveWarmingConfig.onWarm) {
+        this.predictiveWarmingConfig.onWarm(warmedPairs);
+      }
+
+      // Task 2.2.3: Record warming latency
+      const warmingLatency = performance.now() - warmingStartTime;
+      this.predictiveWarmingStats.totalWarmingLatencyMs += warmingLatency;
+      this.predictiveWarmingStats.warmingLatencyCount++;
+      this.predictiveWarmingStats.lastWarmingLatencyMs = warmingLatency;
+
+      logger.debug('Predictive warming completed', {
+        triggerPair: pairAddress,
+        pairsRequested: limitedPairs.length,
+        pairsWarmed: warmedPairs.length,
+        latencyMs: warmingLatency.toFixed(2)
+      });
+    } catch (error) {
+      logger.warn('Predictive warming failed', { pairAddress, error });
+    } finally {
+      // PERF-3: Always clear the pending flag when done
+      this.pendingWarmingPairs.delete(pairAddress);
+    }
+  }
+
   // Utility methods
   private estimateSize(obj: any): number {
     // Rough size estimation
@@ -884,12 +1104,27 @@ export function createHierarchicalCache(config?: Partial<CacheConfig>): Hierarch
   return new HierarchicalCache(config);
 }
 
-// Default instance
-let defaultCache: HierarchicalCache | null = null;
+// =============================================================================
+// Singleton Factory (Issue 6.1: Standardized pattern)
+// =============================================================================
 
-export function getHierarchicalCache(): HierarchicalCache {
+let defaultCache: HierarchicalCache | null = null;
+let defaultCacheConfig: Partial<CacheConfig> | undefined = undefined;
+
+/**
+ * Get the singleton HierarchicalCache instance.
+ *
+ * Note: The configuration is only used on first initialization. If called with
+ * different config after the singleton exists, a warning is logged and the
+ * existing instance is returned unchanged. Use resetHierarchicalCache() first
+ * if you need to change configuration.
+ *
+ * @param config - Optional configuration (only used on first initialization)
+ * @returns The singleton HierarchicalCache instance
+ */
+export function getHierarchicalCache(config?: Partial<CacheConfig>): HierarchicalCache {
   if (!defaultCache) {
-    defaultCache = new HierarchicalCache({
+    const defaultConfig: Partial<CacheConfig> = config ?? {
       l1Enabled: true,
       l1Size: 128, // 128MB L1 cache
       l2Enabled: true,
@@ -897,7 +1132,30 @@ export function getHierarchicalCache(): HierarchicalCache {
       l3Enabled: true,
       enablePromotion: true,
       enableDemotion: true
-    });
+    };
+    defaultCache = new HierarchicalCache(defaultConfig);
+    defaultCacheConfig = config;
+  } else if (config !== undefined && config !== defaultCacheConfig) {
+    // Issue 4.3/6.1: Warn if config differs from initial
+    logger.warn(
+      'getHierarchicalCache called with different config after initialization. ' +
+      'Config is ignored. Use resetHierarchicalCache() first if reconfiguration is needed.',
+      { providedConfig: config, existingConfig: defaultCacheConfig }
+    );
   }
   return defaultCache;
+}
+
+/**
+ * Reset the singleton HierarchicalCache instance.
+ * Use for testing or when reconfiguration is needed.
+ *
+ * Issue 6.1: Standardized reset pattern across all caching singletons.
+ */
+export async function resetHierarchicalCache(): Promise<void> {
+  if (defaultCache) {
+    await defaultCache.clear();
+  }
+  defaultCache = null;
+  defaultCacheConfig = undefined;
 }

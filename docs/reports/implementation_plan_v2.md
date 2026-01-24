@@ -283,7 +283,7 @@ Completed: 2026-01-23
 **Priority:** P2 (Low)
 **Impact:** Reduce cache misses by 20-30%
 **Effort:** 3-4 days
-**Status:** Task 2.2.1 COMPLETE (January 24, 2026)
+**Status:** Tasks 2.2.1, 2.2.2 & 2.2.3 (metrics) COMPLETE (January 24, 2026)
 
 #### Background
 When a price update occurs for WETH-USDC, correlated pairs (WETH-USDT, WBTC-USDC) are likely to have updates soon. Pre-warming the cache improves hit rate.
@@ -321,12 +321,45 @@ CODE ANALYSIS FINDINGS (for future reference):
 - Correlations only available after first updateCorrelations() call or automatic interval
 - Timer handling now consistent with PairActivityTracker (.unref() unconditional)
 
-Task 2.2.2: Implement Predictive Warming
+Task 2.2.2: Implement Predictive Warming [COMPLETE]
 Location: shared/core/src/caching/hierarchical-cache.ts
-- [ ] On cache update, fetch correlated pairs
-- [ ] Use low-priority background fetch
-- [ ] Limit warming to top 3 correlated pairs
+- [x] On cache update, fetch correlated pairs
+- [x] Use low-priority background fetch
+- [x] Limit warming to top 3 correlated pairs (configurable via maxPairsToWarm)
 Estimated: 1 day
+Completed: 2026-01-24
+
+IMPLEMENTATION DETAILS for Task 2.2.2:
+- Added PredictiveWarmingConfig interface (enabled, maxPairsToWarm, onWarm callback)
+- Extended CacheConfig with optional predictiveWarming config
+- Integrated with CorrelationAnalyzer singleton via getCorrelationAnalyzer()
+- Warming triggered automatically on set() for pair keys (format: pair:<address>)
+- Uses setImmediate() for non-blocking operation - doesn't block cache writes
+- Statistics tracking: warmingTriggeredCount, pairsWarmedCount, warmingHitCount
+- Warming paused during clear() to prevent interference
+- 19 tests covering configuration, triggers, warming logic, stats, error handling
+- Export: PredictiveWarmingConfig type from @arbitrage/core
+
+CODE ANALYSIS FIXES (January 24, 2026):
+- FIX BUG-1: warmingHitCount now tracks pairs already in L1 when warming is triggered
+- FIX PERF-1: Changed from sequential to parallel warming using Promise.allSettled
+- FIX PERF-2: Skip warming for pairs already in L1 (no redundant fetches)
+- FIX DOC-1: Call updateCorrelations() on startup so warming works immediately
+- FIX INCON-1: Normalize pair addresses to lowercase for consistency with CorrelationAnalyzer
+- Added PAIR_KEY_PREFIX constant to avoid hardcoded string
+
+USAGE EXAMPLE:
+```typescript
+const cache = createHierarchicalCache({
+  l1Enabled: true,
+  l2Enabled: true,
+  predictiveWarming: {
+    enabled: true,
+    maxPairsToWarm: 3,  // default
+    onWarm: (pairs) => console.log('Warmed pairs:', pairs)
+  }
+});
+```
 
 INTEGRATION GUIDANCE for Task 2.2.2:
 - Import: import { getCorrelationAnalyzer } from './correlation-analyzer';
@@ -336,19 +369,42 @@ INTEGRATION GUIDANCE for Task 2.2.2:
 - Consider calling updateCorrelations() on startup to populate cache immediately
 - Default config: minCoOccurrences=3, topCorrelatedLimit=3, coOccurrenceWindowMs=1000
 
-Task 2.2.3: Measure Impact
-- [ ] Add cache hit rate metrics (with/without warming)
-- [ ] Track warming latency and throughput
-- [ ] A/B test warming enabled vs disabled
-- [ ] Monitor memory usage of CorrelationAnalyzer
-Estimated: 1 day
+Task 2.2.3: Measure Impact [PARTIAL - METRICS IMPLEMENTED]
+- [x] Add cache hit rate metrics (with/without warming)
+      - warmingHitRate: computed metric in getStats()
+      - warmingHitCount: increments when correlated pair already in L1
+- [x] Track warming latency and throughput
+      - avgWarmingLatencyMs: average warming operation time
+      - lastWarmingLatencyMs: most recent warming latency
+      - warmingLatencyCount: number of measurements
+      - deduplicatedCount: warming requests deduplicated (PERF-3)
+- [ ] A/B test warming enabled vs disabled (requires production validation)
+- [x] Monitor memory usage of CorrelationAnalyzer
+      - estimatedMemoryBytes: estimated total memory usage
+      - coOccurrenceEntries: count of co-occurrence matrix entries
+      - correlationCacheEntries: count of correlation cache entries
+Completed (metrics): January 24, 2026
 
-METRICS TO TRACK for Task 2.2.3:
-- cache.warmingTriggeredCount: how often warming is triggered
-- cache.warmingHitRate: % of warmed entries that were subsequently accessed
-- cache.warmingLatencyMs: time to warm correlated pairs
-- correlation.trackedPairs: current pair count
-- correlation.avgCorrelationScore: quality metric
+IMPLEMENTATION DETAILS for Task 2.2.3:
+All metrics exposed via cache.getStats().predictiveWarming:
+- warmingTriggeredCount: how often warming is triggered
+- pairsWarmedCount: pairs successfully promoted to L1
+- warmingHitCount: correlated pairs found already in L1
+- warmingHitRate: warmingHitCount / warmingTriggeredCount
+- deduplicatedCount: warming requests skipped (PERF-3)
+- avgWarmingLatencyMs: average warming operation latency
+- lastWarmingLatencyMs: most recent warming latency
+- correlationStats: CorrelationAnalyzer stats including memory estimates
+
+CorrelationAnalyzer stats (via correlationStats):
+- trackedPairs: current pair count
+- totalUpdates: price updates processed
+- avgCorrelationScore: correlation quality metric
+- estimatedMemoryBytes: memory usage estimate
+- coOccurrenceEntries: matrix entry count
+- correlationCacheEntries: cache entry count
+
+Tests: 26 predictive-warming tests + 38 correlation-analyzer tests = 64 total
 ```
 
 ---

@@ -85,14 +85,26 @@ export interface CorrelationStats {
 
   /** Average correlation score across all pairs */
   avgCorrelationScore: number;
+
+  /** Task 2.2.3: Estimated memory usage in bytes */
+  estimatedMemoryBytes: number;
+
+  /** Task 2.2.3: Number of co-occurrence matrix entries */
+  coOccurrenceEntries: number;
+
+  /** Task 2.2.3: Number of correlation cache entries */
+  correlationCacheEntries: number;
 }
 
 /**
  * Internal state for tracking a pair's update history
  */
 interface PairUpdateState {
-  /** Timestamps of recent updates */
-  updateTimestamps: number[];
+  /**
+   * Timestamps of recent updates.
+   * Issue 10.4: Changed from number[] to CircularTimestampBuffer for O(1) insertion.
+   */
+  updateTimestamps: CircularTimestampBuffer;
 
   /** Last update time (for LRU eviction) */
   lastUpdateTime: number;
@@ -127,6 +139,119 @@ const DEFAULT_CONFIG: CorrelationAnalyzerConfig = {
 const MAX_TIMESTAMPS_PER_PAIR = 1000;
 
 // =============================================================================
+// CircularTimestampBuffer - Issue 10.4 Performance Optimization
+// =============================================================================
+
+/**
+ * Circular buffer for storing timestamps with O(1) insertion.
+ *
+ * Replaces array-based storage with slice() which allocates O(n) memory
+ * on every trim operation. This buffer:
+ * - Uses fixed-size array with wrap-around indexing
+ * - O(1) push (overwrites oldest when full)
+ * - Supports iteration in chronological order
+ * - Supports in-place filtering for cleanup
+ *
+ * @see Issue 10.4: Performance optimization for hot path
+ */
+class CircularTimestampBuffer {
+  private buffer: number[];
+  private head: number = 0;    // Next write position
+  private count: number = 0;   // Current number of elements
+  private readonly capacity: number;
+
+  constructor(capacity: number = MAX_TIMESTAMPS_PER_PAIR) {
+    this.capacity = capacity;
+    this.buffer = new Array(capacity);
+  }
+
+  /**
+   * Add a timestamp to the buffer.
+   * O(1) operation - overwrites oldest if at capacity.
+   */
+  push(timestamp: number): void {
+    this.buffer[this.head] = timestamp;
+    this.head = (this.head + 1) % this.capacity;
+    if (this.count < this.capacity) {
+      this.count++;
+    }
+  }
+
+  /**
+   * Get the current number of timestamps in the buffer.
+   */
+  get length(): number {
+    return this.count;
+  }
+
+  /**
+   * Check if buffer is empty.
+   */
+  isEmpty(): boolean {
+    return this.count === 0;
+  }
+
+  /**
+   * Clear all timestamps.
+   */
+  clear(): void {
+    this.head = 0;
+    this.count = 0;
+  }
+
+  /**
+   * Iterate through all timestamps in chronological order.
+   * Returns timestamps from oldest to newest.
+   */
+  *[Symbol.iterator](): IterableIterator<number> {
+    if (this.count === 0) return;
+
+    // Start position is (head - count) wrapped to positive
+    const start = (this.head - this.count + this.capacity) % this.capacity;
+
+    for (let i = 0; i < this.count; i++) {
+      const index = (start + i) % this.capacity;
+      yield this.buffer[index];
+    }
+  }
+
+  /**
+   * Convert to array (for compatibility with existing code).
+   * O(n) operation - use sparingly, prefer iteration.
+   */
+  toArray(): number[] {
+    return Array.from(this);
+  }
+
+  /**
+   * Filter timestamps in place, keeping only those matching predicate.
+   * O(n) operation but doesn't allocate new array.
+   *
+   * @param predicate - Function that returns true for timestamps to keep
+   * @returns Number of timestamps retained
+   */
+  filterInPlace(predicate: (timestamp: number) => boolean): number {
+    if (this.count === 0) return 0;
+
+    // Collect matching timestamps
+    const kept: number[] = [];
+    for (const ts of this) {
+      if (predicate(ts)) {
+        kept.push(ts);
+      }
+    }
+
+    // Rebuild buffer with kept timestamps
+    this.clear();
+    for (const ts of kept) {
+      this.push(ts);
+    }
+
+    return this.count;
+  }
+}
+
+// =============================================================================
 // Correlation Analyzer
 // =============================================================================
 
@@ -137,12 +262,48 @@ const MAX_TIMESTAMPS_PER_PAIR = 1000;
  * Used for predictive cache warming - when pair A updates, pre-warm cache for
  * correlated pairs B, C, D.
  *
- * Thread Safety:
+ * ## Thread Safety
+ *
  * This class is designed for single-threaded Node.js event loop usage.
  * All operations (recordPriceUpdate, getCorrelatedPairs, etc.) are synchronous
- * and safe to call from async code without additional locking. If used with
- * Worker Threads sharing this instance, external synchronization (AsyncMutex)
- * would be required on recordPriceUpdate() calls.
+ * and safe to call from async code without additional locking.
+ *
+ * ### Worker Thread Usage (Issue 2.1 Documentation)
+ *
+ * If sharing this instance across Worker Threads, external synchronization is required.
+ * Use AsyncMutex from @arbitrage/core for thread-safe access:
+ *
+ * @example
+ * ```typescript
+ * import { namedMutex, CorrelationAnalyzer } from '@arbitrage/core';
+ *
+ * // Create analyzer in main thread
+ * const analyzer = new CorrelationAnalyzer();
+ *
+ * // In worker thread - wrap mutating operations with mutex
+ * async function recordUpdateSafe(pairAddress: string): Promise<void> {
+ *   await namedMutex('correlation-analyzer').runExclusive(() => {
+ *     analyzer.recordPriceUpdate(pairAddress);
+ *   });
+ * }
+ *
+ * // Read operations are safe without mutex (snapshot semantics)
+ * function getPairsToWarmSafe(pairAddress: string): string[] {
+ *   return analyzer.getPairsToWarm(pairAddress);
+ * }
+ * ```
+ *
+ * Methods requiring synchronization when used with Worker Threads:
+ * - recordPriceUpdate() - modifies internal state
+ * - updateCorrelations() - modifies correlation cache
+ * - reset() / destroy() - clears all state
+ * - beginBatch() / endBatch() - batch mode state
+ *
+ * Read-only methods (safe without synchronization):
+ * - getCorrelatedPairs() - reads cached correlations
+ * - getPairsToWarm() - reads cached correlations
+ * - getStats() - reads statistics snapshot
+ * - isBatchMode() - reads boolean flag
  */
 export class CorrelationAnalyzer {
   private config: CorrelationAnalyzerConfig;
@@ -172,6 +333,22 @@ export class CorrelationAnalyzer {
   /** Periodic update timer */
   private updateTimer: NodeJS.Timeout | null = null;
 
+  /** Task 2.2.3: Cached memory estimate for performance */
+  private memoryEstimateCache: {
+    totalBytes: number;
+    coOccurrenceEntries: number;
+    correlationCacheEntries: number;
+  } | null = null;
+  private memoryEstimateDirty: boolean = true;
+
+  /**
+   * Issue 10.5: Batch mode state for burst update processing.
+   * When batch mode is active, co-occurrence tracking is deferred until endBatch().
+   * This is more efficient for processing multiple updates from a single block.
+   */
+  private batchMode: boolean = false;
+  private batchUpdates: Array<{ pairAddress: string; timestamp: number }> = [];
+
   constructor(config: Partial<CorrelationAnalyzerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
@@ -196,6 +373,9 @@ export class CorrelationAnalyzer {
    * Record a price update for a pair.
    * Call this whenever a Sync event is processed.
    *
+   * In batch mode (beginBatch() called), updates are collected but co-occurrence
+   * tracking is deferred until endBatch() for better performance during bursts.
+   *
    * @param pairAddress - The pair contract address
    * @param timestamp - Optional timestamp (defaults to now)
    */
@@ -205,6 +385,26 @@ export class CorrelationAnalyzer {
     const now = timestamp ?? Date.now();
     const normalizedAddress = pairAddress.toLowerCase();
 
+    // Issue 10.5: In batch mode, collect updates for deferred processing
+    if (this.batchMode) {
+      this.batchUpdates.push({ pairAddress: normalizedAddress, timestamp: now });
+      return;
+    }
+
+    this.recordPriceUpdateInternal(normalizedAddress, now, true);
+  }
+
+  /**
+   * Internal implementation of recordPriceUpdate.
+   * @param normalizedAddress - Lowercase pair address
+   * @param timestamp - Update timestamp
+   * @param trackCoOccurrences - Whether to track co-occurrences (false in batch mode)
+   */
+  private recordPriceUpdateInternal(
+    normalizedAddress: string,
+    timestamp: number,
+    trackCoOccurrencesNow: boolean
+  ): void {
     // Get or create pair state
     let state = this.pairUpdates.get(normalizedAddress);
     if (!state) {
@@ -212,31 +412,122 @@ export class CorrelationAnalyzer {
       this.evictLRUPairsIfNeeded();
 
       state = {
-        updateTimestamps: [],
-        lastUpdateTime: now,
+        // Issue 10.4: Use CircularTimestampBuffer for O(1) insertion without GC pressure
+        updateTimestamps: new CircularTimestampBuffer(MAX_TIMESTAMPS_PER_PAIR),
+        lastUpdateTime: timestamp,
         totalUpdates: 0
       };
       this.pairUpdates.set(normalizedAddress, state);
     }
 
-    // Record timestamp
-    state.updateTimestamps.push(now);
-    state.lastUpdateTime = now;
+    // Record timestamp - O(1) operation, automatically evicts oldest if at capacity
+    // Issue 10.4: Removed slice() call that was O(n) and created GC pressure
+    state.updateTimestamps.push(timestamp);
+    state.lastUpdateTime = timestamp;
     state.totalUpdates++;
-
-    // Trim old timestamps to prevent memory growth
-    if (state.updateTimestamps.length > MAX_TIMESTAMPS_PER_PAIR) {
-      state.updateTimestamps = state.updateTimestamps.slice(-MAX_TIMESTAMPS_PER_PAIR);
-    }
 
     this.totalUpdates++;
 
-    // Track co-occurrences with other pairs that updated recently
-    // Must be called BEFORE updating recentlyUpdatedPairs to avoid self-correlation
-    this.trackCoOccurrences(normalizedAddress, now);
+    // Track co-occurrences (skipped in batch mode - done in endBatch())
+    if (trackCoOccurrencesNow) {
+      // Track co-occurrences with other pairs that updated recently
+      // Must be called BEFORE updating recentlyUpdatedPairs to avoid self-correlation
+      this.trackCoOccurrences(normalizedAddress, timestamp);
 
-    // Add to recently updated set for future co-occurrence detection
-    this.recentlyUpdatedPairs.set(normalizedAddress, now);
+      // Add to recently updated set for future co-occurrence detection
+      this.recentlyUpdatedPairs.set(normalizedAddress, timestamp);
+    }
+
+    // Mark memory estimate as dirty since data structures changed
+    this.memoryEstimateDirty = true;
+  }
+
+  // ===========================================================================
+  // Issue 10.5: Batch Mode API for Burst Processing
+  // ===========================================================================
+
+  /**
+   * Start batch mode for collecting multiple updates.
+   * Use this when processing a block with multiple Sync events.
+   *
+   * Performance benefit: Instead of O(k) co-occurrence checks per update
+   * (where k = recently updated pairs), batch mode computes co-occurrences
+   * once at the end, reducing total work for burst updates.
+   *
+   * @example
+   * ```typescript
+   * analyzer.beginBatch();
+   * for (const event of blockEvents) {
+   *   analyzer.recordPriceUpdate(event.pairAddress, event.timestamp);
+   * }
+   * analyzer.endBatch();
+   * ```
+   */
+  beginBatch(): void {
+    if (this.batchMode) {
+      logger.warn('beginBatch called while already in batch mode');
+      return;
+    }
+    this.batchMode = true;
+    this.batchUpdates = [];
+  }
+
+  /**
+   * End batch mode and process all collected updates.
+   * Co-occurrences are computed efficiently in a single pass.
+   *
+   * @returns Number of updates processed
+   */
+  endBatch(): number {
+    if (!this.batchMode) {
+      logger.warn('endBatch called while not in batch mode');
+      return 0;
+    }
+
+    const updates = this.batchUpdates;
+    this.batchMode = false;
+    this.batchUpdates = [];
+
+    if (updates.length === 0) {
+      return 0;
+    }
+
+    // First pass: Record all updates without co-occurrence tracking
+    for (const { pairAddress, timestamp } of updates) {
+      this.recordPriceUpdateInternal(pairAddress, timestamp, false);
+    }
+
+    // Second pass: Compute co-occurrences for all pairs in the batch
+    // All pairs in the same batch are considered co-occurring
+    const batchPairs = new Set(updates.map(u => u.pairAddress));
+    const batchTime = Math.max(...updates.map(u => u.timestamp));
+
+    // Track co-occurrences between all pairs in the batch
+    // All pairs that updated together in the same batch are considered co-occurring
+    for (const pairA of batchPairs) {
+      for (const pairB of batchPairs) {
+        if (pairA !== pairB) {
+          // Record bidirectional co-occurrence using existing private method
+          this.recordCoOccurrence(pairA, pairB, batchTime);
+        }
+      }
+      // Add to recently updated for future correlation tracking
+      this.recentlyUpdatedPairs.set(pairA, batchTime);
+    }
+
+    logger.debug('Batch processing completed', {
+      updatesProcessed: updates.length,
+      uniquePairs: batchPairs.size
+    });
+
+    return updates.length;
+  }
+
+  /**
+   * Check if batch mode is currently active.
+   */
+  isBatchMode(): boolean {
+    return this.batchMode;
   }
 
   /**
@@ -278,6 +569,8 @@ export class CorrelationAnalyzer {
 
     // Clear existing correlation cache
     this.correlationCache.clear();
+    // Mark memory estimate as dirty since cache structure changed
+    this.memoryEstimateDirty = true;
     let totalCorrelations = 0;
     let totalScore = 0;
 
@@ -349,13 +642,100 @@ export class CorrelationAnalyzer {
       }
     }
 
+    // Task 2.2.3: Calculate memory usage estimation
+    const memoryEstimate = this.estimateMemoryUsage();
+
     return {
       trackedPairs: this.pairUpdates.size,
       totalUpdates: this.totalUpdates,
       correlationsComputed: this.correlationsComputed,
       lastCorrelationUpdate: this.lastCorrelationUpdate,
-      avgCorrelationScore: scoreCount > 0 ? totalScore / scoreCount : 0
+      avgCorrelationScore: scoreCount > 0 ? totalScore / scoreCount : 0,
+      // Task 2.2.3: Memory tracking
+      estimatedMemoryBytes: memoryEstimate.totalBytes,
+      coOccurrenceEntries: memoryEstimate.coOccurrenceEntries,
+      correlationCacheEntries: memoryEstimate.correlationCacheEntries
     };
+  }
+
+  /**
+   * Task 2.2.3: Estimate memory usage of the analyzer.
+   * Provides rough estimates for monitoring memory consumption.
+   * PERF: Caches result to avoid O(n) iteration on every getStats() call.
+   */
+  private estimateMemoryUsage(): {
+    totalBytes: number;
+    coOccurrenceEntries: number;
+    correlationCacheEntries: number;
+  } {
+    // Return cached estimate if available and not dirty
+    if (!this.memoryEstimateDirty && this.memoryEstimateCache) {
+      return this.memoryEstimateCache;
+    }
+
+    // Estimate bytes per entry (rough approximations):
+    // - String (address): ~42 bytes (40 hex chars + overhead)
+    // - Number: 8 bytes
+    // - Object overhead: ~16 bytes
+
+    const ADDRESS_SIZE = 42;
+    const NUMBER_SIZE = 8;
+    const OBJECT_OVERHEAD = 16;
+
+    // pairUpdates: Map<string, PairUpdateState>
+    // PairUpdateState = { updateTimestamps: CircularTimestampBuffer, lastUpdateTime: number, totalUpdates: number }
+    // Issue 10.4: CircularTimestampBuffer has fixed capacity but variable count
+    const CIRCULAR_BUFFER_OVERHEAD = 24; // head, count, capacity (3 numbers)
+    let pairUpdatesBytes = 0;
+    for (const [key, state] of this.pairUpdates.entries()) {
+      pairUpdatesBytes += ADDRESS_SIZE; // key
+      // CircularTimestampBuffer: fixed capacity array + overhead
+      pairUpdatesBytes += MAX_TIMESTAMPS_PER_PAIR * NUMBER_SIZE; // fixed-size buffer
+      pairUpdatesBytes += CIRCULAR_BUFFER_OVERHEAD; // buffer instance overhead
+      pairUpdatesBytes += NUMBER_SIZE * 2; // lastUpdateTime + totalUpdates
+      pairUpdatesBytes += OBJECT_OVERHEAD;
+    }
+
+    // coOccurrenceMatrix: Map<string, Map<string, CoOccurrenceEntry>>
+    // CoOccurrenceEntry = { count: number, lastOccurrence: number }
+    let coOccurrenceBytes = 0;
+    let coOccurrenceEntries = 0;
+    for (const [key, innerMap] of this.coOccurrenceMatrix.entries()) {
+      coOccurrenceBytes += ADDRESS_SIZE; // outer key
+      for (const [innerKey] of innerMap.entries()) {
+        coOccurrenceBytes += ADDRESS_SIZE; // inner key
+        coOccurrenceBytes += NUMBER_SIZE * 2; // count + lastOccurrence
+        coOccurrenceBytes += OBJECT_OVERHEAD;
+        coOccurrenceEntries++;
+      }
+    }
+
+    // correlationCache: Map<string, PairCorrelation[]>
+    // PairCorrelation = { pairAddress, coOccurrenceCount, correlationScore, lastCoOccurrence }
+    let correlationCacheBytes = 0;
+    let correlationCacheEntries = 0;
+    for (const [key, correlations] of this.correlationCache.entries()) {
+      correlationCacheBytes += ADDRESS_SIZE; // key
+      for (const correlation of correlations) {
+        correlationCacheBytes += ADDRESS_SIZE; // pairAddress
+        correlationCacheBytes += NUMBER_SIZE * 3; // count + score + lastOccurrence
+        correlationCacheBytes += OBJECT_OVERHEAD;
+        correlationCacheEntries++;
+      }
+    }
+
+    // recentlyUpdatedPairs: Map<string, number>
+    const recentlyUpdatedBytes = this.recentlyUpdatedPairs.size * (ADDRESS_SIZE + NUMBER_SIZE);
+
+    // Cache the result and mark as clean
+    this.memoryEstimateCache = {
+      totalBytes: pairUpdatesBytes + coOccurrenceBytes + correlationCacheBytes + recentlyUpdatedBytes,
+      coOccurrenceEntries,
+      correlationCacheEntries
+    };
+    this.memoryEstimateDirty = false;
+
+    return this.memoryEstimateCache;
   }
 
   /**
@@ -369,6 +749,8 @@ export class CorrelationAnalyzer {
     this.totalUpdates = 0;
     this.correlationsComputed = 0;
     this.lastCorrelationUpdate = 0;
+    // Mark memory estimate as dirty since all data was cleared
+    this.memoryEstimateDirty = true;
   }
 
   /**
@@ -439,17 +821,19 @@ export class CorrelationAnalyzer {
 
   /**
    * Clean up stale update records.
+   * Issue 10.4: Uses filterInPlace() on CircularTimestampBuffer instead of array.filter()
    */
   private cleanupStaleData(): void {
     const cutoff = Date.now() - this.config.correlationHistoryMs;
     const pairsToRemove: string[] = [];
 
     for (const [pairAddress, state] of this.pairUpdates.entries()) {
-      // Remove old timestamps
-      state.updateTimestamps = state.updateTimestamps.filter(ts => ts > cutoff);
+      // Remove old timestamps using in-place filtering
+      // Issue 10.4: filterInPlace avoids array allocation vs filter() which creates new array
+      state.updateTimestamps.filterInPlace(ts => ts > cutoff);
 
       // If no recent updates, mark for removal
-      if (state.updateTimestamps.length === 0) {
+      if (state.updateTimestamps.isEmpty()) {
         pairsToRemove.push(pairAddress);
       }
     }
@@ -461,6 +845,8 @@ export class CorrelationAnalyzer {
     }
 
     if (pairsToRemove.length > 0) {
+      // Mark memory estimate as dirty since pairs were removed
+      this.memoryEstimateDirty = true;
       logger.debug('Cleaned up stale pairs', {
         removed: pairsToRemove.length,
         remaining: this.pairUpdates.size
@@ -486,6 +872,9 @@ export class CorrelationAnalyzer {
       this.pairUpdates.delete(pair);
       this.coOccurrenceMatrix.delete(pair);
     }
+
+    // Mark memory estimate as dirty since pairs were evicted
+    this.memoryEstimateDirty = true;
 
     logger.debug('Evicted LRU pairs', {
       evicted: toRemove,
@@ -520,9 +909,15 @@ export class CorrelationAnalyzer {
 // =============================================================================
 
 let analyzerInstance: CorrelationAnalyzer | null = null;
+let analyzerInstanceConfig: Partial<CorrelationAnalyzerConfig> | undefined = undefined;
 
 /**
  * Get the singleton CorrelationAnalyzer instance.
+ *
+ * Note: The configuration is only used on first initialization. If called with
+ * different config after the singleton exists, a warning is logged and the
+ * existing instance is returned unchanged. Use resetCorrelationAnalyzer() first
+ * if you need to change configuration.
  *
  * @param config - Optional configuration (only used on first initialization)
  * @returns The singleton CorrelationAnalyzer instance
@@ -532,6 +927,15 @@ export function getCorrelationAnalyzer(
 ): CorrelationAnalyzer {
   if (!analyzerInstance) {
     analyzerInstance = new CorrelationAnalyzer(config);
+    analyzerInstanceConfig = config;
+  } else if (config !== undefined && config !== analyzerInstanceConfig) {
+    // P0-FIX Issue 4.3: Warn if config differs from initial
+    // This prevents silent config being ignored which can cause subtle bugs
+    logger.warn(
+      'getCorrelationAnalyzer called with different config after initialization. ' +
+      'Config is ignored. Use resetCorrelationAnalyzer() first if reconfiguration is needed.',
+      { providedConfig: config, existingConfig: analyzerInstanceConfig }
+    );
   }
   return analyzerInstance;
 }
@@ -557,4 +961,5 @@ export function resetCorrelationAnalyzer(): void {
     analyzerInstance.destroy();
   }
   analyzerInstance = null;
+  analyzerInstanceConfig = undefined;
 }
