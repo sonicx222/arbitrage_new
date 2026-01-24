@@ -868,6 +868,7 @@ export {
   parseAlgebraPoolCreatedEvent,
   parseTraderJoePairCreatedEvent,
   FactoryEventSignatures,
+  AdditionalEventSignatures,
 } from './factory-subscription';
 
 export type {

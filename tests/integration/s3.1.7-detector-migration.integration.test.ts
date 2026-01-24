@@ -695,33 +695,36 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
       const fs = await import('fs');
       const path = await import('path');
 
-      // Verify P1 uses correct port
+      // P0-FIX: Test updated to match centralized port pattern
+      // Ports now come from PARTITION_PORTS constant with fallback defaults
+
+      // Verify P1 uses correct port via PARTITION_PORTS
       const p1Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-asia-fast/src/index.ts'),
         'utf-8'
       );
-      expect(p1Content).toContain('P1_DEFAULT_PORT = 3001');
+      expect(p1Content).toMatch(/P1_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3001/);
 
-      // Verify P2 uses correct port
+      // Verify P2 uses correct port via PARTITION_PORTS
       const p2Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-l2-turbo/src/index.ts'),
         'utf-8'
       );
-      expect(p2Content).toContain('P2_DEFAULT_PORT = 3002');
+      expect(p2Content).toMatch(/P2_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3002/);
 
-      // Verify P3 uses correct port
+      // Verify P3 uses correct port via PARTITION_PORTS
       const p3Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-high-value/src/index.ts'),
         'utf-8'
       );
-      expect(p3Content).toContain('P3_DEFAULT_PORT = 3003');
+      expect(p3Content).toMatch(/P3_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3003/);
 
-      // Verify P4 uses correct port
+      // Verify P4 uses correct port via PARTITION_PORTS
       const p4Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-solana/src/index.ts'),
         'utf-8'
       );
-      expect(p4Content).toContain('P4_DEFAULT_PORT = 3004');
+      expect(p4Content).toMatch(/P4_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3004/);
     });
   });
 

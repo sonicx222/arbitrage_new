@@ -204,6 +204,7 @@ Completed: January 23, 2026
 **Priority:** P2 (Medium)
 **Impact:** 40-50x RPC subscription reduction
 **Effort:** 5-7 days
+**Status:** ✅ COMPLETE (January 23, 2026)
 
 #### Background
 Currently subscribing to individual pair addresses. Factory-level subscription (listening to PairCreated/Sync events at factory) reduces subscriptions from 1000+ to ~20.
@@ -246,12 +247,22 @@ Location: shared/core/src/factory-subscription.ts, shared/core/src/base-detector
 - [x] Integrate with BaseDetector lifecycle
 Completed: 2026-01-23
 
-Task 2.1.3: Migrate Existing Subscriptions
-Location: services/partition-*/src/index.ts
-- [ ] Replace individual pair subscriptions
-- [ ] Add config flag for gradual rollout
-- [ ] Monitor subscription count reduction
-Estimated: 2 days
+Task 2.1.3: Migrate Existing Subscriptions ✅ COMPLETE
+Location: services/unified-detector/src/chain-instance.ts
+- [x] Replace individual pair subscriptions with factory subscriptions
+      - Added shouldUseFactorySubscriptions() for mode selection
+      - Implemented subscribeViaFactoryMode() and subscribeViaLegacyMode()
+      - Added handlePairCreatedEvent() for dynamic pair discovery
+- [x] Add config flag for gradual rollout
+      - ChainInstanceConfig.useFactorySubscriptions (default: false)
+      - ChainInstanceConfig.factorySubscriptionEnabledChains (specific chains)
+      - ChainInstanceConfig.factorySubscriptionRolloutPercent (0-100%)
+      - Constants in services/unified-detector/src/constants.ts
+- [x] Monitor subscription count reduction
+      - Added getSubscriptionStats() method
+      - Tracks mode, subscription counts, and RPC reduction ratio
+- [x] Unit tests (20 tests in subscription-migration.test.ts)
+Completed: 2026-01-23
 
 Task 2.1.4: Testing ✅ COMPLETE
 - [x] Test factory event parsing (52 tests in factory-subscription.test.ts)

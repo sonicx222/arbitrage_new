@@ -3,8 +3,8 @@
 > **Version**: 2.0
 > **Created**: 2025-01-10
 > **Status**: Active
-> **Last Updated**: 2025-01-19 (S4.1.2 & S4.1.3 verified complete with test coverage)
-> **Tests**: 4029 passing (772 S3.1.x tests + 113 S3.2.1 tests + 113 S3.2.2 tests + 63 S3.2.3 tests + 48 S3.2.4 tests + 101 S3.3.1 tests + 73 S3.3.2 tests + 51 S3.3.3 tests + 98 S3.3.4 tests + 88 S3.3.5 tests + 47 S3.3.6 tests + 50 S3.3.7 tests + 31 S4.1.2 tests + 34 S4.1.3 tests)
+> **Last Updated**: 2025-01-24 (S3.3.6 architectural refactor: synchronous pool management)
+> **Tests**: 5485 passing (118 test suites)
 
 ---
 
@@ -812,6 +812,11 @@
     - Redis Streams integration for opportunity publishing
     - SolanaDetector composition pattern for pool updates
     - File: services/partition-solana/src/arbitrage-detector.ts
+    - Architecture Decision (2025-01-24): Synchronous pool management
+      * Pool operations (addPool, removePool, updatePoolPrice) are synchronous
+      * Rationale: Node.js single-threaded model, no mutex needed for in-memory data
+      * ARCHITECTURE_V2.md requires <1ms for price matrix updates
+      * Async patterns reserved for inter-service I/O (Redis Streams)
 
 [x] S3.3.7 Deploy and test Solana partition (P4)
     - COMPLETED: 2025-01-19 - 49 integration tests

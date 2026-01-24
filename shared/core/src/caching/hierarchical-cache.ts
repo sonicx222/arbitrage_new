@@ -259,6 +259,12 @@ export class HierarchicalCache {
     demotions: 0
   };
 
+  // P1-PERF: Cache compiled RegExp patterns to avoid repeated compilation
+  // Pattern matching is called frequently during invalidation operations
+  // Pre-compiled patterns provide significant performance improvement
+  private patternCache: Map<string, RegExp> = new Map();
+  private readonly PATTERN_CACHE_MAX_SIZE = 100; // Limit to prevent memory leak
+
   constructor(config: Partial<CacheConfig> = {}) {
     // P2-2-FIX: Use configured constants instead of magic numbers
     this.config = {
@@ -773,6 +779,7 @@ export class HierarchicalCache {
 
   /**
    * P1-FIX-1: Glob-like pattern matching for cache key invalidation.
+   * P1-PERF: Now caches compiled RegExp patterns for performance.
    * Supports:
    * - '*' matches any sequence of characters
    * - '?' matches any single character
@@ -782,14 +789,30 @@ export class HierarchicalCache {
     // Special case: '*' matches everything
     if (pattern === '*') return true;
 
-    // Convert glob pattern to regex
-    // Escape regex special chars except * and ?
-    const escaped = pattern
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')
-      .replace(/\?/g, '.');
+    // P1-PERF: Check pattern cache first
+    let regex = this.patternCache.get(pattern);
 
-    const regex = new RegExp(`^${escaped}$`);
+    if (!regex) {
+      // Convert glob pattern to regex
+      // Escape regex special chars except * and ?
+      const escaped = pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.');
+
+      regex = new RegExp(`^${escaped}$`);
+
+      // P1-PERF: Cache the compiled pattern with size limit to prevent memory leak
+      if (this.patternCache.size >= this.PATTERN_CACHE_MAX_SIZE) {
+        // Remove oldest entry (first in iteration order)
+        const oldestKey = this.patternCache.keys().next().value;
+        if (oldestKey) {
+          this.patternCache.delete(oldestKey);
+        }
+      }
+      this.patternCache.set(pattern, regex);
+    }
+
     return regex.test(key);
   }
 

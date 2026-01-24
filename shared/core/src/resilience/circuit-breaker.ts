@@ -3,8 +3,11 @@
 // P0-1 FIX: Added mutex lock for thread-safe state transitions
 // P0-2 FIX: Replaced console.log with structured logger
 // P2-2 FIX: Added monitoring period window for failure tracking
+// P0-3 FIX: Use AsyncMutex for truly atomic HALF_OPEN state transition
 
 import { createLogger } from '../logger';
+import { AsyncMutex } from '../async/async-mutex';
+import type { ServiceLogger } from '../logging';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -12,21 +15,17 @@ import { createLogger } from '../logger';
 
 /**
  * Logger interface for CircuitBreaker.
- * Enables proper testing without Jest mock hoisting issues.
+ * @deprecated Use ServiceLogger from '../logging' directly instead.
+ * P1-REFACTOR: Consolidated to use shared ServiceLogger type.
  */
-export interface CircuitBreakerLogger {
-  info: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+export type CircuitBreakerLogger = ServiceLogger;
 
 /**
  * Dependencies for CircuitBreaker (DI pattern).
  * Enables proper testing without Jest mock hoisting issues.
  */
 export interface CircuitBreakerDeps {
-  logger?: CircuitBreakerLogger;
+  logger?: ServiceLogger;
 }
 
 // Default logger (used when deps not provided)
@@ -80,10 +79,12 @@ export class CircuitBreaker {
   private totalFailures = 0;
   private totalSuccesses = 0;
   private nextAttemptTime = 0;
-  private logger: CircuitBreakerLogger;
+  private logger: ServiceLogger;
 
-  // P0-1 FIX: Mutex lock for thread-safe state transitions
-  private transitionLock: Promise<void> | null = null;
+  // P0-3 FIX: AsyncMutex for truly atomic HALF_OPEN state transition
+  // Prevents race condition where multiple concurrent callers could both
+  // pass the state check and transition to HALF_OPEN simultaneously
+  private halfOpenMutex = new AsyncMutex();
   private halfOpenInProgress = false;
 
   // P2-2 FIX: Track failure timestamps for monitoring window
@@ -107,9 +108,13 @@ export class CircuitBreaker {
         );
       }
 
-      // P0-1 FIX: Use atomic lock to prevent race condition
-      // Only one request can transition to HALF_OPEN
-      if (this.halfOpenInProgress) {
+      // P0-3 FIX: Use AsyncMutex.tryAcquire for truly atomic state transition
+      // This prevents the race condition where multiple callers could both read
+      // halfOpenInProgress === false before either sets it to true
+      const release = this.halfOpenMutex.tryAcquire();
+
+      if (!release) {
+        // Another request is already transitioning to HALF_OPEN
         throw new CircuitBreakerError(
           `Circuit breaker is testing recovery for ${this.config.name}`,
           this.config.name,
@@ -117,10 +122,22 @@ export class CircuitBreaker {
         );
       }
 
-      // Atomically set flag before state change
+      // We acquired the mutex - we're the one to transition
+      // Check again in case another caller completed while we waited
+      if (this.halfOpenInProgress) {
+        release();
+        throw new CircuitBreakerError(
+          `Circuit breaker is testing recovery for ${this.config.name}`,
+          this.config.name,
+          CircuitState.HALF_OPEN
+        );
+      }
+
+      // Atomically set flag and transition state while holding mutex
       this.halfOpenInProgress = true;
       this.state = CircuitState.HALF_OPEN;
       this.successes = 0; // Reset success counter for HALF_OPEN
+      release(); // Release mutex after state is set
 
       // P0-2 FIX: Use structured logger
       this.logger.info('Circuit breaker transitioning to HALF_OPEN', {

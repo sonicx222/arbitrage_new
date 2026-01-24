@@ -28,6 +28,7 @@ import {
   getAllFactoryAddresses,
 } from '../../config/src/dex-factories';
 import { ServiceLogger } from './logging';
+import { AsyncMutex } from './async/async-mutex';
 
 // =============================================================================
 // Constants for Hex Parsing
@@ -169,11 +170,23 @@ export type FactorySubscriptionLogger = ServiceLogger;
 
 /**
  * WebSocket manager interface for DI.
+ * P0-FIX: Extended to match WebSocketManager subscribe signature.
+ * The subscribe method accepts additional optional properties for
+ * event type categorization and callback registration.
+ *
+ * NOTE: This interface is intentionally flexible to support both
+ * the actual WebSocketManager class and mock implementations in tests.
  */
 export interface FactoryWebSocketManager {
-  subscribe: (params: { method: string; params: any[] }) => void;
-  unsubscribe?: (subscriptionId: string) => void;
-  isConnected: () => boolean;
+  subscribe: (params: {
+    method: string;
+    params: any[];
+    type?: string;      // Optional: subscription type for categorization
+    topics?: string[];  // Optional: event topics for filtering
+    callback?: (data: any) => void;  // Optional: per-subscription callback
+  }) => number | void;
+  unsubscribe?: (subscriptionId: string) => void;  // Only string for compatibility
+  isConnected(): boolean;  // Method signature (not private access)
 }
 
 /**
@@ -830,7 +843,9 @@ export class FactorySubscriptionService {
 
   // Subscription state
   private subscribed = false;
-  private subscribing = false; // P0-8 FIX: Guard against concurrent subscription calls
+  // P0-9 FIX: Use AsyncMutex for truly atomic subscription guard
+  // Replaces boolean flag which has TOCTOU race condition window
+  private subscribeMutex = new AsyncMutex();
   private subscriptionIds: string[] = [];
 
   // Event callbacks
@@ -971,90 +986,97 @@ export class FactorySubscriptionService {
    * Groups factories by event signature type to minimize subscriptions.
    * Each factory type (V2, V3, Solidly, etc.) uses a different event signature.
    *
-   * P0-8 FIX: Added concurrent call guard to prevent race condition where
-   * multiple callers could pass the `if (this.subscribed)` check before
-   * the first caller sets `this.subscribed = true`.
+   * P0-9 FIX: Use AsyncMutex for truly atomic subscription guard.
+   * The previous boolean flag had a TOCTOU race condition window where
+   * multiple concurrent callers could pass the check before any sets the flag.
    */
   async subscribeToFactories(): Promise<void> {
-    // P0-8 FIX: Check both subscribed AND subscribing to prevent race
-    if (this.subscribed || this.subscribing) {
-      this.logger.debug('Already subscribed or subscription in progress');
+    // P0-9 FIX: Use tryAcquire for non-blocking atomic check
+    // If mutex is already held, another caller is subscribing
+    const release = this.subscribeMutex.tryAcquire();
+    if (!release) {
+      this.logger.debug('Subscription already in progress');
       return;
     }
 
-    // Set guard immediately (synchronous) before any async operations
-    this.subscribing = true;
-
-    if (!this.config.enabled) {
-      this.subscribing = false;
-      this.logger.info('Factory subscriptions disabled');
-      return;
-    }
-
-    // BUG FIX: Use factoryByAddress map which respects customFactories filter
-    // Previously used getFactoriesForChain() which ignored the customFactories config
-    const factories = Array.from(this.factoryByAddress.values());
-    if (factories.length === 0) {
-      this.subscribing = false; // P0-8 FIX: Clear guard on early exit
-      this.logger.warn(`No factories found for chain ${this.config.chain}`);
-      return;
-    }
-
-    // Group factories by type for efficient subscriptions
-    const subscriptionGroups = new Map<string, { addresses: string[]; type: FactoryType }>();
-
-    for (const factory of factories) {
-      const signature = getFactoryEventSignature(factory.type);
-      const existing = subscriptionGroups.get(signature);
-
-      if (existing) {
-        existing.addresses.push(factory.address.toLowerCase());
-      } else {
-        subscriptionGroups.set(signature, {
-          addresses: [factory.address.toLowerCase()],
-          type: factory.type,
-        });
+    try {
+      // Check if already subscribed (while holding mutex)
+      if (this.subscribed) {
+        this.logger.debug('Already subscribed');
+        return;
       }
-    }
 
-    // Subscribe to each group
-    let subscriptionCount = 0;
-    for (const [signature, group] of subscriptionGroups) {
-      try {
-        if (this.wsManager) {
-          this.wsManager.subscribe({
-            method: 'eth_subscribe',
-            params: [
-              'logs',
-              {
-                topics: [signature],
-                address: group.addresses,
-              },
-            ],
-          });
+      if (!this.config.enabled) {
+        this.logger.info('Factory subscriptions disabled');
+        return;
+      }
 
-          this.subscriptionIds.push(`${group.type}_${subscriptionCount}`);
-          subscriptionCount++;
+      // BUG FIX: Use factoryByAddress map which respects customFactories filter
+      // Previously used getFactoriesForChain() which ignored the customFactories config
+      const factories = Array.from(this.factoryByAddress.values());
+      if (factories.length === 0) {
+        this.logger.warn(`No factories found for chain ${this.config.chain}`);
+        return;
+      }
 
-          this.logger.info(`Subscribed to ${group.type} factory events`, {
-            signature: signature.slice(0, 10) + '...',
-            factoryCount: group.addresses.length,
+      // Group factories by type for efficient subscriptions
+      const subscriptionGroups = new Map<string, { addresses: string[]; type: FactoryType }>();
+
+      for (const factory of factories) {
+        const signature = getFactoryEventSignature(factory.type);
+        const existing = subscriptionGroups.get(signature);
+
+        if (existing) {
+          existing.addresses.push(factory.address.toLowerCase());
+        } else {
+          subscriptionGroups.set(signature, {
+            addresses: [factory.address.toLowerCase()],
+            type: factory.type,
           });
         }
-      } catch (error) {
-        this.logger.error(`Failed to subscribe to ${group.type} factories`, { error });
       }
+
+      // Subscribe to each group
+      let subscriptionCount = 0;
+      for (const [signature, group] of subscriptionGroups) {
+        try {
+          if (this.wsManager) {
+            this.wsManager.subscribe({
+              method: 'eth_subscribe',
+              params: [
+                'logs',
+                {
+                  topics: [signature],
+                  address: group.addresses,
+                },
+              ],
+            });
+
+            this.subscriptionIds.push(`${group.type}_${subscriptionCount}`);
+            subscriptionCount++;
+
+            this.logger.info(`Subscribed to ${group.type} factory events`, {
+              signature: signature.slice(0, 10) + '...',
+              factoryCount: group.addresses.length,
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Failed to subscribe to ${group.type} factories`, { error });
+        }
+      }
+
+      this.subscribed = true;
+      this.stats.factoriesSubscribed = factories.length;
+      this.stats.startedAt = Date.now();
+
+      this.logger.info(`Factory subscriptions active for ${this.config.chain}`, {
+        factories: factories.length,
+        subscriptionGroups: subscriptionGroups.size,
+      });
+    } finally {
+      // Always release mutex, even on error or early return
+      release();
     }
-
-    this.subscribed = true;
-    this.subscribing = false; // P0-8 FIX: Clear guard after completion
-    this.stats.factoriesSubscribed = factories.length;
-    this.stats.startedAt = Date.now();
-
-    this.logger.info(`Factory subscriptions active for ${this.config.chain}`, {
-      factories: factories.length,
-      subscriptionGroups: subscriptionGroups.size,
-    });
   }
 
   /**

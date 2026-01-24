@@ -189,7 +189,9 @@ export class ProfessionalQualityMonitor {
   }): Promise<void> {
     try {
       const redis = await this.getRedis();
-      const key = `quality:detection:${Date.now()}`;
+      // P0-FIX: Use operationId in key to ensure uniqueness for concurrent calls
+      // Date.now() alone can cause key collisions when multiple calls happen in the same millisecond
+      const key = `quality:detection:${result.operationId}`;
       await redis.setex(key, 3600, JSON.stringify(result)); // 1 hour TTL
 
       // Update rolling metrics

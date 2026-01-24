@@ -228,7 +228,8 @@ describe('ADR-003: Centralized Chain Configuration', () => {
       '../../../../shared/config/src/index.ts'
     );
     const indexContent = await fs.readFile(sharedConfigPath, 'utf-8');
-    expect(indexContent).toMatch(/export.*CHAINS/);
+    // P0-FIX: Match either "export { CHAINS" or "export * from" pattern (multiline export block)
+    expect(indexContent).toMatch(/export\s*\{[\s\S]*CHAINS|export.*CHAINS/);
 
     // Chain definitions are in chains submodule (modular config structure)
     const chainsPath = path.resolve(

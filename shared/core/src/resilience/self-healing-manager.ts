@@ -76,6 +76,12 @@ export class SelfHealingManager {
   // P5-FIX: Rate limiter to prevent recovery spam attacks
   private recoveryRateLimiter = new Map<string, number>();
   private readonly RECOVERY_COOLDOWN_MS = SELF_HEALING_DEFAULTS.circuitBreakerCooldownMs;
+  // P5-FIX-2: Periodic cleanup timer for rate limiter to prevent memory growth
+  private rateLimiterCleanupTimer: NodeJS.Timeout | null = null;
+  // Cleanup entries older than 10x the cooldown period (10 minutes by default)
+  private readonly RATE_LIMITER_TTL_MS = SELF_HEALING_DEFAULTS.circuitBreakerCooldownMs * 10;
+  // Cleanup interval: run every 5 minutes
+  private readonly RATE_LIMITER_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
   constructor() {
     this.initializeRecoveryStrategies();
@@ -179,6 +185,44 @@ export class SelfHealingManager {
 
     // Subscribe to service health updates
     await this.subscribeToHealthUpdates();
+
+    // P5-FIX-2: Start periodic cleanup of rate limiter to prevent memory growth
+    this.startRateLimiterCleanup();
+  }
+
+  /**
+   * P5-FIX-2: Start periodic cleanup of recoveryRateLimiter.
+   * Removes entries older than RATE_LIMITER_TTL_MS to prevent unbounded memory growth.
+   */
+  private startRateLimiterCleanup(): void {
+    // Clear existing timer if any
+    if (this.rateLimiterCleanupTimer) {
+      clearInterval(this.rateLimiterCleanupTimer);
+    }
+
+    this.rateLimiterCleanupTimer = setInterval(() => {
+      if (!this.isRunning) return;
+
+      const now = Date.now();
+      const cutoff = now - this.RATE_LIMITER_TTL_MS;
+      let cleanedCount = 0;
+
+      for (const [serviceName, timestamp] of this.recoveryRateLimiter.entries()) {
+        if (timestamp < cutoff) {
+          this.recoveryRateLimiter.delete(serviceName);
+          cleanedCount++;
+        }
+      }
+
+      if (cleanedCount > 0) {
+        logger.debug(`Rate limiter cleanup: removed ${cleanedCount} stale entries`);
+      }
+    }, this.RATE_LIMITER_CLEANUP_INTERVAL_MS);
+
+    // Ensure timer doesn't prevent process exit
+    if (this.rateLimiterCleanupTimer.unref) {
+      this.rateLimiterCleanupTimer.unref();
+    }
   }
 
   // Stop the self-healing manager
@@ -198,6 +242,12 @@ export class SelfHealingManager {
 
     this.healthCheckTimers.clear();
     this.restartTimers.clear();
+
+    // P5-FIX-2: Clear rate limiter cleanup timer
+    if (this.rateLimiterCleanupTimer) {
+      clearInterval(this.rateLimiterCleanupTimer);
+      this.rateLimiterCleanupTimer = null;
+    }
 
     // P2-FIX: Wait for any pending health checks to complete before stopping
     const pendingLocks = Array.from(this.healthUpdateLocks.values());

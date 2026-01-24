@@ -792,8 +792,8 @@ describe('S3.1.2.9: EVM Chain Helpers', () => {
       expect(isEvmChain('solana')).toBe(false);
     });
 
-    it('should return true for unknown chains (safe default)', () => {
-      expect(isEvmChain('unknown-chain')).toBe(true);
+    it('should throw for unknown chains (use isEvmChainSafe for safe default)', () => {
+      expect(() => isEvmChain('unknown-chain')).toThrow('Unknown chain "unknown-chain"');
     });
   });
 
