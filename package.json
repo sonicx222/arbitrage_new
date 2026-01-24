@@ -59,7 +59,8 @@
   "workspaces": [
     "shared/*",
     "services/*",
-    "infrastructure/*"
+    "infrastructure/*",
+    "contracts"
   ],
   "private": true,
   "devDependencies": {

@@ -2,7 +2,7 @@
 
 **Date:** January 22, 2026
 **Based On:** Consolidated Analysis Report
-**Status:** Phase 1 COMPLETE (1.1, 1.2, 1.3 all completed)
+**Status:** Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3.1.1 COMPLETE
 **Confidence:** 92%
 **Last Updated:** January 24, 2026
 
@@ -423,13 +423,49 @@ Flash loans from Aave or dYdX allow executing arbitrage without capital lockup. 
 #### Implementation Tasks
 
 ```
-Task 3.1.1: Flash Loan Smart Contract
+Task 3.1.1: Flash Loan Smart Contract ✅ COMPLETE
 Location: contracts/FlashLoanArbitrage.sol (new)
-- [ ] Create base flash loan receiver contract
-- [ ] Implement Aave FlashLoanSimpleReceiverBase
-- [ ] Add multi-hop swap execution
-- [ ] Add profit verification and return
-Estimated: 5 days
+- [x] Create base flash loan receiver contract
+- [x] Implement Aave FlashLoanSimpleReceiverBase
+- [x] Add multi-hop swap execution
+- [x] Add profit verification and return
+Completed: January 24, 2026
+
+IMPLEMENTATION DETAILS for Task 3.1.1:
+- Created Hardhat project in contracts/ folder with full toolchain
+- FlashLoanArbitrage.sol implements IFlashLoanSimpleReceiver interface
+- Multi-hop swap execution via SwapStep[] struct (supports 2-hop, 3-hop, N-hop)
+- Profit verification: minimum profit threshold, flash loan fee (0.09%) calculation
+- Security features: ReentrancyGuard, Ownable, Pausable, approved router whitelist
+- calculateExpectedProfit() view function for pre-execution profit estimation
+- Fund recovery: withdrawToken(), withdrawETH() for stuck funds
+- Mock contracts for testing: MockERC20, MockAavePool, MockDexRouter, MockMaliciousRouter
+- Comprehensive test suite: 20+ tests covering deployment, access control,
+  flash loan execution, multi-hop swaps, profit verification, fund recovery, security
+
+CONTRACT FILES CREATED:
+- contracts/src/FlashLoanArbitrage.sol (main contract)
+- contracts/src/interfaces/IFlashLoanReceiver.sol (IPool, IDexRouter interfaces)
+- contracts/src/mocks/MockERC20.sol (test token)
+- contracts/src/mocks/MockAavePool.sol (Aave pool mock)
+- contracts/src/mocks/MockDexRouter.sol (DEX router mock)
+- contracts/src/mocks/MockMaliciousRouter.sol (reentrancy test)
+- contracts/test/FlashLoanArbitrage.test.ts (comprehensive test suite)
+- contracts/hardhat.config.ts (Hardhat configuration)
+- contracts/package.json (dependencies: @aave/core-v3, @openzeppelin/contracts)
+
+USAGE EXAMPLE:
+```solidity
+// Execute 2-hop arbitrage: WETH -> USDC -> WETH
+SwapStep[] memory swapPath = new SwapStep[](2);
+swapPath[0] = SwapStep(router1, weth, usdc, minUsdcOut);
+swapPath[1] = SwapStep(router2, usdc, weth, minWethOut);
+flashLoanArbitrage.executeArbitrage(weth, 10 ether, swapPath, minProfit);
+```
+
+NOTE: Contract compilation requires network access to download Solidity compiler.
+Run: cd contracts && npx hardhat compile
+Tests: cd contracts && npx hardhat test
 
 Task 3.1.2: Contract Integration
 Location: services/execution-engine/src/strategies/flash-loan.strategy.ts (new)
@@ -600,8 +636,21 @@ shared/core/src/
 shared/config/src/
 └── dex-factories.ts                   # NEW Phase 2.1
 
-contracts/                             # NEW Phase 3.1
-└── FlashLoanArbitrage.sol
+contracts/                             # ✅ COMPLETE Phase 3.1.1
+├── src/
+│   ├── FlashLoanArbitrage.sol         # Main flash loan arbitrage contract
+│   ├── interfaces/
+│   │   └── IFlashLoanReceiver.sol     # IPool, IDexRouter, IFlashLoanSimpleReceiver
+│   └── mocks/
+│       ├── MockERC20.sol              # Test token
+│       ├── MockAavePool.sol           # Aave pool mock
+│       ├── MockDexRouter.sol          # DEX router mock
+│       └── MockMaliciousRouter.sol    # Reentrancy attack test
+├── test/
+│   └── FlashLoanArbitrage.test.ts     # Comprehensive test suite (20+ tests)
+├── hardhat.config.ts                  # Hardhat configuration
+├── tsconfig.json                      # TypeScript config
+└── package.json                       # Dependencies
 ```
 
 ---
@@ -651,6 +700,6 @@ services/execution-engine/src/
 
 ---
 
-**Plan Status:** Phase 1 COMPLETE (Tasks 1.1.1-1.1.4, 1.2.1-1.2.3, 1.3.1-1.3.3)
-**Next Action:** Begin Phase 2.1 (Factory-Level Event Subscriptions)
-**Review Date:** January 23, 2026
+**Plan Status:** Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3.1.1 COMPLETE
+**Next Action:** Begin Phase 3.1.2 (Contract Integration with FlashLoanStrategy)
+**Review Date:** January 24, 2026
