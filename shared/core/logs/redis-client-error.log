@@ -1,4 +1,0 @@
-2026-01-13T23:00:28.050Z [redis-client] error: Error publishing message {"error":{},"channel":"test"}
-2026-01-13T23:00:28.100Z [redis-client] error: Error getting cache {"error":{}}
-2026-01-13T23:00:28.145Z [redis-client] error: Error getting cache {"error":{}}
-2026-01-13T23:00:28.150Z [redis-client] error: Error subscribing to channel {"error":{},"channel":"test-channel"}
