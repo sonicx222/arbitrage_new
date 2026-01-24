@@ -4,7 +4,7 @@
 **Based On:** Consolidated Analysis Report
 **Status:** Phase 1 COMPLETE (1.1, 1.2, 1.3 all completed)
 **Confidence:** 92%
-**Last Updated:** January 23, 2026
+**Last Updated:** January 24, 2026
 
 ---
 
@@ -283,6 +283,7 @@ Completed: 2026-01-23
 **Priority:** P2 (Low)
 **Impact:** Reduce cache misses by 20-30%
 **Effort:** 3-4 days
+**Status:** Task 2.2.1 COMPLETE (January 24, 2026)
 
 #### Background
 When a price update occurs for WETH-USDC, correlated pairs (WETH-USDT, WBTC-USDC) are likely to have updates soon. Pre-warming the cache improves hit rate.
@@ -290,24 +291,64 @@ When a price update occurs for WETH-USDC, correlated pairs (WETH-USDT, WBTC-USDC
 #### Implementation Tasks
 
 ```
-Task 2.2.1: Build Correlation Matrix
-Location: shared/core/src/cache/correlation-analyzer.ts (new)
-- [ ] Track co-occurrence of price updates
-- [ ] Build pair correlation scores
-- [ ] Update correlation periodically (every hour)
-Estimated: 2 days
+Task 2.2.1: Build Correlation Matrix ✅ COMPLETE
+Location: shared/core/src/caching/correlation-analyzer.ts (new)
+- [x] Track co-occurrence of price updates (within configurable time window)
+- [x] Build pair correlation scores (0-1 normalized)
+- [x] Update correlation periodically (configurable, default: every hour)
+- [x] Memory-efficient with LRU eviction (max 5000 pairs by default)
+- [x] getPairsToWarm(pairAddress) convenience method for cache warming
+- [x] 31 unit tests covering all functionality
+Completed: January 24, 2026
+
+IMPLEMENTATION NOTES:
+- CorrelationAnalyzer tracks co-occurrences within configurable window (default: 1s)
+- Correlation score = co-occurrences / min(updates_A, updates_B)
+- minCoOccurrences threshold filters noise (default: 3)
+- topCorrelatedLimit caps return (default: 3 pairs)
+- Exported from shared/core/src/caching/index.ts
+- Uses same singleton pattern as PairActivityTracker
+
+PERFORMANCE OPTIMIZATION (January 24, 2026):
+- Original trackCoOccurrences was O(n*m) - scanning all pairs on every update
+- Added recentlyUpdatedPairs Map for O(k) lookup where k << n (typically < 100)
+- Stale entries automatically cleaned on each update
+- 35 tests passing including performance regression tests
+
+CODE ANALYSIS FINDINGS (for future reference):
+- No race conditions in single-threaded Node.js context
+- If used with worker threads, would need AsyncMutex protection
+- Correlations only available after first updateCorrelations() call or automatic interval
+- Timer handling now consistent with PairActivityTracker (.unref() unconditional)
 
 Task 2.2.2: Implement Predictive Warming
-Location: shared/core/src/cache/hierarchical-cache.ts
+Location: shared/core/src/caching/hierarchical-cache.ts
 - [ ] On cache update, fetch correlated pairs
 - [ ] Use low-priority background fetch
 - [ ] Limit warming to top 3 correlated pairs
 Estimated: 1 day
 
+INTEGRATION GUIDANCE for Task 2.2.2:
+- Import: import { getCorrelationAnalyzer } from './correlation-analyzer';
+- In hot path (e.g., processSyncEvent): call analyzer.recordPriceUpdate(pairAddress)
+- After cache update: const toWarm = analyzer.getPairsToWarm(pairAddress);
+- Use setImmediate() or low-priority queue for warming to avoid blocking
+- Consider calling updateCorrelations() on startup to populate cache immediately
+- Default config: minCoOccurrences=3, topCorrelatedLimit=3, coOccurrenceWindowMs=1000
+
 Task 2.2.3: Measure Impact
-- [ ] Add cache hit rate metrics
+- [ ] Add cache hit rate metrics (with/without warming)
+- [ ] Track warming latency and throughput
 - [ ] A/B test warming enabled vs disabled
+- [ ] Monitor memory usage of CorrelationAnalyzer
 Estimated: 1 day
+
+METRICS TO TRACK for Task 2.2.3:
+- cache.warmingTriggeredCount: how often warming is triggered
+- cache.warmingHitRate: % of warmed entries that were subsequently accessed
+- cache.warmingLatencyMs: time to warm correlated pairs
+- correlation.trackedPairs: current pair count
+- correlation.avgCorrelationScore: quality metric
 ```
 
 ---
@@ -495,8 +536,9 @@ shared/core/src/
 │   ├── jito-provider.ts               # Solana Jito bundles
 │   ├── metrics-manager.ts             # MevMetricsManager (shared by all providers)
 │   └── mev-risk-analyzer.ts           # MEV risk scoring (Phase 1.2.3)
-├── cache/
-│   └── correlation-analyzer.ts        # NEW Phase 2.2
+├── caching/
+│   ├── ...                            # Existing cache modules
+│   └── correlation-analyzer.ts        # ✅ COMPLETE Phase 2.2.1
 └── ...
 
 shared/config/src/

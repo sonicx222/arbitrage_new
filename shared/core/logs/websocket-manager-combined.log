@@ -102,3 +102,105 @@
 2026-01-13T23:00:25.683Z [websocket-manager] info: Disconnecting WebSocket
 2026-01-13T23:00:25.678Z [websocket-manager] info: Disconnecting WebSocket
 2026-01-13T23:00:25.678Z [websocket-manager] info: Disconnecting WebSocket
+2026-01-24T10:28:50.826Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.850Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.878Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.885Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.881Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.882Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.883Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 12029ms (exponential backoff)
+2026-01-24T10:28:50.886Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.886Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.887Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 12448ms (exponential backoff)
+2026-01-24T10:28:50.892Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.895Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.898Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.901Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.899Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.909Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.899Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.901Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.900Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 11102ms (exponential backoff)
+2026-01-24T10:28:50.902Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.902Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 10894ms (exponential backoff)
+2026-01-24T10:28:50.911Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.917Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.914Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.915Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.918Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.916Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.918Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.917Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 10317ms (exponential backoff)
+2026-01-24T10:28:50.923Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.919Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 12377ms (exponential backoff)
+2026-01-24T10:28:50.926Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.928Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.930Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.928Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.930Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.935Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.931Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.929Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.932Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 10779ms (exponential backoff)
+2026-01-24T10:28:50.929Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 11968ms (exponential backoff)
+2026-01-24T10:28:50.938Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.954Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.956Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.955Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.957Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.955Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.957Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.956Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 11492ms (exponential backoff)
+2026-01-24T10:28:50.958Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 11530ms (exponential backoff)
+2026-01-24T10:28:50.961Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.964Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.965Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.966Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.968Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.975Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.966Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.978Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.967Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 11263ms (exponential backoff)
+2026-01-24T10:28:50.969Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.970Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.970Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 10825ms (exponential backoff)
+2026-01-24T10:28:50.981Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.984Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.985Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.982Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:50.985Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.990Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.983Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.992Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:50.986Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 10791ms (exponential backoff)
+2026-01-24T10:28:50.983Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 12199ms (exponential backoff)
+2026-01-24T10:28:50.994Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:50.996Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:50.995Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:51.002Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:50.997Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:50.995Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.997Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:50.996Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 10477ms (exponential backoff)
+2026-01-24T10:28:50.998Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 11155ms (exponential backoff)
+2026-01-24T10:28:51.004Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:51.006Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:51.007Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:51.007Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:51.008Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 12107ms (exponential backoff)
+2026-01-24T10:28:51.009Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:51.014Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:51.017Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:51.009Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:51.010Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:51.010Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 11255ms (exponential backoff)
+2026-01-24T10:28:51.022Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"bsc.example.com"}}
+2026-01-24T10:28:51.023Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://bsc.example.com"}
+2026-01-24T10:28:51.019Z [websocket-manager] error: WebSocket error {"error":{"errno":-3008,"code":"ENOTFOUND","syscall":"getaddrinfo","hostname":"eth.example.com"}}
+2026-01-24T10:28:51.023Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:51.024Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://bsc.example.com in 11716ms (exponential backoff)
+2026-01-24T10:28:51.020Z [websocket-manager] warn: WebSocket closed {"code":1006,"reason":"","url":"wss://eth.example.com"}
+2026-01-24T10:28:51.029Z [websocket-manager] info: Connecting to WebSocket: wss://eth.example.com
+2026-01-24T10:28:51.021Z [websocket-manager] warn: No available fallback URLs {"chainId":"unknown"}
+2026-01-24T10:28:51.032Z [websocket-manager] info: Connecting to WebSocket: wss://bsc.example.com
+2026-01-24T10:28:51.021Z [websocket-manager] info: Scheduling reconnection attempt 1/5 to wss://eth.example.com in 12135ms (exponential backoff)

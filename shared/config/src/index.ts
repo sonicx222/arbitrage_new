@@ -157,7 +157,13 @@ export {
 // =============================================================================
 // TOKEN CONFIGURATIONS
 // =============================================================================
-export { CORE_TOKENS, TOKEN_METADATA, FALLBACK_TOKEN_PRICES } from './tokens';
+export {
+  CORE_TOKENS,
+  TOKEN_METADATA,
+  FALLBACK_TOKEN_PRICES,
+  NATIVE_TOKEN_PRICES,
+  getNativeTokenPrice
+} from './tokens';
 
 // =============================================================================
 // THRESHOLDS

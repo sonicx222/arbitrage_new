@@ -257,6 +257,44 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
 });
 
 // =============================================================================
+// NATIVE TOKEN PRICES BY CHAIN
+// Single source of truth for chain native token USD prices
+// Used by: gas-price-cache.ts, cross-dex-triangular-arbitrage.ts, multi-leg-path-finder.ts
+// =============================================================================
+/**
+ * Native token prices by chain name (lowercase).
+ * Used for gas cost estimation and USD value calculations.
+ * Last updated: 2026-01-18
+ */
+export const NATIVE_TOKEN_PRICES: Record<string, number> = Object.freeze({
+  // EVM L1 chains
+  ethereum: 3500,  // ETH
+  bsc: 600,        // BNB
+  polygon: 1.00,   // MATIC
+  avalanche: 40,   // AVAX
+  fantom: 0.80,    // FTM
+  // EVM L2 chains (use ETH as native)
+  arbitrum: 3500,  // ETH
+  optimism: 3500,  // ETH
+  base: 3500,      // ETH
+  zksync: 3500,    // ETH
+  linea: 3500,     // ETH
+  // Non-EVM
+  solana: 200,     // SOL
+});
+
+/**
+ * Get native token price for a chain.
+ * Returns fallback price of 1000 if chain not found.
+ *
+ * @param chain - Chain name (case-insensitive)
+ * @returns Native token price in USD
+ */
+export function getNativeTokenPrice(chain: string): number {
+  return NATIVE_TOKEN_PRICES[chain.toLowerCase()] ?? 1000;
+}
+
+// =============================================================================
 // TOKEN METADATA - Chain-specific token addresses and categories
 // Used for USD value estimation and price calculations
 // =============================================================================

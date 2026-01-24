@@ -119,14 +119,16 @@ export class RetryMechanism {
   private config: Required<RetryConfig>;
 
   constructor(config: Partial<RetryConfig> = {}) {
+    // BUG FIX: Use ?? instead of || to correctly handle 0 values
+    // Previously, maxAttempts: 0 would be treated as falsy and default to 3
     this.config = {
-      maxAttempts: config.maxAttempts || 3,
-      initialDelay: config.initialDelay || 1000,
-      maxDelay: config.maxDelay || 30000,
-      backoffMultiplier: config.backoffMultiplier || 2,
+      maxAttempts: config.maxAttempts ?? 3,
+      initialDelay: config.initialDelay ?? 1000,
+      maxDelay: config.maxDelay ?? 30000,
+      backoffMultiplier: config.backoffMultiplier ?? 2,
       jitter: config.jitter !== false,
-      retryCondition: config.retryCondition || this.defaultRetryCondition,
-      onRetry: config.onRetry || (() => { })
+      retryCondition: config.retryCondition ?? this.defaultRetryCondition,
+      onRetry: config.onRetry ?? (() => { })
     };
   }
 

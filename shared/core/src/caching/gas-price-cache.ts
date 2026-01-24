@@ -16,7 +16,7 @@
  */
 
 import { createLogger } from '../logger';
-import { CHAINS } from '@arbitrage/config';
+import { CHAINS, NATIVE_TOKEN_PRICES } from '@arbitrage/config';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -138,22 +138,10 @@ const FALLBACK_GAS_PRICES: Record<string, number> = {
 
 /**
  * Static fallback native token prices (USD) per chain.
- * Used when price oracle is unavailable.
- * MUST stay in sync with price-oracle.ts DEFAULT_FALLBACK_PRICES
- * Last updated: 2026-01-18
+ * Imported from @arbitrage/config for single source of truth.
+ * @see shared/config/src/tokens/index.ts NATIVE_TOKEN_PRICES
  */
-const FALLBACK_NATIVE_PRICES: Record<string, number> = {
-  ethereum: 3500,
-  arbitrum: 3500,  // ETH
-  optimism: 3500,  // ETH
-  base: 3500,      // ETH
-  polygon: 1.00,   // MATIC
-  bsc: 600,        // BNB
-  avalanche: 40,   // AVAX
-  fantom: 0.80,    // FTM
-  zksync: 3500,    // ETH
-  linea: 3500      // ETH
-};
+const FALLBACK_NATIVE_PRICES: Record<string, number> = NATIVE_TOKEN_PRICES;
 
 /**
  * Default gas units per operation type.

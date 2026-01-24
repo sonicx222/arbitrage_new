@@ -8,6 +8,7 @@
  * - PairCacheService: Trading pair address caching with TTL
  * - PriceMatrix: O(1) price lookup matrix
  * - GasPriceCache: Gas price tracking and caching
+ * - CorrelationAnalyzer: Predictive cache warming via co-occurrence tracking (Task 2.2.1)
  *
  * @module caching
  */
@@ -90,3 +91,16 @@ export type {
   GasCostEstimate,
   GasPriceCacheConfig
 } from './gas-price-cache';
+
+// Correlation Analyzer (Task 2.2.1 - Predictive Cache Warming)
+export {
+  CorrelationAnalyzer,
+  createCorrelationAnalyzer,
+  getCorrelationAnalyzer,
+  resetCorrelationAnalyzer
+} from './correlation-analyzer';
+export type {
+  CorrelationAnalyzerConfig,
+  PairCorrelation,
+  CorrelationStats
+} from './correlation-analyzer';
