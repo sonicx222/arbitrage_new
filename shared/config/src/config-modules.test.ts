@@ -26,6 +26,7 @@ import {
   // Service config
   SERVICE_CONFIGS,
   FLASH_LOAN_PROVIDERS,
+  supportsFlashLoan,
   BRIDGE_COSTS,
   getBridgeCost,
   getAllBridgeOptions,
@@ -240,8 +241,28 @@ describe('Service Config Module', () => {
       expect(FLASH_LOAN_PROVIDERS['linea']).toBeDefined();
     });
 
-    it('should NOT have provider for Solana (different model)', () => {
-      expect(FLASH_LOAN_PROVIDERS['solana']).toBeUndefined();
+    it('should have explicit Solana entry with Jupiter protocol (different model)', () => {
+      // Solana uses Jupiter atomic swaps instead of traditional flash loans
+      expect(FLASH_LOAN_PROVIDERS['solana']).toBeDefined();
+      expect(FLASH_LOAN_PROVIDERS['solana'].protocol).toBe('jupiter');
+      expect(FLASH_LOAN_PROVIDERS['solana'].address).toBe(''); // Empty - uses different mechanism
+      expect(FLASH_LOAN_PROVIDERS['solana'].fee).toBe(0); // Jupiter has no flash loan fee
+    });
+
+    describe('supportsFlashLoan helper', () => {
+      it('should return true for EVM chains with flash loan support', () => {
+        expect(supportsFlashLoan('ethereum')).toBe(true);
+        expect(supportsFlashLoan('arbitrum')).toBe(true);
+        expect(supportsFlashLoan('polygon')).toBe(true);
+      });
+
+      it('should return false for Solana (uses Jupiter instead)', () => {
+        expect(supportsFlashLoan('solana')).toBe(false);
+      });
+
+      it('should return false for unknown chains', () => {
+        expect(supportsFlashLoan('unknown-chain')).toBe(false);
+      });
     });
   });
 

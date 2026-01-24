@@ -238,11 +238,15 @@ export { DETECTOR_CONFIG, DetectorChainConfig } from './detector-config';
 export {
   SERVICE_CONFIGS,
   FLASH_LOAN_PROVIDERS,
+  supportsFlashLoan,
   BRIDGE_COSTS,
   BridgeCostConfig,
   getBridgeCost,
   getAllBridgeOptions,
   calculateBridgeCostUsd,
+  // Hot-path optimized versions (skip toLowerCase normalization)
+  getBridgeCostFast,
+  getAllBridgeOptionsFast,
   // Fix 1.1: Centralized flash loan constants
   AAVE_V3_FEE_BPS,
   BPS_DENOMINATOR,
@@ -281,3 +285,14 @@ export { SYSTEM_CONSTANTS } from './system-constants';
 // NOTE: partition-config.ts is deprecated and no longer imported.
 // It was a re-export wrapper that added confusion without value.
 export * from './partitions';
+
+// =============================================================================
+// CONFIG MANAGER (Task 2.1)
+// =============================================================================
+export {
+  ConfigManager,
+  configManager,
+  resetConfigManager,
+  ValidationRule,
+  ValidationResult
+} from './config-manager';

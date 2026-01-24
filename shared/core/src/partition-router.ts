@@ -24,6 +24,18 @@ import {
 import { CHAINS } from '../../config/src';
 
 // =============================================================================
+// Shared Configuration (Single Source of Truth)
+// =============================================================================
+
+/**
+ * Import port and service configurations from shared JSON.
+ * This ensures consistency across TypeScript services and JavaScript scripts.
+ *
+ * @see shared/constants/service-ports.json
+ */
+import portConfig from '../../constants/service-ports.json';
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -51,62 +63,45 @@ export interface PartitionEndpoint {
 }
 
 // =============================================================================
-// Constants
+// Constants (derived from shared JSON config)
 // =============================================================================
 
 /**
  * Default ports for partition services.
- * Each partition has a unique port to avoid conflicts when running locally.
+ * Derived from shared JSON config (single source of truth).
  *
  * P1-1-FIX: Single source of truth for partition ports.
  * All partition services should import and use these constants.
  *
- * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
- * issues during module initialization. Values match those in partition-ids.ts.
+ * @see shared/constants/service-ports.json
  */
-export const PARTITION_PORTS: Readonly<Record<string, number>> = {
-  'asia-fast': 3001,
-  'l2-turbo': 3002,
-  'high-value': 3003,
-  'solana-native': 3004
-} as const;
+export const PARTITION_PORTS: Readonly<Record<string, number>> = portConfig.partitions as Record<string, number>;
 
 /**
  * Default ports for all services in the arbitrage system.
- * Single source of truth to prevent port conflicts in development.
+ * Derived from shared JSON config (single source of truth).
  *
  * Port assignments:
  * - 3000: coordinator (system orchestration)
  * - 3001-3004: partition detectors (chain detection)
  * - 3005: execution-engine (trade execution)
  * - 3006: cross-chain-detector (cross-chain arbitrage)
+ *
+ * @see shared/constants/service-ports.json
  */
-export const SERVICE_PORTS: Readonly<Record<string, number>> = {
-  'coordinator': 3000,
-  'partition-asia-fast': 3001,
-  'partition-l2-turbo': 3002,
-  'partition-high-value': 3003,
-  'partition-solana': 3004,
-  'execution-engine': 3005,
-  'cross-chain-detector': 3006
-} as const;
+export const SERVICE_PORTS: Readonly<Record<string, number>> = portConfig.services as Record<string, number>;
 
 /**
  * Service names for each partition.
+ * Derived from shared JSON config (single source of truth).
  * Maps partition IDs to their service directory names.
  *
  * P1-2-FIX: Single source of truth for partition service names.
  * All partition services should import and use these constants.
  *
- * Note: Using string literals instead of PARTITION_IDS to avoid circular dependency
- * issues during module initialization. Values match those in partition-ids.ts.
+ * @see shared/constants/service-ports.json
  */
-export const PARTITION_SERVICE_NAMES: Readonly<Record<string, string>> = {
-  'asia-fast': 'partition-asia-fast',
-  'l2-turbo': 'partition-l2-turbo',
-  'high-value': 'partition-high-value',
-  'solana-native': 'partition-solana'
-} as const;
+export const PARTITION_SERVICE_NAMES: Readonly<Record<string, string>> = portConfig.partitionServiceNames as Record<string, string>;
 
 /**
  * Default port when partition is not found.

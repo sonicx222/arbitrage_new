@@ -147,9 +147,24 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     address: '0x80e38291e06339d10AAB483C65695D004dBD5C69',  // SyncSwap Router on Linea
     protocol: 'syncswap',
     fee: 30  // 0.3% flash swap fee
+  },
+  // FIX: Explicit Solana entry to prevent silent failures when iterating all chains
+  // Solana uses Jupiter swap routes instead of traditional flash loans
+  solana: {
+    address: '',  // Not applicable - Solana uses different mechanism
+    protocol: 'jupiter',  // Jupiter aggregator for Solana swaps
+    fee: 0  // Jupiter has no flash loan fee (uses atomic swaps)
   }
-  // Note: Solana doesn't use traditional flash loans - uses Jupiter swap routes instead
 };
+
+/**
+ * Check if a chain supports traditional flash loans.
+ * Solana uses Jupiter atomic swaps instead of flash loans.
+ */
+export function supportsFlashLoan(chainId: string): boolean {
+  const provider = FLASH_LOAN_PROVIDERS[chainId];
+  return provider !== undefined && provider.address !== '';
+}
 
 // =============================================================================
 // BRIDGE COST CONFIGURATION (P1-5 FIX)
@@ -236,9 +251,10 @@ export const BRIDGE_COSTS: BridgeCostConfig[] = [
 // =============================================================================
 // BRIDGE COST LOOKUP CACHE (Performance Optimization)
 // Pre-computed Map for O(1) lookups instead of O(n) filter operations
+// FIX: Keys are pre-normalized to lowercase at build time for hot-path optimization
 // =============================================================================
-type BridgeCostKey = `${string}:${string}`; // sourceChain:targetChain
-type BridgeCostKeyWithBridge = `${string}:${string}:${string}`; // sourceChain:targetChain:bridge
+type BridgeCostKey = `${string}:${string}`; // sourceChain:targetChain (lowercase)
+type BridgeCostKeyWithBridge = `${string}:${string}:${string}`; // sourceChain:targetChain:bridge (lowercase)
 
 // Pre-computed map: route -> all bridge options for that route
 const BRIDGE_COST_BY_ROUTE = new Map<BridgeCostKey, BridgeCostConfig[]>();
@@ -248,9 +264,15 @@ const BRIDGE_COST_BY_ROUTE_AND_BRIDGE = new Map<BridgeCostKeyWithBridge, BridgeC
 const BEST_BRIDGE_BY_ROUTE = new Map<BridgeCostKey, BridgeCostConfig>();
 
 // Initialize lookup maps at module load time (runs once)
+// FIX: Pre-normalize all keys to lowercase to avoid per-lookup normalization
 for (const config of BRIDGE_COSTS) {
-  const routeKey: BridgeCostKey = `${config.sourceChain}:${config.targetChain}`;
-  const fullKey: BridgeCostKeyWithBridge = `${config.sourceChain}:${config.targetChain}:${config.bridge}`;
+  // Pre-normalize keys to lowercase (source data should already be lowercase, but this ensures consistency)
+  const sourceNorm = config.sourceChain.toLowerCase();
+  const targetNorm = config.targetChain.toLowerCase();
+  const bridgeNorm = config.bridge.toLowerCase();
+
+  const routeKey: BridgeCostKey = `${sourceNorm}:${targetNorm}`;
+  const fullKey: BridgeCostKeyWithBridge = `${sourceNorm}:${targetNorm}:${bridgeNorm}`;
 
   // Build route -> options map
   const existing = BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
@@ -324,4 +346,44 @@ export function calculateBridgeCostUsd(
     latency: config.estimatedLatencySeconds,
     bridge: config.bridge
   };
+}
+
+// =============================================================================
+// HOT-PATH OPTIMIZED FUNCTIONS (skip normalization for performance)
+// Use these when you KNOW your input strings are already lowercase
+// =============================================================================
+
+/**
+ * Fast-path version of getBridgeCost - skips toLowerCase() normalization.
+ * Use when input strings are guaranteed to be lowercase (e.g., from CHAINS config).
+ * @param sourceChain - Source chain (MUST be lowercase)
+ * @param targetChain - Target chain (MUST be lowercase)
+ * @param bridge - Optional bridge name (MUST be lowercase if provided)
+ */
+export function getBridgeCostFast(
+  sourceChain: string,
+  targetChain: string,
+  bridge?: string
+): BridgeCostConfig | undefined {
+  const routeKey: BridgeCostKey = `${sourceChain}:${targetChain}`;
+
+  if (bridge) {
+    const fullKey: BridgeCostKeyWithBridge = `${sourceChain}:${targetChain}:${bridge}`;
+    return BRIDGE_COST_BY_ROUTE_AND_BRIDGE.get(fullKey);
+  }
+
+  return BEST_BRIDGE_BY_ROUTE.get(routeKey);
+}
+
+/**
+ * Fast-path version of getAllBridgeOptions - skips toLowerCase() normalization.
+ * @param sourceChain - Source chain (MUST be lowercase)
+ * @param targetChain - Target chain (MUST be lowercase)
+ */
+export function getAllBridgeOptionsFast(
+  sourceChain: string,
+  targetChain: string
+): BridgeCostConfig[] {
+  const routeKey: BridgeCostKey = `${sourceChain}:${targetChain}`;
+  return BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
 }

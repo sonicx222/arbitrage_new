@@ -142,7 +142,8 @@ function findGhostNodeProcesses() {
         }
         const processes = [];
         stdout.trim().split('\n').forEach(line => {
-          if (line.includes('ts-node') || line.includes('services') && line.includes('index.ts')) {
+          // FIX: Added explicit parentheses for clarity (operator precedence)
+          if (line.includes('ts-node') || (line.includes('services') && line.includes('index.ts'))) {
             const parts = line.split(',');
             if (parts.length >= 3) {
               const pid = parseInt(parts[parts.length - 1], 10);
@@ -381,6 +382,65 @@ function deleteRedisMemoryConfig() {
 // PID File Management
 // =============================================================================
 
+const PID_LOCK_FILE = PID_FILE + '.lock';
+const LOCK_TIMEOUT_MS = 5000;
+const LOCK_RETRY_INTERVAL_MS = 50;
+
+/**
+ * Acquire a file lock for PID operations.
+ * Uses a simple .lock file approach with retries.
+ * @returns {Promise<boolean>} - True if lock acquired
+ */
+async function acquirePidLock() {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+    try {
+      // O_EXCL flag ensures atomic create - fails if file exists
+      fs.writeFileSync(PID_LOCK_FILE, String(process.pid), { flag: 'wx' });
+      return true;
+    } catch (err) {
+      if (err.code === 'EEXIST') {
+        // Lock file exists, check if it's stale (holder process dead)
+        try {
+          const lockPid = parseInt(fs.readFileSync(PID_LOCK_FILE, 'utf8'), 10);
+          if (lockPid && !isNaN(lockPid)) {
+            try {
+              // Check if process exists (signal 0 doesn't kill, just checks)
+              process.kill(lockPid, 0);
+              // Process exists, wait and retry
+            } catch {
+              // Process doesn't exist, lock is stale - remove it
+              fs.unlinkSync(PID_LOCK_FILE);
+              continue; // Try again immediately
+            }
+          }
+        } catch {
+          // Can't read lock file, try to remove it
+          try { fs.unlinkSync(PID_LOCK_FILE); } catch { /* ignore */ }
+          continue;
+        }
+        // Wait before retry
+        await new Promise(r => setTimeout(r, LOCK_RETRY_INTERVAL_MS));
+      } else {
+        throw err;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Release the PID file lock.
+ */
+function releasePidLock() {
+  try {
+    fs.unlinkSync(PID_LOCK_FILE);
+  } catch {
+    // Ignore - lock may already be released
+  }
+}
+
 /**
  * Load PIDs from the PID file.
  * @returns {Object<string, number>}
@@ -398,7 +458,7 @@ function loadPids() {
 
 /**
  * Save PIDs to the PID file.
- * Uses atomic write to prevent race conditions.
+ * Uses atomic write to prevent partial writes.
  * @param {Object<string, number>} pids
  */
 function savePids(pids) {
@@ -408,11 +468,71 @@ function savePids(pids) {
 }
 
 /**
+ * Atomically update a single PID entry.
+ * Uses file locking to prevent race conditions when multiple services start concurrently.
+ * @param {string} serviceName - The service name
+ * @param {number} pid - The process ID
+ * @returns {Promise<boolean>} - True if update succeeded
+ */
+async function updatePid(serviceName, pid) {
+  const lockAcquired = await acquirePidLock();
+  if (!lockAcquired) {
+    console.warn(`Warning: Could not acquire PID lock for ${serviceName}, proceeding without lock`);
+  }
+
+  try {
+    const pids = loadPids();
+    pids[serviceName] = pid;
+    savePids(pids);
+    return true;
+  } finally {
+    if (lockAcquired) {
+      releasePidLock();
+    }
+  }
+}
+
+/**
+ * Atomically remove a single PID entry.
+ * @param {string} serviceName - The service name to remove
+ * @returns {Promise<boolean>} - True if removal succeeded
+ */
+async function removePid(serviceName) {
+  const lockAcquired = await acquirePidLock();
+  if (!lockAcquired) {
+    console.warn(`Warning: Could not acquire PID lock for removing ${serviceName}`);
+  }
+
+  try {
+    const pids = loadPids();
+    delete pids[serviceName];
+    if (Object.keys(pids).length === 0) {
+      deletePidFile();
+    } else {
+      savePids(pids);
+    }
+    return true;
+  } finally {
+    if (lockAcquired) {
+      releasePidLock();
+    }
+  }
+}
+
+/**
  * Delete the PID file.
  */
 function deletePidFile() {
-  if (fs.existsSync(PID_FILE)) {
-    fs.unlinkSync(PID_FILE);
+  try {
+    if (fs.existsSync(PID_FILE)) {
+      fs.unlinkSync(PID_FILE);
+    }
+    // Also clean up lock file
+    if (fs.existsSync(PID_LOCK_FILE)) {
+      fs.unlinkSync(PID_LOCK_FILE);
+    }
+  } catch {
+    // Ignore errors during cleanup
   }
 }
 
@@ -456,5 +576,7 @@ module.exports = {
   // PID management
   loadPids,
   savePids,
+  updatePid,
+  removePid,
   deletePidFile
 };

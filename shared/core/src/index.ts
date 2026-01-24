@@ -932,3 +932,19 @@ export type {
   PairCreatedEvent,
   PairCreatedCallback,
 } from './factory-subscription';
+
+// =============================================================================
+// PERFORMANCE MONITORING (Task 2.3)
+// =============================================================================
+export {
+  HotPathMonitor,
+  measureHotPath,
+  measureHotPathAsync,
+  hotPathMonitor,
+  resetHotPathMonitor,
+} from './performance-monitor';
+
+export type {
+  LatencyMetric,
+  LatencyStats,
+} from './performance-monitor';
