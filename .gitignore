@@ -20,9 +20,9 @@ services/*/dist
 
 # Logs
 logs
+**/logs/
 *.log
 npm-debug.log*
-**shared/core/logs/*
 
 # OS files
 nul

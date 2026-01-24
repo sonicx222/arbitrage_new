@@ -219,12 +219,69 @@ export const CORE_TOKENS: Record<string, Token[]> = {
 // P0-FIX: Extracted from base-detector.ts to configuration for maintainability
 // Used for USD value estimation when price oracle is unavailable
 // =============================================================================
+
+/**
+ * Timestamp when fallback prices were last updated.
+ * Used to detect when prices may be stale and need refreshing.
+ * Format: ISO 8601 date string
+ */
+export const FALLBACK_PRICES_LAST_UPDATED = '2026-01-18T00:00:00Z';
+
+/**
+ * Number of days after which fallback prices are considered stale.
+ * A warning will be logged when using prices older than this threshold.
+ */
+export const FALLBACK_PRICES_STALENESS_WARNING_DAYS = 7;
+
+/**
+ * Check if fallback prices are stale and log a warning if so.
+ * Should be called once at service startup to alert operators.
+ *
+ * @param logger - Optional logger function (defaults to console.warn)
+ * @returns true if prices are stale, false otherwise
+ */
+export function checkFallbackPriceStaleness(
+  logger: (message: string, meta?: object) => void = console.warn
+): boolean {
+  const lastUpdated = new Date(FALLBACK_PRICES_LAST_UPDATED).getTime();
+  const now = Date.now();
+  const ageMs = now - lastUpdated;
+  const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+
+  if (ageDays > FALLBACK_PRICES_STALENESS_WARNING_DAYS) {
+    logger(
+      `[STALE_FALLBACK_PRICES] Fallback token prices are ${ageDays} days old (last updated: ${FALLBACK_PRICES_LAST_UPDATED}). ` +
+      `Consider updating FALLBACK_TOKEN_PRICES in shared/config/src/tokens/index.ts to reflect current market prices.`,
+      {
+        lastUpdated: FALLBACK_PRICES_LAST_UPDATED,
+        ageDays,
+        stalenessThresholdDays: FALLBACK_PRICES_STALENESS_WARNING_DAYS
+      }
+    );
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get the age of fallback prices in days.
+ * Useful for monitoring dashboards.
+ *
+ * @returns Age in days since last update
+ */
+export function getFallbackPriceAgeDays(): number {
+  const lastUpdated = new Date(FALLBACK_PRICES_LAST_UPDATED).getTime();
+  return Math.floor((Date.now() - lastUpdated) / (1000 * 60 * 60 * 24));
+}
+
 /**
  * Fallback token prices for USD estimation when price oracle is unavailable.
  * These prices are approximations and should only be used as fallbacks.
  *
  * @see base-detector.ts estimateSwapUsdValue()
  * @see price-oracle.ts DEFAULT_FALLBACK_PRICES (keep in sync)
+ * @see FALLBACK_PRICES_LAST_UPDATED for when these were last updated
  */
 export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
   // Native tokens and wrappers
@@ -260,11 +317,64 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
 // NATIVE TOKEN PRICES BY CHAIN
 // Single source of truth for chain native token USD prices
 // Used by: gas-price-cache.ts, cross-dex-triangular-arbitrage.ts, multi-leg-path-finder.ts
+// Issue 3.2 FIX: Added staleness tracking and validation
 // =============================================================================
+
+/**
+ * Metadata for native token price tracking.
+ * Issue 3.2: Track staleness to prevent using outdated fallback prices.
+ */
+export const NATIVE_TOKEN_PRICE_METADATA = Object.freeze({
+  /** ISO date string of last price update */
+  lastUpdated: '2026-01-18',
+  /** Maximum age in days before prices are considered stale */
+  maxAgeDays: 7,
+  /** Update frequency recommendation */
+  updateFrequency: 'weekly',
+  /** Data source for manual updates */
+  dataSource: 'CoinGecko API or market aggregators',
+});
+
+/**
+ * Check if native token prices are potentially stale.
+ * Issue 3.2 FIX: Enables proactive staleness detection.
+ *
+ * @returns Object with staleness info: { isStale, ageDays, lastUpdated, recommendation }
+ */
+export function checkNativeTokenPriceStaleness(): {
+  isStale: boolean;
+  ageDays: number;
+  lastUpdated: string;
+  recommendation: string;
+} {
+  const lastUpdatedDate = new Date(NATIVE_TOKEN_PRICE_METADATA.lastUpdated);
+  const now = new Date();
+  const ageDays = Math.floor((now.getTime() - lastUpdatedDate.getTime()) / (1000 * 60 * 60 * 24));
+  const isStale = ageDays > NATIVE_TOKEN_PRICE_METADATA.maxAgeDays;
+
+  return {
+    isStale,
+    ageDays,
+    lastUpdated: NATIVE_TOKEN_PRICE_METADATA.lastUpdated,
+    recommendation: isStale
+      ? `NATIVE_TOKEN_PRICES are ${ageDays} days old. Update prices in shared/config/src/tokens/index.ts using ${NATIVE_TOKEN_PRICE_METADATA.dataSource}.`
+      : `Prices are current (${ageDays} days old, max ${NATIVE_TOKEN_PRICE_METADATA.maxAgeDays} days).`,
+  };
+}
+
+// Track if staleness warning has been shown (avoid spam)
+let _stalenessWarningShown = false;
+
 /**
  * Native token prices by chain name (lowercase).
  * Used for gas cost estimation and USD value calculations.
+ *
+ * IMPORTANT: These are FALLBACK prices used when real-time price feeds are unavailable.
+ * For production arbitrage, always prefer real-time price data from oracles.
+ *
  * Last updated: 2026-01-18
+ * @see NATIVE_TOKEN_PRICE_METADATA for staleness tracking
+ * @see checkNativeTokenPriceStaleness() to verify price freshness
  */
 export const NATIVE_TOKEN_PRICES: Record<string, number> = Object.freeze({
   // EVM L1 chains
@@ -287,10 +397,29 @@ export const NATIVE_TOKEN_PRICES: Record<string, number> = Object.freeze({
  * Get native token price for a chain.
  * Returns fallback price of 1000 if chain not found.
  *
+ * Issue 3.2 FIX: Now warns once if prices are stale (in non-test environments).
+ *
  * @param chain - Chain name (case-insensitive)
+ * @param options - Optional settings
+ * @param options.suppressWarning - Set to true to suppress staleness warning
  * @returns Native token price in USD
  */
-export function getNativeTokenPrice(chain: string): number {
+export function getNativeTokenPrice(
+  chain: string,
+  options?: { suppressWarning?: boolean }
+): number {
+  // Issue 3.2 FIX: Warn once if prices are stale
+  if (!_stalenessWarningShown && !options?.suppressWarning && process.env.NODE_ENV !== 'test') {
+    const staleness = checkNativeTokenPriceStaleness();
+    if (staleness.isStale) {
+      _stalenessWarningShown = true;
+      console.warn(
+        `[FALLBACK PRICE WARNING] ${staleness.recommendation} ` +
+        `Using stale fallback prices may lead to inaccurate gas cost estimates.`
+      );
+    }
+  }
+
   return NATIVE_TOKEN_PRICES[chain.toLowerCase()] ?? 1000;
 }
 

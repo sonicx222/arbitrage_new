@@ -282,16 +282,25 @@ describe('JitoProvider', () => {
     });
 
     it('should submit bundle to Jito when enabled', async () => {
-      // Mock successful Jito response
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            jsonrpc: '2.0',
-            id: 1,
-            result: 'bundle-uuid-12345',
-          }),
-      });
+      // Mock successful Jito response with a small delay to ensure measurable latency
+      // This prevents flaky tests where Date.now() returns the same value at start and end
+      (global.fetch as jest.Mock).mockImplementationOnce(() =>
+        new Promise(resolve =>
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                json: () =>
+                  Promise.resolve({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    result: 'bundle-uuid-12345',
+                  }),
+              }),
+            5 // 5ms delay ensures latencyMs > 0
+          )
+        )
+      );
 
       // Mock successful bundle status check
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -329,7 +338,9 @@ describe('JitoProvider', () => {
       expect(result.strategy).toBe('jito');
       expect(result.bundleHash).toBeDefined();
       expect(result.usedFallback).toBe(false);
-      expect(result.latencyMs).toBeGreaterThan(0);
+      // Latency should be positive due to the 5ms delay in mock
+      // Using >= 1 instead of > 0 to handle edge case where timer fires just under 5ms
+      expect(result.latencyMs).toBeGreaterThanOrEqual(1);
     }, 10000);
 
     it('should fallback to standard submission when Jito fails and fallback enabled', async () => {

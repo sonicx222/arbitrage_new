@@ -12,11 +12,23 @@ module.exports = {
       'ts-jest',
       {
         useESM: false,
+        tsconfig: 'tsconfig.test.json',
         diagnostics: {
           ignoreCodes: [151001]
         }
       }
     ]
+  },
+  // Module path mappings for workspace packages
+  moduleNameMapper: {
+    '^@arbitrage/core$': '<rootDir>/src',
+    '^@arbitrage/core/(.*)$': '<rootDir>/src/$1',
+    '^@arbitrage/test-utils$': '<rootDir>/../test-utils/src',
+    '^@arbitrage/test-utils/(.*)$': '<rootDir>/../test-utils/src/$1',
+    '^@arbitrage/config$': '<rootDir>/../config/src',
+    '^@arbitrage/config/(.*)$': '<rootDir>/../config/src/$1',
+    '^@arbitrage/types$': '<rootDir>/../types/src',
+    '^@arbitrage/types/(.*)$': '<rootDir>/../types/src/$1',
   },
   collectCoverageFrom: [
     'src/**/*.ts',

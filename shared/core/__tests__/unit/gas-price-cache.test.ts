@@ -60,6 +60,12 @@ jest.mock('@arbitrage/config', () => ({
       rpcUrl: 'https://bsc-mainnet.example.com',
       nativeToken: 'BNB'
     }
+  },
+  // FIX: Include NATIVE_TOKEN_PRICES which is imported by gas-price-cache.ts
+  NATIVE_TOKEN_PRICES: {
+    ethereum: 3500,
+    arbitrum: 3500,
+    bsc: 600
   }
 }));
 

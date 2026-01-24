@@ -147,6 +147,7 @@ export type {
 } from './monitoring/provider-health-scorer';
 
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
+export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching/hierarchical-cache';
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
 // REMOVED: ABTestingFramework (unused module cleaned up)
@@ -522,23 +523,74 @@ export type {
 // REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
 // =============================================================================
 
+// =============================================================================
 // REF-1/ARCH-1: Shared arbitrage calculation logic
+// Issue 1.2: DEPRECATED - These exports are maintained for backward compatibility.
+// New code should import from components/price-calculator instead.
+// This module will be removed in a future version.
+// @see ./components/price-calculator for replacement functions
+// @see ./arbitrage-calculator.ts header comments for migration guide
+// =============================================================================
 export {
-  // P0-1 FIX: Precision-safe BigInt utilities
+  /**
+   * @deprecated Use safeBigIntDiv from components/price-calculator instead
+   */
   safeBigIntDivision,
+  /**
+   * @deprecated Use calcPriceFromReserves from components/price-calculator instead
+   */
   calculatePriceFromReserves,
+  /**
+   * @deprecated Use calcPriceFromReserves from components/price-calculator instead
+   */
   calculatePriceFromBigIntReserves,
+  /**
+   * @deprecated Use invertPriceValue from components/price-calculator instead
+   */
   invertPrice,
+  /**
+   * @deprecated Use calculateSpread from components/price-calculator instead
+   */
   calculatePriceDifferencePercent,
+  /**
+   * @deprecated Will be moved to components/token-utils
+   */
   isSameTokenPair,
+  /**
+   * @deprecated Will be moved to components/token-utils
+   */
   isReverseOrder,
+  /**
+   * @deprecated Use getMinProfitThreshold from @arbitrage/config instead
+   */
   getMinProfitThreshold,
+  /**
+   * @deprecated Use getDefaultDexFee from components/price-calculator instead
+   */
   getDefaultFee,
+  /**
+   * @deprecated Will be replaced by components/arbitrage-detector
+   */
   calculateIntraChainArbitrage,
+  /**
+   * @deprecated Will be replaced by components/arbitrage-detector
+   */
   calculateCrossChainArbitrage,
+  /**
+   * @deprecated Use isValidPairSnapshot from components/arbitrage-detector
+   */
   validatePairSnapshot,
+  /**
+   * @deprecated Use PairRepository.createSnapshot() instead
+   */
   createPairSnapshot
 } from './arbitrage-calculator';
+
+/**
+ * @deprecated These types are deprecated. Import from components instead.
+ * - PairSnapshot → ComponentPairSnapshot from components/pair-repository
+ * - ChainPriceData → components/arbitrage-detector (when available)
+ */
 export type {
   PairSnapshot as ArbitragePairSnapshot,
   ChainPriceData,

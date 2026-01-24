@@ -83,34 +83,71 @@ export function validateChainEnvironment(chainIds?: string[]): string[] {
 // P0-3 FIX: Use partition-aware validation instead of hardcoding Ethereum requirement
 // This allows non-Ethereum partitions (P1 Asia-Fast, P4 Solana-Native) to start independently
 // P0-4 FIX: Enforce validation in production to prevent partial configuration issues
+// P0-5 FIX: Stricter validation in development to catch configuration issues early
+// Issue 3.1 FIX: Consistent validation across all environments
 if (process.env.NODE_ENV !== 'test') {
   // Partition-aware validation: only require env vars for chains in the current partition
   const missingEnvVars = validateChainEnvironment();
 
-  // Only fail if there are missing env vars AND we're in a partition deployment
-  // (PARTITION_ID env var is set). Without PARTITION_ID, we assume legacy mode
-  // which expects at least Ethereum to be configured.
+  // Determine validation strictness:
+  // - STRICT_CONFIG_VALIDATION=true: Always fail on missing env vars (opt-in for CI/staging)
+  // - STRICT_CONFIG_VALIDATION=false: Never fail, only warn (opt-out for local dev)
+  // - Default: Strict in ALL environments when PARTITION_ID is set or any chains are missing
+  // Issue 3.1 FIX: Development mode now fails consistently, not just for Ethereum
+  const strictValidation = process.env.STRICT_CONFIG_VALIDATION;
+  const forceStrict = strictValidation === 'true' || strictValidation === '1';
+  const forceWarn = strictValidation === 'false' || strictValidation === '0';
+
   if (missingEnvVars.length > 0) {
-    if (process.env.PARTITION_ID) {
-      // Partition mode: fail only if partition chains are missing configs
-      throw new Error(
-        `CRITICAL CONFIG ERROR: Missing environment variables for partition ${process.env.PARTITION_ID}: ${missingEnvVars.join(', ')}`
+    const errorContext = process.env.PARTITION_ID
+      ? `partition ${process.env.PARTITION_ID}`
+      : 'configured chains';
+
+    if (forceWarn) {
+      // Explicit opt-out - warn with detailed information
+      console.warn(
+        `CONFIG WARNING: Missing environment variables for ${errorContext}: ${missingEnvVars.join(', ')}. ` +
+        `Validation bypassed via STRICT_CONFIG_VALIDATION=false. ` +
+        `Chains with missing config will fail at runtime.`
       );
-    } else if (process.env.NODE_ENV === 'production') {
-      // P0-4 FIX: Production mode without PARTITION_ID - strict validation
-      // In production, all chains must be properly configured to prevent silent failures
+    } else if (process.env.PARTITION_ID || process.env.NODE_ENV === 'production' || forceStrict) {
+      // Partition mode, production, or explicit strict mode: fail immediately
       throw new Error(
-        `CRITICAL CONFIG ERROR (production): Missing environment variables: ${missingEnvVars.join(', ')}. ` +
-        `Set PARTITION_ID for partition-aware deployment or configure all required chains.`
+        `CRITICAL CONFIG ERROR: Missing environment variables for ${errorContext}: ${missingEnvVars.join(', ')}. ` +
+        `Either configure the missing variables or set STRICT_CONFIG_VALIDATION=false to bypass (not recommended).`
       );
     } else {
-      // Development/staging mode: warn but only fail if Ethereum is missing (backward compatibility)
-      if (!process.env.ETHEREUM_RPC_URL || !process.env.ETHEREUM_WS_URL) {
-        console.warn(
-          `WARNING: Missing chain environment variables: ${missingEnvVars.join(', ')}. ` +
-          `Set PARTITION_ID for partition-aware validation or NODE_ENV=production for strict validation.`
-        );
-      }
+      // Issue 3.1 FIX: Development mode - CONSISTENT strict behavior
+      // ALL missing chain configs now fail, not just Ethereum
+      // This prevents silent configuration issues that only surface at runtime
+      // Rationale: Silent warnings led to developers starting services that would fail at runtime
+      // when accessing chains other than Ethereum. Consistent failure ensures early detection.
+      console.error(
+        `\n${'='.repeat(80)}\n` +
+        `CONFIG ERROR: Missing chain environment variables\n` +
+        `${'='.repeat(80)}\n` +
+        `Missing: ${missingEnvVars.join(', ')}\n\n` +
+        `This error occurs because chain configuration is incomplete.\n` +
+        `To fix this, choose one of the following options:\n\n` +
+        `  1. Set the missing environment variables:\n` +
+        `     ${missingEnvVars.map(v => `export ${v}="your_url_here"`).join('\n     ')}\n\n` +
+        `  2. Set PARTITION_ID to only validate chains you're working with:\n` +
+        `     export PARTITION_ID=asia-fast    # For BSC, Polygon, Avalanche, Fantom\n` +
+        `     export PARTITION_ID=l2-turbo     # For Arbitrum, Optimism, Base\n` +
+        `     export PARTITION_ID=high-value   # For Ethereum, zkSync, Linea\n` +
+        `     export PARTITION_ID=solana-native # For Solana only\n\n` +
+        `  3. Bypass validation (not recommended - will fail at runtime):\n` +
+        `     export STRICT_CONFIG_VALIDATION=false\n` +
+        `${'='.repeat(80)}\n`
+      );
+
+      // Issue 3.1 FIX: Fail for ANY missing chain config, not just Ethereum
+      // This ensures consistent behavior and prevents runtime failures
+      throw new Error(
+        `CONFIG ERROR: Missing chain configuration for: ${missingEnvVars.join(', ')}. ` +
+        `See error output above for resolution options. ` +
+        `Set STRICT_CONFIG_VALIDATION=false to bypass (not recommended).`
+      );
     }
   }
 }
@@ -161,8 +198,15 @@ export {
   CORE_TOKENS,
   TOKEN_METADATA,
   FALLBACK_TOKEN_PRICES,
+  FALLBACK_PRICES_LAST_UPDATED,
+  FALLBACK_PRICES_STALENESS_WARNING_DAYS,
+  checkFallbackPriceStaleness,
+  getFallbackPriceAgeDays,
   NATIVE_TOKEN_PRICES,
-  getNativeTokenPrice
+  getNativeTokenPrice,
+  // Issue 3.2 FIX: Native token price staleness tracking
+  NATIVE_TOKEN_PRICE_METADATA,
+  checkNativeTokenPriceStaleness
 } from './tokens';
 
 // =============================================================================
