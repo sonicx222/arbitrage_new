@@ -107,3 +107,31 @@ export const STABLECOIN_SYMBOLS = [
 
 /** Default token decimals when token info is not available */
 export const DEFAULT_TOKEN_DECIMALS = 18;
+
+// =============================================================================
+// Factory Subscription Configuration (Task 2.1.3)
+// =============================================================================
+
+/**
+ * Default value for useFactorySubscriptions config flag.
+ * Set to false for backward compatibility during gradual rollout.
+ *
+ * @see Task 2.1.3: Migrate Existing Subscriptions
+ */
+export const DEFAULT_USE_FACTORY_SUBSCRIPTIONS = false;
+
+/**
+ * Chains enabled for factory subscriptions during initial rollout.
+ * Start with L2 chains that have most to gain from RPC reduction.
+ *
+ * @see Task 2.1.3: Gradual rollout strategy
+ */
+export const FACTORY_SUBSCRIPTION_ENABLED_CHAINS: readonly string[] = [];
+
+/**
+ * Rollout percentage for factory subscriptions (0-100).
+ * Used for deterministic gradual rollout across chains.
+ *
+ * @see Task 2.1.3: Gradual rollout strategy
+ */
+export const DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT = 0;

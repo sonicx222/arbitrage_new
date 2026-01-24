@@ -81,6 +81,22 @@ jest.mock('@arbitrage/core', () => ({
     registerCapabilities: jest.fn(),
     triggerDegradation: jest.fn(),
   }),
+  // P0-FIX: Add PARTITION_PORTS and PARTITION_SERVICE_NAMES to mock
+  // These are required by index.ts for P1_DEFAULT_PORT calculation
+  PARTITION_PORTS: {
+    'asia-fast': 3001,
+    'l2-turbo': 3002,
+    'high-value': 3003,
+    'solana-native': 3004,
+  },
+  PARTITION_SERVICE_NAMES: {
+    'asia-fast': 'partition-asia-fast',
+    'l2-turbo': 'partition-l2-turbo',
+    'high-value': 'partition-high-value',
+    'solana-native': 'partition-solana',
+  },
+  exitWithConfigError: jest.fn(),
+  PartitionServiceConfig: {},
 }));
 
 jest.mock('@arbitrage/config', () => ({

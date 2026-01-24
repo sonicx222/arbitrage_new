@@ -17,6 +17,8 @@ export {};
 const redisInstance = new RedisMock();
 const mockRedis = {
   get: jest.fn<any>((key: string) => redisInstance.get(key)),
+  // P0-FIX: Add getRaw method used by hierarchical-cache for L2 reads
+  getRaw: jest.fn<any>((key: string) => redisInstance.get(key)),
   set: jest.fn<any>((key: string, value: any, ttl?: number) => {
     if (ttl) {
       return redisInstance.setex(key, ttl, value);
@@ -65,7 +67,10 @@ describe('HierarchicalCache', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.clear();
+    // P0-FIX: Reset BOTH get and getRaw mocks after clearAllMocks
+    // clearAllMocks resets all mock implementations, so we need to restore them
     mockRedis.get.mockImplementation((key: string) => redisInstance.get(key));
+    mockRedis.getRaw.mockImplementation((key: string) => redisInstance.get(key));
     cache = createHierarchicalCache({
       l1Enabled: true,
       l1Size: 64,
@@ -160,8 +165,8 @@ describe('HierarchicalCache', () => {
 
       await cache.set(testKey, testValue);
 
-      // P2-FIX-1: Cache now uses set(key, value, ttl) instead of setex directly
-      expect(mockRedis.set).toHaveBeenCalled();
+      // P0-FIX: Cache uses setex() for L2 writes with TTL
+      expect(mockRedis.setex).toHaveBeenCalled();
     });
   });
 

@@ -1767,10 +1767,12 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
       const p3Content = fs.readFileSync(p3Path, 'utf-8');
       const p4Content = fs.readFileSync(p4Path, 'utf-8');
 
-      expect(p1Content).toContain('P1_DEFAULT_PORT = 3001');
-      expect(p2Content).toContain('P2_DEFAULT_PORT = 3002');
-      expect(p3Content).toContain('P3_DEFAULT_PORT = 3003');
-      expect(p4Content).toContain('P4_DEFAULT_PORT = 3004');
+      // P0-FIX: Test updated to match centralized port pattern
+      // Ports now come from PARTITION_PORTS constant with fallback defaults
+      expect(p1Content).toMatch(/P1_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3001/);
+      expect(p2Content).toMatch(/P2_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3002/);
+      expect(p3Content).toMatch(/P3_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3003/);
+      expect(p4Content).toMatch(/P4_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3004/);
     });
 
     it('should have Solana-specific environment variables in docs', async () => {

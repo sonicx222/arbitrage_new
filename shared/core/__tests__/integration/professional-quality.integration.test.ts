@@ -148,10 +148,10 @@ describe('ProfessionalQualityMonitor Integration', () => {
           operationalConsistency: 70
         },
         metrics: {
-          latency: { p50: 5, p95: 10, p99: 15, max: 20 },
-          accuracy: { precision: 0.7, recall: 0.65, f1Score: 0.675 },
-          reliability: { uptime: 0.95, errorRate: 0.05 },
-          consistency: { variance: 0.15 }
+          detectionLatency: { p50: 5, p95: 10, p99: 15, max: 20 },
+          detectionAccuracy: { precision: 0.7, recall: 0.65, f1Score: 0.675, falsePositiveRate: 0.15 },
+          systemReliability: { uptime: 0.95, availability: 0.94, errorRate: 0.05, recoveryTime: 30 },
+          operationalConsistency: { performanceVariance: 0.15, throughputStability: 0.85, memoryStability: 0.9, loadHandling: 0.8 }
         },
         timestamp: Date.now() - 3600000,
         assessmentPeriod: { start: 0, end: 0, duration: 3600000 },
@@ -170,10 +170,10 @@ describe('ProfessionalQualityMonitor Integration', () => {
           operationalConsistency: 85
         },
         metrics: {
-          latency: { p50: 3, p95: 7, p99: 10, max: 12 },
-          accuracy: { precision: 0.85, recall: 0.82, f1Score: 0.835 },
-          reliability: { uptime: 0.99, errorRate: 0.01 },
-          consistency: { variance: 0.08 }
+          detectionLatency: { p50: 3, p95: 7, p99: 10, max: 12 },
+          detectionAccuracy: { precision: 0.85, recall: 0.82, f1Score: 0.835, falsePositiveRate: 0.08 },
+          systemReliability: { uptime: 0.99, availability: 0.98, errorRate: 0.01, recoveryTime: 15 },
+          operationalConsistency: { performanceVariance: 0.08, throughputStability: 0.92, memoryStability: 0.95, loadHandling: 0.9 }
         },
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 3600000 },
@@ -199,10 +199,10 @@ describe('ProfessionalQualityMonitor Integration', () => {
           operationalConsistency: 90
         },
         metrics: {
-          latency: { p50: 2, p95: 5, p99: 8, max: 10 },
-          accuracy: { precision: 0.92, recall: 0.90, f1Score: 0.91 },
-          reliability: { uptime: 0.999, errorRate: 0.001 },
-          consistency: { variance: 0.05 }
+          detectionLatency: { p50: 2, p95: 5, p99: 8, max: 10 },
+          detectionAccuracy: { precision: 0.92, recall: 0.90, f1Score: 0.91, falsePositiveRate: 0.02 },
+          systemReliability: { uptime: 0.999, availability: 0.998, errorRate: 0.001, recoveryTime: 5 },
+          operationalConsistency: { performanceVariance: 0.05, throughputStability: 0.95, memoryStability: 0.97, loadHandling: 0.95 }
         },
         timestamp: Date.now() - 3600000,
         assessmentPeriod: { start: 0, end: 0, duration: 3600000 },
@@ -220,10 +220,10 @@ describe('ProfessionalQualityMonitor Integration', () => {
           operationalConsistency: 55
         },
         metrics: {
-          latency: { p50: 15, p95: 30, p99: 50, max: 100 },
-          accuracy: { precision: 0.55, recall: 0.50, f1Score: 0.524 },
-          reliability: { uptime: 0.90, errorRate: 0.10 },
-          consistency: { variance: 0.30 }
+          detectionLatency: { p50: 15, p95: 30, p99: 50, max: 100 },
+          detectionAccuracy: { precision: 0.55, recall: 0.50, f1Score: 0.524, falsePositiveRate: 0.25 },
+          systemReliability: { uptime: 0.90, availability: 0.88, errorRate: 0.10, recoveryTime: 60 },
+          operationalConsistency: { performanceVariance: 0.30, throughputStability: 0.70, memoryStability: 0.75, loadHandling: 0.60 }
         },
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 3600000 },
@@ -288,26 +288,33 @@ describe('ProfessionalQualityMonitor Integration', () => {
 
   describe('Error Resilience Integration', () => {
     it('should gracefully handle Redis connection failures', async () => {
-      // Simulate Redis failure
-      mockRedis.get = jest.fn().mockRejectedValue(new Error('Connection refused'));
+      // Simulate Redis failure - override get method
+      const originalGet = mockRedis.get;
+      mockRedis.get = async () => {
+        throw new Error('Connection refused');
+      };
 
       // Should not throw
       const score = await monitor.getCurrentQualityScore();
       expect(score).toBeNull();
+
+      // Restore
+      mockRedis.get = originalGet;
     });
 
     it('should recover from temporary Redis failures', async () => {
       let failCount = 0;
 
-      // Fail first 2 calls, succeed after
-      mockRedis.setex = jest.fn().mockImplementation((key, _ttl, value) => {
+      // Override setex to fail first 2 calls, succeed after
+      const originalSetex = mockRedis.setex;
+      mockRedis.setex = async (key, _ttl, value) => {
         failCount++;
         if (failCount <= 2) {
-          return Promise.reject(new Error('Temporary failure'));
+          throw new Error('Temporary failure');
         }
         mockRedis.storage.set(key, value);
-        return Promise.resolve('OK');
-      });
+        return 'OK';
+      };
 
       // Record multiple results - some will fail
       for (let i = 0; i < 5; i++) {
@@ -323,6 +330,9 @@ describe('ProfessionalQualityMonitor Integration', () => {
 
       // Later calls should succeed
       expect(mockRedis.storage.size).toBeGreaterThan(0);
+
+      // Restore
+      mockRedis.setex = originalSetex;
     });
   });
 });

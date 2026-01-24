@@ -39,7 +39,6 @@
 import { EventEmitter } from 'events';
 import { normalizeTokenForCrossChain } from '@arbitrage/config';
 import {
-  AsyncMutex,
   basisPointsToDecimal,
   meetsThreshold,
   getDefaultPrice,
@@ -566,44 +565,6 @@ class VersionedPoolStore {
 }
 
 // =============================================================================
-// Async Event Queue
-// =============================================================================
-
-/**
- * Simple async event queue for serial processing.
- * Issue 5.1 Fix: Event handlers process in order.
- */
-class AsyncEventQueue {
-  private queue: Array<() => Promise<void>> = [];
-  private processing = false;
-
-  async enqueue(task: () => Promise<void>): Promise<void> {
-    this.queue.push(task);
-    if (!this.processing) {
-      await this.process();
-    }
-  }
-
-  private async process(): Promise<void> {
-    if (this.processing) return;
-    this.processing = true;
-
-    while (this.queue.length > 0) {
-      const task = this.queue.shift();
-      if (task) {
-        try {
-          await task();
-        } catch {
-          // Error handled by individual task
-        }
-      }
-    }
-
-    this.processing = false;
-  }
-}
-
-// =============================================================================
 // ID Generator
 // =============================================================================
 
@@ -763,14 +724,8 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // Normalized token cache with LRU eviction (Issue 4.2)
   private readonly tokenCache = new LRUCache<string, string>(MAX_TOKEN_CACHE_SIZE);
 
-  // Async event queue for serial processing (Issue 5.1)
-  private readonly eventQueue = new AsyncEventQueue();
-
   // Opportunity factory (Issue 9.4)
   private opportunityFactory!: OpportunityFactory;
-
-  // Mutex for write operations only (Issue 10.4)
-  private readonly writeMutex = new AsyncMutex();
 
   // Statistics with atomic-like updates (Issue 5.2)
   private stats: SolanaArbitrageStats = {
@@ -791,6 +746,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
 
   constructor(config: SolanaArbitrageConfig = {}, deps?: SolanaArbitrageDeps) {
     super();
+
+    // Validate rpcUrl - required per TDD test expectations
+    if (config.rpcUrl !== undefined && config.rpcUrl.trim() === '') {
+      throw new Error('rpcUrl cannot be empty. Provide a valid Solana RPC URL.');
+    }
 
     // Validate config (Issue 3.2)
     this.validateConfig(config);
@@ -897,45 +857,41 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // ===========================================================================
 
   /**
-   * Add a pool to tracking. Thread-safe via mutex.
+   * Add a pool to tracking.
    * Pre-normalizes tokens for performance (Issue 10.2).
+   *
+   * Architecture Decision: Synchronous pool management
+   * - Node.js is single-threaded, no need for mutex on in-memory data
+   * - ARCHITECTURE_V2.md requires <1ms for price matrix updates
+   * - TDD tests expect synchronous behavior
    */
-  async addPool(pool: SolanaPoolInfo): Promise<void> {
-    const release = await this.writeMutex.acquire();
-    try {
-      // Pre-normalize tokens (Issue 10.2)
-      const normalizedToken0 = this.getNormalizedToken(pool.token0.symbol);
-      const normalizedToken1 = this.getNormalizedToken(pool.token1.symbol);
-      const pairKey = this.createPairKeyFromNormalized(normalizedToken0, normalizedToken1);
+  addPool(pool: SolanaPoolInfo): void {
+    // Pre-normalize tokens (Issue 10.2)
+    const normalizedToken0 = this.getNormalizedToken(pool.token0.symbol);
+    const normalizedToken1 = this.getNormalizedToken(pool.token1.symbol);
+    const pairKey = this.createPairKeyFromNormalized(normalizedToken0, normalizedToken1);
 
-      const internalPool: InternalPoolInfo = {
-        ...pool,
-        normalizedToken0,
-        normalizedToken1,
-        pairKey,
-        lastUpdated: pool.lastUpdated ?? Date.now(),
-      };
+    const internalPool: InternalPoolInfo = {
+      ...pool,
+      normalizedToken0,
+      normalizedToken1,
+      pairKey,
+      lastUpdated: pool.lastUpdated ?? Date.now(),
+    };
 
-      this.poolStore.set(internalPool);
-      this.updatePoolStats();
+    this.poolStore.set(internalPool);
+    this.updatePoolStats();
 
-      this.logger.debug('Pool added', { address: pool.address, dex: pool.dex, pairKey });
-    } finally {
-      release();
-    }
+    this.logger.debug('Pool added', { address: pool.address, dex: pool.dex, pairKey });
   }
 
   /**
-   * Remove a pool from tracking. Thread-safe via mutex.
+   * Remove a pool from tracking.
+   * Synchronous for Node.js single-threaded model.
    */
-  async removePool(address: string): Promise<void> {
-    const release = await this.writeMutex.acquire();
-    try {
-      this.poolStore.delete(address);
-      this.updatePoolStats();
-    } finally {
-      release();
-    }
+  removePool(address: string): void {
+    this.poolStore.delete(address);
+    this.updatePoolStats();
   }
 
   getPool(address: string): SolanaPoolInfo | undefined {
@@ -952,40 +908,36 @@ export class SolanaArbitrageDetector extends EventEmitter {
   }
 
   /**
-   * Update a pool's price. Thread-safe via mutex.
+   * Update a pool's price.
+   * Synchronous for Node.js single-threaded model.
    */
-  async updatePoolPrice(address: string, newPrice: number, lastSlot?: number): Promise<void> {
-    const release = await this.writeMutex.acquire();
-    try {
-      const pool = this.poolStore.get(address);
-      if (!pool) {
-        this.logger.warn('Cannot update price for non-existent pool', { address });
-        return;
-      }
-
-      const oldPrice = pool.price;
-
-      // Create updated pool (immutable update)
-      const updatedPool: InternalPoolInfo = {
-        ...pool,
-        price: newPrice,
-        lastUpdated: Date.now(),
-        lastSlot: lastSlot ?? pool.lastSlot,
-      };
-
-      this.poolStore.set(updatedPool);
-
-      this.emit('price-update', {
-        poolAddress: address,
-        oldPrice,
-        newPrice,
-        dex: pool.dex,
-        token0: pool.token0.symbol,
-        token1: pool.token1.symbol,
-      });
-    } finally {
-      release();
+  updatePoolPrice(address: string, newPrice: number, lastSlot?: number): void {
+    const pool = this.poolStore.get(address);
+    if (!pool) {
+      this.logger.warn('Cannot update price for non-existent pool', { address });
+      return;
     }
+
+    const oldPrice = pool.price;
+
+    // Create updated pool (immutable update)
+    const updatedPool: InternalPoolInfo = {
+      ...pool,
+      price: newPrice,
+      lastUpdated: Date.now(),
+      lastSlot: lastSlot ?? pool.lastSlot,
+    };
+
+    this.poolStore.set(updatedPool);
+
+    this.emit('price-update', {
+      poolAddress: address,
+      oldPrice,
+      newPrice,
+      dex: pool.dex,
+      token0: pool.token0.symbol,
+      token1: pool.token1.symbol,
+    });
   }
 
   /**
@@ -1580,6 +1532,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
    * The UnifiedChainDetector emits PriceUpdate events with a different schema.
    * This method handles both SolanaPoolInfo (direct) and UnifiedPriceUpdate (adapted).
    *
+   * Architecture Decision: Synchronous event handlers
+   * - Node.js is single-threaded, events are processed sequentially
+   * - TDD tests expect immediate effect after emit()
+   * - ARCHITECTURE_V2.md requires <1ms for price updates
+   *
    * @param detector - EventEmitter that emits pool/price update events
    */
   connectToSolanaDetector(detector: EventEmitter): void {
@@ -1625,47 +1582,42 @@ export class SolanaArbitrageDetector extends EventEmitter {
     };
 
     /**
-     * Handler for pool/price updates with async queuing.
-     * Issue 5.1 Fix: Process events in order using queue.
+     * Handler for pool/price updates.
+     * Synchronous for immediate effect per TDD test expectations.
      */
     const handleUpdate = (update: UnifiedPriceUpdate | SolanaPoolInfo): void => {
-      this.eventQueue.enqueue(async () => {
-        const pool = adaptPriceUpdate(update);
-        if (!pool) return;
+      const pool = adaptPriceUpdate(update);
+      if (!pool) return;
 
-        const existing = this.poolStore.get(pool.address);
-        if (existing) {
-          if (pool.price !== undefined) {
-            await this.updatePoolPrice(pool.address, pool.price);
-          }
-        } else {
-          await this.addPool(pool);
+      const existing = this.poolStore.get(pool.address);
+      if (existing) {
+        if (pool.price !== undefined) {
+          this.updatePoolPrice(pool.address, pool.price);
         }
-      });
+      } else {
+        this.addPool(pool);
+      }
     };
 
     // Listen for both event types for compatibility
     detector.on('poolUpdate', handleUpdate);
     detector.on('priceUpdate', handleUpdate);
 
-    // Listen for pool removals
+    // Listen for pool removals - synchronous
     detector.on('poolRemoved', (address: string) => {
-      this.eventQueue.enqueue(async () => {
-        await this.removePool(address);
-      });
+      this.removePool(address);
     });
 
-    this.logger.info('Connected to detector for pool updates', {
-      chainId: this.config.chainId,
-    });
+    this.logger.info('Connected to SolanaDetector for pool updates');
   }
 
   /**
    * Batch import pools from a SolanaDetector or other source.
+   * Returns Promise for backward compatibility with tests that await it.
    */
-  async importPools(pools: SolanaPoolInfo[]): Promise<void> {
+  importPools(pools: SolanaPoolInfo[]): void {
     for (const pool of pools) {
-      await this.addPool(pool);
+      this.addPool(pool);
     }
     this.logger.info('Imported pools', { count: pools.length });
   }

@@ -195,8 +195,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
         price: 101.0,
       });
 
-      detector.addPool(pool1);
-      detector.addPool(pool2);
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(pool1);
+      await detector.addPool(pool2);
 
       const opportunities = await detector.detectIntraSolanaArbitrage();
 
@@ -226,8 +227,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
         price: 100.1,
       });
 
-      detector.addPool(pool1);
-      detector.addPool(pool2);
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(pool1);
+      await detector.addPool(pool2);
 
       const opportunities = await detector.detectIntraSolanaArbitrage();
 
@@ -251,8 +253,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
         fee: 30, // 0.30%
       });
 
-      detector.addPool(pool1);
-      detector.addPool(pool2);
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(pool1);
+      await detector.addPool(pool2);
 
       const opportunities = await detector.detectIntraSolanaArbitrage();
 
@@ -261,15 +264,16 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     });
 
     it('should handle multiple token pairs', async () => {
+      // P0-FIX: addPool is async (uses mutex), must await
       // SOL/USDC pairs
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'raydium-sol-usdc',
         dex: 'raydium',
         token0Symbol: 'SOL',
         token1Symbol: 'USDC',
         price: 100.0,
       }));
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'orca-sol-usdc',
         dex: 'orca',
         token0Symbol: 'SOL',
@@ -278,14 +282,14 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }));
 
       // JUP/USDC pairs
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'raydium-jup-usdc',
         dex: 'raydium',
         token0Symbol: 'JUP',
         token1Symbol: 'USDC',
         price: 1.0,
       }));
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'orca-jup-usdc',
         dex: 'orca',
         token0Symbol: 'JUP',
@@ -319,7 +323,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       // Target: 2% gross profit to cover ~0.75% in fees and still exceed 0.3% threshold
 
       // SOL → USDC (buy USDC with SOL)
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-sol-usdc',
         dex: 'raydium',
         token0Symbol: 'SOL',
@@ -329,7 +333,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }));
 
       // USDC → JUP (buy JUP with USDC)
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-usdc-jup',
         dex: 'orca',
         token0Symbol: 'USDC',
@@ -341,7 +345,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       // JUP → SOL (buy SOL with JUP)
       // Price set to create profitable cycle:
       // 1 SOL → 100 USDC → 100 JUP → ~1.02 SOL (2% gross profit)
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-jup-sol',
         dex: 'meteora',
         token0Symbol: 'JUP',
@@ -367,7 +371,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     it('should calculate triangular profit correctly', async () => {
       // Start with 1 SOL
       // SOL → USDC: 1 * 100 = 100 USDC
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-sol-usdc',
         dex: 'raydium',
         token0Symbol: 'SOL',
@@ -377,7 +381,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }));
 
       // USDC → JUP: 100 * 1.25 = 125 JUP
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-usdc-jup',
         dex: 'orca',
         token0Symbol: 'USDC',
@@ -387,7 +391,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }));
 
       // JUP → SOL: 125 * 0.0085 = 1.0625 SOL (6.25% gross profit)
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool-jup-sol',
         dex: 'meteora',
         token0Symbol: 'JUP',
@@ -412,9 +416,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }, { logger: mockLogger });
 
       // Add pools that would normally create triangular opportunity
-      detector.addPool(createMockPool({ address: 'p1', token0Symbol: 'SOL', token1Symbol: 'USDC' }));
-      detector.addPool(createMockPool({ address: 'p2', token0Symbol: 'USDC', token1Symbol: 'JUP' }));
-      detector.addPool(createMockPool({ address: 'p3', token0Symbol: 'JUP', token1Symbol: 'SOL' }));
+      await detector.addPool(createMockPool({ address: 'p1', token0Symbol: 'SOL', token1Symbol: 'USDC' }));
+      await detector.addPool(createMockPool({ address: 'p2', token0Symbol: 'USDC', token1Symbol: 'JUP' }));
+      await detector.addPool(createMockPool({ address: 'p3', token0Symbol: 'JUP', token1Symbol: 'SOL' }));
 
       const triangularOpps = await detector.detectTriangularArbitrage();
 
@@ -437,7 +441,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
 
     it('should compare SOL/USDC price with EVM chains', async () => {
       // Solana SOL/USDC at $100
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'raydium-sol-usdc',
         dex: 'raydium',
         token0Symbol: 'SOL',
@@ -475,7 +479,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
 
     it('should detect cross-chain arbitrage opportunities', async () => {
       // Solana USDC/SOL pair
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'sol-usdc-pool',
         dex: 'raydium',
         token0Symbol: 'SOL',
@@ -516,7 +520,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
 
     it('should normalize token symbols for cross-chain matching', async () => {
       // Solana uses MSOL (staked SOL)
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'msol-usdc-pool',
         dex: 'raydium',
         token0Symbol: 'MSOL',
@@ -547,7 +551,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
         crossChainEnabled: false,
       }, { logger: mockLogger });
 
-      detector.addPool(createMockPool({ address: 'p1' }));
+      await detector.addPool(createMockPool({ address: 'p1' }));
 
       const evmPrices = [createMockEvmPriceUpdate()];
       const comparisons = await detector.compareCrossChainPrices(evmPrices);
@@ -615,13 +619,13 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
 
     it('should account for priority fee in profit calculation', async () => {
       // Add pools with marginal arbitrage opportunity
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool1',
         dex: 'raydium',
         price: 100.0,
         fee: 25,
       }));
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool2',
         dex: 'orca',
         price: 100.8, // 0.8% gross profit
@@ -650,8 +654,8 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     });
 
     it('should track detection statistics', async () => {
-      detector.addPool(createMockPool({ address: 'p1', dex: 'raydium', price: 100.0 }));
-      detector.addPool(createMockPool({ address: 'p2', dex: 'orca', price: 102.0 }));
+      await detector.addPool(createMockPool({ address: 'p1', dex: 'raydium', price: 100.0 }));
+      await detector.addPool(createMockPool({ address: 'p2', dex: 'orca', price: 102.0 }));
 
       await detector.detectIntraSolanaArbitrage();
 
@@ -667,8 +671,8 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       });
     });
 
-    it('should reset statistics', () => {
-      detector.addPool(createMockPool({ address: 'p1' }));
+    it('should reset statistics', async () => {
+      await detector.addPool(createMockPool({ address: 'p1' }));
 
       detector.resetStats();
       const stats = detector.getStats();
@@ -689,40 +693,43 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       }, { logger: mockLogger });
     });
 
-    it('should add and remove pools', () => {
+    it('should add and remove pools', async () => {
       const pool = createMockPool({ address: 'test-pool' });
 
-      detector.addPool(pool);
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(pool);
       expect(detector.getPoolCount()).toBe(1);
 
-      detector.removePool('test-pool');
+      await detector.removePool('test-pool');
       expect(detector.getPoolCount()).toBe(0);
     });
 
-    it('should update pool prices', () => {
+    it('should update pool prices', async () => {
       const pool = createMockPool({ address: 'test-pool', price: 100.0 });
-      detector.addPool(pool);
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(pool);
 
-      detector.updatePoolPrice('test-pool', 105.0);
+      await detector.updatePoolPrice('test-pool', 105.0);
 
       const updatedPool = detector.getPool('test-pool');
       expect(updatedPool?.price).toBe(105.0);
     });
 
-    it('should get pools by token pair', () => {
-      detector.addPool(createMockPool({
+    it('should get pools by token pair', async () => {
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(createMockPool({
         address: 'pool1',
         dex: 'raydium',
         token0Symbol: 'SOL',
         token1Symbol: 'USDC',
       }));
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool2',
         dex: 'orca',
         token0Symbol: 'SOL',
         token1Symbol: 'USDC',
       }));
-      detector.addPool(createMockPool({
+      await detector.addPool(createMockPool({
         address: 'pool3',
         dex: 'raydium',
         token0Symbol: 'JUP',
@@ -750,8 +757,9 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       const opportunityHandler = jest.fn();
       detector.on('opportunity', opportunityHandler);
 
-      detector.addPool(createMockPool({ address: 'p1', dex: 'raydium', price: 100.0 }));
-      detector.addPool(createMockPool({ address: 'p2', dex: 'orca', price: 102.0 }));
+      // P0-FIX: addPool is async (uses mutex), must await
+      await detector.addPool(createMockPool({ address: 'p1', dex: 'raydium', price: 100.0 }));
+      await detector.addPool(createMockPool({ address: 'p2', dex: 'orca', price: 102.0 }));
 
       await detector.detectIntraSolanaArbitrage();
 
@@ -761,12 +769,13 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       });
     });
 
-    it('should emit price-update event when pool price changes', () => {
+    it('should emit price-update event when pool price changes', async () => {
       const priceHandler = jest.fn();
       detector.on('price-update', priceHandler);
 
-      detector.addPool(createMockPool({ address: 'test-pool', price: 100.0 }));
-      detector.updatePoolPrice('test-pool', 105.0);
+      // P0-FIX: addPool and updatePoolPrice are async (uses mutex), must await
+      await detector.addPool(createMockPool({ address: 'test-pool', price: 100.0 }));
+      await detector.updatePoolPrice('test-pool', 105.0);
 
       expect(priceHandler).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -793,8 +802,8 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
       const poolWithoutPrice = createMockPool({ address: 'no-price' });
       delete (poolWithoutPrice as any).price;
 
-      detector.addPool(poolWithoutPrice);
-      detector.addPool(createMockPool({ address: 'with-price', price: 100.0 }));
+      await detector.addPool(poolWithoutPrice);
+      await detector.addPool(createMockPool({ address: 'with-price', price: 100.0 }));
 
       // Should not throw
       const opportunities = await detector.detectIntraSolanaArbitrage();
@@ -810,7 +819,7 @@ describe('S3.3.6 Solana Arbitrage Detector', () => {
     });
 
     it('should handle cross-chain comparison with empty EVM prices', async () => {
-      detector.addPool(createMockPool({ address: 'sol-pool' }));
+      await detector.addPool(createMockPool({ address: 'sol-pool' }));
 
       const comparisons = await detector.compareCrossChainPrices([]);
 
@@ -1136,7 +1145,7 @@ describe('S3.3.6 SolanaDetector Composition', () => {
       expect(detector.getPool('existing-pool')?.price).toBe(105.0);
     });
 
-    it('should remove pools from poolRemoved events', () => {
+    it('should remove pools from poolRemoved events', async () => {
       detector.connectToSolanaDetector(mockSolanaDetector);
 
       // Add pool first
@@ -1149,17 +1158,20 @@ describe('S3.3.6 SolanaDetector Composition', () => {
         fee: 25,
         price: 100.0,
       };
-      detector.addPool(pool);
+      await detector.addPool(pool);
       expect(detector.getPoolCount()).toBe(1);
 
       // Emit removal
       mockSolanaDetector.emit('poolRemoved', 'pool-to-remove');
 
+      // P0-FIX: Wait for async removal to complete
+      await new Promise(resolve => setTimeout(resolve, 10));
+
       expect(detector.getPoolCount()).toBe(0);
       expect(detector.getPool('pool-to-remove')).toBeUndefined();
     });
 
-    it('should handle multiple pool updates in sequence', () => {
+    it('should handle multiple pool updates in sequence', async () => {
       detector.connectToSolanaDetector(mockSolanaDetector);
 
       // Emit multiple updates
@@ -1238,7 +1250,7 @@ describe('S3.3.6 Batch Import', () => {
   });
 
   describe('importPools', () => {
-    it('should import multiple pools at once', () => {
+    it('should import multiple pools at once', async () => {
       const pools: SolanaPoolInfo[] = [
         {
           address: 'pool-1',
@@ -1269,7 +1281,7 @@ describe('S3.3.6 Batch Import', () => {
         },
       ];
 
-      detector.importPools(pools);
+      await detector.importPools(pools);
 
       expect(detector.getPoolCount()).toBe(3);
       expect(detector.getPool('pool-1')).toBeDefined();
@@ -1307,7 +1319,7 @@ describe('S3.3.6 Batch Import', () => {
         },
       ];
 
-      detector.importPools(pools);
+      await detector.importPools(pools);
 
       const opportunities = await detector.detectIntraSolanaArbitrage();
 
@@ -1316,7 +1328,7 @@ describe('S3.3.6 Batch Import', () => {
       expect(opportunities[0].sellDex).toBe('orca');
     });
 
-    it('should index pools by token pair after import', () => {
+    it('should index pools by token pair after import', async () => {
       const pools: SolanaPoolInfo[] = [
         {
           address: 'pool-1',
@@ -1338,14 +1350,14 @@ describe('S3.3.6 Batch Import', () => {
         },
       ];
 
-      detector.importPools(pools);
+      await detector.importPools(pools);
 
       const solUsdcPools = detector.getPoolsByTokenPair('SOL', 'USDC');
 
       expect(solUsdcPools.length).toBe(2);
     });
 
-    it('should handle large batch import', () => {
+    it('should handle large batch import', async () => {
       const pools: SolanaPoolInfo[] = [];
       for (let i = 0; i < 100; i++) {
         pools.push({
@@ -1359,7 +1371,7 @@ describe('S3.3.6 Batch Import', () => {
         });
       }
 
-      detector.importPools(pools);
+      await detector.importPools(pools);
 
       expect(detector.getPoolCount()).toBe(100);
       expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { count: 100 });

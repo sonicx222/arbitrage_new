@@ -2052,13 +2052,20 @@ export abstract class BaseDetector {
   /**
    * T1.1: Get all pairs for a given token combination.
    * Returns pairs on different DEXs that trade the same tokens.
+   *
+   * P0-FIX: Returns a shallow copy of the array to prevent iteration-mutation
+   * race conditions. Callers can safely iterate over the returned array while
+   * other async operations may call updatePairInTokenIndex() concurrently.
+   *
    * @param token0 First token address
    * @param token1 Second token address
-   * @returns Array of pairs trading these tokens (may be empty)
+   * @returns Array of pairs trading these tokens (may be empty) - COPY, safe to iterate
    */
   protected getPairsForTokens(token0: string, token1: string): Pair[] {
     const key = this.getTokenPairKey(token0, token1);
-    return this.pairsByTokens.get(key) || [];
+    const pairsForKey = this.pairsByTokens.get(key);
+    // Return a shallow copy to prevent concurrent modification during iteration
+    return pairsForKey ? [...pairsForKey] : [];
   }
 
   /**
