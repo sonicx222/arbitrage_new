@@ -62,6 +62,8 @@ const config: HardhatUserConfig = {
       chainId: 421614,
     },
     // Production networks - uncomment after security audit
+    // TODO: Track deployment progress - create GitHub issue for mainnet deployment
+    // Prerequisites: 1) Security audit, 2) Testnet verification, 3) Deployment runbook
     // ethereum: {
     //   url: process.env.ETHEREUM_RPC_URL || '',
     //   accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],

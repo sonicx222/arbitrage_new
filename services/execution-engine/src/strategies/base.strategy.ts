@@ -106,11 +106,19 @@ const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
 
 /**
  * Fix 3.1: Validate gas price is within reasonable bounds for chain.
+ * Fix 3.2: Also validates that the price is not NaN (from invalid env var).
  * Logs warning if configured value is suspicious but clamps to safe range.
  */
 function validateGasPrice(chain: string, configuredPrice: number): number {
   const min = MIN_GAS_PRICE_GWEI[chain] ?? 0.0001;
   const max = MAX_GAS_PRICE_GWEI[chain] ?? 1000;
+
+  // Fix 3.2: Check for NaN from invalid environment variable (e.g., GAS_PRICE_ETHEREUM_GWEI=abc)
+  // NaN comparisons always return false, so we must check explicitly
+  if (Number.isNaN(configuredPrice)) {
+    console.error(`[ERR_GAS_PRICE] Invalid gas price for ${chain} (NaN). Check GAS_PRICE_${chain.toUpperCase()}_GWEI env var. Using minimum (${min} gwei).`);
+    return min;
+  }
 
   if (configuredPrice < min) {
     console.warn(`[WARN_GAS_PRICE] Gas price for ${chain} (${configuredPrice} gwei) below minimum (${min} gwei). Using minimum.`);
@@ -308,10 +316,15 @@ export abstract class BaseExecutionStrategy {
    * This method performs a lightweight gas price refresh without full baseline
    * update (which would be too slow for the hot path).
    *
+   * **Abort Thresholds:**
+   * - >20%: Warning logged but execution continues
+   * - >50%: Execution aborted to prevent unprofitable trades
+   *
    * @param chain - Chain identifier
    * @param ctx - Strategy context
    * @param previousGasPrice - The gas price from earlier getOptimalGasPrice() call
    * @returns Fresh gas price, or previousGasPrice if refresh fails
+   * @throws Error if price increased >50% (Fix 5.1: prevents unprofitable execution)
    */
   protected async refreshGasPriceForSubmission(
     chain: string,
@@ -331,13 +344,31 @@ export abstract class BaseExecutionStrategy {
         return previousGasPrice;
       }
 
-      // Check for significant price increase (>20%) since initial fetch
+      // Check for significant price increase since initial fetch
       const priceIncrease = currentPrice > previousGasPrice
         ? Number((currentPrice - previousGasPrice) * 100n / previousGasPrice)
         : 0;
 
+      // Fix 5.1: Abort on >50% increase to prevent unprofitable trades
+      if (priceIncrease > 50) {
+        const previousGwei = Number(previousGasPrice / GWEI_DIVISOR);
+        const currentGwei = Number(currentPrice / GWEI_DIVISOR);
+
+        this.logger.error('[ERR_GAS_SPIKE] Aborting: gas price increased >50% since preparation', {
+          chain,
+          previousGwei,
+          currentGwei,
+          increasePercent: priceIncrease,
+        });
+
+        throw new Error(
+          `[ERR_GAS_SPIKE] Gas price spike during submission: ` +
+          `${previousGwei.toFixed(2)} -> ${currentGwei.toFixed(2)} gwei (+${priceIncrease}%)`
+        );
+      }
+
       if (priceIncrease > 20) {
-        this.logger.warn('Significant gas price increase since initial fetch', {
+        this.logger.warn('[WARN_GAS_INCREASE] Significant gas price increase since initial fetch', {
           chain,
           previousGwei: Number(previousGasPrice / GWEI_DIVISOR),
           currentGwei: Number(currentPrice / GWEI_DIVISOR),
@@ -346,8 +377,12 @@ export abstract class BaseExecutionStrategy {
       }
 
       return currentPrice;
-    } catch {
-      // On failure, use the previous price - don't block transaction
+    } catch (error) {
+      // Re-throw gas spike errors (they're intentional aborts)
+      if (getErrorMessage(error)?.includes('[ERR_GAS_SPIKE]')) {
+        throw error;
+      }
+      // On other failures, use the previous price - don't block transaction
       return previousGasPrice;
     }
   }
@@ -476,6 +511,20 @@ export abstract class BaseExecutionStrategy {
    * Clean up expired median cache entries periodically.
    * Called during getGasBaseline to avoid memory leaks from stale chain entries.
    * Also enforces a hard cap on cache size for safety.
+   *
+   * Fix 10.2.1: Performance note on cache cleanup
+   * This uses Array.from + sort for eviction, which allocates temporary arrays.
+   * This is acceptable because:
+   * 1. Cleanup only runs every MEDIAN_CACHE_CLEANUP_INTERVAL_MS (not hot path)
+   * 2. Cache size is bounded by number of chains (~11), so arrays are small
+   * 3. The sort only happens in the rare overflow case (typically never)
+   *
+   * Alternative approaches considered:
+   * - Min-heap for validUntil timestamps: Over-engineering for ~11 entries
+   * - LRU cache: Would require tracking access order (more overhead)
+   * - Random eviction: Simpler but could evict recently-used entries
+   *
+   * Current approach is simple, correct, and performant for the actual use case.
    */
   private cleanupMedianCacheIfNeeded(now: number): void {
     // Only run cleanup periodically to avoid overhead on every call
@@ -484,14 +533,15 @@ export abstract class BaseExecutionStrategy {
     }
     this.lastMedianCacheCleanup = now;
 
-    // Remove expired entries
+    // Remove expired entries (O(n) scan)
     for (const [key, value] of this.medianCache) {
       if (now >= value.validUntil) {
         this.medianCache.delete(key);
       }
     }
 
-    // Hard cap: if still over limit, evict oldest entries (by validUntil)
+    // Hard cap: if still over limit after expiry check, evict oldest entries
+    // This only triggers if many chains added rapidly without expiry
     if (this.medianCache.size > this.MAX_MEDIAN_CACHE_SIZE) {
       const entries = Array.from(this.medianCache.entries())
         .sort((a, b) => a[1].validUntil - b[1].validUntil);
@@ -566,6 +616,52 @@ export abstract class BaseExecutionStrategy {
   }
 
   // ===========================================================================
+  // MEV Eligibility Check (Fix 6.3 & 9.1)
+  // ===========================================================================
+
+  /**
+   * Fix 6.3 & 9.1: Check if MEV protection should be used for a transaction.
+   *
+   * This helper consolidates the MEV eligibility check that was duplicated
+   * in FlashLoanStrategy.execute() and submitTransaction().
+   *
+   * MEV protection is used when:
+   * 1. MEV provider is available for the chain
+   * 2. MEV provider is enabled
+   * 3. Chain-specific MEV settings allow it (enabled !== false)
+   * 4. Expected profit meets minimum threshold for MEV protection
+   *
+   * @param chain - Chain identifier
+   * @param ctx - Strategy context with mevProviderFactory
+   * @param expectedProfit - Expected profit in USD
+   * @returns Object with eligibility status and provider if eligible
+   */
+  protected checkMevEligibility(
+    chain: string,
+    ctx: StrategyContext,
+    expectedProfit?: number
+  ): {
+    shouldUseMev: boolean;
+    mevProvider?: ReturnType<NonNullable<StrategyContext['mevProviderFactory']>['getProvider']>;
+    chainSettings?: typeof MEV_CONFIG.chainSettings[string];
+  } {
+    const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
+    const chainSettings = MEV_CONFIG.chainSettings[chain];
+
+    const shouldUseMev = !!(
+      mevProvider?.isEnabled() &&
+      chainSettings?.enabled !== false &&
+      (expectedProfit ?? 0) >= (chainSettings?.minProfitForProtection ?? 0)
+    );
+
+    return {
+      shouldUseMev,
+      mevProvider: shouldUseMev ? mevProvider : undefined,
+      chainSettings,
+    };
+  }
+
+  // ===========================================================================
   // Transaction Submission (Fix 9.1)
   // ===========================================================================
 
@@ -617,9 +713,27 @@ export abstract class BaseExecutionStrategy {
       options.initialGasPrice
     );
 
-    // Get nonce from NonceManager
+    // Fix 4.2 & 5.3: Get nonce from NonceManager only if not already set
+    // This prevents double nonce allocation when strategy pre-allocates nonce
+    //
+    // IMPORTANT (Fix 5.3 - Race Condition Warning):
+    // If multiple strategies execute in parallel for the SAME chain without external
+    // coordination, nonce allocation can race. The NonceManager itself is NOT
+    // distributed-lock protected. For production environments with parallel execution:
+    // 1. Use a distributed lock (Redis SETNX) per chain before calling getNextNonce()
+    // 2. Or ensure only one executor per chain is active at a time
+    // 3. Or pre-allocate nonces at the engine level before dispatching to strategies
+    //
+    // The engine.ts currently uses per-opportunity locks which is insufficient for
+    // same-chain parallel execution. Consider implementing per-chain locks if you
+    // observe nonce conflicts in production.
     let nonce: number | undefined;
-    if (ctx.nonceManager) {
+    if (tx.nonce !== undefined) {
+      // Nonce already set by caller, use it
+      nonce = Number(tx.nonce);
+      this.logger.debug('Using pre-allocated nonce', { chain, nonce });
+    } else if (ctx.nonceManager) {
+      // Allocate new nonce from NonceManager
       try {
         nonce = await ctx.nonceManager.getNextNonce(chain);
         tx.nonce = nonce;
@@ -632,12 +746,12 @@ export abstract class BaseExecutionStrategy {
     }
 
     try {
-      // Check if MEV protection should be used
-      const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
-      const chainSettings = MEV_CONFIG.chainSettings[chain];
-      const shouldUseMev = mevProvider?.isEnabled() &&
-        chainSettings?.enabled !== false &&
-        (options.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
+      // Fix 6.3 & 9.1: Use shared MEV eligibility check helper
+      const { shouldUseMev, mevProvider, chainSettings } = this.checkMevEligibility(
+        chain,
+        ctx,
+        options.expectedProfit
+      );
 
       let receipt: ethers.TransactionReceipt | null = null;
       let txHash: string | undefined;
@@ -991,6 +1105,77 @@ export abstract class BaseExecutionStrategy {
   }
 
   // ===========================================================================
+  // Bridge Fee Validation (Fix 9.3)
+  // ===========================================================================
+
+  /**
+   * Fix 9.3: Check if bridge fees make the opportunity unprofitable.
+   *
+   * Extracted from CrossChainStrategy to enable reuse and consistent
+   * fee threshold checking across strategies that involve bridging.
+   *
+   * @param bridgeFeeWei - Bridge fee in wei (from bridge quote)
+   * @param expectedProfitUsd - Expected profit in USD
+   * @param nativeTokenPriceUsd - Price of native token in USD (ETH price for Ethereum)
+   * @param options - Configuration options
+   * @returns Object with profitability status and details
+   */
+  protected checkBridgeProfitability(
+    bridgeFeeWei: bigint,
+    expectedProfitUsd: number,
+    nativeTokenPriceUsd: number,
+    options: {
+      /** Maximum percentage of profit that bridge fees can consume (default: 50%) */
+      maxFeePercentage?: number;
+      /** Chain name for logging */
+      chain?: string;
+    } = {}
+  ): {
+    isProfitable: boolean;
+    bridgeFeeUsd: number;
+    bridgeFeeEth: number;
+    profitAfterFees: number;
+    feePercentageOfProfit: number;
+    reason?: string;
+  } {
+    const maxFeePercentage = options.maxFeePercentage ?? 50;
+
+    // Convert bridge fee from wei to ETH, then to USD
+    const bridgeFeeEth = parseFloat(ethers.formatEther(bridgeFeeWei));
+    const bridgeFeeUsd = bridgeFeeEth * nativeTokenPriceUsd;
+
+    // Calculate what percentage of profit the fee represents
+    const feePercentageOfProfit = expectedProfitUsd > 0
+      ? (bridgeFeeUsd / expectedProfitUsd) * 100
+      : 100;
+
+    const profitAfterFees = expectedProfitUsd - bridgeFeeUsd;
+    const isProfitable = feePercentageOfProfit < maxFeePercentage;
+
+    if (!isProfitable) {
+      this.logger.debug('Bridge fee profitability check failed', {
+        bridgeFeeEth,
+        bridgeFeeUsd,
+        expectedProfitUsd,
+        feePercentageOfProfit: feePercentageOfProfit.toFixed(2),
+        maxFeePercentage,
+        chain: options.chain,
+      });
+    }
+
+    return {
+      isProfitable,
+      bridgeFeeUsd,
+      bridgeFeeEth,
+      profitAfterFees,
+      feePercentageOfProfit,
+      reason: isProfitable
+        ? undefined
+        : `Bridge fees ($${bridgeFeeUsd.toFixed(2)}) exceed ${maxFeePercentage}% of expected profit ($${expectedProfitUsd.toFixed(2)})`,
+    };
+  }
+
+  // ===========================================================================
   // Transaction Timeout
   // ===========================================================================
 
@@ -1067,21 +1252,23 @@ export abstract class BaseExecutionStrategy {
     ) {
       const revertData = (error as { data: string }).data;
 
-      // FlashLoanArbitrage.sol custom error selectors (Fix 8.1: Match actual contract)
-      // Selectors computed from keccak256("<ErrorName>()")[:4]
+      // FlashLoanArbitrage.sol custom error selectors (Fix 9.3: Match actual contract)
+      // Selectors computed using: ethers.id('<ErrorName>()').slice(0, 10)
+      // All errors are parameterless in contracts/src/FlashLoanArbitrage.sol
+      // Validated by base.strategy.test.ts
       const CUSTOM_ERRORS: Record<string, string> = {
-        '0xc22c9fd3': 'InvalidPoolAddress',
-        '0x63d1bea9': 'InvalidRouterAddress',
-        '0xa3cf8b39': 'RouterAlreadyApproved',
-        '0xf5fc1e4d': 'RouterNotApproved',
-        '0xa1fb4e1e': 'EmptySwapPath',
-        '0x87f88cab': 'InvalidSwapPath',
-        '0xb32cd96c': 'InsufficientProfit',
-        '0xaa8cc9cd': 'InvalidFlashLoanInitiator',
-        '0x0c68f18e': 'InvalidFlashLoanCaller',
-        '0x28a56e8e': 'SwapFailed',
-        '0x90c18d2e': 'InsufficientOutputAmount',
-        '0x29af29f4': 'InvalidRecipient',
+        '0xda6a56c3': 'InvalidPoolAddress',
+        '0x14203b4b': 'InvalidRouterAddress',
+        '0x0d35b41e': 'RouterAlreadyApproved',
+        '0x233d278a': 'RouterNotApproved',
+        '0x86a559ea': 'EmptySwapPath',
+        '0x33782793': 'InvalidSwapPath',
+        '0x4e47f8ea': 'InsufficientProfit',
+        '0xef7cc6b6': 'InvalidFlashLoanInitiator',
+        '0xe17c49b7': 'InvalidFlashLoanCaller',
+        '0x81ceff30': 'SwapFailed',
+        '0x42301c23': 'InsufficientOutputAmount',
+        '0x9c8d2cd2': 'InvalidRecipient',
         '0xb12d13eb': 'ETHTransferFailed',
       };
 

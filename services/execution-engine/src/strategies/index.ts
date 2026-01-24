@@ -34,3 +34,22 @@ export type {
   StrategyFactoryConfig,
   RegisteredStrategies,
 } from './strategy-factory';
+
+// Flash Loan Provider Abstraction (Fix 1.1)
+export {
+  FlashLoanProviderFactory,
+  createFlashLoanProviderFactory,
+  AaveV3FlashLoanProvider,
+  UnsupportedFlashLoanProvider,
+} from './flash-loan-providers';
+export type {
+  FlashLoanProtocol,
+  ProtocolSupportStatus,
+  FlashLoanRequest,
+  FlashLoanSwapStep,
+  FlashLoanResult,
+  FlashLoanFeeInfo,
+  FlashLoanProviderCapabilities,
+  IFlashLoanProvider,
+  FlashLoanProviderConfig,
+} from './flash-loan-providers';

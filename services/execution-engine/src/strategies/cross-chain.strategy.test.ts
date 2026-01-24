@@ -560,11 +560,79 @@ describe('CrossChainStrategy - Bridge Execution', () => {
     expect(result.error).toContain('Bridge execution failed');
   });
 
-  // Note: Bridge timeout test skipped because it requires complex timeout mock setup
-  // and can cause test suite to hang. Bridge timeout handling is tested via
-  // integration tests with actual timeout configurations.
-  it.skip('should handle bridge timeout', async () => {
-    // Timeout test would go here
+  // Fix 8.1: Bridge status transition tests
+  // Note: Full timeout tests require real timers and are better suited for integration tests.
+  // These unit tests verify the error handling paths for bridge failures.
+  it('should handle bridge status failure correctly', async () => {
+    // Mock bridge that returns failed status immediately
+    const mockRouter = {
+      protocol: 'stargate',
+      isRouteSupported: jest.fn().mockReturnValue(true),
+      quote: jest.fn().mockResolvedValue({
+        valid: true,
+        estimatedOutput: BigInt('1000000000'),
+        totalFee: BigInt('1000000000000000'),
+        expiresAt: Date.now() + 60000,
+      }),
+      execute: jest.fn().mockResolvedValue({
+        success: true,
+        sourceTxHash: '0xbridge123',
+        bridgeId: 'bridge-id-123',
+        gasUsed: BigInt(250000),
+      }),
+      // Returns 'failed' status immediately
+      getStatus: jest.fn().mockResolvedValue({
+        status: 'failed',
+        error: 'Bridge reverted on destination',
+      }),
+    };
+
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity();
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[ERR_BRIDGE_FAILED]');
+    expect(result.error).toContain('Bridge reverted on destination');
+    expect(result.transactionHash).toBe('0xbridge123');
+  });
+
+  it('should handle bridge refunded status correctly', async () => {
+    const mockRouter = {
+      protocol: 'stargate',
+      isRouteSupported: jest.fn().mockReturnValue(true),
+      quote: jest.fn().mockResolvedValue({
+        valid: true,
+        estimatedOutput: BigInt('1000000000'),
+        totalFee: BigInt('1000000000000000'),
+        expiresAt: Date.now() + 60000,
+      }),
+      execute: jest.fn().mockResolvedValue({
+        success: true,
+        sourceTxHash: '0xbridge123',
+        bridgeId: 'bridge-id-123',
+        gasUsed: BigInt(250000),
+      }),
+      // Returns 'refunded' status
+      getStatus: jest.fn().mockResolvedValue({
+        status: 'refunded',
+        error: 'Bridge transaction was refunded',
+      }),
+    };
+
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity();
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[ERR_BRIDGE_FAILED]');
+    expect(result.transactionHash).toBe('0xbridge123');
   });
 });
 

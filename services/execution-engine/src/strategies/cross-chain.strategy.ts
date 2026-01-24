@@ -12,6 +12,21 @@
  * 3. Wait for bridge completion
  * 4. Execute sell side on destination chain
  *
+ * ## Bridge Status Values (Fix 2.2)
+ *
+ * The bridge router's `getStatus()` returns a `BridgeStatusResult` with these status values:
+ *
+ * | Status       | Description                                          | Action                    |
+ * |--------------|------------------------------------------------------|---------------------------|
+ * | `pending`    | Transaction submitted, waiting for confirmation      | Continue polling          |
+ * | `inflight`   | Bridge is processing, tokens in transit              | Continue polling          |
+ * | `completed`  | Bridge succeeded, tokens delivered on destination    | Proceed to sell           |
+ * | `failed`     | Bridge failed permanently (e.g., invalid params)     | Return error, log details |
+ * | `refunded`   | Bridge failed but source funds were returned         | Return error, log refund  |
+ *
+ * Any other status is treated as "still in progress" and polling continues.
+ *
+ * @see BridgeStatusResult from @arbitrage/core
  * @see engine.ts (parent service)
  */
 
@@ -21,7 +36,7 @@ import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/co
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult } from '../types';
+import { createErrorResult, createSuccessResult } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
@@ -103,7 +118,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           });
           return createErrorResult(
             opportunity.id,
-            `Gas spike on ${sourceChain}: ${errorMessage}`,
+            `[ERR_GAS_SPIKE] Gas spike on ${sourceChain}: ${errorMessage}`,
             sourceChain,
             opportunity.buyDex || 'unknown'
           );
@@ -127,36 +142,50 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!bridgeQuote.valid) {
         return createErrorResult(
           opportunity.id,
-          `Bridge quote failed: ${bridgeQuote.error}`,
+          `[ERR_BRIDGE_QUOTE] Bridge quote failed: ${bridgeQuote.error}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
       }
 
+      // Fix 9.3: Use extracted bridge profitability helper
       // Validate profit still viable after bridge fees
-      // Convert bridge fee from ETH to USD for consistent comparison
-      // (expectedProfit is in USD, bridgeQuote.totalFee is in wei)
-      const bridgeFeeEth = parseFloat(ethers.formatEther(bridgeQuote.totalFee));
       const ethPriceUsd = getDefaultPrice('ETH');
-      const bridgeFeeUsd = bridgeFeeEth * ethPriceUsd;
       const expectedProfit = opportunity.expectedProfit || 0;
 
-      if (bridgeFeeUsd >= expectedProfit * 0.5) {
+      // Ensure totalFee is bigint (might be string from JSON or bigint from direct call)
+      const totalFeeBigInt = typeof bridgeQuote.totalFee === 'string'
+        ? BigInt(bridgeQuote.totalFee)
+        : bridgeQuote.totalFee;
+
+      const bridgeProfitability = this.checkBridgeProfitability(
+        totalFeeBigInt,
+        expectedProfit,
+        ethPriceUsd,
+        { chain: sourceChain }
+      );
+
+      if (!bridgeProfitability.isProfitable) {
         this.logger.warn('Cross-chain profit too low after bridge fees', {
           opportunityId: opportunity.id,
-          bridgeFeeEth,
-          bridgeFeeUsd,
+          bridgeFeeEth: bridgeProfitability.bridgeFeeEth,
+          bridgeFeeUsd: bridgeProfitability.bridgeFeeUsd,
           ethPriceUsd,
           expectedProfit,
+          feePercentage: bridgeProfitability.feePercentageOfProfit.toFixed(2),
         });
 
         return createErrorResult(
           opportunity.id,
-          `Bridge fees ($${bridgeFeeUsd.toFixed(2)}) exceed 50% of expected profit ($${expectedProfit.toFixed(2)})`,
+          `[ERR_HIGH_FEES] ${bridgeProfitability.reason}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
       }
+
+      // Use fee values from helper for later calculations
+      const bridgeFeeEth = bridgeProfitability.bridgeFeeEth;
+      const bridgeFeeUsd = bridgeProfitability.bridgeFeeUsd;
 
       // Step 2: Get wallet and provider for source chain
       const sourceWallet = ctx.wallets.get(sourceChain);
@@ -165,7 +194,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!sourceWallet || !sourceProvider) {
         return createErrorResult(
           opportunity.id,
-          `No wallet/provider for source chain: ${sourceChain}`,
+          `[ERR_NO_WALLET] No wallet/provider for source chain: ${sourceChain}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -202,7 +231,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          'Bridge quote expired before execution',
+          '[ERR_QUOTE_EXPIRED] Bridge quote expired before execution',
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -240,7 +269,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
             return createErrorResult(
               opportunity.id,
-              `Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+              `[ERR_SIMULATION_REVERT] Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
               sourceChain,
               opportunity.buyDex || 'unknown'
             );
@@ -273,7 +302,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `Bridge execution failed: ${bridgeResult.error}`,
+          `[ERR_BRIDGE_EXEC] Bridge execution failed: ${bridgeResult.error}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -292,15 +321,23 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Step 4: Wait for bridge completion
       // Fix 5.2: Enhanced polling with transition handling
+      // Fix 4.3: Added iteration limit to prevent infinite loops
       const bridgeId = bridgeResult.bridgeId!;
       const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
       const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
       const bridgeStartTime = Date.now();
 
+      // Fix 4.3: Calculate maximum iterations based on wait time and minimum poll interval
+      // This prevents infinite loops if getStatus consistently returns non-terminal status
+      const minPollInterval = Math.min(pollInterval, 5000); // At least 5s between polls
+      const maxIterations = Math.ceil(maxWaitTime / minPollInterval) + 10; // +10 buffer for timing variance
+      let iterationCount = 0;
+
       let bridgeCompleted = false;
       let lastSeenStatus = 'pending';
 
-      while (Date.now() - bridgeStartTime < maxWaitTime) {
+      while (Date.now() - bridgeStartTime < maxWaitTime && iterationCount < maxIterations) {
+        iterationCount++;
         // Check for shutdown
         if (!ctx.stateManager.isRunning()) {
           this.logger.warn('Bridge polling interrupted by shutdown', {
@@ -367,15 +404,24 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         // We don't need to confirm again here - the source chain transaction was submitted
         // successfully, we're just waiting for the destination chain to receive it.
 
+        // Fix 4.3: Include iteration count for debugging infinite loop scenarios
+        const timedOutByTime = Date.now() - bridgeStartTime >= maxWaitTime;
+        const timedOutByIterations = iterationCount >= maxIterations;
+
         this.logger.warn('Bridge timeout - funds may still be in transit', {
           opportunityId: opportunity.id,
           bridgeId,
           elapsedMs: Date.now() - bridgeStartTime,
+          iterationCount,
+          maxIterations,
+          timedOutByTime,
+          timedOutByIterations,
+          lastStatus: lastSeenStatus,
         });
 
         return createErrorResult(
           opportunity.id,
-          'Bridge timeout - transaction may still complete',
+          `[ERR_BRIDGE_TIMEOUT] Bridge timeout after ${iterationCount} polls - transaction may still complete`,
           sourceChain,
           opportunity.buyDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -396,7 +442,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
+          `[ERR_NO_WALLET] No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -422,13 +468,33 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // Prepare and execute sell transaction on destination chain using DEX router
-      // TODO (Fix 7.2): Evaluate using flash loans on destination chain for improved capital efficiency.
-      // Current implementation uses direct DEX swap after bridge completion.
-      // Flash loans could:
-      // 1. Allow larger position sizes without holding capital on dest chain
-      // 2. Provide atomic execution guarantees (revert if unprofitable)
-      // 3. Reduce capital lockup during bridge waiting period
-      // Trade-off: Additional flash loan fees (~0.09% on Aave V3) must be weighed against benefits.
+      //
+      // TODO (Fix 7.2): Evaluate using flash loans on destination chain
+      // ================================================================
+      // Priority: Medium | Effort: 3 days | Depends on: FlashLoanProviderFactory
+      //
+      // Current: Direct DEX swap after bridge completion.
+      //
+      // Proposed: Use flash loan on destination chain for sell transaction.
+      //
+      // Benefits:
+      // 1. Larger positions without holding capital on dest chain
+      // 2. Atomic execution (revert if unprofitable after bridge)
+      // 3. Reduced capital lockup during bridge waiting period
+      // 4. Protection against price movement during bridge delay
+      //
+      // Trade-offs:
+      // - Flash loan fee: ~0.09% on Aave V3, ~0.25-0.30% on other protocols
+      // - Requires FlashLoanArbitrage contract deployed on dest chain
+      // - Increased complexity in error handling (bridge succeeded but flash loan failed)
+      //
+      // Implementation:
+      // 1. Check if FlashLoanProviderFactory.isFullySupported(destChain)
+      // 2. If supported: use FlashLoanStrategy for sell
+      // 3. If not supported: fall back to direct swap (current behavior)
+      //
+      // Tracking: https://github.com/yourorg/arbitrage/issues/XXX
+      // ================================================================
       const sellTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
 
       // Ensure token approval for DEX router before swap
@@ -509,7 +575,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
+          `[ERR_SELL_FAILED] Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -559,17 +625,18 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         actualProfit,
       });
 
-      return {
-        opportunityId: opportunity.id,
-        success: true,
-        transactionHash: sellTxHash || bridgeResult.sourceTxHash,
-        actualProfit,
-        gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
-        gasCost: totalGasCostUsd, // Gas cost in USD for consistency with actualProfit
-        timestamp: Date.now(),
-        chain: destChain, // Report final chain where sell occurred
-        dex: opportunity.sellDex || 'unknown',
-      };
+      // Fix 6.2: Use createSuccessResult helper for consistency
+      return createSuccessResult(
+        opportunity.id,
+        sellTxHash || bridgeResult.sourceTxHash || '',
+        destChain, // Report final chain where sell occurred
+        opportunity.sellDex || 'unknown',
+        {
+          actualProfit,
+          gasUsed: sellReceipt ? Number(sellReceipt.gasUsed) : (bridgeResult.gasUsed ? Number(bridgeResult.gasUsed) : undefined),
+          gasCost: totalGasCostUsd, // Gas cost in USD for consistency with actualProfit
+        }
+      );
 
     } catch (error) {
       this.logger.error('Cross-chain arbitrage execution failed', {
@@ -581,7 +648,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       return createErrorResult(
         opportunity.id,
-        `Cross-chain execution error: ${getErrorMessage(error)}`,
+        `[ERR_EXECUTION] Cross-chain execution error: ${getErrorMessage(error)}`,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );

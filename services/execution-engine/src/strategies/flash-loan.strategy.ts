@@ -39,7 +39,18 @@
  */
 
 import { ethers } from 'ethers';
-import { ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG, DEXES, getNativeTokenPrice, getTokenDecimals } from '@arbitrage/config';
+import {
+  ARBITRAGE_CONFIG,
+  FLASH_LOAN_PROVIDERS,
+  MEV_CONFIG,
+  DEXES,
+  getNativeTokenPrice,
+  getTokenDecimals,
+  // Fix 1.1 & 9.2: Import centralized constants and ABI
+  AAVE_V3_FEE_BPS_BIGINT,
+  BPS_DENOMINATOR_BIGINT,
+  FLASH_LOAN_ARBITRAGE_ABI,
+} from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
@@ -50,15 +61,10 @@ import { BaseExecutionStrategy } from './base.strategy';
 // Constants
 // =============================================================================
 
-/**
- * Aave V3 flash loan fee in basis points (0.09% = 9 bps)
- */
-const AAVE_V3_FEE_BPS = 9n;
-
-/**
- * Basis points denominator (10000 = 100%)
- */
-const BPS_DENOMINATOR = 10000n;
+// Fix 1.1: Use centralized constants from @arbitrage/config
+// These are aliased here for backward compatibility with existing code
+const AAVE_V3_FEE_BPS = AAVE_V3_FEE_BPS_BIGINT;
+const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 
 /**
  * Default gas estimate for flash loan arbitrage (conservative)
@@ -170,40 +176,18 @@ export interface ProfitabilityAnalysis {
 }
 
 // =============================================================================
-// ABI
+// ABI Interface
 // =============================================================================
-
-/**
- * FlashLoanArbitrage contract ABI (minimal for execution)
- *
- * ## Return Value Documentation (Fix 2.2)
- *
- * ### calculateExpectedProfit
- * Returns `(uint256 expectedProfit, uint256 flashLoanFee)`:
- * - `expectedProfit`: The expected profit in the flash-loaned asset's units (wei).
- *   Returns 0 if the swap path is invalid, the router call fails, or the
- *   final token doesn't match the starting asset.
- * - `flashLoanFee`: The flash loan fee (Aave V3: 0.09% of loan amount).
- *
- * When `expectedProfit` is 0, check these common causes:
- * 1. Invalid swap path (tokenIn/tokenOut mismatch)
- * 2. Router's getAmountsOut() call failed (pair doesn't exist, low liquidity)
- * 3. Final token doesn't match the starting asset (path doesn't loop back)
- * 4. Expected output is less than loan repayment amount (unprofitable)
- *
- * @see FlashLoanArbitrage.sol calculateExpectedProfit()
- */
-const FLASH_LOAN_ARBITRAGE_ABI = [
-  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit) external',
-  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
-  'function isApprovedRouter(address router) external view returns (bool)',
-  'function POOL() external view returns (address)',
-];
 
 /**
  * Cached ethers.Interface for hot-path optimization.
  * Creating Interface objects is expensive - cache at module level.
  * Issue 10.2 Fix: Avoid repeated instantiation on every calldata build.
+ *
+ * Fix 9.2: Uses centralized FLASH_LOAN_ARBITRAGE_ABI from @arbitrage/config.
+ * See service-config.ts for full documentation of function return values.
+ *
+ * @see service-config.ts FLASH_LOAN_ARBITRAGE_ABI
  */
 const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
 
@@ -445,12 +429,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       }
 
       try {
-        // Check if MEV protection should be used
-        const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
-        const chainSettings = MEV_CONFIG.chainSettings[chain];
-        const shouldUseMevProtection = mevProvider?.isEnabled() &&
-          chainSettings?.enabled !== false &&
-          (opportunity.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
+        // Fix 6.3 & 9.1: Use shared MEV eligibility check helper
+        const { shouldUseMev: shouldUseMevProtection, mevProvider, chainSettings } = this.checkMevEligibility(
+          chain,
+          ctx,
+          opportunity.expectedProfit
+        );
 
         let receipt: ethers.TransactionReceipt | null = null;
         let txHash: string | undefined;
@@ -710,9 +694,25 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     );
     const minIntermediateOut = expectedIntermediateAmount - (expectedIntermediateAmount * slippage / BPS_DENOMINATOR);
 
-    // Fix 4.2: Convert USD profit to token units correctly
+    // Fix 4.1 & 4.2: Convert USD profit to token units correctly
     // profitInTokens = profitUsd / tokenPriceUsd
-    const tokenPriceUsd = opportunity.buyPrice || 1;
+    // Fix 4.2: Validate buyPrice is valid before using
+    const buyPriceValid = opportunity.buyPrice !== undefined &&
+                          opportunity.buyPrice !== null &&
+                          Number.isFinite(opportunity.buyPrice) &&
+                          opportunity.buyPrice > 0;
+
+    if (!buyPriceValid) {
+      this.logger.warn('[WARN_PRICE] Invalid buyPrice, using fallback of 1 for profit calculation', {
+        opportunityId: opportunity.id,
+        buyPrice: opportunity.buyPrice,
+        chain,
+      });
+    }
+
+    // TypeScript doesn't infer that buyPriceValid being true means buyPrice is defined,
+    // so we use explicit numeric fallback
+    const tokenPriceUsd: number = buyPriceValid ? opportunity.buyPrice! : 1;
     const profitInTokenUnits = expectedProfitUsd / tokenPriceUsd;
 
     // Fix 7.1: Use actual token decimals for profit calculation
@@ -760,7 +760,14 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     intermediateDecimals: number
   ): bigint {
     const amountIn = BigInt(opportunity.amountIn!);
-    const buyPrice = opportunity.buyPrice || 1;
+
+    // Fix 4.2: Properly validate buyPrice (|| 1 doesn't catch buyPrice === 0)
+    const buyPriceValid = opportunity.buyPrice !== undefined &&
+                          opportunity.buyPrice !== null &&
+                          Number.isFinite(opportunity.buyPrice) &&
+                          opportunity.buyPrice > 0;
+    // TypeScript requires explicit assertion since conditional check doesn't narrow type
+    const buyPrice: number = buyPriceValid ? opportunity.buyPrice! : 1;
 
     // Fix 4.1: Use 1e18 precision to handle very small prices
     const PRECISION = 1e18;
@@ -859,11 +866,14 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       chain,
     });
 
-    // Issue 4.2 Fix: Convert USD profit to token units
+    // Fix 4.1: Convert USD profit to token units
     // expectedProfit is in USD, but contract expects minProfit in token units (flash-loaned asset)
     // Formula: profitInTokens = expectedProfitUsd / tokenPriceUsd
+    // Use explicit zero check since || would not catch buyPrice === 0
     const expectedProfitUsd = opportunity.expectedProfit || 0;
-    const tokenPriceUsd = opportunity.buyPrice || 1; // Fallback to $1 to avoid division by zero
+    const tokenPriceUsd = (opportunity.buyPrice !== undefined && opportunity.buyPrice !== null && opportunity.buyPrice > 0)
+      ? opportunity.buyPrice
+      : 1;
 
     // Finding 7.1 Fix: Get actual token decimals from config instead of assuming 18
     // This is critical for tokens like USDC (6), USDT (6), WBTC (8)
