@@ -2,13 +2,16 @@ import { HardhatUserConfig } from 'hardhat/config';
 import '@nomicfoundation/hardhat-toolbox';
 import '@nomicfoundation/hardhat-verify';
 
+// Suppress Node.js version warning
+process.removeAllListeners('warning');
+
 /**
  * Hardhat Configuration for Flash Loan Arbitrage Contracts
  *
  * Networks configured:
  * - localhost: Local Hardhat node for development
  * - sepolia: Ethereum testnet for testing
- * - arbitrumGoerli: Arbitrum testnet
+ * - arbitrumSepolia: Arbitrum testnet
  * - mainnet/arbitrum/base/optimism: Production networks (commented out until needed)
  *
  * @see implementation_plan_v2.md Task 3.1.1
@@ -16,14 +19,18 @@ import '@nomicfoundation/hardhat-verify';
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: '0.8.20',
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
+    compilers: [
+      {
+        version: '0.8.19',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 200,
+          },
+          viaIR: true,
+        },
       },
-      viaIR: true,
-    },
+    ],
   },
   paths: {
     sources: './src',

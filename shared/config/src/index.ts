@@ -206,7 +206,10 @@ export {
   getNativeTokenPrice,
   // Issue 3.2 FIX: Native token price staleness tracking
   NATIVE_TOKEN_PRICE_METADATA,
-  checkNativeTokenPriceStaleness
+  checkNativeTokenPriceStaleness,
+  // Finding 7.1 FIX: Token decimals lookup for flash loan strategy
+  getTokenDecimals,
+  hasKnownDecimals
 } from './tokens';
 
 // =============================================================================

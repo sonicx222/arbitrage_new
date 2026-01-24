@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -12,12 +12,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract MockMaliciousRouter {
     using SafeERC20 for IERC20;
 
-    address public target;
+    address public attackTarget;
     bool public attackEnabled;
     uint256 public attackCount;
 
-    constructor(address _target) {
-        target = _target;
+    constructor(address _attackTarget) {
+        attackTarget = _attackTarget;
     }
 
     function enableAttack() external {
@@ -62,7 +62,7 @@ contract MockMaliciousRouter {
             );
 
             // This should fail due to reentrancy guard
-            (bool success, ) = target.call(attackData);
+            (bool success, ) = attackTarget.call(attackData);
             require(!success, "Reentrancy attack should have failed");
         }
 

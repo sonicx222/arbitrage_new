@@ -5,21 +5,22 @@
  * - Gas price optimization with spike protection
  * - MEV protection
  * - Price verification
- * - Flash loan transaction preparation
+ * - DEX swap transaction preparation
  * - Transaction timeout handling
+ *
+ * Note: For flash loan transactions, use FlashLoanStrategy directly.
  *
  * @see engine.ts (parent service)
  */
 
 import { ethers } from 'ethers';
-import { CHAINS, ARBITRAGE_CONFIG, FLASH_LOAN_PROVIDERS, MEV_CONFIG, DEXES } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   Logger,
   StrategyContext,
   ExecutionResult,
-  FlashLoanParams
 } from '../types';
 import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
 import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
@@ -42,22 +43,87 @@ const ERC20_APPROVE_ABI = [
 ];
 
 /**
+ * Fix 3.1: Minimum gas prices by chain type (mainnet vs L2).
+ * These sanity checks prevent misconfigured gas prices that could cause:
+ * 1. Transaction failures (gas too low)
+ * 2. Unprofitable trades (testnet gas price on mainnet)
+ *
+ * L1 mainnet: Minimum 1 gwei (Ethereum mainnet rarely goes below this)
+ * L2 chains: Can be much lower (often <0.01 gwei)
+ */
+const MIN_GAS_PRICE_GWEI: Record<string, number> = {
+  ethereum: 1,       // Mainnet minimum
+  polygon: 1,        // Mainnet minimum
+  bsc: 1,            // Mainnet minimum
+  avalanche: 1,      // Mainnet minimum
+  fantom: 1,         // Mainnet minimum
+  // L2s can have very low gas
+  arbitrum: 0.001,
+  optimism: 0.0001,
+  base: 0.0001,
+  zksync: 0.01,
+  linea: 0.01,
+};
+
+/**
+ * Fix 3.1: Maximum reasonable gas prices by chain (sanity upper bound).
+ * Prevents obviously misconfigured values (e.g., 10000 gwei).
+ */
+const MAX_GAS_PRICE_GWEI: Record<string, number> = {
+  ethereum: 500,     // Very high but possible during extreme congestion
+  polygon: 1000,     // Polygon can spike
+  bsc: 100,
+  avalanche: 200,
+  fantom: 500,
+  arbitrum: 10,
+  optimism: 1,
+  base: 1,
+  zksync: 10,
+  linea: 10,
+};
+
+/**
  * Default fallback gas prices by chain (in gwei).
  * Used when provider fails to return gas price or no provider available.
- * These are conservative estimates - actual gas prices may be lower.
+ *
+ * Finding 3.2 Fix: Gas prices are now configurable via environment variables.
+ * Environment variable format: GAS_PRICE_<CHAIN>_GWEI (e.g., GAS_PRICE_ETHEREUM_GWEI=50)
+ *
+ * Default values are conservative estimates - actual gas prices may be lower.
  */
 const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
-  ethereum: 50,
-  arbitrum: 0.1,
-  optimism: 0.001,
-  base: 0.001,
-  polygon: 100,
-  bsc: 5,
-  avalanche: 25,
-  fantom: 100,
-  zksync: 0.25,
-  linea: 0.5,
+  ethereum: validateGasPrice('ethereum', parseFloat(process.env.GAS_PRICE_ETHEREUM_GWEI || '50')),
+  arbitrum: validateGasPrice('arbitrum', parseFloat(process.env.GAS_PRICE_ARBITRUM_GWEI || '0.1')),
+  optimism: validateGasPrice('optimism', parseFloat(process.env.GAS_PRICE_OPTIMISM_GWEI || '0.001')),
+  base: validateGasPrice('base', parseFloat(process.env.GAS_PRICE_BASE_GWEI || '0.001')),
+  polygon: validateGasPrice('polygon', parseFloat(process.env.GAS_PRICE_POLYGON_GWEI || '100')),
+  bsc: validateGasPrice('bsc', parseFloat(process.env.GAS_PRICE_BSC_GWEI || '5')),
+  avalanche: validateGasPrice('avalanche', parseFloat(process.env.GAS_PRICE_AVALANCHE_GWEI || '25')),
+  fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '100')),
+  zksync: validateGasPrice('zksync', parseFloat(process.env.GAS_PRICE_ZKSYNC_GWEI || '0.25')),
+  linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
 };
+
+/**
+ * Fix 3.1: Validate gas price is within reasonable bounds for chain.
+ * Logs warning if configured value is suspicious but clamps to safe range.
+ */
+function validateGasPrice(chain: string, configuredPrice: number): number {
+  const min = MIN_GAS_PRICE_GWEI[chain] ?? 0.0001;
+  const max = MAX_GAS_PRICE_GWEI[chain] ?? 1000;
+
+  if (configuredPrice < min) {
+    console.warn(`[WARN_GAS_PRICE] Gas price for ${chain} (${configuredPrice} gwei) below minimum (${min} gwei). Using minimum.`);
+    return min;
+  }
+
+  if (configuredPrice > max) {
+    console.warn(`[WARN_GAS_PRICE] Gas price for ${chain} (${configuredPrice} gwei) above maximum (${max} gwei). Using maximum.`);
+    return max;
+  }
+
+  return configuredPrice;
+}
 
 /**
  * Pre-computed fallback gas prices in wei for hot-path optimization.
@@ -89,9 +155,11 @@ function getFallbackGasPrice(chain: string): bigint {
  *
  * GAS_SPIKE_MULTIPLIER_BIGINT: Used for gas spike detection (e.g., 1.5x = 150)
  * SLIPPAGE_BASIS_POINTS_BIGINT: Slippage tolerance in basis points (e.g., 0.5% = 50)
+ * GWEI_DIVISOR: 10^9, pre-computed for wei-to-gwei conversions (Finding 10.2 fix)
  */
 const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100));
 const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
+const GWEI_DIVISOR = BigInt(1e9);
 
 /**
  * Base class for execution strategies.
@@ -111,6 +179,61 @@ export abstract class BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
   ): Promise<ExecutionResult>;
+
+  // ===========================================================================
+  // Context Validation (Fix 9.1: Reduce duplication across strategies)
+  // ===========================================================================
+
+  /**
+   * Validate that required context dependencies are available for a chain.
+   *
+   * This helper consolidates the common pattern of checking wallet and provider
+   * availability that was duplicated across IntraChainStrategy, FlashLoanStrategy,
+   * and CrossChainStrategy.
+   *
+   * @param chain - Chain identifier to validate
+   * @param ctx - Strategy context to check
+   * @param options - Additional validation options
+   * @returns Validation result with wallet/provider if valid
+   */
+  protected validateContext(
+    chain: string,
+    ctx: StrategyContext,
+    options?: {
+      requireNonceManager?: boolean;
+      requireMevProvider?: boolean;
+      requireBridgeRouter?: boolean;
+    }
+  ): { valid: true; wallet: ethers.Wallet; provider: ethers.JsonRpcProvider } | { valid: false; error: string } {
+    // Check provider
+    const provider = ctx.providers.get(chain);
+    if (!provider) {
+      return { valid: false, error: `[ERR_NO_PROVIDER] No provider available for chain: ${chain}` };
+    }
+
+    // Check wallet
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
+      return { valid: false, error: `[ERR_NO_WALLET] No wallet available for chain: ${chain}` };
+    }
+
+    // Optional: Check nonce manager
+    if (options?.requireNonceManager && !ctx.nonceManager) {
+      return { valid: false, error: '[ERR_NO_NONCE_MANAGER] NonceManager not initialized' };
+    }
+
+    // Optional: Check MEV provider
+    if (options?.requireMevProvider && !ctx.mevProviderFactory) {
+      return { valid: false, error: '[ERR_NO_MEV_PROVIDER] MevProviderFactory not initialized' };
+    }
+
+    // Optional: Check bridge router
+    if (options?.requireBridgeRouter && !ctx.bridgeRouterFactory) {
+      return { valid: false, error: '[ERR_NO_BRIDGE] BridgeRouterFactory not initialized' };
+    }
+
+    return { valid: true, wallet, provider };
+  }
 
   // ===========================================================================
   // Gas Price Management
@@ -144,9 +267,10 @@ export abstract class BaseExecutionStrategy {
           const maxAllowedPrice = baselinePrice * GAS_SPIKE_MULTIPLIER_BIGINT / 100n;
 
           if (currentPrice > maxAllowedPrice) {
-            const currentGwei = Number(currentPrice / BigInt(1e9));
-            const baselineGwei = Number(baselinePrice / BigInt(1e9));
-            const maxGwei = Number(maxAllowedPrice / BigInt(1e9));
+            // Finding 10.2 Fix: Use pre-computed GWEI_DIVISOR to avoid BigInt creation in hot path
+            const currentGwei = Number(currentPrice / GWEI_DIVISOR);
+            const baselineGwei = Number(baselinePrice / GWEI_DIVISOR);
+            const maxGwei = Number(maxAllowedPrice / GWEI_DIVISOR);
 
             this.logger.warn('Gas price spike detected, aborting transaction', {
               chain,
@@ -169,10 +293,62 @@ export abstract class BaseExecutionStrategy {
       }
       this.logger.warn('Failed to get optimal gas price, using chain-specific fallback', {
         chain,
-        fallbackGwei: Number(fallbackPrice / BigInt(1e9)),
+        fallbackGwei: Number(fallbackPrice / GWEI_DIVISOR),
         error
       });
       return fallbackPrice;
+    }
+  }
+
+  /**
+   * Fix 5.1: Refresh gas price immediately before transaction submission.
+   *
+   * In competitive MEV environments, gas prices can change significantly between
+   * the initial getOptimalGasPrice() call and actual transaction submission.
+   * This method performs a lightweight gas price refresh without full baseline
+   * update (which would be too slow for the hot path).
+   *
+   * @param chain - Chain identifier
+   * @param ctx - Strategy context
+   * @param previousGasPrice - The gas price from earlier getOptimalGasPrice() call
+   * @returns Fresh gas price, or previousGasPrice if refresh fails
+   */
+  protected async refreshGasPriceForSubmission(
+    chain: string,
+    ctx: StrategyContext,
+    previousGasPrice: bigint
+  ): Promise<bigint> {
+    const provider = ctx.providers.get(chain);
+    if (!provider) {
+      return previousGasPrice;
+    }
+
+    try {
+      const feeData = await provider.getFeeData();
+      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice;
+
+      if (!currentPrice) {
+        return previousGasPrice;
+      }
+
+      // Check for significant price increase (>20%) since initial fetch
+      const priceIncrease = currentPrice > previousGasPrice
+        ? Number((currentPrice - previousGasPrice) * 100n / previousGasPrice)
+        : 0;
+
+      if (priceIncrease > 20) {
+        this.logger.warn('Significant gas price increase since initial fetch', {
+          chain,
+          previousGwei: Number(previousGasPrice / GWEI_DIVISOR),
+          currentGwei: Number(currentPrice / GWEI_DIVISOR),
+          increasePercent: priceIncrease,
+        });
+      }
+
+      return currentPrice;
+    } catch {
+      // On failure, use the previous price - don't block transaction
+      return previousGasPrice;
     }
   }
 
@@ -188,6 +364,12 @@ export abstract class BaseExecutionStrategy {
    * Update gas price baseline for spike detection.
    * Optimized for hot-path: uses in-place array compaction to avoid
    * temporary array allocations (filter/slice create new arrays).
+   *
+   * Note on thread safety (Fix 5.1):
+   * In Node.js single-threaded event loop, this method runs synchronously.
+   * There's no true race condition, but we use atomic-style cache update
+   * (validUntil = 0) instead of delete to prevent thundering herd if multiple
+   * async operations are queued.
    */
   protected updateGasBaseline(
     chain: string,
@@ -206,8 +388,13 @@ export abstract class BaseExecutionStrategy {
     // Add current price
     history.push({ price, timestamp: now });
 
-    // Invalidate median cache when data changes
-    this.medianCache.delete(chain);
+    // Fix 5.1: Use atomic-style invalidation instead of delete
+    // Setting validUntil to 0 marks as stale while preserving the entry
+    // This prevents thundering herd on immediate subsequent reads
+    const cached = this.medianCache.get(chain);
+    if (cached) {
+      cached.validUntil = 0; // Mark as stale, will be recomputed on next read
+    }
 
     // Remove old entries and cap size using in-place compaction
     // This avoids creating temporary arrays on every call (hot-path optimization)
@@ -379,6 +566,192 @@ export abstract class BaseExecutionStrategy {
   }
 
   // ===========================================================================
+  // Transaction Submission (Fix 9.1)
+  // ===========================================================================
+
+  /**
+   * Fix 9.1: Extracted common transaction submission logic.
+   *
+   * This method encapsulates the common pattern used by IntraChainStrategy
+   * and FlashLoanStrategy for submitting transactions with:
+   * - MEV protection (optional)
+   * - Nonce management
+   * - Gas price refresh before submission
+   * - Timeout handling
+   * - Receipt waiting
+   *
+   * @param tx - Prepared transaction request
+   * @param chain - Chain identifier
+   * @param ctx - Strategy context
+   * @param options - Submission options
+   * @returns Transaction result with receipt or error
+   */
+  protected async submitTransaction(
+    tx: ethers.TransactionRequest,
+    chain: string,
+    ctx: StrategyContext,
+    options: {
+      opportunityId: string;
+      expectedProfit?: number;
+      initialGasPrice: bigint;
+    }
+  ): Promise<{
+    success: boolean;
+    receipt?: ethers.TransactionReceipt;
+    txHash?: string;
+    error?: string;
+    nonce?: number;
+    usedMevProtection?: boolean;
+  }> {
+    const wallet = ctx.wallets.get(chain);
+    const provider = ctx.providers.get(chain);
+
+    if (!wallet) {
+      return { success: false, error: `No wallet for chain: ${chain}` };
+    }
+
+    // Fix 5.1: Refresh gas price just before submission
+    const finalGasPrice = await this.refreshGasPriceForSubmission(
+      chain,
+      ctx,
+      options.initialGasPrice
+    );
+
+    // Get nonce from NonceManager
+    let nonce: number | undefined;
+    if (ctx.nonceManager) {
+      try {
+        nonce = await ctx.nonceManager.getNextNonce(chain);
+        tx.nonce = nonce;
+      } catch (error) {
+        return {
+          success: false,
+          error: `[ERR_NONCE] Failed to get nonce: ${getErrorMessage(error)}`,
+        };
+      }
+    }
+
+    try {
+      // Check if MEV protection should be used
+      const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
+      const chainSettings = MEV_CONFIG.chainSettings[chain];
+      const shouldUseMev = mevProvider?.isEnabled() &&
+        chainSettings?.enabled !== false &&
+        (options.expectedProfit || 0) >= (chainSettings?.minProfitForProtection || 0);
+
+      let receipt: ethers.TransactionReceipt | null = null;
+      let txHash: string | undefined;
+
+      if (shouldUseMev && mevProvider) {
+        // MEV protected submission
+        const mevResult = await this.withTransactionTimeout(
+          () => mevProvider.sendProtectedTransaction(tx, {
+            simulate: MEV_CONFIG.simulateBeforeSubmit,
+            priorityFeeGwei: chainSettings?.priorityFeeGwei,
+          }),
+          'mevProtectedSubmission'
+        );
+
+        if (!mevResult.success) {
+          if (ctx.nonceManager && nonce !== undefined) {
+            ctx.nonceManager.failTransaction(chain, nonce, mevResult.error || 'MEV submission failed');
+          }
+          return {
+            success: false,
+            error: `MEV protected submission failed: ${mevResult.error}`,
+            nonce,
+          };
+        }
+
+        txHash = mevResult.transactionHash;
+
+        // Get receipt if we have a transaction hash
+        if (txHash && provider) {
+          receipt = await this.withTransactionTimeout(
+            () => provider.getTransactionReceipt(txHash!),
+            'getReceipt'
+          );
+        }
+
+        this.logger.info('MEV protected transaction submitted', {
+          chain,
+          strategy: mevResult.strategy,
+          txHash,
+          usedFallback: mevResult.usedFallback,
+        });
+
+        // Confirm nonce
+        if (ctx.nonceManager && nonce !== undefined && receipt) {
+          ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
+        }
+
+        return {
+          success: true,
+          receipt: receipt || undefined,
+          txHash,
+          nonce,
+          usedMevProtection: true,
+        };
+      } else {
+        // Standard transaction submission
+        // Update gas price to refreshed value
+        if (tx.type === 2) {
+          tx.maxFeePerGas = finalGasPrice;
+        } else {
+          tx.gasPrice = finalGasPrice;
+        }
+
+        const txResponse = await this.withTransactionTimeout(
+          () => wallet.sendTransaction(tx),
+          'sendTransaction'
+        );
+
+        txHash = txResponse.hash;
+
+        receipt = await this.withTransactionTimeout(
+          () => txResponse.wait(),
+          'waitForReceipt'
+        );
+
+        if (!receipt) {
+          if (ctx.nonceManager && nonce !== undefined) {
+            ctx.nonceManager.failTransaction(chain, nonce, 'No receipt received');
+          }
+          return {
+            success: false,
+            error: 'Transaction receipt not received',
+            txHash,
+            nonce,
+          };
+        }
+
+        // Confirm nonce
+        if (ctx.nonceManager && nonce !== undefined) {
+          ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
+        }
+
+        return {
+          success: true,
+          receipt,
+          txHash: receipt.hash,
+          nonce,
+          usedMevProtection: false,
+        };
+      }
+    } catch (error) {
+      // Mark transaction as failed
+      if (ctx.nonceManager && nonce !== undefined) {
+        ctx.nonceManager.failTransaction(chain, nonce, getErrorMessage(error));
+      }
+      return {
+        success: false,
+        error: getErrorMessage(error) || 'Unknown submission error',
+        nonce,
+      };
+    }
+  }
+
+  // ===========================================================================
   // Price Verification
   // ===========================================================================
 
@@ -445,59 +818,15 @@ export abstract class BaseExecutionStrategy {
   }
 
   // ===========================================================================
-  // Flash Loan Transaction
+  // Swap Path Building (used by DEX swap transaction)
   // ===========================================================================
 
   /**
-   * Prepare flash loan transaction with proper slippage protection.
+   * Build swap path for DEX router.
+   *
+   * @param opportunity - The arbitrage opportunity
+   * @returns Array of token addresses forming the swap path
    */
-  protected async prepareFlashLoanTransaction(
-    opportunity: ArbitrageOpportunity,
-    chain: string,
-    ctx: StrategyContext
-  ): Promise<ethers.TransactionRequest> {
-    if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.expectedProfit) {
-      throw new Error('Invalid opportunity: missing required fields (tokenIn, amountIn, expectedProfit)');
-    }
-
-    // Calculate minAmountOut with slippage protection
-    const amountInBigInt = BigInt(opportunity.amountIn);
-    const expectedProfitWei = ethers.parseUnits(
-      opportunity.expectedProfit.toFixed(18),
-      18
-    );
-    const expectedAmountOut = amountInBigInt + expectedProfitWei;
-    const minAmountOut = expectedAmountOut - (expectedAmountOut * SLIPPAGE_BASIS_POINTS_BIGINT / 10000n);
-
-    const flashParams: FlashLoanParams = {
-      token: opportunity.tokenIn,
-      amount: opportunity.amountIn,
-      path: this.buildSwapPath(opportunity),
-      minProfit: opportunity.expectedProfit * (1 - ARBITRAGE_CONFIG.slippageTolerance),
-      minAmountOut: minAmountOut.toString()
-    };
-
-    this.logger.debug('Flash loan params prepared', {
-      token: flashParams.token,
-      amount: flashParams.amount,
-      minProfit: flashParams.minProfit,
-      minAmountOut: flashParams.minAmountOut,
-      slippageTolerance: ARBITRAGE_CONFIG.slippageTolerance
-    });
-
-    const flashLoanContract = await this.getFlashLoanContract(chain, ctx);
-
-    const tx = await flashLoanContract.executeFlashLoan.populateTransaction(
-      flashParams.token,
-      flashParams.amount,
-      flashParams.path,
-      flashParams.minProfit,
-      flashParams.minAmountOut
-    );
-
-    return tx;
-  }
-
   protected buildSwapPath(opportunity: ArbitrageOpportunity): string[] {
     if (!opportunity.tokenIn || !opportunity.tokenOut) {
       throw new Error('Invalid opportunity: missing tokenIn or tokenOut');
@@ -505,29 +834,8 @@ export abstract class BaseExecutionStrategy {
     return [opportunity.tokenIn, opportunity.tokenOut];
   }
 
-  protected async getFlashLoanContract(
-    chain: string,
-    ctx: StrategyContext
-  ): Promise<ethers.Contract> {
-    const provider = ctx.providers.get(chain);
-    if (!provider) {
-      throw new Error(`No provider for chain: ${chain}`);
-    }
-
-    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-    if (!flashLoanConfig) {
-      throw new Error(`No flash loan provider configured for chain: ${chain}`);
-    }
-
-    const flashLoanAbi = flashLoanConfig.protocol === 'aave_v3'
-      ? ['function executeFlashLoan(address asset, uint256 amount, address[] calldata path, uint256 minProfit, uint256 minAmountOut) external']
-      : ['function flashSwap(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, bytes calldata data) external'];
-
-    return new ethers.Contract(flashLoanConfig.address, flashLoanAbi, provider);
-  }
-
   // ===========================================================================
-  // DEX Swap Transaction (for cross-chain sell after bridge)
+  // DEX Swap Transaction (for intra-chain and cross-chain sell after bridge)
   // ===========================================================================
 
   /**
@@ -713,6 +1021,130 @@ export abstract class BaseExecutionStrategy {
     const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
     const expectedProfit = opportunity.expectedProfit || 0;
     return expectedProfit - gasCost;
+  }
+
+  // ===========================================================================
+  // Contract Error Decoding (Fix 9.3)
+  // ===========================================================================
+
+  /**
+   * Fix 8.1: Decode contract custom errors for better debugging.
+   *
+   * FlashLoanArbitrage.sol uses custom errors. This helper decodes them
+   * from revert data for better error messages.
+   *
+   * Known FlashLoanArbitrage errors (from contracts/src/FlashLoanArbitrage.sol):
+   * - InvalidPoolAddress()
+   * - InvalidRouterAddress()
+   * - RouterAlreadyApproved()
+   * - RouterNotApproved()
+   * - EmptySwapPath()
+   * - InvalidSwapPath()
+   * - InsufficientProfit()
+   * - InvalidFlashLoanInitiator()
+   * - InvalidFlashLoanCaller()
+   * - SwapFailed()
+   * - InsufficientOutputAmount()
+   * - InvalidRecipient()
+   * - ETHTransferFailed()
+   *
+   * @param error - Error from contract call/transaction
+   * @param contractInterface - Optional ethers.Interface for decoding
+   * @returns Decoded error message or original error message
+   */
+  protected decodeContractError(
+    error: unknown,
+    contractInterface?: ethers.Interface
+  ): string {
+    const errorMessage = getErrorMessage(error);
+
+    // Check if this is a contract revert with data
+    if (
+      error &&
+      typeof error === 'object' &&
+      'data' in error &&
+      typeof (error as { data: unknown }).data === 'string'
+    ) {
+      const revertData = (error as { data: string }).data;
+
+      // FlashLoanArbitrage.sol custom error selectors (Fix 8.1: Match actual contract)
+      // Selectors computed from keccak256("<ErrorName>()")[:4]
+      const CUSTOM_ERRORS: Record<string, string> = {
+        '0xc22c9fd3': 'InvalidPoolAddress',
+        '0x63d1bea9': 'InvalidRouterAddress',
+        '0xa3cf8b39': 'RouterAlreadyApproved',
+        '0xf5fc1e4d': 'RouterNotApproved',
+        '0xa1fb4e1e': 'EmptySwapPath',
+        '0x87f88cab': 'InvalidSwapPath',
+        '0xb32cd96c': 'InsufficientProfit',
+        '0xaa8cc9cd': 'InvalidFlashLoanInitiator',
+        '0x0c68f18e': 'InvalidFlashLoanCaller',
+        '0x28a56e8e': 'SwapFailed',
+        '0x90c18d2e': 'InsufficientOutputAmount',
+        '0x29af29f4': 'InvalidRecipient',
+        '0xb12d13eb': 'ETHTransferFailed',
+      };
+
+      const selector = revertData.slice(0, 10);
+      const knownError = CUSTOM_ERRORS[selector];
+
+      if (knownError) {
+        // Try to decode error parameters if we have the interface
+        if (contractInterface) {
+          try {
+            const decoded = contractInterface.parseError(revertData);
+            if (decoded) {
+              const args = decoded.args.map((arg, i) =>
+                typeof arg === 'bigint' ? arg.toString() : String(arg)
+              ).join(', ');
+              return `${decoded.name}(${args})`;
+            }
+          } catch {
+            // Fall through to basic error name
+          }
+        }
+        return `Contract error: ${knownError}`;
+      }
+
+      // Try to decode as standard Error(string) or Panic(uint256)
+      if (revertData.startsWith('0x08c379a0')) {
+        // Error(string)
+        try {
+          const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+            ['string'],
+            '0x' + revertData.slice(10)
+          );
+          return `Revert: ${decoded[0]}`;
+        } catch {
+          // Fall through
+        }
+      } else if (revertData.startsWith('0x4e487b71')) {
+        // Panic(uint256)
+        try {
+          const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+            ['uint256'],
+            '0x' + revertData.slice(10)
+          );
+          const panicCode = Number(decoded[0]);
+          const panicMessages: Record<number, string> = {
+            0x01: 'Assertion failed',
+            0x11: 'Arithmetic overflow/underflow',
+            0x12: 'Division by zero',
+            0x21: 'Invalid enum value',
+            0x22: 'Storage byte array encoding error',
+            0x31: 'Pop on empty array',
+            0x32: 'Array index out of bounds',
+            0x41: 'Memory allocation overflow',
+            0x51: 'Zero initialized function pointer',
+          };
+          return `Panic: ${panicMessages[panicCode] || `code ${panicCode}`}`;
+        } catch {
+          // Fall through
+        }
+      }
+    }
+
+    return errorMessage || 'Unknown contract error';
   }
 
   // ===========================================================================

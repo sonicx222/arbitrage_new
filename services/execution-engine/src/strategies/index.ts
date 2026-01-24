@@ -10,6 +10,18 @@ export { BaseExecutionStrategy } from './base.strategy';
 export { IntraChainStrategy } from './intra-chain.strategy';
 export { CrossChainStrategy } from './cross-chain.strategy';
 export { SimulationStrategy } from './simulation.strategy';
+export {
+  FlashLoanStrategy,
+  createFlashLoanStrategy,
+} from './flash-loan.strategy';
+export type {
+  FlashLoanStrategyConfig,
+  SwapStep,
+  SwapStepsParams,
+  ExecuteArbitrageParams,
+  ProfitabilityParams,
+  ProfitabilityAnalysis,
+} from './flash-loan.strategy';
 
 // Strategy Factory Pattern
 export {

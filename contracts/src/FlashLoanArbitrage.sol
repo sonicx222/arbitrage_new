@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
 
 /**
@@ -25,7 +25,7 @@ import "./interfaces/IFlashLoanReceiver.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
  *
- * @see implementation_plan_v2.md Task 3.1.1
+ * See implementation_plan_v2.md Task 3.1.1
  */
 contract FlashLoanArbitrage is
     IFlashLoanSimpleReceiver,
@@ -114,6 +114,8 @@ contract FlashLoanArbitrage is
     error InvalidFlashLoanCaller();
     error SwapFailed();
     error InsufficientOutputAmount();
+    error InvalidRecipient();
+    error ETHTransferFailed();
 
     // ==========================================================================
     // Constructor
@@ -124,9 +126,10 @@ contract FlashLoanArbitrage is
      * @param _pool The Aave V3 Pool address
      * @param _owner The contract owner address
      */
-    constructor(address _pool, address _owner) Ownable(_owner) {
-        require(_pool != address(0), "Invalid pool address");
+    constructor(address _pool, address _owner) {
+        if (_pool == address(0)) revert InvalidPoolAddress();
         POOL = IPool(_pool);
+        _transferOwnership(_owner);
     }
 
     // ==========================================================================
@@ -146,11 +149,13 @@ contract FlashLoanArbitrage is
         SwapStep[] calldata swapPath,
         uint256 minProfit
     ) external nonReentrant whenNotPaused {
-        require(swapPath.length > 0, "Empty swap path");
+        if (swapPath.length == 0) revert EmptySwapPath();
 
         // Validate all routers in the path are approved
-        for (uint256 i = 0; i < swapPath.length; i++) {
-            require(isApprovedRouter[swapPath[i].router], "Router not approved");
+        uint256 pathLength = swapPath.length;
+        for (uint256 i = 0; i < pathLength;) {
+            if (!isApprovedRouter[swapPath[i].router]) revert RouterNotApproved();
+            unchecked { ++i; }
         }
 
         // Encode the swap path and minimum profit for the callback
@@ -184,10 +189,10 @@ contract FlashLoanArbitrage is
         bytes calldata params
     ) external override returns (bool) {
         // Security: Verify caller is the Aave Pool
-        require(msg.sender == address(POOL), "Invalid flash loan caller");
+        if (msg.sender != address(POOL)) revert InvalidFlashLoanCaller();
 
         // Security: Verify initiator is this contract
-        require(initiator == address(this), "Invalid flash loan initiator");
+        if (initiator != address(this)) revert InvalidFlashLoanInitiator();
 
         // Decode parameters
         (SwapStep[] memory swapPath, uint256 minProfit) = abi.decode(
@@ -200,19 +205,22 @@ contract FlashLoanArbitrage is
 
         // Calculate required repayment and profit
         uint256 amountOwed = amount + premium;
-        require(amountReceived >= amountOwed, "Insufficient funds to repay");
+        if (amountReceived < amountOwed) revert InsufficientProfit();
 
         uint256 profit = amountReceived - amountOwed;
 
-        // Verify minimum profit threshold
-        uint256 effectiveMinProfit = minProfit > minimumProfit ? minProfit : minimumProfit;
-        require(profit >= effectiveMinProfit, "Profit below minimum");
+        // Verify minimum profit threshold (cache storage read)
+        uint256 _minimumProfit = minimumProfit;
+        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
+        if (profit < effectiveMinProfit) revert InsufficientProfit();
 
         // Update profit tracking
         totalProfits += profit;
 
         // Approve the Pool to pull the owed amount
-        IERC20(asset).safeIncreaseAllowance(address(POOL), amountOwed);
+        // Fix 9.1: Use forceApprove instead of safeIncreaseAllowance to prevent
+        // allowance accumulation and handle tokens that revert on non-zero to non-zero approval
+        IERC20(asset).forceApprove(address(POOL), amountOwed);
 
         emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
 
@@ -237,16 +245,17 @@ contract FlashLoanArbitrage is
     ) internal returns (uint256 finalAmount) {
         uint256 currentAmount = startAmount;
         address currentToken = startAsset;
+        uint256 pathLength = swapPath.length;
 
-        for (uint256 i = 0; i < swapPath.length; i++) {
+        for (uint256 i = 0; i < pathLength;) {
             SwapStep memory step = swapPath[i];
 
-            // Validate swap step
-            require(step.tokenIn == currentToken, "Invalid swap path");
-            require(isApprovedRouter[step.router], "Router not approved");
+            // Validate swap step (router already validated in executeArbitrage)
+            if (step.tokenIn != currentToken) revert InvalidSwapPath();
 
             // Approve router to spend tokens
-            IERC20(currentToken).safeIncreaseAllowance(step.router, currentAmount);
+            // Fix 9.1: Use forceApprove for safe token approvals
+            IERC20(currentToken).forceApprove(step.router, currentAmount);
 
             // Build path for the swap
             address[] memory path = new address[](2);
@@ -264,15 +273,17 @@ contract FlashLoanArbitrage is
 
             // Verify output
             uint256 amountOut = amounts[amounts.length - 1];
-            require(amountOut >= step.amountOutMin, "Insufficient output amount");
+            if (amountOut < step.amountOutMin) revert InsufficientOutputAmount();
 
             // Update for next iteration
             currentAmount = amountOut;
             currentToken = step.tokenOut;
+
+            unchecked { ++i; }
         }
 
         // Verify we end up with the same asset we started with (for repayment)
-        require(currentToken == startAsset, "Must end with flash loan asset");
+        if (currentToken != startAsset) revert InvalidSwapPath();
 
         return currentAmount;
     }
@@ -286,8 +297,8 @@ contract FlashLoanArbitrage is
      * @param router The router address to approve
      */
     function addApprovedRouter(address router) external onlyOwner {
-        require(router != address(0), "Invalid router address");
-        require(!isApprovedRouter[router], "Router already approved");
+        if (router == address(0)) revert InvalidRouterAddress();
+        if (isApprovedRouter[router]) revert RouterAlreadyApproved();
 
         isApprovedRouter[router] = true;
         approvedRouters.push(router);
@@ -298,19 +309,31 @@ contract FlashLoanArbitrage is
     /**
      * @notice Removes a router from the approved list
      * @param router The router address to remove
+     *
+     * @dev Fix 10.5: Performance note - This function iterates through the array
+     * to find the router index, which is O(n). For contracts with many routers,
+     * consider one of these optimizations:
+     * 1. Accept routerIndex as parameter (caller provides index, we validate)
+     * 2. Use EnumerableSet from OpenZeppelin for O(1) removal
+     * 3. Use a doubly-linked list pattern
+     *
+     * Current implementation is acceptable for small router lists (<50 routers).
      */
     function removeApprovedRouter(address router) external onlyOwner {
-        require(isApprovedRouter[router], "Router not approved");
+        if (!isApprovedRouter[router]) revert RouterNotApproved();
 
         isApprovedRouter[router] = false;
 
         // Remove from array (find and swap with last element)
-        for (uint256 i = 0; i < approvedRouters.length; i++) {
+        // Note: O(n) iteration - see @dev comment for optimization options
+        uint256 length = approvedRouters.length;
+        for (uint256 i = 0; i < length;) {
             if (approvedRouters[i] == router) {
-                approvedRouters[i] = approvedRouters[approvedRouters.length - 1];
+                approvedRouters[i] = approvedRouters[length - 1];
                 approvedRouters.pop();
                 break;
             }
+            unchecked { ++i; }
         }
 
         emit RouterRemoved(router);
@@ -367,7 +390,7 @@ contract FlashLoanArbitrage is
         address to,
         uint256 amount
     ) external onlyOwner {
-        require(to != address(0), "Invalid recipient");
+        if (to == address(0)) revert InvalidRecipient();
         IERC20(token).safeTransfer(to, amount);
         emit TokenWithdrawn(token, to, amount);
     }
@@ -378,9 +401,9 @@ contract FlashLoanArbitrage is
      * @param amount The amount to withdraw
      */
     function withdrawETH(address payable to, uint256 amount) external onlyOwner {
-        require(to != address(0), "Invalid recipient");
+        if (to == address(0)) revert InvalidRecipient();
         (bool success, ) = to.call{value: amount}("");
-        require(success, "ETH transfer failed");
+        if (!success) revert ETHTransferFailed();
         emit ETHWithdrawn(to, amount);
     }
 
@@ -391,6 +414,23 @@ contract FlashLoanArbitrage is
     /**
      * @notice Calculates the expected profit for an arbitrage opportunity
      * @dev This is a simulation that doesn't execute the actual swaps
+     *
+     * Fix 10.4: Performance optimization note - This function makes sequential
+     * external calls to getAmountsOut() for each swap step. For competitive
+     * speed in MEV environments, consider these alternatives:
+     *
+     * 1. Cache quotes off-chain: Call this function only for final verification,
+     *    use off-chain quote aggregation for initial screening.
+     *
+     * 2. Multicall pattern: If the caller can batch read calls, combine this
+     *    with other view functions to reduce round trips.
+     *
+     * 3. Custom quoter: Deploy a quoter contract that batches getAmountsOut()
+     *    calls internally using DELEGATECALL.
+     *
+     * Current implementation prioritizes correctness and gas efficiency over
+     * latency. The sequential approach is safer for production use.
+     *
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan
      * @param swapPath Array of swap steps
@@ -409,8 +449,9 @@ contract FlashLoanArbitrage is
         // Simulate swaps to get expected output
         uint256 currentAmount = amount;
         address currentToken = asset;
+        uint256 pathLength = swapPath.length;
 
-        for (uint256 i = 0; i < swapPath.length; i++) {
+        for (uint256 i = 0; i < pathLength;) {
             SwapStep calldata step = swapPath[i];
 
             if (step.tokenIn != currentToken) {
@@ -430,6 +471,8 @@ contract FlashLoanArbitrage is
             } catch {
                 return (0, flashLoanFee); // Router call failed
             }
+
+            unchecked { ++i; }
         }
 
         // Check if we end with the correct asset
