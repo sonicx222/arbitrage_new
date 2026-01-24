@@ -342,8 +342,23 @@ export const FUTURE_PARTITIONS: PartitionConfig[] = [
 // Chain Assignment
 // =============================================================================
 
+// Pre-computed partition lookup by ID for O(1) access
+const PARTITION_BY_ID = new Map<string, PartitionConfig>(
+  PARTITIONS.map(p => [p.partitionId, p])
+);
+
+// Pre-computed chain-to-partition assignments for O(1) lookups (hot-path optimization)
+// Built at module load time from PARTITIONS chain lists
+const CHAIN_TO_PARTITION = new Map<string, PartitionConfig>();
+for (const partition of PARTITIONS) {
+  for (const chainId of partition.chains) {
+    CHAIN_TO_PARTITION.set(chainId, partition);
+  }
+}
+
 /**
  * Assign a chain to the appropriate partition based on ADR-003 rules.
+ * FIX: Uses pre-computed O(1) lookup instead of O(n) iterations.
  *
  * S3.1.2: 4-Partition Assignment Rules (in priority order):
  * 1. Non-EVM chains (Solana) → solana-native partition
@@ -358,35 +373,23 @@ export function assignChainToPartition(chainId: string): PartitionConfig | null 
     return null;
   }
 
-  // Rule 1: Non-EVM chains (Solana)
-  if (!isEvmChain(chainId)) {
-    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.SOLANA_NATIVE) || null;
+  // Fast path: use pre-computed lookup
+  const preComputed = CHAIN_TO_PARTITION.get(chainId);
+  if (preComputed) {
+    return preComputed;
   }
 
-  // Rule 2: Ethereum L2 rollups
-  if (['arbitrum', 'optimism', 'base'].includes(chainId)) {
-    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.L2_TURBO) || null;
-  }
-
-  // Rule 3: High-value chains (Ethereum mainnet + ZK rollups)
-  if (['ethereum', 'zksync', 'linea'].includes(chainId)) {
-    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.HIGH_VALUE) || null;
-  }
-
-  // Rule 4: Fast Asian chains (high-throughput EVM)
-  if (['bsc', 'polygon', 'avalanche', 'fantom'].includes(chainId)) {
-    return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.ASIA_FAST) || null;
-  }
-
-  // Default: high-value
-  return PARTITIONS.find(p => p.partitionId === PARTITION_IDS.HIGH_VALUE) || null;
+  // Fallback for chains not explicitly assigned (should not happen with complete config)
+  // Default: high-value partition
+  return PARTITION_BY_ID.get(PARTITION_IDS.HIGH_VALUE) || null;
 }
 
 /**
  * Get partition by ID.
+ * FIX: Uses pre-computed O(1) lookup instead of O(n) find.
  */
 export function getPartition(partitionId: string): PartitionConfig | undefined {
-  return PARTITIONS.find(p => p.partitionId === partitionId);
+  return PARTITION_BY_ID.get(partitionId);
 }
 
 /**

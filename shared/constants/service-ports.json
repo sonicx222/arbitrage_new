@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Single source of truth for all service ports. Both JS and TS code import from this file.",
+
+  "services": {
+    "coordinator": 3000,
+    "partition-asia-fast": 3001,
+    "partition-l2-turbo": 3002,
+    "partition-high-value": 3003,
+    "partition-solana": 3004,
+    "execution-engine": 3005,
+    "cross-chain-detector": 3006,
+    "unified-detector": 3007
+  },
+
+  "partitions": {
+    "asia-fast": 3001,
+    "l2-turbo": 3002,
+    "high-value": 3003,
+    "solana-native": 3004
+  },
+
+  "partitionServiceNames": {
+    "asia-fast": "partition-asia-fast",
+    "l2-turbo": "partition-l2-turbo",
+    "high-value": "partition-high-value",
+    "solana-native": "partition-solana"
+  },
+
+  "infrastructure": {
+    "redis": 6379,
+    "redis-ui": 8081
+  },
+
+  "envVarMapping": {
+    "coordinator": "COORDINATOR_PORT",
+    "partition-asia-fast": "P1_ASIA_FAST_PORT",
+    "partition-l2-turbo": "P2_L2_TURBO_PORT",
+    "partition-high-value": "P3_HIGH_VALUE_PORT",
+    "partition-solana": "P4_SOLANA_PORT",
+    "execution-engine": "EXECUTION_ENGINE_PORT",
+    "cross-chain-detector": "CROSS_CHAIN_DETECTOR_PORT",
+    "unified-detector": "UNIFIED_DETECTOR_PORT",
+    "redis": "REDIS_PORT"
+  }
+}

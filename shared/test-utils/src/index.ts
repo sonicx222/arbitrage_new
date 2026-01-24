@@ -81,6 +81,9 @@ export * from './factories';
 // Setup utilities
 export * from './setup';
 
+// Redis Test Helper (Task 2.2: Test Isolation)
+export * from './redis-test-helper';
+
 // =============================================================================
 // Legacy Exports (kept for backward compatibility)
 // =============================================================================

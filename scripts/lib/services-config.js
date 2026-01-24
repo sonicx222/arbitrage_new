@@ -3,17 +3,21 @@
  * Centralized Service Configuration for Development Scripts
  *
  * Single source of truth for all service configurations.
- * Includes all 8 services in the architecture.
+ * Includes:
+ * - 6 core services (Coordinator, 4 partition detectors, Execution engine)
+ * - 1 cross-chain detector
+ * - 1 deprecated optional service (Unified detector)
+ * - 2 infrastructure services (Redis, Redis Commander)
  *
  * Environment Variables:
  * - COORDINATOR_PORT: Coordinator service port (default: 3000)
  * - P1_ASIA_FAST_PORT: Asia-Fast partition port (default: 3001)
  * - P2_L2_TURBO_PORT: L2-Turbo partition port (default: 3002)
  * - P3_HIGH_VALUE_PORT: High-Value partition port (default: 3003)
- * - CROSS_CHAIN_DETECTOR_PORT: Cross-chain detector port (default: 3004)
+ * - P4_SOLANA_PORT: Solana partition port (default: 3004)
  * - EXECUTION_ENGINE_PORT: Execution engine port (default: 3005)
- * - UNIFIED_DETECTOR_PORT: Unified detector port (default: 3006)
- * - P4_SOLANA_PORT: Solana partition port (default: 3007)
+ * - CROSS_CHAIN_DETECTOR_PORT: Cross-chain detector port (default: 3006)
+ * - UNIFIED_DETECTOR_PORT: Unified detector port (default: 3007, deprecated)
  * - REDIS_PORT: Redis port (default: 6379)
  *
  * @see ADR-003: Partitioned Chain Detectors
@@ -25,6 +29,12 @@ const path = require('path');
 // .env.local should override .env for local development
 const dotenv = require('dotenv');
 const ROOT_DIR = path.join(__dirname, '..', '..');
+
+// =============================================================================
+// Shared Configuration (Single Source of Truth)
+// =============================================================================
+const portConfig = require('../../shared/constants/service-ports.json');
+const deprecationConfig = require('../../shared/constants/deprecation-patterns.json');
 
 // Load base .env first
 dotenv.config({ path: path.join(ROOT_DIR, '.env') });
@@ -41,20 +51,35 @@ if (localEnvResult.error && localEnvResult.error.code !== 'ENOENT') {
 }
 
 // =============================================================================
+// Deprecation Checker (Task 1.1)
+// =============================================================================
+const { checkForDeprecatedEnvVars, printWarnings } = require('./deprecation-checker');
+
+// Check for deprecated environment variables at module load time
+const envWarnings = checkForDeprecatedEnvVars();
+if (envWarnings.length > 0) {
+  printWarnings(envWarnings);
+}
+
+// =============================================================================
 // Port Configuration (from environment with defaults)
 // =============================================================================
 
 const PORTS = {
-  REDIS: parseInt(process.env.REDIS_PORT || '6379', 10),
-  REDIS_UI: 8081,
-  COORDINATOR: parseInt(process.env.COORDINATOR_PORT || '3000', 10),
-  P1_ASIA_FAST: parseInt(process.env.P1_ASIA_FAST_PORT || '3001', 10),
-  P2_L2_TURBO: parseInt(process.env.P2_L2_TURBO_PORT || '3002', 10),
-  P3_HIGH_VALUE: parseInt(process.env.P3_HIGH_VALUE_PORT || '3003', 10),
-  CROSS_CHAIN: parseInt(process.env.CROSS_CHAIN_DETECTOR_PORT || '3004', 10),
-  EXECUTION_ENGINE: parseInt(process.env.EXECUTION_ENGINE_PORT || '3005', 10),
-  UNIFIED_DETECTOR: parseInt(process.env.UNIFIED_DETECTOR_PORT || '3006', 10),
-  P4_SOLANA: parseInt(process.env.P4_SOLANA_PORT || '3007', 10)
+  // Infrastructure (from shared config)
+  REDIS: parseInt(process.env.REDIS_PORT || String(portConfig.infrastructure.redis), 10),
+  REDIS_UI: portConfig.infrastructure['redis-ui'],
+  // Core services (from shared config)
+  COORDINATOR: parseInt(process.env.COORDINATOR_PORT || String(portConfig.services.coordinator), 10),
+  // Partition detectors (from shared config)
+  P1_ASIA_FAST: parseInt(process.env.P1_ASIA_FAST_PORT || String(portConfig.services['partition-asia-fast']), 10),
+  P2_L2_TURBO: parseInt(process.env.P2_L2_TURBO_PORT || String(portConfig.services['partition-l2-turbo']), 10),
+  P3_HIGH_VALUE: parseInt(process.env.P3_HIGH_VALUE_PORT || String(portConfig.services['partition-high-value']), 10),
+  P4_SOLANA: parseInt(process.env.P4_SOLANA_PORT || String(portConfig.services['partition-solana']), 10),
+  // Other services (from shared config)
+  EXECUTION_ENGINE: parseInt(process.env.EXECUTION_ENGINE_PORT || String(portConfig.services['execution-engine']), 10),
+  CROSS_CHAIN: parseInt(process.env.CROSS_CHAIN_DETECTOR_PORT || String(portConfig.services['cross-chain-detector']), 10),
+  UNIFIED_DETECTOR: parseInt(process.env.UNIFIED_DETECTOR_PORT || String(portConfig.services['unified-detector']), 10)
 };
 
 // =============================================================================

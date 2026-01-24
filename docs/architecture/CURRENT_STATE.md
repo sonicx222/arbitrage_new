@@ -1,0 +1,201 @@
+# Current Architecture State
+
+**Date:** January 24, 2026
+**Version:** 1.0
+**Task:** 1.3 - Document Existing Architecture
+
+---
+
+## Overview
+
+This document provides a snapshot of the current arbitrage trading system architecture, including service inventory, partition mapping, Redis Streams topology, and health monitoring.
+
+---
+
+## Service Inventory (8 Services)
+
+| Service | Port | Type | Description |
+|---------|------|------|-------------|
+| **Coordinator** | 3000 | Core | Orchestrates all services, manages leader election |
+| **Partition Asia-Fast** | 3001 | Detector | P1: BSC, Polygon, Avalanche, Fantom |
+| **Partition L2-Turbo** | 3002 | Detector | P2: Arbitrum, Optimism, Base |
+| **Partition High-Value** | 3003 | Detector | P3: Ethereum, zkSync, Linea |
+| **Partition Solana** | 3004 | Detector | P4: Solana (non-EVM) |
+| **Execution Engine** | 3005 | Core | Trade execution and MEV protection |
+| **Cross-Chain Detector** | 3006 | Detector | Cross-chain arbitrage opportunities |
+| **Unified Detector** | 3007 | Optional | Legacy unified detector (deprecated) |
+
+---
+
+## Partition Architecture (ADR-003)
+
+### P1: Asia-Fast
+- **Partition ID:** `asia-fast`
+- **Chains:** BSC, Polygon, Avalanche, Fantom
+- **Region:** Asia-Southeast-1 (Oracle Cloud)
+- **Standby:** US-West-1 (Render)
+- **Resource Profile:** Heavy (768MB)
+- **Rationale:** High-throughput Asian chains with fast block times
+
+### P2: L2-Turbo
+- **Partition ID:** `l2-turbo`
+- **Chains:** Arbitrum, Optimism, Base
+- **Region:** Asia-Southeast-1 (Fly.io)
+- **Standby:** US-East-1 (Railway)
+- **Resource Profile:** Standard (512MB)
+- **Rationale:** Ethereum L2 rollups with sub-second confirmations
+
+### P3: High-Value
+- **Partition ID:** `high-value`
+- **Chains:** Ethereum, zkSync, Linea
+- **Region:** US-East-1 (Oracle Cloud)
+- **Standby:** EU-West-1 (GCP)
+- **Resource Profile:** Heavy (768MB)
+- **Rationale:** High-value transactions requiring reliability
+
+### P4: Solana-Native
+- **Partition ID:** `solana-native`
+- **Chains:** Solana
+- **Region:** US-West-1 (Fly.io)
+- **Standby:** US-East-1 (Railway)
+- **Resource Profile:** Heavy (512MB)
+- **Rationale:** Non-EVM chain requiring dedicated handling
+
+---
+
+## Redis Streams Topology (ADR-002)
+
+### Stream Names
+
+| Stream | Purpose | Producers | Consumers |
+|--------|---------|-----------|-----------|
+| `stream:price-updates:{partition}` | Real-time price data | Partition Detectors | Cross-Chain Detector, Execution Engine |
+| `stream:swap-events:{partition}` | DEX swap events | Partition Detectors | Analytics, Quality Monitor |
+| `stream:opportunities:{partition}` | Arbitrage opportunities | Partition Detectors | Execution Engine |
+| `stream:whale-alerts` | Large trade notifications | All Detectors | Alert Service |
+| `stream:system-failover` | Failover coordination | CrossRegionHealthManager | All Services |
+| `stream:coordinator-commands` | Service orchestration | Coordinator | All Services |
+
+### Consumer Groups
+
+| Group | Members | Purpose |
+|-------|---------|---------|
+| `execution-engine-group` | Execution Engine | Processes opportunities |
+| `cross-chain-group` | Cross-Chain Detector | Processes price updates |
+| `analytics-group` | Quality Monitor | Processes events for analytics |
+
+---
+
+## Health Check Endpoints
+
+| Service | Endpoint | Response |
+|---------|----------|----------|
+| Coordinator | `/api/health` | `{ status, services, leader }` |
+| Partition Detectors | `/health` | `{ status, chains, blocksProcessed }` |
+| Cross-Chain Detector | `/health` | `{ status, opportunities }` |
+| Execution Engine | `/health` | `{ status, trades, pending }` |
+
+### Health Status Values
+
+- `healthy` - All subsystems operational
+- `degraded` - Some subsystems have issues but service is operational
+- `unhealthy` - Critical issues, service may not be functional
+- `starting` - Service is initializing
+
+---
+
+## Key Redis Keys
+
+### Leader Election
+- `coordinator:leader:lock` - Distributed lock for leader election (30s TTL)
+
+### Service Health
+- `region:health:{regionId}` - Region health data (60s TTL)
+- `health:{serviceName}` - Service health data (300s TTL)
+
+### Routing
+- `routing:failed:{region}` - Failed region routing redirect
+
+### Metrics
+- `metrics:{serviceName}:{bucket}` - Time-bucketed metrics (24h TTL)
+- `metrics:{serviceName}:recent` - Rolling metrics list (24h TTL)
+
+---
+
+## Message Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      WebSocket Providers                         │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Partition Detectors                          │
+│  P1: Asia-Fast  │  P2: L2-Turbo  │  P3: High-Value  │  P4: Solana│
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                    Redis Streams (ADR-002)
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                 ▼
+    ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+    │  Cross-Chain    │ │   Coordinator   │ │   Execution     │
+    │   Detector      │ │    (Leader)     │ │     Engine      │
+    └─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+---
+
+## Configuration Sources
+
+### Environment Variables
+
+```bash
+# Redis
+REDIS_URL=redis://localhost:6379
+
+# Partition
+PARTITION_ID=asia-fast|l2-turbo|high-value|solana-native
+
+# Chain-specific (per partition)
+ETHEREUM_RPC_URL=https://...
+ETHEREUM_WS_URL=wss://...
+```
+
+### Packages
+
+- `@arbitrage/config` - Centralized configuration (chains, DEXes, tokens, thresholds)
+- `@arbitrage/core` - Core functionality (Redis, logging, monitoring)
+- `@arbitrage/test-utils` - Test utilities and mocks
+
+---
+
+## Current Metrics (Phase 1)
+
+| Metric | Current | Target |
+|--------|---------|--------|
+| Chains | 11 | 11 |
+| DEXes | 49 | 49 |
+| Tokens | 112 | 112 |
+| Target Opportunities/day | 500 | 500 |
+
+---
+
+## Related ADRs
+
+- [ADR-002: Redis Streams](adr/ADR-002-redis-streams.md) - Message transport
+- [ADR-003: Partitioned Detectors](adr/ADR-003-partitions.md) - Partition architecture
+- [ADR-007: Failover Strategy](adr/ADR-007-failover-strategy.md) - Leader election & failover
+- [ADR-009: Test Architecture](adr/ADR-009-test-architecture.md) - Testing patterns
+- [ADR-014: Modular Detector Components](adr/ADR-014-modular-detector-components.md) - Detector refactoring
+
+---
+
+## Maintenance Notes
+
+- This document should be updated when:
+  - New services are added
+  - Partition assignments change
+  - Redis Streams topology changes
+  - New health endpoints are added

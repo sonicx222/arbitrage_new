@@ -18,8 +18,7 @@ const {
   isWindows,
   checkRedis,
   checkHealth,
-  loadPids,
-  savePids,
+  updatePid,
   ROOT_DIR
 } = require('./lib/utils');
 
@@ -78,12 +77,15 @@ async function startService(service) {
     if (isWindows()) {
       // On Windows, use shell with a single command string
       // FIX: DEP0190 - Avoid deprecation warning
+      // FIX: Added detached + windowsHide to prevent process leak on parent exit
       const command = `npx ts-node -r dotenv/config -r tsconfig-paths/register ${service.script}`;
       child = spawn(command, [], {
         cwd: ROOT_DIR,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true
+        shell: true,
+        detached: true,
+        windowsHide: true
       });
     } else {
       // On Unix, use array args without shell for better process management
@@ -95,10 +97,10 @@ async function startService(service) {
       });
     }
 
-    // Store PID for later cleanup (atomic write to prevent race conditions)
-    const pids = loadPids();
-    pids[service.name] = child.pid;
-    savePids(pids);
+    // Store PID for later cleanup using atomic update (prevents race conditions)
+    updatePid(service.name, child.pid).catch(err => {
+      logService(service.name, `Warning: Failed to save PID: ${err.message}`, 'yellow');
+    });
 
     // Log output
     child.stdout.on('data', (data) => {
@@ -124,10 +126,9 @@ async function startService(service) {
       reject(error);
     });
 
-    // Detach the child process (only on non-Windows)
-    if (!isWindows()) {
-      child.unref();
-    }
+    // Detach the child process to allow parent to exit independently
+    // FIX: Now also applies to Windows (previously caused parent to hang)
+    child.unref();
 
     // Wait for health check after startup delay
     setTimeout(async () => {

@@ -1,0 +1,80 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Single source of truth for deprecation warnings. Both JS and TS code import from this file.",
+
+  "services": {
+    "ethereum-detector": {
+      "replacement": "partition-high-value",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "arbitrum-detector": {
+      "replacement": "partition-l2-turbo",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "optimism-detector": {
+      "replacement": "partition-l2-turbo",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "base-detector": {
+      "replacement": "partition-l2-turbo",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "polygon-detector": {
+      "replacement": "partition-asia-fast",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "bsc-detector": {
+      "replacement": "partition-asia-fast",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "avalanche-detector": {
+      "replacement": "partition-asia-fast",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "fantom-detector": {
+      "replacement": "partition-asia-fast",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "zksync-detector": {
+      "replacement": "partition-high-value",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    },
+    "linea-detector": {
+      "replacement": "partition-high-value",
+      "since": "2025-01-11",
+      "reason": "ADR-003: Per-chain detectors replaced by partition-based architecture"
+    }
+  },
+
+  "envVars": {
+    "USE_REDIS_STREAMS": {
+      "replacement": "Always enabled per ADR-002",
+      "since": "2025-01-10",
+      "reason": "Redis Streams is now the only supported message transport"
+    },
+    "USE_PUBSUB": {
+      "replacement": "Removed per ADR-002",
+      "since": "2025-01-10",
+      "reason": "Pub/Sub replaced by Redis Streams for reliability"
+    },
+    "PUBSUB_ENABLED": {
+      "replacement": "Removed per ADR-002",
+      "since": "2025-01-10",
+      "reason": "Pub/Sub replaced by Redis Streams for reliability"
+    },
+    "ENABLE_PUBSUB": {
+      "replacement": "Removed per ADR-002",
+      "since": "2025-01-10",
+      "reason": "Pub/Sub replaced by Redis Streams for reliability"
+    }
+  }
+}
