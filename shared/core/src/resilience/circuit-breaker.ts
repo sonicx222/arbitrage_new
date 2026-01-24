@@ -14,15 +14,10 @@ import type { ServiceLogger } from '../logging';
 // =============================================================================
 
 /**
- * Logger interface for CircuitBreaker.
- * @deprecated Use ServiceLogger from '../logging' directly instead.
- * P1-REFACTOR: Consolidated to use shared ServiceLogger type.
- */
-export type CircuitBreakerLogger = ServiceLogger;
-
-/**
  * Dependencies for CircuitBreaker (DI pattern).
  * Enables proper testing without Jest mock hoisting issues.
+ *
+ * Note: CircuitBreakerLogger type alias was removed. Use ServiceLogger directly.
  */
 export interface CircuitBreakerDeps {
   logger?: ServiceLogger;

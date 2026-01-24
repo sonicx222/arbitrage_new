@@ -21,6 +21,7 @@
 
 import { RedisClient, getRedisClient } from '../redis';
 import { createLogger, Logger } from '../logger';
+import { FALLBACK_TOKEN_PRICES } from '@arbitrage/config';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -113,63 +114,16 @@ function normalizeTokenSymbol(symbol: string): string {
 }
 
 // =============================================================================
-// Default Fallback Prices - CANONICAL SOURCE OF TRUTH
+// Default Fallback Prices - Imported from @arbitrage/config
 // =============================================================================
 //
-// IMPORTANT: This is the SINGLE SOURCE OF TRUTH for fallback token prices.
-// The following files MUST be kept in sync when prices are updated:
-// - shared/core/src/base-detector.ts (defaultPrices in estimateUsdValue)
-// - shared/core/src/gas-price-cache.ts (FALLBACK_NATIVE_PRICES)
+// SINGLE SOURCE OF TRUTH: FALLBACK_TOKEN_PRICES in shared/config/src/tokens/index.ts
+// This import replaces the locally-defined DEFAULT_FALLBACK_PRICES to ensure
+// consistency across all modules (price-oracle, base-detector, gas-price-cache).
 //
-// When updating prices here, search for "MUST stay in sync with price-oracle.ts"
-// in the codebase and update those locations as well.
-//
-// Note: Wrapped token entries (WETH, WBNB, etc.) are NOT included here
-// because normalizeTokenSymbol() aliases them to their native counterparts.
-const DEFAULT_FALLBACK_PRICES: Record<string, number> = {
-  // Major cryptocurrencies (native tokens only - wrapped aliases handled by normalizeTokenSymbol)
-  // Updated: 2026-01-18 to reflect current market prices
-  ETH: 3500,
-  BTC: 100000,
-  BNB: 600,
-  MATIC: 1.00,
-  AVAX: 40,
-  FTM: 0.80,
-  OP: 3.00,
-  ARB: 1.50,
-  SOL: 200,  // Solana native token
-
-  // Stablecoins
-  USDT: 1.00,
-  USDC: 1.00,
-  DAI: 1.00,
-  BUSD: 1.00,
-  FRAX: 1.00,
-  TUSD: 1.00,
-  USDP: 1.00,
-
-  // DeFi tokens
-  UNI: 12.00,
-  AAVE: 300,
-  LINK: 25,
-  CRV: 0.80,
-  MKR: 2000,
-  COMP: 80,
-  SNX: 4.00,
-  SUSHI: 2.00,
-  YFI: 10000,
-
-  // Liquid staking (priced relative to ETH at $3500)
-  STETH: 3500,
-  WSTETH: 4100,
-  RETH: 3800,
-  CBETH: 3600,
-
-  // Meme coins (approximate)
-  SHIB: 0.00002,
-  DOGE: 0.15,
-  PEPE: 0.000002
-};
+// The config module includes both native tokens and wrapped variants.
+// normalizeTokenSymbol() handles aliases like WETH -> ETH for lookups.
+const DEFAULT_FALLBACK_PRICES: Record<string, number> = FALLBACK_TOKEN_PRICES;
 
 // Cache size limit to prevent unbounded memory growth
 const DEFAULT_MAX_CACHE_SIZE = 10000;

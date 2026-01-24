@@ -10,6 +10,7 @@ import {
   FALLBACK_GAS_COSTS_ETH,
   FALLBACK_GAS_SCALING_PER_STEP
 } from './caching/gas-price-cache';
+import { getNativeTokenPrice } from '@arbitrage/config';
 
 const logger = createLogger('cross-dex-triangular-arbitrage');
 
@@ -269,6 +270,15 @@ export class CrossDexTriangularArbitrage {
 
   /**
    * T2.6: Find quadrilaterals starting from a specific base token.
+   *
+   * HOT PATH OPTIMIZATION (10.3):
+   * - Build adjacency map for O(1) neighbor lookups
+   * - Early pruning: skip paths where edges don't exist
+   * - Sort tokens by liquidity (high-liquidity first)
+   * - Timeout protection to prevent blocking
+   * - Skip invalid paths early in nested loops
+   *
+   * Reduces effective complexity from O(n³) to O(e²) where e = edges from token
    */
   private async findQuadrilateralsFromBaseToken(
     baseToken: string,
@@ -277,30 +287,63 @@ export class CrossDexTriangularArbitrage {
     chain: string
   ): Promise<QuadrilateralOpportunity[]> {
     const opportunities: QuadrilateralOpportunity[] = [];
+    const startTime = Date.now();
+    const TIMEOUT_MS = 2000; // 2 second timeout per base token
 
-    // Get all tokens reachable from base token
-    const reachableTokens = this.findReachableTokens(baseToken, tokenPairs);
+    // Build adjacency map: token -> Set of connected tokens with liquidity
+    const adjacency = this.buildAdjacencyMap(tokenPairs);
 
-    // Need at least 4 tokens for a quadrilateral (including base)
-    if (reachableTokens.length < 4) {
-      return [];
+    // Get tokens connected to base token (first hop candidates)
+    const baseNeighbors = adjacency.get(baseToken);
+    if (!baseNeighbors || baseNeighbors.size < 3) {
+      return []; // Need at least 3 neighbors for quadrilateral
     }
 
-    // Try all possible quadrilaterals: baseToken -> tokenA -> tokenB -> tokenC -> baseToken
-    // Use a limit on combinations to avoid O(n^3) explosion
-    const maxTokensToCheck = Math.min(reachableTokens.length, 20); // Limit search space
-    const tokensToCheck = reachableTokens.slice(0, maxTokensToCheck);
+    // Sort neighbors by liquidity (highest first) - check profitable paths first
+    const sortedNeighborsA = this.sortTokensByLiquidity(
+      Array.from(baseNeighbors),
+      baseToken,
+      tokenPairs
+    ).slice(0, 15); // Limit first hop
 
-    for (const tokenA of tokensToCheck) {
-      if (tokenA === baseToken) continue;
+    // Iterate with early pruning
+    for (const tokenA of sortedNeighborsA) {
+      // Timeout check
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        logger.debug('Quadrilateral search timeout', { baseToken, found: opportunities.length });
+        break;
+      }
 
-      for (const tokenB of tokensToCheck) {
-        if (tokenB === baseToken || tokenB === tokenA) continue;
+      // EARLY PRUNING: Get tokenA's neighbors for second hop
+      const neighborsA = adjacency.get(tokenA);
+      if (!neighborsA || neighborsA.size < 2) continue;
 
-        for (const tokenC of tokensToCheck) {
-          if (tokenC === baseToken || tokenC === tokenA || tokenC === tokenB) continue;
+      const sortedNeighborsB = this.sortTokensByLiquidity(
+        Array.from(neighborsA).filter(t => t !== baseToken && t !== tokenA),
+        tokenA,
+        tokenPairs
+      ).slice(0, 10); // Limit second hop
 
-          // Check if we can form a valid quadrilateral
+      for (const tokenB of sortedNeighborsB) {
+        // Timeout check
+        if (Date.now() - startTime > TIMEOUT_MS) break;
+
+        // EARLY PRUNING: Get tokenB's neighbors for third hop
+        const neighborsB = adjacency.get(tokenB);
+        if (!neighborsB || neighborsB.size < 2) continue;
+
+        // Filter: must connect to a token that connects back to base
+        const sortedNeighborsC = this.sortTokensByLiquidity(
+          Array.from(neighborsB).filter(t =>
+            t !== baseToken && t !== tokenA && t !== tokenB &&
+            adjacency.get(t)?.has(baseToken) // CRITICAL: Must connect back to base
+          ),
+          tokenB,
+          tokenPairs
+        ).slice(0, 8); // Limit third hop
+
+        for (const tokenC of sortedNeighborsC) {
+          // Final check: tokenC must connect to baseToken (already filtered above)
           const quad = await this.evaluateQuadrilateral(
             [baseToken, tokenA, tokenB, tokenC, baseToken],
             tokenPairs,
@@ -316,6 +359,57 @@ export class CrossDexTriangularArbitrage {
     }
 
     return opportunities;
+  }
+
+  /**
+   * Build adjacency map for O(1) neighbor lookups.
+   * Maps each token to the set of tokens it has pools with.
+   */
+  private buildAdjacencyMap(tokenPairs: Map<string, DexPool[]>): Map<string, Set<string>> {
+    const adjacency = new Map<string, Set<string>>();
+
+    for (const [pairKey, pools] of tokenPairs.entries()) {
+      if (pools.length === 0) continue;
+      const pool = pools[0];
+      const token0 = pool.token0;
+      const token1 = pool.token1;
+
+      if (!adjacency.has(token0)) adjacency.set(token0, new Set());
+      if (!adjacency.has(token1)) adjacency.set(token1, new Set());
+
+      adjacency.get(token0)!.add(token1);
+      adjacency.get(token1)!.add(token0);
+    }
+
+    return adjacency;
+  }
+
+  /**
+   * Sort tokens by liquidity (highest first).
+   * Prioritizes high-liquidity paths for better arbitrage potential.
+   */
+  private sortTokensByLiquidity(
+    tokens: string[],
+    fromToken: string,
+    tokenPairs: Map<string, DexPool[]>
+  ): string[] {
+    return tokens.sort((a, b) => {
+      const liquidityA = this.getMaxLiquidity(fromToken, a, tokenPairs);
+      const liquidityB = this.getMaxLiquidity(fromToken, b, tokenPairs);
+      return liquidityB - liquidityA;
+    });
+  }
+
+  /**
+   * Get maximum liquidity for a token pair.
+   */
+  private getMaxLiquidity(
+    tokenA: string,
+    tokenB: string,
+    tokenPairs: Map<string, DexPool[]>
+  ): number {
+    const pools = this.findBestPoolsForPair(tokenPairs, tokenA, tokenB);
+    return pools.length > 0 ? pools[0].liquidity : 0;
   }
 
   /**
@@ -432,7 +526,7 @@ export class CrossDexTriangularArbitrage {
         path: [token0, token1, token2, token3],
         dexes: [pool1.dex, pool2.dex, pool3.dex, pool4.dex],
         profitPercentage: netProfit,
-        profitUSD: netProfit * 2000, // Rough ETH to USD conversion
+        profitUSD: netProfit * getNativeTokenPrice(chain),
         gasCost,
         netProfit,
         confidence,
@@ -627,7 +721,7 @@ export class CrossDexTriangularArbitrage {
         path: [token0, token1, token2],
         dexes: [pool1.dex, pool2.dex, pool3.dex],
         profitPercentage: netProfit,
-        profitUSD: netProfit * 2000, // Rough ETH to USD conversion
+        profitUSD: netProfit * getNativeTokenPrice(chain),
         gasCost,
         netProfit,
         confidence,
