@@ -7,8 +7,11 @@
  * @see docs/TEST_ARCHITECTURE.md
  */
 
-/** @type {import('jest').Config} */
-module.exports = {
+/**
+ * Project-level configuration options
+ * These options are valid inside project configurations
+ */
+const projectConfig = {
   preset: 'ts-jest',
   testEnvironment: 'node',
 
@@ -43,9 +46,6 @@ module.exports = {
   // Module file extensions
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
 
-  // Default test timeout (30 seconds)
-  testTimeout: 30000,
-
   // Clear mocks between tests for isolation
   clearMocks: true,
   resetMocks: true,
@@ -54,7 +54,7 @@ module.exports = {
   // Error on deprecated features
   errorOnDeprecated: true,
 
-  // Coverage configuration
+  // Coverage configuration (valid in projects)
   collectCoverageFrom: [
     '**/*.ts',
     '!**/*.d.ts',
@@ -64,7 +64,17 @@ module.exports = {
     '!**/test-utils/**',
     '!**/*.test.ts',
     '!**/*.spec.ts'
-  ],
+  ]
+};
+
+/**
+ * Root-level configuration options
+ * These options are only valid at the root level, not inside project configurations
+ */
+const rootOnlyConfig = {
+  // Default test timeout (30 seconds)
+  testTimeout: 30000,
+
   coverageDirectory: '<rootDir>/coverage',
   coverageReporters: ['text', 'lcov', 'html', 'json-summary'],
   coverageThreshold: {
@@ -82,10 +92,6 @@ module.exports = {
   // Fail fast in CI
   bail: process.env.CI ? 1 : 0,
 
-  // Test isolation - run each test in separate process for full isolation
-  // Note: Disabled by default for performance, enable for debugging
-  // isolatedModules: true,
-
   // Reporter configuration
   reporters: [
     'default',
@@ -96,3 +102,15 @@ module.exports = {
     }]] : [])
   ]
 };
+
+// Full config for standalone use (backward compatibility)
+/** @type {import('jest').Config} */
+const fullConfig = {
+  ...projectConfig,
+  ...rootOnlyConfig
+};
+
+// Attach projectConfig for use by jest.config.js projects
+fullConfig.projectConfig = projectConfig;
+
+module.exports = fullConfig;

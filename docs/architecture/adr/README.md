@@ -193,3 +193,8 @@ XX% - Explanation of confidence factors
 | 2025-01-12 | ADR-009 | Added Test Architecture decision |
 | 2026-01-15 | ADR-010 | Added WebSocket Connection Resilience decision |
 | 2026-01-18 | ADR-014 | Added Modular Detector Components decision |
+| 2026-01-22 | ADR-016 | Added Transaction Simulation Integration decision |
+| 2026-01-23 | ADR-017 | Added MEV Protection Enhancement decision |
+| 2026-01-23 | ADR-018 | Added Execution Circuit Breaker decision |
+| 2026-01-23 | ADR-019 | Added Factory-Level Event Subscriptions decision |
+| 2026-01-24 | ADR-020 | Added Flash Loan Integration decision |
