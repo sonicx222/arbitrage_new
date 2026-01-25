@@ -638,4 +638,212 @@ describe('SimulationService', () => {
       expect(() => service.stop()).not.toThrow();
     });
   });
+
+  // ===========================================================================
+  // Timeout Behavior Tests (Regression tests for P0-CRITICAL fix)
+  // ===========================================================================
+
+  describe('timeout behavior', () => {
+    test('should return error result when provider times out', async () => {
+      // Create a provider that never resolves (simulates hanging request)
+      mockTenderlyProvider.simulate.mockImplementation(
+        () => new Promise(() => {}) // Never resolves
+      );
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // Start simulation (will timeout after 5000ms default)
+      const simulationPromise = service.simulate(request);
+
+      // Fast-forward past the timeout
+      jest.advanceTimersByTime(5100);
+
+      const result = await simulationPromise;
+
+      // Should return error result with timeout message
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('timeout');
+    });
+
+    test('should log timeout with isTimeout flag', async () => {
+      mockTenderlyProvider.simulate.mockImplementation(
+        () => new Promise(() => {}) // Never resolves
+      );
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+      const simulationPromise = service.simulate(request);
+
+      jest.advanceTimersByTime(5100);
+      await simulationPromise;
+
+      // Verify logger was called with isTimeout flag
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Provider simulation error',
+        expect.objectContaining({
+          isTimeout: true,
+          provider: 'tenderly',
+        })
+      );
+    });
+
+    test('should complete successfully when provider responds before timeout', async () => {
+      // Provider responds in 100ms (well before 5000ms timeout)
+      mockTenderlyProvider.simulate.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve({
+                  success: true,
+                  wouldRevert: false,
+                  provider: 'tenderly',
+                  latencyMs: 100,
+                }),
+              100
+            );
+          })
+      );
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+      });
+
+      const request = createSimulationRequest();
+      const simulationPromise = service.simulate(request);
+
+      // Advance past provider response time but before timeout
+      jest.advanceTimersByTime(150);
+
+      const result = await simulationPromise;
+
+      expect(result.success).toBe(true);
+      expect(mockLogger.error).not.toHaveBeenCalled();
+    });
+
+    test('should fallback to secondary provider when primary times out', async () => {
+      // Primary provider hangs
+      mockTenderlyProvider.simulate.mockImplementation(
+        () => new Promise(() => {}) // Never resolves
+      );
+
+      // Set tenderly as higher priority
+      mockTenderlyProvider.getHealth.mockReturnValue({
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0,
+        averageLatencyMs: 50,
+        successRate: 1.0,
+      });
+
+      mockAlchemyProvider.getHealth.mockReturnValue({
+        healthy: true,
+        lastCheck: Date.now(),
+        consecutiveFailures: 0,
+        averageLatencyMs: 100,
+        successRate: 1.0,
+      });
+
+      // Secondary provider responds quickly
+      mockAlchemyProvider.simulate.mockResolvedValue({
+        success: true,
+        wouldRevert: false,
+        provider: 'alchemy',
+        latencyMs: 100,
+      });
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider, mockAlchemyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: true,
+          providerPriority: ['tenderly', 'alchemy'],
+        },
+      });
+
+      const request = createSimulationRequest();
+      const simulationPromise = service.simulate(request);
+
+      // Advance past timeout to trigger fallback
+      jest.advanceTimersByTime(5100);
+
+      const result = await simulationPromise;
+
+      // Should have fallen back to Alchemy after Tenderly timeout
+      expect(mockAlchemyProvider.simulate).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.provider).toBe('alchemy');
+    });
+
+    test('should include elapsed time in error log', async () => {
+      mockTenderlyProvider.simulate.mockImplementation(
+        () => new Promise(() => {}) // Never resolves
+      );
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+      const simulationPromise = service.simulate(request);
+
+      jest.advanceTimersByTime(5100);
+      await simulationPromise;
+
+      // Verify logger includes elapsedMs
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Provider simulation error',
+        expect.objectContaining({
+          elapsedMs: expect.any(Number),
+        })
+      );
+    });
+
+    test('should not log isTimeout flag for non-timeout errors', async () => {
+      // Provider throws a regular error (not timeout)
+      mockTenderlyProvider.simulate.mockRejectedValue(new Error('Network error'));
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+      const result = await service.simulate(request);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Network error');
+
+      // isTimeout should be false for non-timeout errors
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        'Provider simulation error',
+        expect.objectContaining({
+          isTimeout: false,
+        })
+      );
+    });
+  });
 });

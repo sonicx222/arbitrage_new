@@ -298,22 +298,61 @@ export class SimulationService implements ISimulationService {
   // ===========================================================================
 
   /**
-   * Try to simulate using a specific provider
+   * Try to simulate using a specific provider with timeout protection.
+   *
+   * Uses Promise.race() to prevent hanging provider requests from blocking
+   * execution indefinitely. This is critical for arbitrage trading where
+   * timing determines profitability.
+   *
+   * @param provider - The simulation provider to use
+   * @param request - The simulation request
+   * @returns SimulationResult (success or error with timeout info)
    */
   private async tryProvider(
     provider: ISimulationProvider,
     request: SimulationRequest
   ): Promise<SimulationResult> {
+    const timeoutMs = SIMULATION_DEFAULTS.timeoutMs;
+    const startTime = Date.now();
+
     try {
-      return await provider.simulate(request);
+      const result = await Promise.race([
+        provider.simulate(request),
+        this.createTimeoutRejection(timeoutMs),
+      ]);
+      return result;
     } catch (error) {
       const errorMessage = getErrorMessage(error);
+      const isTimeout = errorMessage.includes('timeout');
+
       this.logger.error('Provider simulation error', {
         provider: provider.type,
         error: errorMessage,
+        isTimeout,
+        elapsedMs: Date.now() - startTime,
       });
+
       return this.createErrorResult(errorMessage, provider.type);
     }
+  }
+
+  /**
+   * Create a promise that rejects after the specified timeout duration.
+   *
+   * Extracted as a separate method for:
+   * 1. Testability: Can be mocked in unit tests to simulate timeouts
+   * 2. Readability: Keeps tryProvider() focused on the main logic
+   *
+   * @param timeoutMs - Duration in milliseconds before rejection
+   * @returns Promise that never resolves, only rejects after timeout
+   */
+  private createTimeoutRejection(timeoutMs: number): Promise<never> {
+    return new Promise((_, reject) => {
+      setTimeout(
+        () => reject(new Error(`Simulation timeout after ${timeoutMs}ms`)),
+        timeoutMs
+      );
+    });
   }
 
   /**
