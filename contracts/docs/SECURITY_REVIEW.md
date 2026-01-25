@@ -19,6 +19,7 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 - [x] `addApprovedRouter()` - Only owner can add routers
 - [x] `removeApprovedRouter()` - Only owner can remove routers
 - [x] `setMinimumProfit()` - Only owner can set minimum profit
+- [x] `setSwapDeadline()` - Only owner can set swap deadline (added Jan 2026)
 - [x] `pause()` / `unpause()` - Only owner can pause/unpause
 - [x] `withdrawToken()` - Only owner can withdraw tokens
 - [x] `withdrawETH()` - Only owner can withdraw ETH
@@ -78,7 +79,7 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 ### 4.2 Router Interaction
 - [x] Tokens approved to router before swap
 - [x] Uses `swapExactTokensForTokens` (not permit-based)
-- [x] Deadline set to `block.timestamp + 300` (5 minutes)
+- [x] Configurable deadline via `setSwapDeadline()` (default: 300s, max: 3600s)
 
 ### 4.3 Slippage Protection
 - [x] `amountOutMin` enforced on each swap step
@@ -138,10 +139,13 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 - [x] Uses `unchecked` for safe increments
 - [x] Caches storage reads in local variables
 - [x] 2-hop arbitrage uses < 500,000 gas
+- [x] Pre-allocated path array reused across swap iterations
+- [x] Optimizer runs set to 10000 for runtime efficiency
 
-### 8.2 Array Optimization
-- [ ] Consider using EnumerableSet for router list (O(1) removal)
-- [x] Current O(n) removal acceptable for small router lists
+### 8.2 Router Storage (Updated Jan 2026)
+- [x] Uses EnumerableSet for O(1) add/remove/contains operations
+- [x] Replaced O(n) array iteration with O(1) set operations
+- [x] `isApprovedRouter()` is now O(1) lookup
 
 ---
 
@@ -149,8 +153,8 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 
 ### 9.1 Documented Limitations
 1. **Sequential Quote Calls:** `calculateExpectedProfit()` makes sequential external calls. For MEV-competitive scenarios, use off-chain quote aggregation.
-2. **Router List Size:** O(n) removal in `removeApprovedRouter()`. Keep router list small (<50).
-3. **Flash Loan Provider:** Only Aave V3 supported. Other protocols require different callback interfaces.
+2. **Flash Loan Provider:** Only Aave V3 supported. Other protocols require different callback interfaces.
+3. **DEX Router Interface:** Only V2-style routers (`swapExactTokensForTokens`) supported. Uniswap V3 uses different interface.
 
 ### 9.2 Out of Scope
 - Cross-chain flash loans

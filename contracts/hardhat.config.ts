@@ -25,7 +25,11 @@ const config: HardhatUserConfig = {
         settings: {
           optimizer: {
             enabled: true,
-            runs: 200,
+            // Optimization runs: Higher values optimize for runtime (cheaper execution),
+            // lower values optimize for deployment cost. For flash loan arbitrage where
+            // functions are called frequently, we optimize for runtime efficiency.
+            // Trade-off: ~50% higher deployment cost, ~10-20% cheaper execution
+            runs: 10000,
           },
           viaIR: true,
         },
@@ -42,7 +46,9 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: {
         url: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
-        blockNumber: 19000000, // Fixed block for reproducible tests
+        // Fixed block for reproducible tests (updated Jan 2026)
+        // Using block from late 2025 for accurate DEX liquidity/prices
+        blockNumber: 21500000,
         enabled: process.env.FORK_ENABLED === 'true',
       },
       chainId: 31337,

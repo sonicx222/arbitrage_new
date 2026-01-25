@@ -1118,4 +1118,107 @@ describe('FlashLoanArbitrage', () => {
       expect(receipt!.gasUsed).to.be.lt(500000);
     });
   });
+
+  // ===========================================================================
+  // Edge Case Tests (Added for regression prevention)
+  // ===========================================================================
+  describe('Edge Cases', () => {
+    describe('Swap Deadline Configuration', () => {
+      it('should initialize with default swap deadline', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        const deadline = await flashLoanArbitrage.swapDeadline();
+        expect(deadline).to.equal(300n); // DEFAULT_SWAP_DEADLINE
+      });
+
+      it('should allow owner to update swap deadline', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.setSwapDeadline(600); // 10 minutes
+        expect(await flashLoanArbitrage.swapDeadline()).to.equal(600n);
+      });
+
+      it('should reject zero deadline', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await expect(
+          flashLoanArbitrage.setSwapDeadline(0)
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapDeadline');
+      });
+
+      it('should reject deadline exceeding maximum', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        // MAX_SWAP_DEADLINE is 3600 (1 hour)
+        await expect(
+          flashLoanArbitrage.setSwapDeadline(3601)
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapDeadline');
+      });
+
+      it('should emit SwapDeadlineUpdated event', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+
+        await expect(flashLoanArbitrage.setSwapDeadline(120))
+          .to.emit(flashLoanArbitrage, 'SwapDeadlineUpdated')
+          .withArgs(300, 120); // old value, new value
+      });
+    });
+
+    describe('EnumerableSet Router Storage', () => {
+      it('should support O(1) router lookup via isApprovedRouter', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
+
+        // Add routers
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        // Check lookup works
+        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
+        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
+        expect(await flashLoanArbitrage.isApprovedRouter(ethers.ZeroAddress)).to.be.false;
+      });
+
+      it('should enumerate all routers via getApprovedRouters', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        const routers = await flashLoanArbitrage.getApprovedRouters();
+        expect(routers.length).to.equal(2);
+        expect(routers).to.include(await dexRouter1.getAddress());
+        expect(routers).to.include(await dexRouter2.getAddress());
+      });
+
+      it('should handle removal correctly with EnumerableSet', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2 } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        // Remove first router
+        await flashLoanArbitrage.removeApprovedRouter(await dexRouter1.getAddress());
+
+        // Verify removal
+        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
+        expect(await flashLoanArbitrage.isApprovedRouter(await dexRouter2.getAddress())).to.be.true;
+
+        const routers = await flashLoanArbitrage.getApprovedRouters();
+        expect(routers.length).to.equal(1);
+        expect(routers[0]).to.equal(await dexRouter2.getAddress());
+      });
+    });
+
+    describe('Constants Verification', () => {
+      it('should have correct DEFAULT_SWAP_DEADLINE constant', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+        expect(await flashLoanArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(300n);
+      });
+
+      it('should have correct MAX_SWAP_DEADLINE constant', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+        expect(await flashLoanArbitrage.MAX_SWAP_DEADLINE()).to.equal(3600n);
+      });
+    });
+  });
 });

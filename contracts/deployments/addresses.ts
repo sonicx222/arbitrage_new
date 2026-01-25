@@ -78,19 +78,23 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
   ],
 
   // Mainnets
+  // NOTE: Only V2-style routers (swapExactTokensForTokens) are supported.
+  // Uniswap V3 uses a different interface (exactInputSingle) and requires a separate adapter.
+  // See: https://docs.uniswap.org/contracts/v3/reference/periphery/interfaces/ISwapRouter
   ethereum: [
-    '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Uniswap V2
-    '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3
-    '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F', // SushiSwap
+    '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Uniswap V2 Router
+    '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F', // SushiSwap Router (V2-compatible)
+    // NOTE: Uniswap V3 (0xE592427A0AEce92De3Edee1F18E0157C05861564) NOT supported - uses different interface
   ],
   arbitrum: [
-    '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap
-    '0xE592427A0AEce92De3Edee1F18E0157C05861564', // Uniswap V3
-    '0xc873fEcbd354f5A56E00E710B90EF4201db2448d', // Camelot
+    '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap Router (V2-compatible)
+    '0xc873fEcbd354f5A56E00E710B90EF4201db2448d', // Camelot Router (V2-compatible)
+    // NOTE: Uniswap V3 (0xE592427A0AEce92De3Edee1F18E0157C05861564) NOT supported - uses different interface
   ],
   base: [
-    '0x2626664c2603336E57B271c5C0b26F421741e481', // Uniswap V3
-    '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86', // BaseSwap
+    '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86', // BaseSwap Router (V2-compatible)
+    '0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb', // Aerodrome Router (V2-compatible)
+    // NOTE: Uniswap V3 (0x2626664c2603336E57B271c5C0b26F421741e481) NOT supported - uses different interface
   ],
 };
 

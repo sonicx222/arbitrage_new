@@ -49,13 +49,17 @@ contract MockAavePool {
         IERC20(asset).safeTransfer(receiverAddress, amount);
 
         // Call the receiver's executeOperation function
+        // NOTE: In Aave V3, the 'initiator' parameter is msg.sender of flashLoanSimple().
+        // When FlashLoanArbitrage calls POOL.flashLoanSimple(address(this), ...), the
+        // msg.sender from the Pool's perspective is the FlashLoanArbitrage contract.
+        // The contract validates initiator == address(this) for security.
         (bool success, bytes memory result) = receiverAddress.call(
             abi.encodeWithSignature(
                 "executeOperation(address,uint256,uint256,address,bytes)",
                 asset,
                 amount,
                 premium,
-                msg.sender, // initiator is the original caller
+                msg.sender, // initiator = address that called flashLoanSimple (FlashLoanArbitrage)
                 params
             )
         );

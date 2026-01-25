@@ -208,10 +208,12 @@ function analyzeProfitability(opportunity): ProfitabilityAnalysis {
 
 | Component | Tests |
 |-----------|-------|
-| FlashLoanArbitrage.sol (unit) | 36 |
-| FlashLoanArbitrage.sol (fork) | 14 |
+| FlashLoanArbitrage.sol (unit) | 51 |
+| FlashLoanArbitrage.sol (fork) | 16 |
 | flash-loan.strategy.ts | 39 |
-| **Total** | 89 |
+| **Total** | 106 |
+
+*Note: Test counts updated January 2026*
 
 ### Deployment Status
 
