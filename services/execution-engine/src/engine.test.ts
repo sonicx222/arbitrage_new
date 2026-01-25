@@ -76,6 +76,137 @@ describe('ExecutionEngineService', () => {
 });
 
 // =============================================================================
+// Production Simulation Mode Guard Tests (FIX-3.1)
+// =============================================================================
+
+describe('ExecutionEngineService Production Simulation Guard (FIX-3.1)', () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  const createMockLogger = () => ({
+    info: jest.fn<(msg: string, meta?: object) => void>(),
+    error: jest.fn<(msg: string, meta?: object) => void>(),
+    warn: jest.fn<(msg: string, meta?: object) => void>(),
+    debug: jest.fn<(msg: string, meta?: object) => void>()
+  });
+
+  const createMockPerfLogger = () => ({
+    logEventLatency: jest.fn(),
+    logExecutionResult: jest.fn(),
+    logHealthCheck: jest.fn()
+  });
+
+  const createMockStateManager = () => ({
+    getState: jest.fn(() => 'idle'),
+    executeStart: jest.fn((fn: () => Promise<void>) => fn()),
+    executeStop: jest.fn((fn: () => Promise<void>) => fn()),
+    transition: jest.fn(() => Promise.resolve({ success: true })),
+    isTransitioning: jest.fn(() => false),
+    isRunning: jest.fn(() => false),
+    waitForIdle: jest.fn(() => Promise.resolve()),
+    on: jest.fn(),
+    off: jest.fn(),
+    canTransition: jest.fn(() => true)
+  });
+
+  it('should throw error when simulation mode is enabled in production', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE;
+
+    const mockLogger = createMockLogger();
+    const mockPerfLogger = createMockPerfLogger();
+    const mockStateManager = createMockStateManager();
+
+    expect(() => {
+      new ExecutionEngineService({
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        stateManager: mockStateManager as any,
+        simulationConfig: {
+          enabled: true
+        }
+      });
+    }).toThrow('[CRITICAL] Simulation mode is enabled in production environment');
+  });
+
+  it('should allow simulation mode in non-production environments', () => {
+    process.env.NODE_ENV = 'development';
+
+    const mockLogger = createMockLogger();
+    const mockPerfLogger = createMockPerfLogger();
+    const mockStateManager = createMockStateManager();
+
+    expect(() => {
+      new ExecutionEngineService({
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        stateManager: mockStateManager as any,
+        simulationConfig: {
+          enabled: true
+        }
+      });
+    }).not.toThrow();
+  });
+
+  it('should allow production mode without simulation', () => {
+    process.env.NODE_ENV = 'production';
+
+    const mockLogger = createMockLogger();
+    const mockPerfLogger = createMockPerfLogger();
+    const mockStateManager = createMockStateManager();
+
+    expect(() => {
+      new ExecutionEngineService({
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        stateManager: mockStateManager as any,
+        simulationConfig: {
+          enabled: false
+        }
+      });
+    }).not.toThrow();
+  });
+
+  it('should allow simulation mode in production with explicit override', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE = 'true';
+
+    const mockLogger = createMockLogger();
+    const mockPerfLogger = createMockPerfLogger();
+    const mockStateManager = createMockStateManager();
+
+    // Capture console.error for the warning
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(() => {
+      new ExecutionEngineService({
+        logger: mockLogger,
+        perfLogger: mockPerfLogger as any,
+        stateManager: mockStateManager as any,
+        simulationConfig: {
+          enabled: true
+        }
+      });
+    }).not.toThrow();
+
+    // Verify warning was logged
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION')
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+});
+
+// =============================================================================
 // Precision Fix Regression Tests (PRECISION-FIX)
 // =============================================================================
 
