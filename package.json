@@ -19,7 +19,7 @@
     "lint:fix": "eslint . --fix",
     "prebuild": "node scripts/validate-build.js",
     "build": "tsc -p tsconfig.json",
-    "build:clean": "rimraf dist && npm run prebuild && tsc -p tsconfig.json",
+    "build:clean": "node scripts/clean-dist.js && npm run prebuild && tsc -p tsconfig.json",
     "build:validate": "node scripts/validate-build.js",
     "build:workspaces": "npm run build --workspaces",
     "clean:cache": "node -e \"const fs=require('fs');const path=require('path');const del=(d,p)=>{try{const f=fs.readdirSync(d,{withFileTypes:true});f.forEach(x=>{const fp=path.join(d,x.name);if(x.isDirectory()&&x.name!=='node_modules')del(fp,p);else if(p.test(x.name)){fs.unlinkSync(fp);console.log('Deleted:',fp)}})}catch{}};del('.',/tsconfig\\.tsbuildinfo$/);console.log('TypeScript cache cleared')\"",
