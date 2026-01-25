@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
 
 /**
@@ -70,6 +71,17 @@ contract FlashLoanArbitrage is
     ReentrancyGuard
 {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
+
+    // ==========================================================================
+    // Constants
+    // ==========================================================================
+
+    /// @notice Default swap deadline (5 minutes)
+    uint256 public constant DEFAULT_SWAP_DEADLINE = 300;
+
+    /// @notice Maximum swap deadline (1 hour) to prevent stale transactions
+    uint256 public constant MAX_SWAP_DEADLINE = 3600;
 
     // ==========================================================================
     // State Variables
@@ -84,11 +96,12 @@ contract FlashLoanArbitrage is
     /// @notice Total profits accumulated (for tracking)
     uint256 public totalProfits;
 
-    /// @notice Mapping of approved DEX routers
-    mapping(address => bool) public isApprovedRouter;
+    /// @notice Configurable swap deadline in seconds (default: 300 = 5 minutes)
+    uint256 public swapDeadline;
 
-    /// @notice List of all approved routers (for enumeration)
-    address[] public approvedRouters;
+    /// @notice Set of approved DEX routers (O(1) add/remove/contains)
+    /// @dev Uses EnumerableSet for gas-efficient operations and enumeration
+    EnumerableSet.AddressSet private _approvedRouters;
 
     // ==========================================================================
     // Structs
@@ -135,6 +148,9 @@ contract FlashLoanArbitrage is
     /// @notice Emitted when ETH is withdrawn
     event ETHWithdrawn(address indexed to, uint256 amount);
 
+    /// @notice Emitted when swap deadline is updated
+    event SwapDeadlineUpdated(uint256 oldValue, uint256 newValue);
+
     // ==========================================================================
     // Errors
     // ==========================================================================
@@ -152,6 +168,7 @@ contract FlashLoanArbitrage is
     error InsufficientOutputAmount();
     error InvalidRecipient();
     error ETHTransferFailed();
+    error InvalidSwapDeadline();
 
     // ==========================================================================
     // Constructor
@@ -165,6 +182,7 @@ contract FlashLoanArbitrage is
     constructor(address _pool, address _owner) {
         if (_pool == address(0)) revert InvalidPoolAddress();
         POOL = IPool(_pool);
+        swapDeadline = DEFAULT_SWAP_DEADLINE;
         _transferOwnership(_owner);
     }
 
@@ -187,10 +205,10 @@ contract FlashLoanArbitrage is
     ) external nonReentrant whenNotPaused {
         if (swapPath.length == 0) revert EmptySwapPath();
 
-        // Validate all routers in the path are approved
+        // Validate all routers in the path are approved (O(1) lookup via EnumerableSet)
         uint256 pathLength = swapPath.length;
         for (uint256 i = 0; i < pathLength;) {
-            if (!isApprovedRouter[swapPath[i].router]) revert RouterNotApproved();
+            if (!_approvedRouters.contains(swapPath[i].router)) revert RouterNotApproved();
             unchecked { ++i; }
         }
 
@@ -269,6 +287,10 @@ contract FlashLoanArbitrage is
 
     /**
      * @notice Executes multi-hop swaps according to the swap path
+     * @dev Gas optimizations applied:
+     *      - Pre-allocated path array reused across iterations (~200 gas/swap saved)
+     *      - Configurable deadline instead of hardcoded value
+     *      - Defense-in-depth output verification (see note below)
      * @param startAsset The starting asset (flash loaned asset)
      * @param startAmount The starting amount
      * @param swapPath Array of swap steps
@@ -283,6 +305,13 @@ contract FlashLoanArbitrage is
         address currentToken = startAsset;
         uint256 pathLength = swapPath.length;
 
+        // Gas optimization: Pre-allocate path array once, reuse across iterations
+        // Saves ~200 gas per swap step by avoiding repeated memory allocation
+        address[] memory path = new address[](2);
+
+        // Cache swapDeadline to avoid repeated SLOAD (~100 gas saved)
+        uint256 deadline = block.timestamp + swapDeadline;
+
         for (uint256 i = 0; i < pathLength;) {
             SwapStep memory step = swapPath[i];
 
@@ -293,8 +322,7 @@ contract FlashLoanArbitrage is
             // Fix 9.1: Use forceApprove for safe token approvals
             IERC20(currentToken).forceApprove(step.router, currentAmount);
 
-            // Build path for the swap
-            address[] memory path = new address[](2);
+            // Reuse pre-allocated path array
             path[0] = step.tokenIn;
             path[1] = step.tokenOut;
 
@@ -304,10 +332,16 @@ contract FlashLoanArbitrage is
                 step.amountOutMin,
                 path,
                 address(this),
-                block.timestamp + 300 // 5 minute deadline
+                deadline
             );
 
-            // Verify output
+            // Defense-in-depth: Verify output matches minimum
+            // NOTE: This check is technically redundant as compliant DEX routers
+            // already revert if output < amountOutMin. However, we keep this as:
+            // 1. Protection against non-compliant or malicious routers
+            // 2. Explicit error message (InsufficientOutputAmount vs generic revert)
+            // 3. Security audit requirement for explicit state validation
+            // Cost: ~200 gas per swap - acceptable for the security guarantee
             uint256 amountOut = amounts[amounts.length - 1];
             if (amountOut < step.amountOutMin) revert InsufficientOutputAmount();
 
@@ -330,49 +364,35 @@ contract FlashLoanArbitrage is
 
     /**
      * @notice Adds a router to the approved list
+     * @dev O(1) complexity using EnumerableSet
      * @param router The router address to approve
      */
     function addApprovedRouter(address router) external onlyOwner {
         if (router == address(0)) revert InvalidRouterAddress();
-        if (isApprovedRouter[router]) revert RouterAlreadyApproved();
-
-        isApprovedRouter[router] = true;
-        approvedRouters.push(router);
+        if (!_approvedRouters.add(router)) revert RouterAlreadyApproved();
 
         emit RouterAdded(router);
     }
 
     /**
      * @notice Removes a router from the approved list
+     * @dev O(1) complexity using EnumerableSet (Fix 10.5 implemented)
      * @param router The router address to remove
-     *
-     * @dev Fix 10.5: Performance note - This function iterates through the array
-     * to find the router index, which is O(n). For contracts with many routers,
-     * consider one of these optimizations:
-     * 1. Accept routerIndex as parameter (caller provides index, we validate)
-     * 2. Use EnumerableSet from OpenZeppelin for O(1) removal
-     * 3. Use a doubly-linked list pattern
-     *
-     * Current implementation is acceptable for small router lists (<50 routers).
      */
     function removeApprovedRouter(address router) external onlyOwner {
-        if (!isApprovedRouter[router]) revert RouterNotApproved();
-
-        isApprovedRouter[router] = false;
-
-        // Remove from array (find and swap with last element)
-        // Note: O(n) iteration - see @dev comment for optimization options
-        uint256 length = approvedRouters.length;
-        for (uint256 i = 0; i < length;) {
-            if (approvedRouters[i] == router) {
-                approvedRouters[i] = approvedRouters[length - 1];
-                approvedRouters.pop();
-                break;
-            }
-            unchecked { ++i; }
-        }
+        if (!_approvedRouters.remove(router)) revert RouterNotApproved();
 
         emit RouterRemoved(router);
+    }
+
+    /**
+     * @notice Checks if a router is approved
+     * @dev O(1) complexity using EnumerableSet
+     * @param router The router address to check
+     * @return True if router is approved
+     */
+    function isApprovedRouter(address router) external view returns (bool) {
+        return _approvedRouters.contains(router);
     }
 
     /**
@@ -380,7 +400,7 @@ contract FlashLoanArbitrage is
      * @return Array of approved router addresses
      */
     function getApprovedRouters() external view returns (address[] memory) {
-        return approvedRouters;
+        return _approvedRouters.values();
     }
 
     // ==========================================================================
@@ -395,6 +415,21 @@ contract FlashLoanArbitrage is
         uint256 oldValue = minimumProfit;
         minimumProfit = _minimumProfit;
         emit MinimumProfitUpdated(oldValue, _minimumProfit);
+    }
+
+    /**
+     * @notice Sets the swap deadline for DEX transactions
+     * @dev Deadline must be between 1 second and MAX_SWAP_DEADLINE (1 hour)
+     *      Shorter deadlines provide better MEV protection but may cause failures
+     *      on congested networks. Longer deadlines are more reliable but expose
+     *      transactions to price movements.
+     * @param _swapDeadline The new deadline in seconds (added to block.timestamp)
+     */
+    function setSwapDeadline(uint256 _swapDeadline) external onlyOwner {
+        if (_swapDeadline == 0 || _swapDeadline > MAX_SWAP_DEADLINE) revert InvalidSwapDeadline();
+        uint256 oldValue = swapDeadline;
+        swapDeadline = _swapDeadline;
+        emit SwapDeadlineUpdated(oldValue, _swapDeadline);
     }
 
     /**
