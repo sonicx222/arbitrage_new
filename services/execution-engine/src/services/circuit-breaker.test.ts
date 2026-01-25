@@ -643,6 +643,161 @@ describe('CircuitBreaker', () => {
   });
 
   // ===========================================================================
+  // Concurrent Access Tests (FIX-8.1)
+  // ===========================================================================
+
+  describe('concurrent access patterns', () => {
+    /**
+     * FIX-8.1: Tests to verify behavior under concurrent-like scenarios.
+     *
+     * Note: In Node.js single-threaded model, true concurrency doesn't occur
+     * within synchronous code. These tests verify behavior when multiple
+     * operations are queued or called in quick succession.
+     */
+
+    it('should handle multiple canExecute calls in HALF_OPEN correctly', () => {
+      circuitBreaker = createCircuitBreaker({
+        logger: mockLogger,
+        onStateChange: mockEventEmitter.emit,
+        failureThreshold: 3,
+        cooldownPeriodMs: 1000,
+        halfOpenMaxAttempts: 2,
+      });
+
+      // Trip the circuit
+      for (let i = 0; i < 3; i++) {
+        circuitBreaker.recordFailure();
+      }
+      advanceTime(1001);
+
+      // Multiple calls in sequence (simulating concurrent-like access)
+      const results = [
+        circuitBreaker.canExecute(), // Should allow (triggers HALF_OPEN, attempt 1)
+        circuitBreaker.canExecute(), // Should allow (attempt 2)
+        circuitBreaker.canExecute(), // Should NOT allow (exceeded max)
+        circuitBreaker.canExecute(), // Should NOT allow
+      ];
+
+      expect(results).toEqual([true, true, false, false]);
+      expect(circuitBreaker.getState()).toBe('HALF_OPEN');
+    });
+
+    it('should handle interleaved canExecute and recordFailure calls', () => {
+      circuitBreaker = createCircuitBreaker({
+        logger: mockLogger,
+        onStateChange: mockEventEmitter.emit,
+        failureThreshold: 3,
+        cooldownPeriodMs: 1000,
+        halfOpenMaxAttempts: 2,
+      });
+
+      // Trip the circuit
+      for (let i = 0; i < 3; i++) {
+        circuitBreaker.recordFailure();
+      }
+      advanceTime(1001);
+
+      // canExecute triggers HALF_OPEN
+      expect(circuitBreaker.canExecute()).toBe(true);
+      expect(circuitBreaker.getState()).toBe('HALF_OPEN');
+
+      // recordFailure should re-OPEN
+      circuitBreaker.recordFailure();
+      expect(circuitBreaker.getState()).toBe('OPEN');
+
+      // Further canExecute should fail (back in OPEN, cooldown restarted)
+      expect(circuitBreaker.canExecute()).toBe(false);
+    });
+
+    it('should handle Promise.all-like parallel calls correctly', async () => {
+      circuitBreaker = createCircuitBreaker({
+        logger: mockLogger,
+        onStateChange: mockEventEmitter.emit,
+        failureThreshold: 3,
+        cooldownPeriodMs: 1000,
+        halfOpenMaxAttempts: 1,
+      });
+
+      // Trip the circuit
+      for (let i = 0; i < 3; i++) {
+        circuitBreaker.recordFailure();
+      }
+      advanceTime(1001);
+
+      // Simulate multiple async checks (all synchronous in reality)
+      const checkResults = await Promise.all([
+        Promise.resolve(circuitBreaker.canExecute()),
+        Promise.resolve(circuitBreaker.canExecute()),
+        Promise.resolve(circuitBreaker.canExecute()),
+      ]);
+
+      // Only the first should succeed (halfOpenMaxAttempts = 1)
+      expect(checkResults[0]).toBe(true);
+      expect(checkResults[1]).toBe(false);
+      expect(checkResults[2]).toBe(false);
+    });
+
+    it('should maintain consistent state across rapid record operations', () => {
+      circuitBreaker = createCircuitBreaker({
+        logger: mockLogger,
+        onStateChange: mockEventEmitter.emit,
+        failureThreshold: 5,
+        cooldownPeriodMs: 1000,
+      });
+
+      // Simulate rapid-fire operations
+      const operations = [
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordSuccess(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordSuccess(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(),
+        () => circuitBreaker.recordFailure(), // Should trip here (5 consecutive)
+      ];
+
+      operations.forEach(op => op());
+
+      expect(circuitBreaker.getState()).toBe('OPEN');
+      expect(circuitBreaker.getConsecutiveFailures()).toBe(5);
+    });
+
+    it('should handle state transition during cooldown check edge case', () => {
+      circuitBreaker = createCircuitBreaker({
+        logger: mockLogger,
+        onStateChange: mockEventEmitter.emit,
+        failureThreshold: 3,
+        cooldownPeriodMs: 1000,
+        halfOpenMaxAttempts: 1,
+      });
+
+      // Trip the circuit
+      for (let i = 0; i < 3; i++) {
+        circuitBreaker.recordFailure();
+      }
+
+      // Advance to just before cooldown expiry
+      advanceTime(999);
+      expect(circuitBreaker.canExecute()).toBe(false);
+
+      // Advance to just after cooldown expiry
+      advanceTime(2);
+
+      // First call should transition to HALF_OPEN and allow
+      expect(circuitBreaker.canExecute()).toBe(true);
+      expect(circuitBreaker.getState()).toBe('HALF_OPEN');
+
+      // Force-open during HALF_OPEN should work
+      circuitBreaker.forceOpen('manual override');
+      expect(circuitBreaker.getState()).toBe('OPEN');
+    });
+  });
+
+  // ===========================================================================
   // Factory Function
   // ===========================================================================
 

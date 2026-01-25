@@ -301,6 +301,20 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
    *
    * This also handles state transitions:
    * - OPEN -> HALF_OPEN after cooldown expires
+   *
+   * FIX-4.1: Thread-safety note
+   * ===========================
+   * This function is safe in Node.js single-threaded model because:
+   * 1. JavaScript executes synchronously within an event loop tick
+   * 2. There are no await points in this function
+   * 3. The switch/case blocks execute atomically
+   *
+   * If this code were to be used in a multi-threaded environment (e.g., worker threads
+   * sharing state), additional synchronization would be needed. For such cases,
+   * consider using a mutex or converting to async with proper locking.
+   *
+   * The check-then-act pattern (check attempts < max, then increment) is safe here
+   * because no interleaving can occur between the check and the increment.
    */
   function canExecute(): boolean {
     // Disabled circuit breaker always allows execution
@@ -313,16 +327,25 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
       case 'OPEN':
         // Check if cooldown has expired
         if (isCooldownExpired()) {
+          // FIX-4.1: Transition first, then check if we should allow this attempt
+          // The transitionTo is idempotent (no-op if already HALF_OPEN)
           transitionTo('HALF_OPEN', 'Cooldown period expired - testing recovery');
-          // Count this as the first attempt in HALF_OPEN
-          halfOpenAttempts++;
-          return true;
+
+          // FIX-4.1: After transition, verify we have attempt capacity
+          // In Node.js single-threaded model, state is now guaranteed to be HALF_OPEN
+          // (no concurrent modification possible during synchronous execution)
+          if (halfOpenAttempts < halfOpenMaxAttempts) {
+            halfOpenAttempts++;
+            return true;
+          }
+          // No attempt capacity available - deny execution
+          return false;
         }
         return false;
 
       case 'HALF_OPEN':
         // Allow limited attempts in HALF_OPEN
-        // Increment attempt counter when allowing execution
+        // FIX-4.1: Check-then-increment is atomic in Node.js single-threaded model
         if (halfOpenAttempts < halfOpenMaxAttempts) {
           halfOpenAttempts++;
           return true;

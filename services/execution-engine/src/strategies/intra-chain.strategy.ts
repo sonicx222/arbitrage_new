@@ -24,7 +24,7 @@ import { MEV_CONFIG } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult } from '../types';
+import { createErrorResult, createSuccessResult, ExecutionErrorCode } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
@@ -36,11 +36,12 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
   ): Promise<ExecutionResult> {
+    // FIX-6.1: Use ExecutionErrorCode enum for standardized error codes
     const chain = opportunity.buyChain;
     if (!chain) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_NO_CHAIN] No chain specified for opportunity',
+        ExecutionErrorCode.NO_CHAIN,
         'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -51,7 +52,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (opportunity.sellChain && opportunity.sellChain !== chain) {
       return createErrorResult(
         opportunity.id,
-        `[ERR_CROSS_CHAIN] IntraChainStrategy cannot execute cross-chain opportunity (buy: ${chain}, sell: ${opportunity.sellChain}). Use CrossChainStrategy instead.`,
+        `${ExecutionErrorCode.CROSS_CHAIN_MISMATCH} (buy: ${chain}, sell: ${opportunity.sellChain}). Use CrossChainStrategy instead.`,
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -61,7 +62,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (!opportunity.tokenIn || !opportunity.tokenOut || !opportunity.amountIn) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_INVALID_OPPORTUNITY] Missing required fields (tokenIn, tokenOut, amountIn)',
+        `${ExecutionErrorCode.INVALID_OPPORTUNITY} Missing required fields (tokenIn, tokenOut, amountIn)`,
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -72,7 +73,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (!wallet) {
       return createErrorResult(
         opportunity.id,
-        `[ERR_NO_WALLET] No wallet available for chain: ${chain}`,
+        `${ExecutionErrorCode.NO_WALLET}: ${chain}`,
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -83,7 +84,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (!provider) {
       return createErrorResult(
         opportunity.id,
-        `[ERR_NO_PROVIDER] No provider available for chain: ${chain}`,
+        `${ExecutionErrorCode.NO_PROVIDER}: ${chain}`,
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -105,7 +106,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_PRICE_VERIFICATION] ${priceVerification.reason}`,
+          `${ExecutionErrorCode.PRICE_VERIFICATION} ${priceVerification.reason}`,
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -128,7 +129,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         } catch (approvalError) {
           return createErrorResult(
             opportunity.id,
-            `[ERR_APPROVAL] Token approval failed: ${getErrorMessage(approvalError)}`,
+            `${ExecutionErrorCode.APPROVAL_FAILED}: ${getErrorMessage(approvalError)}`,
             chain,
             opportunity.buyDex || 'unknown'
           );
@@ -151,7 +152,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_SIMULATION_REVERT] Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+          `${ExecutionErrorCode.SIMULATION_REVERT} - ${simulationResult.revertReason || 'unknown reason'}`,
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -170,7 +171,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         } catch (error) {
           return createErrorResult(
             opportunity.id,
-            `[ERR_NONCE] Failed to get nonce: ${getErrorMessage(error)}`,
+            `${ExecutionErrorCode.NONCE_ERROR}: ${getErrorMessage(error)}`,
             chain,
             opportunity.buyDex || 'unknown'
           );

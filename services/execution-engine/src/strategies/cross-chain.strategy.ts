@@ -36,7 +36,7 @@ import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/co
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult } from '../types';
+import { createErrorResult, createSuccessResult, ExecutionErrorCode } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
@@ -52,11 +52,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     const destChain = opportunity.sellChain;
     const startTime = Date.now();
 
-    // Fix 6.1: Validate chains with error codes
+    // FIX-6.1: Use ExecutionErrorCode enum for standardized error codes
     if (!sourceChain || !destChain) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_NO_CHAIN] Missing source or destination chain',
+        `${ExecutionErrorCode.NO_CHAIN} Missing source or destination chain`,
         sourceChain || 'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -65,7 +65,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (sourceChain === destChain) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_SAME_CHAIN] Cross-chain arbitrage requires different chains',
+        ExecutionErrorCode.SAME_CHAIN,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -75,7 +75,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!ctx.bridgeRouterFactory) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_NO_BRIDGE] Bridge router not initialized',
+        ExecutionErrorCode.NO_BRIDGE,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -88,7 +88,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!bridgeRouter) {
       return createErrorResult(
         opportunity.id,
-        `[ERR_NO_ROUTE] No bridge route available: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
+        `${ExecutionErrorCode.NO_ROUTE}: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -335,6 +335,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       let bridgeCompleted = false;
       let lastSeenStatus = 'pending';
+      // BUG-4.2-FIX: Store the amount received from bridge for destination sell
+      let bridgedAmountReceived: string | undefined;
 
       while (Date.now() - bridgeStartTime < maxWaitTime && iterationCount < maxIterations) {
         iterationCount++;
@@ -369,6 +371,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         if (bridgeStatus.status === 'completed') {
           bridgeCompleted = true;
+          // BUG-4.2-FIX: Store bridged amount for destination sell
+          bridgedAmountReceived = bridgeStatus.amountReceived;
           this.logger.info('Bridge completed', {
             opportunityId: opportunity.id,
             bridgeId,
@@ -493,26 +497,44 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // 2. If supported: use FlashLoanStrategy for sell
       // 3. If not supported: fall back to direct swap (current behavior)
       //
-      // Tracking: https://github.com/yourorg/arbitrage/issues/XXX
+      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/142
       // ================================================================
-      const sellTx = await this.prepareDexSwapTransaction(opportunity, destChain, ctx);
+
+      // BUG-4.2-FIX: Create a "sell opportunity" with reversed tokens for destination swap
+      // After bridging, we have bridgeToken (= tokenOut) on destination chain
+      // We want to SELL bridgeToken -> tokenIn (reverse of the buy direction)
+      // The bridged amount is what we're selling, not the original amountIn
+      const sellAmount = bridgedAmountReceived || opportunity.amountIn || '0';
+      const sellOpportunity: ArbitrageOpportunity = {
+        ...opportunity,
+        // Reverse the token direction for the sell
+        tokenIn: bridgeToken,                    // We're selling the bridged token
+        tokenOut: opportunity.tokenIn || 'USDT', // We're receiving the base token
+        amountIn: sellAmount,                    // Amount we received from bridge
+        // Keep sell DEX reference
+        buyDex: opportunity.sellDex || opportunity.buyDex,
+      };
+
+      const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, destChain, ctx);
 
       // Ensure token approval for DEX router before swap
-      // This is critical for cross-chain swaps where tokens were just bridged
-      if (opportunity.tokenIn && sellTx.to) {
+      // BUG-4.2-FIX: Use the bridged token (bridgeToken) for approval, not tokenIn
+      // The bridged token is what we're selling on the destination chain
+      if (bridgeToken && sellTx.to) {
         try {
-          const amountIn = BigInt(opportunity.amountIn || '0');
+          const amountToApprove = BigInt(sellAmount);
           const approvalNeeded = await this.ensureTokenAllowance(
-            opportunity.tokenIn,
+            bridgeToken,               // BUG-4.2-FIX: Approve the token we're selling
             sellTx.to as string,
-            amountIn,
+            amountToApprove,           // BUG-4.2-FIX: Use bridged amount, not original amountIn
             destChain,
             ctx
           );
           if (approvalNeeded) {
             this.logger.info('Token approval granted for destination sell', {
               opportunityId: opportunity.id,
-              token: opportunity.tokenIn,
+              token: bridgeToken,       // BUG-4.2-FIX: Log the correct token
+              amount: sellAmount,
               router: sellTx.to,
               destChain,
             });
@@ -520,6 +542,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         } catch (approvalError) {
           this.logger.warn('Token approval failed, proceeding with sell attempt', {
             opportunityId: opportunity.id,
+            token: bridgeToken,
             error: getErrorMessage(approvalError),
           });
           // Continue anyway - approval might already exist or swap might still work

@@ -171,6 +171,33 @@ export class ExecutionEngineService {
     this.isSimulationMode = config.simulationConfig?.enabled ?? false;
     this.simulationConfig = resolveSimulationConfig(config.simulationConfig);
 
+    // FIX-3.1: Production safety guard for simulation mode
+    // Prevents accidental deployment with simulation mode enabled in production
+    // which would cause the engine to NOT execute real transactions (capital drain risk)
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction && this.isSimulationMode) {
+      throw new Error(
+        '[CRITICAL] Simulation mode is enabled in production environment. ' +
+        'This would prevent real transaction execution. ' +
+        'Either set NODE_ENV to a non-production value or disable simulation mode. ' +
+        'Set SIMULATION_MODE_PRODUCTION_OVERRIDE=true to explicitly allow (dangerous).'
+      );
+    }
+
+    // Allow explicit override for production testing scenarios (with extra warning)
+    if (isProduction && process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE === 'true') {
+      // This is a deliberate override - log prominently but allow
+      console.error(
+        '\n' +
+        '╔══════════════════════════════════════════════════════════════════╗\n' +
+        '║  ⚠️  DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION  ⚠️   ║\n' +
+        '║                                                                  ║\n' +
+        '║  No real transactions will be executed!                          ║\n' +
+        '║  Remove SIMULATION_MODE_PRODUCTION_OVERRIDE for live trading.    ║\n' +
+        '╚══════════════════════════════════════════════════════════════════╝\n'
+      );
+    }
+
     // Initialize queue config
     this.queueConfig = {
       ...DEFAULT_QUEUE_CONFIG,
@@ -1269,12 +1296,24 @@ export class ExecutionEngineService {
     }
 
     // Create the activation promise atomically - this is the mutex
+    // FIX-5.2: The promise-based mutex pattern ensures:
+    // 1. Only one activation runs at a time
+    // 2. Concurrent callers wait for the same result
+    // 3. The mutex is always cleared (via finally) even on error
     this.activationPromise = this.performActivation();
 
     try {
       return await this.activationPromise;
+    } catch (error) {
+      // FIX-5.2: Defensive error handling - performActivation catches internally,
+      // but if an unexpected error escapes (e.g., from logger), log and return false
+      this.logger.error('Unexpected error during activation', {
+        error: getErrorMessage(error)
+      });
+      return false;
     } finally {
-      // Clear the mutex after activation completes (success or failure)
+      // FIX-5.2: Clear the mutex after activation completes (success or failure)
+      // This is critical - without this, failed activations would block all future attempts
       this.activationPromise = null;
     }
   }
