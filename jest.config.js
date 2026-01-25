@@ -9,11 +9,13 @@
  */
 
 const baseConfig = require('./jest.config.base');
+// Extract project-level config (excludes root-only options like verbose, bail, reporters)
+const { projectConfig, ...rootConfig } = baseConfig;
 
 /** @type {import('jest').Config} */
 module.exports = {
-  // Extend base configuration
-  ...baseConfig,
+  // Extend base configuration (excluding projectConfig property)
+  ...rootConfig,
 
   // Root directories to scan for tests
   roots: ['<rootDir>/shared', '<rootDir>/services', '<rootDir>/tests'],
@@ -81,6 +83,9 @@ module.exports = {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'text-summary', 'lcov', 'html', 'json-summary'],
 
+  // Use V8 coverage provider for better handling of dynamic imports
+  coverageProvider: 'v8',
+
   // Verbose in CI
   verbose: !!process.env.CI,
 
@@ -89,12 +94,13 @@ module.exports = {
 
   // Projects configuration for categorized test runs
   // Run with: npm run test:unit, npm run test:integration, npm run test:e2e, npm run test:performance
+  // Note: Using projectConfig (not baseConfig) to avoid including root-only options like verbose, bail, reporters
   projects: [
     {
       displayName: 'unit',
       testMatch: ['**/__tests__/unit/**/*.test.ts', '**/__tests__/unit/**/*.spec.ts'],
       testTimeout: 10000,
-      ...baseConfig
+      ...projectConfig
     },
     {
       displayName: 'integration',
@@ -103,25 +109,25 @@ module.exports = {
         '**/tests/integration/**/*.test.ts'
       ],
       testTimeout: 60000,
-      ...baseConfig
+      ...projectConfig
     },
     {
       displayName: 'e2e',
       testMatch: ['**/tests/e2e/**/*.test.ts'],
       testTimeout: 120000,
-      ...baseConfig
+      ...projectConfig
     },
     {
       displayName: 'performance',
       testMatch: ['**/tests/performance/**/*.test.ts', '**/tests/performance/**/*.perf.ts'],
       testTimeout: 300000,
-      ...baseConfig
+      ...projectConfig
     },
     {
       displayName: 'smoke',
       testMatch: ['**/tests/smoke/**/*.test.ts', '**/tests/smoke/**/*.smoke.ts'],
       testTimeout: 30000,
-      ...baseConfig
+      ...projectConfig
     }
   ]
 };
