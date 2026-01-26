@@ -202,6 +202,25 @@ export interface CrossChainOpportunity {
 
   /** Whether ML predictions support this opportunity (favorable alignment) */
   mlSupported?: boolean;
+
+  // ===========================================================================
+  // FIX 7.1: Pending Opportunity Fields (Mempool Integration)
+  // ===========================================================================
+
+  /** Trade size in USD for profit calculations */
+  tradeSizeUsd?: number;
+
+  /** Timestamp when opportunity was detected (alternative to createdAt) */
+  timestamp?: number;
+
+  /** Transaction hash of the pending swap that triggered this opportunity */
+  pendingTxHash?: string;
+
+  /** Deadline timestamp of the pending swap */
+  pendingDeadline?: number;
+
+  /** Slippage tolerance of the pending swap (decimal, e.g., 0.005 = 0.5%) */
+  pendingSlippage?: number;
 }
 
 // =============================================================================

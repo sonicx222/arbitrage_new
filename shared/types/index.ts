@@ -160,6 +160,88 @@ export interface WhaleTransaction {
   impact: number; // Price impact percentage
 }
 
+// =============================================================================
+// Pending Transaction Types (Task 1.3.3: Integration with Existing Detection)
+// =============================================================================
+
+/**
+ * Supported swap router types for pending transaction decoding.
+ */
+export type SwapRouterType =
+  | 'uniswapV2'
+  | 'uniswapV3'
+  | 'sushiswap'
+  | 'curve'
+  | '1inch'
+  | 'pancakeswap'
+  | 'unknown';
+
+/**
+ * Pending swap intent extracted from mempool transactions.
+ * Represents a user's swap intent before block inclusion.
+ *
+ * FIX 1.1: Type Design Decision - Two Versions Exist By Design:
+ * - This shared type uses `string` for amount fields (amountIn, gasPrice, etc.)
+ *   because JSON serialization doesn't support BigInt natively.
+ * - The mempool-detector/src/types.ts has a local version using `bigint`
+ *   for precise arithmetic during transaction processing.
+ * - Use toSerializableIntent() in mempool-detector to convert between them.
+ *
+ * @see mempool-detector/src/types.ts - Internal bigint version
+ * @see mempool-detector/src/index.ts - toSerializableIntent() conversion
+ */
+export interface PendingSwapIntent {
+  /** Transaction hash of the pending transaction */
+  hash: string;
+  /** Router contract address */
+  router: string;
+  /** Identified router/DEX type */
+  type: SwapRouterType;
+  /** Input token address */
+  tokenIn: string;
+  /** Output token address */
+  tokenOut: string;
+  /** Input amount in wei (as string for JSON serialization) */
+  amountIn: string;
+  /** Expected minimum output amount in wei (as string for JSON serialization) */
+  expectedAmountOut: string;
+  /** Token path for multi-hop swaps */
+  path: string[];
+  /** Slippage tolerance as decimal (e.g., 0.005 = 0.5%) */
+  slippageTolerance: number;
+  /** Transaction deadline timestamp */
+  deadline: number;
+  /** Sender address */
+  sender: string;
+  /** Gas price in wei (as string for JSON serialization) */
+  gasPrice: string;
+  /** Max fee per gas (EIP-1559) */
+  maxFeePerGas?: string;
+  /** Max priority fee per gas (EIP-1559) */
+  maxPriorityFeePerGas?: string;
+  /** Transaction nonce */
+  nonce: number;
+  /** Chain ID */
+  chainId: number;
+  /** Timestamp when the pending tx was first seen */
+  firstSeen: number;
+}
+
+/**
+ * Pending opportunity message published to stream:pending-opportunities.
+ * Contains the decoded swap intent and optional impact estimation.
+ */
+export interface PendingOpportunity {
+  /** Message type discriminator */
+  type: 'pending';
+  /** Decoded swap intent from mempool transaction */
+  intent: PendingSwapIntent;
+  /** Estimated price impact of the pending swap (optional) */
+  estimatedImpact?: number;
+  /** Timestamp when opportunity was published */
+  publishedAt: number;
+}
+
 export interface MessageEvent {
   type: string;
   data: any;
@@ -263,7 +345,25 @@ export interface ExecutionConfig extends ServiceConfig {
   };
 }
 
-// Error types
+// =============================================================================
+// Error Types
+// =============================================================================
+// FIX 9.3: Canonical error type definitions for the arbitrage system.
+//
+// IMPORTANT: These are the CANONICAL error types. Duplicates exist in:
+// - shared/core/src/domain-models.ts (ArbitrageError) - legacy, for backwards compat
+// - shared/core/src/resilience/error-handling.ts (ArbitrageError) - legacy
+// - shared/core/src/async/async-utils.ts (TimeoutError) - use this for async ops
+// - services/execution-engine/src/types.ts (TimeoutError) - execution-specific
+//
+// New code should import from @arbitrage/types. Future refactoring should
+// consolidate all error types here and update imports across the codebase.
+// =============================================================================
+
+/**
+ * Base error class for arbitrage system errors.
+ * Use this for errors that need to be caught and handled specifically.
+ */
 export class ArbitrageError extends Error {
   constructor(
     message: string,

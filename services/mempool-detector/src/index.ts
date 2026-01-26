@@ -39,6 +39,7 @@ import {
   type PendingSwapIntent,
   type FeedHealthMetrics,
 } from './types';
+import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIntent } from '@arbitrage/types';
 
 // =============================================================================
 // CONSTANTS
@@ -76,6 +77,50 @@ const getHighResTime = (): number => {
   // performance.now() provides microsecond precision
   return performance.now();
 };
+
+/**
+ * FIX 4.1/6.1: Convert local PendingSwapIntent (bigint) to serializable format.
+ * BigInt cannot be JSON.stringify'd, so we convert to strings for Redis publishing.
+ *
+ * @param intent - Local PendingSwapIntent with bigint fields
+ * @returns Serializable PendingSwapIntent with string fields
+ */
+function toSerializableIntent(intent: PendingSwapIntent): SerializablePendingSwapIntent {
+  return {
+    hash: intent.hash,
+    router: intent.router,
+    type: intent.type,
+    tokenIn: intent.tokenIn,
+    tokenOut: intent.tokenOut,
+    amountIn: intent.amountIn.toString(),
+    expectedAmountOut: intent.expectedAmountOut.toString(),
+    path: intent.path,
+    slippageTolerance: intent.slippageTolerance,
+    deadline: intent.deadline,
+    sender: intent.sender,
+    gasPrice: intent.gasPrice.toString(),
+    maxFeePerGas: intent.maxFeePerGas?.toString(),
+    maxPriorityFeePerGas: intent.maxPriorityFeePerGas?.toString(),
+    nonce: intent.nonce,
+    chainId: intent.chainId,
+    firstSeen: intent.firstSeen,
+  };
+}
+
+/**
+ * FIX 4.1: Wrap PendingSwapIntent in PendingOpportunity for cross-chain-detector.
+ * The cross-chain-detector expects a wrapper with type='pending' discriminator.
+ *
+ * @param intent - Local PendingSwapIntent with bigint fields
+ * @returns PendingOpportunity wrapper with serializable intent
+ */
+function createPendingOpportunity(intent: PendingSwapIntent): PendingOpportunity {
+  return {
+    type: 'pending',
+    intent: toSerializableIntent(intent),
+    publishedAt: Date.now(),
+  };
+}
 
 // =============================================================================
 // SERVICE CLASS
@@ -115,7 +160,8 @@ export class MempoolDetectorService extends EventEmitter {
 
   // FIX 1.2/7.1: Redis publishing
   private streamsClient: RedisStreamsClient | null = null;
-  private streamBatcher: StreamBatcher<PendingSwapIntent> | null = null;
+  // FIX 4.1: Batcher now publishes PendingOpportunity wrapper (not raw PendingSwapIntent)
+  private streamBatcher: StreamBatcher<PendingOpportunity> | null = null;
 
   // FIX 2.1: Swap decoder
   private swapDecoder: SwapDecoderRegistry | null = null;
@@ -394,7 +440,8 @@ export class MempoolDetectorService extends EventEmitter {
 
       // Create batcher for efficient publishing
       // FIX 2.2: Use default from types.ts instead of removed constant
-      this.streamBatcher = this.streamsClient.createBatcher<PendingSwapIntent>(
+      // FIX 4.1: Batcher now publishes PendingOpportunity wrapper
+      this.streamBatcher = this.streamsClient.createBatcher<PendingOpportunity>(
         this.config.opportunityStream || DEFAULT_PENDING_OPPORTUNITIES_STREAM,
         {
           maxBatchSize: this.config.batchSize!,
@@ -610,19 +657,29 @@ export class MempoolDetectorService extends EventEmitter {
 
       this.stats.txDecoded++;
 
-      // FIX 1.3: Track filtered transactions
-      // TODO: Add USD value filtering with price oracle integration
-      // For now, publish all decoded swaps (minSwapSizeUsd filtering requires price oracle)
-      const shouldPublish = true; // Placeholder for USD filtering
+      // FIX 7.2: USD Filtering Design Decision
+      // ----------------------------------------
+      // The mempool-detector intentionally does NOT filter by USD value because:
+      // 1. This service doesn't have access to a price oracle for token valuations
+      // 2. Filtering is better done downstream at cross-chain-detector which has price data
+      // 3. Publishing all decoded swaps allows downstream consumers to apply their own filters
+      // 4. Low latency is critical for mempool data - adding price lookups would add latency
+      //
+      // The minSwapSizeUsd config option is reserved for future use if a lightweight
+      // price cache is added, but currently all decoded swaps are published.
+      // Downstream consumers (cross-chain-detector) filter based on opportunity quality.
+      const shouldPublish = true;
       if (!shouldPublish) {
         this.stats.txFiltered++;
         return;
       }
 
       // FIX 4.5: Publish to Redis stream - only count on successful add
+      // FIX 4.1: Wrap in PendingOpportunity and serialize bigint fields
       if (this.streamBatcher) {
         try {
-          this.streamBatcher.add(swapIntent);
+          const pendingOpp = createPendingOpportunity(swapIntent);
+          this.streamBatcher.add(pendingOpp);
           this.stats.opportunitiesPublished++;
         } catch (publishError) {
           this.logger.warn('Failed to add to stream batcher', {
