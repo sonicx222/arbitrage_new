@@ -1219,6 +1219,252 @@ describe('FlashLoanArbitrage', () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
         expect(await flashLoanArbitrage.MAX_SWAP_DEADLINE()).to.equal(3600n);
       });
+
+      it('should have correct MIN_SLIPPAGE_BPS constant (Fix 6.1)', async () => {
+        const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
+        expect(await flashLoanArbitrage.MIN_SLIPPAGE_BPS()).to.equal(10n);
+      });
+    });
+  });
+
+  // ===========================================================================
+  // Fix 8.x: Additional Test Cases for New Validations
+  // ===========================================================================
+  describe('New Validations (Fix 8.x)', () => {
+    describe('Fix 8.1: SwapPath Asset Mismatch', () => {
+      it('should revert when swapPath[0].tokenIn != flash loaned asset', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc, dai } = await loadFixture(deployContractsFixture);
+
+        // Add router
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        // Create swap path that starts with USDC but we flash loan WETH
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),  // Wrong! Should be WETH
+            tokenOut: await dai.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        // Should revert with SwapPathAssetMismatch
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),  // Flash loan WETH
+            ethers.parseEther('10'),
+            swapPath,
+            0
+          )
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'SwapPathAssetMismatch');
+      });
+
+      it('should calculate expected profit as 0 for mismatched asset', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc, dai } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        // Path starts with USDC but asset is WETH
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await dai.getAddress(),
+            amountOutMin: 0n,
+          },
+        ];
+
+        const [profit, fee] = await flashLoanArbitrage.calculateExpectedProfit(
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          swapPath
+        );
+
+        expect(profit).to.equal(0n);
+        expect(fee).to.be.gt(0n); // Fee is still calculated
+      });
+    });
+
+    describe('Fix 8.2: InsufficientSlippageProtection', () => {
+      it('should revert when amountOutMin is zero', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 0n,  // Zero slippage protection - dangerous!
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,  // This one is fine
+          },
+        ];
+
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('10'),
+            swapPath,
+            0
+          )
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientSlippageProtection');
+      });
+
+      it('should allow non-zero amountOutMin', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        // Set exchange rates for profitable arbitrage
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter2.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), ethers.parseUnits('0.00051', 18));
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,  // Non-zero - passes validation
+          },
+          {
+            router: await dexRouter2.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,  // Non-zero - passes validation
+          },
+        ];
+
+        // Should not revert on validation (may revert on profit check)
+        // We're just testing the slippage validation passes
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('10'),
+            swapPath,
+            0
+          )
+        ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientSlippageProtection');
+      });
+    });
+
+    describe('Fix 7.2: Ownable2Step', () => {
+      it('should support two-step ownership transfer', async () => {
+        const { flashLoanArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+        // Step 1: Current owner initiates transfer
+        await flashLoanArbitrage.connect(owner).transferOwnership(user.address);
+
+        // Owner is still the original owner (pending transfer)
+        expect(await flashLoanArbitrage.owner()).to.equal(owner.address);
+        expect(await flashLoanArbitrage.pendingOwner()).to.equal(user.address);
+
+        // Step 2: New owner accepts
+        await flashLoanArbitrage.connect(user).acceptOwnership();
+
+        // Now ownership is transferred
+        expect(await flashLoanArbitrage.owner()).to.equal(user.address);
+      });
+
+      it('should not allow non-pending owner to accept', async () => {
+        const { flashLoanArbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.connect(owner).transferOwnership(user.address);
+
+        // Attacker tries to accept
+        // Note: OpenZeppelin 4.9.x uses require with string, not custom error
+        await expect(
+          flashLoanArbitrage.connect(attacker).acceptOwnership()
+        ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
+      });
+    });
+
+    describe('Fix 10.3: Router Validation Optimization', () => {
+      it('should only validate unique routers (optimization test)', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc, dai } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        // Set exchange rates
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter1.setExchangeRate(await usdc.getAddress(), await dai.getAddress(), ethers.parseUnits('1', 18));
+        await dexRouter1.setExchangeRate(await dai.getAddress(), await weth.getAddress(), ethers.parseUnits('0.00052', 18));
+
+        // Create 3-hop path with same router (common in triangular arb)
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),  // Same router
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter1.getAddress(),  // Same router
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await dai.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter1.getAddress(),  // Same router
+            tokenIn: await dai.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        // Should work - router validation is optimized to skip repeated routers
+        // Will likely revert on profit, but that's expected
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('10'),
+            swapPath,
+            0
+          )
+        ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'RouterNotApproved');
+      });
+    });
+
+    describe('Fix 8.4: Zero Output Handling', () => {
+      it('should handle calculateExpectedProfit with router returning zero', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        // Set a tiny exchange rate that will truncate to 0 for small amounts
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), 1n);
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 0n,
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 0n,
+          },
+        ];
+
+        // Should return 0 profit for path that produces 0 output
+        const [profit] = await flashLoanArbitrage.calculateExpectedProfit(
+          await weth.getAddress(),
+          1n,  // Very small amount
+          swapPath
+        );
+
+        // Profit should be 0 due to truncation
+        expect(profit).to.equal(0n);
+      });
     });
   });
 });

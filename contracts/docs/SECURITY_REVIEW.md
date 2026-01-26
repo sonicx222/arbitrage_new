@@ -1,8 +1,8 @@
 # FlashLoanArbitrage Security Review Checklist
 
 **Contract:** FlashLoanArbitrage.sol
-**Version:** 1.0.0
-**Date:** January 24, 2026
+**Version:** 1.1.0
+**Date:** January 26, 2026
 **Status:** Pre-Audit
 
 ---
@@ -25,8 +25,8 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 - [x] `withdrawETH()` - Only owner can withdraw ETH
 
 ### 1.2 Ownership Transfer
-- [x] Uses OpenZeppelin's `Ownable` contract
-- [ ] Consider implementing 2-step ownership transfer (`Ownable2Step`)
+- [x] Uses OpenZeppelin's `Ownable2Step` contract (Fix 7.2 - upgraded from Ownable)
+- [x] 2-step ownership transfer implemented for safer transfers
 - [ ] Document ownership transfer procedure
 
 ### 1.3 Multi-sig Recommendation
@@ -100,9 +100,13 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 
 ### 5.3 Token Compatibility
 - [x] Handles standard ERC20 tokens
-- [ ] Test with fee-on-transfer tokens
-- [ ] Test with rebasing tokens
+- [ ] Test with fee-on-transfer tokens (EXPLICITLY UNSUPPORTED - will fail profit check)
+- [ ] Test with rebasing tokens (EXPLICITLY UNSUPPORTED - amounts may change mid-transaction)
 - [ ] Test with tokens that revert on zero transfer
+
+**Note (Fix 2.1):** Fee-on-transfer and rebasing tokens are intentionally NOT supported.
+These tokens alter amounts during transfers, which breaks the flash loan repayment math.
+Attempting to use them will result in `InsufficientProfit` errors.
 
 ---
 
@@ -112,10 +116,16 @@ This document provides a security review checklist for the FlashLoanArbitrage sm
 - [x] Rejects empty swap paths
 - [x] Validates token continuity (tokenOut[i] == tokenIn[i+1])
 - [x] Validates path ends with flash loan asset
+- [x] **Fix 4.3:** Validates swapPath[0].tokenIn == asset (new SwapPathAssetMismatch error)
 
 ### 6.2 Router Validation
 - [x] All routers in path must be approved
 - [x] Validation happens before flash loan initiation
+- [x] **Fix 10.3:** Optimized with caching for repeated routers
+
+### 6.3 Slippage Validation (Fix 6.1)
+- [x] Minimum slippage protection enforced (MIN_SLIPPAGE_BPS constant)
+- [x] Reverts with `InsufficientSlippageProtection` if amountOutMin == 0
 
 ---
 
