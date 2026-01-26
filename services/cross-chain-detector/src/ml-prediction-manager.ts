@@ -315,6 +315,13 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
    * If a prediction is already being fetched for a key, return the pending promise
    * instead of starting a new fetch. This prevents cache coherence issues when
    * multiple detection cycles overlap.
+   *
+   * FIX 5.3: Race condition analysis - The pattern is safe because:
+   * 1. Cache check (predictionCache.get) is atomic in Node.js
+   * 2. Pending check (pendingPredictions.get) is atomic
+   * 3. Cache write (predictionCache.set) happens within the tracked promise
+   * 4. Concurrent requests either get cache hit, pending promise, or start new fetch
+   * 5. No partial reads/writes due to JS single-threaded event loop
    */
   async function getCachedPrediction(
     chain: string,

@@ -47,7 +47,11 @@ export interface PriceDataManager {
   /** Handle incoming price update */
   handlePriceUpdate(update: PriceUpdate): void;
 
-  /** Create atomic snapshot of price data (legacy) */
+  /**
+   * Create atomic snapshot of price data.
+   * @deprecated Use createIndexedSnapshot() for O(1) token pair lookups.
+   * This method is retained for backwards compatibility but incurs O(n²) cost.
+   */
   createSnapshot(): PriceData;
 
   /**
@@ -179,7 +183,14 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         cleanup();
       }
 
-      logger.debug(`Updated price: ${update.chain}/${update.dex}/${update.pairKey} = ${update.price}`);
+      // FIX 10.4: Use structured logging to avoid string interpolation cost
+      // String template literals are evaluated even if debug logging is disabled
+      logger.debug('Updated price', {
+        chain: update.chain,
+        dex: update.dex,
+        pairKey: update.pairKey,
+        price: update.price,
+      });
     } catch (error) {
       logger.error('Failed to handle price update', { error: (error as Error).message });
     }
@@ -447,9 +458,13 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
     updateCounter = 0;
 
     // PERF-P4: Reset cache
+    // FIX 4.4: Reset to consistent values that won't cause cache collision
+    // - cachedSnapshot = null ensures first createIndexedSnapshot rebuilds
+    // - cachedSnapshotVersion = -1 ensures no match with lastSnapshotVersion
+    // - lastSnapshotVersion = 1 matches overflow reset behavior for consistency
     cachedSnapshot = null;
     cachedSnapshotVersion = -1;
-    lastSnapshotVersion = 0;
+    lastSnapshotVersion = 1;
 
     // FIX BUG-2: Clear normalizedPairCache to prevent stale entries on restart
     normalizedPairCache.clear();
