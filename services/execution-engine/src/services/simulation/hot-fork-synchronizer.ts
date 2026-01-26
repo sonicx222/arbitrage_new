@@ -16,27 +16,25 @@
 
 import { ethers } from 'ethers';
 import type { AnvilForkManager } from './anvil-manager';
+import type { Logger } from '../../types';
 
 // =============================================================================
 // Types
 // =============================================================================
 
 /**
- * Minimal logger interface for HotForkSynchronizer.
- * Fix 3.2: Added to replace console.error with proper logging.
+ * Fix 6.2: Use shared Logger interface from types.ts for consistency.
+ * Deprecated: SynchronizerLogger interface removed in favor of Logger.
+ *
+ * The Logger interface from types.ts is used across all execution engine
+ * components for consistent logging behavior.
  */
-export interface SynchronizerLogger {
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  info: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
 
 /**
  * Default console-based logger for backward compatibility.
  * Fix 3.2: Used when no logger is provided in config.
  */
-const defaultLogger: SynchronizerLogger = {
+const defaultLogger: Logger = {
   error: (message: string, meta?: object) => console.error(`[HotForkSynchronizer] ${message}`, meta ?? ''),
   warn: (message: string, meta?: object) => console.warn(`[HotForkSynchronizer] ${message}`, meta ?? ''),
   info: (message: string, meta?: object) => console.info(`[HotForkSynchronizer] ${message}`, meta ?? ''),
@@ -57,8 +55,8 @@ export interface HotForkSynchronizerConfig {
   maxConsecutiveFailures?: number;
   /** Whether to auto-start synchronization (default: false) */
   autoStart?: boolean;
-  /** Logger instance for structured logging (default: console-based) - Fix 3.2 */
-  logger?: SynchronizerLogger;
+  /** Logger instance for structured logging (default: console-based) - Fix 6.2 */
+  logger?: Logger;
   /**
    * Fix 10.5: Enable adaptive sync interval based on block production rate.
    * When enabled, sync interval adjusts between minSyncIntervalMs and maxSyncIntervalMs
@@ -78,6 +76,7 @@ export type SynchronizerState = 'stopped' | 'running' | 'paused' | 'error';
 
 /**
  * Metrics for synchronizer operations.
+ * Fix 6.3: Added lastUpdated field for consistency with other metrics interfaces.
  */
 export interface SynchronizerMetrics {
   /** Total sync attempts */
@@ -94,6 +93,8 @@ export interface SynchronizerMetrics {
   lastSyncTime: number;
   /** Average sync latency in ms */
   averageSyncLatencyMs: number;
+  /** Fix 6.3: Last updated timestamp (for consistency with other metrics interfaces) */
+  lastUpdated: number;
 }
 
 // =============================================================================
@@ -133,8 +134,8 @@ export class HotForkSynchronizer {
   private readonly sourceProvider: ethers.JsonRpcProvider;
   private readonly baseSyncIntervalMs: number;
   private readonly maxConsecutiveFailures: number;
-  /** Fix 3.2: Logger instance for proper structured logging */
-  private readonly logger: SynchronizerLogger;
+  /** Fix 6.2: Logger instance for proper structured logging (using shared Logger interface) */
+  private readonly logger: Logger;
   /** Fix 10.5: Adaptive sync configuration */
   private readonly adaptiveSync: boolean;
   private readonly minSyncIntervalMs: number;
@@ -461,6 +462,7 @@ export class HotForkSynchronizer {
 
   /**
    * Update rolling average latency.
+   * Fix 6.3: Also updates lastUpdated timestamp.
    */
   private updateAverageLatency(latencyMs: number): void {
     const total = this.metrics.successfulSyncs;
@@ -470,10 +472,13 @@ export class HotForkSynchronizer {
       this.metrics.averageSyncLatencyMs =
         (this.metrics.averageSyncLatencyMs * (total - 1) + latencyMs) / total;
     }
+    // Fix 6.3: Update timestamp for consistency with other metrics
+    this.metrics.lastUpdated = Date.now();
   }
 
   /**
    * Create empty metrics object.
+   * Fix 6.3: Added lastUpdated field.
    */
   private createEmptyMetrics(): SynchronizerMetrics {
     return {
@@ -484,6 +489,7 @@ export class HotForkSynchronizer {
       lastSyncedBlock: 0,
       lastSyncTime: 0,
       averageSyncLatencyMs: 0,
+      lastUpdated: Date.now(),
     };
   }
 }

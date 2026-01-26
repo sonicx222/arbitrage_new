@@ -74,6 +74,7 @@ export {
 } from './pending-state-simulator';
 
 // Hot Fork Synchronizer (Phase 2: Pending-State Simulation - Task 2.3.2)
+// Fix 6.2: SynchronizerLogger removed - use Logger from types.ts instead
 export {
   HotForkSynchronizer,
   createHotForkSynchronizer,

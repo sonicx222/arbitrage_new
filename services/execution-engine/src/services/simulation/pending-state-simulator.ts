@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import type { AnvilForkManager } from './anvil-manager';
-import { isWethAddress } from './types';
+import { isWethAddress, createCancellableTimeout } from './types';
 
 /**
  * Extended simulation result with logs for execution price calculation.
@@ -175,6 +175,19 @@ export class PendingStateSimulator {
    */
   private readonly poolTokenIndex: Map<string, Set<string>>;
 
+  /**
+   * Fix 10.4: Cache ABI interfaces to avoid re-parsing on each call.
+   * Key = interface type (e.g., 'v2', 'v3single', 'v3multi')
+   */
+  private readonly abiCache: Map<string, ethers.Interface>;
+
+  /**
+   * Fix 10.5: Pool of reusable snapshots for simulation.
+   * Instead of creating new snapshots each time, reuse existing ones.
+   */
+  private readonly snapshotPool: string[];
+  private readonly maxSnapshotPoolSize: number;
+
   constructor(config: PendingStateSimulatorConfig) {
     this.anvilManager = config.anvilManager;
     this.defaultPools = config.defaultPools ?? [];
@@ -186,6 +199,66 @@ export class PendingStateSimulator {
     // Fix 10.2: Build token pair index for fast lookups
     this.poolTokenIndex = new Map();
     this.buildTokenIndex();
+
+    // Fix 10.4: Initialize ABI cache
+    this.abiCache = new Map();
+    this.initializeAbiCache();
+
+    // Fix 10.5: Initialize snapshot pool
+    this.snapshotPool = [];
+    this.maxSnapshotPoolSize = 5;
+  }
+
+  /**
+   * Fix 10.4: Pre-initialize ABI interfaces for common swap types.
+   * This avoids repeated ABI parsing during hot-path simulation.
+   */
+  private initializeAbiCache(): void {
+    // V2 swap interfaces
+    this.abiCache.set('v2', new ethers.Interface([
+      'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+      'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
+      'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+    ]));
+
+    // V3 single-hop swap interface
+    this.abiCache.set('v3single', new ethers.Interface([
+      'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+    ]));
+
+    // V3 multi-hop swap interface
+    this.abiCache.set('v3multi', new ethers.Interface([
+      'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) external payable returns (uint256 amountOut)',
+    ]));
+  }
+
+  /**
+   * Fix 10.5: Get a snapshot from pool or create new one.
+   */
+  private async getSnapshot(): Promise<string> {
+    if (this.snapshotPool.length > 0) {
+      return this.snapshotPool.pop()!;
+    }
+    return await this.anvilManager.createSnapshot();
+  }
+
+  /**
+   * Fix 10.5: Return snapshot to pool for reuse (or discard if pool is full).
+   * Reverts the snapshot to make it reusable for future simulations.
+   */
+  private async releaseSnapshot(snapshotId: string): Promise<void> {
+    try {
+      // Revert to snapshot to make state clean for reuse
+      await this.anvilManager.revertToSnapshot(snapshotId);
+
+      // Only keep if pool isn't full
+      if (this.snapshotPool.length < this.maxSnapshotPoolSize) {
+        this.snapshotPool.push(snapshotId);
+      }
+      // Otherwise snapshot is simply discarded (Anvil will clean up)
+    } catch {
+      // If revert fails, don't add to pool
+    }
   }
 
   /**
@@ -233,15 +306,15 @@ export class PendingStateSimulator {
     const poolsToQuery = pools ?? this.defaultPools;
     let snapshotId: string | undefined;
 
-    // Fix 4.1: Use cancellable timeout to prevent timer leaks
-    const { promise: timeoutPromise, cancel: cancelTimeout } = this.createCancellableTimeout<PendingSwapSimulationResult>(
+    // Fix 4.1: Use cancellable timeout to prevent timer leaks (using shared utility from types.ts)
+    const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<PendingSwapSimulationResult>(
       this.timeoutMs,
       'Simulation timeout'
     );
 
     try {
-      // Create snapshot before simulation
-      snapshotId = await this.anvilManager.createSnapshot();
+      // Fix 10.5: Use snapshot pool for better performance (reuse snapshots)
+      snapshotId = await this.getSnapshot();
 
       // Pre-encode swap data once (avoid double encoding on hot path)
       const encodedData = this.encodeSwapData(intent);
@@ -273,19 +346,17 @@ export class PendingStateSimulator {
       // Fix 4.1: Always cancel timeout to prevent timer leak
       cancelTimeout();
 
-      // Always revert to snapshot
+      // Fix 10.5: Release snapshot back to pool for reuse
       if (snapshotId) {
-        try {
-          await this.anvilManager.revertToSnapshot(snapshotId);
-        } catch {
-          // Log but don't throw - cleanup errors shouldn't mask primary errors
-        }
+        await this.releaseSnapshot(snapshotId);
       }
     }
   }
 
   /**
    * Simulate multiple pending swaps in sequence.
+   *
+   * Fix 4.2: Added timeout protection to prevent batch simulation from hanging.
    *
    * @param intents - Array of pending swap intents
    * @param options - Batch simulation options
@@ -303,7 +374,17 @@ export class PendingStateSimulator {
     const results: PendingSwapSimulationResult[] = [];
     let snapshotId: string | undefined;
 
-    try {
+    // Fix 4.2: Calculate timeout based on number of intents (with reasonable bounds)
+    const batchTimeoutMs = Math.min(
+      this.timeoutMs * intents.length,
+      60000 // Hard cap at 60 seconds for any batch
+    );
+    const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<PendingSwapSimulationResult[]>(
+      batchTimeoutMs,
+      `Batch simulation timeout after ${batchTimeoutMs}ms`
+    );
+
+    const batchOperation = async (): Promise<PendingSwapSimulationResult[]> => {
       // Create initial snapshot
       snapshotId = await this.anvilManager.createSnapshot();
 
@@ -317,7 +398,24 @@ export class PendingStateSimulator {
       }
 
       return results;
+    };
+
+    try {
+      return await Promise.race([batchOperation(), timeoutPromise]);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Return partial results with timeout error
+      results.push({
+        success: false,
+        predictedReserves: new Map(),
+        error: errorMessage,
+        latencyMs: 0,
+      });
+      return results;
     } finally {
+      // Fix 4.2: Always cancel timeout to prevent timer leak
+      cancelTimeout();
+
       // Revert to initial state
       if (snapshotId) {
         try {
@@ -372,12 +470,14 @@ export class PendingStateSimulator {
    * Detect pools that would be affected by a swap.
    *
    * Fix 10.2: Now uses O(1) indexed lookup instead of O(n) scan.
+   * Fix 10.6: Uses Set instead of Array.includes() for O(1) duplicate detection.
    *
    * @param intent - Pending swap intent
    * @returns Array of pool addresses
    */
   async detectAffectedPools(intent: PendingSwapIntent): Promise<string[]> {
-    const detectedPools: string[] = [];
+    // Fix 10.6: Use Set for O(1) duplicate detection instead of O(n) Array.includes()
+    const detectedPoolsSet = new Set<string>();
     const path = intent.path;
 
     // For each pair of tokens in the path, find corresponding pool
@@ -389,15 +489,14 @@ export class PendingStateSimulator {
 
       const poolAddresses = this.poolTokenIndex.get(key);
       if (poolAddresses) {
+        // Set.add is O(1) and automatically handles duplicates
         for (const address of poolAddresses) {
-          if (!detectedPools.includes(address)) {
-            detectedPools.push(address);
-          }
+          detectedPoolsSet.add(address);
         }
       }
     }
 
-    return detectedPools;
+    return Array.from(detectedPoolsSet);
   }
 
   // ===========================================================================
@@ -624,13 +723,11 @@ export class PendingStateSimulator {
 
   /**
    * Encode Uniswap V2 style swap.
+   * Fix 10.4: Uses cached ABI interface for performance.
    */
   private encodeV2Swap(intent: PendingSwapIntent): string {
-    const iface = new ethers.Interface([
-      'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-      'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
-      'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
-    ]);
+    // Fix 10.4: Use cached ABI instead of creating new Interface each time
+    const iface = this.abiCache.get('v2')!;
 
     // Calculate minimum output with slippage
     const amountOutMin = intent.expectedAmountOut -
@@ -675,17 +772,26 @@ export class PendingStateSimulator {
 
   /**
    * Encode Uniswap V3 style swap.
+   *
+   * Fix 7.3: Added support for multi-hop swaps using `exactInput`.
+   * Fix 10.4: Uses cached ABI interface for performance.
+   * Single-hop swaps use `exactInputSingle` for gas efficiency.
+   * Multi-hop swaps use `exactInput` with encoded path.
    */
   private encodeV3Swap(intent: PendingSwapIntent): string {
-    const iface = new ethers.Interface([
-      'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
-    ]);
-
     const amountOutMin = intent.expectedAmountOut -
       (intent.expectedAmountOut * BigInt(Math.floor(intent.slippageTolerance * 10000))) / 10000n;
 
     // Use fee from intent, default to 3000 (0.3%) if not specified
     const fee = intent.fee ?? 3000;
+
+    // Fix 7.3: Check if this is a multi-hop swap (path length > 2)
+    if (intent.path.length > 2) {
+      return this.encodeV3MultiHopSwap(intent, amountOutMin, fee);
+    }
+
+    // Fix 10.4: Use cached ABI instead of creating new Interface each time
+    const iface = this.abiCache.get('v3single')!;
 
     return iface.encodeFunctionData('exactInputSingle', [
       {
@@ -699,6 +805,69 @@ export class PendingStateSimulator {
         sqrtPriceLimitX96: 0n,
       },
     ]);
+  }
+
+  /**
+   * Fix 7.3: Encode Uniswap V3 multi-hop swap using `exactInput`.
+   * Fix 10.4: Uses cached ABI interface for performance.
+   *
+   * The path is encoded as: token0, fee01, token1, fee12, token2, ...
+   * Each segment is: address (20 bytes) + fee (3 bytes)
+   */
+  private encodeV3MultiHopSwap(
+    intent: PendingSwapIntent,
+    amountOutMin: bigint,
+    defaultFee: number
+  ): string {
+    // Fix 10.4: Use cached ABI instead of creating new Interface each time
+    const iface = this.abiCache.get('v3multi')!;
+
+    // Encode the path: token0 (20 bytes) + fee (3 bytes) + token1 (20 bytes) + ...
+    const encodedPath = this.encodeV3Path(intent.path, defaultFee);
+
+    return iface.encodeFunctionData('exactInput', [
+      {
+        path: encodedPath,
+        recipient: intent.sender,
+        deadline: intent.deadline,
+        amountIn: intent.amountIn,
+        amountOutMinimum: amountOutMin,
+      },
+    ]);
+  }
+
+  /**
+   * Fix 7.3: Encode a V3 swap path.
+   *
+   * Format: token0 (20 bytes) + fee (3 bytes) + token1 (20 bytes) + fee (3 bytes) + ...
+   * Last token has no trailing fee.
+   *
+   * @param path - Array of token addresses
+   * @param defaultFee - Default fee tier (100, 500, 3000, 10000)
+   * @returns Encoded path as hex string
+   */
+  private encodeV3Path(path: string[], defaultFee: number): string {
+    if (path.length < 2) {
+      throw new Error('V3 path must have at least 2 tokens');
+    }
+
+    // Each token is 20 bytes, each fee is 3 bytes
+    // Total: n tokens * 20 + (n-1) fees * 3
+    const parts: string[] = [];
+
+    for (let i = 0; i < path.length; i++) {
+      // Add token address (remove 0x prefix, pad to 40 hex chars = 20 bytes)
+      const token = path[i].toLowerCase().replace('0x', '').padStart(40, '0');
+      parts.push(token);
+
+      // Add fee between tokens (3 bytes = 6 hex chars)
+      if (i < path.length - 1) {
+        const feeHex = defaultFee.toString(16).padStart(6, '0');
+        parts.push(feeHex);
+      }
+    }
+
+    return '0x' + parts.join('');
   }
 
   // ===========================================================================
@@ -726,6 +895,9 @@ export class PendingStateSimulator {
   /**
    * Parse swap result from transaction logs to get actual amounts.
    *
+   * Fix 4.3: Added defensive null checks for log.topics and log.data
+   * to handle malformed or unexpected log formats from Anvil.
+   *
    * Looks for Uniswap V2/V3 Swap events to extract actual output amounts.
    */
   private parseSwapResult(
@@ -741,7 +913,15 @@ export class PendingStateSimulator {
     let actualAmountOut: bigint | undefined;
 
     for (const log of logs) {
-      const topic0 = log.topics?.[0]?.toLowerCase();
+      // Fix 4.3: Defensive null checks for log structure
+      if (!log || !Array.isArray(log.topics) || log.topics.length === 0 || !log.data) {
+        continue;
+      }
+
+      const topic0 = log.topics[0]?.toLowerCase();
+      if (!topic0) {
+        continue;
+      }
 
       if (topic0 === V2_SWAP_TOPIC) {
         // Parse V2 Swap event
@@ -810,34 +990,6 @@ export class PendingStateSimulator {
     }
 
     return errorMessage;
-  }
-
-  /**
-   * Create a cancellable timeout promise.
-   * Fix 4.1: Returns both the promise and a cancel function to prevent timer leaks.
-   *
-   * @param ms - Timeout in milliseconds
-   * @param message - Error message on timeout
-   * @returns Object with promise and cancel function
-   */
-  private createCancellableTimeout<T>(
-    ms: number,
-    message: string
-  ): { promise: Promise<T>; cancel: () => void } {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-
-    const promise = new Promise<T>((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error(message)), ms);
-    });
-
-    const cancel = () => {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId);
-        timeoutId = undefined;
-      }
-    };
-
-    return { promise, cancel };
   }
 
   /**

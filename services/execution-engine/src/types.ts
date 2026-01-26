@@ -151,6 +151,46 @@ export function createSuccessResult(
   };
 }
 
+/**
+ * Fix 6.1: Format error code with optional details.
+ *
+ * Provides consistent error message formatting across all strategies.
+ *
+ * @param code - ExecutionErrorCode enum value
+ * @param details - Optional additional details to append
+ * @returns Formatted error string
+ *
+ * @example
+ * formatExecutionError(ExecutionErrorCode.NO_WALLET, 'ethereum');
+ * // Returns: "[ERR_NO_WALLET] No wallet available for chain: ethereum"
+ *
+ * @example
+ * formatExecutionError(ExecutionErrorCode.PRICE_VERIFICATION);
+ * // Returns: "[ERR_PRICE_VERIFICATION] Price verification failed"
+ */
+export function formatExecutionError(
+  code: ExecutionErrorCode,
+  details?: string
+): string {
+  if (!details) {
+    return code;
+  }
+  return `${code}: ${details}`;
+}
+
+/**
+ * Fix 6.1: Extract the error code identifier from a formatted error message.
+ *
+ * Useful for categorizing errors in logs and metrics.
+ *
+ * @param errorMessage - Full error message
+ * @returns The error code identifier (e.g., "ERR_NO_WALLET") or null if not found
+ */
+export function extractErrorCode(errorMessage: string): string | null {
+  const match = errorMessage.match(/\[ERR_([A-Z_]+)\]/);
+  return match ? `ERR_${match[1]}` : null;
+}
+
 // =============================================================================
 // Flash Loan Parameters
 // =============================================================================
@@ -263,14 +303,41 @@ export interface Logger {
 }
 
 // =============================================================================
+// Base Health Interface (Fix 9.2)
+// =============================================================================
+
+/**
+ * Fix 9.2: Base health interface for consistency across all health types.
+ *
+ * All health-related interfaces should extend this base interface to ensure
+ * they have a consistent core set of fields. This makes it easier to aggregate
+ * health status across the system.
+ *
+ * @example
+ * interface ServiceHealth extends BaseHealth {
+ *   activeConnections: number;
+ *   queueSize: number;
+ * }
+ */
+export interface BaseHealth {
+  /** Whether the component is healthy */
+  healthy: boolean;
+  /** Last health check timestamp */
+  lastCheck: number;
+  /** Last error message if any */
+  lastError?: string;
+}
+
+// =============================================================================
 // Provider Health
 // =============================================================================
 
-export interface ProviderHealth {
-  healthy: boolean;
-  lastCheck: number;
+/**
+ * Provider health status.
+ * Extends BaseHealth with provider-specific fields.
+ */
+export interface ProviderHealth extends BaseHealth {
   consecutiveFailures: number;
-  lastError?: string;
 }
 
 // =============================================================================
@@ -399,6 +466,12 @@ export interface PendingStateEngineConfig {
   syncIntervalMs?: number;
   /** Enable adaptive sync interval (default: true) */
   adaptiveSync?: boolean;
+  /** Minimum sync interval when adaptive sync is enabled (default: 200ms) */
+  minSyncIntervalMs?: number;
+  /** Maximum sync interval when adaptive sync is enabled (default: 5000ms) */
+  maxSyncIntervalMs?: number;
+  /** Maximum consecutive sync failures before pausing (default: 5) */
+  maxConsecutiveFailures?: number;
   /** Timeout for pending state simulations in ms (default: 5000) */
   simulationTimeoutMs?: number;
 }

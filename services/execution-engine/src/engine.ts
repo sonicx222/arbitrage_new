@@ -241,6 +241,9 @@ export class ExecutionEngineService {
       enableHotSync: config.pendingStateConfig?.enableHotSync ?? true,
       syncIntervalMs: config.pendingStateConfig?.syncIntervalMs ?? 1000,
       adaptiveSync: config.pendingStateConfig?.adaptiveSync ?? true,
+      minSyncIntervalMs: config.pendingStateConfig?.minSyncIntervalMs ?? 200,
+      maxSyncIntervalMs: config.pendingStateConfig?.maxSyncIntervalMs ?? 5000,
+      maxConsecutiveFailures: config.pendingStateConfig?.maxConsecutiveFailures ?? 5,
       simulationTimeoutMs: config.pendingStateConfig?.simulationTimeoutMs ?? 5000,
     };
 
@@ -872,6 +875,9 @@ export class ExecutionEngineService {
             sourceProvider,
             syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
             adaptiveSync: this.pendingStateConfig.adaptiveSync,
+            minSyncIntervalMs: this.pendingStateConfig.minSyncIntervalMs,
+            maxSyncIntervalMs: this.pendingStateConfig.maxSyncIntervalMs,
+            maxConsecutiveFailures: this.pendingStateConfig.maxConsecutiveFailures,
             logger: {
               error: (msg, meta) => this.logger.error(`[HotForkSync] ${msg}`, meta),
               warn: (msg, meta) => this.logger.warn(`[HotForkSync] ${msg}`, meta),
@@ -884,6 +890,8 @@ export class ExecutionEngineService {
           this.logger.info('Hot fork synchronizer started', {
             syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
             adaptiveSync: this.pendingStateConfig.adaptiveSync,
+            minSyncIntervalMs: this.pendingStateConfig.minSyncIntervalMs,
+            maxSyncIntervalMs: this.pendingStateConfig.maxSyncIntervalMs,
           });
         }
       }

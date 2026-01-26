@@ -21,6 +21,7 @@ import {
   SimulationProviderHealth,
   SimulationProviderType,
   SIMULATION_DEFAULTS,
+  createCancellableTimeout,
 } from './types';
 
 // =============================================================================
@@ -97,10 +98,36 @@ export class SimulationService implements ISimulationService {
       cacheTtlMs: options.config?.cacheTtlMs ?? SIMULATION_DEFAULTS.cacheTtlMs,
     };
 
+    // Fix 7.2: Validate provider priority configuration
+    this.validateProviderPriority();
+
     this.logger.info('SimulationService initialized', {
       providers: Array.from(this.providers.keys()),
       config: this.config,
     });
+  }
+
+  /**
+   * Fix 7.2: Validate provider priority configuration.
+   * Warns about invalid or unregistered provider types.
+   */
+  private validateProviderPriority(): void {
+    const validTypes: SimulationProviderType[] = ['tenderly', 'alchemy', 'local'];
+    const registeredProviders = Array.from(this.providers.keys());
+
+    for (const type of this.config.providerPriority) {
+      if (!validTypes.includes(type)) {
+        this.logger.error(`Invalid provider type '${type}' in providerPriority`, {
+          validTypes,
+          configuredPriority: this.config.providerPriority,
+        });
+      } else if (!registeredProviders.includes(type)) {
+        this.logger.warn(`Provider '${type}' in priority but not registered`, {
+          registeredProviders,
+          configuredPriority: this.config.providerPriority,
+        });
+      }
+    }
   }
 
   /**
@@ -300,6 +327,10 @@ export class SimulationService implements ISimulationService {
   /**
    * Try to simulate using a specific provider with timeout protection.
    *
+   * Fix 4.1: Uses createCancellableTimeout to prevent timer leaks.
+   * The timeout is always cancelled in the finally block, ensuring
+   * no orphaned timers accumulate over time.
+   *
    * Uses Promise.race() to prevent hanging provider requests from blocking
    * execution indefinitely. This is critical for arbitrage trading where
    * timing determines profitability.
@@ -315,10 +346,16 @@ export class SimulationService implements ISimulationService {
     const timeoutMs = SIMULATION_DEFAULTS.timeoutMs;
     const startTime = Date.now();
 
+    // Fix 4.1: Use cancellable timeout to prevent timer leaks
+    const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<SimulationResult>(
+      timeoutMs,
+      `Simulation timeout after ${timeoutMs}ms`
+    );
+
     try {
       const result = await Promise.race([
         provider.simulate(request),
-        this.createTimeoutRejection(timeoutMs),
+        timeoutPromise,
       ]);
       return result;
     } catch (error) {
@@ -333,26 +370,10 @@ export class SimulationService implements ISimulationService {
       });
 
       return this.createErrorResult(errorMessage, provider.type);
+    } finally {
+      // Fix 4.1: Always cancel the timeout to prevent timer leak
+      cancelTimeout();
     }
-  }
-
-  /**
-   * Create a promise that rejects after the specified timeout duration.
-   *
-   * Extracted as a separate method for:
-   * 1. Testability: Can be mocked in unit tests to simulate timeouts
-   * 2. Readability: Keeps tryProvider() focused on the main logic
-   *
-   * @param timeoutMs - Duration in milliseconds before rejection
-   * @returns Promise that never resolves, only rejects after timeout
-   */
-  private createTimeoutRejection(timeoutMs: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(
-        () => reject(new Error(`Simulation timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      );
-    });
   }
 
   /**
