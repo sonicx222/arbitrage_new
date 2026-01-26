@@ -94,15 +94,8 @@ export class BridgeLatencyPredictor {
     }
 
     // Use statistical model for prediction
-    const prediction = this.predictUsingModel(bridge, history);
-
-    logger.debug(`Bridge prediction for ${bridgeKey}`, {
-      estimatedLatency: prediction.estimatedLatency,
-      estimatedCost: prediction.estimatedCost,
-      confidence: prediction.confidence
-    });
-
-    return prediction;
+    // NOTE: Per-prediction debug logging removed - fires during opportunity evaluation
+    return this.predictUsingModel(bridge, history);
   }
 
   // Update model with actual bridge completion data

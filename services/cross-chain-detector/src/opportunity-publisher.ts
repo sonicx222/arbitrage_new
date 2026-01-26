@@ -164,12 +164,9 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
       return true;
     }
 
-    logger.debug('Skipping duplicate opportunity', {
-      dedupeKey,
-      ageMs: age,
-      profitImprovement: `${(profitImprovement * 100).toFixed(1)}%`,
-    });
-
+    // NOTE: Per-duplicate debug logging removed
+    // Dedup happens at high frequency; logging each one creates unacceptable overhead.
+    // Monitor dedup effectiveness via periodic stats (see cache trim logs).
     return false;
   }
 

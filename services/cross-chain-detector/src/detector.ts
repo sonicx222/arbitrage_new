@@ -719,18 +719,7 @@ export class CrossChainDetectorService {
         return;
       }
 
-      // Log the pending opportunity for monitoring
-      this.logger.debug('Received pending opportunity', {
-        txHash: intent.hash,
-        chain: chainName,
-        router: intent.type,
-        tokenIn: intent.tokenIn,
-        tokenOut: intent.tokenOut,
-        amountIn: intent.amountIn,
-        slippage: intent.slippageTolerance,
-        deadline: intent.deadline,
-      });
-
+      // NOTE: Per-event debug logging removed - high-frequency mempool events
       // Track pending opportunities for metrics (increment internal counter)
       this.pendingOpportunitiesReceived = (this.pendingOpportunitiesReceived || 0) + 1;
 
@@ -1009,8 +998,8 @@ export class CrossChainDetectorService {
 
       // FIX 5.1: Concurrency guard - skip if previous detection cycle is still running
       // This prevents duplicate opportunities and resource contention
+      // NOTE: Per-skip debug logging removed - expected under load
       if (this.isDetecting) {
-        this.logger.debug('Skipping detection cycle - previous cycle still running');
         return;
       }
 

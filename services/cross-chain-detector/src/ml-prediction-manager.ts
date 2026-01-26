@@ -301,11 +301,12 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
         return prediction;
       }
 
-      // Prediction timed out
-      logger.debug('ML prediction timed out', { chain, pairKey, maxLatencyMs: mlConfig.maxLatencyMs });
+      // Prediction timed out - expected behavior, no logging needed
+      // Monitor via metrics if tracking is required
       return null;
-    } catch (error) {
-      logger.debug('ML prediction failed', { chain, pairKey, error: (error as Error).message });
+    } catch {
+      // Prediction failed - expected under load, no logging needed
+      // Errors here are operational (timeout, model busy), not bugs
       return null;
     }
   }

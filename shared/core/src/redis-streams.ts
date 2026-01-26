@@ -833,12 +833,13 @@ export class RedisStreamsClient {
 /**
  * FIX 6.1: Minimal logger interface for StreamConsumer.
  * Compatible with winston, pino, and test mock loggers.
+ * Uses Record<string, unknown> for type safety and consistency with ILogger.
  */
 export interface StreamConsumerLogger {
-  error: (msg: string, ctx?: object) => void;
-  warn?: (msg: string, ctx?: object) => void;
-  info?: (msg: string, ctx?: object) => void;
-  debug?: (msg: string, ctx?: object) => void;
+  error: (msg: string, ctx?: Record<string, unknown>) => void;
+  warn?: (msg: string, ctx?: Record<string, unknown>) => void;
+  info?: (msg: string, ctx?: Record<string, unknown>) => void;
+  debug?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
 
 export interface StreamConsumerConfig {
