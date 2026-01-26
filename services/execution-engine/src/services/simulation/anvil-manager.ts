@@ -37,7 +37,7 @@ export interface AnvilForkConfig {
   rpcUrl: string;
   /** Chain identifier (e.g., 'ethereum', 'arbitrum') */
   chain: string;
-  /** Port for Anvil to listen on (default: 8545) */
+  /** Port for Anvil to listen on (default: 8546 to avoid conflict with standard nodes) */
   port?: number;
   /** Block number to fork at (default: latest) */
   forkBlockNumber?: number;
@@ -127,7 +127,8 @@ export interface AnvilForkMetrics {
 // Constants
 // =============================================================================
 
-const DEFAULT_PORT = 8545;
+// Fix 3.2: Changed from 8545 to 8546 to avoid conflict with standard Ethereum nodes
+const DEFAULT_PORT = 8546;
 const DEFAULT_ANVIL_PATH = 'anvil';
 const DEFAULT_CACHE_SIZE = 500;
 const DEFAULT_ACCOUNTS = 1;

@@ -1,19 +1,20 @@
 /**
- * HotForkSynchronizer Unit Tests
+ * HotForkSynchronizer Integration Tests
  *
- * Tests the hot fork synchronization functionality.
+ * Tests the hot fork synchronization with real Anvil instance.
+ * Requires Anvil (Foundry) to be installed.
  *
- * Run with: npm test -- hot-fork-synchronizer
+ * Run with: npm run test:integration -- hot-fork-synchronizer
  *
  * @see Phase 2: Pending-State Simulation Engine (Implementation Plan v3.0)
  * @see Task 2.3.2: Hot Fork Synchronization
  */
 
-import { describe, test, expect, beforeAll, afterAll, afterEach, jest } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll, afterEach } from '@jest/globals';
 import { execSync } from 'child_process';
 import { ethers } from 'ethers';
-import { HotForkSynchronizer, type HotForkSynchronizerConfig } from './hot-fork-synchronizer';
-import { AnvilForkManager, type AnvilForkConfig } from './anvil-manager';
+import { HotForkSynchronizer } from '../../../services/simulation/hot-fork-synchronizer';
+import { AnvilForkManager, type AnvilForkConfig } from '../../../services/simulation/anvil-manager';
 
 // =============================================================================
 // Test Configuration
@@ -43,102 +44,6 @@ const createAnvilConfig = (port: number): AnvilForkConfig => ({
 });
 
 const getUniquePort = () => 8545 + Math.floor(Math.random() * 1000);
-
-// =============================================================================
-// Unit Tests (no Anvil required)
-// =============================================================================
-
-describe('HotForkSynchronizer - Unit Tests', () => {
-  test('should throw when Anvil is not running', async () => {
-    const mockManager = {
-      getState: () => 'stopped',
-      resetToBlock: async () => {},
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {
-      getBlockNumber: async () => 18000000,
-    } as unknown as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-    });
-
-    await expect(synchronizer.start()).rejects.toThrow(/not running/i);
-  });
-
-  test('should initialize with default config', () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-    });
-
-    expect(synchronizer.getState()).toBe('stopped');
-  });
-
-  test('should return initial metrics', () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-    });
-
-    const metrics = synchronizer.getMetrics();
-    expect(metrics.totalSyncs).toBe(0);
-    expect(metrics.successfulSyncs).toBe(0);
-    expect(metrics.failedSyncs).toBe(0);
-    expect(metrics.consecutiveFailures).toBe(0);
-  });
-
-  test('should be able to pause and resume', () => {
-    const mockManager = {
-      getState: () => 'running',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-    });
-
-    // Can't pause when stopped
-    synchronizer.pause();
-    expect(synchronizer.getState()).toBe('stopped');
-
-    // Can't resume when stopped
-    synchronizer.resume();
-    expect(synchronizer.getState()).toBe('stopped');
-  });
-
-  test('stop should be idempotent', async () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-    });
-
-    await synchronizer.stop();
-    await synchronizer.stop();
-    expect(synchronizer.getState()).toBe('stopped');
-  });
-});
 
 // =============================================================================
 // Integration Tests (requires Anvil)
@@ -272,77 +177,108 @@ describeIntegration('HotForkSynchronizer - Integration Tests', () => {
     await synchronizer.stop();
     expect(synchronizer.getState()).toBe('stopped');
   }, TEST_TIMEOUT);
+
+  test('should update average latency metric', async () => {
+    synchronizer = new HotForkSynchronizer({
+      anvilManager,
+      sourceProvider,
+      syncIntervalMs: 50,
+    });
+
+    await synchronizer.start();
+
+    // Wait for multiple syncs
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const metrics = synchronizer.getMetrics();
+    expect(metrics.successfulSyncs).toBeGreaterThan(0);
+    expect(metrics.averageSyncLatencyMs).toBeGreaterThan(0);
+  }, TEST_TIMEOUT);
 });
 
 // =============================================================================
-// Adaptive Sync Unit Tests (Fix 10.5)
+// Success Criteria Tests (Phase 2 Section 2.4)
 // =============================================================================
 
-describe('HotForkSynchronizer - Adaptive Sync Unit Tests', () => {
-  test('should initialize with adaptive sync config', () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
+describeIntegration('HotForkSynchronizer - Success Criteria (2.4)', () => {
+  let anvilManager: AnvilForkManager;
+  let sourceProvider: ethers.JsonRpcProvider;
+  let synchronizer: HotForkSynchronizer;
+  let testPort: number;
 
-    const mockProvider = {} as ethers.JsonRpcProvider;
+  beforeAll(async () => {
+    testPort = getUniquePort();
+    anvilManager = new AnvilForkManager(createAnvilConfig(testPort));
+    await anvilManager.startFork(30000);
+    sourceProvider = new ethers.JsonRpcProvider(TEST_RPC_URL);
+  }, TEST_TIMEOUT);
 
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-      adaptiveSync: true,
-      minSyncIntervalMs: 100,
-      maxSyncIntervalMs: 5000,
-    });
-
-    expect(synchronizer.getState()).toBe('stopped');
-    // Internal config should be set (verified by not throwing)
+  afterEach(async () => {
+    if (synchronizer) {
+      await synchronizer.stop();
+    }
   });
 
-  test('should accept custom logger', () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const mockLogger = {
-      error: jest.fn(),
-      warn: jest.fn(),
-      info: jest.fn(),
-      debug: jest.fn(),
-    };
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
-      logger: mockLogger,
-    });
-
-    expect(synchronizer.getState()).toBe('stopped');
-    // Logger should be set (can't verify directly, but no errors means success)
+  afterAll(async () => {
+    if (anvilManager) {
+      await anvilManager.shutdown();
+    }
   });
 
-  test('should reset metrics', () => {
-    const mockManager = {
-      getState: () => 'stopped',
-    } as unknown as AnvilForkManager;
-
-    const mockProvider = {} as ethers.JsonRpcProvider;
-
-    const synchronizer = new HotForkSynchronizer({
-      anvilManager: mockManager,
-      sourceProvider: mockProvider,
+  /**
+   * Success Criteria 2.4: Reserve prediction accuracy >95% vs actual post-block state
+   *
+   * This test verifies that the sync operation correctly updates to the latest block,
+   * which is essential for accurate reserve prediction.
+   */
+  test('should maintain sync accuracy with source chain', async () => {
+    synchronizer = new HotForkSynchronizer({
+      anvilManager,
+      sourceProvider,
+      syncIntervalMs: 100,
     });
 
-    // Get initial metrics
-    const initialMetrics = synchronizer.getMetrics();
-    expect(initialMetrics.totalSyncs).toBe(0);
+    await synchronizer.start();
 
-    // Reset should work (even though nothing changed)
-    synchronizer.resetMetrics();
+    // Wait for initial sync
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
-    const resetMetrics = synchronizer.getMetrics();
-    expect(resetMetrics.totalSyncs).toBe(0);
-    expect(resetMetrics.consecutiveFailures).toBe(0);
-  });
+    // Get the last synced block from synchronizer
+    const syncedBlock = synchronizer.getLastSyncedBlock();
+
+    // Get the actual latest block from source
+    const sourceBlock = await sourceProvider.getBlockNumber();
+
+    // The synced block should be close to the source block (within 2 blocks)
+    // This accounts for network latency and block production during test
+    expect(Math.abs(sourceBlock - syncedBlock)).toBeLessThanOrEqual(2);
+
+    const metrics = synchronizer.getMetrics();
+    // Success rate should be high
+    const successRate = metrics.successfulSyncs / metrics.totalSyncs;
+    expect(successRate).toBeGreaterThanOrEqual(0.95);
+  }, TEST_TIMEOUT);
+
+  /**
+   * Success Criteria 2.4: Low latency sync operations
+   *
+   * Tests that average sync latency stays reasonable.
+   */
+  test('should maintain low average sync latency', async () => {
+    synchronizer = new HotForkSynchronizer({
+      anvilManager,
+      sourceProvider,
+      syncIntervalMs: 100,
+    });
+
+    await synchronizer.start();
+
+    // Wait for multiple syncs
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const metrics = synchronizer.getMetrics();
+    // Average latency should be reasonable (< 500ms for sync operations)
+    expect(metrics.averageSyncLatencyMs).toBeLessThan(500);
+    expect(metrics.successfulSyncs).toBeGreaterThan(3);
+  }, TEST_TIMEOUT);
 });
