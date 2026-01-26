@@ -296,3 +296,16 @@ export {
   ValidationRule,
   ValidationResult
 } from './config-manager';
+
+// =============================================================================
+// MEMPOOL CONFIGURATION (Phase 1: Mempool Detection Service)
+// =============================================================================
+export {
+  MEMPOOL_CONFIG,
+  KNOWN_ROUTERS,
+  getKnownRouters,
+  getRouterInfo,
+  isMempoolEnabledForChain,
+  getChainMempoolConfig,
+  getEnabledMempoolChains
+} from './mempool-config';
