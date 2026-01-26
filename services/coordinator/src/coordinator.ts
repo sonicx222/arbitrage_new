@@ -407,7 +407,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     });
 
     if (!result.success) {
-      this.logger.error('Failed to start Coordinator Service', { error: result.error });
+      // FIX: Properly serialize Error object for logging
+      this.logger.error('Failed to start Coordinator Service', {
+        error: result.error instanceof Error ? result.error.message : String(result.error),
+        stack: result.error instanceof Error ? result.error.stack : undefined,
+      });
       throw result.error;
     }
   }
@@ -491,7 +495,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     });
 
     if (!result.success) {
-      this.logger.error('Error stopping Coordinator Service', { error: result.error });
+      // FIX: Properly serialize Error object for logging (Error properties aren't enumerable)
+      this.logger.error('Error stopping Coordinator Service', {
+        error: result.error instanceof Error ? result.error.message : String(result.error),
+        stack: result.error instanceof Error ? result.error.stack : undefined,
+      });
     }
   }
 
