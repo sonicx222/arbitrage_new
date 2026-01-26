@@ -143,10 +143,23 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     }
 
     // Only republish if profit improved significantly
-    // DIV-ZERO-FIX: Guard against division by zero when existing profit is 0 or negative
-    const profitImprovement = existingOpp.netProfit > 0
-      ? (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit
-      : (opportunity.netProfit > existingOpp.netProfit ? 1.0 : 0);
+    // FIX 4.1: Comprehensive edge case handling for profit improvement calculation
+    let profitImprovement = 0;
+
+    if (existingOpp.netProfit > 0 && opportunity.netProfit > 0) {
+      // Both positive: calculate relative improvement
+      profitImprovement = (opportunity.netProfit - existingOpp.netProfit) / existingOpp.netProfit;
+    } else if (existingOpp.netProfit <= 0 && opportunity.netProfit > 0) {
+      // New is profitable, old wasn't: always republish (significant improvement)
+      profitImprovement = 1.0;
+    } else if (existingOpp.netProfit > 0 && opportunity.netProfit <= 0) {
+      // New is worse (unprofitable): don't republish
+      profitImprovement = -1.0;
+    } else {
+      // Both non-positive: don't republish unprofitable opportunities
+      profitImprovement = 0;
+    }
+
     if (profitImprovement >= minProfitImprovement) {
       return true;
     }
@@ -227,8 +240,9 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     const arbitrageOpp = toArbitrageOpportunity(opportunity);
 
     try {
-      // Publish to Redis Streams
-      await streamsClient.xadd(
+      // FIX 2.2: Use xaddWithLimit to prevent unbounded stream growth
+      // STREAM_MAX_LENGTHS[OPPORTUNITIES] = 10000 per redis-streams.ts
+      await streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.OPPORTUNITIES,
         arbitrageOpp
       );

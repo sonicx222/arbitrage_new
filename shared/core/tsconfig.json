@@ -17,6 +17,7 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "resolveJsonModule": true,
     "moduleResolution": "node",
     "outDir": "./dist",
     "rootDir": "./src",

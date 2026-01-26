@@ -202,9 +202,12 @@ export class StreamBatcher<T = Record<string, unknown>> {
       return;
     }
 
-    // P0-1 fix: Create mutex lock BEFORE setting flushing flag
-    let resolveLock: () => void;
-    this.flushLock = new Promise(resolve => { resolveLock = resolve; });
+    // FIX 4.3: Create resolveLock with definite assignment using IIFE pattern
+    // This ensures resolveLock is always defined before use in finally block
+    let resolveLock: () => void = () => {}; // Safe default
+    this.flushLock = new Promise<void>(resolve => {
+      resolveLock = resolve;
+    });
     this.flushing = true;
 
     // Atomically take the batch - prevents race condition
@@ -244,7 +247,8 @@ export class StreamBatcher<T = Record<string, unknown>> {
       }
       this.flushing = false;
       this.flushLock = null;
-      resolveLock!();
+      // FIX 4.3: resolveLock is now guaranteed to be defined
+      resolveLock();
     }
   }
 
@@ -305,7 +309,9 @@ export class RedisStreamsClient {
     VOLUME_AGGREGATES: 'stream:volume-aggregates',
     HEALTH: 'stream:health',
     // FIX: Added for coordinator to forward opportunities to execution engine
-    EXECUTION_REQUESTS: 'stream:execution-requests'
+    EXECUTION_REQUESTS: 'stream:execution-requests',
+    // Task 1.3.3: Pending opportunities from mempool detection
+    PENDING_OPPORTUNITIES: 'stream:pending-opportunities',
   } as const;
 
   /**
@@ -319,7 +325,8 @@ export class RedisStreamsClient {
     [RedisStreamsClient.STREAMS.WHALE_ALERTS]: 5000,       // Low volume, critical alerts
     [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: 10000, // Aggregated data
     [RedisStreamsClient.STREAMS.HEALTH]: 1000,             // Health checks, short history
-    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 5000  // Execution requests, critical for trading
+    [RedisStreamsClient.STREAMS.EXECUTION_REQUESTS]: 5000, // Execution requests, critical for trading
+    [RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES]: 10000, // Mempool pending swaps, time-sensitive
   };
 
   constructor(url: string, password?: string, deps?: RedisStreamsClientDeps) {
@@ -823,6 +830,17 @@ export class RedisStreamsClient {
 // Reduces code duplication in services consuming from Redis Streams
 // =============================================================================
 
+/**
+ * FIX 6.1: Minimal logger interface for StreamConsumer.
+ * Compatible with winston, pino, and test mock loggers.
+ */
+export interface StreamConsumerLogger {
+  error: (msg: string, ctx?: object) => void;
+  warn?: (msg: string, ctx?: object) => void;
+  info?: (msg: string, ctx?: object) => void;
+  debug?: (msg: string, ctx?: object) => void;
+}
+
 export interface StreamConsumerConfig {
   /** Consumer group configuration */
   config: ConsumerGroupConfig;
@@ -834,8 +852,8 @@ export interface StreamConsumerConfig {
   blockMs?: number;
   /** Whether to auto-acknowledge after handler completes (default: true) */
   autoAck?: boolean;
-  /** Logger instance for error logging */
-  logger?: { error: (msg: string, ctx?: any) => void; debug?: (msg: string, ctx?: any) => void };
+  /** FIX 6.1: Logger instance using standardized interface */
+  logger?: StreamConsumerLogger;
   /** Callback when pause state changes (for backpressure monitoring) */
   onPauseStateChange?: (isPaused: boolean) => void;
 }

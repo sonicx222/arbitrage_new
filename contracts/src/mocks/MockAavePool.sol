@@ -8,6 +8,22 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @title MockAavePool
  * @dev Mock Aave V3 Pool for testing flash loans
  * @notice Implements IPool.flashLoanSimple() interface
+ *
+ * ## Initiator Parameter Behavior (Fix 1.1 Documentation)
+ *
+ * In Aave V3's real Pool contract, the `initiator` parameter passed to
+ * `executeOperation()` is the address that called `flashLoanSimple()`.
+ *
+ * When our FlashLoanArbitrage contract calls `POOL.flashLoanSimple(address(this), ...)`,
+ * the Pool sees FlashLoanArbitrage as msg.sender. The Pool then calls back
+ * FlashLoanArbitrage.executeOperation() with `initiator = FlashLoanArbitrage`.
+ *
+ * This mock replicates that behavior by passing `msg.sender` as the initiator,
+ * which will be the FlashLoanArbitrage contract in our test setup.
+ *
+ * Security check in FlashLoanArbitrage.executeOperation():
+ * - `initiator == address(this)` ensures only self-initiated flash loans are processed
+ * - This prevents attackers from triggering the callback directly
  */
 contract MockAavePool {
     using SafeERC20 for IERC20;

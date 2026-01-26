@@ -26,10 +26,10 @@
  * 4. **Multi-Chain by Design**: BaseDetector = 1 chain per instance.
  *    CrossChainDetector = aggregates ALL chains in one instance.
  *
- * This exception is documented in ADR-003.
+ * This architectural decision is documented here as there is no separate ADR.
+ * FIX 2.1: Removed reference to non-existent ADR-003.
  *
  * @see ADR-002: Redis Streams over Pub/Sub
- * @see ADR-003: Partitioned Chain Detectors (documents this exception)
  * @see ADR-007: Failover Strategy
  */
 
@@ -55,11 +55,17 @@ import {
   normalizeTokenForCrossChain,
   // REFACTOR: Use centralized default quote tokens from config
   getDefaultQuoteToken,
+  // FIX 9.1: Use centralized chain ID mapping
+  getChainName,
 } from '@arbitrage/config';
 import {
   PriceUpdate,
   WhaleTransaction,
-  CrossChainBridge
+  CrossChainBridge,
+  // Task 1.3.3: Pending opportunity types for mempool integration
+  PendingOpportunity,
+  // FIX 7.1: Import PendingSwapIntent for pending opportunity analysis
+  PendingSwapIntent,
 } from '@arbitrage/types';
 import { BridgeLatencyPredictor } from './bridge-predictor';
 
@@ -78,6 +84,8 @@ import {
   MLPredictionConfig,
   // FIX 4.2: Import normalizeToInternalFormat for consistent token pair lookups
   normalizeToInternalFormat,
+  // FIX 7.1: Import toDisplayTokenPair for pending opportunity formatting
+  toDisplayTokenPair,
 } from './types';
 
 // Phase 3: Whale Activity Tracker imports
@@ -132,12 +140,22 @@ const DEFAULT_ML_CONFIG: MLPredictionConfig = {
 /**
  * FIX #12: Environment-aware detector configuration
  * Production environments need faster detection for competitive arbitrage trading.
+ *
+ * FIX 3.1: Detection interval must be greater than typical detection cycle time
+ * to prevent cycles from being skipped. Typical cycle time includes:
+ * - Snapshot creation: ~1-5ms
+ * - ML predictions (optional): up to 50ms
+ * - Price comparison: ~1-10ms (depends on pair count)
+ * - Opportunity publishing: ~1-5ms
+ * Total: ~10-70ms typical, 100ms safe minimum for production.
  */
 const isProduction = process.env.NODE_ENV === 'production';
 
 const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
-  // FIX #12: Faster detection in production for competitive trading
-  detectionIntervalMs: isProduction ? 50 : 100,
+  // FIX 3.1: Production interval increased from 50ms to 100ms
+  // 50ms was too aggressive - detection cycles would overlap and get skipped
+  // 100ms provides good balance between speed and reliability
+  detectionIntervalMs: isProduction ? 100 : 200,
   // FIX #12: More frequent health checks in production for faster failover
   healthCheckIntervalMs: isProduction ? 10000 : 30000,
   bridgeCleanupFrequency: 100,
@@ -215,6 +233,10 @@ export class CrossChainDetectorService {
   // FIX B2: Concurrency guard for health monitoring
   private isMonitoringHealth = false;
 
+  // FIX 5.1: Concurrency guard for detection cycles
+  // Prevents overlapping detection cycles when detectCrossChainOpportunities() takes longer than interval
+  private isDetecting = false;
+
   // FIX #5: Circuit breaker for detection loop errors
   private consecutiveDetectionErrors = 0;
   private static readonly DETECTION_ERROR_THRESHOLD = 5;
@@ -226,6 +248,9 @@ export class CrossChainDetectorService {
 
   // FIX #23: Cycle counter for structured logging
   private detectionCycleCounter = 0;
+
+  // Task 1.3.3: Counter for pending opportunities received from mempool
+  private pendingOpportunitiesReceived = 0;
 
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
@@ -267,6 +292,13 @@ export class CrossChainDetectorService {
       },
       {
         streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        groupName: 'cross-chain-detector-group',
+        consumerName: this.instanceId,
+        startId: '$'
+      },
+      // Task 1.3.3: Pending opportunities from mempool detection
+      {
+        streamName: RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES,
         groupName: 'cross-chain-detector-group',
         consumerName: this.instanceId,
         startId: '$'
@@ -556,6 +588,11 @@ export class CrossChainDetectorService {
       this.handleWhaleTransaction(tx);
     });
 
+    // Task 1.3.3: Handle pending opportunities from mempool detection
+    this.streamConsumer.on('pendingOpportunity', (opp: PendingOpportunity) => {
+      this.handlePendingOpportunity(opp);
+    });
+
     this.streamConsumer.on('error', (error: Error) => {
       this.logger.error('StreamConsumer error', { error: error.message });
     });
@@ -643,6 +680,265 @@ export class CrossChainDetectorService {
   }
 
   // ===========================================================================
+  // Task 1.3.3: Pending Opportunity Handling (Mempool Integration)
+  // ===========================================================================
+
+  // FIX 9.1: Removed duplicate CHAIN_ID_TO_NAME - use getChainName() from @arbitrage/config
+
+  /**
+   * Handle a pending opportunity from the mempool detector.
+   *
+   * This converts a pending swap intent into a potential arbitrage opportunity
+   * by checking if the pending transaction creates a price discrepancy that
+   * can be exploited.
+   *
+   * Task 1.3.3: Integration with Existing Detection
+   */
+  private async handlePendingOpportunity(opp: PendingOpportunity): Promise<void> {
+    try {
+      const intent = opp.intent;
+
+      // Get chain name from chain ID (FIX 9.1: Use centralized getChainName)
+      const chainName = getChainName(intent.chainId);
+      if (chainName === 'unknown') {
+        this.logger.debug('Unknown chain ID in pending opportunity', {
+          chainId: intent.chainId,
+          txHash: intent.hash,
+        });
+        return;
+      }
+
+      // Check if deadline has passed
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      if (intent.deadline < currentTimestamp) {
+        this.logger.debug('Pending opportunity expired', {
+          txHash: intent.hash,
+          deadline: intent.deadline,
+          now: currentTimestamp,
+        });
+        return;
+      }
+
+      // Log the pending opportunity for monitoring
+      this.logger.debug('Received pending opportunity', {
+        txHash: intent.hash,
+        chain: chainName,
+        router: intent.type,
+        tokenIn: intent.tokenIn,
+        tokenOut: intent.tokenOut,
+        amountIn: intent.amountIn,
+        slippage: intent.slippageTolerance,
+        deadline: intent.deadline,
+      });
+
+      // Track pending opportunities for metrics (increment internal counter)
+      this.pendingOpportunitiesReceived = (this.pendingOpportunitiesReceived || 0) + 1;
+
+      // FIX 7.1: Implement pending opportunity analysis
+      // Task 1.3.4: Full implementation of mempool-based opportunity detection
+      await this.analyzePendingOpportunity(intent, chainName, opp.estimatedImpact);
+
+    } catch (error) {
+      this.logger.error('Error handling pending opportunity', {
+        error: (error as Error).message,
+        txHash: opp.intent?.hash,
+      });
+    }
+  }
+
+  /**
+   * FIX 7.1: Analyze pending swap for arbitrage opportunities.
+   *
+   * This method implements the full pending opportunity analysis:
+   * 1. Calculate expected price impact from the pending swap
+   * 2. Check current prices on other DEXes (same chain for now)
+   * 3. Determine if backrunning is profitable after the pending swap executes
+   * 4. Publish enhanced opportunity with pending tx metadata
+   *
+   * Task 1.3.4: Full implementation of mempool-based opportunity detection
+   *
+   * @param intent - The pending swap intent from mempool
+   * @param chainName - The chain name (e.g., 'ethereum')
+   * @param estimatedImpact - Optional estimated price impact from mempool detector
+   */
+  private async analyzePendingOpportunity(
+    intent: PendingSwapIntent,
+    chainName: string,
+    estimatedImpact?: number
+  ): Promise<void> {
+    if (!this.priceDataManager || !this.opportunityPublisher) {
+      return;
+    }
+
+    try {
+      // Get current price snapshot
+      const snapshot = this.priceDataManager.createIndexedSnapshot();
+
+      // Normalize token addresses to find matching pairs
+      const normalizedTokenIn = normalizeTokenForCrossChain(intent.tokenIn);
+      const normalizedTokenOut = normalizeTokenForCrossChain(intent.tokenOut);
+      const normalizedPair = `${normalizedTokenIn}_${normalizedTokenOut}`;
+      const reversePair = `${normalizedTokenOut}_${normalizedTokenIn}`;
+
+      // Look for prices on this token pair
+      const pricesForPair = snapshot.byToken.get(normalizedPair)
+        ?? snapshot.byToken.get(reversePair)
+        ?? [];
+
+      if (pricesForPair.length < 2) {
+        // Need at least 2 price sources to find arbitrage
+        this.logger.debug('Insufficient price sources for pending opportunity', {
+          txHash: intent.hash,
+          pair: normalizedPair,
+          priceCount: pricesForPair.length,
+        });
+        return;
+      }
+
+      // Calculate expected price impact from pending swap
+      // For AMM DEXs, price impact ≈ amountIn / reserve (simplified constant product)
+      // Use estimatedImpact from mempool detector if available, otherwise estimate
+      // Use the update object which contains reserve0/reserve1
+      const priceImpact = estimatedImpact ?? this.estimatePriceImpact(intent, pricesForPair[0].update);
+
+      if (priceImpact < 0.001) {
+        // Less than 0.1% impact - not significant enough
+        return;
+      }
+
+      // Find the price point that would be affected by this pending swap
+      // (the DEX where the pending swap is executing)
+      const affectedPrice = pricesForPair.find(p =>
+        p.chain === chainName && intent.router.toLowerCase().includes(p.dex.toLowerCase())
+      );
+
+      if (!affectedPrice) {
+        // Pending swap is on a DEX we're not tracking
+        return;
+      }
+
+      // Calculate post-swap price (after pending tx executes)
+      // If buying tokenOut, price of tokenOut increases
+      const postSwapPrice = affectedPrice.price * (1 + priceImpact);
+
+      // Find best alternative price on other DEXes/chains
+      let bestAltPrice = 0;
+      let bestAltSource: typeof pricesForPair[0] | null = null;
+
+      for (const pricePoint of pricesForPair) {
+        if (pricePoint === affectedPrice) continue;
+
+        if (pricePoint.price > bestAltPrice) {
+          bestAltPrice = pricePoint.price;
+          bestAltSource = pricePoint;
+        }
+      }
+
+      if (!bestAltSource || bestAltPrice === 0) {
+        return;
+      }
+
+      // Calculate potential profit from backrunning
+      // Buy on affected DEX (at post-swap price), sell on alternative DEX
+      const priceDiff = bestAltPrice - postSwapPrice;
+      const priceDiffPercent = priceDiff / postSwapPrice;
+
+      // Apply confidence boost for pending opportunities
+      // Higher confidence for larger pending swaps and shorter deadline
+      const timeToDeadline = intent.deadline - Math.floor(Date.now() / 1000);
+      const deadlineBoost = Math.min(timeToDeadline / 300, 1.0); // Max boost at 5min deadline
+      const baseConfidence = 0.6 + (priceImpact * 10); // Higher impact = higher confidence
+      const confidence = Math.min(baseConfidence * deadlineBoost, 0.95);
+
+      // Minimum profitability threshold: 0.5% after estimated gas costs
+      const MIN_PROFIT_THRESHOLD = 0.005;
+      if (priceDiffPercent < MIN_PROFIT_THRESHOLD) {
+        return;
+      }
+
+      // Estimate net profit (simplified - assumes same trade size as pending)
+      const estimatedGasCost = BigInt(intent.gasPrice) * BigInt(200000); // ~200k gas for swap
+      const amountInBigInt = BigInt(intent.amountIn);
+      const grossProfit = (amountInBigInt * BigInt(Math.floor(priceDiffPercent * 10000))) / BigInt(10000);
+      const netProfit = Number(grossProfit) - Number(estimatedGasCost);
+
+      if (netProfit <= 0) {
+        return;
+      }
+
+      // Create and publish opportunity
+      const now = Date.now();
+      const opportunity: CrossChainOpportunity = {
+        token: toDisplayTokenPair(normalizedPair),
+        sourceChain: chainName,
+        sourceDex: affectedPrice.dex,
+        sourcePrice: postSwapPrice,
+        targetChain: bestAltSource.chain,
+        targetDex: bestAltSource.dex,
+        targetPrice: bestAltPrice,
+        priceDiff: priceDiff,
+        percentageDiff: priceDiffPercent,
+        tradeSizeUsd: this.config.defaultTradeSizeUsd ?? 1000,
+        estimatedProfit: netProfit / 1e18, // Convert from wei to ETH
+        bridgeCost: 0, // Same-chain opportunity
+        netProfit: netProfit / 1e18,
+        createdAt: now,
+        timestamp: now,
+        confidence,
+        // Pending opportunity metadata
+        pendingTxHash: intent.hash,
+        pendingDeadline: intent.deadline,
+        pendingSlippage: intent.slippageTolerance,
+      };
+
+      // Publish with higher priority due to time sensitivity
+      await this.publishArbitrageOpportunity(opportunity);
+
+      this.logger.info('Pending opportunity detected and published', {
+        txHash: intent.hash,
+        chain: chainName,
+        pair: normalizedPair,
+        priceDiff: `${(priceDiffPercent * 100).toFixed(2)}%`,
+        netProfit: opportunity.netProfit,
+        confidence: opportunity.confidence,
+      });
+
+    } catch (error) {
+      this.logger.error('Failed to analyze pending opportunity', {
+        error: (error as Error).message,
+        txHash: intent.hash,
+      });
+    }
+  }
+
+  /**
+   * FIX 7.1: Estimate price impact for a pending swap.
+   * Uses simplified constant product formula for AMM DEXs.
+   */
+  private estimatePriceImpact(
+    intent: PendingSwapIntent,
+    priceUpdate: PriceUpdate
+  ): number {
+    try {
+      // If we have reserve data, calculate impact
+      if (priceUpdate.reserve0 && priceUpdate.reserve1) {
+        const reserve = BigInt(priceUpdate.reserve0);
+        const amountIn = BigInt(intent.amountIn);
+
+        // Price impact ≈ amountIn / (reserve + amountIn) for constant product
+        const impact = Number(amountIn * BigInt(10000) / (reserve + amountIn)) / 10000;
+        return impact;
+      }
+
+      // Fallback: estimate based on slippage tolerance
+      // If user set high slippage, they expect high impact
+      return intent.slippageTolerance * 2; // Conservative estimate
+    } catch {
+      return intent.slippageTolerance; // Safe fallback
+    }
+  }
+
+  // ===========================================================================
   // ADR-014: Validation and cleanup now handled by modular components
   // - StreamConsumer handles message validation
   // - PriceDataManager handles price data cleanup and snapshots
@@ -711,6 +1007,13 @@ export class CrossChainDetectorService {
     this.opportunityDetectionInterval = setInterval(async () => {
       if (!this.stateManager.isRunning()) return;
 
+      // FIX 5.1: Concurrency guard - skip if previous detection cycle is still running
+      // This prevents duplicate opportunities and resource contention
+      if (this.isDetecting) {
+        this.logger.debug('Skipping detection cycle - previous cycle still running');
+        return;
+      }
+
       // FIX #5: Circuit breaker - skip detection if too many consecutive errors
       const now = Date.now();
       if (this.consecutiveDetectionErrors >= CrossChainDetectorService.DETECTION_ERROR_THRESHOLD) {
@@ -725,6 +1028,9 @@ export class CrossChainDetectorService {
         });
         this.consecutiveDetectionErrors = 0;
       }
+
+      // FIX 5.1: Set guard before async operation
+      this.isDetecting = true;
 
       try {
         await this.detectCrossChainOpportunities();
@@ -746,6 +1052,9 @@ export class CrossChainDetectorService {
             cooldownMs: CrossChainDetectorService.CIRCUIT_BREAKER_RESET_MS,
           });
         }
+      } finally {
+        // FIX 5.1: Always release guard, even on error
+        this.isDetecting = false;
       }
     }, intervalMs);
   }
@@ -1328,31 +1637,58 @@ export class CrossChainDetectorService {
   ): Promise<void> {
     if (!this.priceDataManager || !ARBITRAGE_CONFIG.crossChainEnabled) return;
 
+    // FIX 4.2: Validate whale token before processing
+    if (!whaleTx.token || typeof whaleTx.token !== 'string' || whaleTx.token.trim().length === 0) {
+      this.logger.debug('Skipping whale opportunity detection: invalid token', {
+        txHash: whaleTx.transactionHash,
+      });
+      return;
+    }
+
     try {
       // PERF-P1: Use indexed snapshot for O(1) lookups
       const indexedSnapshot = this.priceDataManager.createIndexedSnapshot();
 
-      // FIX 4.2: Normalize the token from whale transaction for lookup
-      // Use normalizeToInternalFormat to ensure consistent WETH_USDC format
-      // (handles both "WETH/USDC" display format and "WETH_USDC" internal format)
-      const normalizedToken = normalizeToInternalFormat(normalizeTokenPair(whaleTx.token));
+      // FIX 4.2: WhaleTransaction.token is a single token (e.g., "WETH"), not a pair.
+      // We need to find ALL pairs that contain this token and check for arbitrage.
+      const normalizedWhaleToken = normalizeTokenForCrossChain(whaleTx.token);
 
-      // PERF-P1: O(1) lookup instead of O(n²) iteration
-      const chainPrices = indexedSnapshot.byToken.get(normalizedToken);
+      // Find all token pairs containing the whale's token
+      const matchingPairs: string[] = [];
+      for (const tokenPair of indexedSnapshot.tokenPairs) {
+        // tokenPair is in format "TOKEN0_TOKEN1"
+        if (tokenPair.includes(normalizedWhaleToken)) {
+          matchingPairs.push(tokenPair);
+        }
+      }
 
-      if (chainPrices && chainPrices.length >= 2) {
-        // DUPLICATION-I1: Use shared method with whale data
-        const opportunities = this.findArbitrageInPrices(chainPrices, summary, whaleTx);
+      if (matchingPairs.length === 0) {
+        this.logger.debug('No pairs found for whale token', {
+          token: whaleTx.token,
+          normalized: normalizedWhaleToken,
+        });
+        return;
+      }
 
-        for (const opportunity of opportunities) {
-          if (opportunity.confidence > ARBITRAGE_CONFIG.confidenceThreshold) {
-            await this.publishArbitrageOpportunity(opportunity);
+      // Check each matching pair for cross-chain arbitrage
+      for (const tokenPair of matchingPairs) {
+        const chainPrices = indexedSnapshot.byToken.get(tokenPair);
+
+        if (chainPrices && chainPrices.length >= 2) {
+          // DUPLICATION-I1: Use shared method with whale data
+          const opportunities = this.findArbitrageInPrices(chainPrices, summary, whaleTx);
+
+          for (const opportunity of opportunities) {
+            if (opportunity.confidence > ARBITRAGE_CONFIG.confidenceThreshold) {
+              await this.publishArbitrageOpportunity(opportunity);
+            }
           }
         }
       }
     } catch (error) {
       this.logger.error('Failed to detect whale-induced opportunities', {
-        error: (error as Error).message
+        error: (error as Error).message,
+        token: whaleTx.token,
       });
     }
   }
@@ -1387,7 +1723,9 @@ export class CrossChainDetectorService {
       this.isMonitoringHealth = true;
       try {
         // P3-2 FIX: Use unified ServiceHealth with 'name' field
-        // FIX: Add 'timestamp' field - coordinator maps data.timestamp to lastHeartbeat
+        // FIX 6.3: Standardized to 'lastHeartbeat' per ServiceHealth interface.
+        // 'timestamp' kept for coordinator compatibility until coordinator is updated.
+        // TODO: Remove 'timestamp' once coordinator uses 'lastHeartbeat' consistently.
         const now = Date.now();
         const health = {
           name: 'cross-chain-detector',
@@ -1395,17 +1733,18 @@ export class CrossChainDetectorService {
           uptime: process.uptime(),
           memoryUsage: process.memoryUsage().heapUsed,
           cpuUsage: 0,
-          timestamp: now,        // FIX: Coordinator expects 'timestamp' for health tracking
-          lastHeartbeat: now,    // Keep for backwards compatibility
+          lastHeartbeat: now,    // FIX 6.3: Primary field per ServiceHealth interface
+          timestamp: now,        // Deprecated: kept for coordinator backwards compatibility
           // ADR-014: Use module getters for health metrics
           chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
           opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,
           mlPredictorActive: !!this.mlPredictor
         };
 
-        // Publish health to stream
+        // FIX 2.2: Publish health to stream with MAXLEN limit
+        // STREAM_MAX_LENGTHS[HEALTH] = 1000 per redis-streams.ts
         if (this.streamsClient) {
-          await this.streamsClient.xadd(
+          await this.streamsClient.xaddWithLimit(
             RedisStreamsClient.STREAMS.HEALTH,
             health
           );

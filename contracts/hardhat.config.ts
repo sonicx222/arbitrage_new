@@ -46,9 +46,13 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: {
         url: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
-        // Fixed block for reproducible tests (updated Jan 2026)
-        // Using block from late 2025 for accurate DEX liquidity/prices
-        blockNumber: 21500000,
+        // Fix 3.2: Block number is now configurable via environment variable
+        // Default to a fixed block for reproducible tests when not specified
+        // Set FORK_BLOCK_NUMBER to 'latest' for current block or a specific number
+        // Example: FORK_BLOCK_NUMBER=21500000 or FORK_BLOCK_NUMBER=latest
+        blockNumber: process.env.FORK_BLOCK_NUMBER === 'latest'
+          ? undefined  // undefined = latest block
+          : parseInt(process.env.FORK_BLOCK_NUMBER || '21500000'),
         enabled: process.env.FORK_ENABLED === 'true',
       },
       chainId: 31337,

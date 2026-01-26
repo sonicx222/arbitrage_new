@@ -8,6 +8,15 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @title MockMaliciousRouter
  * @dev Malicious router that attempts reentrancy attack
  * @notice Used for testing reentrancy protection in FlashLoanArbitrage
+ *
+ * ## Fix 6.3: Attack Behavior
+ *
+ * The attack is now ENABLED BY DEFAULT in the constructor. This ensures
+ * reentrancy tests actually trigger the attack attempt. Use disableAttack()
+ * if you need to test normal swap behavior with this router.
+ *
+ * The reentrancy attack attempts to call executeArbitrage() during a swap.
+ * This should fail due to the ReentrancyGuard modifier on executeArbitrage().
  */
 contract MockMaliciousRouter {
     using SafeERC20 for IERC20;
@@ -18,12 +27,16 @@ contract MockMaliciousRouter {
 
     constructor(address _attackTarget) {
         attackTarget = _attackTarget;
+        // Fix 6.3: Enable attack by default so tests actually trigger it
+        attackEnabled = true;
     }
 
+    /// @notice Enable reentrancy attack (enabled by default)
     function enableAttack() external {
         attackEnabled = true;
     }
 
+    /// @notice Disable reentrancy attack for normal swap testing
     function disableAttack() external {
         attackEnabled = false;
     }
