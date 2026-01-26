@@ -274,13 +274,24 @@ export interface ProviderHealth {
 }
 
 // =============================================================================
-// Simulation Configuration
+// Simulation Configuration (DEV/TEST MODE)
 // =============================================================================
 
+/**
+ * Configuration for DEV simulation mode (SimulationStrategy).
+ *
+ * Fix 2.2: This is NOT the transaction simulation service (Tenderly/Alchemy).
+ * This controls the "dry run" mode where the engine simulates execution
+ * without actually submitting blockchain transactions. Used for testing
+ * and development purposes.
+ *
+ * @see SimulationStrategy (strategies/simulation.strategy.ts)
+ * @see services/simulation/ for actual transaction simulation (pre-flight checks)
+ */
 export interface SimulationConfig {
-  /** Enable simulation mode - bypasses blockchain transactions */
+  /** Enable simulation mode - bypasses blockchain transactions (dev/test only) */
   enabled: boolean;
-  /** Simulated success rate (0.0 - 1.0), default 0.85 */
+  /** Simulated success rate (0.0 - 1.0), default 0.85 - DEV MODE ONLY */
   successRate?: number;
   /** Simulated execution latency in ms, default 500 */
   executionLatencyMs?: number;
@@ -356,6 +367,40 @@ export interface ExecutionEngineConfig {
   standbyConfig?: StandbyConfig;
   /** Circuit breaker configuration (Phase 1.3) */
   circuitBreakerConfig?: CircuitBreakerConfig;
+  /** Phase 2 pending state simulation configuration */
+  pendingStateConfig?: PendingStateEngineConfig;
+}
+
+/**
+ * Phase 2: Pending State Simulation Engine Configuration
+ *
+ * Enables local Anvil fork for simulating pending mempool transactions
+ * to predict post-swap pool states before execution.
+ *
+ * @see implementation_plan_v3.md Phase 2
+ * @see services/simulation/anvil-manager.ts
+ * @see services/simulation/pending-state-simulator.ts
+ * @see services/simulation/hot-fork-synchronizer.ts
+ */
+export interface PendingStateEngineConfig {
+  /** Enable pending state simulation (default: false) */
+  enabled: boolean;
+  /** RPC URL to fork from (required if enabled) */
+  rpcUrl?: string;
+  /** Chain to simulate (e.g., 'ethereum', 'arbitrum') */
+  chain?: string;
+  /** Port for Anvil to listen on (default: 8546 to avoid conflict with 8545) */
+  anvilPort?: number;
+  /** Auto-start Anvil on engine start (default: true when enabled) */
+  autoStartAnvil?: boolean;
+  /** Enable hot fork synchronization (default: true when enabled) */
+  enableHotSync?: boolean;
+  /** Sync interval in ms for hot fork (default: 1000) */
+  syncIntervalMs?: number;
+  /** Enable adaptive sync interval (default: true) */
+  adaptiveSync?: boolean;
+  /** Timeout for pending state simulations in ms (default: 5000) */
+  simulationTimeoutMs?: number;
 }
 
 /**
@@ -376,60 +421,131 @@ export interface StandbyConfig {
 // Timeouts (configurable via environment variables)
 // =============================================================================
 
+// =============================================================================
+// Environment Variable Parsing with Validation (Fix 3.1)
+// =============================================================================
+
+/**
+ * Parse and validate a numeric environment variable.
+ * Fix 3.1: Adds bounds checking and NaN protection for production safety.
+ *
+ * @param envVar - Environment variable name
+ * @param defaultValue - Default value if not set or invalid
+ * @param min - Minimum allowed value (inclusive)
+ * @param max - Maximum allowed value (inclusive)
+ * @returns Validated numeric value
+ */
+function parseEnvTimeout(
+  envVar: string,
+  defaultValue: number,
+  min: number = 100,
+  max: number = 600000
+): number {
+  const raw = process.env[envVar];
+  if (raw === undefined || raw === '') {
+    return defaultValue;
+  }
+
+  const parsed = parseInt(raw, 10);
+
+  // Check for NaN (e.g., if someone sets EXECUTION_TIMEOUT_MS="abc")
+  if (Number.isNaN(parsed)) {
+    console.warn(
+      `[WARN] Invalid ${envVar}="${raw}" (not a number), using default ${defaultValue}ms`
+    );
+    return defaultValue;
+  }
+
+  // Check bounds
+  if (parsed < min) {
+    console.warn(
+      `[WARN] ${envVar}=${parsed} is below minimum ${min}ms, using minimum`
+    );
+    return min;
+  }
+
+  if (parsed > max) {
+    console.warn(
+      `[WARN] ${envVar}=${parsed} is above maximum ${max}ms, using maximum`
+    );
+    return max;
+  }
+
+  return parsed;
+}
+
 /**
  * Execution timeout - must be less than lock TTL (120s per-opportunity lock).
  * The distributed lock manager uses 60s default TTL, but withLock() in engine.ts
  * uses 120s for opportunity locks (2x execution timeout for safety margin).
  * Environment: EXECUTION_TIMEOUT_MS (default: 55000)
+ * Valid range: 1000ms - 120000ms
  */
-export const EXECUTION_TIMEOUT_MS = parseInt(
-  process.env.EXECUTION_TIMEOUT_MS || '55000',
-  10
+export const EXECUTION_TIMEOUT_MS = parseEnvTimeout(
+  'EXECUTION_TIMEOUT_MS',
+  55000,
+  1000,
+  120000
 );
 
 /**
  * Transaction timeout for blockchain operations.
  * Environment: TRANSACTION_TIMEOUT_MS (default: 50000)
+ * Valid range: 1000ms - 120000ms
  */
-export const TRANSACTION_TIMEOUT_MS = parseInt(
-  process.env.TRANSACTION_TIMEOUT_MS || '50000',
-  10
+export const TRANSACTION_TIMEOUT_MS = parseEnvTimeout(
+  'TRANSACTION_TIMEOUT_MS',
+  50000,
+  1000,
+  120000
 );
 
 /**
  * Shutdown timeout for graceful cleanup.
  * Environment: SHUTDOWN_TIMEOUT_MS (default: 5000)
+ * Valid range: 1000ms - 30000ms
  */
-export const SHUTDOWN_TIMEOUT_MS = parseInt(
-  process.env.SHUTDOWN_TIMEOUT_MS || '5000',
-  10
+export const SHUTDOWN_TIMEOUT_MS = parseEnvTimeout(
+  'SHUTDOWN_TIMEOUT_MS',
+  5000,
+  1000,
+  30000
 );
 
 /**
  * Provider connectivity check timeout (quick check).
  * Environment: PROVIDER_CONNECTIVITY_TIMEOUT_MS (default: 5000)
+ * Valid range: 500ms - 30000ms
  */
-export const PROVIDER_CONNECTIVITY_TIMEOUT_MS = parseInt(
-  process.env.PROVIDER_CONNECTIVITY_TIMEOUT_MS || '5000',
-  10
+export const PROVIDER_CONNECTIVITY_TIMEOUT_MS = parseEnvTimeout(
+  'PROVIDER_CONNECTIVITY_TIMEOUT_MS',
+  5000,
+  500,
+  30000
 );
 
 /**
  * Provider health check timeout (periodic check).
  * Environment: PROVIDER_HEALTH_CHECK_TIMEOUT_MS (default: 5000)
+ * Valid range: 500ms - 30000ms
  */
-export const PROVIDER_HEALTH_CHECK_TIMEOUT_MS = parseInt(
-  process.env.PROVIDER_HEALTH_CHECK_TIMEOUT_MS || '5000',
-  10
+export const PROVIDER_HEALTH_CHECK_TIMEOUT_MS = parseEnvTimeout(
+  'PROVIDER_HEALTH_CHECK_TIMEOUT_MS',
+  5000,
+  500,
+  30000
 );
 
 /**
  * Provider reconnection timeout (longer for new connection establishment).
  * Environment: PROVIDER_RECONNECTION_TIMEOUT_MS (default: 10000)
+ * Valid range: 1000ms - 60000ms
  */
-export const PROVIDER_RECONNECTION_TIMEOUT_MS = parseInt(
-  process.env.PROVIDER_RECONNECTION_TIMEOUT_MS || '10000',
-  10
+export const PROVIDER_RECONNECTION_TIMEOUT_MS = parseEnvTimeout(
+  'PROVIDER_RECONNECTION_TIMEOUT_MS',
+  10000,
+  1000,
+  60000
 );
 
 // =============================================================================
@@ -517,6 +633,12 @@ export interface StrategyContext {
   stats: ExecutionStats;
   /** Simulation service for pre-flight transaction validation (Phase 1.1) */
   simulationService?: ISimulationService;
+  /**
+   * Phase 2: Pending state simulator for mempool-aware execution.
+   * Enables strategies to simulate pending transactions and predict
+   * post-swap pool states before execution.
+   */
+  pendingStateSimulator?: import('./services/simulation/pending-state-simulator').PendingStateSimulator;
 }
 
 /**

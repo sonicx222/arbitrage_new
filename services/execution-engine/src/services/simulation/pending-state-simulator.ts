@@ -1,0 +1,882 @@
+/**
+ * Pending State Simulator
+ *
+ * Simulates pending swap transactions to predict post-swap pool reserves.
+ * Uses AnvilForkManager to apply transactions and query resulting state.
+ *
+ * Features:
+ * - Simulate individual pending swaps
+ * - Batch simulation for multiple transactions
+ * - Predict pool reserves after swap execution
+ * - Calculate execution prices
+ * - Detect affected liquidity pools
+ *
+ * @see Phase 2: Pending-State Simulation Engine (Implementation Plan v3.0)
+ * @see Task 2.3.1: Anvil Fork Manager
+ */
+
+import { ethers } from 'ethers';
+import type { AnvilForkManager } from './anvil-manager';
+import { isWethAddress } from './types';
+
+/**
+ * Extended simulation result with logs for execution price calculation.
+ */
+interface ExtendedSimulationResult {
+  success: boolean;
+  txHash?: string;
+  gasUsed?: bigint;
+  latencyMs: number;
+  revertReason?: string;
+  error?: string;
+  /** Transaction logs for parsing actual swap amounts */
+  logs?: Array<{ topics: string[]; data: string; address: string }>;
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Pending swap intent from mempool.
+ * Matches the structure from mempool-detector.
+ */
+export interface PendingSwapIntent {
+  hash: string;
+  router: string;
+  type: 'uniswapV2' | 'uniswapV3' | 'sushiswap' | 'curve' | '1inch' | 'pancakeswap' | 'unknown';
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: bigint;
+  expectedAmountOut: bigint;
+  path: string[];
+  slippageTolerance: number;
+  deadline: number;
+  sender: string;
+  gasPrice: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  nonce: number;
+  chainId: number;
+  firstSeen: number;
+  /** V3 pool fee tier (100, 500, 3000, or 10000). Defaults to 3000 (0.3%) */
+  fee?: number;
+  /** Whether this is a native ETH input swap (requires msg.value) */
+  isNativeInput?: boolean;
+}
+
+/**
+ * Configuration for PendingStateSimulator.
+ */
+export interface PendingStateSimulatorConfig {
+  /** AnvilForkManager instance to use for simulation */
+  anvilManager: AnvilForkManager;
+  /** Default pools to query reserves for (if not specified per call) */
+  defaultPools?: string[];
+  /** Maximum number of pools to query per simulation */
+  maxPoolsPerSimulation?: number;
+  /** Timeout for each simulation in ms (default: 5000) */
+  timeoutMs?: number;
+  /** Known pool registry for pool detection */
+  poolRegistry?: Map<string, PoolInfo>;
+}
+
+/**
+ * Result of simulating a pending swap.
+ */
+export interface PendingSwapSimulationResult {
+  /** Whether the swap simulation succeeded */
+  success: boolean;
+  /** Predicted reserves for each pool after the swap */
+  predictedReserves: Map<string, [bigint, bigint]>;
+  /** Effective execution price (amountOut / amountIn) */
+  executionPrice?: bigint;
+  /** Actual amount received (if determinable) */
+  actualAmountOut?: bigint;
+  /** Gas used by the transaction */
+  gasUsed?: bigint;
+  /** Revert reason if failed */
+  revertReason?: string;
+  /** Error message if simulation failed */
+  error?: string;
+  /** Simulation latency in ms */
+  latencyMs: number;
+  /** Transaction hash from simulation */
+  txHash?: string;
+}
+
+/**
+ * Options for batch simulation.
+ */
+export interface BatchSimulationOptions {
+  /** Stop simulation on first failure (default: false) */
+  stopOnFailure?: boolean;
+  /** Pools to query reserves for */
+  pools?: string[];
+}
+
+/**
+ * Pool information for detection.
+ */
+export interface PoolInfo {
+  address: string;
+  token0: string;
+  token1: string;
+  dex: string;
+  type: 'v2' | 'v3';
+}
+
+/**
+ * Metrics for simulator operations.
+ */
+export interface SimulatorMetrics {
+  totalSimulations: number;
+  successfulSimulations: number;
+  failedSimulations: number;
+  averageLatencyMs: number;
+  lastUpdated: number;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_MAX_POOLS = 10;
+
+// =============================================================================
+// PendingStateSimulator Implementation
+// =============================================================================
+
+/**
+ * Simulates pending swap transactions to predict post-swap state.
+ *
+ * Usage:
+ * ```typescript
+ * const simulator = new PendingStateSimulator({
+ *   anvilManager: manager,
+ *   defaultPools: [poolAddress1, poolAddress2],
+ * });
+ *
+ * const result = await simulator.simulatePendingSwap(pendingIntent);
+ * console.log('Predicted reserves:', result.predictedReserves);
+ * ```
+ */
+export class PendingStateSimulator {
+  private readonly anvilManager: AnvilForkManager;
+  private readonly defaultPools: string[];
+  private readonly maxPoolsPerSimulation: number;
+  private readonly timeoutMs: number;
+  private readonly poolRegistry: Map<string, PoolInfo>;
+  private metrics: SimulatorMetrics;
+  /**
+   * Fix 10.2: Token pair index for O(1) pool lookups instead of O(n) scan.
+   * Maps "token0:token1" (sorted, lowercase) -> Set of pool addresses
+   */
+  private readonly poolTokenIndex: Map<string, Set<string>>;
+
+  constructor(config: PendingStateSimulatorConfig) {
+    this.anvilManager = config.anvilManager;
+    this.defaultPools = config.defaultPools ?? [];
+    this.maxPoolsPerSimulation = config.maxPoolsPerSimulation ?? DEFAULT_MAX_POOLS;
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.poolRegistry = config.poolRegistry ?? new Map();
+    this.metrics = this.createEmptyMetrics();
+
+    // Fix 10.2: Build token pair index for fast lookups
+    this.poolTokenIndex = new Map();
+    this.buildTokenIndex();
+  }
+
+  /**
+   * Fix 10.2: Build index for O(1) token pair lookups.
+   * Called once during construction.
+   */
+  private buildTokenIndex(): void {
+    for (const [address, pool] of this.poolRegistry) {
+      const key = this.getTokenPairKey(pool.token0, pool.token1);
+      if (!this.poolTokenIndex.has(key)) {
+        this.poolTokenIndex.set(key, new Set());
+      }
+      this.poolTokenIndex.get(key)!.add(address);
+    }
+  }
+
+  /**
+   * Fix 10.2: Create a canonical key for a token pair.
+   * Tokens are sorted alphabetically to ensure (A,B) and (B,A) produce same key.
+   */
+  private getTokenPairKey(token0: string, token1: string): string {
+    const t0 = token0.toLowerCase();
+    const t1 = token1.toLowerCase();
+    return t0 < t1 ? `${t0}:${t1}` : `${t1}:${t0}`;
+  }
+
+  // ===========================================================================
+  // Public Methods - Simulation
+  // ===========================================================================
+
+  /**
+   * Simulate a pending swap and predict resulting pool reserves.
+   *
+   * @param intent - Pending swap intent from mempool
+   * @param pools - Pool addresses to query reserves for (uses defaults if not specified)
+   * @returns Simulation result with predicted reserves
+   */
+  async simulatePendingSwap(
+    intent: PendingSwapIntent,
+    pools?: string[]
+  ): Promise<PendingSwapSimulationResult> {
+    const startTime = Date.now();
+    this.metrics.totalSimulations++;
+
+    const poolsToQuery = pools ?? this.defaultPools;
+    let snapshotId: string | undefined;
+
+    // Fix 4.1: Use cancellable timeout to prevent timer leaks
+    const { promise: timeoutPromise, cancel: cancelTimeout } = this.createCancellableTimeout<PendingSwapSimulationResult>(
+      this.timeoutMs,
+      'Simulation timeout'
+    );
+
+    try {
+      // Create snapshot before simulation
+      snapshotId = await this.anvilManager.createSnapshot();
+
+      // Pre-encode swap data once (avoid double encoding on hot path)
+      const encodedData = this.encodeSwapData(intent);
+
+      const simulationPromise = this.executeSimulation(intent, encodedData, poolsToQuery);
+
+      const result = await Promise.race([simulationPromise, timeoutPromise]);
+
+      // Update metrics
+      if (result.success) {
+        this.metrics.successfulSimulations++;
+      } else {
+        this.metrics.failedSimulations++;
+      }
+      this.updateAverageLatency(result.latencyMs);
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.metrics.failedSimulations++;
+
+      return {
+        success: false,
+        predictedReserves: new Map(),
+        error: errorMessage,
+        latencyMs: Date.now() - startTime,
+      };
+    } finally {
+      // Fix 4.1: Always cancel timeout to prevent timer leak
+      cancelTimeout();
+
+      // Always revert to snapshot
+      if (snapshotId) {
+        try {
+          await this.anvilManager.revertToSnapshot(snapshotId);
+        } catch {
+          // Log but don't throw - cleanup errors shouldn't mask primary errors
+        }
+      }
+    }
+  }
+
+  /**
+   * Simulate multiple pending swaps in sequence.
+   *
+   * @param intents - Array of pending swap intents
+   * @param options - Batch simulation options
+   * @returns Array of simulation results
+   */
+  async simulateBatch(
+    intents: PendingSwapIntent[],
+    options: BatchSimulationOptions = {}
+  ): Promise<PendingSwapSimulationResult[]> {
+    if (intents.length === 0) {
+      return [];
+    }
+
+    const { stopOnFailure = false, pools } = options;
+    const results: PendingSwapSimulationResult[] = [];
+    let snapshotId: string | undefined;
+
+    try {
+      // Create initial snapshot
+      snapshotId = await this.anvilManager.createSnapshot();
+
+      for (const intent of intents) {
+        const result = await this.simulateSingleInBatch(intent, pools);
+        results.push(result);
+
+        if (!result.success && stopOnFailure) {
+          break;
+        }
+      }
+
+      return results;
+    } finally {
+      // Revert to initial state
+      if (snapshotId) {
+        try {
+          await this.anvilManager.revertToSnapshot(snapshotId);
+        } catch {
+          // Cleanup error
+        }
+      }
+    }
+  }
+
+  /**
+   * Build a raw transaction hex from a pending swap intent.
+   *
+   * Note: Since we use impersonation, we don't need a signed transaction.
+   * This returns serialized transaction data suitable for impersonation.
+   *
+   * @param intent - Pending swap intent
+   * @returns Raw transaction hex string
+   */
+  async buildRawTransaction(intent: PendingSwapIntent): Promise<string> {
+    // Build transaction data based on router type
+    const data = this.encodeSwapData(intent);
+
+    // Build transaction object compatible with ethers TransactionLike
+    const txLike: ethers.TransactionLike = {
+      to: intent.router,
+      data,
+      value: this.isNativeSwap(intent) ? intent.amountIn : 0n,
+      nonce: intent.nonce,
+      chainId: BigInt(intent.chainId),
+      gasLimit: 500000n, // Conservative estimate
+    };
+
+    // Add gas pricing
+    if (intent.maxFeePerGas && intent.maxPriorityFeePerGas) {
+      // EIP-1559
+      txLike.maxFeePerGas = intent.maxFeePerGas;
+      txLike.maxPriorityFeePerGas = intent.maxPriorityFeePerGas;
+      txLike.type = 2;
+    } else {
+      // Legacy
+      txLike.gasPrice = intent.gasPrice;
+      txLike.type = 0;
+    }
+
+    // Return serialized unsigned transaction for impersonation
+    return ethers.Transaction.from(txLike).unsignedSerialized;
+  }
+
+  /**
+   * Detect pools that would be affected by a swap.
+   *
+   * Fix 10.2: Now uses O(1) indexed lookup instead of O(n) scan.
+   *
+   * @param intent - Pending swap intent
+   * @returns Array of pool addresses
+   */
+  async detectAffectedPools(intent: PendingSwapIntent): Promise<string[]> {
+    const detectedPools: string[] = [];
+    const path = intent.path;
+
+    // For each pair of tokens in the path, find corresponding pool
+    // Fix 10.2: Use indexed lookup for O(1) per pair instead of O(n) scan
+    for (let i = 0; i < path.length - 1; i++) {
+      const token0 = path[i];
+      const token1 = path[i + 1];
+      const key = this.getTokenPairKey(token0, token1);
+
+      const poolAddresses = this.poolTokenIndex.get(key);
+      if (poolAddresses) {
+        for (const address of poolAddresses) {
+          if (!detectedPools.includes(address)) {
+            detectedPools.push(address);
+          }
+        }
+      }
+    }
+
+    return detectedPools;
+  }
+
+  // ===========================================================================
+  // Public Methods - Metrics
+  // ===========================================================================
+
+  /**
+   * Get current simulation metrics.
+   */
+  getMetrics(): SimulatorMetrics {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Reset metrics.
+   */
+  resetMetrics(): void {
+    this.metrics = this.createEmptyMetrics();
+  }
+
+  // ===========================================================================
+  // Private Methods - Simulation Execution
+  // ===========================================================================
+
+  /**
+   * Execute the core simulation logic.
+   *
+   * @param intent - The pending swap intent
+   * @param encodedData - Pre-encoded swap calldata (avoids re-encoding)
+   * @param poolsToQuery - Pool addresses to query reserves for
+   */
+  private async executeSimulation(
+    intent: PendingSwapIntent,
+    encodedData: string,
+    poolsToQuery: string[]
+  ): Promise<PendingSwapSimulationResult> {
+    const startTime = Date.now();
+
+    // Apply the pending transaction using impersonation
+    const txResult = await this.applyWithImpersonation(intent, encodedData);
+
+    if (!txResult.success) {
+      return {
+        success: false,
+        predictedReserves: new Map(),
+        revertReason: txResult.revertReason,
+        error: txResult.error,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
+    // Query pool reserves after the swap
+    const predictedReserves = await this.queryPoolReserves(poolsToQuery);
+
+    // Parse actual swap amounts from logs
+    const { executionPrice, actualAmountOut } = this.parseSwapResult(intent, txResult);
+
+    return {
+      success: true,
+      predictedReserves,
+      executionPrice,
+      actualAmountOut,
+      gasUsed: txResult.gasUsed,
+      txHash: txResult.txHash,
+      latencyMs: Date.now() - startTime,
+    };
+  }
+
+  /**
+   * Apply transaction with account impersonation (Anvil feature).
+   *
+   * @param intent - The pending swap intent
+   * @param encodedData - Pre-encoded swap calldata
+   */
+  private async applyWithImpersonation(
+    intent: PendingSwapIntent,
+    encodedData: string
+  ): Promise<ExtendedSimulationResult> {
+    const startTime = Date.now();
+    const provider = this.anvilManager.getProvider();
+    if (!provider) {
+      return {
+        success: false,
+        error: 'Anvil not running',
+        latencyMs: 0,
+      };
+    }
+
+    try {
+      // Impersonate the sender
+      await provider.send('anvil_impersonateAccount', [intent.sender]);
+
+      // Fund the account with ETH for gas
+      await provider.send('anvil_setBalance', [
+        intent.sender,
+        '0x' + (10n ** 20n).toString(16), // 100 ETH
+      ]);
+
+      // Build and send transaction using pre-encoded data
+      const tx = {
+        from: intent.sender,
+        to: intent.router,
+        data: encodedData,
+        value: this.isNativeSwap(intent) ? '0x' + intent.amountIn.toString(16) : '0x0',
+        gas: '0x' + (500000).toString(16),
+        gasPrice: '0x' + intent.gasPrice.toString(16),
+      };
+
+      const txHash = await provider.send('eth_sendTransaction', [tx]);
+
+      // Mine the transaction
+      await provider.send('evm_mine', []);
+
+      // Get receipt
+      const receipt = await provider.send('eth_getTransactionReceipt', [txHash]);
+
+      // Stop impersonation
+      await provider.send('anvil_stopImpersonatingAccount', [intent.sender]);
+
+      const latencyMs = Date.now() - startTime;
+
+      if (receipt && receipt.status === '0x1') {
+        return {
+          success: true,
+          txHash,
+          gasUsed: receipt.gasUsed ? BigInt(receipt.gasUsed) : undefined,
+          latencyMs,
+          logs: receipt.logs ?? [],
+        };
+      } else {
+        return {
+          success: false,
+          revertReason: 'Transaction reverted',
+          latencyMs,
+        };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Try to stop impersonation even on error
+      try {
+        await provider.send('anvil_stopImpersonatingAccount', [intent.sender]);
+      } catch {
+        // Ignore cleanup errors
+      }
+
+      return {
+        success: false,
+        revertReason: this.extractRevertReason(errorMessage),
+        error: errorMessage,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+  }
+
+  /**
+   * Simulate a single transaction in a batch (without snapshot management).
+   */
+  private async simulateSingleInBatch(
+    intent: PendingSwapIntent,
+    pools?: string[]
+  ): Promise<PendingSwapSimulationResult> {
+    const startTime = Date.now();
+    const poolsToQuery = pools ?? this.defaultPools;
+
+    try {
+      // Pre-encode swap data once
+      const encodedData = this.encodeSwapData(intent);
+      const result = await this.executeSimulation(intent, encodedData, poolsToQuery);
+      result.latencyMs = Date.now() - startTime;
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        predictedReserves: new Map(),
+        error: errorMessage,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+  }
+
+  /**
+   * Query reserves for multiple pools.
+   */
+  private async queryPoolReserves(
+    pools: string[]
+  ): Promise<Map<string, [bigint, bigint]>> {
+    const reserves = new Map<string, [bigint, bigint]>();
+    const poolsToQuery = pools.slice(0, this.maxPoolsPerSimulation);
+
+    const promises = poolsToQuery.map(async (pool) => {
+      try {
+        const [reserve0, reserve1] = await this.anvilManager.getPoolReserves(pool);
+        reserves.set(pool, [reserve0, reserve1]);
+      } catch {
+        // Skip pools that fail to query
+      }
+    });
+
+    await Promise.all(promises);
+    return reserves;
+  }
+
+  // ===========================================================================
+  // Private Methods - Transaction Encoding
+  // ===========================================================================
+
+  /**
+   * Encode swap data based on router type.
+   */
+  private encodeSwapData(intent: PendingSwapIntent): string {
+    switch (intent.type) {
+      case 'uniswapV2':
+      case 'sushiswap':
+      case 'pancakeswap':
+        return this.encodeV2Swap(intent);
+      case 'uniswapV3':
+        return this.encodeV3Swap(intent);
+      default:
+        return this.encodeV2Swap(intent); // Default to V2 encoding
+    }
+  }
+
+  /**
+   * Encode Uniswap V2 style swap.
+   */
+  private encodeV2Swap(intent: PendingSwapIntent): string {
+    const iface = new ethers.Interface([
+      'function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+      'function swapExactETHForTokens(uint amountOutMin, address[] calldata path, address to, uint deadline) external payable returns (uint[] memory amounts)',
+      'function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)',
+    ]);
+
+    // Calculate minimum output with slippage
+    const amountOutMin = intent.expectedAmountOut -
+      (intent.expectedAmountOut * BigInt(Math.floor(intent.slippageTolerance * 10000))) / 10000n;
+
+    const isNative = this.isNativeSwap(intent);
+
+    if (isNative) {
+      // ETH -> Token swap
+      return iface.encodeFunctionData('swapExactETHForTokens', [
+        amountOutMin,
+        intent.path,
+        intent.sender,
+        intent.deadline,
+      ]);
+    } else {
+      // Token -> Token or Token -> ETH swap
+      // Fix 6.3: Use multi-chain WETH address detection instead of hardcoded Mainnet address
+      const lastPathToken = intent.path[intent.path.length - 1];
+      const isTokenToEth = intent.tokenOut.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' ||
+        isWethAddress(lastPathToken, intent.chainId);
+
+      if (isTokenToEth) {
+        return iface.encodeFunctionData('swapExactTokensForETH', [
+          intent.amountIn,
+          amountOutMin,
+          intent.path,
+          intent.sender,
+          intent.deadline,
+        ]);
+      }
+
+      return iface.encodeFunctionData('swapExactTokensForTokens', [
+        intent.amountIn,
+        amountOutMin,
+        intent.path,
+        intent.sender,
+        intent.deadline,
+      ]);
+    }
+  }
+
+  /**
+   * Encode Uniswap V3 style swap.
+   */
+  private encodeV3Swap(intent: PendingSwapIntent): string {
+    const iface = new ethers.Interface([
+      'function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96)) external payable returns (uint256 amountOut)',
+    ]);
+
+    const amountOutMin = intent.expectedAmountOut -
+      (intent.expectedAmountOut * BigInt(Math.floor(intent.slippageTolerance * 10000))) / 10000n;
+
+    // Use fee from intent, default to 3000 (0.3%) if not specified
+    const fee = intent.fee ?? 3000;
+
+    return iface.encodeFunctionData('exactInputSingle', [
+      {
+        tokenIn: intent.tokenIn,
+        tokenOut: intent.tokenOut,
+        fee,
+        recipient: intent.sender,
+        deadline: intent.deadline,
+        amountIn: intent.amountIn,
+        amountOutMinimum: amountOutMin,
+        sqrtPriceLimitX96: 0n,
+      },
+    ]);
+  }
+
+  // ===========================================================================
+  // Private Methods - Utilities
+  // ===========================================================================
+
+  /**
+   * Check if this is a native ETH input swap (requires msg.value).
+   *
+   * Note: A swap with WETH as input is NOT a native swap - the user already has WETH.
+   * A native swap is when the user sends ETH with the transaction, which gets
+   * wrapped to WETH by the router.
+   */
+  private isNativeSwap(intent: PendingSwapIntent): boolean {
+    // Use explicit flag if set (most reliable)
+    if (intent.isNativeInput !== undefined) {
+      return intent.isNativeInput;
+    }
+
+    // Check for native ETH placeholder address (standard convention)
+    const nativeAddress = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    return intent.tokenIn.toLowerCase() === nativeAddress;
+  }
+
+  /**
+   * Parse swap result from transaction logs to get actual amounts.
+   *
+   * Looks for Uniswap V2/V3 Swap events to extract actual output amounts.
+   */
+  private parseSwapResult(
+    intent: PendingSwapIntent,
+    txResult: ExtendedSimulationResult
+  ): { executionPrice?: bigint; actualAmountOut?: bigint } {
+    // UniswapV2 Swap event: Swap(address indexed sender, uint amount0In, uint amount1In, uint amount0Out, uint amount1Out, address indexed to)
+    const V2_SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822';
+    // UniswapV3 Swap event: Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, ...)
+    const V3_SWAP_TOPIC = '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67';
+
+    const logs = txResult.logs ?? [];
+    let actualAmountOut: bigint | undefined;
+
+    for (const log of logs) {
+      const topic0 = log.topics?.[0]?.toLowerCase();
+
+      if (topic0 === V2_SWAP_TOPIC) {
+        // Parse V2 Swap event
+        try {
+          const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+            ['uint256', 'uint256', 'uint256', 'uint256'],
+            log.data
+          );
+          // amounts: [amount0In, amount1In, amount0Out, amount1Out]
+          const amount0Out = BigInt(decoded[2].toString());
+          const amount1Out = BigInt(decoded[3].toString());
+          // The actual output is whichever is non-zero
+          actualAmountOut = amount0Out > 0n ? amount0Out : amount1Out;
+          break;
+        } catch {
+          // Failed to parse, continue looking
+        }
+      } else if (topic0 === V3_SWAP_TOPIC) {
+        // Parse V3 Swap event
+        try {
+          const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+            ['int256', 'int256', 'uint160', 'uint128', 'int24'],
+            log.data
+          );
+          // amounts: [amount0, amount1, sqrtPriceX96, liquidity, tick]
+          // Negative means tokens leaving the pool (user receives)
+          const amount0 = BigInt(decoded[0].toString());
+          const amount1 = BigInt(decoded[1].toString());
+          // User receives the negative amount (tokens leaving pool)
+          actualAmountOut = amount0 < 0n ? -amount0 : (amount1 < 0n ? -amount1 : undefined);
+          break;
+        } catch {
+          // Failed to parse, continue looking
+        }
+      }
+    }
+
+    // Calculate execution price
+    let executionPrice: bigint | undefined;
+    if (actualAmountOut !== undefined && intent.amountIn > 0n) {
+      // Price = amountOut / amountIn (scaled by 1e18 for precision)
+      executionPrice = (actualAmountOut * (10n ** 18n)) / intent.amountIn;
+    } else if (intent.amountIn > 0n && intent.expectedAmountOut > 0n) {
+      // Fallback to expected price if logs parsing failed
+      executionPrice = (intent.expectedAmountOut * (10n ** 18n)) / intent.amountIn;
+    }
+
+    return { executionPrice, actualAmountOut };
+  }
+
+  /**
+   * Extract revert reason from error message.
+   */
+  private extractRevertReason(errorMessage: string): string {
+    const patterns = [
+      /execution reverted:\s*(.+)/i,
+      /revert\s*(.+)/i,
+      /reason:\s*(.+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = errorMessage.match(pattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+
+    return errorMessage;
+  }
+
+  /**
+   * Create a cancellable timeout promise.
+   * Fix 4.1: Returns both the promise and a cancel function to prevent timer leaks.
+   *
+   * @param ms - Timeout in milliseconds
+   * @param message - Error message on timeout
+   * @returns Object with promise and cancel function
+   */
+  private createCancellableTimeout<T>(
+    ms: number,
+    message: string
+  ): { promise: Promise<T>; cancel: () => void } {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const promise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(message)), ms);
+    });
+
+    const cancel = () => {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+    };
+
+    return { promise, cancel };
+  }
+
+  /**
+   * Update rolling average latency.
+   */
+  private updateAverageLatency(latencyMs: number): void {
+    const total = this.metrics.totalSimulations;
+    if (total === 1) {
+      this.metrics.averageLatencyMs = latencyMs;
+    } else {
+      this.metrics.averageLatencyMs =
+        (this.metrics.averageLatencyMs * (total - 1) + latencyMs) / total;
+    }
+    this.metrics.lastUpdated = Date.now();
+  }
+
+  /**
+   * Create empty metrics object.
+   */
+  private createEmptyMetrics(): SimulatorMetrics {
+    return {
+      totalSimulations: 0,
+      successfulSimulations: 0,
+      failedSimulations: 0,
+      averageLatencyMs: 0,
+      lastUpdated: Date.now(),
+    };
+  }
+}
+
+// =============================================================================
+// Factory Function
+// =============================================================================
+
+/**
+ * Create a PendingStateSimulator instance.
+ */
+export function createPendingStateSimulator(
+  config: PendingStateSimulatorConfig
+): PendingStateSimulator {
+  return new PendingStateSimulator(config);
+}
