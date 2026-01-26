@@ -307,5 +307,13 @@ export {
   getRouterInfo,
   isMempoolEnabledForChain,
   getChainMempoolConfig,
-  getEnabledMempoolChains
+  getEnabledMempoolChains,
+  // Curve pool token configuration (Task 1.3.2)
+  CURVE_POOL_TOKENS,
+  getCurvePoolTokens,
+  // FIX 6.3, 9.2: Centralized chain ID utilities
+  CHAIN_NAME_TO_ID,
+  CHAIN_ID_TO_NAME,
+  resolveChainId,
+  getChainName,
 } from './mempool-config';

@@ -351,6 +351,64 @@ export interface MempoolDetectorHealth {
 }
 
 // =============================================================================
+// ERROR TYPES (FIX 6.1, 9.5: Improved error discrimination)
+// =============================================================================
+
+/**
+ * Decode result status for distinguishing different decode outcomes.
+ * FIX 6.1: Better error handling consistency.
+ */
+export type DecodeResultStatus =
+  | 'success' // Successfully decoded swap
+  | 'not_swap' // Valid transaction but not a swap (expected)
+  | 'unsupported_selector' // Swap selector not supported
+  | 'unsupported_router' // Router not recognized
+  | 'decode_error' // Error during decoding
+  | 'invalid_input'; // Input data too short or malformed
+
+/**
+ * Result of a decode attempt with status and optional error info.
+ * FIX 6.1: Allows distinguishing between "not a swap" and actual errors.
+ */
+export interface DecodeResult {
+  status: DecodeResultStatus;
+  intent?: PendingSwapIntent;
+  error?: {
+    message: string;
+    code?: string;
+    selector?: string;
+    router?: string;
+  };
+}
+
+/**
+ * Create a successful decode result.
+ */
+export function createDecodeSuccess(intent: PendingSwapIntent): DecodeResult {
+  return { status: 'success', intent };
+}
+
+/**
+ * Create a "not a swap" result (expected for most transactions).
+ */
+export function createNotSwapResult(selector?: string): DecodeResult {
+  return {
+    status: selector ? 'unsupported_selector' : 'not_swap',
+    error: selector ? { message: 'Unknown swap selector', selector } : undefined,
+  };
+}
+
+/**
+ * Create a decode error result.
+ */
+export function createDecodeError(message: string, code?: string): DecodeResult {
+  return {
+    status: 'decode_error',
+    error: { message, code },
+  };
+}
+
+// =============================================================================
 // CONSTANTS
 // =============================================================================
 

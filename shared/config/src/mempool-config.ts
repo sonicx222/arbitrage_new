@@ -139,54 +139,281 @@ export const MEMPOOL_CONFIG = {
 /**
  * Known DEX router addresses mapped to their types.
  * Used by the decoder registry to identify swap transactions.
+ *
+ * FIX 3.3: Added comprehensive L2 router configurations for
+ * Polygon, Arbitrum, Optimism, and Base networks.
+ *
+ * Note: Addresses are stored in lowercase for consistent O(1) lookups.
  */
 export const KNOWN_ROUTERS = {
   // Ethereum Mainnet (chainId: 1)
   ethereum: {
     // Uniswap V2
-    '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D': {
+    '0x7a250d5630b4cf539739df2c5dacb4c659f2488d': {
       type: 'uniswapV2' as const,
       name: 'Uniswap V2 Router',
     },
     // Uniswap V3
-    '0xE592427A0AEce92De3Edee1F18E0157C05861564': {
+    '0xe592427a0aece92de3edee1f18e0157c05861564': {
       type: 'uniswapV3' as const,
       name: 'Uniswap V3 SwapRouter',
     },
-    '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45': {
+    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45': {
       type: 'uniswapV3' as const,
       name: 'Uniswap V3 SwapRouter02',
     },
+    // Uniswap Universal Router
+    '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap Universal Router',
+    },
     // SushiSwap
-    '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F': {
+    '0xd9e1ce17f2641f24ae83637ab66a2cca9c378b9f': {
       type: 'sushiswap' as const,
       name: 'SushiSwap Router',
     },
     // 1inch
-    '0x1111111254EEB25477B68fb85Ed929f73A960582': {
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
       type: '1inch' as const,
       name: '1inch AggregatorV5',
+    },
+    // Curve Router
+    '0xf0d4c12a5768d806021f80a262b4d39d26c58b8d': {
+      type: 'curve' as const,
+      name: 'Curve Router',
     },
   },
   // BSC (chainId: 56)
   bsc: {
     // PancakeSwap V2
-    '0x10ED43C718714eb63d5aA57B78B54704E256024E': {
+    '0x10ed43c718714eb63d5aa57b78b54704e256024e': {
       type: 'uniswapV2' as const, // Uses same interface
       name: 'PancakeSwap V2 Router',
     },
     // PancakeSwap V3
-    '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4': {
+    '0x13f4ea83d0bd40e75c8222255bc855a974568dd4': {
       type: 'uniswapV3' as const, // Uses same interface
       name: 'PancakeSwap V3 SmartRouter',
     },
+    // SushiSwap
+    '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
     // 1inch
-    '0x1111111254EEB25477B68fb85Ed929f73A960582': {
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
+      type: '1inch' as const,
+      name: '1inch AggregatorV5',
+    },
+  },
+  // FIX 3.3: Polygon (chainId: 137)
+  polygon: {
+    // Uniswap V3
+    '0xe592427a0aece92de3edee1f18e0157c05861564': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter',
+    },
+    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter02',
+    },
+    // QuickSwap (V2 compatible)
+    '0xa5e0829caced8ffdd4de3c43696c57f7d7a678ff': {
+      type: 'uniswapV2' as const,
+      name: 'QuickSwap Router',
+    },
+    // SushiSwap
+    '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
+    // 1inch
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
+      type: '1inch' as const,
+      name: '1inch AggregatorV5',
+    },
+  },
+  // FIX 3.3: Arbitrum (chainId: 42161)
+  arbitrum: {
+    // Uniswap V3
+    '0xe592427a0aece92de3edee1f18e0157c05861564': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter',
+    },
+    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter02',
+    },
+    // Uniswap Universal Router
+    '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap Universal Router',
+    },
+    // SushiSwap
+    '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
+    // Camelot (V2 compatible)
+    '0xc873fecbd354f5a56e00e710b90ef4201db2448d': {
+      type: 'uniswapV2' as const,
+      name: 'Camelot Router',
+    },
+    // 1inch
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
+      type: '1inch' as const,
+      name: '1inch AggregatorV5',
+    },
+    // GMX
+    '0xabc0000000000000000000000000000000000000': {
+      type: 'uniswapV2' as const, // Placeholder
+      name: 'GMX Router',
+    },
+  },
+  // FIX 3.3: Optimism (chainId: 10)
+  optimism: {
+    // Uniswap V3
+    '0xe592427a0aece92de3edee1f18e0157c05861564': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter',
+    },
+    '0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter02',
+    },
+    // Uniswap Universal Router
+    '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap Universal Router',
+    },
+    // Velodrome (V2 compatible)
+    '0xa062ae8a9c5e11aaa026fc2670b0d65ccc8b2858': {
+      type: 'uniswapV2' as const,
+      name: 'Velodrome Router',
+    },
+    // 1inch
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
+      type: '1inch' as const,
+      name: '1inch AggregatorV5',
+    },
+  },
+  // FIX 3.3: Base (chainId: 8453)
+  base: {
+    // Uniswap V3
+    '0x2626664c2603336e57b271c5c0b26f421741e481': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap V3 SwapRouter02',
+    },
+    // Uniswap Universal Router
+    '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad': {
+      type: 'uniswapV3' as const,
+      name: 'Uniswap Universal Router',
+    },
+    // BaseSwap (V2 compatible)
+    '0x327df1e6de05895d2ab08513aadd9313fe505d86': {
+      type: 'uniswapV2' as const,
+      name: 'BaseSwap Router',
+    },
+    // Aerodrome (Velodrome fork)
+    '0xcf77a3ba9a5ca399b7c97c74d54e5b1beb874e43': {
+      type: 'uniswapV2' as const,
+      name: 'Aerodrome Router',
+    },
+    // SushiSwap
+    '0x6bded42c6da8fbf0d2ba55b2fa120c5e0c8d7891': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
+  },
+  // FIX 3.3: Avalanche (chainId: 43114)
+  avalanche: {
+    // Trader Joe (V2 compatible)
+    '0x60ae616a2155ee3d9a68541ba4544862310933d4': {
+      type: 'uniswapV2' as const,
+      name: 'Trader Joe Router',
+    },
+    // Pangolin (V2 compatible)
+    '0xe54ca86531e17ef3616d22ca28b0d458b6c89106': {
+      type: 'uniswapV2' as const,
+      name: 'Pangolin Router',
+    },
+    // SushiSwap
+    '0x1b02da8cb0d097eb8d57a175b88c7d8b47997506': {
+      type: 'sushiswap' as const,
+      name: 'SushiSwap Router',
+    },
+    // 1inch
+    '0x1111111254eeb25477b68fb85ed929f73a960582': {
       type: '1inch' as const,
       name: '1inch AggregatorV5',
     },
   },
 } as const;
+
+// =============================================================================
+// CHAIN ID UTILITIES (FIX 6.3, 9.2: Centralized chain ID handling)
+// =============================================================================
+
+/**
+ * Chain name to numeric ID mapping.
+ * Centralized source of truth for chain identification.
+ */
+export const CHAIN_NAME_TO_ID: Record<string, number> = {
+  ethereum: 1,
+  bsc: 56,
+  polygon: 137,
+  arbitrum: 42161,
+  optimism: 10,
+  base: 8453,
+  avalanche: 43114,
+  fantom: 250,
+  // Add aliases
+  mainnet: 1,
+  eth: 1,
+  binance: 56,
+  matic: 137,
+  arb: 42161,
+  op: 10,
+  avax: 43114,
+};
+
+/**
+ * Numeric chain ID to name mapping.
+ */
+export const CHAIN_ID_TO_NAME: Record<number, string> = {
+  1: 'ethereum',
+  56: 'bsc',
+  137: 'polygon',
+  42161: 'arbitrum',
+  10: 'optimism',
+  8453: 'base',
+  43114: 'avalanche',
+  250: 'fantom',
+};
+
+/**
+ * Resolve chain identifier to numeric chain ID.
+ *
+ * @param chainId - Chain name (string) or numeric ID
+ * @param defaultChainId - Default chain ID if resolution fails (default: 1)
+ * @returns Numeric chain ID
+ */
+export function resolveChainId(chainId: string | number, defaultChainId: number = 1): number {
+  if (typeof chainId === 'number') {
+    return chainId;
+  }
+  return CHAIN_NAME_TO_ID[chainId.toLowerCase()] ?? defaultChainId;
+}
+
+/**
+ * Get chain name from numeric ID.
+ *
+ * @param chainId - Numeric chain ID
+ * @returns Chain name or 'unknown'
+ */
+export function getChainName(chainId: number): string {
+  return CHAIN_ID_TO_NAME[chainId] ?? 'unknown';
+}
 
 /**
  * Get known routers for a specific chain.
@@ -256,4 +483,84 @@ export function getEnabledMempoolChains(): string[] {
   return Object.entries(MEMPOOL_CONFIG.chainSettings)
     .filter(([, config]) => config.enabled)
     .map(([chainId]) => chainId);
+}
+
+// =============================================================================
+// CURVE POOL TOKEN CONFIGURATION
+// =============================================================================
+
+/**
+ * Known Curve pool configurations.
+ * Maps pool addresses to their token addresses by index.
+ *
+ * Format: chainId -> poolAddress (lowercase) -> [token0, token1, ...]
+ */
+export const CURVE_POOL_TOKENS: Record<number, Record<string, string[]>> = {
+  // Ethereum Mainnet (chainId: 1)
+  1: {
+    // 3pool (DAI, USDC, USDT)
+    '0xbebc44782c7db0a1a60cb6fe97d0b483032ff1c7': [
+      '0x6B175474E89094C44Da98b954EeadCDeBc5C5e818', // DAI
+      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+      '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+    ],
+    // sUSD pool (DAI, USDC, USDT, sUSD)
+    '0xa5407eae9ba41422680e2e00537571bcc53efbfd': [
+      '0x6B175474E89094C44Da98b954EeadCDeBc5C5e818', // DAI
+      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+      '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+      '0x57Ab1ec28D129707052df4dF418D58a2D46d5f51', // sUSD
+    ],
+    // stETH pool (ETH, stETH)
+    '0xdc24316b9ae028f1497c275eb9192a3ea0f67022': [
+      '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', // ETH
+      '0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84', // stETH
+    ],
+    // Tricrypto2 (USDT, WBTC, WETH)
+    '0xd51a44d3fae010294c616388b506acda1bfaae46': [
+      '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+      '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC
+      '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+    ],
+    // FRAX/USDC
+    '0xdcef968d416a41cdac0ed8702fac8128a64241a2': [
+      '0x853d955aCEf822Db058eb8505911ED77F175b99e', // FRAX
+      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+    ],
+    // crvUSD/USDC
+    '0x4dece678ceceb27446b35c672dc7d61f30bad69e': [
+      '0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E', // crvUSD
+      '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+    ],
+  },
+  // Arbitrum (chainId: 42161)
+  42161: {
+    // 2pool (USDC, USDT)
+    '0x7f90122bf0700f9e7e1f688fe926940e8839f353': [
+      '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC
+      '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USDT
+    ],
+  },
+  // Polygon (chainId: 137)
+  137: {
+    // aave pool (DAI, USDC, USDT)
+    '0x445fe580ef8d70ff569ab36e80c647af338db351': [
+      '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', // DAI
+      '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC
+      '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // USDT
+    ],
+  },
+};
+
+/**
+ * Get Curve pool token configuration for a specific pool.
+ *
+ * @param chainId - Chain ID
+ * @param poolAddress - Pool contract address
+ * @returns Array of token addresses or undefined if pool not configured
+ */
+export function getCurvePoolTokens(chainId: number, poolAddress: string): string[] | undefined {
+  const chainPools = CURVE_POOL_TOKENS[chainId];
+  if (!chainPools) return undefined;
+  return chainPools[poolAddress.toLowerCase()];
 }
