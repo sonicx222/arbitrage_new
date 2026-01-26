@@ -71,8 +71,25 @@ export interface BatchUpdate {
 // =============================================================================
 
 /**
+ * Error thrown when the PriceIndexMapper is full and cannot allocate new keys.
+ * P0-FIX 4.3: Instead of silently using hash-based collision (which overwrites data),
+ * we now throw an explicit error to prevent data corruption.
+ */
+export class PriceMatrixFullError extends Error {
+  readonly key: string;
+  readonly maxIndex: number;
+
+  constructor(key: string, maxIndex: number) {
+    super(`PriceMatrix is full: cannot add key "${key}". Max capacity: ${maxIndex}`);
+    this.name = 'PriceMatrixFullError';
+    this.key = key;
+    this.maxIndex = maxIndex;
+  }
+}
+
+/**
  * Maps string keys ("chain:dex:pair") to array offsets with O(1) complexity.
- * Uses a hash-based approach for fast lookups.
+ * Uses sequential allocation for deterministic, collision-free mapping.
  */
 export class PriceIndexMapper {
   private keyToIndex: Map<string, number> = new Map();
@@ -85,9 +102,28 @@ export class PriceIndexMapper {
   }
 
   /**
+   * Check if the mapper can accept new keys.
+   * @returns true if there's capacity for more keys
+   */
+  hasCapacity(): boolean {
+    return this.nextIndex < this.maxIndex;
+  }
+
+  /**
+   * Get remaining capacity (number of new keys that can be added).
+   */
+  getRemainingCapacity(): number {
+    return Math.max(0, this.maxIndex - this.nextIndex);
+  }
+
+  /**
    * Get or create index for a key.
    * Returns existing index if key is known, or allocates new one.
-   * WARNING: When all slots are used, falls back to hash-based index which may collide!
+   *
+   * P0-FIX 4.3: When all slots are used, returns -1 instead of using
+   * hash-based collision which could overwrite existing price data.
+   *
+   * @returns Index for the key, or -1 if mapper is full and key is new
    */
   getIndex(key: string): number {
     // Fast path: key already exists
@@ -98,19 +134,33 @@ export class PriceIndexMapper {
 
     // Slow path: allocate new index
     if (this.nextIndex >= this.maxIndex) {
-      // All slots used - use hash-based collision (may overwrite existing data!)
-      const hashIndex = this.hashKey(key) % this.maxIndex;
-      logger.warn('PriceIndexMapper: All slots used, using hash-based index (potential collision)', {
+      // P0-FIX 4.3: Return -1 instead of hash collision to prevent data corruption
+      // The caller (PriceMatrix) should handle this by logging a warning and skipping the update
+      logger.warn('PriceIndexMapper: All slots used, cannot allocate new key', {
         key,
-        hashIndex,
+        usedSlots: this.nextIndex,
         maxIndex: this.maxIndex
       });
-      return hashIndex;
+      return -1;
     }
 
     const index = this.nextIndex++;
     this.keyToIndex.set(key, index);
     this.indexToKey.set(index, key);
+    return index;
+  }
+
+  /**
+   * Get or create index for a key, throwing if full.
+   * Use this when you need guaranteed allocation.
+   *
+   * @throws PriceMatrixFullError if mapper is full and key is new
+   */
+  getIndexOrThrow(key: string): number {
+    const index = this.getIndex(key);
+    if (index === -1) {
+      throw new PriceMatrixFullError(key, this.maxIndex);
+    }
     return index;
   }
 
@@ -311,26 +361,33 @@ export class PriceMatrix {
 
   /**
    * Set price for a key.
+   *
+   * P0-FIX 4.3: Now properly handles capacity limits by returning false
+   * instead of silently using hash collisions which could corrupt data.
+   *
+   * @returns true if price was set, false if rejected (capacity full, invalid key, etc.)
    */
-  setPrice(key: string, price: number, timestamp: number): void {
+  setPrice(key: string, price: number, timestamp: number): boolean {
     if (this.destroyed) {
       logger.warn('setPrice called on destroyed PriceMatrix');
-      return;
+      return false;
     }
 
     if (!key) {
-      return; // Ignore empty keys
+      return false; // Ignore empty keys
     }
 
     // Check if we've reached maxPairs limit for new keys
     if (!this.mapper.hasKey(key) && this.writtenSlots.size >= this.config.maxPairs) {
       logger.warn('PriceMatrix maxPairs limit reached, ignoring new key', { key });
-      return;
+      return false;
     }
 
     const index = this.getIndexForKey(key);
     if (index < 0) {
-      return; // Strict mode and unknown key
+      // P0-FIX 4.3: -1 means either strict mode rejection OR capacity full
+      // The mapper already logged a warning, so just return false
+      return false;
     }
 
     // Convert timestamp to relative seconds
@@ -352,6 +409,7 @@ export class PriceMatrix {
     // Track that this slot has been written
     this.writtenSlots.add(index);
     this.stats.writes++;
+    return true;
   }
 
   /**

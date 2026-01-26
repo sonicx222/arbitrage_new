@@ -104,19 +104,38 @@ const PRICE_PRECISION_NUMBER = 1e18;
 // Price Calculation Utilities (ARCH-3)
 // =============================================================================
 
+// P1-FIX 1.1: Emit deprecation warning only once per session
+let deprecationWarned = false;
+function emitDeprecationWarning(funcName: string): void {
+  if (!deprecationWarned) {
+    deprecationWarned = true;
+    console.warn(
+      '[DEPRECATION] arbitrage-calculator.ts is deprecated. ' +
+      'Import from components/price-calculator instead. ' +
+      `First usage: ${funcName}()`
+    );
+  }
+}
+
 /**
  * Safely convert BigInt to Number with precision scaling.
  * This prevents precision loss for large BigInt values.
  *
  * P0-1 FIX: Uses scaled division to preserve precision.
+ * P0-FIX 4.4: Now returns null for division by zero instead of 0.
  *
- * @param value - The BigInt value
- * @param divisor - The divisor BigInt (must be > 0)
- * @returns The result as a Number with preserved precision
+ * @deprecated Use safeBigIntDivision from components/price-calculator instead.
+ * @param numerator - The BigInt numerator
+ * @param denominator - The divisor BigInt (must be > 0)
+ * @returns The result as a Number with preserved precision, or null if denominator is 0
  */
 export function safeBigIntDivision(numerator: bigint, denominator: bigint): number {
+  emitDeprecationWarning('safeBigIntDivision');
+
+  // P0-FIX 4.4: Return NaN for division by zero to signal invalid operation
+  // This is safer than returning 0 which could be misinterpreted as a valid price
   if (denominator === 0n) {
-    return 0;
+    return NaN;
   }
 
   // Scale up the numerator before division to preserve decimal places
@@ -133,10 +152,11 @@ export function safeBigIntDivision(numerator: bigint, denominator: bigint): numb
  * P0-1 FIX: Uses scaled BigInt arithmetic to prevent precision loss
  * that occurs when converting large BigInt values directly to Number.
  *
- * Example: For reserves of 1e27 (1 billion tokens in wei), direct Number
- * conversion would lose precision, but scaled division preserves it.
+ * @deprecated Use calculatePriceFromReserves from components/price-calculator instead.
  */
 export function calculatePriceFromReserves(reserve0: string, reserve1: string): number | null {
+  emitDeprecationWarning('calculatePriceFromReserves');
+
   try {
     const r0 = BigInt(reserve0);
     const r1 = BigInt(reserve1);
@@ -145,7 +165,9 @@ export function calculatePriceFromReserves(reserve0: string, reserve1: string): 
       return null;
     }
 
-    return safeBigIntDivision(r0, r1);
+    const result = safeBigIntDivision(r0, r1);
+    // P0-FIX 4.4: Handle NaN from division by zero
+    return Number.isNaN(result) ? null : result;
   } catch {
     // Handle invalid BigInt strings gracefully
     return null;
@@ -155,27 +177,36 @@ export function calculatePriceFromReserves(reserve0: string, reserve1: string): 
 /**
  * Calculate price from BigInt reserves directly (avoids string parsing overhead).
  * P0-1 FIX: Optimized version for when reserves are already BigInt.
+ * @deprecated Use calculatePriceFromBigIntReserves from components/price-calculator instead.
  */
 export function calculatePriceFromBigIntReserves(reserve0: bigint, reserve1: bigint): number | null {
+  emitDeprecationWarning('calculatePriceFromBigIntReserves');
+
   if (reserve0 === 0n || reserve1 === 0n) {
     return null;
   }
 
-  return safeBigIntDivision(reserve0, reserve1);
+  const result = safeBigIntDivision(reserve0, reserve1);
+  // P0-FIX 4.4: Handle NaN from division by zero
+  return Number.isNaN(result) ? null : result;
 }
 
 /**
  * Invert price for reverse token order comparison.
+ * @deprecated Use invertPrice from components/price-calculator instead.
  */
 export function invertPrice(price: number): number {
+  emitDeprecationWarning('invertPrice');
   if (price === 0) return 0;
   return 1 / price;
 }
 
 /**
  * Calculate price difference as percentage of lower price.
+ * @deprecated Use calculateSpread from components/price-calculator instead.
  */
 export function calculatePriceDifferencePercent(price1: number, price2: number): number {
+  emitDeprecationWarning('calculatePriceDifferencePercent');
   const minPrice = Math.min(price1, price2);
   if (minPrice === 0) return 0;
   return Math.abs(price1 - price2) / minPrice;

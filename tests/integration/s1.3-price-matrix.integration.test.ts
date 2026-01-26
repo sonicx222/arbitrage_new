@@ -706,10 +706,13 @@ describe('Hash Collision Handling', () => {
       expect(index).toBe(i); // Sequential allocation
     }
 
-    // Next key will use hash-based index (slot reuse)
-    const hashIndex = smallMapper.getIndex('overflow_key');
-    expect(hashIndex).toBeGreaterThanOrEqual(0);
-    expect(hashIndex).toBeLessThan(5);
+    // P0-FIX 4.3: When slots are exhausted, getIndex returns -1 instead of
+    // using hash-based collision (which could overwrite existing price data)
+    const overflowIndex = smallMapper.getIndex('overflow_key');
+    expect(overflowIndex).toBe(-1); // -1 indicates mapper is full
+
+    // Can still use getIndexOrThrow if caller needs guaranteed allocation
+    expect(() => smallMapper.getIndexOrThrow('another_overflow')).toThrow('PriceMatrix is full');
   });
 
   it('should maintain existing key mappings when slots exhausted', () => {

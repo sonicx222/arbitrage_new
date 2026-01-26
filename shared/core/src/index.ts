@@ -262,6 +262,7 @@ export type {
 export {
   PriceMatrix,
   PriceIndexMapper,
+  PriceMatrixFullError, // P0-FIX 4.3: Explicit error when capacity is full
   getPriceMatrix,
   resetPriceMatrix
 } from './caching/price-matrix';
@@ -842,6 +843,7 @@ export {
   // Core price calculations
   calculatePriceFromReserves as calcPriceFromReserves,
   safeBigIntDivision as safeBigIntDiv,
+  safeBigIntDivisionOrNull, // P0-FIX 4.4: Safe version that returns null instead of throwing
   invertPrice as invertPriceValue,
 
   // Spread and profit calculations
@@ -948,3 +950,36 @@ export type {
   LatencyMetric,
   LatencyStats,
 } from './performance-monitor';
+
+// =============================================================================
+// RISK MANAGEMENT (Phase 3: Capital & Risk Controls - Task 3.4)
+// =============================================================================
+
+export {
+  ExecutionProbabilityTracker,
+  getExecutionProbabilityTracker,
+  resetExecutionProbabilityTracker,
+} from './risk';
+
+export type {
+  // Configuration
+  ExecutionProbabilityConfig,
+
+  // Outcome tracking
+  ExecutionOutcome,
+  SerializedOutcome,
+
+  // Query parameters
+  ProbabilityQueryParams,
+  ProfitQueryParams,
+  GasCostQueryParams,
+
+  // Query results
+  ProbabilityResult,
+  ProfitResult,
+  GasCostResult,
+
+  // Statistics
+  ExecutionTrackerStats,
+  HourlyStats,
+} from './risk';

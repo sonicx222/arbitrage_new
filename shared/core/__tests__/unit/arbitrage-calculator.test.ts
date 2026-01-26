@@ -61,8 +61,10 @@ describe('P0-1: BigInt Precision (safeBigIntDivision)', () => {
     expect(safeBigIntDivision(2n, 3n)).toBeCloseTo(0.666666, 5);
   });
 
-  it('should return 0 for zero denominator', () => {
-    expect(safeBigIntDivision(100n, 0n)).toBe(0);
+  // P0-FIX 4.4: Division by zero now returns NaN instead of 0
+  // This prevents false arbitrage opportunity detection where price appears to be 0
+  it('should return NaN for zero denominator', () => {
+    expect(safeBigIntDivision(100n, 0n)).toBeNaN();
   });
 
   it('should handle very large BigInt values (> 2^53) without precision loss', () => {
