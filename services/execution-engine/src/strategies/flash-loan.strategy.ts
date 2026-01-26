@@ -122,7 +122,7 @@ export interface SwapStep {
 }
 
 /**
- * Parameters for building swap steps
+ * Parameters for building swap steps (2-hop)
  */
 export interface SwapStepsParams {
   buyRouter: string;
@@ -130,6 +130,24 @@ export interface SwapStepsParams {
   intermediateToken: string;
   slippageBps?: number;
   /** Chain identifier for token decimals lookup (required for precision) */
+  chain: string;
+}
+
+/**
+ * Fix 1.2: Parameters for building N-hop swap paths
+ * Supports triangular arbitrage and more complex routes
+ */
+export interface NHopSwapStepsParams {
+  /** Array of swap hops defining the route */
+  hops: Array<{
+    router: string;
+    tokenOut: string;
+    /** Expected output amount for slippage calculation (optional) */
+    expectedOutput?: bigint;
+  }>;
+  /** Global slippage tolerance in basis points (applied to all hops) */
+  slippageBps?: number;
+  /** Chain identifier for token decimals lookup */
   chain: string;
 }
 
@@ -790,6 +808,88 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     return intermediateAmount;
+  }
+
+  /**
+   * Fix 1.2: Build N-hop swap steps for complex arbitrage paths.
+   *
+   * Supports triangular arbitrage (3-hop) and more complex routes.
+   * The path must start and end with the same asset (the flash-loaned token).
+   *
+   * @example
+   * // 3-hop triangular arbitrage: WETH -> USDC -> DAI -> WETH
+   * const steps = strategy.buildNHopSwapSteps(opportunity, {
+   *   hops: [
+   *     { router: uniswapRouter, tokenOut: USDC },
+   *     { router: sushiRouter, tokenOut: DAI },
+   *     { router: uniswapRouter, tokenOut: WETH },
+   *   ],
+   *   slippageBps: 50,
+   *   chain: 'ethereum',
+   * });
+   *
+   * @param opportunity - Arbitrage opportunity with tokenIn as the starting asset
+   * @param params - N-hop swap parameters
+   * @returns Array of swap steps ready for contract execution
+   */
+  buildNHopSwapSteps(
+    opportunity: ArbitrageOpportunity,
+    params: NHopSwapStepsParams
+  ): SwapStep[] {
+    const { hops, slippageBps, chain } = params;
+    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : DEFAULT_SLIPPAGE_BPS;
+
+    if (!opportunity.tokenIn) {
+      throw new Error('[ERR_INVALID_OPPORTUNITY] tokenIn is required for N-hop path building');
+    }
+
+    if (hops.length === 0) {
+      throw new Error('[ERR_EMPTY_HOPS] At least one hop is required');
+    }
+
+    // Validate the path ends with the starting asset (required for flash loan repayment)
+    const lastHop = hops[hops.length - 1];
+    if (lastHop.tokenOut.toLowerCase() !== opportunity.tokenIn.toLowerCase()) {
+      throw new Error(
+        `[ERR_INVALID_PATH] Path must end with starting asset. ` +
+        `Expected ${opportunity.tokenIn}, got ${lastHop.tokenOut}`
+      );
+    }
+
+    const steps: SwapStep[] = [];
+    let currentTokenIn = opportunity.tokenIn;
+
+    for (let i = 0; i < hops.length; i++) {
+      const hop = hops[i];
+
+      // Calculate amountOutMin with slippage
+      let amountOutMin: bigint;
+
+      if (hop.expectedOutput !== undefined) {
+        // Use provided expected output with slippage applied
+        amountOutMin = hop.expectedOutput - (hop.expectedOutput * slippage / BPS_DENOMINATOR);
+      } else {
+        // Default to 1 wei as minimum (caller should provide expectedOutput for safety)
+        this.logger.warn('[WARN_SLIPPAGE] No expectedOutput provided for hop, using 1 wei minimum', {
+          hopIndex: i,
+          tokenIn: currentTokenIn,
+          tokenOut: hop.tokenOut,
+        });
+        amountOutMin = 1n;
+      }
+
+      steps.push({
+        router: hop.router,
+        tokenIn: currentTokenIn,
+        tokenOut: hop.tokenOut,
+        amountOutMin,
+      });
+
+      // Update tokenIn for next hop
+      currentTokenIn = hop.tokenOut;
+    }
+
+    return steps;
   }
 
   // ===========================================================================
