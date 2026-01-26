@@ -52,6 +52,7 @@ import {
   QueueConfig,
   StandbyConfig,
   CircuitBreakerConfig,
+  PendingStateEngineConfig,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   EXECUTION_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_MS,
@@ -82,6 +83,10 @@ import {
   CircuitBreakerEvent,
   CircuitBreakerStatus,
 } from './services/circuit-breaker';
+// Phase 2 components
+import { AnvilForkManager, createAnvilForkManager } from './services/simulation/anvil-manager';
+import { PendingStateSimulator, createPendingStateSimulator } from './services/simulation/pending-state-simulator';
+import { HotForkSynchronizer, createHotForkSynchronizer } from './services/simulation/hot-fork-synchronizer';
 
 // Re-export types for consumers
 export type {
@@ -139,6 +144,11 @@ export class ExecutionEngineService {
   // Circuit breaker for execution protection (Phase 1.3.1)
   private circuitBreaker: CircuitBreaker | null = null;
 
+  // Phase 2: Pending state simulation components
+  private anvilForkManager: AnvilForkManager | null = null;
+  private pendingStateSimulator: PendingStateSimulator | null = null;
+  private hotForkSynchronizer: HotForkSynchronizer | null = null;
+
   // Infrastructure
   private readonly logger: Logger;
   private readonly perfLogger: PerformanceLogger;
@@ -151,6 +161,7 @@ export class ExecutionEngineService {
   private readonly queueConfig: QueueConfig;
   private readonly standbyConfig: StandbyConfig;
   private readonly circuitBreakerConfig: Required<CircuitBreakerConfig>;
+  private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
   private isActivated = false; // Track if standby has been activated
   private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
   private isInitializingProviders = false; // Guard against concurrent provider initialization
@@ -218,6 +229,19 @@ export class ExecutionEngineService {
       failureThreshold: config.circuitBreakerConfig?.failureThreshold ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.failureThreshold,
       cooldownPeriodMs: config.circuitBreakerConfig?.cooldownPeriodMs ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.cooldownPeriodMs,
       halfOpenMaxAttempts: config.circuitBreakerConfig?.halfOpenMaxAttempts ?? DEFAULT_CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts,
+    };
+
+    // Initialize Phase 2 pending state config
+    this.pendingStateConfig = {
+      enabled: config.pendingStateConfig?.enabled ?? false,
+      rpcUrl: config.pendingStateConfig?.rpcUrl,
+      chain: config.pendingStateConfig?.chain ?? 'ethereum',
+      anvilPort: config.pendingStateConfig?.anvilPort ?? 8546,
+      autoStartAnvil: config.pendingStateConfig?.autoStartAnvil ?? true,
+      enableHotSync: config.pendingStateConfig?.enableHotSync ?? true,
+      syncIntervalMs: config.pendingStateConfig?.syncIntervalMs ?? 1000,
+      adaptiveSync: config.pendingStateConfig?.adaptiveSync ?? true,
+      simulationTimeoutMs: config.pendingStateConfig?.simulationTimeoutMs ?? 5000,
     };
 
     // Use injected dependencies or defaults
@@ -333,6 +357,11 @@ export class ExecutionEngineService {
       // Initialize execution strategies
       this.initializeStrategies();
 
+      // Initialize Phase 2 pending state simulation (if enabled and not in dev simulation mode)
+      if (this.pendingStateConfig.enabled && !this.isSimulationMode) {
+        await this.initializePendingStateSimulation();
+      }
+
       // Initialize circuit breaker (Phase 1.3.1)
       this.initializeCircuitBreaker();
 
@@ -387,6 +416,9 @@ export class ExecutionEngineService {
         this.circuitBreaker.stop();
         this.circuitBreaker = null;
       }
+
+      // Stop Phase 2 pending state components
+      await this.shutdownPendingStateSimulation();
 
       // Stop consumer
       if (this.opportunityConsumer) {
@@ -782,6 +814,123 @@ export class ExecutionEngineService {
     });
   }
 
+  /**
+   * Initialize Phase 2 pending state simulation components.
+   *
+   * Creates and starts:
+   * - AnvilForkManager: Local Anvil fork for state simulation
+   * - PendingStateSimulator: Simulates pending swaps on the fork
+   * - HotForkSynchronizer: Keeps the fork in sync with mainnet
+   *
+   * @see implementation_plan_v3.md Phase 2
+   */
+  private async initializePendingStateSimulation(): Promise<void> {
+    if (!this.pendingStateConfig.rpcUrl) {
+      this.logger.warn('Phase 2 pending state simulation skipped - no RPC URL configured', {
+        hint: 'Set pendingStateConfig.rpcUrl to enable pending state simulation',
+      });
+      return;
+    }
+
+    try {
+      this.logger.info('Initializing Phase 2 pending state simulation', {
+        chain: this.pendingStateConfig.chain,
+        anvilPort: this.pendingStateConfig.anvilPort,
+        enableHotSync: this.pendingStateConfig.enableHotSync,
+        adaptiveSync: this.pendingStateConfig.adaptiveSync,
+      });
+
+      // Create Anvil fork manager
+      this.anvilForkManager = createAnvilForkManager({
+        rpcUrl: this.pendingStateConfig.rpcUrl,
+        chain: this.pendingStateConfig.chain ?? 'ethereum',
+        port: this.pendingStateConfig.anvilPort,
+        autoStart: false, // We'll start manually to handle errors
+      });
+
+      // Start the fork if autoStartAnvil is enabled
+      if (this.pendingStateConfig.autoStartAnvil) {
+        await this.anvilForkManager.startFork();
+        this.logger.info('Anvil fork started', {
+          port: this.pendingStateConfig.anvilPort,
+          state: this.anvilForkManager.getState(),
+        });
+      }
+
+      // Create pending state simulator
+      this.pendingStateSimulator = createPendingStateSimulator({
+        anvilManager: this.anvilForkManager,
+        timeoutMs: this.pendingStateConfig.simulationTimeoutMs,
+      });
+
+      // Create hot fork synchronizer if enabled
+      if (this.pendingStateConfig.enableHotSync && this.anvilForkManager.getState() === 'running') {
+        const sourceProvider = this.providerService?.getProvider(this.pendingStateConfig.chain ?? 'ethereum');
+        if (sourceProvider) {
+          this.hotForkSynchronizer = createHotForkSynchronizer({
+            anvilManager: this.anvilForkManager,
+            sourceProvider,
+            syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
+            adaptiveSync: this.pendingStateConfig.adaptiveSync,
+            logger: {
+              error: (msg, meta) => this.logger.error(`[HotForkSync] ${msg}`, meta),
+              warn: (msg, meta) => this.logger.warn(`[HotForkSync] ${msg}`, meta),
+              info: (msg, meta) => this.logger.info(`[HotForkSync] ${msg}`, meta),
+              debug: (msg, meta) => this.logger.debug(`[HotForkSync] ${msg}`, meta),
+            },
+          });
+
+          await this.hotForkSynchronizer.start();
+          this.logger.info('Hot fork synchronizer started', {
+            syncIntervalMs: this.pendingStateConfig.syncIntervalMs,
+            adaptiveSync: this.pendingStateConfig.adaptiveSync,
+          });
+        }
+      }
+
+      this.logger.info('Phase 2 pending state simulation initialized successfully');
+
+    } catch (error) {
+      this.logger.error('Failed to initialize Phase 2 pending state simulation', {
+        error: getErrorMessage(error),
+      });
+      // Clean up partial initialization
+      await this.shutdownPendingStateSimulation();
+    }
+  }
+
+  /**
+   * Shutdown Phase 2 pending state simulation components.
+   */
+  private async shutdownPendingStateSimulation(): Promise<void> {
+    // Stop hot fork synchronizer
+    if (this.hotForkSynchronizer) {
+      try {
+        await this.hotForkSynchronizer.stop();
+      } catch (error) {
+        this.logger.warn('Error stopping hot fork synchronizer', {
+          error: getErrorMessage(error),
+        });
+      }
+      this.hotForkSynchronizer = null;
+    }
+
+    // Shutdown Anvil fork
+    if (this.anvilForkManager) {
+      try {
+        await this.anvilForkManager.shutdown();
+      } catch (error) {
+        this.logger.warn('Error shutting down Anvil fork', {
+          error: getErrorMessage(error),
+        });
+      }
+      this.anvilForkManager = null;
+    }
+
+    // Clear simulator reference
+    this.pendingStateSimulator = null;
+  }
+
   // ===========================================================================
   // Execution Processing
   // ===========================================================================
@@ -834,43 +983,58 @@ export class ExecutionEngineService {
         this.queueService.size() > 0 &&
         this.activeExecutionCount < this.maxConcurrentExecutions
       ) {
-        // Check circuit breaker BEFORE each dequeue (not just once at start)
-        // This is critical for HALF_OPEN state where only N attempts are allowed.
-        // Without this check, we could dequeue multiple items when only one
-        // execution is authorized, violating the circuit breaker contract.
-        //
-        // NOTE: canExecute() has a side effect in HALF_OPEN - it increments the
-        // attempt counter. If the subsequent dequeue() returns null (rare race
-        // condition with distributed queue), we "waste" a HALF_OPEN attempt.
-        // This is acceptable because: (1) queue size is checked before loop,
-        // (2) single-process deployment has no race, (3) wasted attempt just
-        // means slightly longer recovery time, not correctness issue.
-        if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
-          const queueSize = this.queueService.size();
-          if (queueSize > 0) {
-            this.stats.circuitBreakerBlocks++;
-            this.logger.debug('Circuit breaker blocking execution', {
-              state: this.circuitBreaker.getState(),
-              cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
-              queueSize,
-            });
+        // Fix 5.1: Check circuit breaker state BEFORE dequeue to avoid blocking
+        // For OPEN state, we can skip without side effects
+        if (this.circuitBreaker) {
+          const cbState = this.circuitBreaker.getState();
+          if (cbState === 'OPEN') {
+            // Circuit is fully open - block all executions
+            const queueSize = this.queueService.size();
+            if (queueSize > 0) {
+              this.stats.circuitBreakerBlocks++;
+              this.logger.debug('Circuit breaker blocking execution (OPEN)', {
+                state: cbState,
+                cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
+                queueSize,
+              });
+            }
+            break;
           }
-          break; // Exit loop - circuit is blocking
         }
 
+        // Dequeue first, then check if we can actually execute
         const opportunity = this.queueService.dequeue();
         if (!opportunity) break;
 
-        // Increment counter before async operation
+        // Fix 5.1: Check canExecute() AFTER successful dequeue to avoid wasting
+        // HALF_OPEN attempts on empty queue race conditions
+        if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
+          // Put the opportunity back at the front of the queue
+          // This avoids losing the opportunity when circuit breaker blocks
+          this.queueService.enqueue(opportunity);
+          this.stats.circuitBreakerBlocks++;
+          this.logger.debug('Circuit breaker blocking execution (HALF_OPEN exhausted)', {
+            state: this.circuitBreaker.getState(),
+            cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
+          });
+          break;
+        }
+
+        // Fix 5.2: Increment counter before async operation with bounds check
         this.activeExecutionCount++;
 
         // Execute and decrement counter when done (success or failure)
         // Also trigger another processing cycle to handle queued items
         this.executeOpportunityWithLock(opportunity)
           .finally(() => {
-            this.activeExecutionCount--;
+            // Fix 5.2: Ensure counter doesn't go negative (defensive check)
+            if (this.activeExecutionCount > 0) {
+              this.activeExecutionCount--;
+            } else {
+              this.logger.warn('activeExecutionCount was already 0, not decrementing');
+            }
             // Process more items if available (avoids waiting for next event/interval)
-            // FIX: Check isProcessingQueue INSIDE setImmediate to prevent race condition
+            // Check isProcessingQueue INSIDE setImmediate to prevent race condition
             // where multiple .finally() callbacks could each check the flag before any
             // of them had a chance to set it, resulting in multiple processQueueItems calls
             if (
@@ -1055,6 +1219,8 @@ export class ExecutionEngineService {
       gasBaselines: this.gasBaselines,
       stats: this.stats,
       simulationService: this.txSimulationService ?? undefined,
+      // Phase 2: Pending state simulator for mempool-aware execution
+      pendingStateSimulator: this.pendingStateSimulator ?? undefined,
     };
   }
 
@@ -1079,6 +1245,9 @@ export class ExecutionEngineService {
   private startHealthMonitoring(): void {
     this.healthMonitoringInterval = setInterval(async () => {
       try {
+        // Fix 4.2: Cleanup old gas baseline entries to prevent memory leak
+        this.cleanupGasBaselines();
+
         const health: ServiceHealth = {
           name: 'execution-engine',
           status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
@@ -1116,6 +1285,32 @@ export class ExecutionEngineService {
         this.logger.error('Execution engine health monitoring failed', { error });
       }
     }, 30000);
+  }
+
+  /**
+   * Cleanup old gas baseline entries to prevent memory leak.
+   * Fix 4.2: Removes entries older than 5 minutes and limits to 100 entries per chain.
+   */
+  private cleanupGasBaselines(): void {
+    const MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+    const MAX_ENTRIES_PER_CHAIN = 100;
+    const now = Date.now();
+
+    for (const [chain, history] of this.gasBaselines) {
+      if (history.length === 0) continue;
+
+      // Filter out entries older than MAX_AGE_MS
+      const validEntries = history.filter(entry => (now - entry.timestamp) < MAX_AGE_MS);
+
+      // Also limit to MAX_ENTRIES_PER_CHAIN (keep most recent)
+      const trimmedEntries = validEntries.length > MAX_ENTRIES_PER_CHAIN
+        ? validEntries.slice(-MAX_ENTRIES_PER_CHAIN)
+        : validEntries;
+
+      // Update in place to preserve references (strategies may hold reference to array)
+      history.length = 0;
+      history.push(...trimmedEntries);
+    }
   }
 
   /**

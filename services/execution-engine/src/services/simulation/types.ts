@@ -317,9 +317,13 @@ export interface ISimulationService {
 
 /**
  * Chain ID mapping for simulation providers
+ *
+ * Note: Goerli testnet has been deprecated as of January 2024.
+ * Use Sepolia for Ethereum testnet simulation.
  */
 export const CHAIN_IDS: Record<string, number> = {
   ethereum: 1,
+  /** @deprecated Goerli testnet is deprecated. Use sepolia instead. */
   goerli: 5,
   sepolia: 11155111,
   arbitrum: 42161,
@@ -332,6 +336,71 @@ export const CHAIN_IDS: Record<string, number> = {
   linea: 59144,
   fantom: 250,
 };
+
+/**
+ * Fix 6.3: WETH (Wrapped Native Token) address mapping per chain.
+ * Used for detecting ETH-out swaps across different chains.
+ */
+export const WETH_ADDRESSES: Record<number, string> = {
+  // Ethereum Mainnet
+  1: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2',
+  // Goerli (deprecated)
+  5: '0xb4fbf271143f4fbf7b91a5ded31805e42b2208d6',
+  // Sepolia
+  11155111: '0x7b79995e5f793a07bc00c21412e50ecae098e7f9',
+  // Arbitrum One
+  42161: '0x82af49447d8a07e3bd95bd0d56f35241523fbab1',
+  // Optimism
+  10: '0x4200000000000000000000000000000000000006',
+  // Polygon (WMATIC)
+  137: '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270',
+  // Base
+  8453: '0x4200000000000000000000000000000000000006',
+  // BNB Chain (WBNB)
+  56: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
+  // Avalanche (WAVAX)
+  43114: '0xb31f66aa3c1e785363f0875a1b74e27b85fd66c7',
+  // zkSync Era
+  324: '0x5aea5775959fbc2557cc8789bc1bf90a239d9a91',
+  // Linea
+  59144: '0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f',
+  // Fantom (WFTM)
+  250: '0x21be370d5312f44cb42ce377bc9b8a0cef1a4c83',
+};
+
+/**
+ * Get WETH address for a chain ID.
+ * Returns lowercase address or undefined if chain not supported.
+ */
+export function getWethAddress(chainId: number): string | undefined {
+  return WETH_ADDRESSES[chainId]?.toLowerCase();
+}
+
+/**
+ * Check if an address is the WETH address for a given chain.
+ */
+export function isWethAddress(address: string, chainId: number): boolean {
+  const wethAddress = getWethAddress(chainId);
+  return wethAddress !== undefined && address.toLowerCase() === wethAddress;
+}
+
+/**
+ * Fix 6.1: Standardized error message extraction.
+ * Replaces inconsistent `error instanceof Error ? error.message : String(error)` patterns.
+ */
+export function getSimulationErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return String(error);
+  } catch {
+    return 'Unknown error';
+  }
+}
 
 /**
  * Default configuration values
@@ -376,3 +445,59 @@ export const ALCHEMY_CONFIG = {
  * @see @arbitrage/core CircularBuffer
  */
 export { CircularBuffer, createRollingWindow } from '@arbitrage/core';
+
+// =============================================================================
+// Shared Utilities (Fix 9.1-9.2)
+// =============================================================================
+
+/**
+ * Fix 9.1: Create a cancellable timeout promise.
+ * Use this instead of duplicating timeout logic across classes.
+ *
+ * @example
+ * const { promise, cancel } = createCancellableTimeout<MyResult>(5000, 'Operation timeout');
+ * try {
+ *   const result = await Promise.race([myOperation(), promise]);
+ *   return result;
+ * } finally {
+ *   cancel(); // Always cancel to prevent timer leak
+ * }
+ */
+export function createCancellableTimeout<T = never>(
+  ms: number,
+  message: string
+): { promise: Promise<T>; cancel: () => void } {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const promise = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), ms);
+  });
+
+  const cancel = () => {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+      timeoutId = undefined;
+    }
+  };
+
+  return { promise, cancel };
+}
+
+/**
+ * Fix 9.2: Update rolling average for metrics.
+ * Consolidates the duplicated averaging logic found in multiple classes.
+ *
+ * @param currentAverage - Current average value
+ * @param newValue - New value to incorporate
+ * @param totalCount - Total number of samples (including new value)
+ * @returns Updated average
+ */
+export function updateRollingAverage(
+  currentAverage: number,
+  newValue: number,
+  totalCount: number
+): number {
+  if (totalCount <= 0) return newValue;
+  if (totalCount === 1) return newValue;
+  return (currentAverage * (totalCount - 1) + newValue) / totalCount;
+}
