@@ -83,9 +83,12 @@ export class LSTMPredictor {
       model.add(tf.layers.dense({ units: 3, activation: 'linear' }));
 
       // Compile model
+      // FIX: TensorFlow.js doesn't have 'huberLoss' as a built-in string loss.
+      // Use tf.losses.huberLoss wrapped as a custom loss function.
+      // Huber loss is robust to outliers (combines MSE for small errors, MAE for large errors)
       model.compile({
         optimizer: tf.train.adam(0.001),
-        loss: 'huberLoss', // Robust to outliers
+        loss: (yTrue: tf.Tensor, yPred: tf.Tensor) => tf.losses.huberLoss(yTrue, yPred),
         metrics: ['mae', 'mse']
       });
 

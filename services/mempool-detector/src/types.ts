@@ -28,6 +28,15 @@ export type SwapRouterType =
 /**
  * Decoded pending swap intent extracted from a pending transaction.
  * Represents the user's intent before the transaction is included in a block.
+ *
+ * NOTE: This local type uses `bigint` for amount fields (amountIn, gasPrice, etc.)
+ * for precise arithmetic operations during transaction processing.
+ *
+ * For Redis publishing/JSON serialization, use the shared @arbitrage/types PendingSwapIntent
+ * which uses `string` for these fields. Use toSerializableIntent() in index.ts to convert.
+ *
+ * @see @arbitrage/types PendingSwapIntent - serializable version for cross-service communication
+ * @see toSerializableIntent() - conversion function in index.ts
  */
 export interface PendingSwapIntent {
   /** Transaction hash of the pending transaction */
@@ -419,6 +428,12 @@ export const DEFAULT_MEMPOOL_DETECTOR_PORT = 3007;
 
 /**
  * Default Redis stream name for pending opportunities.
+ *
+ * FIX 9.2: This constant should match RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES
+ * from @arbitrage/core. We keep a local constant here to avoid circular dependencies
+ * in type definition files. The canonical source is redis-streams.ts.
+ *
+ * @see RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES - Canonical source
  */
 export const DEFAULT_PENDING_OPPORTUNITIES_STREAM = 'stream:pending-opportunities';
 

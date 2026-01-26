@@ -86,6 +86,24 @@ export const SERVICE_CONFIGS = {
 // FLASH LOAN PROVIDER CONFIGURATION (P1-4 fix)
 // Moved from hardcoded values in execution-engine
 // =============================================================================
+
+/**
+ * Flash loan provider configuration by chain.
+ *
+ * ## Fix 3.1/9.2: Address Consolidation
+ *
+ * IMPORTANT: Aave V3 Pool addresses are also defined in:
+ * - contracts/deployments/addresses.ts (AAVE_V3_POOL_ADDRESSES)
+ *
+ * The contracts/deployments/addresses.ts is the CANONICAL SOURCE for
+ * Hardhat deployments. When adding/updating Aave addresses, update BOTH files.
+ *
+ * Future improvement: Extract shared addresses to a common JSON file that
+ * both TypeScript and Solidity can consume.
+ *
+ * @see contracts/deployments/addresses.ts
+ * @see https://docs.aave.com/developers/deployed-contracts/v3-mainnet
+ */
 export const FLASH_LOAN_PROVIDERS: Record<string, {
   address: string;
   protocol: string;
@@ -93,6 +111,7 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
 }> = {
   // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
   // FIX 3.1.3-1: Corrected Ethereum Aave V3 Pool address (was 0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF)
+  // SYNC: Must match contracts/deployments/addresses.ts AAVE_V3_POOL_ADDRESSES
   ethereum: {
     address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
     protocol: 'aave_v3',

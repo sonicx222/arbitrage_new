@@ -8,6 +8,18 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @title MockDexRouter
  * @dev Mock DEX router for testing swaps
  * @notice Simulates Uniswap V2 style router with configurable exchange rates
+ *
+ * ## Exchange Rate Calculation (Fix 4.2 Documentation)
+ *
+ * amountOut = (amountIn * rate) / 1e18
+ *
+ * IMPORTANT: For very small amounts or small rates, this can truncate to 0.
+ * Example: amountIn=1, rate=1e17 (0.1) → amountOut = (1 * 1e17) / 1e18 = 0
+ *
+ * To prevent zero-output issues in tests:
+ * - Use amounts >= 1e18 for 18-decimal tokens
+ * - Set rates that ensure non-zero output for your test amounts
+ * - The contract now emits a warning event when output truncates to zero
  */
 contract MockDexRouter {
     using SafeERC20 for IERC20;
@@ -22,6 +34,14 @@ contract MockDexRouter {
         address indexed tokenOut,
         uint256 amountIn,
         uint256 amountOut
+    );
+
+    /// @notice Emitted when calculation truncates to zero (Fix 4.2)
+    event ZeroOutputWarning(
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 rate
     );
 
     constructor(string memory _name) {
@@ -75,8 +95,13 @@ contract MockDexRouter {
             require(rate > 0, "Exchange rate not set");
 
             // Calculate output: amountIn * rate / 1e18
-            // Handle different decimal tokens properly
+            // Fix 4.2: Check for zero output due to truncation
             uint256 amountOut = (currentAmount * rate) / 1e18;
+
+            // Emit warning if truncation results in zero (helps debug test issues)
+            if (amountOut == 0 && currentAmount > 0) {
+                emit ZeroOutputWarning(tokenIn, tokenOut, currentAmount, rate);
+            }
 
             amounts[i + 1] = amountOut;
             currentAmount = amountOut;

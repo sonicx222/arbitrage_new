@@ -202,16 +202,32 @@ async function main() {
     await coordinator.start(port);
 
     // Graceful shutdown handler
+    // FIX: Guard against double shutdown when user presses Ctrl+C multiple times
+    let isShuttingDown = false;
     const shutdown = async (signal: string) => {
+      if (isShuttingDown) {
+        logger.debug(`Already shutting down, ignoring ${signal}`);
+        return;
+      }
+      isShuttingDown = true;
+
       logger.info(`Received ${signal}, shutting down gracefully`);
 
-      // Stop cross-region health manager
-      await resetCrossRegionHealthManager();
+      try {
+        // Stop cross-region health manager
+        await resetCrossRegionHealthManager();
 
-      // Stop coordinator
-      await coordinator.stop();
+        // Stop coordinator
+        await coordinator.stop();
 
-      process.exit(0);
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during shutdown', {
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+        process.exit(1);
+      }
     };
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));

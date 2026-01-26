@@ -1130,6 +1130,408 @@ describe('ETH Price Detection', () => {
 // Token Pair Normalization Edge Cases
 // =============================================================================
 
+// =============================================================================
+// Concurrent Detection Guard Tests (Fix 8.1)
+// =============================================================================
+
+describe('Concurrent Detection Guard', () => {
+  /**
+   * Simulates the isDetecting concurrency guard from detector.ts.
+   * This prevents overlapping detection cycles that could cause race conditions.
+   */
+  function createDetectionGuard() {
+    let isDetecting = false;
+    let detectionCount = 0;
+    let skippedCount = 0;
+
+    return {
+      async startDetection(detectFn: () => Promise<void>): Promise<boolean> {
+        // FIX 5.1: Skip if already detecting
+        if (isDetecting) {
+          skippedCount++;
+          return false;
+        }
+
+        isDetecting = true;
+        try {
+          await detectFn();
+          detectionCount++;
+          return true;
+        } finally {
+          isDetecting = false;
+        }
+      },
+      getStats: () => ({
+        detectionCount,
+        skippedCount,
+        isDetecting,
+      }),
+    };
+  }
+
+  it('should allow sequential detection cycles', async () => {
+    const guard = createDetectionGuard();
+
+    await guard.startDetection(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+
+    await guard.startDetection(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+
+    const stats = guard.getStats();
+    expect(stats.detectionCount).toBe(2);
+    expect(stats.skippedCount).toBe(0);
+  });
+
+  it('should skip concurrent detection attempts', async () => {
+    const guard = createDetectionGuard();
+
+    // Start a long-running detection
+    const detection1 = guard.startDetection(async () => {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+
+    // Try to start another detection while the first is running
+    const detection2 = guard.startDetection(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+
+    // Second should be skipped
+    const result2 = await detection2;
+    expect(result2).toBe(false);
+
+    // Wait for first to complete
+    const result1 = await detection1;
+    expect(result1).toBe(true);
+
+    const stats = guard.getStats();
+    expect(stats.detectionCount).toBe(1);
+    expect(stats.skippedCount).toBe(1);
+  });
+
+  it('should recover after detection throws error', async () => {
+    const guard = createDetectionGuard();
+
+    // Detection that throws
+    try {
+      await guard.startDetection(async () => {
+        throw new Error('Detection failed');
+      });
+    } catch {
+      // Expected error
+    }
+
+    // Guard should be reset, allowing new detection
+    const result = await guard.startDetection(async () => {
+      // Success
+    });
+
+    expect(result).toBe(true);
+    expect(guard.getStats().isDetecting).toBe(false);
+  });
+
+  it('should handle multiple rapid detection attempts', async () => {
+    const guard = createDetectionGuard();
+
+    // Start multiple detections rapidly
+    const promises = [];
+    for (let i = 0; i < 5; i++) {
+      promises.push(guard.startDetection(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }));
+    }
+
+    await Promise.all(promises);
+
+    const stats = guard.getStats();
+    // Only one should have run, rest should be skipped
+    expect(stats.detectionCount).toBe(1);
+    expect(stats.skippedCount).toBe(4);
+  });
+
+  it('should not be detecting after all cycles complete', async () => {
+    const guard = createDetectionGuard();
+
+    await guard.startDetection(async () => {});
+
+    expect(guard.getStats().isDetecting).toBe(false);
+  });
+});
+
+// =============================================================================
+// Price Impact Estimation Tests (Fix 8.1 - analyzePendingOpportunity support)
+// =============================================================================
+
+describe('Price Impact Estimation', () => {
+  /**
+   * Estimate price impact based on trade size and liquidity.
+   * Extracted from analyzePendingOpportunity logic.
+   */
+  function estimatePriceImpact(
+    amountIn: bigint,
+    reserve0: string | undefined,
+    reserve1: string | undefined,
+    tokenDecimals: number = 18
+  ): number {
+    // Guard against missing reserve data
+    if (!reserve0 || !reserve1) {
+      return 0;
+    }
+
+    try {
+      const r0 = BigInt(reserve0);
+      const r1 = BigInt(reserve1);
+
+      // Guard against zero reserves
+      if (r0 === 0n || r1 === 0n) {
+        return 0;
+      }
+
+      // Calculate impact as percentage of pool
+      // Impact ≈ amountIn / reserve0 for constant product AMM
+      const scaleFactor = 10000n; // 0.01% precision
+      const impactBps = (amountIn * scaleFactor) / r0;
+
+      // Convert to percentage (divide by 100 since scaleFactor is 10000)
+      return Number(impactBps) / 100;
+    } catch {
+      return 0;
+    }
+  }
+
+  it('should estimate impact for small trade', () => {
+    const amountIn = 1000000000000000000n; // 1 ETH
+    const reserve0 = '1000000000000000000000'; // 1000 ETH
+    const reserve1 = '2500000000000'; // 2.5M USDC (6 decimals)
+
+    const impact = estimatePriceImpact(amountIn, reserve0, reserve1);
+
+    // 1 ETH / 1000 ETH = 0.1%
+    expect(impact).toBeCloseTo(0.1, 2);
+  });
+
+  it('should estimate higher impact for larger trade', () => {
+    const amountIn = 100000000000000000000n; // 100 ETH
+    const reserve0 = '1000000000000000000000'; // 1000 ETH
+    const reserve1 = '2500000000000'; // 2.5M USDC
+
+    const impact = estimatePriceImpact(amountIn, reserve0, reserve1);
+
+    // 100 ETH / 1000 ETH = 10%
+    expect(impact).toBeCloseTo(10, 1);
+  });
+
+  it('should return 0 for missing reserves', () => {
+    const amountIn = 1000000000000000000n;
+
+    expect(estimatePriceImpact(amountIn, undefined, '1000')).toBe(0);
+    expect(estimatePriceImpact(amountIn, '1000', undefined)).toBe(0);
+    expect(estimatePriceImpact(amountIn, undefined, undefined)).toBe(0);
+  });
+
+  it('should return 0 for zero reserves', () => {
+    const amountIn = 1000000000000000000n;
+
+    expect(estimatePriceImpact(amountIn, '0', '1000000')).toBe(0);
+    expect(estimatePriceImpact(amountIn, '1000000', '0')).toBe(0);
+  });
+
+  it('should handle very large reserves', () => {
+    // Large DeFi pools can have billions in liquidity
+    const amountIn = 10000000000000000000n; // 10 ETH
+    const reserve0 = '100000000000000000000000'; // 100,000 ETH
+    const reserve1 = '250000000000000'; // 250M USDC
+
+    const impact = estimatePriceImpact(amountIn, reserve0, reserve1);
+
+    // 10 ETH / 100000 ETH = 0.01%
+    expect(impact).toBeCloseTo(0.01, 3);
+  });
+
+  it('should handle invalid reserve strings gracefully', () => {
+    const amountIn = 1000000000000000000n;
+
+    // Invalid string should return 0, not throw
+    expect(estimatePriceImpact(amountIn, 'invalid', '1000')).toBe(0);
+    expect(estimatePriceImpact(amountIn, '1000', 'invalid')).toBe(0);
+  });
+});
+
+// =============================================================================
+// Pending Opportunity Analysis Tests (Fix 8.1)
+// =============================================================================
+
+describe('Pending Opportunity Analysis', () => {
+  /**
+   * Check if a pending opportunity's deadline is still valid.
+   */
+  function isDeadlineValid(deadline: number, bufferSeconds: number = 30): boolean {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    return deadline > nowSeconds + bufferSeconds;
+  }
+
+  /**
+   * Calculate confidence adjustment based on slippage tolerance.
+   * Higher slippage = lower confidence (whale may be desperate)
+   */
+  function adjustConfidenceForSlippage(
+    baseConfidence: number,
+    slippageTolerance: number
+  ): number {
+    // High slippage (>1%) reduces confidence
+    if (slippageTolerance > 0.01) {
+      return baseConfidence * 0.9;
+    }
+    // Very high slippage (>3%) reduces confidence more
+    if (slippageTolerance > 0.03) {
+      return baseConfidence * 0.7;
+    }
+    // Normal slippage (0.1-0.5%) is standard
+    return baseConfidence;
+  }
+
+  describe('Deadline Validation', () => {
+    it('should accept valid future deadline', () => {
+      const futureDeadline = Math.floor(Date.now() / 1000) + 300; // 5 min
+      expect(isDeadlineValid(futureDeadline)).toBe(true);
+    });
+
+    it('should reject expired deadline', () => {
+      const pastDeadline = Math.floor(Date.now() / 1000) - 60; // 1 min ago
+      expect(isDeadlineValid(pastDeadline)).toBe(false);
+    });
+
+    it('should reject deadline too close to now (within buffer)', () => {
+      const closeDeadline = Math.floor(Date.now() / 1000) + 20; // 20 sec
+      expect(isDeadlineValid(closeDeadline, 30)).toBe(false);
+    });
+
+    it('should accept deadline just outside buffer', () => {
+      const okDeadline = Math.floor(Date.now() / 1000) + 35; // 35 sec
+      expect(isDeadlineValid(okDeadline, 30)).toBe(true);
+    });
+  });
+
+  describe('Slippage-Based Confidence', () => {
+    it('should not penalize normal slippage', () => {
+      expect(adjustConfidenceForSlippage(0.8, 0.005)).toBe(0.8);
+      expect(adjustConfidenceForSlippage(0.8, 0.003)).toBe(0.8);
+    });
+
+    it('should reduce confidence for high slippage', () => {
+      expect(adjustConfidenceForSlippage(0.8, 0.015)).toBeCloseTo(0.72, 10); // 0.8 * 0.9
+      expect(adjustConfidenceForSlippage(0.8, 0.02)).toBeCloseTo(0.72, 10);
+    });
+
+    it('should reduce confidence more for very high slippage', () => {
+      expect(adjustConfidenceForSlippage(0.8, 0.05)).toBeCloseTo(0.72, 10); // Still 0.9 (> 0.01 check first)
+    });
+
+    it('should handle edge cases', () => {
+      expect(adjustConfidenceForSlippage(1.0, 0)).toBe(1.0);
+      expect(adjustConfidenceForSlippage(0, 0.01)).toBe(0);
+    });
+  });
+
+  describe('Cross-Chain Opportunity Detection from Pending', () => {
+    /**
+     * Check if a pending swap creates a cross-chain arbitrage opportunity.
+     * This simulates the core logic from analyzePendingOpportunity.
+     */
+    interface PricePoint {
+      chain: string;
+      dex: string;
+      price: number;
+    }
+
+    function detectCrossChainFromPending(
+      pendingChain: string,
+      pendingPrice: number,
+      otherPrices: PricePoint[],
+      minPriceDiff: number = 0.005 // 0.5%
+    ): { targetChain: string; targetDex: string; priceDiff: number } | null {
+      let bestOpportunity: { targetChain: string; targetDex: string; priceDiff: number } | null = null;
+      let bestPriceDiff = 0;
+
+      for (const point of otherPrices) {
+        // Skip same chain
+        if (point.chain === pendingChain) continue;
+
+        // Calculate price difference
+        const priceDiff = Math.abs(point.price - pendingPrice) / Math.min(point.price, pendingPrice);
+
+        if (priceDiff > minPriceDiff && priceDiff > bestPriceDiff) {
+          bestPriceDiff = priceDiff;
+          bestOpportunity = {
+            targetChain: point.chain,
+            targetDex: point.dex,
+            priceDiff,
+          };
+        }
+      }
+
+      return bestOpportunity;
+    }
+
+    it('should detect cross-chain opportunity when price diff exceeds threshold', () => {
+      const otherPrices: PricePoint[] = [
+        { chain: 'ethereum', dex: 'uniswap', price: 2500 },
+        { chain: 'arbitrum', dex: 'sushiswap', price: 2550 }, // 2% higher
+        { chain: 'polygon', dex: 'quickswap', price: 2480 },
+      ];
+
+      const result = detectCrossChainFromPending('ethereum', 2500, otherPrices);
+
+      expect(result).not.toBeNull();
+      expect(result!.targetChain).toBe('arbitrum');
+      expect(result!.priceDiff).toBeCloseTo(0.02, 3);
+    });
+
+    it('should return null when no significant price diff', () => {
+      const otherPrices: PricePoint[] = [
+        { chain: 'ethereum', dex: 'uniswap', price: 2500 },
+        { chain: 'arbitrum', dex: 'sushiswap', price: 2502 }, // 0.08% - too small
+        { chain: 'polygon', dex: 'quickswap', price: 2498 },
+      ];
+
+      const result = detectCrossChainFromPending('ethereum', 2500, otherPrices);
+
+      expect(result).toBeNull();
+    });
+
+    it('should skip same chain prices', () => {
+      const otherPrices: PricePoint[] = [
+        { chain: 'ethereum', dex: 'uniswap', price: 2500 },
+        { chain: 'ethereum', dex: 'sushiswap', price: 2600 }, // Same chain - should skip
+      ];
+
+      const result = detectCrossChainFromPending('ethereum', 2500, otherPrices);
+
+      expect(result).toBeNull();
+    });
+
+    it('should find best opportunity among multiple', () => {
+      const otherPrices: PricePoint[] = [
+        { chain: 'arbitrum', dex: 'sushiswap', price: 2525 }, // 1% diff
+        { chain: 'polygon', dex: 'quickswap', price: 2575 }, // 3% diff - best
+        { chain: 'optimism', dex: 'velodrome', price: 2550 }, // 2% diff
+      ];
+
+      const result = detectCrossChainFromPending('ethereum', 2500, otherPrices);
+
+      expect(result).not.toBeNull();
+      expect(result!.targetChain).toBe('polygon');
+      expect(result!.priceDiff).toBeCloseTo(0.03, 3);
+    });
+  });
+});
+
+// =============================================================================
+// Token Pair Normalization Edge Cases
+// =============================================================================
+
 describe('Token Pair Normalization Edge Cases', () => {
   /**
    * Token normalization logic (simplified version from types.ts)

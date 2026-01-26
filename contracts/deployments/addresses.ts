@@ -3,13 +3,19 @@
  *
  * This file contains deployed FlashLoanArbitrage contract addresses.
  *
- * ARCHITECTURE NOTE (FIX 3.1.3-4):
- * Aave V3 Pool addresses are also defined in:
+ * ## Address Consolidation (Fix 3.1/9.2)
+ *
+ * This file is the CANONICAL SOURCE for Hardhat deployments.
+ * Aave V3 Pool addresses are ALSO defined in:
  * - shared/config/src/service-config.ts (FLASH_LOAN_PROVIDERS)
  *
- * The service-config.ts is the SOURCE OF TRUTH for the TypeScript backend.
- * This file is for Hardhat deployment/testing and should stay in sync.
- * Consider a future refactoring to centralize all addresses.
+ * When updating Aave addresses, update BOTH files to keep them in sync.
+ *
+ * ## Contract Libraries (Fix 9.1/9.4)
+ *
+ * The contracts/ directory includes reusable libraries:
+ * - src/libraries/Constants.sol - Shared constants
+ * - src/libraries/SwapPathValidator.sol - Path validation logic
  *
  * Usage:
  *   import { FLASH_LOAN_CONTRACT_ADDRESSES, AAVE_V3_POOL_ADDRESSES } from '@arbitrage/contracts/deployments';
