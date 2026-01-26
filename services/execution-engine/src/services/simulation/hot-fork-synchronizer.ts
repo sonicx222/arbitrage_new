@@ -15,6 +15,7 @@
  */
 
 import { ethers } from 'ethers';
+import { createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 
@@ -24,22 +25,21 @@ import type { Logger } from '../../types';
 
 /**
  * Fix 6.2: Use shared Logger interface from types.ts for consistency.
- * Deprecated: SynchronizerLogger interface removed in favor of Logger.
- *
  * The Logger interface from types.ts is used across all execution engine
  * components for consistent logging behavior.
  */
 
 /**
- * Default console-based logger for backward compatibility.
- * Fix 3.2: Used when no logger is provided in config.
+ * Lazy-initialized Pino logger for when no logger is provided.
+ * Uses Pino for proper structured logging with LOG_LEVEL support.
  */
-const defaultLogger: Logger = {
-  error: (message: string, meta?: object) => console.error(`[HotForkSynchronizer] ${message}`, meta ?? ''),
-  warn: (message: string, meta?: object) => console.warn(`[HotForkSynchronizer] ${message}`, meta ?? ''),
-  info: (message: string, meta?: object) => console.info(`[HotForkSynchronizer] ${message}`, meta ?? ''),
-  debug: (message: string, meta?: object) => console.debug(`[HotForkSynchronizer] ${message}`, meta ?? ''),
-};
+let _defaultLogger: ILogger | null = null;
+function getDefaultLogger(): ILogger {
+  if (!_defaultLogger) {
+    _defaultLogger = createPinoLogger('hot-fork-synchronizer');
+  }
+  return _defaultLogger;
+}
 
 /**
  * Configuration for HotForkSynchronizer.
@@ -156,7 +156,7 @@ export class HotForkSynchronizer {
     this.sourceProvider = config.sourceProvider;
     this.baseSyncIntervalMs = config.syncIntervalMs ?? DEFAULT_SYNC_INTERVAL_MS;
     this.maxConsecutiveFailures = config.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
-    this.logger = config.logger ?? defaultLogger;
+    this.logger = config.logger ?? getDefaultLogger();
     this.metrics = this.createEmptyMetrics();
 
     // Fix 10.5: Initialize adaptive sync configuration

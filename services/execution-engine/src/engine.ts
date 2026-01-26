@@ -879,10 +879,12 @@ export class ExecutionEngineService {
             maxSyncIntervalMs: this.pendingStateConfig.maxSyncIntervalMs,
             maxConsecutiveFailures: this.pendingStateConfig.maxConsecutiveFailures,
             logger: {
-              error: (msg, meta) => this.logger.error(`[HotForkSync] ${msg}`, meta),
-              warn: (msg, meta) => this.logger.warn(`[HotForkSync] ${msg}`, meta),
-              info: (msg, meta) => this.logger.info(`[HotForkSync] ${msg}`, meta),
-              debug: (msg, meta) => this.logger.debug(`[HotForkSync] ${msg}`, meta),
+              // Use structured component field instead of template literals
+              // Template literals are evaluated on every call, creating overhead
+              error: (msg, meta) => this.logger.error(msg, { component: 'HotForkSync', ...meta }),
+              warn: (msg, meta) => this.logger.warn(msg, { component: 'HotForkSync', ...meta }),
+              info: (msg, meta) => this.logger.info(msg, { component: 'HotForkSync', ...meta }),
+              debug: (msg, meta) => this.logger.debug(msg, { component: 'HotForkSync', ...meta }),
             },
           });
 
@@ -997,14 +999,9 @@ export class ExecutionEngineService {
           const cbState = this.circuitBreaker.getState();
           if (cbState === 'OPEN') {
             // Circuit is fully open - block all executions
-            const queueSize = this.queueService.size();
-            if (queueSize > 0) {
+            // NOTE: Per-block debug logging removed - tracked via stats.circuitBreakerBlocks
+            if (this.queueService.size() > 0) {
               this.stats.circuitBreakerBlocks++;
-              this.logger.debug('Circuit breaker blocking execution (OPEN)', {
-                state: cbState,
-                cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
-                queueSize,
-              });
             }
             break;
           }
@@ -1019,12 +1016,9 @@ export class ExecutionEngineService {
         if (this.circuitBreaker && !this.circuitBreaker.canExecute()) {
           // Put the opportunity back at the front of the queue
           // This avoids losing the opportunity when circuit breaker blocks
+          // NOTE: Per-block debug logging removed - tracked via stats.circuitBreakerBlocks
           this.queueService.enqueue(opportunity);
           this.stats.circuitBreakerBlocks++;
-          this.logger.debug('Circuit breaker blocking execution (HALF_OPEN exhausted)', {
-            state: this.circuitBreaker.getState(),
-            cooldownRemaining: this.circuitBreaker.getCooldownRemaining(),
-          });
           break;
         }
 

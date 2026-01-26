@@ -15,8 +15,17 @@
 
 import { ethers } from 'ethers';
 import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES } from '@arbitrage/config';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage, createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+
+// Lazy-initialized logger for module-level validation
+let _moduleLogger: ILogger | null = null;
+function getModuleLogger(): ILogger {
+  if (!_moduleLogger) {
+    _moduleLogger = createPinoLogger('base-strategy');
+  }
+  return _moduleLogger;
+}
 import type {
   Logger,
   StrategyContext,
@@ -116,17 +125,31 @@ function validateGasPrice(chain: string, configuredPrice: number): number {
   // Fix 3.2: Check for NaN from invalid environment variable (e.g., GAS_PRICE_ETHEREUM_GWEI=abc)
   // NaN comparisons always return false, so we must check explicitly
   if (Number.isNaN(configuredPrice)) {
-    console.error(`[ERR_GAS_PRICE] Invalid gas price for ${chain} (NaN). Check GAS_PRICE_${chain.toUpperCase()}_GWEI env var. Using minimum (${min} gwei).`);
+    getModuleLogger().error('Invalid gas price (NaN)', {
+      chain,
+      envVar: `GAS_PRICE_${chain.toUpperCase()}_GWEI`,
+      fallback: min,
+    });
     return min;
   }
 
   if (configuredPrice < min) {
-    console.warn(`[WARN_GAS_PRICE] Gas price for ${chain} (${configuredPrice} gwei) below minimum (${min} gwei). Using minimum.`);
+    getModuleLogger().warn('Gas price below minimum', {
+      chain,
+      configured: configuredPrice,
+      min,
+      using: min,
+    });
     return min;
   }
 
   if (configuredPrice > max) {
-    console.warn(`[WARN_GAS_PRICE] Gas price for ${chain} (${configuredPrice} gwei) above maximum (${max} gwei). Using maximum.`);
+    getModuleLogger().warn('Gas price above maximum', {
+      chain,
+      configured: configuredPrice,
+      max,
+      using: max,
+    });
     return max;
   }
 

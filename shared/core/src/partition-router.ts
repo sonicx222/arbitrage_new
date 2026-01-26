@@ -22,6 +22,16 @@ import {
 } from '../../config/src/partitions';
 
 import { CHAINS } from '../../config/src';
+import { createPinoLogger, type ILogger } from './logging';
+
+// Lazy-initialized logger for deprecation warnings
+let _routerLogger: ILogger | null = null;
+function getRouterLogger(): ILogger {
+  if (!_routerLogger) {
+    _routerLogger = createPinoLogger('partition-router');
+  }
+  return _routerLogger;
+}
 
 // =============================================================================
 // Shared Configuration (Single Source of Truth)
@@ -328,22 +338,19 @@ export function getMigrationRecommendation(deprecatedService: string): string | 
  * Log a deprecation warning if using a deprecated pattern.
  *
  * @param serviceName - The service name to check
- * @param logger - Optional logger (defaults to console.warn)
+ * @param logger - Optional logger (defaults to lazy-initialized Pino logger)
  */
 export function warnIfDeprecated(
   serviceName: string,
-  logger?: { warn: (msg: string) => void }
+  logger?: { warn: (msg: string, meta?: Record<string, unknown>) => void }
 ): void {
   if (isDeprecatedPattern(serviceName)) {
     const recommendation = getMigrationRecommendation(serviceName);
-    const message = recommendation
-      ? createDeprecationWarning(serviceName, recommendation)
-      : `[DEPRECATED] '${serviceName}' is deprecated. Use partition services instead.`;
+    const effectiveLogger = logger ?? getRouterLogger();
 
-    if (logger) {
-      logger.warn(message);
-    } else {
-      console.warn(message);
-    }
+    effectiveLogger.warn('Deprecated service pattern detected', {
+      serviceName,
+      recommendation: recommendation ?? 'Use partition services instead',
+    });
   }
 }

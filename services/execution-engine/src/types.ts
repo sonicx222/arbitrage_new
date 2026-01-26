@@ -7,17 +7,28 @@
  */
 
 import { ethers } from 'ethers';
-import type {
-  ServiceStateManager,
-  PerformanceLogger,
-  RedisStreamsClient,
-  DistributedLockManager,
-  NonceManager,
-  MevProviderFactory,
-  BridgeRouterFactory,
+import {
+  createPinoLogger,
+  type ILogger,
+  type ServiceStateManager,
+  type PerformanceLogger,
+  type RedisStreamsClient,
+  type DistributedLockManager,
+  type NonceManager,
+  type MevProviderFactory,
+  type BridgeRouterFactory,
 } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
+
+// Lazy-initialized logger for module-level utilities
+let _typesLogger: ILogger | null = null;
+function getTypesLogger(): ILogger {
+  if (!_typesLogger) {
+    _typesLogger = createPinoLogger('execution-engine-types');
+  }
+  return _typesLogger;
+}
 
 // =============================================================================
 // Execution Result
@@ -296,10 +307,10 @@ export function createInitialStats(): ExecutionStats {
 // =============================================================================
 
 export interface Logger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
+  info: (message: string, meta?: Record<string, unknown>) => void;
+  error: (message: string, meta?: Record<string, unknown>) => void;
+  warn: (message: string, meta?: Record<string, unknown>) => void;
+  debug: (message: string, meta?: Record<string, unknown>) => void;
 }
 
 // =============================================================================
@@ -523,24 +534,32 @@ function parseEnvTimeout(
 
   // Check for NaN (e.g., if someone sets EXECUTION_TIMEOUT_MS="abc")
   if (Number.isNaN(parsed)) {
-    console.warn(
-      `[WARN] Invalid ${envVar}="${raw}" (not a number), using default ${defaultValue}ms`
-    );
+    getTypesLogger().warn('Invalid timeout value (NaN)', {
+      envVar,
+      value: raw,
+      default: defaultValue,
+    });
     return defaultValue;
   }
 
   // Check bounds
   if (parsed < min) {
-    console.warn(
-      `[WARN] ${envVar}=${parsed} is below minimum ${min}ms, using minimum`
-    );
+    getTypesLogger().warn('Timeout below minimum', {
+      envVar,
+      value: parsed,
+      min,
+      using: min,
+    });
     return min;
   }
 
   if (parsed > max) {
-    console.warn(
-      `[WARN] ${envVar}=${parsed} is above maximum ${max}ms, using maximum`
-    );
+    getTypesLogger().warn('Timeout above maximum', {
+      envVar,
+      value: parsed,
+      max,
+      using: max,
+    });
     return max;
   }
 

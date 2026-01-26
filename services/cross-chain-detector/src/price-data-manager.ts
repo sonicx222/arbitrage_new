@@ -183,14 +183,9 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         cleanup();
       }
 
-      // FIX 10.4: Use structured logging to avoid string interpolation cost
-      // String template literals are evaluated even if debug logging is disabled
-      logger.debug('Updated price', {
-        chain: update.chain,
-        dex: update.dex,
-        pairKey: update.pairKey,
-        price: update.price,
-      });
+      // NOTE: Per-update debug logging removed (FIX 10.4 superseded)
+      // Hot-path logging creates unacceptable overhead at 100s-1000s updates/sec.
+      // Use cleanup() logs or external monitoring for price update visibility.
     } catch (error) {
       logger.error('Failed to handle price update', { error: (error as Error).message });
     }
@@ -293,11 +288,8 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
    */
   function createIndexedSnapshot(): IndexedSnapshot {
     // PERF-P4: Return cached snapshot if data hasn't changed
+    // NOTE: Per-hit debug logging removed - cache hits are high-frequency
     if (cachedSnapshot !== null && cachedSnapshotVersion === lastSnapshotVersion) {
-      logger.debug('Returning cached snapshot', {
-        version: cachedSnapshotVersion,
-        tokenPairs: cachedSnapshot.tokenPairs.length,
-      });
       return cachedSnapshot;
     }
 

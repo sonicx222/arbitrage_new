@@ -205,13 +205,9 @@ function createHealthServer(port: number): Server {
 // Event Handlers
 // =============================================================================
 
-detector.on('priceUpdate', (update) => {
-  logger.debug('Price update', {
-    chain: update.chain,
-    dex: update.dex,
-    price: update.price
-  });
-});
+// NOTE: Price update event logging removed - fires 100s-1000s times/sec
+// Use metrics/monitoring for price update visibility if needed
+// detector.on('priceUpdate', ...) intentionally not logged
 
 detector.on('opportunity', (opp) => {
   logger.info('Arbitrage opportunity detected', {

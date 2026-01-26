@@ -102,8 +102,8 @@ export class OpportunityConsumer {
       blockMs: 1000,
       autoAck: false, // Deferred ACK after execution
       logger: {
-        error: (msg, ctx) => this.logger.error(msg, ctx),
-        debug: (msg, ctx) => this.logger.debug(msg, ctx)
+        error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
+        debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx)
       },
       onPauseStateChange: (isPaused) => {
         this.logger.info('Stream consumer pause state changed', {
