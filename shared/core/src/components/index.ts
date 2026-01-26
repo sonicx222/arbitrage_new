@@ -19,6 +19,7 @@ export {
   calculatePriceFromReserves,
   calculatePriceFromBigIntReserves,
   safeBigIntDivision,
+  safeBigIntDivisionOrNull, // P0-FIX 4.4: Safe version that returns null instead of throwing
   invertPrice,
   calculatePriceDifferencePercent,
 

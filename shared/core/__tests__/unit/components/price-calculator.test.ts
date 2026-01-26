@@ -80,8 +80,11 @@ describe('PriceCalculator', () => {
   // safeBigIntDivision
   // ==========================================================================
   describe('safeBigIntDivision', () => {
-    it('should return 0 for zero denominator', () => {
-      expect(safeBigIntDivision(100n, 0n)).toBe(0);
+    // P0-FIX 4.4: Division by zero now throws PriceCalculationError instead of returning 0
+    // This prevents false arbitrage opportunity detection where price appears to be 0
+    it('should throw PriceCalculationError for zero denominator', () => {
+      expect(() => safeBigIntDivision(100n, 0n)).toThrow(PriceCalculationError);
+      expect(() => safeBigIntDivision(100n, 0n)).toThrow('Division by zero');
     });
 
     it('should calculate simple division', () => {

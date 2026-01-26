@@ -142,7 +142,8 @@ export function calculatePriceFromReserves(
       return null;
     }
 
-    return safeBigIntDivision(r0, r1);
+    // P0-FIX 4.4: Use safeBigIntDivisionOrNull to return null instead of throwing
+    return safeBigIntDivisionOrNull(r0, r1);
   } catch {
     // Handle invalid BigInt strings gracefully
     return null;
@@ -154,20 +155,41 @@ export function calculatePriceFromReserves(
  * This prevents precision loss for large BigInt values.
  *
  * P0-1 FIX: Uses scaled division to preserve precision.
+ * P0-FIX 4.4: Now throws PriceCalculationError for division by zero instead
+ * of returning 0, which could cause false arbitrage opportunity detection.
  *
  * @param numerator - The numerator BigInt
  * @param denominator - The denominator BigInt (must be > 0)
  * @returns The result as a Number with preserved precision
+ * @throws PriceCalculationError if denominator is 0
  */
 export function safeBigIntDivision(numerator: bigint, denominator: bigint): number {
   if (denominator === 0n) {
-    return 0;
+    // P0-FIX 4.4: Throw instead of returning 0 to prevent false positives
+    throw new PriceCalculationError('Division by zero: denominator cannot be 0');
   }
 
   // Scale up the numerator before division to preserve decimal places
   const scaledResult = (numerator * PRICE_PRECISION) / denominator;
 
   // Convert scaled result to number and divide by scale
+  return Number(scaledResult) / PRICE_PRECISION_NUMBER;
+}
+
+/**
+ * Safe version of safeBigIntDivision that returns null instead of throwing.
+ * Use this when you want to handle invalid input gracefully.
+ *
+ * @param numerator - The numerator BigInt
+ * @param denominator - The denominator BigInt
+ * @returns The result as a Number, or null if denominator is 0
+ */
+export function safeBigIntDivisionOrNull(numerator: bigint, denominator: bigint): number | null {
+  if (denominator === 0n) {
+    return null;
+  }
+
+  const scaledResult = (numerator * PRICE_PRECISION) / denominator;
   return Number(scaledResult) / PRICE_PRECISION_NUMBER;
 }
 
@@ -442,6 +464,7 @@ export function isValidFee(fee: number): boolean {
 /**
  * Calculate price from BigInt reserves directly (avoids string parsing overhead).
  * P0-1 FIX: Optimized version for when reserves are already BigInt.
+ * P0-FIX 4.4: Uses safeBigIntDivisionOrNull to return null instead of throwing.
  *
  * @param reserve0 - Reserve of token0 as BigInt
  * @param reserve1 - Reserve of token1 as BigInt
@@ -452,7 +475,7 @@ export function calculatePriceFromBigIntReserves(reserve0: bigint, reserve1: big
     return null;
   }
 
-  return safeBigIntDivision(reserve0, reserve1);
+  return safeBigIntDivisionOrNull(reserve0, reserve1);
 }
 
 /**
