@@ -70,17 +70,41 @@ async function main() {
 
     await detector.start();
 
-    const shutdown = async () => {
-      logger.info('Shutting down gracefully');
-      if (healthServer) {
-        healthServer.close();
+    // FIX B5: Guard against double shutdown when user presses Ctrl+C multiple times
+    let isShuttingDown = false;
+    const shutdown = async (signal: string) => {
+      if (isShuttingDown) {
+        logger.debug(`Already shutting down, ignoring ${signal}`);
+        return;
       }
-      await detector.stop();
-      process.exit(0);
+      isShuttingDown = true;
+
+      logger.info(`Received ${signal}, shutting down gracefully`);
+
+      try {
+        // FIX B4: Properly await health server close
+        if (healthServer) {
+          await new Promise<void>((resolve) => {
+            healthServer!.close(() => resolve());
+          });
+        }
+        await detector.stop();
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during shutdown', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        process.exit(1);
+      }
     };
 
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
+
+    // FIX B4: Add unhandledRejection handler for better error visibility
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled rejection in Cross-Chain Detector', { reason, promise });
+    });
 
     logger.info('Cross-Chain Detector Service is running');
 

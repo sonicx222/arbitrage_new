@@ -287,23 +287,46 @@ async function main() {
 
     await engine.start();
 
+    // FIX B5: Guard against double shutdown when user presses Ctrl+C multiple times
+    let isShuttingDown = false;
     const shutdown = async (signal: string) => {
+      if (isShuttingDown) {
+        logger.debug(`Already shutting down, ignoring ${signal}`);
+        return;
+      }
+      isShuttingDown = true;
+
       logger.info(`Received ${signal}, shutting down gracefully`);
 
-      // Stop cross-region health manager if running
-      if (crossRegionManager) {
-        await resetCrossRegionHealthManager();
-      }
+      try {
+        // Stop cross-region health manager if running
+        if (crossRegionManager) {
+          await resetCrossRegionHealthManager();
+        }
 
-      if (healthServer) {
-        healthServer.close();
+        // FIX B4: Properly await health server close
+        if (healthServer) {
+          await new Promise<void>((resolve) => {
+            healthServer!.close(() => resolve());
+          });
+        }
+        await engine.stop();
+        process.exit(0);
+      } catch (error) {
+        logger.error('Error during shutdown', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+        process.exit(1);
       }
-      await engine.stop();
-      process.exit(0);
     };
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
+
+    // FIX B4: Add unhandledRejection handler for better error visibility
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('Unhandled rejection in Execution Engine', { reason, promise });
+    });
 
     logger.info('Execution Engine Service is running', {
       isStandby: standbyConfig.isStandby,
