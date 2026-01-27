@@ -44,6 +44,7 @@ describe('OpportunityPublisher', () => {
   let logger: RecordingLogger;
   let mockStreamsClient: {
     xadd: jest.Mock<(stream: string, data: any) => Promise<string>>;
+    xaddWithLimit: jest.Mock<(stream: string, data: any) => Promise<string>>;
   };
   let mockPerfLogger: {
     logArbitrageOpportunity: jest.Mock;
@@ -56,6 +57,7 @@ describe('OpportunityPublisher', () => {
 
     mockStreamsClient = {
       xadd: jest.fn<(stream: string, data: any) => Promise<string>>().mockResolvedValue('stream-id'),
+      xaddWithLimit: jest.fn<(stream: string, data: any) => Promise<string>>().mockResolvedValue('stream-id'),
     };
 
     mockPerfLogger = {
@@ -99,7 +101,7 @@ describe('OpportunityPublisher', () => {
       const result = await publisher.publish(opportunity);
 
       expect(result).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
       expect(mockPerfLogger.logArbitrageOpportunity).toHaveBeenCalled();
     });
 
@@ -113,7 +115,7 @@ describe('OpportunityPublisher', () => {
       const opportunity = createTestOpportunity();
       await publisher.publish(opportunity);
 
-      const publishedOpp = mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity;
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
       expect(publishedOpp.type).toBe('cross-chain');
       expect(publishedOpp.buyDex).toBe('uniswap');
       expect(publishedOpp.sellDex).toBe('camelot');
@@ -132,7 +134,7 @@ describe('OpportunityPublisher', () => {
       const opportunity = createTestOpportunity({ token: 'WETH/USDC' });
       await publisher.publish(opportunity);
 
-      const publishedOpp = mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity;
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
       expect(publishedOpp.tokenIn).toBe('WETH');
       expect(publishedOpp.tokenOut).toBe('USDC');
     });
@@ -151,7 +153,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should return false on publish error', async () => {
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis error'));
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis error'));
 
       const publisher = createOpportunityPublisher({
         streamsClient: mockStreamsClient as any,
@@ -190,7 +192,7 @@ describe('OpportunityPublisher', () => {
       const result2 = await publisher.publish(opportunity);
       expect(result2).toBe(false);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
     });
 
     it('should republish if profit improved significantly', async () => {
@@ -209,7 +211,7 @@ describe('OpportunityPublisher', () => {
       const result2 = await publisher.publish(opportunity2);
 
       expect(result2).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(2);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
     });
 
     it('should not republish if profit improvement is below threshold', async () => {
@@ -228,7 +230,7 @@ describe('OpportunityPublisher', () => {
       const result2 = await publisher.publish(opportunity2);
 
       expect(result2).toBe(false);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
     });
 
     it('should generate deterministic dedupe key', async () => {
@@ -281,7 +283,7 @@ describe('OpportunityPublisher', () => {
       const result2 = await publisher.publish(opp2);
 
       expect(result2).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(2);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -400,7 +402,7 @@ describe('OpportunityPublisher', () => {
       // Should be able to publish same opportunity again
       const result = await publisher.publish(opportunity);
       expect(result).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(2);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -426,7 +428,7 @@ describe('OpportunityPublisher', () => {
 
       await publisher.publish(opportunity);
 
-      const publishedOpp = mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity;
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
 
       // expectedProfit = (percentageDiff / 100) * amountInTokens
       // amountInTokens = defaultTradeSizeUsd / sourcePrice = 2500 / 2500 = 1.0
@@ -448,7 +450,7 @@ describe('OpportunityPublisher', () => {
 
       await publisher.publish(opportunity);
 
-      const publishedOpp = mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity;
+      const publishedOpp = mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity;
 
       expect(publishedOpp.bridgeRequired).toBe(true);
       expect(publishedOpp.bridgeCost).toBe(25);
@@ -467,8 +469,8 @@ describe('OpportunityPublisher', () => {
       publisher.clear();
       await publisher.publish(createTestOpportunity());
 
-      const id1 = (mockStreamsClient.xadd.mock.calls[0][1] as ArbitrageOpportunity).id;
-      const id2 = (mockStreamsClient.xadd.mock.calls[1][1] as ArbitrageOpportunity).id;
+      const id1 = (mockStreamsClient.xaddWithLimit.mock.calls[0][1] as ArbitrageOpportunity).id;
+      const id2 = (mockStreamsClient.xaddWithLimit.mock.calls[1][1] as ArbitrageOpportunity).id;
 
       expect(id1).not.toBe(id2);
       expect(id1).toContain('cross-chain-');

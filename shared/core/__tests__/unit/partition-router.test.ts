@@ -346,7 +346,7 @@ describe('Deprecation Utilities', () => {
       warnIfDeprecated('bsc-detector', logger);
 
       expect(logger.getLogs('warn').length).toBe(1);
-      expect(logger.hasLogMatching('warn', '[DEPRECATED]')).toBe(true);
+      expect(logger.hasLogMatching('warn', 'Deprecated service pattern detected')).toBe(true);
     });
 
     it('should not log for non-deprecated patterns', () => {
@@ -356,19 +356,17 @@ describe('Deprecation Utilities', () => {
       expect(logger.getLogs('warn').length).toBe(0);
     });
 
-    it('should use console.warn when no logger provided', () => {
-      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-      warnIfDeprecated('ethereum-detector');
-
-      expect(consoleSpy).toHaveBeenCalledTimes(1);
-      consoleSpy.mockRestore();
+    it('should use internal Pino logger when no logger provided', () => {
+      // When no logger is provided, warnIfDeprecated uses getRouterLogger() which
+      // returns a Pino logger, not console.warn. This test verifies no error is thrown.
+      expect(() => warnIfDeprecated('ethereum-detector')).not.toThrow();
     });
 
-    it('should include migration recommendation in warning', () => {
+    it('should include migration recommendation in warning metadata', () => {
       warnIfDeprecated('arbitrum-detector', logger);
 
-      expect(logger.hasLogMatching('warn', 'partition-l2-turbo')).toBe(true);
+      // The recommendation is in the metadata, not the message
+      expect(logger.hasLogWithMeta('warn', { recommendation: 'partition-l2-turbo' })).toBe(true);
     });
   });
 });
