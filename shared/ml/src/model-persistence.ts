@@ -396,23 +396,47 @@ export class ModelPersistence {
     return JSON.parse(content) as T;
   }
 
+  /**
+   * FIX 4.1: Move files from temp to destination atomically.
+   *
+   * Uses fs.renameSync for true atomic operations when on the same filesystem.
+   * Falls back to copy-then-delete for cross-filesystem moves.
+   *
+   * Note: fs.renameSync is atomic on POSIX systems (single syscall).
+   * On Windows, it's atomic if destination doesn't exist.
+   */
   private async atomicMove(srcDir: string, destDir: string): Promise<void> {
-    // Copy all files from temp to destination
     const files = fs.readdirSync(srcDir);
+
     for (const file of files) {
       const srcPath = path.join(srcDir, file);
       const destPath = path.join(destDir, file);
 
-      // Remove existing file if present
+      // Remove existing file if present (required for atomic rename on Windows)
       if (fs.existsSync(destPath)) {
         fs.unlinkSync(destPath);
       }
 
-      // Copy file
-      fs.copyFileSync(srcPath, destPath);
+      try {
+        // FIX 4.1: Use renameSync for true atomic move (single syscall)
+        // This is atomic on same filesystem, fails on cross-filesystem
+        fs.renameSync(srcPath, destPath);
+      } catch (renameError) {
+        // Fall back to copy-then-delete for cross-filesystem moves
+        // This is NOT atomic, but necessary for cross-device scenarios
+        const err = renameError as NodeJS.ErrnoException;
+        if (err.code === 'EXDEV') {
+          // Cross-device move - must copy then delete
+          logger.debug('Cross-device move detected, falling back to copy', { srcPath, destPath });
+          fs.copyFileSync(srcPath, destPath);
+          fs.unlinkSync(srcPath);
+        } else {
+          throw renameError;
+        }
+      }
     }
 
-    // Remove temp directory
+    // Remove temp directory (should be empty now)
     fs.rmSync(srcDir, { recursive: true, force: true });
   }
 
@@ -477,13 +501,30 @@ export class ModelPersistence {
 // =============================================================================
 
 let persistenceInstance: ModelPersistence | null = null;
+let persistenceInitialConfig: PersistenceConfig | undefined = undefined;
 
 /**
  * Get the singleton ModelPersistence instance.
+ *
+ * FIX 1.1: Configuration is only applied on first initialization.
+ * Subsequent calls with different config will log a warning.
+ *
+ * @param config - Optional configuration (only used on first call)
+ * @returns The singleton ModelPersistence instance
  */
 export function getModelPersistence(config?: PersistenceConfig): ModelPersistence {
   if (!persistenceInstance) {
     persistenceInstance = new ModelPersistence(config);
+    persistenceInitialConfig = config;
+  } else if (config !== undefined) {
+    // FIX 1.1: Warn if different config provided after initialization
+    const configChanged = JSON.stringify(config) !== JSON.stringify(persistenceInitialConfig);
+    if (configChanged) {
+      logger.warn('getModelPersistence called with different config after initialization. Config ignored.', {
+        initialConfig: persistenceInitialConfig,
+        ignoredConfig: config
+      });
+    }
   }
   return persistenceInstance;
 }
@@ -493,4 +534,5 @@ export function getModelPersistence(config?: PersistenceConfig): ModelPersistenc
  */
 export function resetModelPersistence(): void {
   persistenceInstance = null;
+  persistenceInitialConfig = undefined;
 }
