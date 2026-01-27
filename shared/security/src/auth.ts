@@ -387,7 +387,10 @@ export class AuthService {
   }
 
   private generateUserId(): string {
-    return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // FIX: Use crypto.randomBytes for cryptographically secure ID generation
+    // Math.random() is predictable and NOT suitable for security-sensitive IDs
+    const randomPart = crypto.randomBytes(8).toString('hex');
+    return `user_${Date.now()}_${randomPart}`;
   }
 
   // Account lockout protection methods

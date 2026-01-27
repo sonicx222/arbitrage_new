@@ -39,6 +39,7 @@ interface SubgraphPool {
   tokens: Array<{
     address: string;
     balance: string;
+    decimals: number;
     weight?: string;
   }>;
 }
@@ -218,6 +219,7 @@ export class BalancerV2Adapter implements DexAdapter {
           tokens {
             address
             balance
+            decimals
             weight
           }
         }
@@ -233,10 +235,11 @@ export class BalancerV2Adapter implements DexAdapter {
       poolId: pool.id,
       address: pool.address,
       tokens: pool.tokens.map((t) => t.address.toLowerCase()),
-      // PRECISION-FIX: Use parseUnits for string-to-BigInt conversion
-      // Previously: BigInt(Math.floor(parseFloat(t.balance) * 1e18)) lost precision
+      // FIX: Use actual token decimals from subgraph (not hardcoded 18)
+      // Tokens like USDC/USDT have 6 decimals, WBTC has 8, etc.
+      // Balancer subgraph returns balance as human-readable string for each token
       balances: pool.tokens.map((t) =>
-        ethers.parseUnits(t.balance || '0', 18)
+        ethers.parseUnits(t.balance || '0', t.decimals || 18)
       ),
       swapFee,
       poolType,

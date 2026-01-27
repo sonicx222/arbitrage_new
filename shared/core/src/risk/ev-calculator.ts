@@ -150,10 +150,11 @@ export class EVCalculator {
     const lossProbability = 1 - winProbability;
 
     // Calculate expected values
-    // Note: Using integer math for BigInt. We scale probability by 10000 for 0.01% precision.
-    const scaleFactor = 10000n;
-    const winProbScaled = BigInt(Math.floor(winProbability * 10000));
-    const lossProbScaled = BigInt(Math.floor(lossProbability * 10000));
+    // FIX: Increased precision from 10000 (0.01%) to 1e8 (0.000001%) for DeFi amounts
+    // This prevents significant precision loss when calculating EV for large trades
+    const scaleFactor = 100000000n; // 1e8
+    const winProbScaled = BigInt(Math.floor(winProbability * 100000000));
+    const lossProbScaled = BigInt(Math.floor(lossProbability * 100000000));
 
     const expectedProfit = (profitEstimate * winProbScaled) / scaleFactor;
     const expectedGasCost = (gasCostEstimate * lossProbScaled) / scaleFactor;

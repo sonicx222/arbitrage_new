@@ -5,6 +5,7 @@
 // P2-1 FIX: Created centralized SUPPORTED_CHAINS constant
 
 import Joi from 'joi';
+import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { createLogger } from '../../core/src/logger';
 
@@ -187,8 +188,16 @@ export const validateWebhookRequest = (req: Request, res: Response, next: NextFu
   }
 
   // Verify webhook signature if provided
+  // FIX: Require WEBHOOK_SECRET when signature verification is attempted
   if (value.signature) {
-    const expectedSignature = generateWebhookSignature(value, process.env.WEBHOOK_SECRET || '');
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      logger.error('Webhook signature provided but WEBHOOK_SECRET not configured');
+      return res.status(500).json({
+        error: 'Webhook signature verification not configured'
+      });
+    }
+    const expectedSignature = generateWebhookSignature(value, webhookSecret);
     if (expectedSignature !== value.signature) {
       logger.warn('Webhook signature verification failed', { ip: req.ip });
       return res.status(401).json({
@@ -237,8 +246,8 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
 };
 
 // Utility function for webhook signature verification
-function generateWebhookSignature(payload: any, secret: string): string {
-  const crypto = require('crypto');
+// FIX: Use module-level crypto import instead of require()
+function generateWebhookSignature(payload: unknown, secret: string): string {
   const payloadStr = JSON.stringify(payload);
   return crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
 }

@@ -538,21 +538,38 @@ export class StargateRouter implements IBridgeRouter {
    * Mark a bridge as completed (called externally when destination tx is detected)
    *
    * RACE-CONDITION-FIX: Uses mutex for thread-safe access
+   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'completed'
+   * to prevent race condition where a timed-out bridge gets marked completed
    */
   async markCompleted(bridgeId: string, destTxHash: string, amountReceived: string): Promise<void> {
     await this.bridgesMutex.runExclusive(async () => {
       const pending = this.pendingBridges.get(bridgeId);
-      if (pending) {
-        pending.status = 'completed';
-        pending.destTxHash = destTxHash;
-        pending.amountReceived = amountReceived;
-
-        logger.info('Bridge completed', {
-          bridgeId,
-          destTxHash,
-          amountReceived,
-        });
+      if (!pending) {
+        logger.warn('Cannot mark completed: bridge not found', { bridgeId });
+        return;
       }
+
+      // FIX: Only allow transition from 'bridging' to 'completed'
+      // This prevents the race condition where a timed-out (failed) bridge
+      // is marked as completed after the fact
+      if (pending.status !== 'bridging') {
+        logger.warn('Cannot mark completed: invalid state transition', {
+          bridgeId,
+          currentStatus: pending.status,
+          attemptedStatus: 'completed',
+        });
+        return;
+      }
+
+      pending.status = 'completed';
+      pending.destTxHash = destTxHash;
+      pending.amountReceived = amountReceived;
+
+      logger.info('Bridge completed', {
+        bridgeId,
+        destTxHash,
+        amountReceived,
+      });
     });
   }
 
@@ -560,19 +577,34 @@ export class StargateRouter implements IBridgeRouter {
    * Mark a bridge as failed
    *
    * RACE-CONDITION-FIX: Uses mutex for thread-safe access
+   * STATE-TRANSITION-FIX: Only transitions from 'bridging' to 'failed'
    */
   async markFailed(bridgeId: string, error: string): Promise<void> {
     await this.bridgesMutex.runExclusive(async () => {
       const pending = this.pendingBridges.get(bridgeId);
-      if (pending) {
-        pending.status = 'failed';
-        pending.error = error;
-
-        logger.warn('Bridge failed', {
-          bridgeId,
-          error,
-        });
+      if (!pending) {
+        logger.warn('Cannot mark failed: bridge not found', { bridgeId });
+        return;
       }
+
+      // FIX: Only allow transition from 'bridging' to 'failed'
+      // Cannot fail a completed bridge or re-fail an already failed bridge
+      if (pending.status !== 'bridging') {
+        logger.warn('Cannot mark failed: invalid state transition', {
+          bridgeId,
+          currentStatus: pending.status,
+          attemptedStatus: 'failed',
+        });
+        return;
+      }
+
+      pending.status = 'failed';
+      pending.error = error;
+
+      logger.warn('Bridge failed', {
+        bridgeId,
+        error,
+      });
     });
   }
 
