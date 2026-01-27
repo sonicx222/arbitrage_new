@@ -42,7 +42,7 @@ export function configureMiddleware(app: Application, logger: RouteLogger): void
   // JSON parsing with limits
   app.use(express.json({ limit: '1mb', strict: true }));
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
-  app.use(express.static('public'));
+  // NOTE: express.static('public') removed - no static files are served (API-only service)
 
   // Rate limiting
   const limiter = rateLimit({
