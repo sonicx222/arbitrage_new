@@ -598,7 +598,7 @@ describe('PriceDataManager', () => {
         expect(snapshot2.tokenPairs).toContain('ARB_USDC');
       });
 
-      it('should log cache hit/miss debug messages', () => {
+      it('should log cache miss but not cache hit (performance optimization)', () => {
         const manager = createPriceDataManager({
           logger: asLogger(logger),
         });
@@ -614,8 +614,10 @@ describe('PriceDataManager', () => {
         logger.clear();
 
         // Second call - cache hit
+        // NOTE: Cache hit does NOT log (intentional for performance - see implementation)
         manager.createIndexedSnapshot();
-        expect(logger.hasLogMatching('debug', 'Returning cached snapshot')).toBe(true);
+        // Verify no debug log on cache hit (logging removed for high-frequency operations)
+        expect(logger.getLogs('debug').length).toBe(0);
       });
     });
   });

@@ -47,6 +47,7 @@ const createMockLogger = () => ({
 
 const createMockStreamsClient = () => ({
   xadd: jest.fn<() => Promise<string>>().mockResolvedValue('message-id'),
+  xaddWithLimit: jest.fn<() => Promise<string>>().mockResolvedValue('message-id'),
   xreadgroup: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
   xgroup: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
   xinfo: jest.fn<() => Promise<object>>().mockResolvedValue({}),
@@ -249,7 +250,7 @@ describe('CrossChainDetectorService Integration', () => {
       const published = await publisher.publish(opportunity);
 
       expect(published).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
     });
 
     it('should deduplicate identical opportunities within window', async () => {
@@ -278,7 +279,7 @@ describe('CrossChainDetectorService Integration', () => {
       const second = await publisher.publish(opportunity);
       expect(second).toBe(false);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(1);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
     });
 
     it('should republish when profit improves significantly', async () => {
@@ -308,7 +309,7 @@ describe('CrossChainDetectorService Integration', () => {
       const secondPublished = await publisher.publish(opportunity2);
 
       expect(secondPublished).toBe(true);
-      expect(mockStreamsClient.xadd).toHaveBeenCalledTimes(2);
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
     });
   });
 
