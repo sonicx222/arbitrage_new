@@ -2,8 +2,8 @@
   "name": "@arbitrage/unified-detector",
   "version": "1.0.0",
   "description": "Unified Chain Detector - Multi-chain detector service for partitioned deployment",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/exports.js",
+  "types": "dist/exports.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
