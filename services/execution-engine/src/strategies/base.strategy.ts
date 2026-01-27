@@ -446,6 +446,9 @@ export abstract class BaseExecutionStrategy {
     // Add current price
     history.push({ price, timestamp: now });
 
+    // FIX 10.1: Update pre-computed last gas price for O(1) hot path access
+    ctx.lastGasPrices.set(chain, price);
+
     // Fix 5.1: Use atomic-style invalidation instead of delete
     // Setting validUntil to 0 marks as stale while preserving the entry
     // This prevents thundering herd on immediate subsequent reads

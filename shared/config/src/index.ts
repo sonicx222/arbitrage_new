@@ -317,3 +317,12 @@ export {
   resolveChainId,
   getChainName,
 } from './mempool-config';
+
+// =============================================================================
+// RISK CONFIGURATION (Phase 3: Capital & Risk Controls)
+// =============================================================================
+export {
+  RISK_CONFIG,
+  getRiskConfigWithCapital,
+  validateRiskConfig,
+} from './risk-config';
