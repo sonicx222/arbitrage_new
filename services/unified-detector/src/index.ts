@@ -232,7 +232,16 @@ detector.on('failoverEvent', (event) => {
 // Graceful Shutdown
 // =============================================================================
 
+// FIX B5: Guard against double shutdown when user presses Ctrl+C multiple times
+let isShuttingDown = false;
+
 async function shutdown(signal: string): Promise<void> {
+  if (isShuttingDown) {
+    logger.debug(`Already shutting down, ignoring ${signal}`);
+    return;
+  }
+  isShuttingDown = true;
+
   logger.info(`Received ${signal}, shutting down gracefully...`);
 
   try {

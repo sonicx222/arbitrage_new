@@ -21,6 +21,8 @@
  */
 
 import { ethers } from 'ethers';
+// Fix 8.2: Use centralized constant for consistency with aave-v3.provider.ts
+import { BPS_DENOMINATOR_BIGINT } from '@arbitrage/config';
 import type {
   IFlashLoanProvider,
   FlashLoanProtocol,
@@ -38,10 +40,8 @@ const PROTOCOL_FEES: Record<string, number> = {
   syncswap: 30,        // 0.30% flash swap fee (variable)
 };
 
-/**
- * Basis points denominator
- */
-const BPS_DENOMINATOR = 10000n;
+// Fix 8.2: Use centralized constant, alias for local readability
+const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 
 /**
  * Unsupported Flash Loan Provider
