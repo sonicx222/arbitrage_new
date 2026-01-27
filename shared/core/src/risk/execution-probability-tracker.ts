@@ -37,13 +37,17 @@ const DEFAULT_CONFIG: ExecutionProbabilityConfig = {
   maxOutcomesPerKey: 1000,
   cleanupIntervalMs: 60000, // 1 minute
   outcomeRelevanceWindowMs: 7 * 24 * 60 * 60 * 1000, // 7 days
-  redisKeyPrefix: 'risk:probability:',
-  // TODO: Redis persistence is deferred. When implemented:
+
+  // Redis persistence configuration
+  // STATUS: DEFERRED - In-memory tracking is sufficient for initial deployment.
+  // The redisKeyPrefix is reserved for future use when Redis persistence is needed.
+  // Implementation plan when required:
   // - On recordOutcome(): persist to Redis hash at {redisKeyPrefix}{chain}:{dex}:{pathLength}
   // - On startup: load historical data from Redis
   // - Format: { wins: number, losses: number, avgProfit: string, avgGas: string }
   // See implementation_plan_v3.md Section 3.4.1 for schema details
-  persistToRedis: false, // Disabled until Redis persistence is implemented
+  redisKeyPrefix: 'risk:probability:',
+  persistToRedis: false,
 };
 
 // =============================================================================
@@ -76,9 +80,17 @@ interface OutcomesByKey {
 export class ExecutionProbabilityTracker {
   private config: ExecutionProbabilityConfig;
   private outcomesByKey: Map<string, OutcomesByKey> = new Map();
-  // NOTE: Previously had outcomesByChain and outcomesByChainDex maps, but these
-  // caused 3x memory duplication. Removed in favor of using pre-computed aggregates
-  // from outcomesByKey with prefix matching. See getAverageProfit/getAverageGasCost.
+
+  // P0-FIX 10.1: Key cache for hot path optimization
+  // Avoids repeated string template allocation in buildKey()
+  private keyCache: Map<string, string> = new Map();
+  private static readonly KEY_CACHE_MAX_SIZE = 1000;
+
+  // P0-FIX 10.3: Pre-computed aggregates for O(1) chain/dex lookups
+  // Instead of O(k) iteration in getAverageProfit/getAverageGasCost
+  private chainAggregates: Map<string, { totalGasCost: bigint; count: number }> = new Map();
+  private chainDexAggregates: Map<string, { totalProfit: bigint; successCount: number }> = new Map();
+
   private cleanupTimer: NodeJS.Timeout | null = null;
   private logger: Logger;
 
@@ -139,6 +151,13 @@ export class ExecutionProbabilityTracker {
       if (outcome.profit !== undefined) {
         entry.totalProfit += outcome.profit;
         entry.successfulCount++;
+
+        // P0-FIX 10.3: Update chain:dex aggregate for O(1) profit lookups
+        const chainDexKey = this.buildChainDexPrefix(outcome.chain, outcome.dex);
+        const chainDexAgg = this.chainDexAggregates.get(chainDexKey) || { totalProfit: 0n, successCount: 0 };
+        chainDexAgg.totalProfit += outcome.profit;
+        chainDexAgg.successCount++;
+        this.chainDexAggregates.set(chainDexKey, chainDexAgg);
       }
     } else {
       entry.losses++;
@@ -147,6 +166,13 @@ export class ExecutionProbabilityTracker {
 
     entry.totalGasCost += outcome.gasCost;
     this.totalOutcomes++;
+
+    // P0-FIX 10.3: Update chain aggregate for O(1) gas cost lookups
+    const chainKey = this.buildChainPrefix(outcome.chain);
+    const chainAgg = this.chainAggregates.get(chainKey) || { totalGasCost: 0n, count: 0 };
+    chainAgg.totalGasCost += outcome.gasCost;
+    chainAgg.count++;
+    this.chainAggregates.set(chainKey, chainAgg);
 
     // Update timestamps
     if (this.firstOutcomeTimestamp === null || outcome.timestamp < this.firstOutcomeTimestamp) {
@@ -220,36 +246,24 @@ export class ExecutionProbabilityTracker {
   }
 
   // ---------------------------------------------------------------------------
-  // Public API: Query Average Profit
+  // Public API: Query Average Profit (P0-FIX 10.3: O(1) using pre-computed aggregates)
   // ---------------------------------------------------------------------------
 
   /**
    * Gets the average profit for successful trades on a chain/DEX combination.
    *
-   * Aggregates across all path lengths within the same chain/DEX.
-   * Uses pre-computed aggregates for O(k) performance where k = unique path lengths.
+   * P0-FIX 10.3: Now uses pre-computed aggregates for O(1) performance instead
+   * of O(k) iteration where k = unique path lengths.
    *
    * @param params - Query parameters
    * @returns Average profit result
    */
   getAverageProfit(params: ProfitQueryParams): ProfitResult {
-    // Optimization: Use pre-computed aggregates from outcomesByKey
-    // instead of iterating through all outcomes in outcomesByChainDex
-    const chainDexPrefix = `${params.chain}:${params.dex}:`;
+    // P0-FIX 10.3: Use pre-computed aggregate for O(1) lookup
+    const chainDexKey = this.buildChainDexPrefix(params.chain, params.dex);
+    const aggregate = this.chainDexAggregates.get(chainDexKey);
 
-    let totalProfit = 0n;
-    let successCount = 0;
-
-    // Iterate through outcomesByKey entries matching this chain/dex
-    // This is O(k) where k = unique path lengths, not O(n) where n = all outcomes
-    for (const [key, entry] of this.outcomesByKey) {
-      if (key.startsWith(chainDexPrefix)) {
-        totalProfit += entry.totalProfit;
-        successCount += entry.successfulCount;
-      }
-    }
-
-    if (successCount === 0) {
+    if (!aggregate || aggregate.successCount === 0) {
       return {
         averageProfit: 0n,
         sampleCount: 0,
@@ -258,43 +272,32 @@ export class ExecutionProbabilityTracker {
     }
 
     return {
-      averageProfit: totalProfit / BigInt(successCount),
-      sampleCount: successCount,
-      totalProfit,
+      averageProfit: aggregate.totalProfit / BigInt(aggregate.successCount),
+      sampleCount: aggregate.successCount,
+      totalProfit: aggregate.totalProfit,
     };
   }
 
   // ---------------------------------------------------------------------------
-  // Public API: Query Average Gas Cost
+  // Public API: Query Average Gas Cost (P0-FIX 10.3: O(1) using pre-computed aggregates)
   // ---------------------------------------------------------------------------
 
   /**
    * Gets the average gas cost for all transactions on a chain.
    *
    * Includes both successful and failed transactions.
-   * Uses pre-computed aggregates for O(k) performance where k = unique (dex, pathLength) combos.
+   * P0-FIX 10.3: Now uses pre-computed aggregates for O(1) performance instead
+   * of O(k) iteration where k = unique (dex, pathLength) combos.
    *
    * @param params - Query parameters
    * @returns Average gas cost result
    */
   getAverageGasCost(params: GasCostQueryParams): GasCostResult {
-    // Optimization: Use pre-computed aggregates from outcomesByKey
-    // instead of iterating through all outcomes in outcomesByChain
-    const chainPrefix = `${params.chain}:`;
+    // P0-FIX 10.3: Use pre-computed aggregate for O(1) lookup
+    const chainKey = this.buildChainPrefix(params.chain);
+    const aggregate = this.chainAggregates.get(chainKey);
 
-    let totalGasCost = 0n;
-    let totalCount = 0;
-
-    // Iterate through outcomesByKey entries matching this chain
-    // This is O(k) where k = unique (dex, pathLength) combos, not O(n)
-    for (const [key, entry] of this.outcomesByKey) {
-      if (key.startsWith(chainPrefix)) {
-        totalGasCost += entry.totalGasCost;
-        totalCount += entry.outcomes.length;
-      }
-    }
-
-    if (totalCount === 0) {
+    if (!aggregate || aggregate.count === 0) {
       return {
         averageGasCost: 0n,
         sampleCount: 0,
@@ -303,9 +306,9 @@ export class ExecutionProbabilityTracker {
     }
 
     return {
-      averageGasCost: totalGasCost / BigInt(totalCount),
-      sampleCount: totalCount,
-      totalGasCost,
+      averageGasCost: aggregate.totalGasCost / BigInt(aggregate.count),
+      sampleCount: aggregate.count,
+      totalGasCost: aggregate.totalGasCost,
     };
   }
 
@@ -396,6 +399,11 @@ export class ExecutionProbabilityTracker {
     this.firstOutcomeTimestamp = null;
     this.lastOutcomeTimestamp = null;
 
+    // P0-FIX 10.1, 10.3: Clear caches and aggregates
+    this.keyCache.clear();
+    this.chainAggregates.clear();
+    this.chainDexAggregates.clear();
+
     this.logger.info('ExecutionProbabilityTracker cleared');
   }
 
@@ -410,11 +418,48 @@ export class ExecutionProbabilityTracker {
   }
 
   // ---------------------------------------------------------------------------
-  // Private: Key Building
+  // Private: Key Building (P0-FIX 10.1: Hot path optimization)
   // ---------------------------------------------------------------------------
 
+  /**
+   * Builds a cache key for (chain, dex, pathLength) combination.
+   * P0-FIX 10.1: Uses key caching to avoid repeated string allocations in hot path.
+   */
   private buildKey(chain: string, dex: string, pathLength: number): string {
-    return `${chain}:${dex}:${pathLength}`;
+    // Use array join with delimiter that's unlikely to appear in chain/dex names
+    const cacheKey = `${chain}|${dex}|${pathLength}`;
+    let key = this.keyCache.get(cacheKey);
+
+    if (!key) {
+      key = `${chain}:${dex}:${pathLength}`;
+
+      // Prevent unbounded cache growth
+      if (this.keyCache.size >= ExecutionProbabilityTracker.KEY_CACHE_MAX_SIZE) {
+        // Simple LRU: clear oldest half when full
+        const keysToDelete = Array.from(this.keyCache.keys()).slice(0, this.keyCache.size / 2);
+        for (const k of keysToDelete) {
+          this.keyCache.delete(k);
+        }
+      }
+
+      this.keyCache.set(cacheKey, key);
+    }
+
+    return key;
+  }
+
+  /**
+   * Builds chain:dex: prefix for aggregate lookups.
+   */
+  private buildChainDexPrefix(chain: string, dex: string): string {
+    return `${chain}:${dex}:`;
+  }
+
+  /**
+   * Builds chain: prefix for aggregate lookups.
+   */
+  private buildChainPrefix(chain: string): string {
+    return `${chain}:`;
   }
 
   // ---------------------------------------------------------------------------
@@ -475,6 +520,9 @@ export class ExecutionProbabilityTracker {
   /**
    * Removes outcomes older than the relevance window.
    * Called periodically by the cleanup timer.
+   *
+   * P0-FIX 10.2: Uses in-place array mutation instead of filter() to reduce
+   * memory allocation in the cleanup hot path.
    */
   private cleanupStaleOutcomes(): void {
     const cutoffTime = Date.now() - this.config.outcomeRelevanceWindowMs;
@@ -484,7 +532,15 @@ export class ExecutionProbabilityTracker {
     for (const [key, entry] of this.outcomesByKey) {
       const initialLength = entry.outcomes.length;
 
-      entry.outcomes = entry.outcomes.filter(o => o.timestamp >= cutoffTime);
+      // P0-FIX 10.2: In-place array mutation instead of filter()
+      // This avoids allocating a new array on each cleanup cycle
+      let writeIndex = 0;
+      for (let i = 0; i < entry.outcomes.length; i++) {
+        if (entry.outcomes[i].timestamp >= cutoffTime) {
+          entry.outcomes[writeIndex++] = entry.outcomes[i];
+        }
+      }
+      entry.outcomes.length = writeIndex;
 
       const removed = initialLength - entry.outcomes.length;
       if (removed > 0) {
@@ -500,11 +556,44 @@ export class ExecutionProbabilityTracker {
       }
     }
 
-    // Recalculate global stats
+    // Recalculate global stats and aggregates
     this.recalculateGlobalStats();
+    this.rebuildAggregates();
 
     if (totalRemoved > 0) {
       this.logger.debug('Stale outcomes cleaned up', { removed: totalRemoved });
+    }
+  }
+
+  /**
+   * Rebuilds the pre-computed aggregates from outcomesByKey.
+   * Called after cleanup to maintain consistency.
+   */
+  private rebuildAggregates(): void {
+    this.chainAggregates.clear();
+    this.chainDexAggregates.clear();
+
+    for (const [key, entry] of this.outcomesByKey) {
+      // Parse chain and dex from key (format: chain:dex:pathLength)
+      const parts = key.split(':');
+      if (parts.length < 3) continue;
+
+      const chain = parts[0];
+      const dex = parts[1];
+
+      // Update chain aggregate
+      const chainKey = this.buildChainPrefix(chain);
+      const chainAgg = this.chainAggregates.get(chainKey) || { totalGasCost: 0n, count: 0 };
+      chainAgg.totalGasCost += entry.totalGasCost;
+      chainAgg.count += entry.outcomes.length;
+      this.chainAggregates.set(chainKey, chainAgg);
+
+      // Update chain:dex aggregate
+      const chainDexKey = this.buildChainDexPrefix(chain, dex);
+      const chainDexAgg = this.chainDexAggregates.get(chainDexKey) || { totalProfit: 0n, successCount: 0 };
+      chainDexAgg.totalProfit += entry.totalProfit;
+      chainDexAgg.successCount += entry.successfulCount;
+      this.chainDexAggregates.set(chainDexKey, chainDexAgg);
     }
   }
 
@@ -596,20 +685,34 @@ export class ExecutionProbabilityTracker {
 // =============================================================================
 
 let trackerInstance: ExecutionProbabilityTracker | null = null;
+let initializingTracker = false;
 
 /**
  * Gets the singleton ExecutionProbabilityTracker instance.
  *
  * Creates a new instance on first call. Subsequent calls return the same instance.
+ * Note: config is only used on first call. Passing different values on subsequent
+ * calls will be ignored (singleton pattern).
  *
  * @param config - Optional configuration (only used on first call)
  * @returns The singleton tracker instance
+ * @throws Error if called during initialization (race condition prevention)
  */
 export function getExecutionProbabilityTracker(
   config?: Partial<ExecutionProbabilityConfig>
 ): ExecutionProbabilityTracker {
+  // P0-FIX 5.1: Prevent race condition during initialization
+  if (initializingTracker) {
+    throw new Error('ExecutionProbabilityTracker is being initialized. Avoid concurrent initialization.');
+  }
+
   if (!trackerInstance) {
-    trackerInstance = new ExecutionProbabilityTracker(config);
+    initializingTracker = true;
+    try {
+      trackerInstance = new ExecutionProbabilityTracker(config);
+    } finally {
+      initializingTracker = false;
+    }
   }
   return trackerInstance;
 }
@@ -619,10 +722,15 @@ export function getExecutionProbabilityTracker(
  *
  * Destroys the existing instance if present. A new instance will be created
  * on the next call to getExecutionProbabilityTracker().
+ *
+ * P0-FIX 5.2: Set instance to null BEFORE destroy to prevent race condition
+ * where getExecutionProbabilityTracker() could return the destroyed instance.
  */
 export function resetExecutionProbabilityTracker(): void {
   if (trackerInstance) {
-    trackerInstance.destroy();
+    // P0-FIX 5.2: Capture reference and null out first to prevent race
+    const instanceToDestroy = trackerInstance;
     trackerInstance = null;
+    instanceToDestroy.destroy();
   }
 }

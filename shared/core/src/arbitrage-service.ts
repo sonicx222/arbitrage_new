@@ -232,7 +232,7 @@ export class ArbitrageService extends EventEmitter {
         error: {
           type: (executionError.code === 'EXECUTION_TIMEOUT') ? 'timeout' : 'network',
           message: executionError.message,
-          details: executionError.details,
+          details: executionError.details ?? {},
           recoverable: executionError.recoverable
         },
         metadata: {
