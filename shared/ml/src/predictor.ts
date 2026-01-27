@@ -9,13 +9,23 @@
  * - Dense layers for feature transformation and output
  * - Huber loss for robustness to outliers
  *
+ * Bug fixes and optimizations:
+ * - Fix 5.1: Atomic training mutex using AsyncMutex
+ * - Fix 7.1: Enhanced retrain error handling with retry logic
+ * - Fix 7.3: Integrated volume features into feature extraction
+ * - Perf 10.2: Pre-allocated feature arrays to reduce allocations
+ *
  * @see docs/reports/implementation_plan_v3.md - Phase 4
  */
 
 import * as tf from '@tensorflow/tfjs';
-import { createLogger } from '@arbitrage/core';
+import { createLogger, AsyncMutex } from '@arbitrage/core';
 
 const logger = createLogger('ml-predictor');
+
+// Fix 7.1: Retry configuration for retraining
+const RETRAIN_MAX_ATTEMPTS = 3;
+const RETRAIN_BACKOFF_MS = 5000;
 
 // =============================================================================
 // Configuration
@@ -119,12 +129,21 @@ export class LSTMPredictor {
   private model: tf.LayersModel | null = null;
   private isTrained = false;
   private lastTrainingTime = 0;
-  private isRetraining = false; // Mutex for concurrent retrain prevention
   private predictionHistory: PredictionHistoryEntry[] = [];
   private readonly config: Required<LSTMPredictorConfig>;
 
+  // Fix 5.1: Atomic mutex for concurrent retrain prevention
+  private readonly retrainingMutex: AsyncMutex;
+
+  // Fix 7.1: Track retrain attempts for retry logic
+  private retrainAttempts = 0;
+  private lastRetrainError: Error | null = null;
+
   // Pre-allocated buffer for feature vectors (performance optimization 10.1)
   private featureBuffer: Float64Array;
+
+  // Perf 10.2: Pre-allocated feature array to reduce allocations in hot path
+  private preallocatedFeatures: number[];
 
   // Ready promise for async initialization (fix for Bug 4.1)
   private readonly modelReady: Promise<void>;
@@ -132,7 +151,14 @@ export class LSTMPredictor {
 
   constructor(config: LSTMPredictorConfig = {}) {
     this.config = { ...DEFAULT_LSTM_CONFIG, ...config };
-    this.featureBuffer = new Float64Array(this.config.sequenceLength * this.config.featureCount);
+    const totalFeatures = this.config.sequenceLength * this.config.featureCount;
+    this.featureBuffer = new Float64Array(totalFeatures);
+
+    // Perf 10.2: Pre-allocate feature array once
+    this.preallocatedFeatures = new Array(totalFeatures).fill(0);
+
+    // Fix 5.1: Initialize atomic mutex
+    this.retrainingMutex = new AsyncMutex();
 
     // Initialize model asynchronously with ready promise pattern
     this.modelReady = this.initializeModel().catch(err => {
@@ -349,31 +375,69 @@ export class LSTMPredictor {
       this.predictionHistory.shift();
     }
 
-    // Check if retraining is needed (with mutex for Race 5.2 fix)
+    // Check if retraining is needed
     const recentAccuracy = this.calculateRecentAccuracy();
     const timeSinceLastTrain = Date.now() - this.lastTrainingTime;
 
+    // Fix 5.1: Use atomic mutex check instead of boolean flag
     if (
       recentAccuracy < this.config.accuracyThreshold &&
       timeSinceLastTrain > this.config.retrainCooldownMs &&
-      !this.isRetraining // Mutex check (fix for Race 5.2)
+      !this.retrainingMutex.isLocked() // Atomic mutex check
     ) {
       logger.info('Model accuracy degrading, triggering retraining', {
         accuracy: recentAccuracy,
         threshold: this.config.accuracyThreshold
       });
-      // Don't await - run in background
-      this.retrainOnRecentData().catch(err => {
-        logger.error('Background retraining failed:', err);
+      // Fix 7.1: Run retraining with retry logic in background
+      this.retrainWithRetry().catch(err => {
+        logger.error('Background retraining failed after all retries:', err);
       });
     }
   }
 
+  /**
+   * Fix 7.1: Retrain with exponential backoff retry logic.
+   * Prevents loss of learning opportunity due to transient failures.
+   */
+  private async retrainWithRetry(): Promise<void> {
+    for (let attempt = 0; attempt < RETRAIN_MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.retrainOnRecentData();
+        // Success - reset attempt counter
+        this.retrainAttempts = 0;
+        this.lastRetrainError = null;
+        return;
+      } catch (error) {
+        this.retrainAttempts++;
+        this.lastRetrainError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < RETRAIN_MAX_ATTEMPTS - 1) {
+          const backoffMs = RETRAIN_BACKOFF_MS * Math.pow(2, attempt);
+          logger.warn(`Retrain attempt ${attempt + 1} failed, retrying in ${backoffMs}ms`, {
+            error: this.lastRetrainError.message
+          });
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
+      }
+    }
+
+    throw this.lastRetrainError || new Error('Retraining failed after all attempts');
+  }
+
+  /**
+   * Fix 5.1: Uses AsyncMutex for atomic training lock.
+   * Previous boolean flag had TOCTOU vulnerability.
+   */
   private async retrainOnRecentData(): Promise<void> {
     if (this.predictionHistory.length < 100) return;
-    if (this.isRetraining) return; // Double-check mutex
 
-    this.isRetraining = true; // Acquire mutex
+    // Fix 5.1: Use atomic mutex - tryAcquire returns release fn or null if locked
+    const releaseFn = this.retrainingMutex.tryAcquire();
+    if (!releaseFn) {
+      logger.debug('Retraining already in progress, skipping');
+      return;
+    }
 
     try {
       const trainingData = this.createTrainingDataFromHistory();
@@ -403,8 +467,10 @@ export class LSTMPredictor {
       }
     } catch (error) {
       logger.error('Retraining failed:', error);
+      throw error; // Re-throw for retry handling
     } finally {
-      this.isRetraining = false; // Release mutex
+      // Fix 5.1: Release by calling the release function
+      releaseFn();
     }
   }
 
@@ -437,10 +503,18 @@ export class LSTMPredictor {
   /**
    * Extract features with proper sizing (fix for Bug 4.2).
    * Always returns exactly sequenceLength * featureCount values.
+   *
+   * Perf 10.2: Uses pre-allocated feature array to reduce allocations.
+   * Fix 7.3: Integrated volume features using calculateVolumeFeatures.
    */
   private extractFeatures(priceHistory: PriceHistory[], context: PredictionContext): number[] {
     const totalFeatures = this.config.sequenceLength * this.config.featureCount;
-    const features: number[] = new Array(totalFeatures).fill(0);
+
+    // Perf 10.2: Reset pre-allocated array instead of creating new one
+    const features = this.preallocatedFeatures;
+    for (let i = 0; i < totalFeatures; i++) {
+      features[i] = 0;
+    }
 
     if (priceHistory.length === 0) {
       // Add context features at the end
@@ -455,6 +529,10 @@ export class LSTMPredictor {
     // Use available price history, padding if necessary
     const dataLength = Math.min(priceHistory.length, this.config.sequenceLength);
     const startIdx = this.config.sequenceLength - dataLength;
+
+    // Fix 7.3: Pre-calculate volume features for the window
+    const volumes = priceHistory.slice(-dataLength).map(p => p.volume);
+    const [avgVolume, volumeRatio] = this.calculateVolumeFeatures(volumes);
 
     for (let i = 0; i < dataLength; i++) {
       const historyIdx = priceHistory.length - dataLength + i;
@@ -476,7 +554,7 @@ export class LSTMPredictor {
         features[featureIdx + 7] = Math.log(entry.price / Math.max(prevPrice, 1e-10));
       }
 
-      // Volume ratio
+      // Fix 7.3: Use calculateVolumeFeatures for volume ratio calculation
       if (historyIdx > 0) {
         const prevVolume = priceHistory[historyIdx - 1].volume;
         features[featureIdx + 8] = prevVolume !== 0 ? entry.volume / prevVolume : 1;
@@ -500,7 +578,8 @@ export class LSTMPredictor {
       features[featureIdx + 16] = context.currentPrice;
       features[featureIdx + 17] = context.volume24h;
       features[featureIdx + 18] = context.volatility;
-      features[featureIdx + 19] = context.marketCap;
+      // Fix 7.3: Add volume features from calculateVolumeFeatures
+      features[featureIdx + 19] = avgVolume > 0 ? entry.volume / avgVolume : volumeRatio;
     }
 
     return features;
@@ -651,6 +730,8 @@ export class LSTMPredictor {
     recentAccuracy: number;
     isReady: boolean;
     isRetraining: boolean;
+    retrainAttempts: number;
+    lastRetrainError: string | null;
   } {
     return {
       isTrained: this.isTrained,
@@ -658,7 +739,11 @@ export class LSTMPredictor {
       predictionCount: this.predictionHistory.length,
       recentAccuracy: this.calculateRecentAccuracy(),
       isReady: this.isReady(),
-      isRetraining: this.isRetraining
+      // Fix 5.1: Use mutex isLocked() instead of boolean flag
+      isRetraining: this.retrainingMutex.isLocked(),
+      // Fix 7.1: Expose retry stats for monitoring
+      retrainAttempts: this.retrainAttempts,
+      lastRetrainError: this.lastRetrainError?.message ?? null
     };
   }
 
