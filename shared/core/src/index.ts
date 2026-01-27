@@ -421,11 +421,21 @@ export type {
 } from './analytics/pair-activity-tracker';
 
 // Domain models and core interfaces
-// NOTE: Domain models exports ArbitrageError as LegacyArbitrageError (deprecated alias)
-// For new code, use the ArbitrageError from resilience/error-handling (exported as BaseArbitrageError)
-// Type disambiguation:
-// - LegacyArbitrageError / DomainArbitrageError: Simple error with string code (deprecated)
-// - BaseArbitrageError / ArbitrageError: Rich error with ErrorCode enum (preferred)
+// FIX 6.1: Error Class Name Disambiguation
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║ ERROR CLASS NAMING GUIDE                                                   ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ PREFERRED (use these):                                                      ║
+// ║   - BaseArbitrageError: Rich error with ErrorCode enum, severity, context  ║
+// ║     Import: import { BaseArbitrageError, ErrorCode } from '@arbitrage/core'║
+// ║   - ConnectionError, ValidationError, LifecycleError, ExecutionError       ║
+// ║     (Specialized error classes from resilience/error-handling)             ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ DEPRECATED (legacy, will be removed in v2.0):                              ║
+// ║   - ArbitrageError (from domain-models.ts): Simple error with string code  ║
+// ║   - DomainArbitrageError: Same as above, explicit name                     ║
+// ║     Migration: new BaseArbitrageError(msg, ErrorCode.XXX, { context })     ║
+// ╚════════════════════════════════════════════════════════════════════════════╝
 export * from './domain-models';
 
 // Repository pattern
@@ -1031,6 +1041,20 @@ export {
   resetEVCalculator,
 } from './risk';
 
+// Task 3.4.3: Position Sizer (Kelly Criterion)
+export {
+  KellyPositionSizer,
+  getKellyPositionSizer,
+  resetKellyPositionSizer,
+} from './risk';
+
+// Task 3.4.4: Drawdown Circuit Breaker
+export {
+  DrawdownCircuitBreaker,
+  getDrawdownCircuitBreaker,
+  resetDrawdownCircuitBreaker,
+} from './risk';
+
 export type {
   // Execution Probability Tracker (Task 3.4.1)
   ExecutionProbabilityConfig,
@@ -1050,4 +1074,41 @@ export type {
   EVInput,
   EVCalculation,
   EVCalculatorStats,
+
+  // Position Sizer (Task 3.4.3)
+  PositionSizerConfig,
+  PositionSize,
+  PositionSizerStats,
+
+  // Drawdown Circuit Breaker (Task 3.4.4)
+  DrawdownConfig,
+  DrawdownState,
+  DrawdownStats,
 } from './risk';
+
+// =============================================================================
+// UTILITIES (FIX 9.3)
+// =============================================================================
+
+export {
+  // Scale factors
+  DEFAULT_SCALE,
+  HIGH_PRECISION_SCALE,
+
+  // BigInt <-> Number conversions
+  fractionToBigInt,
+  bigIntToFraction,
+  applyFraction,
+  calculateFraction,
+  bigIntToNumber,
+  numberToBigInt,
+
+  // BigInt arithmetic
+  bigIntMin,
+  bigIntMax,
+  bigIntClamp,
+  bigIntAbs,
+
+  // Formatting
+  formatWeiAsEth,
+} from './utils';

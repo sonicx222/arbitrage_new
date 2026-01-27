@@ -506,6 +506,19 @@ export class PriceMatrix {
 
   /**
    * Set multiple prices in batch.
+   *
+   * FIX 10.3: OPTIMIZATION OPPORTUNITY
+   * Current implementation calls setPrice() per update (N calls).
+   * For SharedArrayBuffer, batch writes could be optimized to:
+   * 1. Resolve all keys to indices first (N index lookups)
+   * 2. Write all prices in a single loop (1 pass over array)
+   * 3. Write all timestamps in a single loop (1 pass)
+   *
+   * This would reduce the number of Atomics operations and improve
+   * cache locality. However, the current implementation prioritizes
+   * correctness and maintainability over micro-optimization.
+   *
+   * Profile before optimizing - the index lookup dominates at low N.
    */
   setBatch(updates: BatchUpdate[]): void {
     if (this.destroyed) {
@@ -739,11 +752,19 @@ export function getPriceMatrix(config?: Partial<PriceMatrixConfig>): PriceMatrix
 
 /**
  * Reset singleton instance.
+ * FIX 4.3: Fixed race condition where concurrent callers could get
+ * a destroying instance. Now nulls the reference before clearing the
+ * initialization flag to prevent TOCTOU races.
  */
 export function resetPriceMatrix(): void {
-  initializingMatrix = false; // Clear initialization flag
-  if (matrixInstance) {
-    matrixInstance.destroy();
-    matrixInstance = null;
+  // FIX 4.3: Save reference, null instance, clear flag, THEN destroy
+  // This order prevents concurrent getPriceMatrix() from returning a destroying instance
+  const instanceToDestroy = matrixInstance;
+  matrixInstance = null;
+  initializingMatrix = false;
+
+  // Now safe to destroy - no one can get a reference to it anymore
+  if (instanceToDestroy) {
+    instanceToDestroy.destroy();
   }
 }

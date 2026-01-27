@@ -316,3 +316,323 @@ export interface EVCalculatorStats {
   /** Average EV of all calculated opportunities */
   averageEV: bigint;
 }
+
+// =============================================================================
+// Position Sizer Types (Task 3.4.3)
+// =============================================================================
+
+/**
+ * Configuration for KellyPositionSizer
+ */
+export interface PositionSizerConfig {
+  /**
+   * Kelly multiplier for fractional Kelly sizing (0-1).
+   * Default: 0.5 (half Kelly - safer than full Kelly)
+   *
+   * Full Kelly (1.0) maximizes long-term growth but has high variance.
+   * Half Kelly (0.5) provides ~75% of growth with ~50% of variance.
+   */
+  kellyMultiplier: number;
+
+  /**
+   * Maximum fraction of capital for a single trade (0-1).
+   * Default: 0.02 (2% max per trade)
+   *
+   * This is a hard cap regardless of Kelly calculation.
+   */
+  maxSingleTradeFraction: number;
+
+  /**
+   * Minimum fraction of capital for a trade to be worth executing (0-1).
+   * Default: 0.001 (0.1% minimum)
+   *
+   * Trades sized below this are not worth the gas/effort.
+   */
+  minTradeFraction: number;
+
+  /**
+   * Total capital available for trading (in wei).
+   * This should be updated when capital changes.
+   */
+  totalCapital: bigint;
+
+  /**
+   * Whether to enable position sizing (can be disabled for testing).
+   * When disabled, returns maxSingleTrade as recommended size.
+   */
+  enabled: boolean;
+}
+
+/**
+ * Result of position size calculation
+ */
+export interface PositionSize {
+  /**
+   * Recommended position size in wei.
+   * This is the capital amount to use for the trade.
+   */
+  recommendedSize: bigint;
+
+  /**
+   * Recommended size as fraction of total capital (0-1).
+   */
+  fractionOfCapital: number;
+
+  /**
+   * Raw Kelly fraction before any adjustments (can be >1 or <0).
+   * f* = (p * b - q) / b
+   */
+  kellyFraction: number;
+
+  /**
+   * Adjusted Kelly fraction after applying multiplier.
+   * = kellyFraction * kellyMultiplier, clamped to [0, 1]
+   */
+  adjustedKelly: number;
+
+  /**
+   * Final fraction after applying max/min caps.
+   */
+  cappedFraction: number;
+
+  /**
+   * Maximum allowed size based on config (in wei).
+   */
+  maxAllowed: bigint;
+
+  /**
+   * Whether the trade should be executed based on sizing.
+   * False if Kelly suggests negative sizing or below minimum.
+   */
+  shouldTrade: boolean;
+
+  /**
+   * Reason for not trading (when shouldTrade is false).
+   */
+  reason?: string;
+}
+
+/**
+ * Input for position sizing calculation
+ */
+export interface PositionSizeInput {
+  /**
+   * Win probability from EV calculator (0-1).
+   */
+  winProbability: number;
+
+  /**
+   * Expected profit if trade succeeds (in wei).
+   */
+  expectedProfit: bigint;
+
+  /**
+   * Expected loss if trade fails (in wei).
+   * Typically the gas cost.
+   */
+  expectedLoss: bigint;
+}
+
+/**
+ * Statistics from KellyPositionSizer
+ */
+export interface PositionSizerStats {
+  /** Total sizing calculations performed */
+  totalCalculations: number;
+
+  /** Number of trades that should be executed */
+  tradesApproved: number;
+
+  /** Number of trades rejected due to negative Kelly */
+  rejectedNegativeKelly: number;
+
+  /** Number of trades rejected due to below minimum size */
+  rejectedBelowMinimum: number;
+
+  /** Number of trades capped at maximum size */
+  cappedAtMaximum: number;
+
+  /** Average recommended fraction (for approved trades) */
+  averageFraction: number;
+
+  /** Total capital value used in calculations */
+  totalCapitalUsed: bigint;
+}
+
+// =============================================================================
+// Drawdown Circuit Breaker Types (Task 3.4.4)
+// =============================================================================
+
+/**
+ * Drawdown state machine states.
+ * Controls trading behavior based on capital performance.
+ */
+export type DrawdownStateType = 'NORMAL' | 'CAUTION' | 'HALT' | 'RECOVERY';
+
+/**
+ * Configuration for DrawdownCircuitBreaker
+ */
+export interface DrawdownConfig {
+  /**
+   * Maximum daily loss as fraction of capital (0-1).
+   * When exceeded, state transitions to HALT.
+   * Default: 0.05 (5%)
+   */
+  maxDailyLoss: number;
+
+  /**
+   * Caution threshold as fraction of capital (0-1).
+   * When exceeded, state transitions to CAUTION.
+   * Default: 0.03 (3%)
+   */
+  cautionThreshold: number;
+
+  /**
+   * Maximum consecutive losses before HALT.
+   * Default: 5
+   */
+  maxConsecutiveLosses: number;
+
+  /**
+   * Position size multiplier during RECOVERY state (0-1).
+   * Default: 0.5 (50% of normal sizing)
+   */
+  recoveryMultiplier: number;
+
+  /**
+   * Number of winning trades required to exit RECOVERY.
+   * Default: 3
+   */
+  recoveryWinsRequired: number;
+
+  /**
+   * Time in ms before HALT state can be manually reset.
+   * Default: 3600000 (1 hour)
+   */
+  haltCooldownMs: number;
+
+  /**
+   * Total capital for drawdown calculations (in wei).
+   * Should be kept in sync with position sizer.
+   */
+  totalCapital: bigint;
+
+  /**
+   * Whether the circuit breaker is enabled.
+   * Default: true
+   */
+  enabled: boolean;
+}
+
+/**
+ * Current state of the drawdown circuit breaker
+ */
+export interface DrawdownState {
+  /** Current state machine state */
+  state: DrawdownStateType;
+
+  /** Daily profit/loss in wei (resets at UTC midnight) */
+  dailyPnL: bigint;
+
+  /** Number of consecutive losing trades */
+  consecutiveLosses: number;
+
+  /** Number of consecutive winning trades (for recovery tracking) */
+  consecutiveWins: number;
+
+  /** Timestamp of last state transition */
+  lastStateChange: number;
+
+  /** Timestamp when HALT state started (for cooldown tracking) */
+  haltStartTime: number | null;
+
+  /** Current date string for daily reset tracking (YYYY-MM-DD) */
+  currentDateUTC: string;
+
+  /** Total realized PnL since tracker start (in wei) */
+  totalPnL: bigint;
+
+  /** Peak capital value for max drawdown calculation (in wei) */
+  peakCapital: bigint;
+
+  /** Current drawdown from peak as decimal (0-1) */
+  currentDrawdown: number;
+
+  /** Maximum drawdown observed as decimal (0-1) */
+  maxDrawdown: number;
+}
+
+/**
+ * Result of checking if trading is allowed
+ */
+export interface TradingAllowedResult {
+  /** Whether trading is allowed */
+  allowed: boolean;
+
+  /** Current circuit breaker state */
+  state: DrawdownStateType;
+
+  /** Position size multiplier to apply (1.0 for normal, less for CAUTION/RECOVERY) */
+  sizeMultiplier: number;
+
+  /** Reason for restriction (if not allowed or reduced) */
+  reason?: string;
+
+  /** Time remaining in HALT cooldown (ms, if in HALT state) */
+  haltCooldownRemaining?: number;
+}
+
+/**
+ * Trade result for updating the circuit breaker
+ */
+export interface TradeResult {
+  /** Whether the trade was profitable */
+  success: boolean;
+
+  /** Profit/loss amount in wei (negative for loss) */
+  pnl: bigint;
+
+  /** Timestamp of trade completion */
+  timestamp: number;
+}
+
+/**
+ * Statistics from DrawdownCircuitBreaker
+ */
+export interface DrawdownStats {
+  /** Current state */
+  currentState: DrawdownStateType;
+
+  /** Daily PnL in wei */
+  dailyPnL: bigint;
+
+  /** Daily PnL as fraction of capital */
+  dailyPnLFraction: number;
+
+  /** Total PnL in wei */
+  totalPnL: bigint;
+
+  /** Current drawdown from peak (0-1) */
+  currentDrawdown: number;
+
+  /** Maximum drawdown observed (0-1) */
+  maxDrawdown: number;
+
+  /** Total trades recorded */
+  totalTrades: number;
+
+  /** Total winning trades */
+  totalWins: number;
+
+  /** Total losing trades */
+  totalLosses: number;
+
+  /** Number of times HALT was triggered */
+  haltCount: number;
+
+  /** Number of times CAUTION was triggered */
+  cautionCount: number;
+
+  /** Time spent in HALT state (ms) */
+  totalHaltTimeMs: number;
+}

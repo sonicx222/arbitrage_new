@@ -337,13 +337,31 @@ export function calculateProfitBetweenSources(
 // =============================================================================
 
 /**
+ * FIX 6.2: Fee Format Convention
+ * ╔════════════════════════════════════════════════════════════════════════════╗
+ * ║ STANDARD FEE FORMAT: DECIMAL (0.003 = 0.3%)                                ║
+ * ╠════════════════════════════════════════════════════════════════════════════╣
+ * ║ All internal calculations use decimal format:                              ║
+ * ║   - 0.003 = 0.3% (standard Uniswap V2/V3 fee)                             ║
+ * ║   - 0.0004 = 0.04% (low-fee pools like Curve)                             ║
+ * ║   - 0.0005 = 0.05% (Uniswap V3 low fee tier)                              ║
+ * ║   - 0.01 = 1% (high fee exotic pairs)                                     ║
+ * ╠════════════════════════════════════════════════════════════════════════════╣
+ * ║ External formats (convert at boundaries):                                  ║
+ * ║   - Basis Points: 30 bps = 0.003 (use basisPointsToDecimal())             ║
+ * ║   - Percentage: 0.3% = 0.003 (divide by 100)                              ║
+ * ║   - Per-million: 3000 = 0.003 (Uniswap V3 style, divide by 1_000_000)     ║
+ * ╚════════════════════════════════════════════════════════════════════════════╝
+ */
+
+/**
  * Default fees by DEX type.
  * Low-fee DEXes like Curve and Balancer use 0.04%.
  * Most AMMs use 0.3%.
  */
 const LOW_FEE_DEXES = new Set(['curve', 'balancer']);
-const DEFAULT_AMM_FEE = 0.003; // 0.3%
-const DEFAULT_LOW_FEE = 0.0004; // 0.04%
+const DEFAULT_AMM_FEE = 0.003; // 0.3% as decimal (30 bps)
+const DEFAULT_LOW_FEE = 0.0004; // 0.04% as decimal (4 bps)
 
 /**
  * Get default fee for a DEX.
@@ -384,13 +402,35 @@ export function basisPointsToDecimal(basisPoints: number): number {
 
 /**
  * Convert decimal fee to basis points.
- * E.g., 0.003 = 30 basis points
+ * E.g., 0.003 (0.3%) = 30 basis points
  *
- * @param decimalFee - Fee as decimal
+ * @param decimal - Fee as decimal
  * @returns Fee in basis points
  */
-export function decimalToBasisPoints(decimalFee: number): number {
-  return decimalFee * 10000;
+export function decimalToBasisPoints(decimal: number): number {
+  return decimal * 10000;
+}
+
+/**
+ * Convert Uniswap V3 per-million fee to decimal.
+ * E.g., 3000 (per million) = 0.003 (0.3%)
+ *
+ * @param perMillion - Fee in per-million format (Uniswap V3 style)
+ * @returns Fee as decimal
+ */
+export function perMillionToDecimal(perMillion: number): number {
+  return perMillion / 1_000_000;
+}
+
+/**
+ * Convert percentage fee to decimal.
+ * E.g., 0.3 (percent) = 0.003 (decimal)
+ *
+ * @param percentage - Fee as percentage (0.3 = 0.3%)
+ * @returns Fee as decimal
+ */
+export function percentageToDecimal(percentage: number): number {
+  return percentage / 100;
 }
 
 // =============================================================================
@@ -423,16 +463,27 @@ export function calculateConfidence(
   ageMs: number,
   maxAgeMs: number = 10000
 ): number {
+  // FIX 4.2: Guard against invalid inputs that could produce NaN
+  if (!Number.isFinite(spread) || !Number.isFinite(ageMs) || !Number.isFinite(maxAgeMs)) {
+    return 0.5; // Return neutral confidence for invalid inputs
+  }
+
+  // Ensure non-negative values
+  const safeSpread = Math.max(0, spread);
+  const safeAgeMs = Math.max(0, ageMs);
+  const safeMaxAgeMs = Math.max(1, maxAgeMs); // Prevent division by zero
+
   // Base confidence on spread magnitude (capped at 0.5 spread = 100% base)
-  let confidence = Math.min(spread / 0.5, 1.0);
+  let confidence = Math.min(safeSpread / 0.5, 1.0);
 
   // Apply freshness penalty
   // Formula: freshnessScore = max(0.5, 1.0 - (ageMs / maxAgeMs))
-  const freshnessScore = Math.max(0.5, 1.0 - ageMs / maxAgeMs);
+  const freshnessScore = Math.max(0.5, 1.0 - safeAgeMs / safeMaxAgeMs);
   confidence *= freshnessScore;
 
-  // Cap at 95%
-  return Math.min(confidence, 0.95);
+  // Cap at 95% and ensure valid number
+  const result = Math.min(confidence, 0.95);
+  return Number.isFinite(result) ? result : 0.5;
 }
 
 // =============================================================================

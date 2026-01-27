@@ -38,14 +38,27 @@ const DEFAULT_CONFIG: ExecutionProbabilityConfig = {
   cleanupIntervalMs: 60000, // 1 minute
   outcomeRelevanceWindowMs: 7 * 24 * 60 * 60 * 1000, // 7 days
 
-  // Redis persistence configuration
-  // STATUS: DEFERRED - In-memory tracking is sufficient for initial deployment.
-  // The redisKeyPrefix is reserved for future use when Redis persistence is needed.
-  // Implementation plan when required:
-  // - On recordOutcome(): persist to Redis hash at {redisKeyPrefix}{chain}:{dex}:{pathLength}
-  // - On startup: load historical data from Redis
-  // - Format: { wins: number, losses: number, avgProfit: string, avgGas: string }
-  // See implementation_plan_v3.md Section 3.4.1 for schema details
+  // FIX 1.2/7.2: Redis persistence configuration
+  // ╔════════════════════════════════════════════════════════════════════════════╗
+  // ║ REDIS PERSISTENCE STATUS: DEFERRED                                         ║
+  // ╠════════════════════════════════════════════════════════════════════════════╣
+  // ║ CURRENT BEHAVIOR (persistToRedis: false):                                  ║
+  // ║   - All probability data is stored IN-MEMORY ONLY                          ║
+  // ║   - Data is LOST on process restart/crash                                  ║
+  // ║   - System starts with defaultWinProbability until data accumulates        ║
+  // ║                                                                             ║
+  // ║ IMPLICATIONS:                                                               ║
+  // ║   - After restart, EV calculations use default 50% win probability         ║
+  // ║   - First ~minSamples trades after restart have higher uncertainty         ║
+  // ║   - Acceptable for initial deployment, not for production longevity        ║
+  // ║                                                                             ║
+  // ║ FUTURE IMPLEMENTATION (when persistToRedis: true):                         ║
+  // ║   - On recordOutcome(): persist to Redis hash                              ║
+  // ║     Key: {redisKeyPrefix}{chain}:{dex}:{pathLength}                        ║
+  // ║     Format: { wins, losses, totalProfit, totalGasCost, lastUpdate }        ║
+  // ║   - On startup: load historical aggregates from Redis                      ║
+  // ║   - See implementation_plan_v3.md Section 3.4.1 for full schema            ║
+  // ╚════════════════════════════════════════════════════════════════════════════╝
   redisKeyPrefix: 'risk:probability:',
   persistToRedis: false,
 };
@@ -494,6 +507,13 @@ export class ExecutionProbabilityTracker {
     if (entry.outcomes.length > 0 && removed.length > 0) {
       // Recalculate first timestamp from remaining outcomes
       this.recalculateTimestampBounds();
+    }
+
+    // FIX 4.1: Rebuild aggregates after pruning to prevent stale data
+    // The chainAggregates and chainDexAggregates were not being updated,
+    // causing getAverageGasCost() and getAverageProfit() to return stale values.
+    if (removed.length > 0) {
+      this.rebuildAggregates();
     }
   }
 

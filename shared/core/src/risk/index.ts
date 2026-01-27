@@ -14,14 +14,13 @@
  *   Calculates expected value: EV = (winProb × profit) - (lossProb × gasCost)
  *   Makes data-driven execution decisions
  *
- * PLANNED (not yet implemented):
- * - Position Sizer (Task 3.4.3) - DEFERRED
- *   Will calculate optimal position sizes based on Kelly Criterion
- *   Target: Implement after EV Calculator is battle-tested in production
+ * - Position Sizer (Task 3.4.3) ✓
+ *   Calculates optimal position sizes based on Kelly Criterion
+ *   Uses fractional Kelly (0.5x default) for reduced variance
  *
- * - Drawdown Circuit Breaker (Task 3.4.4) - DEFERRED
- *   Will halt trading when drawdown exceeds threshold
- *   Target: Implement with Position Sizer
+ * - Drawdown Circuit Breaker (Task 3.4.4) ✓
+ *   Halts trading when drawdown exceeds threshold
+ *   State machine: NORMAL -> CAUTION -> HALT -> RECOVERY -> NORMAL
  *
  * @see docs/reports/implementation_plan_v3.md Section 3.4
  */
@@ -47,6 +46,26 @@ export {
 } from './ev-calculator';
 
 // =============================================================================
+// Position Sizer (Task 3.4.3)
+// =============================================================================
+
+export {
+  KellyPositionSizer,
+  getKellyPositionSizer,
+  resetKellyPositionSizer,
+} from './position-sizer';
+
+// =============================================================================
+// Drawdown Circuit Breaker (Task 3.4.4)
+// =============================================================================
+
+export {
+  DrawdownCircuitBreaker,
+  getDrawdownCircuitBreaker,
+  resetDrawdownCircuitBreaker,
+} from './drawdown-circuit-breaker';
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -69,4 +88,18 @@ export type {
   EVInput,
   EVCalculation,
   EVCalculatorStats,
+
+  // Position Sizer (Task 3.4.3)
+  PositionSizerConfig,
+  PositionSize,
+  PositionSizeInput,
+  PositionSizerStats,
+
+  // Drawdown Circuit Breaker (Task 3.4.4)
+  DrawdownConfig,
+  DrawdownState,
+  DrawdownStateType,
+  DrawdownStats,
+  TradingAllowedResult,
+  TradeResult,
 } from './types';

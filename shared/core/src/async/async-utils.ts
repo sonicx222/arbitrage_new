@@ -245,13 +245,27 @@ export function createDeferred<T = void>(): Deferred<T> {
 /**
  * P1-2 FIX: Thread-safe index generator using closure
  * Ensures each index is returned exactly once, avoiding race conditions.
+ *
+ * FIX 5.2: IMPORTANT - Single-Threaded Invariant
+ * This function relies on JavaScript's single-threaded event loop model.
+ * The check-and-increment operation is atomic because:
+ * 1. JavaScript execution is single-threaded within an event loop tick
+ * 2. The `currentIndex++` happens synchronously before any `await` yields control
+ * 3. No other code can interleave between the check and increment
+ *
+ * ⚠️ DO NOT USE WITH Worker Threads sharing this state:
+ * - Node.js Worker Threads have separate event loops
+ * - SharedArrayBuffer access requires Atomics for thread safety
+ * - This pattern would have TOCTOU races if called from multiple workers
+ *
+ * For multi-worker scenarios, use Atomics.add() on a SharedArrayBuffer integer.
  */
 function createIndexGenerator(length: number): () => number | null {
   let currentIndex = 0;
 
   return (): number | null => {
-    // This is safe because JS is single-threaded in the event loop
-    // The check and increment happen in the same synchronous block
+    // INVARIANT: Safe only in single-threaded context (main thread or single worker)
+    // The if-check and increment are in the same synchronous block with no await
     if (currentIndex >= length) {
       return null;
     }
