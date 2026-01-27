@@ -194,3 +194,125 @@ export interface HourlyStats {
   /** Sample count for this hour */
   sampleCount: number;
 }
+
+// =============================================================================
+// EV Calculator Types (Task 3.4.2)
+// =============================================================================
+
+/**
+ * Configuration for EVCalculator
+ */
+export interface EVConfig {
+  /**
+   * Minimum expected value threshold in wei for execution.
+   * Default: 5000000000000000 (0.005 ETH, ~$10 at $2000/ETH)
+   * Adjust based on gas costs and desired profitability margin.
+   */
+  minEVThreshold: bigint;
+
+  /** Minimum win probability to consider (0-1, filters out highly uncertain trades) */
+  minWinProbability: number;
+
+  /** Maximum allowed loss in wei per trade (for risk capping) */
+  maxLossPerTrade: bigint;
+
+  /** Whether to use historical gas costs when estimatedGas is not provided */
+  useHistoricalGasCost: boolean;
+
+  /** Default gas cost in wei when no data available */
+  defaultGasCost: bigint;
+
+  /** Default profit estimate in wei when no historical data available */
+  defaultProfitEstimate: bigint;
+}
+
+/**
+ * Input for EV calculation
+ * Accepts opportunity-like objects with flexible field names
+ */
+export interface EVInput {
+  /** Chain identifier (e.g., 'ethereum', 'arbitrum') */
+  chain: string;
+
+  /** DEX identifier (e.g., 'uniswap_v2', 'sushiswap') */
+  dex: string;
+
+  /** Number of hops in the arbitrage path (defaults to 2) */
+  pathLength?: number;
+
+  /** Path array for triangular/multi-leg arbitrage */
+  path?: string[];
+
+  /** Estimated profit from the opportunity (in wei) */
+  estimatedProfit?: bigint;
+
+  /** Expected profit (alternative field name for estimatedProfit) */
+  expectedProfit?: bigint;
+
+  /** Estimated gas cost (in wei) */
+  estimatedGas?: bigint;
+
+  /** Gas estimate (alternative field name) */
+  gasEstimate?: bigint;
+}
+
+/**
+ * Result of EV calculation
+ */
+export interface EVCalculation {
+  /** Calculated expected value in wei */
+  expectedValue: bigint;
+
+  /** Win probability used in calculation (0-1) */
+  winProbability: number;
+
+  /** Expected profit weighted by win probability (in wei) */
+  expectedProfit: bigint;
+
+  /** Expected gas cost weighted by loss probability (in wei) */
+  expectedGasCost: bigint;
+
+  /** Whether the opportunity should be executed based on EV threshold */
+  shouldExecute: boolean;
+
+  /** Reason for not executing (when shouldExecute is false) */
+  reason?: string;
+
+  /** Source of probability data */
+  probabilitySource: 'historical' | 'default';
+
+  /** Number of historical samples used */
+  sampleCount: number;
+
+  /** Raw profit estimate used (before probability weighting) */
+  rawProfitEstimate: bigint;
+
+  /** Raw gas cost estimate used (before probability weighting) */
+  rawGasCost: bigint;
+}
+
+/**
+ * Statistics from EVCalculator
+ */
+export interface EVCalculatorStats {
+  /** Total calculations performed */
+  totalCalculations: number;
+
+  /** Number of opportunities that passed EV threshold */
+  approvedCount: number;
+
+  /** Number of opportunities rejected due to low EV */
+  rejectedLowEV: number;
+
+  /** Number of opportunities rejected due to low win probability */
+  rejectedLowProbability: number;
+
+  /** Number of opportunities rejected due to exceeding max loss per trade */
+  rejectedMaxLoss: number;
+
+  /** Average EV of approved opportunities */
+  averageApprovedEV: bigint;
+
+  /** Average EV of all calculated opportunities */
+  averageEV: bigint;
+}

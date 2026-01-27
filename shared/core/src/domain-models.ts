@@ -113,7 +113,8 @@ export interface ExecutionResult {
 export interface ExecutionFailure {
   type: 'slippage' | 'gas' | 'network' | 'insufficient_funds' | 'timeout';
   message: string;
-  details: any;
+  /** Structured error details. Replaces `any` for type safety per code_conventions.md */
+  details: Record<string, unknown>;
   recoverable: boolean;
 }
 
@@ -289,29 +290,53 @@ export interface IExecutorFactory {
 }
 
 // Error Classes
-export class ArbitrageError extends Error {
+/**
+ * @deprecated Use ArbitrageError from './resilience/error-handling' instead.
+ * This legacy class is kept for backward compatibility with existing code.
+ * Migration: Replace `new DomainArbitrageError(code, msg)` with
+ * `new ArbitrageError(msg, ErrorCode.XXX)` from error-handling.
+ *
+ * Removal planned for v2.0.0
+ */
+export class DomainArbitrageError extends Error {
   constructor(
     public code: string,
     message: string,
-    public details?: any,
+    public details?: Record<string, unknown>,
     public recoverable: boolean = false
   ) {
     super(message);
-    this.name = 'ArbitrageError';
+    this.name = 'DomainArbitrageError';
   }
 }
 
-export class ExecutionError extends ArbitrageError {
+/**
+ * @deprecated Alias for DomainArbitrageError. Use ArbitrageError from
+ * './resilience/error-handling' for new code.
+ */
+export { DomainArbitrageError as ArbitrageError };
+
+/**
+ * @deprecated Use ExecutionError from './resilience/error-handling' instead.
+ * Removal planned for v2.0.0
+ */
+export class DomainExecutionError extends DomainArbitrageError {
   constructor(
     code: string,
     message: string,
     public opportunityId: string,
-    details?: any
+    details?: Record<string, unknown>
   ) {
     super(code, message, details, false);
-    this.name = 'ExecutionError';
+    this.name = 'DomainExecutionError';
   }
 }
+
+/**
+ * @deprecated Alias for DomainExecutionError. Use ExecutionError from
+ * './resilience/error-handling' for new code.
+ */
+export { DomainExecutionError as ExecutionError };
 
 export class ConfigurationError extends Error {
   constructor(

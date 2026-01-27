@@ -421,6 +421,11 @@ export type {
 } from './analytics/pair-activity-tracker';
 
 // Domain models and core interfaces
+// NOTE: Domain models exports ArbitrageError as LegacyArbitrageError (deprecated alias)
+// For new code, use the ArbitrageError from resilience/error-handling (exported as BaseArbitrageError)
+// Type disambiguation:
+// - LegacyArbitrageError / DomainArbitrageError: Simple error with string code (deprecated)
+// - BaseArbitrageError / ArbitrageError: Rich error with ErrorCode enum (preferred)
 export * from './domain-models';
 
 // Repository pattern
@@ -547,21 +552,25 @@ export type {
 // =============================================================================
 export {
   /**
-   * @deprecated Use detectArbitrage from components/arbitrage-detector instead
+   * @deprecated Since v1.0.0. Use detectArbitrage from components/arbitrage-detector instead.
+   * Will be removed in v2.0.0.
    */
   calculateIntraChainArbitrage,
   /**
-   * @deprecated Use isValidPairSnapshot from components/arbitrage-detector instead
+   * @deprecated Since v1.0.0. Use isValidPairSnapshot from components/arbitrage-detector instead.
+   * Will be removed in v2.0.0.
    */
   validatePairSnapshot,
   /**
-   * @deprecated Use PairRepository.createSnapshot() from components/pair-repository instead
+   * @deprecated Since v1.0.0. Use PairRepository.createSnapshot() from components/pair-repository instead.
+   * Will be removed in v2.0.0.
    */
   createPairSnapshot
 } from './arbitrage-calculator';
 
 /**
- * @deprecated These types are deprecated. Import from components instead.
+ * @deprecated Since v1.0.0. These types will be removed in v2.0.0.
+ * Migration guide:
  * - PairSnapshot → ComponentPairSnapshot from components/pair-repository
  * - ChainPriceData → components/arbitrage-detector
  * - CrossChainOpportunityResult → components/arbitrage-detector
@@ -1008,31 +1017,37 @@ export type {
 // RISK MANAGEMENT (Phase 3: Capital & Risk Controls - Task 3.4)
 // =============================================================================
 
+// Task 3.4.1: Execution Probability Tracker
 export {
   ExecutionProbabilityTracker,
   getExecutionProbabilityTracker,
   resetExecutionProbabilityTracker,
 } from './risk';
 
-export type {
-  // Configuration
-  ExecutionProbabilityConfig,
+// Task 3.4.2: EV Calculator
+export {
+  EVCalculator,
+  getEVCalculator,
+  resetEVCalculator,
+} from './risk';
 
-  // Outcome tracking
+export type {
+  // Execution Probability Tracker (Task 3.4.1)
+  ExecutionProbabilityConfig,
   ExecutionOutcome,
   SerializedOutcome,
-
-  // Query parameters
   ProbabilityQueryParams,
   ProfitQueryParams,
   GasCostQueryParams,
-
-  // Query results
   ProbabilityResult,
   ProfitResult,
   GasCostResult,
-
-  // Statistics
   ExecutionTrackerStats,
   HourlyStats,
+
+  // EV Calculator (Task 3.4.2)
+  EVConfig,
+  EVInput,
+  EVCalculation,
+  EVCalculatorStats,
 } from './risk';
