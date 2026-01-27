@@ -4,7 +4,8 @@
  * Tests for offloading MultiLegPathFinder DFS to worker threads
  * to prevent event loop blocking.
  *
- * @see docs/architecture/adr/ADR-XXX-worker-thread-path-finding.md
+ * FIX 2.1: Updated ADR reference from placeholder XXX to actual ADR-012.
+ * @see docs/architecture/adr/ADR-012-worker-thread-path-finding.md
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';

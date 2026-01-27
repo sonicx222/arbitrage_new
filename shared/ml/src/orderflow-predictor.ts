@@ -819,6 +819,113 @@ export class OrderflowPredictor {
 
     return { inputs, directionLabels, pressureLabels, volatilityLabels, whaleImpactLabels, timestamps };
   }
+
+  // ===========================================================================
+  // FIX 10.2: Batch Prediction for Performance
+  // ===========================================================================
+
+  /**
+   * FIX 10.2: Predict multiple inputs in a single batch for better performance.
+   *
+   * Batch prediction is significantly faster than individual predictions because:
+   * - Single tensor operation vs N operations
+   * - Better GPU/WASM utilization
+   * - Reduced async overhead
+   *
+   * @param inputs - Array of feature inputs to predict
+   * @returns Array of predictions (same order as inputs)
+   */
+  async predictBatch(inputs: OrderflowFeatureInput[]): Promise<OrderflowPrediction[]> {
+    if (inputs.length === 0) return [];
+
+    // Single input - use regular predict
+    if (inputs.length === 1) {
+      return [await this.predict(inputs[0])];
+    }
+
+    await this.modelReady;
+
+    // Check if model is ready
+    if (!this.model || this.modelInitError || !this.isTrained) {
+      // Fall back to individual predictions with fallback
+      return Promise.all(inputs.map(input => this.predict(input)));
+    }
+
+    try {
+      // Extract and normalize features for all inputs
+      const featurePairs = inputs.map(input => {
+        const features = this.featureExtractor.extractFeatures(input);
+        const normalized = this.featureExtractor.normalizeFeatures(features);
+        return { features, normalized };
+      });
+
+      // Build batch tensor from normalized features
+      const batchInputs = featurePairs.map(({ normalized }) => [
+        normalized.whaleSwapCount1h,
+        normalized.whaleNetDirection,
+        normalized.hourOfDay,
+        normalized.dayOfWeek,
+        normalized.isUsMarketOpen,
+        normalized.isAsiaMarketOpen,
+        normalized.reserveImbalanceRatio,
+        normalized.recentSwapMomentum,
+        normalized.nearestLiquidationLevel,
+        normalized.openInterestChange24h
+      ]);
+
+      const inputTensor = tf.tensor2d(batchInputs);
+
+      try {
+        const output = this.model.predict(inputTensor) as tf.Tensor;
+        const results = await output.array() as number[][];
+        output.dispose();
+
+        // Parse batch results
+        const predictions: OrderflowPrediction[] = results.map((result, idx) => {
+          // Track all predictions atomically
+          this.stats.increment('totalPredictions');
+
+          // Parse output: [bullish, neutral, bearish, pressure, volatility, whaleImpact]
+          const directionScores = [result[0], result[1], result[2]];
+          const maxScore = Math.max(...directionScores);
+          const maxIndex = directionScores.indexOf(maxScore);
+
+          const direction: MarketDirection =
+            maxIndex === 0 ? 'bullish' :
+            maxIndex === 2 ? 'bearish' : 'neutral';
+
+          const confidence = maxScore;
+          const pressure = Math.max(-1, Math.min(1, result[3]));
+          const volatility = Math.max(0, Math.min(1, result[4]));
+          const whaleImpact = Math.max(0, Math.min(1, result[5]));
+
+          const prediction: OrderflowPrediction = {
+            direction,
+            confidence,
+            orderflowPressure: pressure,
+            expectedVolatility: volatility,
+            whaleImpact,
+            timestamp: Date.now(),
+            timeHorizonMs: this.config.predictionTimeHorizonMs,
+            features: featurePairs[idx].features // Use original features, not normalized
+          };
+
+          // Track for accuracy validation
+          this.pendingPredictions.set(prediction.timestamp + idx, prediction);
+
+          return prediction;
+        });
+
+        return predictions;
+      } finally {
+        inputTensor.dispose();
+      }
+    } catch (error) {
+      logger.error('Batch prediction failed, falling back to individual', { error });
+      // Fall back to individual predictions
+      return Promise.all(inputs.map(input => this.predict(input)));
+    }
+  }
 }
 
 // =============================================================================

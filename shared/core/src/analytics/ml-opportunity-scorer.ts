@@ -33,8 +33,35 @@ const logger = createLogger('ml-opportunity-scorer');
 const deferredLogs: Array<{ level: 'info' | 'warn' | 'debug'; msg: string; data?: object }> = [];
 let logFlushScheduled = false;
 
+/**
+ * FIX 4.3, 10.1: Periodic flush timer to prevent unbounded memory growth.
+ * Flushes logs every 5 seconds even under low throughput.
+ */
+const LOG_FLUSH_INTERVAL_MS = 5000;
+let periodicFlushTimer: ReturnType<typeof setInterval> | null = null;
+
+function ensurePeriodicFlush(): void {
+  if (periodicFlushTimer !== null) return;
+
+  periodicFlushTimer = setInterval(() => {
+    if (deferredLogs.length > 0) {
+      flushDeferredLogs();
+    }
+  }, LOG_FLUSH_INTERVAL_MS);
+
+  // Ensure timer doesn't prevent process exit
+  if (periodicFlushTimer.unref) {
+    periodicFlushTimer.unref();
+  }
+}
+
 function deferLog(level: 'info' | 'warn' | 'debug', msg: string, data?: object): void {
   deferredLogs.push({ level, msg, data });
+
+  // FIX 4.3, 10.1: Start periodic flush timer on first log
+  ensurePeriodicFlush();
+
+  // Immediate flush at batch threshold
   if (!logFlushScheduled && deferredLogs.length >= 10) {
     logFlushScheduled = true;
     setImmediate(flushDeferredLogs);
@@ -46,6 +73,20 @@ function flushDeferredLogs(): void {
   const logs = deferredLogs.splice(0, deferredLogs.length);
   for (const log of logs) {
     logger[log.level](log.msg, log.data);
+  }
+}
+
+/**
+ * FIX 4.3: Stop the periodic flush timer (for testing/cleanup).
+ */
+export function stopDeferredLogFlush(): void {
+  if (periodicFlushTimer !== null) {
+    clearInterval(periodicFlushTimer);
+    periodicFlushTimer = null;
+  }
+  // Flush any remaining logs
+  if (deferredLogs.length > 0) {
+    flushDeferredLogs();
   }
 }
 
@@ -98,11 +139,33 @@ export interface OrderflowSignal {
 
 /**
  * Configuration for MLOpportunityScorer
+ *
+ * FIX 2.2, 4.2: Weight allocation documentation.
+ *
+ * Weighting Model:
+ * ────────────────
+ * The scorer uses a layered weighting approach:
+ *
+ * Layer 1 - Base Score (mlWeight + baseWeight must sum to 1.0):
+ *   - mlWeight (0.3): Weight given to ML prediction confidence
+ *   - baseWeight (0.7): Weight given to traditional base confidence
+ *   - Constructor auto-normalizes if they don't sum to 1.0
+ *
+ * Layer 2 - Signal Overlays (applied on top of base score):
+ *   - momentumWeight (0.2): Applied when momentum signal present
+ *   - orderflowWeight (0.15): Applied when orderflow signal present
+ *   - These reduce the base score weight proportionally:
+ *     finalScore = baseScore * (1 - signalWeight) + signalContribution
+ *
+ * Example with all signals:
+ *   baseScore = mlPrediction * 0.3 + baseConfidence * 0.7
+ *   withMomentum = baseScore * 0.8 + momentumContribution * 0.2
+ *   withBoth = baseScore * 0.65 + momentumContribution + orderflowContribution
  */
 export interface MLScorerConfig {
-  /** Weight for ML contribution (0-1, default 0.3) */
+  /** Weight for ML contribution (0-1, default 0.3). Must sum with baseWeight to 1.0 */
   mlWeight: number;
-  /** Weight for base confidence (0-1, default 0.7) */
+  /** Weight for base confidence (0-1, default 0.7). Must sum with mlWeight to 1.0 */
   baseWeight: number;
   /** Minimum ML confidence to consider (default 0.5) */
   minMLConfidence: number;

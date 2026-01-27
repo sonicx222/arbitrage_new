@@ -31,6 +31,7 @@ export {
   disposeAllTensors,
   withTensorCleanup,
   withTensorCleanupAsync,
+  withTrackedTensorCleanup, // FIX 5.4
   resetTensorFlowBackend
 } from './tf-backend';
 
