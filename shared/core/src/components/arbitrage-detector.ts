@@ -208,12 +208,25 @@ export function detectArbitrage(input: ArbitrageDetectionInput): ArbitrageDetect
   const chain = extractChainFromDex(pair1.dex) || 'ethereum';
   const blockTimeMs = getBlockTimeMs(chain);
 
-  // Calculate confidence with data freshness (using chain-specific block time)
-  const dataAge = Math.max(
-    pair1.blockNumber ? timestamp - pair1.blockNumber * blockTimeMs : 0,
-    pair2.blockNumber ? timestamp - pair2.blockNumber * blockTimeMs : 0
-  );
-  const confidence = calculateConfidence(grossSpread, dataAge, chainConfig.expiryMs);
+  // FIX 4.2: Calculate confidence with data freshness, guarding against invalid values
+  // If blockNumber is in the future (data corruption/clock skew), use 0 age (fresh data)
+  // The Math.max ensures we never pass negative ages which could produce NaN
+  const calculateAge = (blockNumber: number | undefined): number => {
+    if (!blockNumber || blockNumber <= 0) return 0;
+    const estimatedTimestamp = blockNumber * blockTimeMs;
+    // Guard against future blocks (corruption) - treat as fresh data
+    if (estimatedTimestamp > timestamp) return 0;
+    return timestamp - estimatedTimestamp;
+  };
+
+  const dataAge = Math.max(0, Math.max(
+    calculateAge(pair1.blockNumber),
+    calculateAge(pair2.blockNumber)
+  ));
+
+  // Guard against NaN/Infinity in confidence calculation
+  const rawConfidence = calculateConfidence(grossSpread, dataAge, chainConfig.expiryMs);
+  const confidence = Number.isFinite(rawConfidence) ? rawConfidence : 0.5; // Default to 50% if invalid
 
   // Generate unique ID with random suffix to prevent collisions
   const randomSuffix = Math.random().toString(36).slice(2, 11);

@@ -26,12 +26,46 @@ import type {
 // Default Configuration
 // =============================================================================
 
+/**
+ * FIX 3.2: Chain-specific default gas costs.
+ * L1 (Ethereum) has much higher gas costs than L2s.
+ * These are conservative estimates in wei.
+ */
+const CHAIN_DEFAULT_GAS_COSTS: Record<string, bigint> = {
+  // L1 - High gas costs
+  ethereum: 10000000000000000n, // 0.01 ETH (~$25)
+
+  // L2s - Much lower gas costs
+  arbitrum: 500000000000000n, // 0.0005 ETH (~$1.25)
+  optimism: 500000000000000n, // 0.0005 ETH (~$1.25)
+  base: 200000000000000n, // 0.0002 ETH (~$0.50)
+  zksync: 300000000000000n, // 0.0003 ETH (~$0.75)
+
+  // Alt L1s - Moderate gas costs
+  polygon: 100000000000000000n, // 0.1 MATIC (~$0.10)
+  bsc: 500000000000000n, // 0.0005 BNB (~$0.30)
+  avalanche: 1000000000000000n, // 0.001 AVAX (~$0.04)
+
+  // Fallback for unknown chains
+  default: 1000000000000000n, // 0.001 ETH (~$2.50)
+};
+
+/**
+ * Get default gas cost for a chain.
+ * FIX 3.2: Uses chain-specific costs instead of one-size-fits-all.
+ */
+function getChainDefaultGasCost(chain: string): bigint {
+  const normalizedChain = chain.toLowerCase();
+  return CHAIN_DEFAULT_GAS_COSTS[normalizedChain] ?? CHAIN_DEFAULT_GAS_COSTS.default;
+}
+
 const DEFAULT_CONFIG: EVConfig = {
   minEVThreshold: 5000000000000000n, // 0.005 ETH (~$10 at $2000/ETH)
   minWinProbability: 0.3, // 30% minimum win probability
   maxLossPerTrade: 100000000000000000n, // 0.1 ETH
   useHistoricalGasCost: true,
-  defaultGasCost: 10000000000000000n, // 0.01 ETH
+  // FIX 3.2: Default to L2-friendly gas cost (will be overridden per-chain)
+  defaultGasCost: 1000000000000000n, // 0.001 ETH (~$2.50)
   defaultProfitEstimate: 50000000000000000n, // 0.05 ETH
 };
 
@@ -65,6 +99,11 @@ export class EVCalculator {
   private rejectedMaxLoss = 0;
   private totalEV = 0n;
   private totalApprovedEV = 0n;
+
+  // FIX 10.1: Cache for frequently used chain+dex combinations
+  // Avoids string allocation and object creation in hot path
+  private readonly queryParamsCache: Map<string, { chain: string; dex: string; pathLength: number }> = new Map();
+  private static readonly MAX_CACHE_SIZE = 1000;
 
   constructor(
     probabilityTracker: ExecutionProbabilityTracker,
@@ -101,12 +140,11 @@ export class EVCalculator {
     const profitEstimate = this.resolveProfitEstimate(input);
     const gasCostEstimate = this.resolveGasCost(input, chain);
 
+    // FIX 10.1: Use cached query params object to avoid allocation in hot path
+    const queryParams = this.getCachedQueryParams(chain, dex, pathLength);
+
     // Get win probability from tracker
-    const probResult = this.probabilityTracker.getWinProbability({
-      chain,
-      dex,
-      pathLength,
-    });
+    const probResult = this.probabilityTracker.getWinProbability(queryParams);
 
     const winProbability = probResult.winProbability;
     const lossProbability = 1 - winProbability;
@@ -210,6 +248,38 @@ export class EVCalculator {
   }
 
   // ---------------------------------------------------------------------------
+  // Private: Query Params Cache (FIX 10.1)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * FIX 10.1: Get cached query params object to avoid allocation in hot path.
+   * Caches the {chain, dex, pathLength} object for frequently used combinations.
+   */
+  private getCachedQueryParams(
+    chain: string,
+    dex: string,
+    pathLength: number
+  ): { chain: string; dex: string; pathLength: number } {
+    const cacheKey = `${chain}:${dex}:${pathLength}`;
+
+    // Check cache first
+    let cached = this.queryParamsCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    // Create new object and cache it
+    cached = { chain, dex, pathLength };
+
+    // Limit cache size to prevent memory leak
+    if (this.queryParamsCache.size < EVCalculator.MAX_CACHE_SIZE) {
+      this.queryParamsCache.set(cacheKey, cached);
+    }
+
+    return cached;
+  }
+
+  // ---------------------------------------------------------------------------
   // Private: Input Resolution
   // ---------------------------------------------------------------------------
 
@@ -250,6 +320,7 @@ export class EVCalculator {
 
   /**
    * Resolves gas cost estimate from input or historical data.
+   * FIX 3.2: Falls back to chain-specific default gas costs.
    */
   private resolveGasCost(input: EVInput, chain: string): bigint {
     // Check explicit fields first
@@ -269,8 +340,8 @@ export class EVCalculator {
       }
     }
 
-    // Fall back to default
-    return this.config.defaultGasCost;
+    // FIX 3.2: Fall back to chain-specific default (L2s have much lower costs)
+    return getChainDefaultGasCost(chain);
   }
 
   // ---------------------------------------------------------------------------
