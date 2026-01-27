@@ -338,60 +338,10 @@ if (!process.env.JEST_WORKER_ID) {
 }
 
 // =============================================================================
-// Exports
+// Exports (re-export from exports.ts for backwards compatibility)
 // =============================================================================
 
-export { UnifiedChainDetector } from './unified-detector';
-export { ChainDetectorInstance } from './chain-instance';
-export type { UnifiedDetectorConfig, UnifiedDetectorStats, ChainStats } from './unified-detector';
-
-// ARCH-REFACTOR: New modular components extracted from UnifiedChainDetector
-export {
-  createChainInstanceManager,
-  type ChainInstanceManager,
-  type ChainInstanceManagerConfig,
-  type ChainInstanceFactory,
-  type StartResult,
-} from './chain-instance-manager';
-
-export {
-  createHealthReporter,
-  type HealthReporter,
-  type HealthReporterConfig,
-  type GetHealthDataFn,
-} from './health-reporter';
-
-export {
-  createMetricsCollector,
-  type MetricsCollector,
-  type MetricsCollectorConfig,
-  type GetStatsFn,
-} from './metrics-collector';
-
-// Shared types
-export {
-  type Logger,
-  type FeeBasisPoints,
-  type FeeDecimal,
-  asLogger,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
-} from './types';
-
-// Constants - FIX Refactor 9.3: Export centralized configuration constants
-export {
-  DEFAULT_HEALTH_CHECK_PORT,
-  DEFAULT_METRICS_INTERVAL_MS,
-  DEFAULT_HEALTH_CHECK_INTERVAL_MS,
-  CHAIN_STOP_TIMEOUT_MS,
-  STATE_TRANSITION_TIMEOUT_MS,
-  SNAPSHOT_CACHE_TTL_MS,
-  DEX_POOL_CACHE_TTL_MS,
-  TRIANGULAR_CHECK_INTERVAL_MS,
-  MULTI_LEG_CHECK_INTERVAL_MS,
-  DEFAULT_OPPORTUNITY_EXPIRY_MS,
-  DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
-  DEFAULT_SIMULATION_VOLATILITY,
-  STABLECOIN_SYMBOLS,
-  DEFAULT_TOKEN_DECIMALS,
-} from './constants';
+// NOTE: For library imports, use the package which points to exports.ts
+// This file (index.ts) is the SERVICE entry point and should only be run directly.
+// Re-exports are kept here for any code that directly imports from index.ts
+export * from './exports';
