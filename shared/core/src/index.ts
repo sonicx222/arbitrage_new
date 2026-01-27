@@ -1078,12 +1078,16 @@ export type {
   // Position Sizer (Task 3.4.3)
   PositionSizerConfig,
   PositionSize,
+  PositionSizeInput,
   PositionSizerStats,
 
   // Drawdown Circuit Breaker (Task 3.4.4)
   DrawdownConfig,
   DrawdownState,
+  DrawdownStateType,
   DrawdownStats,
+  TradingAllowedResult,
+  TradeResult,
 } from './risk';
 
 // =============================================================================

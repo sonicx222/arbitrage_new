@@ -104,6 +104,12 @@ export enum ExecutionErrorCode {
   NO_STRATEGY = '[ERR_NO_STRATEGY] Required strategy not registered',
   FLASH_LOAN_ERROR = '[ERR_FLASH_LOAN] Flash loan error',
   UNSUPPORTED_PROTOCOL = '[ERR_UNSUPPORTED_PROTOCOL] Protocol not implemented',
+
+  // Risk management errors (Phase 3: Task 3.4.5)
+  LOW_EV = '[ERR_LOW_EV] Expected value below threshold',
+  POSITION_SIZE = '[ERR_POSITION_SIZE] Position size below minimum',
+  DRAWDOWN_HALT = '[ERR_DRAWDOWN_HALT] Trading halted due to drawdown',
+  DRAWDOWN_BLOCKED = '[ERR_DRAWDOWN_BLOCKED] Trade blocked by risk controls',
 }
 
 // =============================================================================
@@ -131,6 +137,26 @@ export function createErrorResult(
     chain,
     dex,
     transactionHash,
+  };
+}
+
+/**
+ * Create a skipped ExecutionResult (not executed due to risk controls).
+ * Used when opportunity is rejected before execution attempt.
+ */
+export function createSkippedResult(
+  opportunityId: string,
+  reason: string,
+  chain: string,
+  dex: string
+): ExecutionResult {
+  return {
+    opportunityId,
+    success: false,
+    error: reason,
+    timestamp: Date.now(),
+    chain,
+    dex,
   };
 }
 
@@ -276,6 +302,21 @@ export interface ExecutionStats {
   circuitBreakerTrips: number;
   /** Executions blocked due to circuit breaker being open */
   circuitBreakerBlocks: number;
+  // Capital risk management metrics (Phase 3: Task 3.4.5)
+  /** Trades skipped due to negative expected value */
+  riskEVRejections: number;
+  /** Trades skipped due to position sizing (below minimum or negative Kelly) */
+  riskPositionSizeRejections: number;
+  /** Trades blocked by drawdown circuit breaker (HALT state) */
+  riskDrawdownBlocks: number;
+  /** Trades executed while in CAUTION state (reduced sizing) */
+  riskCautionCount: number;
+  /**
+   * Cumulative HALT state transitions (from DrawdownCircuitBreaker).
+   * Updated via health monitoring from drawdown stats.
+   * Use getDrawdownStats()?.haltCount for real-time value.
+   */
+  riskHaltCount: number;
 }
 
 export function createInitialStats(): ExecutionStats {
@@ -299,6 +340,12 @@ export function createInitialStats(): ExecutionStats {
     // Circuit breaker metrics (Phase 1.3)
     circuitBreakerTrips: 0,
     circuitBreakerBlocks: 0,
+    // Capital risk management metrics (Phase 3: Task 3.4.5)
+    riskEVRejections: 0,
+    riskPositionSizeRejections: 0,
+    riskDrawdownBlocks: 0,
+    riskCautionCount: 0,
+    riskHaltCount: 0,
   };
 }
 
@@ -722,6 +769,11 @@ export interface StrategyContext {
   bridgeRouterFactory: BridgeRouterFactory | null;
   stateManager: ServiceStateManager;
   gasBaselines: Map<string, { price: bigint; timestamp: number }[]>;
+  /**
+   * FIX 10.1: Pre-computed last gas prices for O(1) hot path access.
+   * Updated atomically when gas baseline is updated.
+   */
+  lastGasPrices: Map<string, bigint>;
   stats: ExecutionStats;
   /** Simulation service for pre-flight transaction validation (Phase 1.1) */
   simulationService?: ISimulationService;

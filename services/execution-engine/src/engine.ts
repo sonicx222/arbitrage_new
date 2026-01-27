@@ -35,8 +35,28 @@ import {
   BridgeRouterFactory,
   createBridgeRouterFactory,
   getErrorMessage,
+  // Phase 3: Capital Risk Management (Task 3.4.5)
+  DrawdownCircuitBreaker,
+  getDrawdownCircuitBreaker,
+  resetDrawdownCircuitBreaker,
+  EVCalculator,
+  getEVCalculator,
+  resetEVCalculator,
+  KellyPositionSizer,
+  getKellyPositionSizer,
+  resetKellyPositionSizer,
+  ExecutionProbabilityTracker,
+  getExecutionProbabilityTracker,
+  resetExecutionProbabilityTracker,
+  type DrawdownConfig,
+  type EVConfig,
+  type PositionSizerConfig,
+  type ExecutionProbabilityConfig,
+  type TradingAllowedResult,
+  type EVCalculation,
+  type PositionSize,
 } from '@arbitrage/core';
-import { MEV_CONFIG } from '@arbitrage/config';
+import { MEV_CONFIG, RISK_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity, ServiceHealth } from '@arbitrage/types';
 
 // Internal modules
@@ -60,6 +80,8 @@ import {
   resolveSimulationConfig,
   DEFAULT_QUEUE_CONFIG,
   createErrorResult,
+  createSkippedResult,
+  ExecutionErrorCode,
 } from './types';
 import { ProviderServiceImpl } from './services/provider.service';
 import { QueueServiceImpl } from './services/queue.service';
@@ -144,6 +166,13 @@ export class ExecutionEngineService {
   // Circuit breaker for execution protection (Phase 1.3.1)
   private circuitBreaker: CircuitBreaker | null = null;
 
+  // Phase 3: Capital Risk Management (Task 3.4.5)
+  private drawdownBreaker: DrawdownCircuitBreaker | null = null;
+  private evCalculator: EVCalculator | null = null;
+  private positionSizer: KellyPositionSizer | null = null;
+  private probabilityTracker: ExecutionProbabilityTracker | null = null;
+  private riskManagementEnabled = false;
+
   // Phase 2: Pending state simulation components
   private anvilForkManager: AnvilForkManager | null = null;
   private pendingStateSimulator: PendingStateSimulator | null = null;
@@ -164,11 +193,14 @@ export class ExecutionEngineService {
   private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
   private isActivated = false; // Track if standby has been activated
   private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
-  private isInitializingProviders = false; // Guard against concurrent provider initialization
+  // FIX 5.1: Promise-based mutex for provider initialization (replaces boolean flag)
+  private providerInitPromise: Promise<void> | null = null;
 
   // State
   private stats: ExecutionStats;
   private gasBaselines: Map<string, { price: bigint; timestamp: number }[]> = new Map();
+  // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
+  private lastGasPrices: Map<string, bigint> = new Map();
   private activeExecutionCount = 0;
   private readonly maxConcurrentExecutions = 5; // Limit parallel executions
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
@@ -318,6 +350,8 @@ export class ExecutionEngineService {
         if (history) {
           history.length = 0; // Clear contents, keep array reference valid
         }
+        // FIX 10.1: Also clear pre-computed last gas price
+        this.lastGasPrices.delete(chainName);
         this.logger.debug('Cleared gas baseline after provider reconnect', { chainName });
       });
 
@@ -367,6 +401,9 @@ export class ExecutionEngineService {
 
       // Initialize circuit breaker (Phase 1.3.1)
       this.initializeCircuitBreaker();
+
+      // Initialize capital risk management (Phase 3: Task 3.4.5)
+      this.initializeRiskManagement();
 
       // Initialize opportunity consumer
       this.opportunityConsumer = new OpportunityConsumer({
@@ -494,8 +531,19 @@ export class ExecutionEngineService {
 
       // Clear state
       this.gasBaselines.clear();
+      // FIX 10.1: Clear pre-computed last gas prices
+      this.lastGasPrices.clear();
       this.mevProviderFactory = null;
       this.bridgeRouterFactory = null;
+
+      // Clear risk management components (Phase 3: Task 3.4.5)
+      // Note: We don't reset singletons here as they may be shared across tests
+      // Reset functions are available for test cleanup
+      this.drawdownBreaker = null;
+      this.evCalculator = null;
+      this.positionSizer = null;
+      this.probabilityTracker = null;
+      this.riskManagementEnabled = false;
 
       this.logger.info('Execution Engine Service stopped');
     });
@@ -715,6 +763,89 @@ export class ExecutionEngineService {
         error: getErrorMessage(error),
         event,
       });
+    }
+  }
+
+  /**
+   * Initialize capital risk management components (Phase 3: Task 3.4.5).
+   *
+   * Creates and configures:
+   * - ExecutionProbabilityTracker: Historical win probability tracking
+   * - EVCalculator: Expected value calculation for trade decisions
+   * - KellyPositionSizer: Position sizing using Kelly Criterion
+   * - DrawdownCircuitBreaker: Capital protection via state machine
+   *
+   * @see ADR-021: Capital Risk Management
+   * @see docs/reports/implementation_plan_v3.md Section 3.4
+   */
+  private initializeRiskManagement(): void {
+    if (!RISK_CONFIG.enabled) {
+      this.logger.info('Capital risk management disabled by configuration');
+      return;
+    }
+
+    try {
+      // Initialize Execution Probability Tracker (Task 3.4.1)
+      const probabilityConfig: Partial<ExecutionProbabilityConfig> = {
+        minSamples: RISK_CONFIG.probability.minSamples,
+        defaultWinProbability: RISK_CONFIG.probability.defaultWinProbability,
+        maxOutcomesPerKey: RISK_CONFIG.probability.maxOutcomesPerKey,
+        cleanupIntervalMs: RISK_CONFIG.probability.cleanupIntervalMs,
+        outcomeRelevanceWindowMs: RISK_CONFIG.probability.outcomeRelevanceWindowMs,
+        persistToRedis: RISK_CONFIG.probability.persistToRedis,
+        redisKeyPrefix: RISK_CONFIG.probability.redisKeyPrefix,
+      };
+      this.probabilityTracker = getExecutionProbabilityTracker(probabilityConfig);
+
+      // Initialize EV Calculator (Task 3.4.2)
+      const evConfig: Partial<EVConfig> = {
+        minEVThreshold: RISK_CONFIG.ev.minEVThreshold,
+        minWinProbability: RISK_CONFIG.ev.minWinProbability,
+        maxLossPerTrade: RISK_CONFIG.ev.maxLossPerTrade,
+        useHistoricalGasCost: RISK_CONFIG.ev.useHistoricalGasCost,
+        defaultGasCost: RISK_CONFIG.ev.defaultGasCost,
+        defaultProfitEstimate: RISK_CONFIG.ev.defaultProfitEstimate,
+      };
+      this.evCalculator = getEVCalculator(this.probabilityTracker, evConfig);
+
+      // Initialize Position Sizer (Task 3.4.3)
+      const positionConfig: Partial<PositionSizerConfig> = {
+        kellyMultiplier: RISK_CONFIG.positionSizing.kellyMultiplier,
+        maxSingleTradeFraction: RISK_CONFIG.positionSizing.maxSingleTradeFraction,
+        minTradeFraction: RISK_CONFIG.positionSizing.minTradeFraction,
+        totalCapital: RISK_CONFIG.totalCapital,
+        enabled: RISK_CONFIG.positionSizing.enabled,
+      };
+      this.positionSizer = getKellyPositionSizer(positionConfig);
+
+      // Initialize Drawdown Circuit Breaker (Task 3.4.4)
+      const drawdownConfig: Partial<DrawdownConfig> = {
+        maxDailyLoss: RISK_CONFIG.drawdown.maxDailyLoss,
+        cautionThreshold: RISK_CONFIG.drawdown.cautionThreshold,
+        maxConsecutiveLosses: RISK_CONFIG.drawdown.maxConsecutiveLosses,
+        recoveryMultiplier: RISK_CONFIG.drawdown.recoveryMultiplier,
+        recoveryWinsRequired: RISK_CONFIG.drawdown.recoveryWinsRequired,
+        haltCooldownMs: RISK_CONFIG.drawdown.haltCooldownMs,
+        totalCapital: RISK_CONFIG.totalCapital,
+        enabled: RISK_CONFIG.drawdown.enabled,
+      };
+      this.drawdownBreaker = getDrawdownCircuitBreaker(drawdownConfig);
+
+      this.riskManagementEnabled = true;
+
+      this.logger.info('Capital risk management initialized', {
+        maxDailyLoss: `${RISK_CONFIG.drawdown.maxDailyLoss * 100}%`,
+        cautionThreshold: `${RISK_CONFIG.drawdown.cautionThreshold * 100}%`,
+        kellyMultiplier: RISK_CONFIG.positionSizing.kellyMultiplier,
+        maxSingleTrade: `${RISK_CONFIG.positionSizing.maxSingleTradeFraction * 100}%`,
+        minEVThreshold: RISK_CONFIG.ev.minEVThreshold.toString(),
+      });
+    } catch (error) {
+      this.logger.error('Failed to initialize capital risk management', {
+        error: getErrorMessage(error),
+      });
+      // Continue without risk management - log warning
+      this.riskManagementEnabled = false;
     }
   }
 
@@ -1139,6 +1270,13 @@ export class ExecutionEngineService {
 
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
+    const chain = opportunity.buyChain || 'unknown';
+    const dex = opportunity.buyDex || 'unknown';
+
+    // Variables for risk management
+    let evCalc: EVCalculation | null = null;
+    let positionSize: PositionSize | null = null;
+    let drawdownCheck: TradingAllowedResult | null = null;
 
     try {
       this.opportunityConsumer?.markActive(opportunity.id);
@@ -1147,12 +1285,133 @@ export class ExecutionEngineService {
       this.logger.info('Executing arbitrage opportunity', {
         id: opportunity.id,
         type: opportunity.type,
-        buyChain: opportunity.buyChain,
-        buyDex: opportunity.buyDex,
+        buyChain: chain,
+        buyDex: dex,
         sellDex: opportunity.sellDex,
         expectedProfit: opportunity.expectedProfit,
         simulationMode: this.isSimulationMode
       });
+
+      // =======================================================================
+      // Phase 3: Capital Risk Management Checks (Task 3.4.5)
+      // =======================================================================
+
+      if (this.riskManagementEnabled && !this.isSimulationMode) {
+        // Step 1: Check drawdown circuit breaker
+        if (this.drawdownBreaker) {
+          drawdownCheck = this.drawdownBreaker.isTradingAllowed();
+
+          if (!drawdownCheck.allowed) {
+            this.stats.riskDrawdownBlocks++;
+            this.logger.warn('Trade blocked by drawdown circuit breaker', {
+              id: opportunity.id,
+              state: drawdownCheck.state,
+              reason: drawdownCheck.reason,
+            });
+
+            const skippedResult = createSkippedResult(
+              opportunity.id,
+              `${ExecutionErrorCode.DRAWDOWN_HALT}: ${drawdownCheck.reason}`,
+              chain,
+              dex
+            );
+            await this.publishExecutionResult(skippedResult);
+            return;
+          }
+
+          // Track trades executed with reduced position sizing
+          // Note: HALT state returns early above, so we only reach here for allowed states
+          if (drawdownCheck.state === 'CAUTION') {
+            this.stats.riskCautionCount++;
+            this.logger.debug('Trading with reduced position size (CAUTION)', {
+              id: opportunity.id,
+              sizeMultiplier: drawdownCheck.sizeMultiplier,
+            });
+          } else if (drawdownCheck.state === 'RECOVERY') {
+            this.logger.debug('Trading with reduced position size (RECOVERY)', {
+              id: opportunity.id,
+              sizeMultiplier: drawdownCheck.sizeMultiplier,
+            });
+          }
+        }
+
+        // Step 2: Calculate Expected Value
+        if (this.evCalculator && RISK_CONFIG.ev.enabled) {
+          evCalc = this.evCalculator.calculate({
+            chain,
+            dex,
+            pathLength: opportunity.path?.length ?? 2,
+            estimatedProfit: opportunity.expectedProfit ? BigInt(Math.floor(opportunity.expectedProfit * 1e18)) : undefined,
+            estimatedGas: opportunity.gasEstimate ? BigInt(opportunity.gasEstimate) : undefined,
+          });
+
+          if (!evCalc.shouldExecute) {
+            this.stats.riskEVRejections++;
+            this.logger.debug('Trade rejected due to low expected value', {
+              id: opportunity.id,
+              expectedValue: evCalc.expectedValue.toString(),
+              winProbability: evCalc.winProbability,
+              reason: evCalc.reason,
+            });
+
+            const skippedResult = createSkippedResult(
+              opportunity.id,
+              `${ExecutionErrorCode.LOW_EV}: ${evCalc.reason}`,
+              chain,
+              dex
+            );
+            await this.publishExecutionResult(skippedResult);
+            return;
+          }
+        }
+
+        // Step 3: Size position using Kelly Criterion
+        if (this.positionSizer && RISK_CONFIG.positionSizing.enabled && evCalc) {
+          positionSize = this.positionSizer.calculateSize({
+            winProbability: evCalc.winProbability,
+            expectedProfit: evCalc.rawProfitEstimate,
+            expectedLoss: evCalc.rawGasCost,
+          });
+
+          // Apply drawdown state multiplier to position size
+          if (drawdownCheck && positionSize.recommendedSize > 0n) {
+            const multiplier = BigInt(Math.floor(drawdownCheck.sizeMultiplier * 10000));
+            positionSize = {
+              ...positionSize,
+              recommendedSize: (positionSize.recommendedSize * multiplier) / 10000n,
+            };
+          }
+
+          if (!positionSize.shouldTrade || positionSize.recommendedSize === 0n) {
+            this.stats.riskPositionSizeRejections++;
+            this.logger.debug('Trade rejected due to position sizing', {
+              id: opportunity.id,
+              reason: positionSize.reason,
+              kellyFraction: positionSize.kellyFraction,
+            });
+
+            const skippedResult = createSkippedResult(
+              opportunity.id,
+              `${ExecutionErrorCode.POSITION_SIZE}: ${positionSize.reason}`,
+              chain,
+              dex
+            );
+            await this.publishExecutionResult(skippedResult);
+            return;
+          }
+
+          this.logger.debug('Position sized for trade', {
+            id: opportunity.id,
+            recommendedSize: positionSize.recommendedSize.toString(),
+            fractionOfCapital: positionSize.fractionOfCapital,
+            sizeMultiplier: drawdownCheck?.sizeMultiplier ?? 1.0,
+          });
+        }
+      }
+
+      // =======================================================================
+      // Execute Trade
+      // =======================================================================
 
       // Build strategy context
       const ctx = this.buildStrategyContext();
@@ -1167,6 +1426,46 @@ export class ExecutionEngineService {
       // Publish result
       await this.publishExecutionResult(result);
       this.perfLogger.logExecutionResult(result);
+
+      // =======================================================================
+      // Record Outcome for Risk Management (Task 3.4.5)
+      // =======================================================================
+
+      if (this.riskManagementEnabled && !this.isSimulationMode) {
+        // Record outcome to probability tracker for learning
+        if (this.probabilityTracker) {
+          // FIX 10.1: Use pre-computed last gas price for O(1) hot path access
+          // Instead of array access: gasBaseline[gasBaseline.length - 1].price
+          const currentGasPrice = this.lastGasPrices.get(chain) ?? 0n;
+
+          this.probabilityTracker.recordOutcome({
+            chain,
+            dex,
+            pathLength: opportunity.path?.length ?? 2,
+            hourOfDay: new Date().getUTCHours(),
+            gasPrice: currentGasPrice,
+            success: result.success,
+            profit: result.actualProfit ? BigInt(Math.floor(result.actualProfit * 1e18)) : undefined,
+            gasCost: result.gasCost ? BigInt(result.gasCost) : 0n,
+            timestamp: Date.now(),
+          });
+        }
+
+        // Update drawdown breaker with trade result
+        if (this.drawdownBreaker) {
+          const pnl = result.success && result.actualProfit
+            ? BigInt(Math.floor(result.actualProfit * 1e18))
+            : result.gasCost
+              ? -BigInt(result.gasCost)
+              : 0n;
+
+          this.drawdownBreaker.recordTradeResult({
+            success: result.success,
+            pnl,
+            timestamp: Date.now(),
+          });
+        }
+      }
 
       if (result.success) {
         this.stats.successfulExecutions++;
@@ -1189,6 +1488,15 @@ export class ExecutionEngineService {
       // Record failure with circuit breaker (may trip circuit)
       this.circuitBreaker?.recordFailure();
 
+      // Record failure to risk management
+      if (this.riskManagementEnabled && !this.isSimulationMode && this.drawdownBreaker) {
+        this.drawdownBreaker.recordTradeResult({
+          success: false,
+          pnl: 0n, // Unknown loss on error
+          timestamp: Date.now(),
+        });
+      }
+
       this.logger.error('Failed to execute opportunity', {
         error,
         opportunityId: opportunity.id
@@ -1197,8 +1505,8 @@ export class ExecutionEngineService {
       const errorResult = createErrorResult(
         opportunity.id,
         getErrorMessage(error),
-        opportunity.buyChain || 'unknown',
-        opportunity.buyDex || 'unknown'
+        chain,
+        dex
       );
 
       await this.publishExecutionResult(errorResult);
@@ -1219,6 +1527,8 @@ export class ExecutionEngineService {
       bridgeRouterFactory: this.bridgeRouterFactory,
       stateManager: this.stateManager,
       gasBaselines: this.gasBaselines,
+      // FIX 10.1: Pre-computed last gas prices for O(1) hot path access
+      lastGasPrices: this.lastGasPrices,
       stats: this.stats,
       simulationService: this.txSimulationService ?? undefined,
       // Phase 2: Pending state simulator for mempool-aware execution
@@ -1457,6 +1767,111 @@ export class ExecutionEngineService {
   }
 
   // ===========================================================================
+  // Capital Risk Management Getters (Phase 3: Task 3.4.5)
+  // ===========================================================================
+
+  /**
+   * Check if capital risk management is enabled and initialized.
+   */
+  isRiskManagementEnabled(): boolean {
+    return this.riskManagementEnabled;
+  }
+
+  /**
+   * Get drawdown circuit breaker state.
+   *
+   * Returns null if risk management is disabled.
+   */
+  getDrawdownState(): Readonly<import('@arbitrage/core').DrawdownState> | null {
+    return this.drawdownBreaker?.getState() ?? null;
+  }
+
+  /**
+   * Get drawdown circuit breaker statistics.
+   *
+   * Returns null if risk management is disabled.
+   */
+  getDrawdownStats(): import('@arbitrage/core').DrawdownStats | null {
+    return this.drawdownBreaker?.getStats() ?? null;
+  }
+
+  /**
+   * Check if trading is currently allowed by the drawdown circuit breaker.
+   *
+   * Returns null if risk management is disabled.
+   */
+  isTradingAllowed(): TradingAllowedResult | null {
+    return this.drawdownBreaker?.isTradingAllowed() ?? null;
+  }
+
+  /**
+   * Get EV calculator statistics.
+   *
+   * Returns null if risk management is disabled.
+   */
+  getEVCalculatorStats(): import('@arbitrage/core').EVCalculatorStats | null {
+    return this.evCalculator?.getStats() ?? null;
+  }
+
+  /**
+   * Get position sizer statistics.
+   *
+   * Returns null if risk management is disabled.
+   */
+  getPositionSizerStats(): import('@arbitrage/core').PositionSizerStats | null {
+    return this.positionSizer?.getStats() ?? null;
+  }
+
+  /**
+   * Get execution probability tracker statistics.
+   *
+   * Returns null if risk management is disabled.
+   */
+  getProbabilityTrackerStats(): import('@arbitrage/core').ExecutionTrackerStats | null {
+    return this.probabilityTracker?.getStats() ?? null;
+  }
+
+  /**
+   * Force reset the drawdown circuit breaker to NORMAL state.
+   * WARNING: This bypasses all safety checks - use with caution.
+   */
+  forceResetDrawdownBreaker(): void {
+    if (this.drawdownBreaker) {
+      this.logger.warn('Manually force-resetting drawdown circuit breaker');
+      this.drawdownBreaker.forceReset();
+    }
+  }
+
+  /**
+   * Manually reset the drawdown circuit breaker from HALT to RECOVERY.
+   * Only works if cooldown period has expired.
+   *
+   * @returns true if reset was successful, false otherwise
+   */
+  manualResetDrawdownBreaker(): boolean {
+    if (this.drawdownBreaker) {
+      return this.drawdownBreaker.manualReset();
+    }
+    return false;
+  }
+
+  /**
+   * Update total capital for risk management components.
+   * Call this when capital changes (deposits/withdrawals).
+   */
+  updateRiskCapital(newCapital: bigint): void {
+    if (this.drawdownBreaker) {
+      this.drawdownBreaker.updateCapital(newCapital);
+    }
+    if (this.positionSizer) {
+      this.positionSizer.updateCapital(newCapital);
+    }
+    this.logger.info('Risk management capital updated', {
+      newCapital: newCapital.toString(),
+    });
+  }
+
+  // ===========================================================================
   // Standby Activation (ADR-007)
   // ===========================================================================
 
@@ -1534,30 +1949,20 @@ export class ExecutionEngineService {
         this.logger.warn('SIMULATION MODE DISABLED - Real transactions will now execute');
 
         // Initialize real blockchain providers if not already done
-        // Guard against concurrent initialization (race condition prevention)
-        if (this.providerService && !this.providerService.getHealthyCount() && !this.isInitializingProviders) {
-          this.isInitializingProviders = true;
-          try {
-            this.logger.info('Initializing blockchain providers for real execution');
-            await this.providerService.initialize();
-            this.providerService.initializeWallets();
-
-            // Initialize MEV protection
-            this.initializeMevProviders();
-
-            // Initialize bridge router
-            this.initializeBridgeRouter();
-
-            // Start nonce manager
-            if (this.nonceManager) {
-              this.nonceManager.start();
+        // FIX 5.1: Use promise-based mutex to prevent race conditions
+        if (this.providerService && !this.providerService.getHealthyCount()) {
+          // If initialization is already in progress, wait for it
+          if (this.providerInitPromise) {
+            this.logger.info('Provider initialization already in progress, waiting...');
+            await this.providerInitPromise;
+          } else {
+            // Start initialization and store promise for other callers to await
+            this.providerInitPromise = this.initializeProviders();
+            try {
+              await this.providerInitPromise;
+            } finally {
+              this.providerInitPromise = null;
             }
-
-            // Validate and start health monitoring
-            await this.providerService.validateConnectivity();
-            this.providerService.startHealthChecks();
-          } finally {
-            this.isInitializingProviders = false;
           }
         }
       }
@@ -1598,5 +2003,36 @@ export class ExecutionEngineService {
       });
       return false;
     }
+  }
+
+  /**
+   * FIX 5.1: Extracted provider initialization logic for promise-based mutex pattern.
+   * Called by performActivation when providers need to be initialized.
+   */
+  private async initializeProviders(): Promise<void> {
+    if (!this.providerService) {
+      throw new Error('Provider service not initialized');
+    }
+
+    this.logger.info('Initializing blockchain providers for real execution');
+    await this.providerService.initialize();
+    this.providerService.initializeWallets();
+
+    // Initialize MEV protection
+    this.initializeMevProviders();
+
+    // Initialize bridge router
+    this.initializeBridgeRouter();
+
+    // Start nonce manager
+    if (this.nonceManager) {
+      this.nonceManager.start();
+    }
+
+    // Validate and start health monitoring
+    await this.providerService.validateConnectivity();
+    this.providerService.startHealthChecks();
+
+    this.logger.info('Blockchain providers initialized successfully');
   }
 }

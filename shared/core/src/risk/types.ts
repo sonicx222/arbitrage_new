@@ -500,6 +500,14 @@ export interface DrawdownConfig {
   recoveryMultiplier: number;
 
   /**
+   * Position size multiplier during CAUTION state (0-1).
+   * FIX 2.1/4.1: Added configurable multiplier for CAUTION state.
+   * Previously hardcoded to 0.75.
+   * Default: 0.75 (75% of normal sizing)
+   */
+  cautionMultiplier: number;
+
+  /**
    * Number of winning trades required to exit RECOVERY.
    * Default: 3
    */

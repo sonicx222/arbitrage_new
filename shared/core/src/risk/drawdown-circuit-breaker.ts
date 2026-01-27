@@ -43,6 +43,7 @@ const DEFAULT_CONFIG: DrawdownConfig = {
   cautionThreshold: 0.03, // 3% triggers caution
   maxConsecutiveLosses: 5,
   recoveryMultiplier: 0.5, // 50% sizing in recovery
+  cautionMultiplier: 0.75, // FIX 2.1/4.1: 75% sizing in caution (was hardcoded)
   recoveryWinsRequired: 3,
   haltCooldownMs: 3600000, // 1 hour
   totalCapital: 0n, // Must be set by caller
@@ -95,6 +96,9 @@ export class DrawdownCircuitBreaker {
     totalHaltTimeMs: number;
     lastHaltEndTime: number | null;
   };
+  // FIX 10.4: Cache daily reset check to avoid expensive ISO string creation on every call
+  private cachedDateExpiry = 0;
+  private static readonly DATE_CACHE_TTL_MS = 60000; // Check every 60s max
 
   constructor(config: Partial<DrawdownConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -116,6 +120,7 @@ export class DrawdownCircuitBreaker {
     logger.info('DrawdownCircuitBreaker initialized', {
       maxDailyLoss: `${this.config.maxDailyLoss * 100}%`,
       cautionThreshold: `${this.config.cautionThreshold * 100}%`,
+      cautionMultiplier: `${this.config.cautionMultiplier * 100}%`,
       maxConsecutiveLosses: this.config.maxConsecutiveLosses,
       enabled: this.config.enabled,
     });
@@ -136,6 +141,10 @@ export class DrawdownCircuitBreaker {
     }
     if (this.config.recoveryMultiplier <= 0 || this.config.recoveryMultiplier > 1) {
       throw new Error('recoveryMultiplier must be between 0 and 1');
+    }
+    // FIX 2.1/4.1: Validate cautionMultiplier
+    if (this.config.cautionMultiplier <= 0 || this.config.cautionMultiplier > 1) {
+      throw new Error('cautionMultiplier must be between 0 and 1');
     }
     if (this.config.recoveryWinsRequired < 1) {
       throw new Error('recoveryWinsRequired must be at least 1');
@@ -176,10 +185,11 @@ export class DrawdownCircuitBreaker {
         };
 
       case 'CAUTION':
+        // FIX 2.1/4.1: Use configured cautionMultiplier instead of hardcoded 0.75
         return {
           allowed: true,
           state: 'CAUTION',
-          sizeMultiplier: 0.75, // Reduced sizing in caution
+          sizeMultiplier: this.config.cautionMultiplier,
           reason: 'Daily loss approaching threshold - reduced position sizing',
         };
 
@@ -303,6 +313,8 @@ export class DrawdownCircuitBreaker {
     }
 
     this.state = createInitialState(this.config.totalCapital);
+    // FIX 10.4: Clear the date cache on reset to ensure fresh check
+    this.cachedDateExpiry = 0;
   }
 
   /**
@@ -371,8 +383,17 @@ export class DrawdownCircuitBreaker {
 
   /**
    * Check if we've crossed into a new UTC day and reset if so.
+   * FIX 10.4: Uses caching to avoid expensive ISO string creation on every call.
    */
   private checkDailyReset(): void {
+    const now = Date.now();
+    // Skip expensive date check if we recently checked (within TTL)
+    if (now < this.cachedDateExpiry) {
+      return;
+    }
+    // Update cache expiry for next check
+    this.cachedDateExpiry = now + DrawdownCircuitBreaker.DATE_CACHE_TTL_MS;
+
     const currentDate = getCurrentDateUTC();
     if (currentDate !== this.state.currentDateUTC) {
       logger.info('Daily reset triggered', {
