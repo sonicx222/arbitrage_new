@@ -20,7 +20,7 @@ import {
 
 // Import real functions from @arbitrage/core for accurate performance testing
 import {
-  calcPriceFromReserves,
+  calculatePriceFromReserves,
   calculateSpread,
   calculateSpreadSafe,
   calculateNetProfit,
@@ -94,7 +94,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
 
       const result = await measurePerformance(() => {
         // Test the REAL price calculation function from @arbitrage/core
-        const price = calcPriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
+        const price = calculatePriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
         return price;
       });
 
@@ -107,8 +107,8 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const pair1 = createTestPair(1, 0);
       const pair2 = createTestPair(2, 0.5);
 
-      const price1 = calcPriceFromReserves(pair1.reserve0.toString(), pair1.reserve1.toString());
-      const price2 = calcPriceFromReserves(pair2.reserve0.toString(), pair2.reserve1.toString());
+      const price1 = calculatePriceFromReserves(pair1.reserve0.toString(), pair1.reserve1.toString());
+      const price2 = calculatePriceFromReserves(pair2.reserve0.toString(), pair2.reserve1.toString());
 
       // Skip test if prices are null (invalid reserves)
       if (price1 === null || price2 === null) {
@@ -132,11 +132,11 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const testData = createArbitrageTestData();
 
       // Pre-calculate prices for test setup (not measured)
-      const price1 = calcPriceFromReserves(
+      const price1 = calculatePriceFromReserves(
         testData.pair1.reserve0.toString(),
         testData.pair1.reserve1.toString()
       );
-      const price2 = calcPriceFromReserves(
+      const price2 = calculatePriceFromReserves(
         testData.pair2.reserve0.toString(),
         testData.pair2.reserve1.toString()
       );
@@ -182,7 +182,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
 
       // Pre-calculate prices (in real system this would be cached)
       const pairPrices = pairs.map(pair => {
-        const price = calcPriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
+        const price = calculatePriceFromReserves(pair.reserve0.toString(), pair.reserve1.toString());
         return {
           address: pair.address,
           dex: pair.dex,
@@ -229,7 +229,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const testData = createArbitrageTestData();
 
       // Pre-calculate existing price (simulates cached price from pair2)
-      const existingPrice = calcPriceFromReserves(
+      const existingPrice = calculatePriceFromReserves(
         testData.pair2.reserve0.toString(),
         testData.pair2.reserve1.toString()
       );
@@ -249,7 +249,7 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
         };
 
         // Step 2: Calculate price using REAL function
-        const price = calcPriceFromReserves(
+        const price = calculatePriceFromReserves(
           priceUpdate.reserve0.toString(),
           priceUpdate.reserve1.toString()
         );
@@ -291,11 +291,11 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
       const concurrencyLevel = 10;
 
       // Pre-calculate prices (simulates cached state)
-      const price1 = calcPriceFromReserves(
+      const price1 = calculatePriceFromReserves(
         testData.pair1.reserve0.toString(),
         testData.pair1.reserve1.toString()
       );
-      const price2 = calcPriceFromReserves(
+      const price2 = calculatePriceFromReserves(
         testData.pair2.reserve0.toString(),
         testData.pair2.reserve1.toString()
       );
@@ -352,11 +352,11 @@ describe('Hot Path Performance - Detection (<50ms)', () => {
 
       for (let i = 0; i < iterations; i++) {
         // Use REAL functions from @arbitrage/core
-        const price1 = calcPriceFromReserves(
+        const price1 = calculatePriceFromReserves(
           testData.pair1.reserve0.toString(),
           testData.pair1.reserve1.toString()
         );
-        const price2 = calcPriceFromReserves(
+        const price2 = calculatePriceFromReserves(
           testData.pair2.reserve0.toString(),
           testData.pair2.reserve1.toString()
         );
