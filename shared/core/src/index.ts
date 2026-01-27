@@ -525,64 +525,37 @@ export type {
 // =============================================================================
 
 // =============================================================================
-// REF-1/ARCH-1: Shared arbitrage calculation logic
-// Issue 1.2: DEPRECATED - These exports are maintained for backward compatibility.
-// New code should import from components/price-calculator instead.
-// This module will be removed in a future version.
-// @see ./components/price-calculator for replacement functions
-// @see ./arbitrage-calculator.ts header comments for migration guide
+// REF-1/ARCH-1: DEPRECATED arbitrage-calculator.ts exports
+// REFACTOR: Most functions have been migrated to components/price-calculator
+// and components/arbitrage-detector. Only keeping legacy exports that don't
+// have direct replacements yet.
+//
+// MIGRATION GUIDE:
+// - calculatePriceFromReserves → components/price-calculator (DONE)
+// - calculatePriceFromBigIntReserves → components/price-calculator (DONE)
+// - safeBigIntDivision → components/price-calculator (DONE)
+// - invertPrice → components/price-calculator (DONE)
+// - calculatePriceDifferencePercent → components/price-calculator (DONE)
+// - getDefaultFee → components/price-calculator (DONE)
+// - getMinProfitThreshold → components/price-calculator (DONE)
+// - isSameTokenPair → components/token-utils (DONE)
+// - isReverseOrder → components/token-utils (DONE)
+// - calculateCrossChainArbitrage → components/arbitrage-detector (DONE)
+// - validatePairSnapshot → components/arbitrage-detector as isValidPairSnapshot
+// - createPairSnapshot → components/pair-repository as PairRepository.createSnapshot()
+// - calculateIntraChainArbitrage → components/arbitrage-detector as detectArbitrage
 // =============================================================================
 export {
   /**
-   * @deprecated Use safeBigIntDiv from components/price-calculator instead
-   */
-  safeBigIntDivision,
-  /**
-   * @deprecated Use calcPriceFromReserves from components/price-calculator instead
-   */
-  calculatePriceFromReserves,
-  /**
-   * @deprecated Use calcPriceFromReserves from components/price-calculator instead
-   */
-  calculatePriceFromBigIntReserves,
-  /**
-   * @deprecated Use invertPriceValue from components/price-calculator instead
-   */
-  invertPrice,
-  /**
-   * @deprecated Use calculateSpread from components/price-calculator instead
-   */
-  calculatePriceDifferencePercent,
-  /**
-   * @deprecated Will be moved to components/token-utils
-   */
-  isSameTokenPair,
-  /**
-   * @deprecated Will be moved to components/token-utils
-   */
-  isReverseOrder,
-  /**
-   * @deprecated Use getMinProfitThreshold from @arbitrage/config instead
-   */
-  getMinProfitThreshold,
-  /**
-   * @deprecated Use getDefaultDexFee from components/price-calculator instead
-   */
-  getDefaultFee,
-  /**
-   * @deprecated Will be replaced by components/arbitrage-detector
+   * @deprecated Use detectArbitrage from components/arbitrage-detector instead
    */
   calculateIntraChainArbitrage,
   /**
-   * @deprecated Will be replaced by components/arbitrage-detector
-   */
-  calculateCrossChainArbitrage,
-  /**
-   * @deprecated Use isValidPairSnapshot from components/arbitrage-detector
+   * @deprecated Use isValidPairSnapshot from components/arbitrage-detector instead
    */
   validatePairSnapshot,
   /**
-   * @deprecated Use PairRepository.createSnapshot() instead
+   * @deprecated Use PairRepository.createSnapshot() from components/pair-repository instead
    */
   createPairSnapshot
 } from './arbitrage-calculator';
@@ -590,14 +563,13 @@ export {
 /**
  * @deprecated These types are deprecated. Import from components instead.
  * - PairSnapshot → ComponentPairSnapshot from components/pair-repository
- * - ChainPriceData → components/arbitrage-detector (when available)
+ * - ChainPriceData → components/arbitrage-detector
+ * - CrossChainOpportunityResult → components/arbitrage-detector
  */
 export type {
   PairSnapshot as ArbitragePairSnapshot,
-  ChainPriceData,
   PriceComparisonResult,
   ArbitrageCalcConfig,
-  CrossChainOpportunityResult
 } from './arbitrage-calculator';
 
 // REF-2: Shared message validation utilities
@@ -838,13 +810,18 @@ export type {
 // @see .claude/plans/component-architecture-proposal.md
 // =============================================================================
 
+// =============================================================================
 // PriceCalculator - Pure functions for price/profit calculations
+// REFACTOR: These are now the PRIMARY exports (replacing deprecated versions)
+// =============================================================================
 export {
-  // Core price calculations
-  calculatePriceFromReserves as calcPriceFromReserves,
-  safeBigIntDivision as safeBigIntDiv,
+  // Core price calculations - PRIMARY EXPORTS (replace deprecated versions)
+  calculatePriceFromReserves,
+  calculatePriceFromBigIntReserves,
+  safeBigIntDivision,
   safeBigIntDivisionOrNull, // P0-FIX 4.4: Safe version that returns null instead of throwing
-  invertPrice as invertPriceValue,
+  invertPrice,
+  calculatePriceDifferencePercent,
 
   // Spread and profit calculations
   calculateSpread,
@@ -853,7 +830,7 @@ export {
   calculateProfitBetweenSources,
 
   // Fee utilities
-  getDefaultFee as getDefaultDexFee,
+  getDefaultFee,
   resolveFee,
   basisPointsToDecimal,
   decimalToBasisPoints,
@@ -861,11 +838,16 @@ export {
   // Threshold utilities
   meetsThreshold,
   calculateConfidence,
+  getMinProfitThreshold,
 
   // Validation utilities
   isValidPrice,
   areValidReserves,
   isValidFee,
+
+  // Chain constants
+  BLOCK_TIMES_MS,
+  getBlockTimeMs,
 
   // Error class
   PriceCalculationError,
@@ -906,6 +888,77 @@ export type {
   CircularBufferConfig,
   CircularBufferStats,
 } from './data-structures';
+
+// =============================================================================
+// ArbitrageDetector - Pure detection logic
+// REFACTOR: Replaces calculateIntraChainArbitrage, calculateCrossChainArbitrage
+// =============================================================================
+export {
+  // Core detection functions
+  detectArbitrage,
+  detectArbitrageForTokenPair,
+  calculateArbitrageProfit,
+  calculateCrossChainArbitrage,
+
+  // Token order utilities
+  isReverseTokenOrder,
+  normalizeTokenOrder,
+  adjustPriceForTokenOrder,
+
+  // Validation utilities
+  isValidPairSnapshot,
+  validateDetectionInput,
+} from './components/arbitrage-detector';
+
+export type {
+  ArbitrageDetectionInput,
+  ArbitrageDetectionResult,
+  ArbitrageOpportunityData,
+  BatchDetectionOptions,
+  ChainPriceData,
+  CrossChainOpportunityResult,
+} from './components/arbitrage-detector';
+
+// =============================================================================
+// TokenUtils - Address normalization and token handling
+// REFACTOR: Replaces isSameTokenPair, isReverseOrder from arbitrage-calculator
+// =============================================================================
+export {
+  // Address normalization
+  normalizeAddress,
+  addressEquals,
+  isValidAddress,
+  isSolanaAddress,
+  getAddressChainType,
+
+  // Token pair keys (consolidated here - single source of truth)
+  getTokenPairKey,
+  parseTokenPairKey,
+  isSameTokenPair,
+
+  // Token order utilities
+  isReverseOrder,
+  sortTokens,
+  getTokenIndex,
+
+  // Common tokens
+  COMMON_TOKENS,
+  NATIVE_TOKENS,
+  WRAPPED_NATIVE_TOKENS,
+
+  // Token identification
+  isStablecoin,
+  isWrappedNative,
+  getChainFromToken,
+
+  // Checksum utilities
+  toChecksumAddress,
+
+  // Address set operations
+  createAddressSet,
+  addressInSet,
+  intersectAddresses,
+} from './components/token-utils';
 
 // =============================================================================
 // Factory Subscription Service (Phase 2.1.2)

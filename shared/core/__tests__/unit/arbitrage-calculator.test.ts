@@ -11,23 +11,25 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
+// REFACTOR: Import deprecated functions directly from the deprecated module
+// for backwards compatibility testing. New code should use components instead.
 import {
-  ArbitragePairSnapshot as PairSnapshot,
+  PairSnapshot,
   ChainPriceData,
   safeBigIntDivision,
   calculatePriceFromReserves,
   calculatePriceFromBigIntReserves,
   invertPrice,
   calculatePriceDifferencePercent,
-  isSameTokenPair,
-  isReverseOrder,
+  isSameTokenPair,  // Deprecated: takes PairSnapshot objects
+  isReverseOrder,   // Deprecated: takes PairSnapshot objects
   getMinProfitThreshold,
   getDefaultFee,
   calculateIntraChainArbitrage,
   calculateCrossChainArbitrage,
   validatePairSnapshot,
   createPairSnapshot
-} from '@arbitrage/core';
+} from '../../src/arbitrage-calculator';
 
 // =============================================================================
 // Test Data
