@@ -204,3 +204,153 @@ export function isUnstableChain(
 ): boolean {
   return unstableChains.includes(chainId.toLowerCase());
 }
+
+// =============================================================================
+// Async Utilities (FIX 9.1: Timeout-Race Pattern)
+// =============================================================================
+
+/**
+ * Timeout error for withTimeout utility.
+ */
+export class TimeoutError extends Error {
+  constructor(message: string, public readonly timeoutMs: number) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Execute a promise with a timeout.
+ * FIX 9.1: Centralized timeout-race pattern to avoid code duplication
+ * and ensure proper timer cleanup (prevents memory leaks).
+ *
+ * @param operation - Promise to execute
+ * @param timeoutMs - Maximum time to wait in milliseconds
+ * @param operationName - Name for error messages (optional)
+ * @returns Result of the operation
+ * @throws TimeoutError if operation exceeds timeout
+ *
+ * @example
+ * // Basic usage
+ * const result = await withTimeout(fetchData(), 5000, 'fetchData');
+ *
+ * // With cleanup on timeout
+ * try {
+ *   await withTimeout(wsManager.disconnect(), 5000, 'WebSocket disconnect');
+ * } catch (e) {
+ *   if (e instanceof TimeoutError) {
+ *     logger.warn('Operation timed out', { operation: e.message });
+ *   }
+ * }
+ */
+export async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  operationName: string = 'operation'
+): Promise<T> {
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new TimeoutError(`${operationName} timed out after ${timeoutMs}ms`, timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([operation, timeoutPromise]);
+    return result;
+  } finally {
+    // CRITICAL: Always clear timeout to prevent memory leak
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+/**
+ * Execute a promise with timeout, returning a result object instead of throwing.
+ * Useful when timeout is a valid outcome rather than an error.
+ *
+ * @param operation - Promise to execute
+ * @param timeoutMs - Maximum time to wait in milliseconds
+ * @returns Object with success/timeout status and result/error
+ */
+export async function withTimeoutResult<T>(
+  operation: Promise<T>,
+  timeoutMs: number
+): Promise<{ success: true; result: T } | { success: false; timedOut: boolean; error?: Error }> {
+  try {
+    const result = await withTimeout(operation, timeoutMs);
+    return { success: true, result };
+  } catch (error) {
+    if (error instanceof TimeoutError) {
+      return { success: false, timedOut: true };
+    }
+    return { success: false, timedOut: false, error: error as Error };
+  }
+}
+
+// =============================================================================
+// Fee Validation Utilities (FIX 9.3: Centralized Fee Handling)
+// =============================================================================
+
+/**
+ * Validate and sanitize a fee value for safe calculations.
+ * FIX 9.3: Centralized fee validation to prevent NaN/Infinity in arbitrage calculations.
+ *
+ * Guards against:
+ * - undefined/null values
+ * - NaN (from invalid conversions)
+ * - Infinity (from division errors)
+ * - Negative values (invalid fees)
+ * - Fees > 100% (clearly incorrect)
+ *
+ * @param fee - Fee value to validate (as decimal, e.g., 0.003 = 0.3%)
+ * @param defaultFee - Default value if invalid (default: 0.003 = 0.3%)
+ * @returns Valid fee value
+ */
+export function validateFee(fee: number | undefined | null, defaultFee: number = 0.003): number {
+  if (fee === undefined || fee === null) {
+    return defaultFee;
+  }
+  if (!Number.isFinite(fee) || fee < 0 || fee > 1) {
+    return defaultFee;
+  }
+  return fee;
+}
+
+/**
+ * Validate a price value for safe arithmetic operations.
+ * FIX 4.1: Guards against values that would cause division by zero or overflow.
+ *
+ * @param price - Price value to validate
+ * @returns true if price is safe for calculations
+ */
+export function isValidPrice(price: number): boolean {
+  // Must be a finite positive number
+  if (!Number.isFinite(price) || price <= 0) {
+    return false;
+  }
+  // Must not be too small (would cause overflow when inverted)
+  // 1e-15 is the threshold - inverting gives 1e15 which is still safe
+  if (price < 1e-15) {
+    return false;
+  }
+  // Must not be too large (would cause precision loss)
+  if (price > 1e15) {
+    return false;
+  }
+  return true;
+}
+
+// =============================================================================
+// Data Structure Utilities (FIX 10.5: Consolidated to @arbitrage/core)
+// =============================================================================
+
+/**
+ * Re-export MinHeap and related utilities from @arbitrage/core.
+ * FIX 10.5: Consolidated to avoid code duplication across services.
+ *
+ * @see shared/core/src/data-structures/min-heap.ts for implementation
+ */
+export { MinHeap, findKSmallest, findKLargest } from '@arbitrage/core';

@@ -5,6 +5,26 @@
  * ensure consistency across modules.
  *
  * FIX Refactor 9.3: Consolidate scattered constants into single location
+ *
+ * =============================================================================
+ * PARTITION ARCHITECTURE (FIX 2.1: Documentation alignment with ADR-003)
+ * =============================================================================
+ *
+ * The unified-detector runs in partitions, each monitoring multiple chains:
+ *
+ * | Partition ID  | Chains                              | Region    | Block Time |
+ * |---------------|-------------------------------------|-----------|------------|
+ * | asia-fast     | BSC, Polygon, Avalanche, Fantom     | Singapore | 2-3s       |
+ * | l2-fast       | Arbitrum, Optimism, Base            | Singapore | <1s        |
+ * | high-value    | Ethereum, zkSync, Linea             | US-East   | >5s        |
+ * | solana-native | Solana (non-EVM)                    | US-West   | 400ms      |
+ *
+ * Configuration:
+ * - PARTITION_ID env var selects which partition to run
+ * - PARTITION_CHAINS env var can override chains within a partition
+ *
+ * @see ADR-003: Partitioned Chain Detectors
+ * @see @arbitrage/config for partition definitions
  */
 
 // =============================================================================
@@ -76,24 +96,40 @@ export const MIN_SIMULATION_VOLATILITY = 0;
 export const MAX_SIMULATION_VOLATILITY = 1.0;
 
 // =============================================================================
-// WebSocket Configuration
+// WebSocket Configuration (FIX 2.3: Added documentation for timeout values)
 // =============================================================================
 
 /**
  * Chains known to have unstable WebSocket connections.
  * These chains get extended connection timeouts.
  *
+ * Why these chains are unstable:
+ * - BSC: High block rate (3s) with frequent reorganizations
+ * - Fantom: Known for intermittent RPC endpoint issues
+ *
  * FIX Config 3.2: Moved from hardcoded list in chain-instance.ts
  */
 export const UNSTABLE_WEBSOCKET_CHAINS = ['bsc', 'fantom'] as const;
 
-/** Default WebSocket connection timeout (ms) */
+/**
+ * Default WebSocket connection timeout.
+ * Most chains (Ethereum, Polygon, Arbitrum, etc.) connect within 5-8 seconds.
+ * 10s provides buffer for network latency while failing fast on dead endpoints.
+ */
 export const DEFAULT_WS_CONNECTION_TIMEOUT_MS = 10_000;
 
-/** Extended WebSocket connection timeout for unstable chains (ms) */
+/**
+ * Extended WebSocket connection timeout for unstable chains.
+ * BSC and Fantom may take longer due to RPC endpoint load balancing.
+ * 15s allows for retry cycles on these chains while still failing reasonably fast.
+ */
 export const EXTENDED_WS_CONNECTION_TIMEOUT_MS = 15_000;
 
-/** WebSocket disconnect timeout during shutdown (ms) */
+/**
+ * WebSocket disconnect timeout during graceful shutdown.
+ * Allows 5s for clean WebSocket close handshake.
+ * Longer timeouts could delay shutdown; shorter may leave connections dangling.
+ */
 export const WS_DISCONNECT_TIMEOUT_MS = 5_000;
 
 // =============================================================================
@@ -114,24 +150,49 @@ export const DEFAULT_TOKEN_DECIMALS = 18;
 
 /**
  * Default value for useFactorySubscriptions config flag.
- * Set to false for backward compatibility during gradual rollout.
+ * FIX 1.3: Enabled by default to realize the documented 40-50x RPC reduction.
+ * Can be disabled per-chain via FACTORY_SUBSCRIPTION_ENABLED_CHAINS or env vars.
  *
  * @see Task 2.1.3: Migrate Existing Subscriptions
  */
-export const DEFAULT_USE_FACTORY_SUBSCRIPTIONS = false;
+export const DEFAULT_USE_FACTORY_SUBSCRIPTIONS = true;
 
 /**
- * Chains enabled for factory subscriptions during initial rollout.
- * Start with L2 chains that have most to gain from RPC reduction.
+ * Chains enabled for factory subscriptions.
+ * FIX 1.1: Expanded to all supported chains to realize documented 40-50x RPC reduction.
+ * Previously only 3 chains were enabled, creating architecture/documentation mismatch.
  *
- * @see Task 2.1.3: Gradual rollout strategy
+ * All EVM chains benefit from factory subscriptions:
+ * - L2 chains (arbitrum, optimism, base): Fast blocks, high RPC reduction benefit
+ * - Main chains (ethereum, polygon, avalanche): High volume, significant cost savings
+ * - BSC/Fantom: Despite WebSocket instability, factory subscriptions still help
+ *
+ * Non-EVM chains (solana) are automatically excluded by isEvmChain() check.
+ *
+ * @see Task 2.1.3: Factory subscription migration
+ * @see ADR-003: Partitioned Chain Detectors
  */
-export const FACTORY_SUBSCRIPTION_ENABLED_CHAINS: readonly string[] = [];
+export const FACTORY_SUBSCRIPTION_ENABLED_CHAINS: readonly string[] = [
+  // L2 chains (fastest blocks, highest benefit)
+  'arbitrum',
+  'optimism',
+  'base',
+  // Main chains
+  'ethereum',
+  'polygon',
+  'avalanche',
+  // Other EVM chains
+  'bsc',
+  'fantom',
+  'zksync',
+  'linea',
+];
 
 /**
  * Rollout percentage for factory subscriptions (0-100).
- * Used for deterministic gradual rollout across chains.
+ * FIX 1.3: Set to 100% for chains not in FACTORY_SUBSCRIPTION_ENABLED_CHAINS.
+ * This means all chains get factory subscriptions unless explicitly disabled.
  *
  * @see Task 2.1.3: Gradual rollout strategy
  */
-export const DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT = 0;
+export const DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT = 100;
