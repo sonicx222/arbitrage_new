@@ -96,8 +96,10 @@ To use devnet, set `PARTITION_CHAINS=solana-devnet`:
 1. **Explicit URL** (if `SOLANA_RPC_URL` or `SOLANA_DEVNET_RPC_URL` set)
 2. **Helius** (if `HELIUS_API_KEY` set) - 100K free credits/day
 3. **Triton** (if `TRITON_API_KEY` set) - 50K free credits/day
-4. **PublicNode** - Unlimited, rate-limited
-5. **Solana Public** - Unlimited, rate-limited
+4. **PublicNode** - Unlimited, rate-limited (fallback for development only)
+
+> **Note:** Public endpoints (PublicNode) are blocked in production mode.
+> Set `HELIUS_API_KEY` or `TRITON_API_KEY` for production deployments.
 
 ## API Endpoints
 
@@ -156,9 +158,14 @@ railway up
 
 ### Alerts
 
-- **RPC Disconnect**: When Solana WebSocket connection drops
+The following conditions are monitored and logged:
+
 - **High Memory**: When memory exceeds 400MB (80% of 512MB)
-- **Low Event Rate**: When event rate drops below expected threshold
+- **Circuit Breaker Open**: When detection failures exceed threshold (5 consecutive failures)
+- **Redis Publishing Disabled**: When Redis Streams publishing fails repeatedly (10 consecutive failures)
+
+> **Note:** Configure external alerting (e.g., Prometheus AlertManager) based on the
+> `/health` endpoint status and metrics from `/stats` for production monitoring.
 
 ## Architecture
 
