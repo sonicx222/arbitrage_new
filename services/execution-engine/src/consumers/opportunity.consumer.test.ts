@@ -43,6 +43,12 @@ const createMockStats = (): ExecutionStats => ({
   simulationErrors: 0,
   circuitBreakerTrips: 0,
   circuitBreakerBlocks: 0,
+  // Capital risk management metrics (Phase 3)
+  riskEVRejections: 0,
+  riskPositionSizeRejections: 0,
+  riskDrawdownBlocks: 0,
+  riskCautionCount: 0,
+  riskHaltCount: 0,
 });
 
 const createMockQueueService = (overrides: Partial<QueueService> = {}): QueueService => ({
@@ -525,6 +531,201 @@ describe('OpportunityConsumer - Pause/Resume', () => {
     // These should not throw even without stream consumer
     expect(() => consumer.pause()).not.toThrow();
     expect(() => consumer.resume()).not.toThrow();
+  });
+});
+
+// =============================================================================
+// Test Suite: Shutdown Cleanup (BUG-FIX Regression Test)
+// =============================================================================
+
+describe('OpportunityConsumer - Shutdown Cleanup', () => {
+  let consumer: OpportunityConsumer;
+  let mockLogger: Logger;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockQueueService: QueueService;
+  let mockStats: ExecutionStats;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockQueueService = createMockQueueService();
+    mockStats = createMockStats();
+
+    consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance-1',
+    });
+  });
+
+  it('should ACK all pending messages during stop (BUG-FIX regression)', async () => {
+    // Queue multiple opportunities to create pending messages
+    const opp1 = createMockOpportunity({ id: 'opp-1' });
+    const opp2 = createMockOpportunity({ id: 'opp-2' });
+
+    await (consumer as any).handleStreamMessage({ id: 'msg-1', data: opp1 });
+    await (consumer as any).handleStreamMessage({ id: 'msg-2', data: opp2 });
+
+    expect(consumer.getPendingCount()).toBe(2);
+
+    // Stop should ACK all pending messages
+    await consumer.stop();
+
+    // Both messages should be ACKed
+    expect(mockStreamsClient.xack).toHaveBeenCalledTimes(2);
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'ACKing pending messages during shutdown',
+      expect.objectContaining({ count: 2 })
+    );
+
+    // Pending count should be cleared
+    expect(consumer.getPendingCount()).toBe(0);
+  });
+
+  it('should handle ACK failures during shutdown gracefully', async () => {
+    const opportunity = createMockOpportunity();
+    await (consumer as any).handleStreamMessage({ id: 'msg-1', data: opportunity });
+
+    // Make ACK fail
+    mockStreamsClient.xack.mockRejectedValue(new Error('Redis connection lost'));
+
+    // Stop should not throw even if ACK fails
+    await expect(consumer.stop()).resolves.toBeUndefined();
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Failed to ACK pending message during shutdown',
+      expect.any(Object)
+    );
+  });
+
+  it('should clear active executions during stop', async () => {
+    consumer.markActive('opp-1');
+    consumer.markActive('opp-2');
+    expect(consumer.getActiveCount()).toBe(2);
+
+    await consumer.stop();
+
+    expect(consumer.getActiveCount()).toBe(0);
+  });
+
+  it('should skip ACKing if no pending messages', async () => {
+    expect(consumer.getPendingCount()).toBe(0);
+
+    await consumer.stop();
+
+    // Should not attempt to ACK anything
+    expect(mockStreamsClient.xack).not.toHaveBeenCalled();
+    // Should not log about ACKing
+    expect(mockLogger.info).not.toHaveBeenCalledWith(
+      'ACKing pending messages during shutdown',
+      expect.any(Object)
+    );
+  });
+});
+
+// =============================================================================
+// Test Suite: Enhanced Opportunity Validation (BUG-FIX Regression Test)
+// =============================================================================
+
+describe('OpportunityConsumer - Enhanced Validation', () => {
+  let consumer: OpportunityConsumer;
+  let mockLogger: Logger;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockQueueService: QueueService;
+  let mockStats: ExecutionStats;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockQueueService = createMockQueueService();
+    mockStats = createMockStats();
+
+    consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance-1',
+    });
+  });
+
+  it('should reject opportunities with missing tokenIn (BUG-FIX regression)', async () => {
+    const badOpp = { ...createMockOpportunity(), tokenIn: undefined };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+    expect(mockStreamsClient.xack).toHaveBeenCalled(); // ACKed after moving to DLQ
+  });
+
+  it('should reject opportunities with missing tokenOut (BUG-FIX regression)', async () => {
+    const badOpp = { ...createMockOpportunity(), tokenOut: undefined };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+  });
+
+  it('should reject opportunities with invalid amountIn (BUG-FIX regression)', async () => {
+    const badOpp = { ...createMockOpportunity(), amountIn: 'not-a-number' };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+  });
+
+  it('should reject opportunities with zero amountIn (BUG-FIX regression)', async () => {
+    const badOpp = { ...createMockOpportunity(), amountIn: '0' };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+  });
+
+  it('should reject cross-chain with missing buyChain (BUG-FIX regression)', async () => {
+    const badOpp = { ...createMockOpportunity(), type: 'cross-chain', buyChain: undefined };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+  });
+
+  it('should reject cross-chain with same buyChain and sellChain (BUG-FIX regression)', async () => {
+    const badOpp = {
+      ...createMockOpportunity(),
+      type: 'cross-chain',
+      buyChain: 'ethereum',
+      sellChain: 'ethereum',
+    };
+    const message = { id: 'msg-bad', data: badOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(mockStats.messageProcessingErrors).toBe(1);
+  });
+
+  it('should accept valid cross-chain opportunities', async () => {
+    const validOpp = {
+      ...createMockOpportunity(),
+      type: 'cross-chain',
+      buyChain: 'ethereum',
+      sellChain: 'arbitrum',
+    };
+    const message = { id: 'msg-valid', data: validOpp };
+
+    await (consumer as any).handleStreamMessage(message);
+
+    expect(consumer.getPendingCount()).toBe(1);
+    expect(mockQueueService.enqueue).toHaveBeenCalledWith(validOpp);
   });
 });
 

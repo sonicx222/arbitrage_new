@@ -600,7 +600,8 @@ describe('FlashLoanStrategy', () => {
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('simulation predicted revert');
+      // Fix 6.1: Error format changed to use ExecutionErrorCode
+      expect(result.error).toContain('ERR_SIMULATION_REVERT');
       expect(ctx.stats.simulationPredictedReverts).toBe(1);
     });
 
@@ -955,5 +956,156 @@ describe('FlashLoanStrategy', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('Gas price spike');
     });
+  });
+});
+
+// =============================================================================
+// Fix 8.1: Tests for buildNHopSwapSteps
+// =============================================================================
+
+describe('FlashLoanStrategy - buildNHopSwapSteps', () => {
+  let strategy: FlashLoanStrategy;
+  let mockLogger: Logger;
+
+  const MOCK_ROUTER_A = '0xA000000000000000000000000000000000000001';
+  const MOCK_ROUTER_B = '0xB000000000000000000000000000000000000002';
+  const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  const USDC = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+  const DAI = '0x6B175474E89094C44Da98b954EesdeCD73dF8141D';
+
+  beforeEach(() => {
+    mockLogger = createMockLogger();
+    strategy = new FlashLoanStrategy(mockLogger, {
+      contractAddresses: { ethereum: '0x1234567890123456789012345678901234567890' },
+      approvedRouters: { ethereum: [MOCK_ROUTER_A, MOCK_ROUTER_B] },
+    });
+  });
+
+  it('should build 3-hop triangular arbitrage path', () => {
+    const opportunity = createMockOpportunity({
+      tokenIn: WETH,
+      amountIn: ethers.parseEther('10').toString(),
+    });
+
+    // Triangular: WETH -> USDC -> DAI -> WETH
+    const steps = strategy.buildNHopSwapSteps(opportunity, {
+      hops: [
+        { router: MOCK_ROUTER_A, tokenOut: USDC, expectedOutput: ethers.parseUnits('20000', 6) },
+        { router: MOCK_ROUTER_B, tokenOut: DAI, expectedOutput: ethers.parseEther('20000') },
+        { router: MOCK_ROUTER_A, tokenOut: WETH, expectedOutput: ethers.parseEther('10.5') },
+      ],
+      slippageBps: 50, // 0.5%
+      chain: 'ethereum',
+    });
+
+    expect(steps).toHaveLength(3);
+
+    // First swap: WETH -> USDC
+    expect(steps[0].router).toBe(MOCK_ROUTER_A);
+    expect(steps[0].tokenIn).toBe(WETH);
+    expect(steps[0].tokenOut).toBe(USDC);
+    expect(steps[0].amountOutMin).toBeGreaterThan(0n);
+
+    // Second swap: USDC -> DAI
+    expect(steps[1].router).toBe(MOCK_ROUTER_B);
+    expect(steps[1].tokenIn).toBe(USDC);
+    expect(steps[1].tokenOut).toBe(DAI);
+
+    // Third swap: DAI -> WETH (back to starting token)
+    expect(steps[2].router).toBe(MOCK_ROUTER_A);
+    expect(steps[2].tokenIn).toBe(DAI);
+    expect(steps[2].tokenOut).toBe(WETH);
+  });
+
+  it('should throw if tokenIn is missing', () => {
+    const opportunity = createMockOpportunity({ tokenIn: undefined });
+
+    expect(() =>
+      strategy.buildNHopSwapSteps(opportunity, {
+        hops: [{ router: MOCK_ROUTER_A, tokenOut: USDC }],
+        chain: 'ethereum',
+      })
+    ).toThrow('[ERR_INVALID_OPPORTUNITY]');
+  });
+
+  it('should throw if hops array is empty', () => {
+    const opportunity = createMockOpportunity({ tokenIn: WETH });
+
+    expect(() =>
+      strategy.buildNHopSwapSteps(opportunity, {
+        hops: [],
+        chain: 'ethereum',
+      })
+    ).toThrow('[ERR_EMPTY_HOPS]');
+  });
+
+  it('should throw if path does not end with starting token', () => {
+    const opportunity = createMockOpportunity({ tokenIn: WETH });
+
+    // Invalid path: WETH -> USDC (does not return to WETH)
+    expect(() =>
+      strategy.buildNHopSwapSteps(opportunity, {
+        hops: [{ router: MOCK_ROUTER_A, tokenOut: USDC }],
+        chain: 'ethereum',
+      })
+    ).toThrow('[ERR_INVALID_PATH]');
+  });
+
+  it('should apply slippage protection to amountOutMin', () => {
+    const opportunity = createMockOpportunity({ tokenIn: WETH });
+    const expectedOutput = ethers.parseEther('10');
+    const slippageBps = 100; // 1%
+
+    const steps = strategy.buildNHopSwapSteps(opportunity, {
+      hops: [{ router: MOCK_ROUTER_A, tokenOut: WETH, expectedOutput }],
+      slippageBps,
+      chain: 'ethereum',
+    });
+
+    // 1% slippage on 10 ETH = 0.1 ETH reduction
+    const expectedMin = expectedOutput - (expectedOutput * BigInt(slippageBps) / 10000n);
+    expect(steps[0].amountOutMin).toBe(expectedMin);
+  });
+
+  it('should use 1 wei minimum if expectedOutput not provided', () => {
+    const opportunity = createMockOpportunity({ tokenIn: WETH });
+
+    const steps = strategy.buildNHopSwapSteps(opportunity, {
+      hops: [{ router: MOCK_ROUTER_A, tokenOut: WETH }], // No expectedOutput
+      chain: 'ethereum',
+    });
+
+    expect(steps[0].amountOutMin).toBe(1n);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('[WARN_SLIPPAGE]'),
+      expect.any(Object)
+    );
+  });
+
+  it('should build 4-hop quadrilateral path', () => {
+    const opportunity = createMockOpportunity({ tokenIn: WETH });
+    const WBTC = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599';
+
+    // Quadrilateral: WETH -> USDC -> WBTC -> DAI -> WETH
+    const steps = strategy.buildNHopSwapSteps(opportunity, {
+      hops: [
+        { router: MOCK_ROUTER_A, tokenOut: USDC, expectedOutput: ethers.parseUnits('20000', 6) },
+        { router: MOCK_ROUTER_B, tokenOut: WBTC, expectedOutput: ethers.parseUnits('0.5', 8) },
+        { router: MOCK_ROUTER_A, tokenOut: DAI, expectedOutput: ethers.parseEther('20000') },
+        { router: MOCK_ROUTER_B, tokenOut: WETH, expectedOutput: ethers.parseEther('10.5') },
+      ],
+      slippageBps: 50,
+      chain: 'ethereum',
+    });
+
+    expect(steps).toHaveLength(4);
+    expect(steps[0].tokenIn).toBe(WETH);
+    expect(steps[0].tokenOut).toBe(USDC);
+    expect(steps[1].tokenIn).toBe(USDC);
+    expect(steps[1].tokenOut).toBe(WBTC);
+    expect(steps[2].tokenIn).toBe(WBTC);
+    expect(steps[2].tokenOut).toBe(DAI);
+    expect(steps[3].tokenIn).toBe(DAI);
+    expect(steps[3].tokenOut).toBe(WETH);
   });
 });

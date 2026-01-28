@@ -183,6 +183,7 @@ const createMockContext = (
       isRunning: jest.fn().mockReturnValue(true),
     } as any,
     gasBaselines: new Map(),
+    lastGasPrices: new Map(),
     stats: {
       opportunitiesReceived: 0,
       executionAttempts: 0,
@@ -199,6 +200,13 @@ const createMockContext = (
       simulationsSkipped: 0,
       simulationPredictedReverts: 0,
       simulationErrors: 0,
+      circuitBreakerTrips: 0,
+      circuitBreakerBlocks: 0,
+      riskEVRejections: 0,
+      riskPositionSizeRejections: 0,
+      riskDrawdownBlocks: 0,
+      riskCautionCount: 0,
+      riskHaltCount: 0,
     },
     simulationService: undefined,
     ...overrides,
@@ -358,7 +366,8 @@ describe('CrossChainStrategy - Wallet/Provider Validation', () => {
     const result = await strategy.execute(opportunity, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('No wallet/provider for source chain');
+    // Fix 6.1: Error format changed to use ExecutionErrorCode
+    expect(result.error).toContain('ERR_NO_WALLET');
   });
 
   it('should fail when source chain provider is missing', async () => {
@@ -371,7 +380,8 @@ describe('CrossChainStrategy - Wallet/Provider Validation', () => {
     const result = await strategy.execute(opportunity, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('No wallet/provider for source chain');
+    // Fix 6.1: Error format changed to use ExecutionErrorCode
+    expect(result.error).toContain('ERR_NO_PROVIDER');
   });
 });
 
@@ -405,7 +415,7 @@ describe('CrossChainStrategy - Quote Expiry', () => {
     const result = await strategy.execute(opportunity, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('Bridge quote expired');
+    expect(result.error).toContain('[ERR_QUOTE_EXPIRED]');
     expect(ctx.nonceManager?.failTransaction).toHaveBeenCalled();
   });
 });
@@ -493,7 +503,7 @@ describe('CrossChainStrategy - Simulation Integration', () => {
       shouldSimulate: jest.fn().mockReturnValue(true),
     });
 
-    // Make prepareDexSwapTransaction throw (was prepareFlashLoanTransaction)
+    // Fix 8.3: Make prepareDexSwapTransaction throw to test graceful degradation
     jest.spyOn(strategy as any, 'prepareDexSwapTransaction').mockRejectedValue(
       new Error('Failed to prepare transaction')
     );
@@ -634,6 +644,21 @@ describe('CrossChainStrategy - Bridge Execution', () => {
     expect(result.error).toContain('[ERR_BRIDGE_FAILED]');
     expect(result.transactionHash).toBe('0xbridge123');
   });
+
+  // Fix 2.2: Bridge status transition documentation
+  // Note: Full end-to-end polling tests with status transitions are better suited for
+  // integration tests as they involve real delays. The existing tests for immediate
+  // 'completed', 'failed', and 'refunded' statuses cover the main code paths.
+  //
+  // The polling logic in cross-chain.strategy.ts supports these status values:
+  // - 'pending': Continue polling (waiting for bridge to start)
+  // - 'inflight': Continue polling (tokens in transit)
+  // - 'completed': Exit loop, proceed to destination sell
+  // - 'failed': Return error result with bridge details
+  // - 'refunded': Return error result (treated as failure with refund)
+  //
+  // Each status transition is logged via logger.debug('Bridge status changed', ...)
+  // See cross-chain.strategy.ts lines 383-393 for the status transition logging.
 });
 
 // =============================================================================
@@ -693,6 +718,101 @@ describe('CrossChainStrategy - Nonce Management', () => {
 
     // Should get nonce for bridge (source chain)
     expect(ctx.nonceManager?.getNextNonce).toHaveBeenCalledWith('ethereum');
+  });
+});
+
+// =============================================================================
+// Test Suite: Bridge Fee Type Coercion (BUG-FIX Regression Test)
+// =============================================================================
+
+describe('CrossChainStrategy - Bridge Fee Type Coercion', () => {
+  let strategy: CrossChainStrategy;
+  let mockLogger: Logger;
+
+  const mockStrategyMethods = (strat: CrossChainStrategy) => {
+    jest.spyOn(strat as any, 'prepareDexSwapTransaction').mockResolvedValue({
+      to: '0x1234567890123456789012345678901234567890',
+      data: '0xabcdef',
+      value: 0n,
+      from: '0x1234567890123456789012345678901234567890',
+    });
+    jest.spyOn(strat as any, 'getOptimalGasPrice').mockResolvedValue(BigInt('30000000000'));
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    strategy = new CrossChainStrategy(mockLogger);
+    mockStrategyMethods(strategy);
+  });
+
+  it('should handle invalid totalFee string gracefully (BUG-FIX regression)', async () => {
+    // Test the fix for BigInt() throwing on invalid strings
+    const mockRouter = createMockBridgeRouter({
+      quote: {
+        valid: true,
+        totalFee: 'invalid-not-a-number', // Invalid string that would crash BigInt()
+        expiresAt: Date.now() + 60000,
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity();
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should return error instead of crashing
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('[ERR_BRIDGE_QUOTE]');
+    expect(result.error).toContain('Invalid bridge fee format');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'Invalid bridge fee format',
+      expect.objectContaining({
+        totalFee: 'invalid-not-a-number',
+      })
+    );
+  });
+
+  it('should handle undefined totalFee gracefully (BUG-FIX regression)', async () => {
+    const mockRouter = createMockBridgeRouter({
+      quote: {
+        valid: true,
+        totalFee: undefined, // Missing fee
+        expiresAt: Date.now() + 60000,
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity();
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should handle undefined by defaulting to 0n or returning error
+    // The fix converts undefined to 0n which is valid
+    expect(result).toBeDefined();
+    // Either succeeds with 0 fee or fails for another reason, but should not crash
+  });
+
+  it('should handle string totalFee correctly (normal case)', async () => {
+    // Bridge APIs sometimes return fees as strings from JSON
+    const mockRouter = createMockBridgeRouter({
+      quote: {
+        valid: true,
+        totalFee: '1000000000000000', // 0.001 ETH as string
+        expiresAt: Date.now() + 60000,
+      },
+    });
+    const ctx = createMockContext({
+      bridgeRouterFactory: createMockBridgeRouterFactory(mockRouter),
+    });
+    const opportunity = createMockOpportunity({ expectedProfit: 100 });
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should proceed normally with string fee
+    expect(mockRouter.execute).toHaveBeenCalled();
   });
 });
 

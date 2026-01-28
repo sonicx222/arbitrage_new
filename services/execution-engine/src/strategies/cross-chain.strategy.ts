@@ -36,7 +36,12 @@ import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/co
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult, ExecutionErrorCode } from '../types';
+import {
+  createErrorResult,
+  createSuccessResult,
+  ExecutionErrorCode,
+  formatExecutionError,
+} from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
@@ -56,7 +61,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!sourceChain || !destChain) {
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.NO_CHAIN} Missing source or destination chain`,
+        formatExecutionError(ExecutionErrorCode.NO_CHAIN, 'Missing source or destination chain'),
         sourceChain || 'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -88,7 +93,10 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!bridgeRouter) {
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.NO_ROUTE}: ${sourceChain} -> ${destChain} for ${bridgeToken}`,
+        formatExecutionError(
+          ExecutionErrorCode.NO_ROUTE,
+          `${sourceChain} -> ${destChain} for ${bridgeToken}`
+        ),
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -118,7 +126,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           });
           return createErrorResult(
             opportunity.id,
-            `[ERR_GAS_SPIKE] Gas spike on ${sourceChain}: ${errorMessage}`,
+            `${ExecutionErrorCode.GAS_SPIKE} on ${sourceChain}: ${errorMessage}`,
             sourceChain,
             opportunity.buyDex || 'unknown'
           );
@@ -142,7 +150,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!bridgeQuote.valid) {
         return createErrorResult(
           opportunity.id,
-          `[ERR_BRIDGE_QUOTE] Bridge quote failed: ${bridgeQuote.error}`,
+          `${ExecutionErrorCode.BRIDGE_QUOTE}: ${bridgeQuote.error}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -154,9 +162,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const expectedProfit = opportunity.expectedProfit || 0;
 
       // Ensure totalFee is bigint (might be string from JSON or bigint from direct call)
-      const totalFeeBigInt = typeof bridgeQuote.totalFee === 'string'
-        ? BigInt(bridgeQuote.totalFee)
-        : bridgeQuote.totalFee;
+      // BUG-FIX: Wrap BigInt conversion in try/catch to handle malformed strings
+      let totalFeeBigInt: bigint;
+      try {
+        totalFeeBigInt = typeof bridgeQuote.totalFee === 'string'
+          ? BigInt(bridgeQuote.totalFee)
+          : BigInt(bridgeQuote.totalFee ?? 0);
+      } catch (error) {
+        this.logger.error('Invalid bridge fee format', {
+          opportunityId: opportunity.id,
+          totalFee: bridgeQuote.totalFee,
+          error: getErrorMessage(error),
+        });
+        return createErrorResult(
+          opportunity.id,
+          `${ExecutionErrorCode.BRIDGE_QUOTE}: Invalid bridge fee format: ${bridgeQuote.totalFee}`,
+          sourceChain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
 
       const bridgeProfitability = this.checkBridgeProfitability(
         totalFeeBigInt,
@@ -177,7 +201,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_HIGH_FEES] ${bridgeProfitability.reason}`,
+          `${ExecutionErrorCode.HIGH_FEES}: ${bridgeProfitability.reason}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -187,18 +211,17 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const bridgeFeeEth = bridgeProfitability.bridgeFeeEth;
       const bridgeFeeUsd = bridgeProfitability.bridgeFeeUsd;
 
-      // Step 2: Get wallet and provider for source chain
-      const sourceWallet = ctx.wallets.get(sourceChain);
-      const sourceProvider = ctx.providers.get(sourceChain);
-
-      if (!sourceWallet || !sourceProvider) {
+      // Step 2: Validate source chain context using helper (Fix 6.2 & 9.1)
+      const sourceValidation = this.validateContext(sourceChain, ctx);
+      if (!sourceValidation.valid) {
         return createErrorResult(
           opportunity.id,
-          `[ERR_NO_WALLET] No wallet/provider for source chain: ${sourceChain}`,
+          `${ExecutionErrorCode.NO_WALLET}: ${sourceValidation.error}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
       }
+      const { wallet: sourceWallet, provider: sourceProvider } = sourceValidation;
 
       // Fix 4.3: Get nonce for bridge transaction with proper error handling
       // If NonceManager is available but fails, we should abort rather than continue without a nonce
@@ -216,7 +239,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           // Fix 4.3: Return error instead of continuing with undefined nonce
           return createErrorResult(
             opportunity.id,
-            `[ERR_NONCE] Failed to get nonce for bridge transaction: ${errorMessage}`,
+            `${ExecutionErrorCode.NONCE_ERROR}: Failed to get nonce for bridge transaction: ${errorMessage}`,
             sourceChain,
             opportunity.buyDex || 'unknown'
           );
@@ -231,7 +254,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          '[ERR_QUOTE_EXPIRED] Bridge quote expired before execution',
+          ExecutionErrorCode.QUOTE_EXPIRED,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -269,7 +292,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
             return createErrorResult(
               opportunity.id,
-              `[ERR_SIMULATION_REVERT] Aborted: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+              `${ExecutionErrorCode.SIMULATION_REVERT}: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
               sourceChain,
               opportunity.buyDex || 'unknown'
             );
@@ -302,7 +325,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_BRIDGE_EXEC] Bridge execution failed: ${bridgeResult.error}`,
+          `${ExecutionErrorCode.BRIDGE_EXEC}: ${bridgeResult.error}`,
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -348,7 +371,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           });
           return createErrorResult(
             opportunity.id,
-            '[ERR_SHUTDOWN] Execution interrupted by shutdown',
+            ExecutionErrorCode.SHUTDOWN,
             sourceChain,
             opportunity.buyDex || 'unknown',
             bridgeResult.sourceTxHash
@@ -385,7 +408,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
           return createErrorResult(
             opportunity.id,
-            `[ERR_BRIDGE_FAILED] Bridge failed: ${bridgeStatus.error || bridgeStatus.status}`,
+            `${ExecutionErrorCode.BRIDGE_FAILED}: ${bridgeStatus.error || bridgeStatus.status}`,
             sourceChain,
             opportunity.buyDex || 'unknown',
             bridgeResult.sourceTxHash
@@ -425,33 +448,33 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_BRIDGE_TIMEOUT] Bridge timeout after ${iterationCount} polls - transaction may still complete`,
+          `${ExecutionErrorCode.BRIDGE_TIMEOUT}: timeout after ${iterationCount} polls - transaction may still complete`,
           sourceChain,
           opportunity.buyDex || 'unknown',
           bridgeResult.sourceTxHash
         );
       }
 
-      // Step 5: Execute sell on destination chain
-      const destWallet = ctx.wallets.get(destChain);
-      const destProvider = ctx.providers.get(destChain);
-
-      if (!destWallet || !destProvider) {
+      // Step 5: Validate destination chain context using helper (Fix 6.2 & 9.1)
+      const destValidation = this.validateContext(destChain, ctx);
+      if (!destValidation.valid) {
         // Bridge succeeded but can't execute sell - funds are on dest chain
         this.logger.error('Cannot execute sell - no wallet/provider for destination chain', {
           opportunityId: opportunity.id,
           destChain,
           bridgeTxHash: bridgeResult.sourceTxHash,
+          validationError: destValidation.error,
         });
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_NO_WALLET] No wallet/provider for destination chain: ${destChain}. Funds bridged but sell not executed.`,
+          `${ExecutionErrorCode.NO_WALLET}: ${destValidation.error}. Funds bridged but sell not executed.`,
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
         );
       }
+      const { wallet: destWallet } = destValidation;
 
       // Fix 4.3: Get nonce for sell transaction with proper error handling
       // At this point, bridge already succeeded - we need to log but continue if nonce fails
@@ -507,9 +530,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const sellAmount = bridgedAmountReceived || opportunity.amountIn || '0';
       const sellOpportunity: ArbitrageOpportunity = {
         ...opportunity,
-        // Reverse the token direction for the sell
-        tokenIn: bridgeToken,                    // We're selling the bridged token
-        tokenOut: opportunity.tokenIn || 'USDT', // We're receiving the base token
+        // Fix 4.2: Reverse the token direction for the sell on destination chain
+        // Original buy: tokenIn (e.g., WETH) -> tokenOut (e.g., USDC), then bridge tokenOut
+        // Destination sell: bridgeToken (= tokenOut, e.g., USDC) -> original tokenIn (e.g., WETH)
+        tokenIn: bridgeToken,                    // We're selling the bridged token (was original tokenOut)
+        tokenOut: opportunity.tokenIn || 'USDT', // We're receiving the original buy token (was original tokenIn)
         amountIn: sellAmount,                    // Amount we received from bridge
         // Keep sell DEX reference
         buyDex: opportunity.sellDex || opportunity.buyDex,
@@ -551,38 +576,90 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Apply gas settings for destination chain
       const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
-      sellTx.gasPrice = destGasPrice;
       if (sellNonce !== undefined) {
         sellTx.nonce = sellNonce;
       }
 
+      // Fix 9.3: Apply MEV protection to destination sell transaction
+      // This was previously missing, leaving sell transactions vulnerable to MEV attacks
+      const protectedSellTx = await this.applyMEVProtection(sellTx, destChain, ctx);
+
       let sellReceipt: ethers.TransactionReceipt | null = null;
       let sellTxHash: string | undefined;
+      let usedMevProtection = false;
 
       try {
-        const sellTxResponse = await this.withTransactionTimeout(
-          () => destWallet.sendTransaction(sellTx),
-          'destinationSell'
+        // Fix 9.3: Check MEV eligibility for destination chain and use protected submission if available
+        const { shouldUseMev, mevProvider, chainSettings } = this.checkMevEligibility(
+          destChain,
+          ctx,
+          opportunity.expectedProfit
         );
 
-        sellTxHash = sellTxResponse.hash;
+        if (shouldUseMev && mevProvider) {
+          // Use MEV protected submission
+          this.logger.info('Using MEV protection for destination sell', {
+            opportunityId: opportunity.id,
+            destChain,
+            strategy: mevProvider.strategy,
+          });
 
-        sellReceipt = await this.withTransactionTimeout(
-          () => sellTxResponse.wait(),
-          'waitForSellReceipt'
-        );
+          const mevResult = await this.withTransactionTimeout(
+            () => mevProvider.sendProtectedTransaction(protectedSellTx, {
+              simulate: false, // Already validated via simulation earlier
+              priorityFeeGwei: chainSettings?.priorityFeeGwei,
+            }),
+            'mevProtectedDestinationSell'
+          );
 
-        // Confirm sell nonce
-        if (ctx.nonceManager && sellNonce !== undefined) {
-          ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
+          if (!mevResult.success) {
+            throw new Error(`MEV protected submission failed: ${mevResult.error}`);
+          }
+
+          sellTxHash = mevResult.transactionHash;
+          usedMevProtection = true;
+
+          // Get receipt if available
+          if (sellTxHash && destValidation.provider) {
+            sellReceipt = await this.withTransactionTimeout(
+              () => destValidation.provider.getTransactionReceipt(sellTxHash!),
+              'getMevSellReceipt'
+            );
+          }
+
+          this.logger.info('MEV protected destination sell completed', {
+            opportunityId: opportunity.id,
+            destChain,
+            sellTxHash,
+            strategy: mevResult.strategy,
+            usedFallback: mevResult.usedFallback,
+          });
+        } else {
+          // Standard transaction submission (no MEV protection available/needed)
+          const sellTxResponse = await this.withTransactionTimeout(
+            () => destWallet.sendTransaction(protectedSellTx),
+            'destinationSell'
+          );
+
+          sellTxHash = sellTxResponse.hash;
+
+          sellReceipt = await this.withTransactionTimeout(
+            () => sellTxResponse.wait(),
+            'waitForSellReceipt'
+          );
+
+          this.logger.info('Destination sell executed (standard)', {
+            opportunityId: opportunity.id,
+            destChain,
+            sellTxHash,
+            gasUsed: sellReceipt?.gasUsed?.toString(),
+          });
         }
 
-        this.logger.info('Destination sell executed', {
-          opportunityId: opportunity.id,
-          destChain,
-          sellTxHash,
-          gasUsed: sellReceipt?.gasUsed?.toString(),
-        });
+        // Confirm sell nonce
+        if (ctx.nonceManager && sellNonce !== undefined && sellTxHash) {
+          ctx.nonceManager.confirmTransaction(destChain, sellNonce, sellTxHash);
+        }
       } catch (sellError) {
         // Sell failed - bridge succeeded but profit not captured
         if (ctx.nonceManager && sellNonce !== undefined) {
@@ -593,12 +670,13 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           opportunityId: opportunity.id,
           destChain,
           bridgeTxHash: bridgeResult.sourceTxHash,
+          usedMevProtection,
           error: getErrorMessage(sellError),
         });
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_SELL_FAILED] Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
+          `${ExecutionErrorCode.SELL_FAILED}: Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -671,7 +749,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       return createErrorResult(
         opportunity.id,
-        `[ERR_EXECUTION] Cross-chain execution error: ${getErrorMessage(error)}`,
+        `${ExecutionErrorCode.EXECUTION_ERROR}: Cross-chain execution error: ${getErrorMessage(error)}`,
         sourceChain,
         opportunity.buyDex || 'unknown'
       );

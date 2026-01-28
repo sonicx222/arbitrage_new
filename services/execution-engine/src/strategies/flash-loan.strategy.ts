@@ -54,7 +54,12 @@ import {
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult } from '../types';
+import {
+  createErrorResult,
+  createSuccessResult,
+  ExecutionErrorCode,
+  formatExecutionError,
+} from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 // =============================================================================
@@ -65,6 +70,17 @@ import { BaseExecutionStrategy } from './base.strategy';
 // These are aliased here for backward compatibility with existing code
 const AAVE_V3_FEE_BPS = AAVE_V3_FEE_BPS_BIGINT;
 const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+
+// Fix 2.1: Static assertion to ensure Aave V3 fee matches documentation (ADR-020)
+// This validates at module load time that the imported constant is 9 bps (0.09%)
+// If this fails, it indicates a configuration mismatch that needs investigation
+const EXPECTED_AAVE_V3_FEE_BPS = 9n;
+if (AAVE_V3_FEE_BPS !== EXPECTED_AAVE_V3_FEE_BPS) {
+  throw new Error(
+    `[ERR_CONFIG] Aave V3 fee mismatch: expected ${EXPECTED_AAVE_V3_FEE_BPS} bps (0.09%), ` +
+    `got ${AAVE_V3_FEE_BPS} bps. Check @arbitrage/config AAVE_V3_FEE_BPS constant.`
+  );
+}
 
 /**
  * Default gas estimate for flash loan arbitrage (conservative)
@@ -235,13 +251,18 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Fix 3.2: Validate contract addresses are valid Ethereum addresses
+    const isProduction = process.env.NODE_ENV === 'production';
     for (const [chain, address] of Object.entries(config.contractAddresses)) {
       if (!ethers.isAddress(address)) {
         throw new Error(`[ERR_CONFIG] Invalid contract address for chain '${chain}': ${address}`);
       }
-      // Warn if address looks like a placeholder or test address
+      // Fix 3.2: Zero address guard - throw in production, warn in dev/test
       if (address === '0x0000000000000000000000000000000000000000') {
-        logger.warn('[WARN_CONFIG] Contract address is zero address - likely misconfigured', { chain });
+        const message = `[ERR_ZERO_ADDRESS] Contract address for chain '${chain}' is zero address - this is almost certainly a misconfiguration`;
+        if (isProduction) {
+          throw new Error(message);
+        }
+        logger.warn('[WARN_CONFIG] Contract address is zero address - likely misconfigured (would throw in production)', { chain });
       }
     }
 
@@ -268,11 +289,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     ctx: StrategyContext
   ): Promise<ExecutionResult> {
+    // Fix 6.1: Use ExecutionErrorCode enum for standardized error codes
     const chain = opportunity.buyChain;
     if (!chain) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_NO_CHAIN] No chain specified for opportunity',
+        ExecutionErrorCode.NO_CHAIN,
         'unknown',
         opportunity.buyDex || 'unknown'
       );
@@ -290,39 +312,35 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       });
       return createErrorResult(
         opportunity.id,
-        `[ERR_UNSUPPORTED_PROTOCOL] Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Only Aave V3 chains are currently implemented.`,
+        formatExecutionError(
+          ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+          `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Only Aave V3 chains are currently implemented.`
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
     }
 
-    // Verify wallet exists
-    const wallet = ctx.wallets.get(chain);
-    if (!wallet) {
+    // Fix 6.2 & 9.1: Use validateContext helper to reduce code duplication
+    const validation = this.validateContext(chain, ctx);
+    if (!validation.valid) {
       return createErrorResult(
         opportunity.id,
-        `[ERR_NO_WALLET] No wallet available for chain: ${chain}`,
+        validation.error,
         chain,
         opportunity.buyDex || 'unknown'
       );
     }
-
-    // Verify provider exists
-    const provider = ctx.providers.get(chain);
-    if (!provider) {
-      return createErrorResult(
-        opportunity.id,
-        `[ERR_NO_PROVIDER] No provider available for chain: ${chain}`,
-        chain,
-        opportunity.buyDex || 'unknown'
-      );
-    }
+    const { wallet, provider } = validation;
 
     // Validate opportunity fields
     if (!opportunity.tokenIn || !opportunity.amountIn || !opportunity.tokenOut) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_INVALID_OPPORTUNITY] Invalid opportunity: missing required fields (tokenIn, amountIn, tokenOut)',
+        formatExecutionError(
+          ExecutionErrorCode.INVALID_OPPORTUNITY,
+          'Missing required fields (tokenIn, amountIn, tokenOut)'
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -333,7 +351,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     if (amountIn === 0n) {
       return createErrorResult(
         opportunity.id,
-        '[ERR_ZERO_AMOUNT] Invalid opportunity: amountIn is zero',
+        formatExecutionError(
+          ExecutionErrorCode.INVALID_OPPORTUNITY,
+          'amountIn is zero'
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -355,7 +376,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_PRICE_VERIFICATION] Price verification failed: ${priceVerification.reason}`,
+          formatExecutionError(ExecutionErrorCode.PRICE_VERIFICATION, priceVerification.reason),
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -395,7 +416,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_UNPROFITABLE] Opportunity unprofitable after fees: net ${profitAnalysis.netProfitUsd.toFixed(2)} USD`,
+          formatExecutionError(
+            ExecutionErrorCode.HIGH_FEES,
+            `Opportunity unprofitable after fees: net ${profitAnalysis.netProfitUsd.toFixed(2)} USD`
+          ),
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -421,7 +445,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `[ERR_SIMULATION_REVERT] Aborted: simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+          formatExecutionError(
+            ExecutionErrorCode.SIMULATION_REVERT,
+            simulationResult.revertReason || 'unknown reason'
+          ),
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -445,6 +472,27 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           throw error;
         }
       }
+
+      // TODO (Fix 9.3): Refactor to use submitTransaction() from BaseExecutionStrategy
+      // Priority: Low | Effort: 1 day | Risk: Medium (regression risk)
+      //
+      // Current state: FlashLoanStrategy has its own transaction submission logic that
+      // duplicates parts of submitTransaction(). The code is working but not DRY.
+      //
+      // Benefits of refactoring:
+      // 1. Single source of truth for transaction submission
+      // 2. Automatic adoption of future submitTransaction improvements
+      // 3. Reduced maintenance burden
+      //
+      // Challenges:
+      // 1. FlashLoanStrategy has flash-loan-specific error handling
+      // 2. Nonce management is handled slightly differently
+      // 3. High risk of regression in production-critical code
+      //
+      // Recommendation: Keep current implementation stable until a comprehensive
+      // refactor with full test coverage can be performed.
+      //
+      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/xxx
 
       try {
         // Fix 6.3 & 9.1: Use shared MEV eligibility check helper
@@ -561,7 +609,10 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
       return createErrorResult(
         opportunity.id,
-        errorMessage || 'Unknown error during flash loan execution',
+        formatExecutionError(
+          ExecutionErrorCode.FLASH_LOAN_ERROR,
+          errorMessage || 'Unknown error during flash loan execution'
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -815,6 +866,19 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    *
    * Supports triangular arbitrage (3-hop) and more complex routes.
    * The path must start and end with the same asset (the flash-loaned token).
+   *
+   * TODO (Issue 1.2): Integrate N-hop execution into execute() method.
+   * Priority: Medium | Effort: 2 days | Depends on: ArbitrageOpportunity type update
+   *
+   * Current status: Method implemented and tested (see flash-loan.strategy.test.ts),
+   * but not yet called from execute() because:
+   * 1. ArbitrageOpportunity type doesn't support multi-hop path specification
+   * 2. Opportunity detection services don't emit N-hop opportunities yet
+   *
+   * Integration steps:
+   * 1. Extend ArbitrageOpportunity with optional `hops?: HopDefinition[]`
+   * 2. Update opportunity detectors to emit triangular/quadrilateral paths
+   * 3. Call buildNHopSwapSteps() when hops are present in opportunity
    *
    * @example
    * // 3-hop triangular arbitrage: WETH -> USDC -> DAI -> WETH

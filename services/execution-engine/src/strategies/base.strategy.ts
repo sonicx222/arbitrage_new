@@ -168,6 +168,93 @@ const FALLBACK_GAS_PRICES_WEI: Record<string, bigint> = Object.fromEntries(
   ])
 );
 
+/**
+ * Fix 3.1: Startup validation result for gas price configuration.
+ * Tracks which chains are using fallback/minimum values.
+ */
+export interface GasConfigValidationResult {
+  valid: boolean;
+  warnings: string[];
+  chainConfigs: Record<string, {
+    configuredGwei: number;
+    isMinimum: boolean;
+    isMaximum: boolean;
+    source: 'env' | 'default';
+  }>;
+}
+
+/**
+ * Fix 3.1: Validate gas price configuration at startup.
+ *
+ * Call this from engine initialization to log a summary of gas price configuration
+ * and warn if any values fell back to minimum (which may indicate misconfiguration).
+ *
+ * @param logger - Logger instance for output
+ * @returns Validation result with warnings
+ *
+ * @example
+ * const result = validateGasPriceConfiguration(logger);
+ * if (!result.valid) {
+ *   logger.warn('Gas configuration issues detected', { warnings: result.warnings });
+ * }
+ */
+export function validateGasPriceConfiguration(logger: Logger): GasConfigValidationResult {
+  const warnings: string[] = [];
+  const chainConfigs: GasConfigValidationResult['chainConfigs'] = {};
+
+  for (const [chain, configuredPrice] of Object.entries(DEFAULT_GAS_PRICES_GWEI)) {
+    const min = MIN_GAS_PRICE_GWEI[chain] ?? 0.0001;
+    const max = MAX_GAS_PRICE_GWEI[chain] ?? 1000;
+    const envVar = `GAS_PRICE_${chain.toUpperCase()}_GWEI`;
+    const envValue = process.env[envVar];
+    const source: 'env' | 'default' = envValue !== undefined ? 'env' : 'default';
+
+    const isMinimum = configuredPrice === min;
+    const isMaximum = configuredPrice === max;
+
+    chainConfigs[chain] = {
+      configuredGwei: configuredPrice,
+      isMinimum,
+      isMaximum,
+      source,
+    };
+
+    // Warn if using minimum (may indicate NaN fallback or too-low config)
+    if (isMinimum && source === 'env') {
+      warnings.push(
+        `[WARN] ${chain}: Using minimum gas price (${min} gwei). ` +
+        `Check ${envVar} environment variable for validity.`
+      );
+    }
+
+    // Warn if using maximum (may indicate typo or extreme congestion config)
+    if (isMaximum && source === 'env') {
+      warnings.push(
+        `[WARN] ${chain}: Using maximum gas price (${max} gwei). ` +
+        `Check ${envVar} environment variable - value may be too high.`
+      );
+    }
+  }
+
+  // Log summary
+  const envConfigured = Object.values(chainConfigs).filter(c => c.source === 'env').length;
+  logger.info('Gas price configuration validated', {
+    totalChains: Object.keys(chainConfigs).length,
+    envConfigured,
+    warnings: warnings.length,
+  });
+
+  if (warnings.length > 0) {
+    logger.warn('Gas configuration warnings', { warnings });
+  }
+
+  return {
+    valid: warnings.length === 0,
+    warnings,
+    chainConfigs,
+  };
+}
+
 /** Default fallback price when chain is unknown (50 gwei) */
 const DEFAULT_FALLBACK_GAS_PRICE_WEI = ethers.parseUnits('50', 'gwei');
 
@@ -193,14 +280,125 @@ const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippage
 const GWEI_DIVISOR = BigInt(1e9);
 
 /**
+ * Fix 5.1: Track in-progress nonce allocations per chain.
+ * Used to detect potential race conditions when multiple strategies
+ * attempt to allocate nonces for the same chain concurrently.
+ *
+ * Key: chain name
+ * Value: Set of opportunity IDs currently allocating nonces
+ */
+const IN_PROGRESS_NONCE_ALLOCATIONS = new Map<string, Set<string>>();
+
+/**
+ * Fix 5.1: Check and warn if concurrent nonce access is detected.
+ * This doesn't prevent the race condition but makes it visible in logs.
+ *
+ * @param chain - Chain being accessed
+ * @param opportunityId - ID of the opportunity requesting nonce
+ * @param logger - Logger for warning output
+ * @returns true if concurrency was detected
+ */
+function checkConcurrentNonceAccess(
+  chain: string,
+  opportunityId: string,
+  logger: Logger
+): boolean {
+  let inProgress = IN_PROGRESS_NONCE_ALLOCATIONS.get(chain);
+  if (!inProgress) {
+    inProgress = new Set();
+    IN_PROGRESS_NONCE_ALLOCATIONS.set(chain, inProgress);
+  }
+
+  const hadConcurrency = inProgress.size > 0;
+  if (hadConcurrency) {
+    logger.warn('[WARN_RACE_CONDITION] Concurrent nonce access detected', {
+      chain,
+      opportunityId,
+      concurrentOpportunities: Array.from(inProgress),
+      warning: 'This may cause nonce conflicts. Consider implementing per-chain locks.',
+      tracking: 'https://github.com/arbitrage-system/arbitrage/issues/156',
+    });
+  }
+
+  inProgress.add(opportunityId);
+  return hadConcurrency;
+}
+
+/**
+ * Fix 5.1: Clear in-progress nonce allocation tracking for an opportunity.
+ *
+ * @param chain - Chain being accessed
+ * @param opportunityId - ID of the opportunity that finished
+ */
+function clearNonceAllocationTracking(chain: string, opportunityId: string): void {
+  const inProgress = IN_PROGRESS_NONCE_ALLOCATIONS.get(chain);
+  if (inProgress) {
+    inProgress.delete(opportunityId);
+    if (inProgress.size === 0) {
+      IN_PROGRESS_NONCE_ALLOCATIONS.delete(chain);
+    }
+  }
+}
+
+/**
  * Base class for execution strategies.
  * Provides shared utility methods.
  */
 export abstract class BaseExecutionStrategy {
   protected readonly logger: Logger;
 
+  /**
+   * Fix 10.1: Router contract cache for hot-path optimization.
+   * Avoids creating new Contract instances for every transaction.
+   * Key: `${chain}:${routerAddress}`
+   * Value: ethers.Contract instance
+   */
+  private readonly routerContractCache = new Map<string, ethers.Contract>();
+
+  /**
+   * Fix 10.1: Maximum number of cached router contracts.
+   * Prevents unbounded memory growth in case of many chains/routers.
+   */
+  private readonly MAX_ROUTER_CACHE_SIZE = 50;
+
   constructor(logger: Logger) {
     this.logger = logger;
+  }
+
+  /**
+   * Fix 10.1: Get or create a cached router contract instance.
+   * This avoids creating new Contract instances on every transaction,
+   * reducing GC pressure and allocation overhead on the hot path.
+   *
+   * @param routerAddress - DEX router address
+   * @param provider - JSON-RPC provider for the chain
+   * @param chain - Chain identifier (for cache key)
+   * @returns Cached or newly created Contract instance
+   */
+  protected getRouterContract(
+    routerAddress: string,
+    provider: ethers.JsonRpcProvider,
+    chain: string
+  ): ethers.Contract {
+    const cacheKey = `${chain}:${routerAddress}`;
+    let router = this.routerContractCache.get(cacheKey);
+
+    if (!router) {
+      // Evict oldest entries if cache is full
+      if (this.routerContractCache.size >= this.MAX_ROUTER_CACHE_SIZE) {
+        const firstKey = this.routerContractCache.keys().next().value;
+        if (firstKey) {
+          this.routerContractCache.delete(firstKey);
+        }
+      }
+
+      router = new ethers.Contract(routerAddress, UNISWAP_V2_ROUTER_ABI, provider);
+      this.routerContractCache.set(cacheKey, router);
+
+      this.logger.debug('Router contract cached', { chain, routerAddress });
+    }
+
+    return router;
   }
 
   /**
@@ -446,16 +644,17 @@ export abstract class BaseExecutionStrategy {
     // Add current price
     history.push({ price, timestamp: now });
 
-    // FIX 10.1: Update pre-computed last gas price for O(1) hot path access
-    ctx.lastGasPrices.set(chain, price);
-
-    // Fix 5.1: Use atomic-style invalidation instead of delete
-    // Setting validUntil to 0 marks as stale while preserving the entry
-    // This prevents thundering herd on immediate subsequent reads
-    const cached = this.medianCache.get(chain);
-    if (cached) {
-      cached.validUntil = 0; // Mark as stale, will be recomputed on next read
+    // FIX 10.1 & 1.2: Update pre-computed last gas price for O(1) hot path access
+    // Safety check ensures lastGasPrices is initialized (Fix 1.2)
+    if (ctx.lastGasPrices) {
+      ctx.lastGasPrices.set(chain, price);
     }
+
+    // Fix 5.2: Use simple delete instead of atomic-style invalidation
+    // In Node.js single-threaded event loop, there's no race between invalidation
+    // and recomputation. The previous "atomic-style" pattern (setting validUntil = 0)
+    // added unnecessary complexity for no benefit in this runtime model.
+    this.medianCache.delete(chain);
 
     // Remove old entries and cap size using in-place compaction
     // This avoids creating temporary arrays on every call (hot-path optimization)
@@ -646,12 +845,36 @@ export abstract class BaseExecutionStrategy {
   // ===========================================================================
 
   /**
-   * Fix 6.3 & 9.1: Check if MEV protection should be used for a transaction.
+   * Fix 6.2 & 6.3 & 9.1: Check if MEV protection should be used for a transaction.
    *
    * This helper consolidates the MEV eligibility check that was duplicated
    * in FlashLoanStrategy.execute() and submitTransaction().
    *
-   * MEV protection is used when:
+   * ## MEV Protection Flow by Strategy (Fix 6.2 Documentation)
+   *
+   * ### IntraChainStrategy (same-chain DEX arbitrage)
+   * 1. applyMEVProtection() - Adjusts gas prices for MEV resistance
+   * 2. submitTransaction() internally calls checkMevEligibility()
+   * 3. If eligible: Uses mevProvider.sendProtectedTransaction() (Flashbots/Protect)
+   * 4. If not eligible: Uses wallet.sendTransaction() directly
+   *
+   * ### FlashLoanStrategy (flash loan arbitrage)
+   * 1. applyMEVProtection() - Adjusts gas prices for MEV resistance
+   * 2. Calls checkMevEligibility() directly in execute()
+   * 3. If eligible: Uses mevProvider.sendProtectedTransaction()
+   * 4. If not eligible: Uses wallet.sendTransaction() directly
+   * Note: FlashLoanStrategy has its own submission logic (pending Fix 9.3 refactor)
+   *
+   * ### CrossChainStrategy (cross-chain bridge arbitrage)
+   * 1. applyMEVProtection() - Adjusts gas prices for source chain transactions
+   * 2. Calls checkMevEligibility() for both source and destination chains
+   * 3. MEV protection on SOURCE chain: Protects initial swap
+   * 4. Bridge transaction: Not MEV-protected (handled by bridge protocol)
+   * 5. MEV protection on DESTINATION chain: Protects final sell
+   *
+   * ## MEV Protection Criteria
+   *
+   * MEV protection is used when ALL conditions are met:
    * 1. MEV provider is available for the chain
    * 2. MEV provider is enabled
    * 3. Chain-specific MEV settings allow it (enabled !== false)
@@ -742,7 +965,7 @@ export abstract class BaseExecutionStrategy {
     // Fix 4.2 & 5.3: Get nonce from NonceManager only if not already set
     // This prevents double nonce allocation when strategy pre-allocates nonce
     //
-    // IMPORTANT (Fix 5.3 - Race Condition Warning):
+    // IMPORTANT (Fix 5.1 & 5.3 - Race Condition Warning):
     // If multiple strategies execute in parallel for the SAME chain without external
     // coordination, nonce allocation can race. The NonceManager itself is NOT
     // distributed-lock protected. For production environments with parallel execution:
@@ -753,7 +976,16 @@ export abstract class BaseExecutionStrategy {
     // The engine.ts currently uses per-opportunity locks which is insufficient for
     // same-chain parallel execution. Consider implementing per-chain locks if you
     // observe nonce conflicts in production.
+    //
+    // Tracking: https://github.com/arbitrage-system/arbitrage/issues/156
     let nonce: number | undefined;
+    const needsNonceAllocation = tx.nonce === undefined && ctx.nonceManager;
+
+    // Fix 5.1: Track nonce allocation to detect concurrent access
+    if (needsNonceAllocation) {
+      checkConcurrentNonceAccess(chain, options.opportunityId, this.logger);
+    }
+
     if (tx.nonce !== undefined) {
       // Nonce already set by caller, use it
       nonce = Number(tx.nonce);
@@ -764,10 +996,19 @@ export abstract class BaseExecutionStrategy {
         nonce = await ctx.nonceManager.getNextNonce(chain);
         tx.nonce = nonce;
       } catch (error) {
+        // Fix 5.1: Clear tracking on error
+        if (needsNonceAllocation) {
+          clearNonceAllocationTracking(chain, options.opportunityId);
+        }
         return {
           success: false,
           error: `[ERR_NONCE] Failed to get nonce: ${getErrorMessage(error)}`,
         };
+      } finally {
+        // Fix 5.1: Clear tracking after nonce allocation attempt
+        if (needsNonceAllocation) {
+          clearNonceAllocationTracking(chain, options.opportunityId);
+        }
       }
     }
 
@@ -1038,12 +1279,8 @@ export abstract class BaseExecutionStrategy {
     // Build swap path
     const path = this.buildSwapPath(opportunity);
 
-    // Create router contract interface
-    const routerContract = new ethers.Contract(
-      targetDex.routerAddress,
-      UNISWAP_V2_ROUTER_ABI,
-      provider
-    );
+    // Fix 10.1: Use cached router contract for hot-path optimization
+    const routerContract = this.getRouterContract(targetDex.routerAddress, provider, chain);
 
     // Set deadline (5 minutes from now)
     const deadline = Math.floor(Date.now() / 1000) + 300;

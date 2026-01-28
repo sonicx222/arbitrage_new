@@ -131,14 +131,50 @@ export class OpportunityConsumer {
 
   /**
    * Stop consuming opportunities.
+   *
+   * BUG-FIX: ACK all pending messages before shutdown to prevent redelivery storms.
+   * Without this, unacked messages would be redelivered on restart, potentially
+   * causing duplicate execution attempts for opportunities that were in-flight.
    */
   async stop(): Promise<void> {
     if (this.streamConsumer) {
       await this.streamConsumer.stop();
       this.streamConsumer = null;
     }
-    // Clear pending messages (will be redelivered by Redis Streams)
+
+    // BUG-FIX: ACK all pending messages before clearing to prevent redelivery storm
+    // This ensures opportunities that were queued but not yet executed are not
+    // redelivered on restart (they will need to be re-detected by the coordinator)
+    if (this.pendingMessages.size > 0) {
+      this.logger.info('ACKing pending messages during shutdown', {
+        count: this.pendingMessages.size,
+      });
+
+      const ackPromises: Promise<void>[] = [];
+      for (const [id, info] of this.pendingMessages) {
+        const ackPromise = this.streamsClient.xack(info.streamName, info.groupName, info.messageId)
+          .then(() => {
+            this.logger.debug('ACKed pending message during shutdown', { id });
+          })
+          .catch((error) => {
+            this.logger.warn('Failed to ACK pending message during shutdown', {
+              id,
+              error: getErrorMessage(error),
+            });
+          });
+        ackPromises.push(ackPromise);
+      }
+
+      // Wait for all ACKs with a reasonable timeout
+      await Promise.race([
+        Promise.allSettled(ackPromises),
+        new Promise<void>((resolve) => setTimeout(resolve, 5000)), // 5s timeout
+      ]);
+    }
+
+    // Clear local state
     this.pendingMessages.clear();
+    this.activeExecutions.clear();
   }
 
   /**
@@ -176,6 +212,41 @@ export class OpportunityConsumer {
       }
       if (!opportunity.type || typeof opportunity.type !== 'string') {
         throw new Error('Invalid opportunity: missing or invalid type');
+      }
+
+      // BUG-FIX: Add comprehensive validation for required fields
+      // This prevents crashes in execution strategies due to missing data
+      if (!opportunity.tokenIn || typeof opportunity.tokenIn !== 'string') {
+        throw new Error('Invalid opportunity: missing or invalid tokenIn');
+      }
+      if (!opportunity.tokenOut || typeof opportunity.tokenOut !== 'string') {
+        throw new Error('Invalid opportunity: missing or invalid tokenOut');
+      }
+
+      // Validate amountIn is present and can be converted to BigInt
+      if (!opportunity.amountIn) {
+        throw new Error('Invalid opportunity: missing amountIn');
+      }
+      try {
+        const amountBigInt = BigInt(opportunity.amountIn);
+        if (amountBigInt <= 0n) {
+          throw new Error('Invalid opportunity: amountIn must be positive');
+        }
+      } catch (e) {
+        throw new Error(`Invalid opportunity: amountIn is not a valid number: ${opportunity.amountIn}`);
+      }
+
+      // Validate chain fields for cross-chain opportunities
+      if (opportunity.type === 'cross-chain') {
+        if (!opportunity.buyChain || typeof opportunity.buyChain !== 'string') {
+          throw new Error('Invalid cross-chain opportunity: missing or invalid buyChain');
+        }
+        if (!opportunity.sellChain || typeof opportunity.sellChain !== 'string') {
+          throw new Error('Invalid cross-chain opportunity: missing or invalid sellChain');
+        }
+        if (opportunity.buyChain === opportunity.sellChain) {
+          throw new Error('Invalid cross-chain opportunity: buyChain and sellChain must be different');
+        }
       }
 
       // Handle the opportunity - returns true if successfully queued

@@ -772,8 +772,9 @@ export interface StrategyContext {
   /**
    * FIX 10.1: Pre-computed last gas prices for O(1) hot path access.
    * Updated atomically when gas baseline is updated.
+   * Optional to allow gradual adoption - strategies guard against undefined.
    */
-  lastGasPrices: Map<string, bigint>;
+  lastGasPrices?: Map<string, bigint>;
   stats: ExecutionStats;
   /** Simulation service for pre-flight transaction validation (Phase 1.1) */
   simulationService?: ISimulationService;
