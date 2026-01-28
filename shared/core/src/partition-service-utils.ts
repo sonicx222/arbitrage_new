@@ -18,7 +18,7 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
-import { CHAINS } from '../../config/src';
+import { CHAINS, TESTNET_CHAINS } from '../../config/src';
 
 // =============================================================================
 // Types
@@ -307,6 +307,9 @@ export function parsePort(
  * Validates chains from environment variable against known chain IDs.
  * Returns only valid chains, or defaults if none are valid.
  *
+ * P2-FIX: Now also validates against TESTNET_CHAINS to support devnet modes.
+ * Testnet chains are logged with a warning for visibility.
+ *
  * @param chainsEnv - Comma-separated chain IDs from environment
  * @param defaultChains - Default chains to use if validation fails
  * @param logger - Logger instance for warnings
@@ -321,25 +324,41 @@ export function validateAndFilterChains(
     return [...defaultChains];
   }
 
-  // Chain IDs are the keys of the CHAINS object
-  const validChainIds = Object.keys(CHAINS);
+  // Chain IDs are the keys of CHAINS (mainnet) and TESTNET_CHAINS
+  const mainnetChainIds = Object.keys(CHAINS);
+  const testnetChainIds = Object.keys(TESTNET_CHAINS);
+  const allValidChainIds = [...mainnetChainIds, ...testnetChainIds];
+
   const requestedChains = chainsEnv.split(',').map(c => c.trim().toLowerCase());
   const validChains: string[] = [];
+  const testnetChains: string[] = [];
   const invalidChains: string[] = [];
 
   for (const chain of requestedChains) {
-    if (validChainIds.includes(chain)) {
+    if (mainnetChainIds.includes(chain)) {
       validChains.push(chain);
+    } else if (testnetChainIds.includes(chain)) {
+      // P2-FIX: Accept testnet chains but track them separately
+      validChains.push(chain);
+      testnetChains.push(chain);
     } else {
       invalidChains.push(chain);
     }
+  }
+
+  // P2-FIX: Warn when using testnet chains (important for visibility)
+  if (testnetChains.length > 0 && logger) {
+    logger.warn('Using TESTNET chains - ensure this is intended', {
+      testnetChains,
+      hint: 'Testnet chains should only be used for testing, not production'
+    });
   }
 
   if (invalidChains.length > 0 && logger) {
     logger.warn('Invalid chain IDs in PARTITION_CHAINS, ignoring', {
       invalidChains,
       validChains,
-      availableChains: validChainIds
+      availableChains: allValidChainIds
     });
   }
 

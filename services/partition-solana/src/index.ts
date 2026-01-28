@@ -75,11 +75,33 @@ const logger = createLogger('partition-solana:main');
 // =============================================================================
 
 // Validate REDIS_URL - required for all partition services
+// P3-FIX: Also validate URL format to catch configuration errors early
 if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
   exitWithConfigError('REDIS_URL environment variable is required', {
     partitionId: P4_PARTITION_ID,
     hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
   }, logger);
+} else if (process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
+  // Validate REDIS_URL format
+  const redisUrl = process.env.REDIS_URL;
+  const validRedisProtocols = ['redis:', 'rediss:', 'redis+sentinel:'];
+  try {
+    const url = new URL(redisUrl);
+    if (!validRedisProtocols.includes(url.protocol)) {
+      exitWithConfigError('REDIS_URL has invalid protocol', {
+        partitionId: P4_PARTITION_ID,
+        protocol: url.protocol,
+        validProtocols: validRedisProtocols,
+        hint: 'URL should start with redis:// or rediss://'
+      }, logger);
+    }
+  } catch {
+    exitWithConfigError('REDIS_URL is not a valid URL', {
+      partitionId: P4_PARTITION_ID,
+      // Don't log the actual URL in case it contains credentials
+      hint: 'URL should be in format redis://[user:password@]host:port'
+    }, logger);
+  }
 }
 
 // Single partition config retrieval (P5-FIX pattern)
@@ -187,25 +209,29 @@ function selectSolanaRpcUrl(): { url: string; provider: string; isPublicEndpoint
   }
 
   // Priority 4: PublicNode (free, unlimited, rate-limited)
-  // Prefer over Solana public as it's generally more reliable
-  // Fall through to Solana public for compatibility
+  // More reliable than Solana public, but still rate-limited
+  // FIX: This was documented but not implemented - now added
+  return { url: providers.publicNode, provider: 'publicnode', isPublicEndpoint: true };
 
-  // Priority 5: Solana Public (last resort)
-  return { url: providers.solanaPublic, provider: 'solana-public', isPublicEndpoint: true };
+  // NOTE: Priority 5 (Solana Public) is no longer used since PublicNode is generally more reliable.
+  // If PublicNode is down, the service will fail to start with public endpoint in production,
+  // which is the intended behavior (public endpoints shouldn't be used in production).
 }
 
 // Select RPC URL with priority
 const rpcSelection = selectSolanaRpcUrl();
 const SOLANA_RPC_URL = rpcSelection.url;
 
-// Issue 3.3: Warn about public RPC in production
+// Issue 3.3: FAIL startup if public RPC in production (P0-CRITICAL)
+// Public RPC endpoints have aggressive rate limits that will cause detection failures.
+// Using public RPC in production is a configuration error that must be fixed.
 if (rpcSelection.isPublicEndpoint && process.env.NODE_ENV === 'production') {
-  logger.warn('Using public Solana RPC endpoint in production - this is NOT recommended', {
+  exitWithConfigError('Public Solana RPC endpoint cannot be used in production', {
+    partitionId: P4_PARTITION_ID,
     provider: rpcSelection.provider,
     network: isDevnetMode() ? 'devnet' : 'mainnet',
-    recommendation: 'Set HELIUS_API_KEY or TRITON_API_KEY for better rate limits',
-    docs: 'See README.md "Solana RPC Configuration" section',
-  });
+    hint: 'Set HELIUS_API_KEY or TRITON_API_KEY for production deployment. See README.md "Solana RPC Configuration" section.',
+  }, logger);
 }
 
 // =============================================================================
@@ -252,6 +278,7 @@ setupDetectorEventHandlers(detector, logger, P4_PARTITION_ID);
 solanaArbitrageDetector.connectToSolanaDetector(detector);
 
 // Forward arbitrage opportunities to the main event stream and auto-publish to Redis
+// BUG-FIX: Added try-catch to prevent unhandled promise rejections from crashing the process
 solanaArbitrageDetector.on('opportunity', async (opportunity) => {
   logger.info('Solana arbitrage opportunity detected', {
     id: opportunity.id,
@@ -263,7 +290,26 @@ solanaArbitrageDetector.on('opportunity', async (opportunity) => {
   });
 
   // Publish to Redis Streams if client is configured
-  await solanaArbitrageDetector.publishOpportunity(opportunity);
+  // BUG-FIX: Wrap in try-catch to prevent unhandled rejection if Redis fails
+  try {
+    await solanaArbitrageDetector.publishOpportunity(opportunity);
+  } catch (error) {
+    // Log error but don't crash - opportunity was already detected and logged
+    // Redis publishing failure shouldn't stop the detection service
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error('Failed to publish opportunity to Redis Streams', {
+      opportunityId: opportunity.id,
+      error: errorMessage,
+    });
+    // P3-FIX: Emit event for monitoring systems to track Redis publish failures
+    // This allows external monitoring (Prometheus, alerts, etc.) to react to Redis issues
+    solanaArbitrageDetector.emit('redis-publish-error', {
+      opportunityId: opportunity.id,
+      error: errorMessage,
+      timestamp: Date.now(),
+    });
+    // Don't re-throw - allow the service to continue processing other opportunities
+  }
 });
 
 // =============================================================================
@@ -274,15 +320,31 @@ solanaArbitrageDetector.on('opportunity', async (opportunity) => {
 // in test scenarios and allow proper handler cleanup
 const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
 
-// Ensure arbitrage detector is stopped when main detector stops
-detector.on('stopped', async () => {
+// P2-FIX: Store handler reference for cleanup
+const detectorStoppedHandler = async (): Promise<void> => {
   try {
     await solanaArbitrageDetector.stop();
     logger.info('SolanaArbitrageDetector stopped on main detector shutdown');
   } catch (error) {
     logger.warn('Failed to stop SolanaArbitrageDetector during shutdown', { error });
   }
-});
+};
+
+// Ensure arbitrage detector is stopped when main detector stops
+detector.on('stopped', detectorStoppedHandler);
+
+// P2-FIX: Export cleanup function that includes detector listener cleanup
+// BUG-FIX: Also stop solanaArbitrageDetector to clean up its internal detector listeners
+// This prevents memory leaks when cleanupAllHandlers is called directly (not via 'stopped' event)
+const cleanupAllHandlers = (): void => {
+  detector.off('stopped', detectorStoppedHandler);
+  // P2-FIX: Stop the arbitrage detector to clean up its detector connection listeners
+  // This is safe to call even if already stopped (stop() is idempotent)
+  solanaArbitrageDetector.stop().catch((error) => {
+    logger.warn('Failed to stop solanaArbitrageDetector during cleanup', { error });
+  });
+  cleanupProcessHandlers();
+};
 
 // =============================================================================
 // Main Entry Point
@@ -374,7 +436,8 @@ async function main(): Promise<void> {
     }
 
     // BUG-4.1-FIX: Clean up process handlers before exit to prevent listener leaks
-    cleanupProcessHandlers();
+    // P2-FIX: Use cleanupAllHandlers to also clean up detector 'stopped' listener
+    cleanupAllHandlers();
 
     process.exit(1);
   }
@@ -406,7 +469,8 @@ export {
   P4_PARTITION_ID,
   P4_CHAINS,
   P4_REGION,
-  cleanupProcessHandlers,
+  // P2-FIX: Export comprehensive cleanup function
+  cleanupAllHandlers as cleanupProcessHandlers,
   // Issue 2.1/2.2: Export RPC selection utilities for testing
   selectSolanaRpcUrl,
   isDevnetMode,
