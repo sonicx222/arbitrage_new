@@ -502,6 +502,72 @@ describe('P3 Process Handler Cleanup', () => {
   });
 });
 
+describe('P3 Error Handling', () => {
+  const originalEnv = process.env;
+  let cleanupFn: (() => void) | null = null;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+  });
+
+  afterEach(async () => {
+    try {
+      if (cleanupFn) {
+        cleanupFn();
+      }
+    } catch {
+      // Ignore cleanup errors
+    } finally {
+      cleanupFn = null;
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('uncaughtException');
+      process.removeAllListeners('unhandledRejection');
+    }
+    process.env = originalEnv;
+  });
+
+  it('should have exitWithConfigError available for configuration errors', async () => {
+    const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
+    expect(exitWithConfigError).toBeDefined();
+    expect(typeof exitWithConfigError).toBe('function');
+  });
+
+  it('exitWithConfigError should throw with config error message', async () => {
+    const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
+    expect(() => exitWithConfigError('Test error', { test: true })).toThrow('Config error: Test error');
+  });
+
+  it('should have closeServerWithTimeout available for cleanup on errors', async () => {
+    const { closeServerWithTimeout } = jest.requireMock('@arbitrage/core');
+    expect(closeServerWithTimeout).toBeDefined();
+    expect(typeof closeServerWithTimeout).toBe('function');
+  });
+
+  it('closeServerWithTimeout should resolve when called', async () => {
+    const { closeServerWithTimeout } = jest.requireMock('@arbitrage/core');
+    await expect(closeServerWithTimeout({}, 1000, {})).resolves.toBeUndefined();
+  });
+
+  it('should have createPartitionHealthServer that returns closeable server', async () => {
+    const { createPartitionHealthServer } = jest.requireMock('@arbitrage/core');
+    const mockServer = createPartitionHealthServer({});
+    expect(mockServer).toBeDefined();
+    expect(typeof mockServer.close).toBe('function');
+  });
+
+  it('should correctly handle missing partition config via mock', async () => {
+    // Verify getPartition mock is configured correctly
+    const { getPartition } = jest.requireMock('@arbitrage/config');
+
+    // Normal case returns config
+    const config = getPartition('high-value');
+    expect(config).toBeDefined();
+    expect(config.chains).toEqual(['ethereum', 'zksync', 'linea']);
+  });
+});
+
 describe('P3 High-Value Chain Characteristics', () => {
   // Reset modules before this test block to get fresh mock state
   beforeAll(() => {

@@ -152,12 +152,13 @@ const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, l
 // =============================================================================
 
 // Guard against multiple main() invocations (e.g., from integration tests)
-// BUG-FIX: Use atomic pattern with both "started" and "starting" flags to prevent race conditions
+// Uses dual flags: mainStarted (completed) and mainStarting (in progress)
+// Safe in Node.js single-threaded event loop - synchronous check within one tick
 let mainStarted = false;
 let mainStarting = false;
 
 async function main(): Promise<void> {
-  // BUG-FIX: Atomic check-and-set to prevent race conditions in high-concurrency scenarios
+  // Check-and-set guard prevents duplicate invocations within same event loop tick
   if (mainStarted || mainStarting) {
     logger.warn('main() already started or starting, ignoring duplicate invocation');
     return;

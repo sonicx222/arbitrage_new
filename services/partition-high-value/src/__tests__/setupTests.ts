@@ -24,5 +24,9 @@ jest.setTimeout(10000);
 afterAll(async () => {
   // Allow pending timers/promises to resolve before test teardown
   // Jest's global timeout (10000ms) provides safety against hanging
-  await new Promise(resolve => setTimeout(resolve, 100));
+  try {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } catch {
+    // Ignore any unexpected errors during teardown
+  }
 });
