@@ -23,6 +23,23 @@ This is a professional multi-chain arbitrage trading system with:
 - **Architecture**: Partitioned detectors, Redis Streams, WebSocket event processing
 - **Key Modules**: Execution engine, Cross-chain detector, Coordinator, Risk management
 
+### Critical Rules (Anti-Hallucination)
+- **NEVER** report a bug unless you can point to the exact line(s) causing it
+- **NEVER** assume code behavior without tracing the actual implementation
+- **IF** you need to see related code to verify, ASK to see it first
+- **IF** something looks suspicious but you can't prove it, label as "NEEDS VERIFICATION"
+- **PREFER** under-reporting to over-reporting (false positives waste developer time)
+- **ALWAYS** check if a pattern exists elsewhere in the codebase before flagging
+
+### Analysis Process (Think Step-by-Step)
+Before reporting any issue, work through these steps:
+1. **Understand Intent**: What is this code trying to do?
+2. **Trace Data Flow**: Where do inputs come from? Where do outputs go?
+3. **Identify Assumptions**: What conditions must be true for this to work?
+4. **Find Violations**: Where could those assumptions be violated?
+5. **Verify Pattern**: Does existing codebase handle this differently elsewhere?
+6. **Assess Impact**: What's the worst case if this fails?
+
 ### Task
 Analyze the following code/module for:
 
@@ -63,21 +80,109 @@ Analyze the following code/module for:
 ### Expected Output Format
 For each issue found, provide:
 
-```markdown
 #### [PRIORITY] Issue Title
 **Location**: file:line
 **Type**: Bug | Missing Feature | Code Quality
+**Confidence**: HIGH | MEDIUM | LOW
+- HIGH: I can see the exact code path causing this issue
+- MEDIUM: Pattern matches known bug category but needs verification
+- LOW: Potential issue based on code smell, may be intentional
 **Impact**: Description of what could go wrong
 **Evidence**: Code snippet showing the problem
 **Fix**: Specific code change to resolve
 **Regression Test**: Test case to prevent recurrence
+
+### What NOT to Report (Reduce Noise)
+- Style preferences that don't affect correctness
+- Performance optimizations without measured bottlenecks
+- Refactoring suggestions unrelated to bugs
+- Issues in test files (unless they cause false passes)
+- Duplicate issues (consolidate related problems)
+- Speculative issues without concrete evidence
+
+### If You Need More Context
+Instead of guessing, ask:
+- "I need to see [file] to verify how [function] handles [case]"
+- "Is [pattern] intentional in this codebase? I see it at [location]"
+- "What is the expected behavior when [edge case] occurs?"
 ```
 
-### Constraints
-- If you're unsure whether something is a bug, say "POTENTIAL ISSUE" and explain your uncertainty
-- Focus on issues that could cause financial loss, system downtime, or data corruption
-- Do NOT suggest refactoring unless it's directly related to a bug
-- Verify against existing patterns in the codebase before flagging as an issue
+---
+
+## Few-Shot Examples
+
+### Example 1: HIGH Confidence Bug (P1)
+
+```markdown
+#### [P1] Incorrect Fee Handling for 0% Fee DEXs
+**Location**: services/execution-engine/src/execution-engine.ts:924
+**Type**: Bug
+**Confidence**: HIGH
+**Impact**: DEXs with 0% fee (e.g., promotional pools, some Uniswap V3 pools) would incorrectly use default 0.3% fee, causing wrong profit calculation. Could reject profitable opportunities or accept unprofitable ones.
+**Evidence**:
+```typescript
+const fee = dexConfig.fee || 0.003; // BUG: 0 is falsy, falls back to 0.3%
+```
+**Fix**:
+```typescript
+const fee = dexConfig.fee ?? 0.003; // CORRECT: only fallback for undefined/null
+```
+**Regression Test**:
+```typescript
+it('should use 0% fee when DEX fee is explicitly 0', () => {
+  const dexConfig = { fee: 0, name: 'promotional-pool' };
+  const result = calculateProfit(dexConfig, swap);
+  expect(result.feeApplied).toBe(0);
+});
+```
+```
+
+### Example 2: MEDIUM Confidence Bug (P0)
+
+```markdown
+#### [P0] Potential Race Condition in Cross-Chain Price Update
+**Location**: shared/core/src/partitioned-detector.ts:234-248
+**Type**: Bug
+**Confidence**: MEDIUM
+**Impact**: If two chains emit price updates simultaneously, the Map iteration in findCrossChainDiscrepancies could see inconsistent state mid-update. Could cause missed arbitrage opportunities or false positive signals.
+**Evidence**:
+```typescript
+// Iterating over Map while other async handlers may modify it
+for (const [chainId, prices] of this.pricesByChain) {
+  // ... comparison logic
+}
+```
+**Fix**:
+```typescript
+// Snapshot the Map before iteration
+const priceSnapshot = new Map(this.pricesByChain);
+for (const [chainId, prices] of priceSnapshot) {
+  // ... comparison logic
+}
+```
+**Regression Test**:
+```typescript
+it('should handle concurrent price updates without race condition', async () => {
+  const updates = chains.map(c => detector.updatePrice(c, price));
+  await Promise.all(updates);
+  // Verify no missed comparisons
+});
+```
+
+**Note**: MEDIUM confidence because I need to verify if updates are truly concurrent or serialized by the event loop. Check if there are any await points in the price update handlers.
+```
+
+### Example 3: NEEDS VERIFICATION
+
+```markdown
+#### [P1] Possible Missing Consumer Group Acknowledgment
+**Location**: services/coordinator/src/coordinator.ts:~180
+**Type**: NEEDS VERIFICATION
+**Confidence**: LOW
+**Impact**: If messages are not acknowledged after processing, they will be re-delivered on restart, potentially causing duplicate execution.
+**Evidence**:
+I see xreadgroup calls but need to verify xack is called after successful processing.
+**Request**: Please show me the full message processing loop including any xack calls.
 ```
 
 ---
@@ -120,25 +225,47 @@ Run this mental checklist for every module:
 ## Targeted Analysis Commands
 
 ### Find potential || vs ?? issues
+// turbo
 ```bash
-grep -rn "|| 0" services/ shared/
-grep -rn "|| false" services/ shared/ 
+grep -rn "|| 0" services/ shared/ --include="*.ts" | grep -v test | grep -v node_modules
+```
+
+### Find potential || vs ?? for booleans
+// turbo
+```bash
+grep -rn "|| false" services/ shared/ --include="*.ts" | grep -v test | grep -v node_modules
 ```
 
 ### Find unhandled promise patterns
+// turbo
 ```bash
-grep -rn "\.then(" services/ shared/ | grep -v ".catch"
+grep -rn "\.then(" services/ shared/ --include="*.ts" | grep -v ".catch" | grep -v test
 ```
 
 ### Find event listeners that might leak
+// turbo
 ```bash
-grep -rn "\.on(" services/ shared/ | grep -v "removeListener"
+grep -rn "\.on(" services/ shared/ --include="*.ts" | grep -v "removeListener" | grep -v test | head -20
 ```
 
 ### Find hardcoded values that should be config
+// turbo
 ```bash
-grep -rn -E "[0-9]{4,}" services/ shared/ --include="*.ts" | grep -v test | grep -v ".d.ts"
+grep -rn -E "[0-9]{4,}" services/ shared/ --include="*.ts" | grep -v test | grep -v ".d.ts" | grep -v node_modules | head -20
 ```
+
+---
+
+## Verification Checklist (Before Submitting Analysis)
+
+Before finalizing your bug report, verify:
+- [ ] Each issue has a specific file and line number
+- [ ] Each issue includes the actual problematic code snippet
+- [ ] Each fix is syntactically correct and could be applied directly
+- [ ] No issues are duplicates of each other
+- [ ] No issues contradict patterns verified elsewhere in codebase
+- [ ] Confidence levels are honest (when in doubt, use MEDIUM or LOW)
+- [ ] NEEDS VERIFICATION issues include specific questions to resolve
 
 ---
 
@@ -153,7 +280,7 @@ grep -rn -E "[0-9]{4,}" services/ shared/ --include="*.ts" | grep -v test | grep
 
 ### Focus Areas
 - Fee calculation accuracy
-- Transaction simulation validation
+- Transaction simulation validation  
 - Gas estimation edge cases
 ```
 
@@ -171,6 +298,21 @@ grep -rn -E "[0-9]{4,}" services/ shared/ --include="*.ts" | grep -v test | grep
 - Partition boundary handling
 ```
 
+### Example 3: Security-focused analysis
+```
+[Use the prompt template above with:]
+
+### Code to Analyze
+[services/execution-engine/src/flashloan-executor.ts]
+[shared/core/src/transaction-builder.ts]
+
+### Focus Areas
+- Reentrancy vulnerabilities
+- Input validation
+- Slippage protection
+- Maximum exposure limits
+```
+
 ---
 
 ## Follow-up Actions
@@ -183,8 +325,29 @@ After running bug hunt, prioritize fixes by:
 4. **P3 (Tech Debt)**: Track in docs/todos.md
 
 For each fix:
+// turbo
 1. Write failing test first (TDD)
-2. Implement minimal fix
-3. Run `npm run typecheck && npm test`
-4. Create regression test
-5. Update docs/IMPLEMENTATION_PLAN.md if applicable
+```bash
+npm test -- --testNamePattern="[bug-name]"
+```
+// turbo
+2. Implement minimal fix and verify
+```bash
+npm run typecheck && npm test
+```
+3. Create regression test
+4. Update docs/IMPLEMENTATION_PLAN.md if applicable
+
+---
+
+## Cross-Reference: Known Patterns in This Codebase
+
+These patterns are CORRECT in this codebase (don't flag as bugs):
+
+| Pattern | Location | Reason |
+|---------|----------|--------|
+| `fee ?? 0.003` | execution-engine.ts | Proper nullish coalescing for fees |
+| `Object.assign({}, state)` | partitioned-detector.ts | Snapshot for iteration safety |
+| `Atomics.store/load` | price-matrix.ts | Thread-safe SharedArrayBuffer access |
+| `xack after processing` | coordinator.ts | Proper stream acknowledgment |
+| `exponential backoff` | websocket-manager.ts | Reconnection strategy |
