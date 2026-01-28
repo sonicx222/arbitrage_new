@@ -807,8 +807,10 @@ export class ChainDetectorInstance extends EventEmitter {
         lastUpdate: Date.now()
       });
 
-      // FIX Bug 4.2: Invalidate snapshot cache when pair is updated
+      // FIX Bug 4.2 & Race 5.1: Atomic snapshot cache invalidation (same as handleSyncEvent)
+      this.snapshotVersion++;
       this.snapshotCache = null;
+      this.dexPoolCache = null;
 
       // Calculate price and emit price update
       const price = calculatePriceFromBigIntReserves(
@@ -1295,7 +1297,17 @@ export class ChainDetectorInstance extends EventEmitter {
             // P0-FIX: Route potential factory events to factory subscription service
             // Check if this is a factory event (PairCreated, PoolCreated, etc.)
             if (this.isFactoryEventSignature(topic0)) {
-              this.factorySubscriptionService.handleFactoryEvent(result);
+              // FIX Bug 4.4: Wrap factory event handling in try-catch
+              // If handleFactoryEvent throws, don't crash the entire message handler
+              try {
+                this.factorySubscriptionService.handleFactoryEvent(result);
+              } catch (factoryError) {
+                this.logger.error('Factory event handling failed', {
+                  error: (factoryError as Error).message,
+                  topic0,
+                  address: result.address
+                });
+              }
             }
           }
         } else if (result && 'number' in result && result.number) {
@@ -1359,11 +1371,15 @@ export class ChainDetectorInstance extends EventEmitter {
           lastUpdate: Date.now()
         });
 
-        // FIX Bug 4.2: Invalidate snapshot cache when pair is updated
-        // This ensures arbitrage detection uses fresh data
-        this.snapshotCache = null;
-        // FIX Perf 10.3: Increment version for accurate DexPool cache invalidation
+        // FIX Bug 4.2 & Race 5.1: Atomic snapshot cache invalidation
+        // Increment version FIRST, then invalidate cache
+        // This ensures any concurrent reader sees the new version before cache is cleared
+        // The reader will either: (a) see old version + old cache (valid), or
+        // (b) see new version + null cache (will rebuild)
+        // Never: (c) see old version + null cache (which would cause stale rebuild)
         this.snapshotVersion++;
+        this.snapshotCache = null;
+        this.dexPoolCache = null; // Also invalidate DexPool cache
 
         this.eventsProcessed++;
 
@@ -1722,16 +1738,26 @@ export class ChainDetectorInstance extends EventEmitter {
       return null;
     }
 
-    // BUG FIX: Adjust price for reverse order pairs
-    // If tokens are in reverse order, invert the price for accurate comparison
-    const isReversed = this.isReverseOrder(pair1, pair2);
-    let price2 = isReversed && price2Raw !== 0 ? 1 / price2Raw : price2Raw;
+    // FIX Bug 4.1: Validate prices BEFORE any division to prevent Infinity/overflow
+    // This is more efficient than checking after - avoids unnecessary computation
+    // Threshold: 1e-15 ensures 1/price stays within safe float range (< 1e15)
+    const MIN_SAFE_PRICE = 1e-15;
+    const MAX_SAFE_PRICE = 1e15;
 
-    // FIX Bug 4.4: Guard against zero prices to prevent division by zero
-    const minPrice = Math.min(price1, price2);
-    if (minPrice <= 0 || !Number.isFinite(minPrice)) {
+    if (!Number.isFinite(price1) || price1 < MIN_SAFE_PRICE || price1 > MAX_SAFE_PRICE) {
       return null;
     }
+    if (!Number.isFinite(price2Raw) || price2Raw < MIN_SAFE_PRICE || price2Raw > MAX_SAFE_PRICE) {
+      return null;
+    }
+
+    // BUG FIX: Adjust price for reverse order pairs
+    // If tokens are in reverse order, invert the price for accurate comparison
+    // Safe to divide now - we've validated price2Raw is within bounds
+    const isReversed = this.isReverseOrder(pair1, pair2);
+    const price2 = isReversed ? 1 / price2Raw : price2Raw;
+
+    const minPrice = Math.min(price1, price2);
 
     // Calculate price difference as a percentage of the lower price
     const priceDiff = Math.abs(price1 - price2) / minPrice;
@@ -1880,16 +1906,20 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (pairsSnapshot.size < 3) return;
 
+    // FIX Race 5.1: Capture version ONCE at the start to avoid TOCTOU race
+    // Between checking dexPoolCacheVersion === snapshotVersion and using cache,
+    // a Sync event could increment snapshotVersion making our cache stale
+    const capturedVersion = this.snapshotVersion;
+
     // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
-    // This prevents stale cache when individual pools change but size remains same
     let pools: DexPool[];
-    if (this.dexPoolCache && this.dexPoolCacheVersion === this.snapshotVersion) {
+    if (this.dexPoolCache && this.dexPoolCacheVersion === capturedVersion) {
       pools = this.dexPoolCache;
     } else {
       pools = Array.from(pairsSnapshot.values())
         .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
       this.dexPoolCache = pools;
-      this.dexPoolCacheVersion = this.snapshotVersion;
+      this.dexPoolCacheVersion = capturedVersion; // Use captured version, not current
     }
 
     // BUG-1 FIX: Use token addresses instead of symbols
@@ -1995,16 +2025,18 @@ export class ChainDetectorInstance extends EventEmitter {
     if (pairsSnapshot.size < 5 || !this.multiLegPathFinder) return;
     this.lastMultiLegCheck = now;
 
+    // FIX Race 5.1: Capture version ONCE at the start to avoid TOCTOU race
+    const capturedVersion = this.snapshotVersion;
+
     // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
-    // This prevents stale cache when individual pools change but size remains same
     let pools: DexPool[];
-    if (this.dexPoolCache && this.dexPoolCacheVersion === this.snapshotVersion) {
+    if (this.dexPoolCache && this.dexPoolCacheVersion === capturedVersion) {
       pools = this.dexPoolCache;
     } else {
       pools = Array.from(pairsSnapshot.values())
         .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
       this.dexPoolCache = pools;
-      this.dexPoolCacheVersion = this.snapshotVersion;
+      this.dexPoolCacheVersion = capturedVersion; // Use captured version, not current
     }
 
     // BUG-1 FIX: Use token addresses instead of symbols (same fix as triangular)
@@ -2099,17 +2131,18 @@ export class ChainDetectorInstance extends EventEmitter {
    * - Fees > 100% (clearly incorrect)
    */
   private validateFee(fee: number | undefined, defaultFee: number = 0.003): number {
+    // Return default for missing fees (normal case - don't log)
     if (fee === undefined || fee === null) {
       return defaultFee;
     }
+    // Log warning only for explicitly INVALID fees (NaN, Infinity, negative, >100%)
+    // These indicate a bug in fee conversion or configuration
     if (!Number.isFinite(fee) || fee < 0 || fee > 1) {
-      // Log warning for debugging if fee was provided but invalid
-      if (fee !== undefined) {
-        this.logger.warn('Invalid fee detected, using default', {
-          providedFee: fee,
-          defaultFee
-        });
-      }
+      this.logger.warn('Invalid fee detected, using default', {
+        providedFee: fee,
+        defaultFee,
+        reason: !Number.isFinite(fee) ? 'not finite' : fee < 0 ? 'negative' : 'exceeds 100%'
+      });
       return defaultFee;
     }
     return fee;
@@ -2136,6 +2169,9 @@ export class ChainDetectorInstance extends EventEmitter {
       ? this.blockLatencies.reduce((a, b) => a + b, 0) / this.blockLatencies.length
       : 0;
 
+    // FIX 10.4: Include hot pairs count for monitoring volatility-based prioritization
+    const activityStats = this.activityTracker.getStats();
+
     return {
       chainId: this.chainId,
       status: this.status,
@@ -2143,7 +2179,8 @@ export class ChainDetectorInstance extends EventEmitter {
       opportunitiesFound: this.opportunitiesFound,
       lastBlockNumber: this.lastBlockNumber,
       avgBlockLatencyMs: avgLatency,
-      pairsMonitored: this.pairs.size
+      pairsMonitored: this.pairs.size,
+      hotPairsCount: activityStats.hotPairs
     };
   }
 

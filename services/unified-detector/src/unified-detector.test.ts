@@ -1,5 +1,5 @@
 /**
- * Unit Tests for UnifiedChainDetector
+ * Unit Tests for UnifiedChainDetector (Original)
  *
  * Tests the multi-chain detector service including:
  * - Lifecycle management
@@ -7,7 +7,18 @@
  * - Health reporting
  * - Event emission
  *
+ * FIX 8.3: CONSOLIDATION CANDIDATE
+ * There is another test file at __tests__/unit/unified-detector.test.ts
+ * that uses different mocking patterns (RecordingLogger vs jest.fn).
+ *
+ * Recommendation: Consolidate both test files into __tests__/unit/unified-detector.test.ts
+ * to maintain consistent test organization across the codebase.
+ *
+ * This file is kept for now as it may test different scenarios.
+ * TODO: Review and merge test cases, then delete this file.
+ *
  * @see ADR-003: Partitioned Chain Detectors
+ * @see __tests__/unit/unified-detector.test.ts for additional tests
  */
 
 import { EventEmitter } from 'events';

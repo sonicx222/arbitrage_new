@@ -136,6 +136,8 @@ export interface ChainStats {
   lastBlockNumber: number;
   avgBlockLatencyMs: number;
   pairsMonitored: number;
+  /** FIX 10.4: Expose hot pair count for monitoring volatility-based prioritization */
+  hotPairsCount?: number;
 }
 
 // =============================================================================
@@ -162,8 +164,19 @@ export class UnifiedChainDetector extends EventEmitter {
   private healthReporter: HealthReporter | null = null;
   private metricsCollector: MetricsCollector | null = null;
 
-  // Legacy: Keep chainInstances for backward compatibility with getChainInstance()
-  // This is populated from chainInstanceManager for existing API consumers
+  /**
+   * @deprecated Since v2.0.0 - Use chainInstanceManager.getChainInstance() instead
+   *
+   * FIX 7.2: Legacy chainInstances Map is deprecated.
+   * Kept for backward compatibility with existing API consumers calling getChainInstance().
+   * This map is populated from chainInstanceManager after successful chain startup.
+   *
+   * Migration path:
+   * - Internal code: Use chainInstanceManager.getChainInstance(chainId)
+   * - External code: Use UnifiedChainDetector.getChainInstance(chainId) (unchanged API)
+   *
+   * Scheduled removal: Next major version
+   */
   private chainInstances: Map<string, ChainDetectorInstance> = new Map();
 
   private startTime: number = 0;

@@ -8,7 +8,7 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { Router } from 'express';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
-import type { CoordinatorStateProvider, SystemMetrics, AlertResponse } from '../api/types';
+import type { CoordinatorStateProvider, SystemMetrics, Alert } from '../api/types';
 
 // Mock @shared/security to bypass auth in tests
 jest.mock('@shared/security', () => ({
@@ -70,7 +70,7 @@ function createMockStateProvider(overrides?: Partial<CoordinatorStateProvider>):
     ['opp-2', { id: 'opp-2', confidence: 0.88, timestamp: Date.now() - 2000, chain: 'bsc', buyDex: 'pancakeswap', sellDex: 'biswap' }]
   ]);
 
-  const defaultAlertHistory: AlertResponse[] = [
+  const defaultAlertHistory: Alert[] = [
     { type: 'SERVICE_UNHEALTHY', service: 'partition-l2-turbo', severity: 'high', timestamp: Date.now() - 60000 }
   ];
 
