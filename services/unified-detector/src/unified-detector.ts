@@ -185,8 +185,12 @@ export class UnifiedChainDetector extends EventEmitter {
   // PERF-FIX: Track CPU usage for health reporting
   private lastCpuUsage: { user: number; system: number; timestamp: number } | null = null;
 
-  // Track active opportunities for health reporting
-  private activeOpportunitiesCount: number = 0;
+  // BUG-FIX: Track active opportunities with expiration times
+  // Previously only incremented, causing unbounded memory growth
+  // Now stores expiresAt timestamps for proper cleanup
+  private activeOpportunities: Map<string, number> = new Map(); // opportunityId -> expiresAt
+  private opportunityCleanupInterval: NodeJS.Timeout | null = null;
+  private static readonly OPPORTUNITY_CLEANUP_INTERVAL_MS = 5000;
 
   constructor(config: UnifiedDetectorConfig = {}) {
     super();
@@ -276,12 +280,17 @@ export class UnifiedChainDetector extends EventEmitter {
       // Forward events from chain instance manager
       this.chainInstanceManager.on('priceUpdate', (update) => this.emit('priceUpdate', update));
       this.chainInstanceManager.on('opportunity', (opp) => {
-        // Track active opportunities for health reporting
-        this.activeOpportunitiesCount++;
+        // BUG-FIX: Track active opportunities with proper expiration
+        // Store opportunity ID with expiration time for cleanup
+        const expiresAt = opp.expiresAt || (Date.now() + 5000); // Default 5s expiry
+        this.activeOpportunities.set(opp.id, expiresAt);
         this.emit('opportunity', opp);
       });
       this.chainInstanceManager.on('chainError', (event) => this.emit('chainError', event));
       this.chainInstanceManager.on('statusChange', (event) => this.emit('statusChange', event));
+
+      // BUG-FIX: Start cleanup interval to remove expired opportunities
+      this.startOpportunityCleanup();
 
       // Start chain instances via manager
       const startResult = await this.chainInstanceManager.startAll();
@@ -337,9 +346,48 @@ export class UnifiedChainDetector extends EventEmitter {
     }
   }
 
+  /**
+   * BUG-FIX: Start periodic cleanup of expired opportunities.
+   * Prevents unbounded memory growth from never-cleaned opportunity tracking.
+   */
+  private startOpportunityCleanup(): void {
+    // Clear any existing interval (safety for restart scenarios)
+    if (this.opportunityCleanupInterval) {
+      clearInterval(this.opportunityCleanupInterval);
+    }
+
+    this.opportunityCleanupInterval = setInterval(() => {
+      const now = Date.now();
+      let expiredCount = 0;
+
+      // Remove expired opportunities
+      for (const [id, expiresAt] of this.activeOpportunities) {
+        if (expiresAt < now) {
+          this.activeOpportunities.delete(id);
+          expiredCount++;
+        }
+      }
+
+      // Only log if we cleaned up a significant number (reduce log noise)
+      if (expiredCount > 10) {
+        this.logger.debug('Cleaned up expired opportunities', {
+          expired: expiredCount,
+          remaining: this.activeOpportunities.size
+        });
+      }
+    }, UnifiedChainDetector.OPPORTUNITY_CLEANUP_INTERVAL_MS);
+  }
+
   async stop(): Promise<void> {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping UnifiedChainDetector');
+
+      // BUG-FIX: Stop opportunity cleanup interval and clear tracking
+      if (this.opportunityCleanupInterval) {
+        clearInterval(this.opportunityCleanupInterval);
+        this.opportunityCleanupInterval = null;
+      }
+      this.activeOpportunities.clear();
 
       // REFACTOR 9.1: Stop extracted modules
 
@@ -374,6 +422,10 @@ export class UnifiedChainDetector extends EventEmitter {
         this.crossRegionHealth = null;
       }
 
+      // BUG-FIX: Clear degradation manager reference to allow proper cleanup
+      // Note: The manager is a singleton, so we don't stop it, just clear our reference
+      this.degradationManager = null;
+
       // Disconnect Redis
       if (this.streamsClient) {
         await this.streamsClient.disconnect();
@@ -384,6 +436,9 @@ export class UnifiedChainDetector extends EventEmitter {
         await this.redis.disconnect();
         this.redis = null;
       }
+
+      // BUG-FIX: Reset CPU tracking state to avoid stale data on restart
+      this.lastCpuUsage = null;
 
       this.logger.info('UnifiedChainDetector stopped');
     });
@@ -602,7 +657,8 @@ export class UnifiedChainDetector extends EventEmitter {
       cpuUsage: Math.round(cpuUsagePercent * 100) / 100, // Round to 2 decimal places
       uptimeSeconds,
       lastHealthCheck: Date.now(),
-      activeOpportunities: this.activeOpportunitiesCount
+      // BUG-FIX: Use Map.size for accurate active opportunity count
+      activeOpportunities: this.activeOpportunities.size
     };
   }
 }

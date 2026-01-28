@@ -245,6 +245,9 @@ async function shutdown(signal: string): Promise<void> {
   logger.info(`Received ${signal}, shutting down gracefully...`);
 
   try {
+    // BUG-FIX: Clear health cache to prevent stale data on restart scenarios
+    healthCache = null;
+
     // Close health server first
     if (healthServer) {
       await new Promise<void>((resolve, reject) => {
@@ -255,6 +258,10 @@ async function shutdown(signal: string): Promise<void> {
       });
       logger.info('Health server closed');
     }
+
+    // BUG-FIX: Remove event listeners from detector to prevent memory leaks
+    // This is important if the process doesn't exit (e.g., in tests)
+    detector.removeAllListeners();
 
     await detector.stop();
     logger.info('Shutdown complete');
