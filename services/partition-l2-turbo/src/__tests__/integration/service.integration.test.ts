@@ -69,6 +69,20 @@ jest.mock('@arbitrage/core', () => ({
   exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
     throw new Error(`Config error: ${msg}`);
   }),
+  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+  // BUG-FIX: Add missing mock functions for environment config parsing
+  // Read from process.env to support environment variable tests
+  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
+    partitionChains: process.env.PARTITION_CHAINS,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT,
+    instanceId: process.env.INSTANCE_ID,
+    regionId: process.env.REGION_ID,
+    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+  })),
+  validatePartitionEnvironmentConfig: jest.fn(),
+  generateInstanceId: jest.fn().mockImplementation((partitionId, instanceId) =>
+    instanceId || `p2-${partitionId}-${Date.now()}`
+  ),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
@@ -112,7 +126,8 @@ jest.mock('@arbitrage/config', () => ({
     chains: ['arbitrum', 'optimism', 'base'],
     region: 'asia-southeast1',
     provider: 'fly',
-    resourceProfile: 'medium',
+    // BUG-FIX P3: Use 'standard' to match actual partition config (partitions.ts line 246)
+    resourceProfile: 'standard',
     priority: 1,
     maxMemoryMB: 512,
     enabled: true,
@@ -211,9 +226,20 @@ describe('P2 L2-Turbo Partition Service Integration', () => {
     };
   });
 
-  afterEach(() => {
-    if (cleanupFn) {
-      cleanupFn();
+  afterEach(async () => {
+    // BUG-FIX: Clean up process handlers with error handling to prevent memory leaks
+    // The cleanupFn from setupProcessHandlers uses process.off() with specific handler
+    // references, so it correctly removes only the handlers registered by that module.
+    // We do NOT use removeAllListeners() as it can remove Jest's own handlers for
+    // uncaughtException and unhandledRejection, causing test framework issues.
+    try {
+      if (cleanupFn) {
+        cleanupFn();
+      }
+    } catch (error) {
+      // Log but don't fail test if cleanup throws
+      console.warn('Cleanup function failed:', error);
+    } finally {
       cleanupFn = null;
     }
     process.env = originalEnv;

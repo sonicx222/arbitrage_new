@@ -227,10 +227,22 @@ describe('P3 High-Value Partition Service Integration', () => {
     };
   });
 
-  afterEach(() => {
-    if (cleanupFn) {
-      cleanupFn();
+  afterEach(async () => {
+    // Clean up process handlers with error handling to prevent memory leaks
+    try {
+      if (cleanupFn) {
+        cleanupFn();
+      }
+    } catch (error) {
+      // Log but don't fail test if cleanup throws
+      console.warn('Cleanup function failed:', error);
+    } finally {
       cleanupFn = null;
+      // Force remove all process listeners as last resort to prevent leaks
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('uncaughtException');
+      process.removeAllListeners('unhandledRejection');
     }
     process.env = originalEnv;
   });
