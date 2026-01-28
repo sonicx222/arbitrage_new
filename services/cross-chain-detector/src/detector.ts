@@ -252,6 +252,11 @@ export class CrossChainDetectorService {
   // Task 1.3.3: Counter for pending opportunities received from mempool
   private pendingOpportunitiesReceived = 0;
 
+  // SECURITY-FIX: Rate limiting for whale-triggered detection to prevent DoS
+  // A malicious actor could spam whale transactions to trigger excessive detection cycles
+  private lastWhaleDetectionTime = 0;
+  private static readonly WHALE_DETECTION_COOLDOWN_MS = 1000; // 1 second minimum between whale detections
+
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
   // These are now managed by mlPredictionManager for single-responsibility design
@@ -709,12 +714,17 @@ export class CrossChainDetectorService {
       }
 
       // Check if deadline has passed
-      const currentTimestamp = Math.floor(Date.now() / 1000);
-      if (intent.deadline < currentTimestamp) {
+      // BUG-FIX: Normalize deadline to milliseconds - handle both seconds and milliseconds formats
+      // If deadline < 1e10, it's likely in seconds (Unix timestamp); convert to ms
+      // If deadline >= 1e10, it's likely already in milliseconds
+      const currentTimestampMs = Date.now();
+      const deadlineMs = intent.deadline < 1e10 ? intent.deadline * 1000 : intent.deadline;
+      if (deadlineMs < currentTimestampMs) {
         this.logger.debug('Pending opportunity expired', {
           txHash: intent.hash,
           deadline: intent.deadline,
-          now: currentTimestamp,
+          deadlineMs,
+          nowMs: currentTimestampMs,
         });
         return;
       }
@@ -1188,6 +1198,18 @@ export class CrossChainDetectorService {
 
     // Check if profitable after estimated bridge costs
     const bridgeCost = this.estimateBridgeCost(lowestPrice.chain, highestPrice.chain, lowestPrice.update);
+
+    // BUG-FIX: Validate bridge cost to prevent invalid profit calculations
+    // Bridge cost could be NaN, Infinity, or negative from failed estimation
+    if (!Number.isFinite(bridgeCost) || bridgeCost < 0) {
+      this.logger.warn('Invalid bridge cost estimate, skipping opportunity', {
+        bridgeCost,
+        sourceChain: lowestPrice.chain,
+        targetChain: highestPrice.chain,
+      });
+      return opportunities;
+    }
+
     const netProfit = priceDiff - bridgeCost;
 
     if (netProfit > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
@@ -1538,19 +1560,47 @@ export class CrossChainDetectorService {
       let baseToken: string;
       let quoteToken: string;
 
-      if (whaleTx.token.includes('/')) {
-        const tokenParts = whaleTx.token.split('/');
-        baseToken = tokenParts[0] || whaleTx.token;
-        quoteToken = tokenParts[1] || getDefaultQuoteToken(whaleTx.chain);
-      } else if (whaleTx.token.includes('_')) {
-        const tokenParts = whaleTx.token.split('_');
-        // Take last two parts as tokens (handles DEX_TOKEN0_TOKEN1 format)
-        baseToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 2] : whaleTx.token;
-        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : getDefaultQuoteToken(whaleTx.chain);
+      // BUG-FIX: More robust token parsing with validation for edge cases
+      // Handle multiple formats: "TOKEN0/TOKEN1", "TOKEN0_TOKEN1", "DEX_TOKEN0_TOKEN1", "TOKEN"
+      const tokenString = whaleTx.token.trim();
+
+      if (tokenString.includes('/')) {
+        // Format: "TOKEN0/TOKEN1"
+        const tokenParts = tokenString.split('/').filter(p => p.trim().length > 0);
+        baseToken = tokenParts[0]?.trim() || tokenString;
+        quoteToken = tokenParts[1]?.trim() || getDefaultQuoteToken(whaleTx.chain);
+      } else if (tokenString.includes('_')) {
+        // Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+        const tokenParts = tokenString.split('_').filter(p => p.trim().length > 0);
+        if (tokenParts.length >= 2) {
+          // Take last two parts as tokens (handles DEX_TOKEN0_TOKEN1 format)
+          baseToken = tokenParts[tokenParts.length - 2].trim();
+          quoteToken = tokenParts[tokenParts.length - 1].trim();
+        } else if (tokenParts.length === 1) {
+          // Single part after filtering - treat as single token
+          baseToken = tokenParts[0].trim();
+          quoteToken = getDefaultQuoteToken(whaleTx.chain);
+        } else {
+          // Empty after filtering - use original
+          baseToken = tokenString;
+          quoteToken = getDefaultQuoteToken(whaleTx.chain);
+        }
       } else {
         // Single token - common case is trading against stablecoins
+        baseToken = tokenString;
+        quoteToken = getDefaultQuoteToken(whaleTx.chain);
+      }
+
+      // Validate extracted tokens are non-empty
+      if (!baseToken || baseToken.length === 0) {
+        this.logger.warn('Invalid base token extracted from whale transaction', {
+          originalToken: whaleTx.token,
+          txHash: whaleTx.transactionHash,
+        });
         baseToken = whaleTx.token;
-        quoteToken = getDefaultQuoteToken(whaleTx.chain); // FIX #17: Chain-specific quote token
+      }
+      if (!quoteToken || quoteToken.length === 0) {
+        quoteToken = getDefaultQuoteToken(whaleTx.chain);
       }
 
       // Normalize tokens for consistency
@@ -1596,6 +1646,18 @@ export class CrossChainDetectorService {
       // Phase 3: Trigger immediate detection for super whale or significant activity
       if (whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd ||
           Math.abs(summary.netFlowUsd) > this.whaleConfig.significantFlowThresholdUsd) {
+
+        // SECURITY-FIX: Rate limit whale-triggered detection to prevent DoS
+        // Malicious actors could spam whale transactions to cause excessive CPU usage
+        const now = Date.now();
+        if (now - this.lastWhaleDetectionTime < CrossChainDetectorService.WHALE_DETECTION_COOLDOWN_MS) {
+          this.logger.debug('Whale detection rate limited, skipping', {
+            timeSinceLastMs: now - this.lastWhaleDetectionTime,
+            cooldownMs: CrossChainDetectorService.WHALE_DETECTION_COOLDOWN_MS,
+          });
+          return;
+        }
+        this.lastWhaleDetectionTime = now;
 
         this.logger.info('Super whale detected, triggering immediate opportunity scan', {
           token: whaleTx.token,

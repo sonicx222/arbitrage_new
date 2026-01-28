@@ -225,9 +225,26 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
   /**
    * Publish a cross-chain opportunity.
    *
-   * @returns true if published, false if deduplicated
+   * @returns true if published, false if deduplicated or backpressure applied
    */
   async function publish(opportunity: CrossChainOpportunity): Promise<boolean> {
+    // BUG-FIX: Proactive backpressure - if cache is 2x over limit, force cleanup
+    // and reject new opportunities to prevent memory bloat
+    if (opportunitiesCache.size > maxCacheSize * 2) {
+      logger.warn('Opportunity publisher backpressure triggered', {
+        cacheSize: opportunitiesCache.size,
+        maxSize: maxCacheSize,
+      });
+      cleanup();
+      // If still over limit after cleanup, reject this opportunity
+      if (opportunitiesCache.size > maxCacheSize * 1.5) {
+        logger.warn('Opportunity rejected due to backpressure', {
+          cacheSize: opportunitiesCache.size,
+        });
+        return false;
+      }
+    }
+
     const dedupeKey = generateDedupeKey(opportunity);
 
     if (!shouldPublish(opportunity, dedupeKey)) {
