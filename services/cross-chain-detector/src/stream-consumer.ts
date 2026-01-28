@@ -172,6 +172,17 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (typeof update.price !== 'number' || isNaN(update.price) || update.price <= 0) {
       return false;
     }
+
+    // SECURITY-FIX: Reject extreme prices that indicate potential manipulation
+    // - Prices < 1e-12 are unreasonably low (even for low-cap tokens)
+    // - Prices > 1e12 are unreasonably high (would be worth more than global GDP)
+    // These bounds catch obvious manipulation attempts without needing historical data
+    const MIN_VALID_PRICE = 1e-12;
+    const MAX_VALID_PRICE = 1e12;
+    if (update.price < MIN_VALID_PRICE || update.price > MAX_VALID_PRICE) {
+      return false;
+    }
+
     if (typeof update.timestamp !== 'number' || update.timestamp <= 0) {
       return false;
     }
@@ -409,12 +420,27 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
 
     isConsuming = true;
     try {
-      await Promise.all([
+      // BUG-FIX: Use Promise.allSettled to ensure all streams are processed
+      // even if one fails. Promise.all would reject immediately on first failure,
+      // causing other streams to be skipped.
+      const results = await Promise.allSettled([
         consumePriceUpdates(),
         consumeWhaleAlerts(),
         consumePendingOpportunities(),
       ]);
+
+      // Log any failures but don't throw - allow other streams to continue
+      const streamNames = ['priceUpdates', 'whaleAlerts', 'pendingOpportunities'];
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          logger.error(`Stream consumption failed: ${streamNames[index]}`, {
+            error: (result.reason as Error).message,
+          });
+          emitter.emit('error', result.reason as Error);
+        }
+      });
     } catch (error) {
+      // This catch handles unexpected errors in the allSettled processing itself
       logger.error('Stream consumer poll error', { error: (error as Error).message });
       emitter.emit('error', error as Error);
     } finally {
