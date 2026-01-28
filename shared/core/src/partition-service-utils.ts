@@ -85,6 +85,158 @@ export interface PartitionDetectorInterface extends EventEmitter {
 }
 
 // =============================================================================
+// Typed Environment Configuration (Standardized across P1-P4)
+// =============================================================================
+
+/**
+ * Typed environment configuration for partition services.
+ * Provides compile-time safety for environment variable handling.
+ *
+ * ARCHITECTURE NOTE:
+ * The RPC/WS URLs parsed here are used for VALIDATION AND OPERATOR FEEDBACK ONLY.
+ * The actual URL values flow through the shared CHAINS config in @arbitrage/config,
+ * which reads from the same environment variables at module load time.
+ *
+ * This validation layer provides:
+ * - Production deployment warnings for operators about missing private endpoints
+ * - Typed configuration for IDE autocomplete and compile-time safety
+ * - Centralized environment parsing for testability
+ *
+ * NOTE: Environment config is parsed ONCE at module load time and should be
+ * treated as immutable. If you need to test with different env values,
+ * use jest.resetModules() to force a fresh module import.
+ *
+ * @see shared/config/src/chains/index.ts - Where env vars like BSC_RPC_URL are consumed
+ */
+export interface PartitionEnvironmentConfig {
+  /** Redis URL (required in production) */
+  redisUrl: string | undefined;
+  /** Override chains to monitor */
+  partitionChains: string | undefined;
+  /** Health check port override */
+  healthCheckPort: string | undefined;
+  /** Instance identifier */
+  instanceId: string | undefined;
+  /** Region identifier override */
+  regionId: string | undefined;
+  /** Enable cross-region health reporting */
+  enableCrossRegionHealth: boolean;
+  /** Node environment */
+  nodeEnv: string;
+  /** RPC URLs for validation (actual URLs consumed by @arbitrage/config) */
+  rpcUrls: Record<string, string | undefined>;
+  /** WebSocket URLs for validation (actual URLs consumed by @arbitrage/config) */
+  wsUrls: Record<string, string | undefined>;
+}
+
+/**
+ * Parse environment variables into typed configuration for a partition.
+ *
+ * @param chainNames - Array of chain names to parse RPC/WS URLs for
+ * @returns Typed environment configuration
+ */
+export function parsePartitionEnvironmentConfig(
+  chainNames: readonly string[]
+): PartitionEnvironmentConfig {
+  const rpcUrls: Record<string, string | undefined> = {};
+  const wsUrls: Record<string, string | undefined> = {};
+
+  // Parse RPC/WS URLs for each chain
+  for (const chain of chainNames) {
+    const upperChain = chain.toUpperCase();
+    rpcUrls[chain] = process.env[`${upperChain}_RPC_URL`];
+    wsUrls[chain] = process.env[`${upperChain}_WS_URL`];
+  }
+
+  return {
+    redisUrl: process.env.REDIS_URL,
+    partitionChains: process.env.PARTITION_CHAINS,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT,
+    instanceId: process.env.INSTANCE_ID,
+    regionId: process.env.REGION_ID,
+    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+    nodeEnv: process.env.NODE_ENV || 'development',
+    rpcUrls,
+    wsUrls
+  };
+}
+
+/**
+ * Validate environment configuration for a partition service.
+ * Exits process on critical errors, warns on non-critical issues.
+ *
+ * @param envConfig - Parsed environment configuration
+ * @param partitionId - Partition identifier for logging context
+ * @param chainNames - Chain names to validate RPC/WS URLs for
+ * @param logger - Logger instance for warnings
+ */
+export function validatePartitionEnvironmentConfig(
+  envConfig: PartitionEnvironmentConfig,
+  partitionId: string,
+  chainNames: readonly string[],
+  logger?: ReturnType<typeof createLogger>
+): void {
+  // Validate REDIS_URL - required for all partition services (except in test)
+  if (!envConfig.redisUrl && envConfig.nodeEnv !== 'test') {
+    exitWithConfigError('REDIS_URL environment variable is required', {
+      partitionId,
+      hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
+    }, logger);
+  }
+
+  // Warn about missing RPC/WebSocket URLs in production
+  if (envConfig.nodeEnv === 'production') {
+    const missingRpcUrls: string[] = [];
+    const missingWsUrls: string[] = [];
+
+    for (const chain of chainNames) {
+      const upperChain = chain.toUpperCase();
+      if (!envConfig.rpcUrls[chain]) {
+        missingRpcUrls.push(`${upperChain}_RPC_URL`);
+      }
+      if (!envConfig.wsUrls[chain]) {
+        missingWsUrls.push(`${upperChain}_WS_URL`);
+      }
+    }
+
+    if (missingRpcUrls.length > 0 && logger) {
+      logger.warn('Production deployment without custom RPC URLs - public endpoints may have rate limits', {
+        partitionId,
+        missingRpcUrls,
+        hint: 'Configure private RPC endpoints (Alchemy, Infura, QuickNode) for production reliability'
+      });
+    }
+
+    if (missingWsUrls.length > 0 && logger) {
+      logger.warn('Production deployment without custom WebSocket URLs - public endpoints may be unreliable', {
+        partitionId,
+        missingWsUrls,
+        hint: 'Configure private WebSocket endpoints for production reliability'
+      });
+    }
+  }
+}
+
+/**
+ * Generate a unique instance ID for a partition service.
+ * Uses HOSTNAME if available, falls back to 'local' with timestamp for uniqueness.
+ *
+ * @param partitionId - Partition identifier (e.g., 'asia-fast', 'l2-turbo')
+ * @param providedId - Optional pre-configured instance ID from environment
+ * @returns Unique instance identifier
+ */
+export function generateInstanceId(
+  partitionId: string,
+  providedId?: string
+): string {
+  if (providedId) {
+    return providedId;
+  }
+  const hostname = process.env.HOSTNAME || 'local';
+  return `${partitionId}-${hostname}-${Date.now()}`;
+}
+
+// =============================================================================
 // Critical Configuration Validation (Shared across all partitions)
 // =============================================================================
 
@@ -400,6 +552,64 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
 /** Default timeout for shutdown operations in milliseconds */
 export const SHUTDOWN_TIMEOUT_MS = 5000;
 
+/** Default timeout for health server close during startup failure cleanup */
+export const HEALTH_SERVER_CLOSE_TIMEOUT_MS = 1000;
+
+/**
+ * Closes an HTTP server with timeout protection and resolved flag pattern.
+ *
+ * FIX 9.2/6.2: Extracted from partition services to consolidate the shutdown
+ * pattern that was duplicated across P1/P2/P3/P4. Uses a resolved flag to
+ * prevent double resolution when both timeout and close callback fire.
+ *
+ * Use this utility for startup failure cleanup in partition services.
+ *
+ * @param server - HTTP server to close (null is safely handled)
+ * @param timeoutMs - Timeout in milliseconds (default: 1000ms)
+ * @param logger - Logger instance for warnings
+ * @returns Promise that resolves when server is closed or timeout expires
+ */
+export async function closeServerWithTimeout(
+  server: Server | null,
+  timeoutMs: number = HEALTH_SERVER_CLOSE_TIMEOUT_MS,
+  logger?: ReturnType<typeof createLogger>
+): Promise<void> {
+  if (!server) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let resolved = false;
+    const safeResolve = () => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+      }
+    };
+
+    const timeout = setTimeout(() => {
+      if (logger) {
+        logger.warn(`Health server close timed out after ${timeoutMs}ms`);
+      }
+      safeResolve();
+    }, timeoutMs);
+
+    server.close((err) => {
+      clearTimeout(timeout);
+      if (err) {
+        if (logger) {
+          logger.warn('Failed to close health server during cleanup', { error: err });
+        }
+      } else {
+        if (logger) {
+          logger.info('Health server closed after startup failure');
+        }
+      }
+      safeResolve();
+    });
+  });
+}
+
 /**
  * Gracefully shuts down a partition service.
  * Handles health server and detector shutdown with timeouts.
@@ -461,6 +671,9 @@ export async function shutdownPartitionService(
  * Sets up standard event handlers for a partition detector.
  * Provides consistent logging across all partitions.
  *
+ * FIX 10.3: Uses conditional debug logging to avoid object allocation
+ * on hot-path events (priceUpdate fires 100s-1000s times/sec).
+ *
  * @param detector - Detector instance
  * @param logger - Logger instance
  * @param partitionId - Partition ID for log context
@@ -470,13 +683,18 @@ export function setupDetectorEventHandlers(
   logger: ReturnType<typeof createLogger>,
   partitionId: string
 ): void {
+  // FIX 10.3: Pre-check if debug logging is enabled to avoid hot-path object allocation
+  // priceUpdate events fire 100s-1000s times/sec - even creating log objects has GC cost
   detector.on('priceUpdate', (update: { chain: string; dex: string; price: number }) => {
-    logger.debug('Price update', {
-      partition: partitionId,
-      chain: update.chain,
-      dex: update.dex,
-      price: update.price
-    });
+    // Only create log object if debug level is enabled
+    if (logger.isLevelEnabled?.('debug') ?? logger.level === 'debug') {
+      logger.debug('Price update', {
+        partition: partitionId,
+        chain: update.chain,
+        dex: update.dex,
+        price: update.price
+      });
+    }
   });
 
   detector.on('opportunity', (opp: {
@@ -536,11 +754,14 @@ export function setupDetectorEventHandlers(
         to: newStatus
       });
     } else {
-      logger.debug(`Chain status changed: ${chainId}`, {
-        partition: partitionId,
-        from: oldStatus,
-        to: newStatus
-      });
+      // FIX 10.3: Conditional debug logging for status changes
+      if (logger.isLevelEnabled?.('debug') ?? logger.level === 'debug') {
+        logger.debug(`Chain status changed: ${chainId}`, {
+          partition: partitionId,
+          from: oldStatus,
+          to: newStatus
+        });
+      }
     }
   });
 

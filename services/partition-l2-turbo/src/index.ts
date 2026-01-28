@@ -19,8 +19,11 @@
  * - REDIS_URL: Redis connection URL (required)
  * - LOG_LEVEL: Logging level (default: info)
  * - HEALTH_CHECK_PORT: HTTP health check port (default: 3002)
+ * - INSTANCE_ID: Unique instance identifier (auto-generated if not set)
+ * - REGION_ID: Region identifier (default: asia-southeast1)
+ * - ENABLE_CROSS_REGION_HEALTH: Enable cross-region health reporting (default: true)
+ * - PARTITION_CHAINS: Override default chains (comma-separated)
  *
- * @see IMPLEMENTATION_PLAN.md S3.1.4: Create P2 detector service
  * @see ADR-003: Partitioned Chain Detectors
  */
 
@@ -34,7 +37,12 @@ import {
   setupDetectorEventHandlers,
   setupProcessHandlers,
   exitWithConfigError,
+  closeServerWithTimeout,
+  parsePartitionEnvironmentConfig,
+  validatePartitionEnvironmentConfig,
+  generateInstanceId,
   PartitionServiceConfig,
+  PartitionEnvironmentConfig,
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES
 } from '@arbitrage/core';
@@ -55,30 +63,34 @@ const P2_DEFAULT_PORT = PARTITION_PORTS[P2_PARTITION_ID] ?? 3002;
 const logger = createLogger('partition-l2-turbo:main');
 
 // =============================================================================
-// Critical Environment Validation
-// CRITICAL-FIX: Validate required environment variables early to fail fast
-// Uses shared exitWithConfigError from @arbitrage/core for consistency
+// Partition Configuration Retrieval
 // =============================================================================
 
-// Validate REDIS_URL - required for all partition services
-if (!process.env.REDIS_URL && process.env.NODE_ENV !== 'test') {
-  exitWithConfigError('REDIS_URL environment variable is required', {
-    partitionId: P2_PARTITION_ID,
-    hint: 'Set REDIS_URL=redis://localhost:6379 for local development'
-  }, logger);
-}
-
-// Single partition config retrieval (P5-FIX pattern)
+// Single partition config retrieval
 const partitionConfig = getPartition(P2_PARTITION_ID);
 if (!partitionConfig) {
   exitWithConfigError('P2 partition configuration not found', { partitionId: P2_PARTITION_ID }, logger);
 }
 
-// Derive chains and region from partition config (P3-FIX pattern)
+// Derive chains and region from partition config
 const P2_CHAINS: readonly string[] = partitionConfig.chains;
 const P2_REGION = partitionConfig.region;
 
-// Service configuration for shared utilities (P12-P16 refactor)
+// =============================================================================
+// Environment Configuration (Using shared typed utilities)
+// =============================================================================
+
+// Parse environment into typed configuration using shared utility
+const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P2_CHAINS);
+
+// Validate environment configuration (exits on critical errors, warns on non-critical)
+validatePartitionEnvironmentConfig(envConfig, P2_PARTITION_ID, P2_CHAINS, logger);
+
+// =============================================================================
+// Service Configuration
+// =============================================================================
+
+// Service configuration for shared utilities
 const serviceConfig: PartitionServiceConfig = {
   partitionId: P2_PARTITION_ID,
   serviceName: PARTITION_SERVICE_NAMES[P2_PARTITION_ID] ?? 'partition-l2-turbo',
@@ -91,14 +103,14 @@ const serviceConfig: PartitionServiceConfig = {
 // Store server reference for graceful shutdown
 const healthServerRef: { current: Server | null } = { current: null };
 
-// Unified detector configuration
+// Unified detector configuration (uses typed envConfig)
 const config: UnifiedDetectorConfig = {
   partitionId: P2_PARTITION_ID,
-  chains: validateAndFilterChains(process.env.PARTITION_CHAINS, P2_CHAINS, logger),
-  instanceId: process.env.INSTANCE_ID || `p2-l2-turbo-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
-  regionId: process.env.REGION_ID || P2_REGION,
-  enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-  healthCheckPort: parsePort(process.env.HEALTH_CHECK_PORT, P2_DEFAULT_PORT, logger)
+  chains: validateAndFilterChains(envConfig.partitionChains, P2_CHAINS, logger),
+  instanceId: generateInstanceId(P2_PARTITION_ID, envConfig.instanceId),
+  regionId: envConfig.regionId || P2_REGION,
+  enableCrossRegionHealth: envConfig.enableCrossRegionHealth,
+  healthCheckPort: parsePort(envConfig.healthCheckPort, P2_DEFAULT_PORT, logger)
 };
 
 // =============================================================================
@@ -108,16 +120,16 @@ const config: UnifiedDetectorConfig = {
 const detector = new UnifiedChainDetector(config);
 
 // =============================================================================
-// Event Handlers (P16 refactor - Using shared utilities)
+// Event Handlers (Using shared utilities)
 // =============================================================================
 
 setupDetectorEventHandlers(detector, logger, P2_PARTITION_ID);
 
 // =============================================================================
-// Process Handlers (P15/P19 refactor - Using shared utilities with shutdown guard)
+// Process Handlers (Using shared utilities with shutdown guard)
 // =============================================================================
 
-// S3.2.3-FIX: Store cleanup function to prevent MaxListenersExceeded warnings
+// Store cleanup function to prevent MaxListenersExceeded warnings
 // in test scenarios and allow proper handler cleanup
 const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
 
@@ -125,9 +137,16 @@ const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, l
 // Main Entry Point
 // =============================================================================
 
+// Guard against multiple main() invocations (e.g., from integration tests)
+let mainStarted = false;
+
 async function main(): Promise<void> {
-  // Note: serviceConfig captures all partition config values at module init time,
-  // after validation by exitWithConfigError(), so it's safe to use here
+  // Prevent multiple invocations
+  if (mainStarted) {
+    logger.warn('main() already started, ignoring duplicate invocation');
+    return;
+  }
+  mainStarted = true;
 
   logger.info('Starting P2 L2-Turbo Partition Service', {
     partitionId: P2_PARTITION_ID,
@@ -139,7 +158,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    // Start health check server first (P12-P14 refactor - Using shared utilities)
+    // Start health check server first (using shared utilities)
     healthServerRef.current = createPartitionHealthServer({
       port: config.healthCheckPort || P2_DEFAULT_PORT,
       config: serviceConfig,
@@ -159,29 +178,10 @@ async function main(): Promise<void> {
   } catch (error) {
     logger.error('Failed to start P2 L2-Turbo Partition Service', { error });
 
-    // CRITICAL-FIX: Clean up health server if detector start failed
-    // This prevents leaving port bound when process exits due to startup failure
-    // BUG-4.2-FIX: Await health server close before exiting to ensure port is released
-    if (healthServerRef.current) {
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          logger.warn('Health server close timed out after 1000ms');
-          resolve();
-        }, 1000);
+    // Use shared utility for cleanup (prevents code duplication)
+    await closeServerWithTimeout(healthServerRef.current, 1000, logger);
 
-        healthServerRef.current!.close((err) => {
-          clearTimeout(timeout);
-          if (err) {
-            logger.warn('Failed to close health server during cleanup', { error: err });
-          } else {
-            logger.info('Health server closed after startup failure');
-          }
-          resolve();
-        });
-      });
-    }
-
-    // BUG-4.1-FIX: Clean up process handlers before exit to prevent listener leaks
+    // Clean up process handlers before exit to prevent listener leaks
     cleanupProcessHandlers();
 
     process.exit(1);
@@ -205,4 +205,16 @@ if (!process.env.JEST_WORKER_ID) {
 // Exports
 // =============================================================================
 
-export { detector, config, P2_PARTITION_ID, P2_CHAINS, P2_REGION, cleanupProcessHandlers };
+export {
+  detector,
+  config,
+  P2_PARTITION_ID,
+  P2_CHAINS,
+  P2_REGION,
+  cleanupProcessHandlers,
+  // Export for testing
+  envConfig
+};
+
+// Re-export type from shared utilities for convenience
+export type { PartitionEnvironmentConfig };

@@ -250,10 +250,10 @@ describe('ProfessionalQualityMonitor Performance', () => {
           operationalConsistency: 80
         },
         metrics: {
-          latency: { p50: 3, p95: 8, p99: 12, max: 15 },
-          accuracy: { precision: 0.8, recall: 0.75, f1Score: 0.774 },
-          reliability: { uptime: 0.98, errorRate: 0.02 },
-          consistency: { variance: 0.1 }
+          detectionLatency: { p50: 3, p95: 8, p99: 12, max: 15 },
+          detectionAccuracy: { precision: 0.8, recall: 0.75, f1Score: 0.774, falsePositiveRate: 0.05 },
+          systemReliability: { uptime: 0.98, availability: 0.99, errorRate: 0.02, recoveryTime: 5 },
+          operationalConsistency: { performanceVariance: 0.1, throughputStability: 0.95, memoryStability: 0.98, loadHandling: 0.9 }
         },
         timestamp: Date.now() - 3600000,
         assessmentPeriod: { start: 0, end: 0, duration: 3600000 },

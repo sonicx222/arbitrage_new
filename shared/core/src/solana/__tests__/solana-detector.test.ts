@@ -191,8 +191,8 @@ jest.mock('@solana/web3.js', () => ({
   Commitment: 'confirmed'
 }));
 
-// Mock Redis clients
-jest.mock('./redis', () => ({
+// Mock Redis clients (path relative to solana-detector.ts imports)
+jest.mock('../../redis', () => ({
   getRedisClient: jest.fn().mockResolvedValue({
     ping: jest.fn().mockResolvedValue('PONG'),
     disconnect: jest.fn().mockResolvedValue(undefined),
@@ -202,7 +202,7 @@ jest.mock('./redis', () => ({
   resetRedisInstance: jest.fn()
 }));
 
-jest.mock('./redis-streams', () => ({
+jest.mock('../../redis-streams', () => ({
   getRedisStreamsClient: jest.fn().mockResolvedValue({
     xadd: jest.fn().mockResolvedValue('1234567890-0'),
     disconnect: jest.fn().mockResolvedValue(undefined),
@@ -236,7 +236,7 @@ import {
   SolanaDetectorDeps,
   SolanaDetectorRedisClient,
   SolanaDetectorStreamsClient
-} from './solana-detector';
+} from '../solana-detector';
 
 // =============================================================================
 // Test Fixtures
@@ -607,8 +607,8 @@ describe('S3.3.1.3 - Program Account Subscriptions', () => {
 
     await detector.start();
 
-    const eventPromise = new Promise<any>((resolve) => {
-      detector.on('accountUpdate', (data) => resolve(data));
+    const eventPromise = new Promise<{ programId: string; accountId: string }>((resolve) => {
+      detector.on('accountUpdate', (data: { programId: string; accountId: string }) => resolve(data));
     });
 
     const programId = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
@@ -740,7 +740,7 @@ describe('S3.3.1.4 - Lifecycle Management', () => {
   test('should handle start failure gracefully', async () => {
     // Create deps without Redis clients to test fallback to singletons
     // Mock a failing Redis connection via the singleton getters
-    const { getRedisClient } = require('./redis');
+    const { getRedisClient } = require('../../redis');
     getRedisClient.mockRejectedValueOnce(new Error('Redis connection failed'));
 
     const config = createDefaultConfig();
