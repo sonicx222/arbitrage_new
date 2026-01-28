@@ -68,27 +68,21 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       );
     }
 
-    // Verify wallet exists early and store reference
-    const wallet = ctx.wallets.get(chain);
-    if (!wallet) {
+    // Fix 6.2 & 9.1: Use validateContext helper to reduce code duplication
+    // This consolidates the common wallet/provider check pattern
+    const validation = this.validateContext(chain, ctx);
+    if (!validation.valid) {
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.NO_WALLET}: ${chain}`,
+        validation.error,
         chain,
         opportunity.buyDex || 'unknown'
       );
     }
 
-    // Verify provider exists
-    const provider = ctx.providers.get(chain);
-    if (!provider) {
-      return createErrorResult(
-        opportunity.id,
-        `${ExecutionErrorCode.NO_PROVIDER}: ${chain}`,
-        chain,
-        opportunity.buyDex || 'unknown'
-      );
-    }
+    // Destructure validated wallet and provider for use below
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { wallet, provider } = validation;
 
     try {
       // Get optimal gas price (may throw on gas spike)
@@ -161,24 +155,16 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       // Apply MEV protection
       const protectedTx = await this.applyMEVProtection(swapTx, chain, ctx);
 
-      // Get nonce from NonceManager for atomic allocation
-      let nonce: number | undefined;
-      if (ctx.nonceManager) {
-        try {
-          nonce = await ctx.nonceManager.getNextNonce(chain);
-          protectedTx.nonce = nonce;
-          this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
-        } catch (error) {
-          return createErrorResult(
-            opportunity.id,
-            `${ExecutionErrorCode.NONCE_ERROR}: ${getErrorMessage(error)}`,
-            chain,
-            opportunity.buyDex || 'unknown'
-          );
-        }
-      }
+      // Fix 4.1: Removed manual nonce allocation - submitTransaction handles it
+      // The previous code allocated nonce here AND in submitTransaction, which was
+      // redundant. submitTransaction already:
+      // 1. Checks if tx.nonce is set (uses it if so)
+      // 2. Allocates from NonceManager if not set
+      // 3. Handles nonce confirmation/failure
+      // Letting submitTransaction handle all nonce management reduces code duplication
+      // and ensures consistent nonce lifecycle management.
 
-      // Submit transaction using base class method
+      // Submit transaction using base class method (handles nonce internally)
       const submitResult = await this.submitTransaction(protectedTx, chain, ctx, {
         opportunityId: opportunity.id,
         expectedProfit: opportunity.expectedProfit,

@@ -294,7 +294,8 @@ describe('IntraChainStrategy - Simulation Integration', () => {
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('simulation predicted revert');
+      // Fix 6.1: Error format changed to use ExecutionErrorCode
+      expect(result.error).toContain('ERR_SIMULATION_REVERT');
       expect(result.error).toContain('INSUFFICIENT_OUTPUT_AMOUNT');
       // Should NOT send transaction
       const wallet = ctx.wallets.get('ethereum');

@@ -64,6 +64,12 @@ const createMockContext = (): StrategyContext => ({
     simulationErrors: 0,
     circuitBreakerTrips: 0,
     circuitBreakerBlocks: 0,
+    // Fix 8.2: Add missing risk management stats
+    riskEVRejections: 0,
+    riskPositionSizeRejections: 0,
+    riskDrawdownBlocks: 0,
+    riskCautionCount: 0,
+    riskHaltCount: 0,
   },
   stateManager: {
     isRunning: jest.fn().mockReturnValue(true),
