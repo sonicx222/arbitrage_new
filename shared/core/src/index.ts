@@ -394,10 +394,13 @@ export {
 } from './analytics/price-momentum';
 
 // T2.8: ML Opportunity Scorer
+// T4.3.3: Orderflow Integration with Opportunity Scoring
 export {
   MLOpportunityScorer,
   getMLOpportunityScorer,
-  resetMLOpportunityScorer
+  resetMLOpportunityScorer,
+  // T4.3.3: Orderflow conversion helper
+  toOrderflowSignal
 } from './analytics/ml-opportunity-scorer';
 export type {
   MLPrediction,
@@ -405,7 +408,13 @@ export type {
   OpportunityScoreInput,
   OpportunityWithMomentum,
   EnhancedScore,
-  ScorerStats
+  ScorerStats,
+  // T4.3.3: Orderflow integration types
+  OrderflowSignal,
+  OpportunityWithOrderflow,
+  OpportunityWithAllSignals,
+  EnhancedScoreWithOrderflow,
+  OrderflowPredictionInput
 } from './analytics/ml-opportunity-scorer';
 
 // Pair Activity Tracker (Volatility-based prioritization)
@@ -901,6 +910,10 @@ export {
   CircularBuffer,
   createFifoBuffer,
   createRollingWindow,
+  // FIX 10.5: MinHeap for O(n log k) partial sorting (consolidated from services)
+  MinHeap,
+  findKSmallest,
+  findKLargest,
 } from './data-structures';
 
 export type {

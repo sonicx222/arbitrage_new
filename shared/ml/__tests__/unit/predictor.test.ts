@@ -25,15 +25,59 @@ import {
   PatternRecognizerConfig
 } from '../../src/predictor';
 
-// Mock @arbitrage/core
-jest.mock('@arbitrage/core', () => ({
-  createLogger: jest.fn(() => ({
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn()
-  }))
-}));
+// Mock @arbitrage/core - define mock class inline to work with Jest hoisting
+jest.mock('@arbitrage/core', () => {
+  // Mock AsyncMutex class defined inline
+  class MockAsyncMutex {
+    private locked = false;
+    private waitQueue: Array<() => void> = [];
+
+    async acquire(): Promise<() => void> {
+      if (this.locked) {
+        await new Promise<void>(resolve => {
+          this.waitQueue.push(resolve);
+        });
+      }
+      this.locked = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const next = this.waitQueue.shift();
+        if (next) {
+          setImmediate(next);
+        } else {
+          this.locked = false;
+        }
+      };
+    }
+
+    tryAcquire(): (() => void) | null {
+      if (this.locked) return null;
+      this.locked = true;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        this.locked = false;
+      };
+    }
+
+    isLocked(): boolean {
+      return this.locked;
+    }
+  }
+
+  return {
+    createLogger: jest.fn(() => ({
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    })),
+    AsyncMutex: MockAsyncMutex
+  };
+});
 
 describe('LSTMPredictor', () => {
   // Reset singletons before each test

@@ -57,3 +57,11 @@ export type {
   Task,
   TaskResult
 } from './worker-pool';
+
+// FIX 9.1: Queue Lock (shared pattern)
+export {
+  QueueLock,
+  withLock,
+  tryWithLock
+} from './queue-lock';
+export type { QueueLockStats } from './queue-lock';

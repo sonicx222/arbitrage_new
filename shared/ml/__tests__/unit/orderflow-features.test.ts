@@ -27,12 +27,12 @@ interface MockWhaleActivitySummary {
   avgPriceImpact: number;
 }
 
-// Mock whale activity tracker
+// Create mock whale tracker
 const mockWhaleTracker = {
   getActivitySummary: jest.fn<(pairKey: string, chain: string, windowMs?: number) => MockWhaleActivitySummary>()
 };
 
-// Mock the @arbitrage/core module
+// Mock the @arbitrage/core module with default implementations for module-level code
 jest.mock('@arbitrage/core', () => ({
   createLogger: jest.fn(() => ({
     info: jest.fn(),
@@ -40,7 +40,7 @@ jest.mock('@arbitrage/core', () => ({
     warn: jest.fn(),
     debug: jest.fn()
   })),
-  getWhaleActivityTracker: jest.fn(() => mockWhaleTracker)
+  getWhaleActivityTracker: jest.fn()
 }));
 
 // Import after mocking
@@ -49,6 +49,11 @@ import {
   getOrderflowFeatureExtractor,
   resetOrderflowFeatureExtractor
 } from '../../src/orderflow-features';
+
+// Get the mocked module and set up whale tracker implementation
+import { getWhaleActivityTracker } from '@arbitrage/core';
+const mockedGetWhaleActivityTracker = jest.mocked(getWhaleActivityTracker);
+mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
 import type {
   OrderflowFeatureInput,
   OrderflowExtractorConfig
@@ -105,6 +110,8 @@ describe('OrderflowFeatureExtractor', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // Re-setup whale tracker mock after clearAllMocks
+    mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
     resetOrderflowFeatureExtractor();
     extractor = new OrderflowFeatureExtractor();
   });

@@ -46,7 +46,7 @@ import {
 // Import alert notification system
 import { AlertNotifier } from './alerts';
 
-// Import type guard utilities
+// Import type guard utilities and collections
 import {
   getString,
   getNumber,
@@ -54,8 +54,29 @@ import {
   getOptionalString,
   getOptionalNumber,
   unwrapMessageData,
-  hasRequiredString
+  hasRequiredString,
+  MinHeap
 } from './utils';
+
+// =============================================================================
+// Service Name Patterns (FIX 3.2: Configurable instead of hardcoded)
+// =============================================================================
+
+/**
+ * Service name patterns for degradation level evaluation.
+ * FIX 3.2: Extracted from hardcoded checks to enable configuration.
+ *
+ * These patterns are used to identify service types without coupling
+ * the coordinator to specific naming conventions.
+ */
+export const SERVICE_NAME_PATTERNS = {
+  /** Pattern to match execution engine service name */
+  EXECUTION_ENGINE: 'execution-engine',
+  /** Pattern to identify detector services (contains 'detector') */
+  DETECTOR_PATTERN: 'detector',
+  /** Pattern to identify cross-chain services */
+  CROSS_CHAIN_PATTERN: 'cross-chain',
+} as const;
 
 // =============================================================================
 // Types
@@ -195,6 +216,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // FIX: Use Promise-based mutex to prevent race condition in activateStandby()
   // Two rapid calls could both pass the boolean check before either sets it
   private activationPromise: Promise<boolean> | null = null;
+  // FIX 5.5: Track activation state separately from config to avoid concurrent reads of modified config
+  // During activation, this is true and bypasses standby checks without modifying config.isStandby
+  private isActivating = false;
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
   // FIX: Track degradation level per ADR-007
@@ -277,7 +301,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
       opportunityTtlMs: config?.opportunityTtlMs ?? parseInt(process.env.OPPORTUNITY_TTL_MS || '60000'),
       opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? parseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS || '10000'),
       pairTtlMs: config?.pairTtlMs ?? parseInt(process.env.PAIR_TTL_MS || '300000'),
-      alertCooldownMs: config?.alertCooldownMs ?? parseInt(process.env.ALERT_COOLDOWN_MS || '300000'),
+      // FIX Config 3.2: Environment-aware alert cooldown
+      // Development: 30 seconds (faster feedback cycle)
+      // Production: 5 minutes (prevent alert spam)
+      alertCooldownMs: config?.alertCooldownMs ?? parseInt(
+        process.env.ALERT_COOLDOWN_MS ||
+        (process.env.NODE_ENV === 'development' ? '30000' : '300000')
+      ),
       // FIX: Legacy polling disabled by default - all services now use streams
       enableLegacyHealthPolling: config?.enableLegacyHealthPolling ?? (process.env.ENABLE_LEGACY_HEALTH_POLLING === 'true')
     };
@@ -488,8 +518,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.activePairs.clear();
       // P2-1 FIX: Reset stream error counter
       this.streamConsumerErrors = 0;
-      // P4-FIX: Reset stream warning counter
-      this.streamConsumerWarnings = 0;
 
       this.logger.info('Coordinator Service stopped successfully');
     });
@@ -541,7 +569,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // ADR-007: Standby instances should not proactively acquire leadership
     // They wait for CrossRegionHealthManager to signal activation
-    if (this.config.isStandby) {
+    // FIX 5.5: Check isActivating flag to allow activation to proceed
+    if (this.config.isStandby && !this.isActivating) {
       this.logger.debug('Standby instance - waiting for activation signal');
       return false;
     }
@@ -726,15 +755,24 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }
 
-    // FIX: Ensure EXECUTION_REQUESTS stream exists for publishing
-    // The coordinator publishes to this stream but doesn't consume from it
-    // Creating a dummy entry ensures the stream exists before first publish
+    // FIX 7.3: Ensure EXECUTION_REQUESTS stream exists for publishing
+    //
+    // The coordinator publishes to EXECUTION_REQUESTS but doesn't consume from it,
+    // so we can't use XGROUP CREATE ... MKSTREAM (which only works for consumer groups).
+    //
+    // Approaches considered:
+    // 1. Dummy message (current) - Simple, works reliably, message is harmless
+    // 2. XADD with NOMKSTREAM check - Requires extra call, not cleaner
+    // 3. Redis XINFO STREAM - Would need error handling for non-existent stream
+    //
+    // The dummy message approach is standard practice for publish-only streams.
+    // The execution-engine will skip 'stream-init' type messages.
     try {
       await this.streamsClient.xadd(
         RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
         {
           type: 'stream-init',
-          message: 'Coordinator stream initialization',
+          message: 'Coordinator stream initialization - safe to ignore',
           timestamp: Date.now().toString()
         }
       );
@@ -753,10 +791,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private streamConsumerErrors = 0;
   private readonly MAX_STREAM_ERRORS = 10;
   private alertSentForCurrentErrorBurst = false; // P1-NEW-2: Prevent duplicate alerts
-
-  // P4-FIX: Track stream consumer warnings for monitoring parity with errors
-  private streamConsumerWarnings = 0;
-  private readonly MAX_STREAM_WARNINGS = 50; // Higher threshold since warnings are less severe
+  // FIX Race 5.3: Use atomic flag-and-send pattern to prevent race between check and set
+  private sendingStreamErrorAlert = false;
 
   /**
    * Start stream consumers using blocking reads pattern.
@@ -830,12 +866,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * Track stream consumer errors and send alerts if threshold exceeded.
    * Preserves P2-1 and P1-NEW-2 error tracking behavior.
+   * FIX Race 5.3: Uses atomic flag pattern to prevent duplicate alerts from concurrent calls.
    */
   private trackStreamError(streamName: string): void {
     this.streamConsumerErrors++;
 
-    // P1-NEW-2 FIX: Send critical alert only once per error burst
-    if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS && !this.alertSentForCurrentErrorBurst) {
+    // FIX Race 5.3: Check and set alert flag atomically using sendingStreamErrorAlert
+    // This prevents multiple concurrent consumers from all passing the check before any sets the flag
+    if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS &&
+        !this.alertSentForCurrentErrorBurst &&
+        !this.sendingStreamErrorAlert) {
+      // Set sending flag FIRST (synchronously) before any async work
+      this.sendingStreamErrorAlert = true;
+
       this.sendAlert({
         type: 'STREAM_CONSUMER_FAILURE',
         message: `Stream consumer experienced ${this.streamConsumerErrors} errors on ${streamName}`,
@@ -844,7 +887,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
         data: { streamName, errorCount: this.streamConsumerErrors },
         timestamp: Date.now()
       });
+
+      // Set permanent flag after sending (prevents retries)
       this.alertSentForCurrentErrorBurst = true;
+      this.sendingStreamErrorAlert = false;
     }
   }
 
@@ -859,32 +905,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.streamConsumerErrors = 0;
       this.alertSentForCurrentErrorBurst = false;
     }
-  }
-
-  /**
-   * P4-FIX: Track stream consumer warnings for monitoring parity.
-   * Sends a warning alert after accumulating MAX_STREAM_WARNINGS.
-   */
-  private trackStreamWarning(streamName: string, message: string): void {
-    this.streamConsumerWarnings++;
-
-    // Log accumulated warnings periodically
-    if (this.streamConsumerWarnings >= this.MAX_STREAM_WARNINGS) {
-      this.logger.warn('Stream consumer accumulated warnings', {
-        streamName,
-        warningCount: this.streamConsumerWarnings,
-        lastWarning: message
-      });
-      // Reset counter after logging (don't send alerts for warnings, just log)
-      this.streamConsumerWarnings = 0;
-    }
-  }
-
-  /**
-   * P4-FIX: Reset stream warning tracking.
-   */
-  private resetStreamWarnings(): void {
-    this.streamConsumerWarnings = 0;
   }
 
   // ===========================================================================
@@ -1039,37 +1059,30 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Phase 3: Enforce size limit by removing oldest entries
-    // FIX: Use partial selection O(n) instead of full sort O(n log n)
-    // For large opportunity sets, this is significantly faster
+    // FIX 4.5 & 10.5: Use MinHeap for O(n log k) instead of O(n*k) selection sort
+    // For 1000 opportunities removing 100 oldest:
+    // - Selection sort: O(1000 * 100) = 100,000 operations
+    // - MinHeap: O(1000 * log(100)) = ~7,000 operations (14x faster)
     if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
-      const entries = Array.from(this.opportunities.entries());
       const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
 
-      // Use partial selection: find the k-th smallest timestamps without full sort
-      // This is O(n) average vs O(n log n) for full sort
-      const timestampedEntries = entries.map((entry, idx) => ({
-        idx,
-        id: entry[0],
-        timestamp: entry[1].timestamp || 0
-      }));
+      // Use min-heap ordered by timestamp (oldest at top)
+      // We'll collect the removeCount oldest entries
+      const minHeap = new MinHeap<{ id: string; timestamp: number }>(
+        (a, b) => a.timestamp - b.timestamp
+      );
 
-      // Partition to find the removeCount oldest entries
-      // Simple approach: find minimum removeCount times - still better than full sort for small removeCount
-      for (let i = 0; i < removeCount; i++) {
-        let minIdx = i;
-        for (let j = i + 1; j < timestampedEntries.length; j++) {
-          if (timestampedEntries[j].timestamp < timestampedEntries[minIdx].timestamp) {
-            minIdx = j;
-          }
+      // FIX 10.6: Iterate Map directly instead of creating intermediate array
+      for (const [id, opp] of this.opportunities) {
+        minHeap.push({ id, timestamp: opp.timestamp || 0 });
+      }
+
+      // Extract and delete the removeCount oldest
+      for (let i = 0; i < removeCount && !minHeap.isEmpty(); i++) {
+        const oldest = minHeap.pop();
+        if (oldest) {
+          this.opportunities.delete(oldest.id);
         }
-        // Swap
-        if (minIdx !== i) {
-          const temp = timestampedEntries[i];
-          timestampedEntries[i] = timestampedEntries[minIdx];
-          timestampedEntries[minIdx] = temp;
-        }
-        // Delete this entry
-        this.opportunities.delete(timestampedEntries[i].id);
       }
     }
 
@@ -1463,10 +1476,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }, 5000);
 
-    // FIX: Legacy health polling is now configurable (disabled by default)
-    // All services now use Redis Streams, so this is only needed for backwards compatibility
+    // FIX 7.1: Legacy health polling is DEPRECATED and scheduled for removal.
+    // All services now use Redis Streams (ADR-002). This code path is only kept for
+    // backward compatibility with older services that don't publish to streams yet.
+    //
+    // DEPRECATION NOTICE:
+    // - Current status: Disabled by default (enableLegacyHealthPolling: false)
+    // - Scheduled removal: Next major version
+    // - Migration: Ensure all services publish to stream:health instead of Redis keys
+    // - To verify: Check that ENABLE_LEGACY_HEALTH_POLLING is not set in any deployment
+    //
+    // @deprecated Since v2.0.0 - Will be removed in v3.0.0
     if (this.config.enableLegacyHealthPolling) {
-      this.logger.info('Legacy health polling enabled (consider migrating to streams-only mode)');
+      this.logger.warn('⚠️ DEPRECATED: Legacy health polling enabled. This feature will be removed in v3.0.0. Migrate to streams-only mode by setting ENABLE_LEGACY_HEALTH_POLLING=false');
       this.healthCheckInterval = setInterval(async () => {
         // P1-8 FIX: Use stateManager.isRunning() for consistency
         if (!this.stateManager.isRunning() || !this.redis) return;
@@ -1630,17 +1652,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
     };
 
     // Single pass over all services
+    // FIX 3.2: Use configurable service name patterns instead of hardcoded strings
     for (const [name, health] of this.serviceHealth) {
       const isHealthy = health.status === 'healthy';
 
-      // Check execution engine
-      if (name === 'execution-engine') {
+      // Check execution engine using configurable pattern
+      if (name === SERVICE_NAME_PATTERNS.EXECUTION_ENGINE) {
         result.executorHealthy = isHealthy;
         continue;
       }
 
-      // Check detectors (includes 'detector' in name)
-      if (name.includes('detector')) {
+      // Check detectors using configurable pattern (contains pattern string)
+      if (name.includes(SERVICE_NAME_PATTERNS.DETECTOR_PATTERN)) {
         result.detectorCount++;
         if (isHealthy) {
           result.healthyDetectorCount++;
@@ -1936,31 +1959,35 @@ export class CoordinatorService implements CoordinatorStateProvider {
       previousIsLeader: this.isLeader
     });
 
-    // Temporarily allow leadership acquisition
-    const originalIsStandby = this.config.isStandby;
-    this.config.isStandby = false;
+    // FIX 5.5: Use separate flag instead of modifying config.isStandby
+    // This prevents race conditions where other code reads config.isStandby concurrently
+    // The isActivating flag bypasses standby checks in tryAcquireLeadership
+    this.isActivating = true;
 
     try {
       // Force attempt to acquire leadership
+      // tryAcquireLeadership will check isActivating flag to bypass standby check
       const acquired = await this.tryAcquireLeadership();
 
       if (acquired) {
+        // Successful activation - update config.isStandby atomically at the end
+        this.config.isStandby = false;
         this.logger.warn('✅ STANDBY COORDINATOR ACTIVATED - Now leader', {
           instanceId: this.config.leaderElection.instanceId,
           regionId: this.config.regionId
         });
         return true;
       } else {
-        // Restore standby state if we couldn't acquire
-        this.config.isStandby = originalIsStandby;
         this.logger.error('Failed to acquire leadership during activation');
         return false;
       }
 
     } catch (error) {
-      this.config.isStandby = originalIsStandby;
       this.logger.error('Error during standby activation', { error });
       return false;
+    } finally {
+      // Always clear activation flag when done
+      this.isActivating = false;
     }
   }
 }

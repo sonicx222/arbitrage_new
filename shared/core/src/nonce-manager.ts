@@ -409,61 +409,48 @@ export class NonceManager {
 // =============================================================================
 
 let nonceManagerInstance: NonceManager | null = null;
-let nonceManagerInitPromise: Promise<NonceManager> | null = null;
+let nonceManagerInitialConfig: Partial<NonceManagerConfig> | undefined = undefined;
 
 /**
- * CRITICAL-4 FIX: Thread-safe singleton with Promise-based initialization.
- * Prevents TOCTOU race condition where multiple callers could create
- * multiple instances due to async gaps between null check and assignment.
+ * Get the singleton NonceManager instance.
  *
- * Pattern: First caller creates the Promise, all subsequent callers
- * await the same Promise until it resolves.
+ * FIX 1.1: Configuration is only applied on first initialization.
+ * Subsequent calls with different config will log a warning.
+ *
+ * FIX 1.2: Removed unnecessary async version since constructor is synchronous.
+ * The previous getNonceManagerAsync added complexity without benefit.
+ *
+ * @param config - Optional configuration (only used on first call)
+ * @returns The singleton NonceManager instance
  */
 export function getNonceManager(config?: Partial<NonceManagerConfig>): NonceManager {
-  // Fast path: instance already exists
-  if (nonceManagerInstance) {
-    return nonceManagerInstance;
+  if (!nonceManagerInstance) {
+    nonceManagerInstance = new NonceManager(config);
+    nonceManagerInitialConfig = config;
+  } else if (config !== undefined) {
+    // FIX 1.1: Warn if different config provided after initialization
+    const configChanged = JSON.stringify(config) !== JSON.stringify(nonceManagerInitialConfig);
+    if (configChanged) {
+      logger.warn('getNonceManager called with different config after initialization. Config ignored.', {
+        initialConfig: nonceManagerInitialConfig,
+        ignoredConfig: config
+      });
+    }
   }
-
-  // Slow path: create instance synchronously to avoid async race
-  // This is safe because NonceManager constructor is synchronous
-  nonceManagerInstance = new NonceManager(config);
   return nonceManagerInstance;
 }
 
 /**
- * Async version for cases where initialization needs to be awaited.
- * Ensures only one instance is ever created, even under concurrent calls.
+ * FIX 1.2: Simplified async version - just returns the sync version.
+ * Kept for backwards compatibility, but the sync version is sufficient
+ * since the constructor is synchronous.
+ *
+ * @deprecated Use getNonceManager() instead - the sync version is sufficient.
+ * @param config - Optional configuration (only used on first call)
+ * @returns Promise resolving to the singleton NonceManager instance
  */
 export async function getNonceManagerAsync(config?: Partial<NonceManagerConfig>): Promise<NonceManager> {
-  // Fast path: instance already exists
-  if (nonceManagerInstance) {
-    return nonceManagerInstance;
-  }
-
-  // Check if initialization is already in progress
-  if (nonceManagerInitPromise) {
-    return nonceManagerInitPromise;
-  }
-
-  // Start initialization - capture the Promise immediately to prevent races
-  nonceManagerInitPromise = (async () => {
-    // Double-check after acquiring the "lock"
-    if (nonceManagerInstance) {
-      return nonceManagerInstance;
-    }
-
-    const instance = new NonceManager(config);
-    nonceManagerInstance = instance;
-    return instance;
-  })();
-
-  try {
-    return await nonceManagerInitPromise;
-  } finally {
-    // Clear the init promise after completion
-    nonceManagerInitPromise = null;
-  }
+  return getNonceManager(config);
 }
 
 export function resetNonceManager(): void {
@@ -471,5 +458,5 @@ export function resetNonceManager(): void {
     nonceManagerInstance.stop();
     nonceManagerInstance = null;
   }
-  nonceManagerInitPromise = null;
+  nonceManagerInitialConfig = undefined;
 }

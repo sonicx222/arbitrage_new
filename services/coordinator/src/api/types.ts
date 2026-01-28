@@ -112,19 +112,26 @@ export interface CoordinatorStateProvider {
 
 /**
  * Logger interface for route handlers and coordinator internals.
- * FIX: Consolidated Logger interface (previously duplicated in coordinator.ts)
+ * FIX 6.1: Consolidated Logger interface using `object` type for consistency
+ * with unified-detector's Logger interface.
+ *
+ * Use `object` instead of `unknown` because:
+ * - Meta should always be a key-value structure (not primitives)
+ * - Provides better type safety for structured logging
+ * - Consistent with winston/pino logger signatures
  */
 export interface RouteLogger {
-  info: (message: string, meta?: unknown) => void;
-  error: (message: string, meta?: unknown) => void;
-  warn: (message: string, meta?: unknown) => void;
-  debug?: (message: string, meta?: unknown) => void; // Optional for routes, required for coordinator
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
+  debug?: (message: string, meta?: object) => void; // Optional for routes, required for coordinator
 }
 
 /**
- * FIX: Full logger interface with required debug method.
+ * FIX 6.1: Full logger interface with required debug method.
  * Used by CoordinatorService for internal logging.
+ * Matches unified-detector's Logger interface signature.
  */
 export interface Logger extends RouteLogger {
-  debug: (message: string, meta?: unknown) => void;
+  debug: (message: string, meta?: object) => void;
 }

@@ -1632,3 +1632,793 @@ describe('T2.8: ML Predictor Integration', () => {
     });
   });
 });
+
+// ===========================================================================
+// T4.3.3: Orderflow Integration with ML Opportunity Scorer Tests
+// ===========================================================================
+
+import type {
+  OrderflowSignal,
+  OpportunityWithOrderflow,
+  EnhancedScoreWithOrderflow
+} from '../../src/analytics/ml-opportunity-scorer';
+
+describe('T4.3.3: Orderflow Integration with ML Opportunity Scorer', () => {
+  let scorer: MLOpportunityScorer;
+
+  beforeEach(() => {
+    resetMLOpportunityScorer();
+    scorer = new MLOpportunityScorer({
+      mlWeight: 0.3,
+      baseWeight: 0.7,
+      minMLConfidence: 0.5,
+      directionBonus: 0.1,
+      directionPenalty: 0.15,
+      orderflowWeight: 0.15 // New: orderflow weight for integration
+    });
+  });
+
+  describe('Orderflow Signal Type Mapping', () => {
+    it('should map bullish orderflow direction to up ML direction', async () => {
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Bullish orderflow should boost buy opportunity
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.orderflowContribution).toBeGreaterThan(0);
+      expect(result.orderflowDirectionAligned).toBe(true);
+    });
+
+    it('should map bearish orderflow direction to down ML direction', async () => {
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bearish',
+        confidence: 0.8,
+        orderflowPressure: -0.6,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'sell',
+        currentPrice: 2500
+      });
+
+      // Bearish orderflow should boost sell opportunity
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.orderflowContribution).toBeGreaterThan(0);
+      expect(result.orderflowDirectionAligned).toBe(true);
+    });
+
+    it('should map neutral orderflow direction to sideways ML direction', async () => {
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'neutral',
+        confidence: 0.7,
+        orderflowPressure: 0.1,
+        expectedVolatility: 0.2,
+        whaleImpact: 0.2,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Neutral orderflow should have minimal effect
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.orderflowDirectionAligned).toBe(true); // Neutral is always considered aligned
+    });
+  });
+
+  describe('Orderflow Score Enhancement', () => {
+    it('should enhance confidence when orderflow aligns with opportunity direction', async () => {
+      const baseConfidence = 0.7;
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.85,
+        orderflowPressure: 0.7,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.6,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      expect(result.enhancedConfidence).toBeGreaterThan(baseConfidence);
+    });
+
+    it('should reduce confidence when orderflow opposes opportunity direction', async () => {
+      const baseConfidence = 0.7;
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bearish',
+        confidence: 0.85,
+        orderflowPressure: -0.7,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.6,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy', // Buy when orderflow is bearish
+        currentPrice: 2500
+      });
+
+      expect(result.enhancedConfidence).toBeLessThan(baseConfidence);
+      expect(result.orderflowDirectionAligned).toBe(false);
+    });
+
+    it('should apply orderflowWeight correctly', async () => {
+      // Create scorer with higher orderflow weight
+      const highOrderflowScorer = new MLOpportunityScorer({
+        mlWeight: 0.3,
+        baseWeight: 0.7,
+        minMLConfidence: 0.5,
+        directionBonus: 0.1,
+        directionPenalty: 0.15,
+        orderflowWeight: 0.3 // Higher orderflow weight
+      });
+
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.9,
+        orderflowPressure: 0.8,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.7,
+        timestamp: Date.now()
+      };
+
+      const input = {
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy' as const,
+        currentPrice: 2500
+      };
+
+      const lowResult = await scorer.enhanceWithOrderflow(input);
+      const highResult = await highOrderflowScorer.enhanceWithOrderflow(input);
+
+      // Higher orderflow weight should have larger orderflow contribution
+      expect(highResult.orderflowContribution!).toBeGreaterThan(lowResult.orderflowContribution!);
+    });
+  });
+
+  describe('Combined ML + Orderflow Enhancement', () => {
+    it('should combine ML prediction and orderflow signal', async () => {
+      const baseConfidence = 0.7;
+      const mlPrediction = {
+        predictedPrice: 2600,
+        confidence: 0.85,
+        direction: 'up' as const,
+        timeHorizon: 300000,
+        features: [] as number[]
+      };
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence,
+        mlPrediction,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Both ML and orderflow should contribute
+      expect(result.mlApplied).toBe(true);
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.mlContribution).toBeGreaterThan(0);
+      expect(result.orderflowContribution).toBeGreaterThan(0);
+    });
+
+    it('should give higher score when ML and orderflow agree', async () => {
+      const baseConfidence = 0.7;
+      const alignedOrderflow: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+      const opposingOrderflow: OrderflowSignal = {
+        direction: 'bearish',
+        confidence: 0.8,
+        orderflowPressure: -0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const mlPrediction = {
+        predictedPrice: 2600,
+        confidence: 0.85,
+        direction: 'up' as const,
+        timeHorizon: 300000,
+        features: [] as number[]
+      };
+
+      const alignedResult = await scorer.enhanceWithOrderflow({
+        baseConfidence,
+        mlPrediction,
+        orderflowSignal: alignedOrderflow,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      const opposingResult = await scorer.enhanceWithOrderflow({
+        baseConfidence,
+        mlPrediction,
+        orderflowSignal: opposingOrderflow,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // When ML (up) and orderflow (bullish) agree with buy, score should be higher
+      expect(alignedResult.enhancedConfidence).toBeGreaterThan(opposingResult.enhancedConfidence);
+    });
+  });
+
+  describe('Orderflow Pressure Integration', () => {
+    it('should boost score with high positive orderflow pressure for buy', async () => {
+      const highPressure: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.9, // Strong buying pressure
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+      const lowPressure: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.3, // Weak buying pressure
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const highPressureResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: highPressure,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      const lowPressureResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: lowPressure,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Higher pressure should result in higher score
+      expect(highPressureResult.enhancedConfidence).toBeGreaterThan(lowPressureResult.enhancedConfidence);
+    });
+
+    it('should boost score with high negative orderflow pressure for sell', async () => {
+      const strongSellPressure: OrderflowSignal = {
+        direction: 'bearish',
+        confidence: 0.8,
+        orderflowPressure: -0.9, // Strong selling pressure
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: strongSellPressure,
+        opportunityDirection: 'sell',
+        currentPrice: 2500
+      });
+
+      // Strong selling pressure should boost sell opportunity
+      expect(result.enhancedConfidence).toBeGreaterThan(0.7);
+    });
+  });
+
+  describe('Whale Impact Factor', () => {
+    it('should factor whale impact into score enhancement', async () => {
+      const highWhaleImpact: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.9, // High whale activity impact
+        timestamp: Date.now()
+      };
+      const lowWhaleImpact: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.2, // Low whale activity impact
+        timestamp: Date.now()
+      };
+
+      const highImpactResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: highWhaleImpact,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      const lowImpactResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: lowWhaleImpact,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Higher whale impact should affect the score more
+      expect(Math.abs(highImpactResult.enhancedConfidence - 0.7)).toBeGreaterThan(
+        Math.abs(lowImpactResult.enhancedConfidence - 0.7)
+      );
+    });
+  });
+
+  describe('Volatility Consideration', () => {
+    it('should reduce confidence with high expected volatility', async () => {
+      const highVolatility: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.9, // Very high volatility
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+      const lowVolatility: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.1, // Low volatility
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const highVolResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: highVolatility,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      const lowVolResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: lowVolatility,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // High volatility should result in lower confidence due to uncertainty
+      expect(highVolResult.enhancedConfidence).toBeLessThan(lowVolResult.enhancedConfidence);
+    });
+  });
+
+  describe('Fallback Behavior', () => {
+    it('should return base score without orderflow signal', async () => {
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: null,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      expect(result.enhancedConfidence).toBe(0.7);
+      expect(result.orderflowApplied).toBe(false);
+    });
+
+    it('should skip orderflow signal below minOrderflowConfidence threshold', async () => {
+      const lowConfidenceSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.3, // Below default threshold (0.4)
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: lowConfidenceSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Low confidence signal should be skipped entirely
+      expect(result.orderflowApplied).toBe(false);
+      expect(result.orderflowContribution).toBe(0);
+      expect(result.enhancedConfidence).toBe(0.7); // Base confidence unchanged
+    });
+
+    it('should apply orderflow signal at or above minOrderflowConfidence threshold', async () => {
+      const validConfidenceSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.4, // At threshold
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: validConfidenceSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Signal at threshold should be applied
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.orderflowContribution).not.toBe(0);
+    });
+
+    it('should skip invalid orderflow signal with NaN values', async () => {
+      const invalidSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: NaN, // Invalid
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: invalidSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Invalid signal should be skipped
+      expect(result.orderflowApplied).toBe(false);
+      expect(result.enhancedConfidence).toBe(0.7);
+    });
+
+    it('should skip orderflow signal with zero confidence', async () => {
+      const zeroConfidenceSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0, // Zero confidence
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: zeroConfidenceSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // Zero confidence is below threshold, should be skipped
+      expect(result.orderflowApplied).toBe(false);
+      expect(result.enhancedConfidence).toBe(0.7);
+    });
+  });
+
+  describe('Combined Momentum, ML, and Orderflow', () => {
+    it('should combine all three signals when available', async () => {
+      const momentumSignal: MomentumSignal = {
+        pair: 'ETH_USDT',
+        currentPrice: 2500,
+        velocity: 0.02,
+        acceleration: 0.001,
+        zScore: 1.5,
+        meanReversionSignal: false,
+        volumeSpike: true,
+        volumeRatio: 2.5,
+        trend: 'bullish',
+        confidence: 0.85,
+        emaShort: 2480,
+        emaMedium: 2450,
+        emaLong: 2400,
+        timestamp: Date.now()
+      };
+
+      const mlPrediction = {
+        predictedPrice: 2600,
+        confidence: 0.85,
+        direction: 'up' as const,
+        timeHorizon: 300000,
+        features: [] as number[]
+      };
+
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithAllSignals({
+        baseConfidence: 0.6,
+        mlPrediction,
+        momentumSignal,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // All signals should contribute
+      expect(result.mlApplied).toBe(true);
+      expect(result.orderflowApplied).toBe(true);
+      expect(result.momentumContribution).toBeDefined();
+      expect(result.orderflowContribution).toBeDefined();
+      expect(result.mlContribution).toBeGreaterThan(0);
+
+      // With all signals aligned (bullish), confidence should be significantly enhanced
+      expect(result.enhancedConfidence).toBeGreaterThan(0.7);
+    });
+
+    it('should handle mixed signals appropriately', async () => {
+      const momentumSignal: MomentumSignal = {
+        pair: 'ETH_USDT',
+        currentPrice: 2500,
+        velocity: -0.02, // Bearish momentum
+        acceleration: -0.001,
+        zScore: -1.5,
+        meanReversionSignal: false,
+        volumeSpike: false,
+        volumeRatio: 1.0,
+        trend: 'bearish',
+        confidence: 0.85,
+        emaShort: 2520,
+        emaMedium: 2550,
+        emaLong: 2600,
+        timestamp: Date.now()
+      };
+
+      const mlPrediction = {
+        predictedPrice: 2600,
+        confidence: 0.85,
+        direction: 'up' as const, // ML says up
+        timeHorizon: 300000,
+        features: [] as number[]
+      };
+
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish', // Orderflow says bullish
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      const result = await scorer.enhanceWithAllSignals({
+        baseConfidence: 0.6,
+        mlPrediction,
+        momentumSignal, // Bearish
+        orderflowSignal, // Bullish
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      // With mixed signals, the enhancement should be moderate
+      expect(result.enhancedConfidence).toBeDefined();
+      // The score should reflect the conflict between momentum (bearish) and ML+orderflow (bullish)
+    });
+  });
+
+  describe('Statistics Tracking', () => {
+    it('should track orderflow enhancement statistics', async () => {
+      // Perform some enhancements
+      const orderflowSignal: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: Date.now()
+      };
+
+      await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.6,
+        mlPrediction: null,
+        orderflowSignal,
+        opportunityDirection: 'sell', // Misaligned
+        currentPrice: 2500
+      });
+
+      const stats = scorer.getStats();
+
+      expect(stats.scoredOpportunities).toBeGreaterThanOrEqual(2);
+      expect(stats).toHaveProperty('orderflowEnhancedCount');
+      expect(stats).toHaveProperty('avgOrderflowContribution');
+    });
+  });
+
+  describe('Edge Cases', () => {
+    it('should clamp enhanced confidence to [0, 1] with extreme orderflow', async () => {
+      // Extreme positive case
+      const extremeBullish: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 1.0,
+        orderflowPressure: 1.0,
+        expectedVolatility: 0.0,
+        whaleImpact: 1.0,
+        timestamp: Date.now()
+      };
+
+      const positiveResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.95,
+        mlPrediction: {
+          predictedPrice: 3000,
+          confidence: 0.99,
+          direction: 'up',
+          timeHorizon: 300000,
+          features: []
+        },
+        orderflowSignal: extremeBullish,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      expect(positiveResult.enhancedConfidence).toBeLessThanOrEqual(1);
+      expect(positiveResult.enhancedConfidence).toBeGreaterThanOrEqual(0);
+
+      // Extreme negative case
+      const extremeBearish: OrderflowSignal = {
+        direction: 'bearish',
+        confidence: 1.0,
+        orderflowPressure: -1.0,
+        expectedVolatility: 1.0,
+        whaleImpact: 1.0,
+        timestamp: Date.now()
+      };
+
+      const negativeResult = await scorer.enhanceWithOrderflow({
+        baseConfidence: 0.1,
+        mlPrediction: {
+          predictedPrice: 2000,
+          confidence: 0.99,
+          direction: 'down',
+          timeHorizon: 300000,
+          features: []
+        },
+        orderflowSignal: extremeBearish,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      });
+
+      expect(negativeResult.enhancedConfidence).toBeLessThanOrEqual(1);
+      expect(negativeResult.enhancedConfidence).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should handle zero timestamp gracefully', async () => {
+      const signalWithZeroTimestamp: OrderflowSignal = {
+        direction: 'bullish',
+        confidence: 0.8,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.25,
+        whaleImpact: 0.5,
+        timestamp: 0 // Zero timestamp
+      };
+
+      // Should not throw
+      await expect(scorer.enhanceWithOrderflow({
+        baseConfidence: 0.7,
+        mlPrediction: null,
+        orderflowSignal: signalWithZeroTimestamp,
+        opportunityDirection: 'buy',
+        currentPrice: 2500
+      })).resolves.toBeDefined();
+    });
+  });
+
+  describe('toOrderflowSignal Helper', () => {
+    it('should convert OrderflowPrediction to OrderflowSignal', () => {
+      // Import the helper
+      const { toOrderflowSignal } = require('../../src/analytics/ml-opportunity-scorer');
+
+      // Mock OrderflowPrediction from @arbitrage/ml
+      const prediction = {
+        direction: 'bullish' as const,
+        confidence: 0.85,
+        orderflowPressure: 0.6,
+        expectedVolatility: 0.3,
+        whaleImpact: 0.5,
+        timeHorizonMs: 60000,
+        features: { whaleSwapCount1h: 5 }, // Extra field should be ignored
+        timestamp: Date.now()
+      };
+
+      const signal = toOrderflowSignal(prediction);
+
+      expect(signal.direction).toBe('bullish');
+      expect(signal.confidence).toBe(0.85);
+      expect(signal.orderflowPressure).toBe(0.6);
+      expect(signal.expectedVolatility).toBe(0.3);
+      expect(signal.whaleImpact).toBe(0.5);
+      expect(signal.timestamp).toBe(prediction.timestamp);
+      // Extra fields should not be present
+      expect((signal as unknown as Record<string, unknown>).timeHorizonMs).toBeUndefined();
+      expect((signal as unknown as Record<string, unknown>).features).toBeUndefined();
+    });
+
+    it('should work with minimal required fields', () => {
+      const { toOrderflowSignal } = require('../../src/analytics/ml-opportunity-scorer');
+
+      const minimalPrediction = {
+        direction: 'neutral' as const,
+        confidence: 0.5,
+        orderflowPressure: 0,
+        expectedVolatility: 0.1,
+        whaleImpact: 0.2,
+        timestamp: 123456789
+      };
+
+      const signal = toOrderflowSignal(minimalPrediction);
+
+      expect(signal).toEqual({
+        direction: 'neutral',
+        confidence: 0.5,
+        orderflowPressure: 0,
+        expectedVolatility: 0.1,
+        whaleImpact: 0.2,
+        timestamp: 123456789
+      });
+    });
+  });
+});
