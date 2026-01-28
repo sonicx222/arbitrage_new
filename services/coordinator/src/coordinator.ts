@@ -55,7 +55,7 @@ import {
   getOptionalNumber,
   unwrapMessageData,
   hasRequiredString,
-  MinHeap
+  findKSmallest
 } from './utils';
 
 // =============================================================================
@@ -228,6 +228,16 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // FIX: Alert notifier for sending alerts to Discord/Slack
   private alertNotifier: AlertNotifier | null = null;
 
+  // FIX P2: Circuit breaker for execution forwarding
+  // Prevents hammering the execution stream when it's down
+  private executionCircuitBreaker = {
+    failures: 0,
+    isOpen: false,
+    lastFailure: 0,
+    threshold: 5,          // Open after 5 consecutive failures
+    resetTimeoutMs: 60000  // Try again after 1 minute
+  };
+
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
   private static readonly STARTUP_GRACE_PERIOD_MS = 60000; // 60 seconds
@@ -240,6 +250,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // REFACTOR: Separate interval for opportunity cleanup to prevent race conditions
   // with concurrent stream consumers adding opportunities
   private opportunityCleanupInterval: NodeJS.Timeout | null = null;
+  // FIX P1: Dedicated interval for general cleanup operations (activePairs, alertCooldowns)
+  // This runs independently of legacy health polling mode
+  private generalCleanupInterval: NodeJS.Timeout | null = null;
 
   // Stream consumers (blocking read pattern - replaces setInterval polling)
   private streamConsumers: StreamConsumer[] = [];
@@ -549,6 +562,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       clearInterval(this.opportunityCleanupInterval);
       this.opportunityCleanupInterval = null;
     }
+    // FIX P1: Clear general cleanup interval
+    if (this.generalCleanupInterval) {
+      clearInterval(this.generalCleanupInterval);
+      this.generalCleanupInterval = null;
+    }
     // Stop all stream consumers (replaces setInterval pattern)
     await Promise.all(this.streamConsumers.map(c => c.stop()));
     this.streamConsumers = [];
@@ -794,6 +812,68 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // FIX Race 5.3: Use atomic flag-and-send pattern to prevent race between check and set
   private sendingStreamErrorAlert = false;
 
+  // FIX P1: Rate limiting for stream message processing
+  // Token bucket rate limiter per stream to prevent DoS via message flooding
+  private streamRateLimiters: Map<string, { tokens: number; lastRefill: number }> = new Map();
+  private readonly RATE_LIMIT_MAX_TOKENS = 1000;     // Max messages per refill period
+  private readonly RATE_LIMIT_REFILL_MS = 1000;      // Refill period (1 second)
+  private readonly RATE_LIMIT_TOKENS_PER_MSG = 1;    // Cost per message
+
+  /**
+   * FIX P1: Check and consume rate limit tokens for a stream.
+   * Returns true if message should be processed, false if rate limited.
+   * Uses token bucket algorithm for smooth rate limiting.
+   */
+  private checkRateLimit(streamName: string): boolean {
+    const now = Date.now();
+    let limiter = this.streamRateLimiters.get(streamName);
+
+    if (!limiter) {
+      // Initialize rate limiter for this stream
+      limiter = { tokens: this.RATE_LIMIT_MAX_TOKENS, lastRefill: now };
+      this.streamRateLimiters.set(streamName, limiter);
+    }
+
+    // Refill tokens based on elapsed time
+    const elapsed = now - limiter.lastRefill;
+    if (elapsed >= this.RATE_LIMIT_REFILL_MS) {
+      const refillCount = Math.floor(elapsed / this.RATE_LIMIT_REFILL_MS);
+      limiter.tokens = Math.min(
+        this.RATE_LIMIT_MAX_TOKENS,
+        limiter.tokens + (refillCount * this.RATE_LIMIT_MAX_TOKENS)
+      );
+      limiter.lastRefill = now;
+    }
+
+    // Check if we have enough tokens
+    if (limiter.tokens >= this.RATE_LIMIT_TOKENS_PER_MSG) {
+      limiter.tokens -= this.RATE_LIMIT_TOKENS_PER_MSG;
+      return true;
+    }
+
+    // Rate limited
+    return false;
+  }
+
+  /**
+   * FIX P1: Wrap a message handler with rate limiting.
+   */
+  private withRateLimit(
+    streamName: string,
+    handler: (msg: StreamMessage) => Promise<void>
+  ): (msg: StreamMessage) => Promise<void> {
+    return async (msg: StreamMessage) => {
+      if (!this.checkRateLimit(streamName)) {
+        this.logger.warn('Rate limit exceeded, dropping message', {
+          stream: streamName,
+          messageId: msg.id
+        });
+        return;
+      }
+      return handler(msg);
+    };
+  }
+
   /**
    * Start stream consumers using blocking reads pattern.
    * Replaces setInterval polling for better latency and reduced Redis command usage.
@@ -811,14 +891,33 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (!this.streamsClient) return;
 
     // Handler map for each stream
+    // FIX P1: All handlers are wrapped with rate limiting to prevent DoS attacks
     const handlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
-      [RedisStreamsClient.STREAMS.HEALTH]: (msg) => this.handleHealthMessage(msg),
-      [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
-      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg),
-      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
-      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg),
+      [RedisStreamsClient.STREAMS.HEALTH]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.HEALTH,
+        (msg) => this.handleHealthMessage(msg)
+      ),
+      [RedisStreamsClient.STREAMS.OPPORTUNITIES]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.OPPORTUNITIES,
+        (msg) => this.handleOpportunityMessage(msg)
+      ),
+      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.WHALE_ALERTS,
+        (msg) => this.handleWhaleAlertMessage(msg)
+      ),
+      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.SWAP_EVENTS,
+        (msg) => this.handleSwapEventMessage(msg)
+      ),
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
+        (msg) => this.handleVolumeAggregateMessage(msg)
+      ),
       // S3.3.5 FIX: Add price updates handler
-      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg)
+      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: this.withRateLimit(
+        RedisStreamsClient.STREAMS.PRICE_UPDATES,
+        (msg) => this.handlePriceUpdateMessage(msg)
+      )
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
@@ -984,15 +1083,48 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // FIX: Use type guard utilities for cleaner type-safe extraction
+      const opportunityId = getString(data, 'id');
+      const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
+
+      // FIX P2: Duplicate opportunity detection
+      // If we've seen this opportunity recently (within 5s), skip it to prevent
+      // duplicate forwarding when multiple detectors report the same opportunity
+      const existing = this.opportunities.get(opportunityId);
+      if (existing && Math.abs((existing.timestamp || 0) - opportunityTimestamp) < 5000) {
+        this.logger.debug('Duplicate opportunity detected, skipping', {
+          id: opportunityId,
+          existingTimestamp: existing.timestamp,
+          newTimestamp: opportunityTimestamp
+        });
+        this.resetStreamErrors();
+        return;
+      }
+
+      // FIX P1: Input validation for profit percentage
+      // Validate profit is within reasonable range (-100% to 10000%)
+      // Unrealistic values likely indicate malformed data or manipulation
+      let profitPercentage = getOptionalNumber(data, 'profitPercentage');
+      if (profitPercentage !== undefined) {
+        if (profitPercentage < -100 || profitPercentage > 10000) {
+          this.logger.warn('Invalid profit percentage, rejecting opportunity', {
+            id: opportunityId,
+            profitPercentage,
+            reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
+          });
+          this.resetStreamErrors();
+          return;
+        }
+      }
+
       const opportunity: ArbitrageOpportunity = {
-        id: getString(data, 'id'),
+        id: opportunityId,
         confidence: getNumber(data, 'confidence', 0),
-        timestamp: getNumber(data, 'timestamp', Date.now()),
+        timestamp: opportunityTimestamp,
         // Optional fields using type guards
         chain: getOptionalString(data, 'chain'),
         buyDex: getOptionalString(data, 'buyDex'),
         sellDex: getOptionalString(data, 'sellDex'),
-        profitPercentage: getOptionalNumber(data, 'profitPercentage'),
+        profitPercentage,
         expiresAt: getOptionalNumber(data, 'expiresAt'),
         status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
       };
@@ -1059,30 +1191,26 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
 
     // Phase 3: Enforce size limit by removing oldest entries
-    // FIX 4.5 & 10.5: Use MinHeap for O(n log k) instead of O(n*k) selection sort
+    // FIX 4.5 & 10.5: Use findKSmallest for O(n log k) with bounded memory
     // For 1000 opportunities removing 100 oldest:
     // - Selection sort: O(1000 * 100) = 100,000 operations
-    // - MinHeap: O(1000 * log(100)) = ~7,000 operations (14x faster)
+    // - findKSmallest: O(1000 * log(100)) = ~7,000 operations (14x faster)
+    // FIX P0: Previous MinHeap approach allocated memory for ALL items.
+    // findKSmallest maintains only k items in memory at any time.
     if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
       const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
 
-      // Use min-heap ordered by timestamp (oldest at top)
-      // We'll collect the removeCount oldest entries
-      const minHeap = new MinHeap<{ id: string; timestamp: number }>(
-        (a, b) => a.timestamp - b.timestamp
+      // Find the k oldest opportunities efficiently
+      // Only keeps removeCount items in memory instead of all opportunities
+      const oldestK = findKSmallest(
+        this.opportunities.entries(),
+        removeCount,
+        ([, a], [, b]) => (a.timestamp || 0) - (b.timestamp || 0)
       );
 
-      // FIX 10.6: Iterate Map directly instead of creating intermediate array
-      for (const [id, opp] of this.opportunities) {
-        minHeap.push({ id, timestamp: opp.timestamp || 0 });
-      }
-
-      // Extract and delete the removeCount oldest
-      for (let i = 0; i < removeCount && !minHeap.isEmpty(); i++) {
-        const oldest = minHeap.pop();
-        if (oldest) {
-          this.opportunities.delete(oldest.id);
-        }
+      // Delete the oldest entries
+      for (const [id] of oldestK) {
+        this.opportunities.delete(id);
       }
     }
 
@@ -1367,8 +1495,67 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * FIX P2: Check if execution circuit breaker is open.
+   * If open, check if reset timeout has passed (half-open state).
+   */
+  private isExecutionCircuitOpen(): boolean {
+    const cb = this.executionCircuitBreaker;
+    if (!cb.isOpen) return false;
+
+    const now = Date.now();
+    // Check if we should try again (half-open state)
+    if (now - cb.lastFailure >= cb.resetTimeoutMs) {
+      return false; // Allow one attempt
+    }
+
+    return true;
+  }
+
+  /**
+   * FIX P2: Record execution forwarding failure.
+   */
+  private recordExecutionFailure(): void {
+    const cb = this.executionCircuitBreaker;
+    const now = Date.now();
+    cb.failures++;
+    cb.lastFailure = now;
+
+    if (cb.failures >= cb.threshold && !cb.isOpen) {
+      cb.isOpen = true;
+      this.logger.warn('Execution circuit breaker opened', {
+        failures: cb.failures,
+        resetTimeoutMs: cb.resetTimeoutMs
+      });
+
+      // Send alert about circuit breaker opening
+      this.sendAlert({
+        type: 'EXECUTION_CIRCUIT_OPEN',
+        message: `Execution forwarding circuit breaker opened after ${cb.failures} failures`,
+        severity: 'high',
+        data: { failures: cb.failures },
+        timestamp: now
+      });
+    }
+  }
+
+  /**
+   * FIX P2: Record execution forwarding success.
+   */
+  private recordExecutionSuccess(): void {
+    const cb = this.executionCircuitBreaker;
+    const wasOpen = cb.isOpen;
+    cb.failures = 0;
+    cb.isOpen = false;
+
+    if (wasOpen) {
+      this.logger.info('Execution circuit breaker closed - recovered');
+    }
+  }
+
+  /**
    * Forward a pending opportunity to the execution engine via Redis Streams.
    * FIX: Implemented actual stream publishing (was TODO stub).
+   * FIX P2: Added circuit breaker to prevent hammering failed streams.
    *
    * Only the leader coordinator should call this method to prevent
    * duplicate execution attempts.
@@ -1377,6 +1564,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (!this.streamsClient) {
       this.logger.warn('Cannot forward opportunity - streams client not initialized', {
         id: opportunity.id
+      });
+      return;
+    }
+
+    // FIX P2: Check circuit breaker before attempting to forward
+    if (this.isExecutionCircuitOpen()) {
+      this.logger.debug('Execution circuit open, skipping opportunity forwarding', {
+        id: opportunity.id,
+        failures: this.executionCircuitBreaker.failures
       });
       return;
     }
@@ -1405,6 +1601,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         }
       );
 
+      // FIX P2: Record success to close circuit breaker if it was half-open
+      this.recordExecutionSuccess();
+
       this.logger.info('Forwarded opportunity to execution engine', {
         id: opportunity.id,
         chain: opportunity.chain,
@@ -1415,19 +1614,25 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.systemMetrics.totalExecutions++;
 
     } catch (error) {
+      // FIX P2: Record failure for circuit breaker
+      this.recordExecutionFailure();
+
       this.logger.error('Failed to forward opportunity to execution engine', {
         id: opportunity.id,
-        error: (error as Error).message
+        error: (error as Error).message,
+        circuitFailures: this.executionCircuitBreaker.failures
       });
 
-      // Send alert for execution forwarding failures
-      this.sendAlert({
-        type: 'EXECUTION_FORWARD_FAILED',
-        message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
-        severity: 'high',
-        data: { opportunityId: opportunity.id, chain: opportunity.chain },
-        timestamp: Date.now()
-      });
+      // Send alert for execution forwarding failures (only if circuit not already alerted)
+      if (!this.executionCircuitBreaker.isOpen) {
+        this.sendAlert({
+          type: 'EXECUTION_FORWARD_FAILED',
+          message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
+          severity: 'high',
+          data: { opportunityId: opportunity.id, chain: opportunity.chain },
+          timestamp: Date.now()
+        });
+      }
     }
   }
 
@@ -1508,9 +1713,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }, 10000);
     }
 
-    // FIX: Moved cleanup operations to a separate interval (always enabled)
-    // This runs regardless of legacy polling mode
-    this.healthCheckInterval = this.healthCheckInterval ?? setInterval(async () => {
+    // FIX P1: Use dedicated interval for cleanup operations (not tied to legacy polling)
+    // This runs regardless of legacy polling mode to ensure cleanup always happens
+    // Previous bug: cleanup only ran if legacy polling was disabled due to ?? operator
+    this.generalCleanupInterval = setInterval(() => {
       if (!this.stateManager.isRunning()) return;
 
       try {
@@ -1711,24 +1917,30 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const inGracePeriod = (now - this.startTime) < CoordinatorService.STARTUP_GRACE_PERIOD_MS;
 
     // Check service health
-    for (const [serviceName, health] of this.serviceHealth) {
-      // Skip 'starting' and 'stopping' status - these are transient states
-      if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
-        alerts.push({
-          type: 'SERVICE_UNHEALTHY',
-          service: serviceName,
-          message: `${serviceName} is ${health.status}`,
-          severity: 'high',
-          timestamp: now
-        });
+    // FIX P1: During grace period, don't alert about individual service health
+    // Services are still starting up and may not have reported healthy yet
+    if (!inGracePeriod) {
+      for (const [serviceName, health] of this.serviceHealth) {
+        // Skip 'starting' and 'stopping' status - these are transient states
+        if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
+          alerts.push({
+            type: 'SERVICE_UNHEALTHY',
+            service: serviceName,
+            message: `${serviceName} is ${health.status}`,
+            severity: 'high',
+            timestamp: now
+          });
+        }
       }
     }
 
     // Check system metrics
-    // During grace period: only alert if there are services AND health is low
+    // FIX P1: During grace period, require minimum services before alerting
+    // This prevents false alerts when only 1-2 services have reported
     // After grace period: alert on any low health
+    const MIN_SERVICES_FOR_GRACE_PERIOD_ALERT = 3;
     const shouldAlertLowHealth = inGracePeriod
-      ? this.serviceHealth.size > 0 && this.systemMetrics.systemHealth < 80
+      ? this.serviceHealth.size >= MIN_SERVICES_FOR_GRACE_PERIOD_ALERT && this.systemMetrics.systemHealth < 80
       : this.systemMetrics.systemHealth < 80;
 
     if (shouldAlertLowHealth) {
