@@ -621,6 +621,8 @@ export class ChainDetectorInstance extends EventEmitter {
     this.snapshotVersion = 0;
     this.dexPoolCacheVersion = -1;
     this.dexPoolCache = null;
+    // BUG-FIX: Clear factory event signature set to free memory on restart
+    this.factoryEventSignatureSet = null;
 
     // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
     this.blockLatencies = [];

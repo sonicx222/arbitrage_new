@@ -198,8 +198,15 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
   /**
    * Start the health monitoring interval.
    * FIX Race 5.3: Improved concurrency guard with proper error handling
+   * BUG-FIX: Added guard against duplicate interval creation on restart
    */
   function startHealthMonitoring(): void {
+    // BUG-FIX: Clear any existing interval to prevent memory leak on restart
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+      healthCheckInterval = null;
+    }
+
     healthCheckInterval = setInterval(() => {
       // FIX B2: Skip if already checking health (prevents concurrent executions)
       // or if service is stopping
