@@ -640,6 +640,153 @@ describe('SimulationService', () => {
   });
 
   // ===========================================================================
+  // Cache Behavior Tests (Task 0.3: Edge case coverage)
+  // ===========================================================================
+
+  describe('cache behavior', () => {
+    test('should cache successful simulation results', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 5000,
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // First call - should call provider
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1);
+
+      // Second call with same request - should hit cache
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1); // Still 1
+
+      const metrics = service.getAggregatedMetrics();
+      expect(metrics.cacheHits).toBeGreaterThan(0);
+    });
+
+    test('should not cache failed simulation results', async () => {
+      mockTenderlyProvider.simulate.mockResolvedValue({
+        success: false,
+        wouldRevert: false,
+        error: 'API error',
+        provider: 'tenderly',
+        latencyMs: 100,
+      });
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 5000,
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // First call - should call provider
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1);
+
+      // Second call - should NOT hit cache (failed results not cached)
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(2);
+    });
+
+    test('should expire cache entries after TTL', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 1000, // 1 second TTL
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // First call - should call provider
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1);
+
+      // Advance time past cache TTL
+      jest.advanceTimersByTime(1100);
+
+      // Second call after expiration - should call provider again
+      await service.simulate(request);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(2);
+    });
+
+    test('should evict oldest entries when cache exceeds MAX_CACHE_SIZE', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 60000, // Long TTL so entries don't expire
+        },
+      });
+
+      // Add 500+ entries to trigger eviction (MAX_CACHE_SIZE = 500)
+      // Use different 'from' addresses to generate unique cache keys
+      for (let i = 0; i < 450; i++) {
+        const uniqueFrom = `0x${i.toString(16).padStart(40, '0')}`;
+        const request = createSimulationRequest({
+          transaction: {
+            from: uniqueFrom,
+            to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+            data: '0x12345678',
+            value: 0n,
+            gasLimit: 200000n,
+          },
+        });
+        await service.simulate(request);
+      }
+
+      // Service should not crash and should continue working
+      const finalRequest = createSimulationRequest();
+      const result = await service.simulate(finalRequest);
+      expect(result.success).toBe(true);
+    });
+
+    test('should use different cache keys for different transactions', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 5000,
+        },
+      });
+
+      const request1 = createSimulationRequest({
+        transaction: {
+          from: '0x1111111111111111111111111111111111111111',
+          to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+          data: '0x12345678',
+          value: 0n,
+          gasLimit: 200000n,
+        },
+      });
+
+      const request2 = createSimulationRequest({
+        transaction: {
+          from: '0x2222222222222222222222222222222222222222',
+          to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+          data: '0x12345678',
+          value: 0n,
+          gasLimit: 200000n,
+        },
+      });
+
+      // Different requests should both call provider
+      await service.simulate(request1);
+      await service.simulate(request2);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ===========================================================================
   // Timeout Behavior Tests (Regression tests for P0-CRITICAL fix)
   // ===========================================================================
 

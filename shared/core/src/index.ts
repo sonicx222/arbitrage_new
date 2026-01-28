@@ -910,6 +910,10 @@ export {
   CircularBuffer,
   createFifoBuffer,
   createRollingWindow,
+  // FIX 10.5: MinHeap for O(n log k) partial sorting (consolidated from services)
+  MinHeap,
+  findKSmallest,
+  findKLargest,
 } from './data-structures';
 
 export type {

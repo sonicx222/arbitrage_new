@@ -179,9 +179,13 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
 
     try {
       await streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, {
-        // Use both 'name' (preferred) and 'service' (legacy) for compatibility
+        // FIX 6.3: Health field naming standardization
+        // 'name' is the preferred field (new standard)
+        // 'service' is deprecated but included for backward compatibility
+        // TODO: Remove 'service' field after all consumers migrate to 'name'
+        // Migration tracking: coordinator.ts handleHealthMessage() already supports both
         name: serviceName,
-        service: serviceName,
+        service: serviceName, // @deprecated - use 'name' instead
         ...health,
         // Convert Map to object for serialization
         chainHealth: Object.fromEntries(health.chainHealth),
