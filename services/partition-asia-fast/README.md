@@ -23,17 +23,21 @@ Partition detector service for high-throughput Asian blockchain networks.
 
 ## DEXes Monitored
 
-### BSC (8 DEXes)
+DEXes are dynamically loaded from configuration. The following are typically enabled:
+
+### BSC
 - PancakeSwap V3, PancakeSwap V2, Biswap, Thena, ApeSwap, MDEX, Ellipsis, Nomiswap
 
-### Polygon (4 DEXes)
+### Polygon
 - Uniswap V3, QuickSwap V3, SushiSwap, ApeSwap
 
-### Avalanche (3 DEXes)
+### Avalanche
 - Trader Joe V2, Pangolin, SushiSwap
 
-### Fantom (2 DEXes)
+### Fantom
 - SpookySwap, SpiritSwap
+
+> **Note:** Actual DEX counts are determined by enabled configuration in `shared/config/src/dexes.ts`.
 
 ## Environment Variables
 
@@ -41,26 +45,37 @@ Partition detector service for high-throughput Asian blockchain networks.
 # Required
 REDIS_URL=redis://localhost:6379
 
-# Optional (have defaults)
-PARTITION_ID=asia-fast
-PARTITION_CHAINS=bsc,polygon,avalanche,fantom
-REGION_ID=asia-southeast1
-LOG_LEVEL=info
-HEALTH_CHECK_PORT=3001
+# Optional - Service Configuration (have defaults)
+PARTITION_ID=asia-fast                    # Partition identifier
+PARTITION_CHAINS=bsc,polygon,avalanche,fantom  # Chains to monitor (comma-separated)
+REGION_ID=asia-southeast1                 # Region identifier for health reporting
+LOG_LEVEL=info                            # Logging level (debug, info, warn, error)
+HEALTH_CHECK_PORT=3001                    # HTTP health check port
+INSTANCE_ID=p1-asia-fast-local-123        # Unique instance ID (auto-generated if not set)
+ENABLE_CROSS_REGION_HEALTH=true           # Enable cross-region health reporting
 
 # RPC URLs (override defaults)
+# WARNING: In production, configure private RPC endpoints for reliability
 BSC_RPC_URL=https://bsc-dataseed1.binance.org
 POLYGON_RPC_URL=https://polygon-rpc.com
 AVALANCHE_RPC_URL=https://api.avax.network/ext/bc/C/rpc
 FANTOM_RPC_URL=https://rpc.ftm.tools
 
 # WebSocket URLs (override defaults)
-# Note: Use reliable public WebSocket endpoints. Alchemy/Infura recommended for production.
+# WARNING: In production, configure private WebSocket endpoints (Alchemy, Infura, QuickNode)
 BSC_WS_URL=wss://bsc.publicnode.com
 POLYGON_WS_URL=wss://polygon-bor-rpc.publicnode.com
 AVALANCHE_WS_URL=wss://api.avax.network/ext/bc/C/ws
 FANTOM_WS_URL=wss://fantom.publicnode.com
 ```
+
+### Production Configuration
+
+For production deployments, it's strongly recommended to:
+
+1. **Use private RPC/WebSocket endpoints** - Public endpoints have rate limits
+2. **Set `NODE_ENV=production`** - Enables production warnings for missing configs
+3. **Configure all chain URLs** - Ensures reliable connectivity
 
 ## Local Development
 
@@ -125,7 +140,8 @@ docker-compose down
 ## Oracle Cloud Deployment
 
 ### Instance Specification
-- Shape: VM.Standard.E4.Flex (1 OCPU, 768MB RAM)
+- Shape: VM.Standard.E4.Flex (1 OCPU)
+- Memory: 768MB limit (256MB reserved minimum)
 - Image: Oracle Linux 8 with Docker
 - Region: ap-singapore-1
 
@@ -146,4 +162,13 @@ docker-compose down
 
 ## Architecture Reference
 
-See [ADR-003: Partitioned Chain Detectors](../../../docs/architecture/adr/ADR-003-partitioned-chain-detectors.md) for architectural decisions.
+See [ADR-003: Partitioned Chain Detectors](../../../docs/architecture/adr/ADR-003-partitioned-detectors.md) for architectural decisions.
+
+## Docker Environment Notes
+
+- **Dockerfile**: Sets `NODE_ENV=production` by default for production-optimized builds
+- **docker-compose.yml**: Overrides to `NODE_ENV=development` for local development/testing
+
+When running with docker-compose, the service runs in development mode. For production deployments, either:
+1. Remove the `NODE_ENV=development` override from docker-compose.yml
+2. Or set `NODE_ENV=production` in your deployment configuration

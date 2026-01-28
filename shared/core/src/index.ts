@@ -700,13 +700,21 @@ export {
   setupDetectorEventHandlers,
   setupProcessHandlers,
   exitWithConfigError,
-  SHUTDOWN_TIMEOUT_MS
+  closeServerWithTimeout,
+  SHUTDOWN_TIMEOUT_MS,
+  HEALTH_SERVER_CLOSE_TIMEOUT_MS,
+  // Typed environment config utilities (standardized across P1-P4)
+  parsePartitionEnvironmentConfig,
+  validatePartitionEnvironmentConfig,
+  generateInstanceId
 } from './partition-service-utils';
 export type {
   PartitionServiceConfig,
   HealthServerOptions,
   PartitionDetectorInterface,
-  ProcessHandlerCleanup
+  ProcessHandlerCleanup,
+  // Typed environment config type
+  PartitionEnvironmentConfig
 } from './partition-service-utils';
 
 // Partition Router (S3.1.7 - Detector Migration)

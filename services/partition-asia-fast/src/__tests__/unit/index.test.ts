@@ -60,6 +60,24 @@ jest.mock('@arbitrage/core', () => ({
   exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
     throw new Error(`Config error: ${msg}`);
   }),
+  // New shared utilities for typed environment config
+  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((chainNames: readonly string[]) => ({
+    redisUrl: process.env.REDIS_URL,
+    partitionChains: process.env.PARTITION_CHAINS,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT,
+    instanceId: process.env.INSTANCE_ID,
+    regionId: process.env.REGION_ID,
+    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+    nodeEnv: process.env.NODE_ENV || 'development',
+    rpcUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+    wsUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+  })),
+  validatePartitionEnvironmentConfig: jest.fn(),
+  generateInstanceId: jest.fn().mockImplementation((partitionId: string, providedId?: string) => {
+    if (providedId) return providedId;
+    return `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+  }),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
@@ -81,7 +99,7 @@ jest.mock('@arbitrage/core', () => ({
     registerCapabilities: jest.fn(),
     triggerDegradation: jest.fn(),
   }),
-  // Centralized constants (P1-1/P1-2-FIX: Single source of truth)
+  // Centralized constants (Single source of truth)
   PARTITION_PORTS: {
     'asia-fast': 3001,
     'l2-turbo': 3002,
@@ -417,7 +435,8 @@ describe('Environment Variable Handling', () => {
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
 
-    expect(config.instanceId).toMatch(/^p1-asia-fast-/);
+    // Instance ID format is now ${partitionId}-${hostname}-${timestamp}
+    expect(config.instanceId).toMatch(/^asia-fast-/);
   });
 });
 
@@ -451,5 +470,91 @@ describe('Process Handler Cleanup', () => {
       cleanupProcessHandlers();
       cleanupProcessHandlers();
     }).not.toThrow();
+  });
+});
+
+// Tests for typed environment configuration using shared utilities
+describe('Typed Environment Configuration (Shared Utilities)', () => {
+  const originalEnv = process.env;
+  let cleanupFn: (() => void) | null = null;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+  });
+
+  afterEach(() => {
+    if (cleanupFn) {
+      cleanupFn();
+      cleanupFn = null;
+    }
+    process.env = originalEnv;
+  });
+
+  it('should export envConfig with all required properties', async () => {
+    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    expect(envConfig).toBeDefined();
+    expect(envConfig).toHaveProperty('redisUrl');
+    expect(envConfig).toHaveProperty('partitionChains');
+    expect(envConfig).toHaveProperty('healthCheckPort');
+    expect(envConfig).toHaveProperty('instanceId');
+    expect(envConfig).toHaveProperty('regionId');
+    expect(envConfig).toHaveProperty('enableCrossRegionHealth');
+    expect(envConfig).toHaveProperty('nodeEnv');
+    expect(envConfig).toHaveProperty('rpcUrls');
+    expect(envConfig).toHaveProperty('wsUrls');
+  });
+
+  it('should parse RPC URLs from environment', async () => {
+    process.env.BSC_RPC_URL = 'https://custom-bsc-rpc.com';
+    process.env.POLYGON_RPC_URL = 'https://custom-polygon-rpc.com';
+
+    jest.resetModules();
+    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    // Now using Record<string, string | undefined> instead of fixed properties
+    expect(envConfig.rpcUrls['bsc']).toBe('https://custom-bsc-rpc.com');
+    expect(envConfig.rpcUrls['polygon']).toBe('https://custom-polygon-rpc.com');
+  });
+
+  it('should parse WebSocket URLs from environment', async () => {
+    process.env.BSC_WS_URL = 'wss://custom-bsc-ws.com';
+    process.env.FANTOM_WS_URL = 'wss://custom-fantom-ws.com';
+
+    jest.resetModules();
+    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    // Now using Record<string, string | undefined> instead of fixed properties
+    expect(envConfig.wsUrls['bsc']).toBe('wss://custom-bsc-ws.com');
+    expect(envConfig.wsUrls['fantom']).toBe('wss://custom-fantom-ws.com');
+  });
+
+  it('should set nodeEnv to test in test environment', async () => {
+    const { envConfig, cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    expect(envConfig.nodeEnv).toBe('test');
+  });
+
+  it('should call validatePartitionEnvironmentConfig during module init', async () => {
+    jest.resetModules();
+    const { cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    const { validatePartitionEnvironmentConfig } = jest.requireMock('@arbitrage/core');
+    expect(validatePartitionEnvironmentConfig).toHaveBeenCalled();
+  });
+
+  it('should use generateInstanceId from shared utilities', async () => {
+    jest.resetModules();
+    const { cleanupProcessHandlers } = await import('../../index');
+    cleanupFn = cleanupProcessHandlers;
+
+    const { generateInstanceId } = jest.requireMock('@arbitrage/core');
+    expect(generateInstanceId).toHaveBeenCalledWith('asia-fast', undefined);
   });
 });
