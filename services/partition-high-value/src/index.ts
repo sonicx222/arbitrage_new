@@ -77,6 +77,14 @@ if (!partitionConfig) {
 const P3_CHAINS: readonly string[] = partitionConfig.chains;
 const P3_REGION = partitionConfig.region;
 
+// BUG-FIX: Validate partition config has chains
+if (!P3_CHAINS || P3_CHAINS.length === 0) {
+  exitWithConfigError('P3 partition has no chains configured', {
+    partitionId: P3_PARTITION_ID,
+    chains: P3_CHAINS
+  }, logger);
+}
+
 // =============================================================================
 // Environment Configuration (Using shared typed utilities)
 // =============================================================================
@@ -105,11 +113,13 @@ const serviceConfig: PartitionServiceConfig = {
 const healthServerRef: { current: Server | null } = { current: null };
 
 // Unified detector configuration (uses typed envConfig)
+// BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)
+// to properly handle falsy but valid values like empty strings or 0
 const config: UnifiedDetectorConfig = {
   partitionId: P3_PARTITION_ID,
   chains: validateAndFilterChains(envConfig.partitionChains, P3_CHAINS, logger),
   instanceId: generateInstanceId(P3_PARTITION_ID, envConfig.instanceId),
-  regionId: envConfig.regionId || P3_REGION,
+  regionId: envConfig.regionId ?? P3_REGION,
   enableCrossRegionHealth: envConfig.enableCrossRegionHealth,
   healthCheckPort: parsePort(envConfig.healthCheckPort, P3_DEFAULT_PORT, logger)
 };
@@ -139,15 +149,17 @@ const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, l
 // =============================================================================
 
 // Guard against multiple main() invocations (e.g., from integration tests)
+// BUG-FIX: Use atomic pattern with both "started" and "starting" flags to prevent race conditions
 let mainStarted = false;
+let mainStarting = false;
 
 async function main(): Promise<void> {
-  // Prevent multiple invocations
-  if (mainStarted) {
-    logger.warn('main() already started, ignoring duplicate invocation');
+  // BUG-FIX: Atomic check-and-set to prevent race conditions in high-concurrency scenarios
+  if (mainStarted || mainStarting) {
+    logger.warn('main() already started or starting, ignoring duplicate invocation');
     return;
   }
-  mainStarted = true;
+  mainStarting = true;
 
   logger.info('Starting P3 High-Value Partition Service', {
     partitionId: P3_PARTITION_ID,
@@ -160,8 +172,9 @@ async function main(): Promise<void> {
 
   try {
     // Start health check server first (using shared utilities)
+    // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly
     healthServerRef.current = createPartitionHealthServer({
-      port: config.healthCheckPort || P3_DEFAULT_PORT,
+      port: config.healthCheckPort ?? P3_DEFAULT_PORT,
       config: serviceConfig,
       detector,
       logger
@@ -170,6 +183,10 @@ async function main(): Promise<void> {
     // Start detector
     await detector.start();
 
+    // BUG-FIX: Mark as fully started only after successful completion
+    mainStarted = true;
+    mainStarting = false;
+
     logger.info('P3 High-Value Partition Service started successfully', {
       partitionId: detector.getPartitionId(),
       chains: detector.getChains(),
@@ -177,10 +194,19 @@ async function main(): Promise<void> {
     });
 
   } catch (error) {
+    // BUG-FIX: Reset starting flag on failure
+    mainStarting = false;
+
     logger.error('Failed to start P3 High-Value Partition Service', { error });
 
-    // Use shared utility for cleanup (prevents code duplication)
-    await closeServerWithTimeout(healthServerRef.current, 1000, logger);
+    // BUG-FIX: Explicit null check before closing server
+    // Server may be null if createPartitionHealthServer threw before assignment
+    if (healthServerRef.current) {
+      await closeServerWithTimeout(healthServerRef.current, 1000, logger);
+    }
+
+    // BUG-FIX: Clear server reference after closing to prevent stale reference issues
+    healthServerRef.current = null;
 
     // Clean up process handlers before exit to prevent listener leaks
     cleanupProcessHandlers();
@@ -193,10 +219,16 @@ async function main(): Promise<void> {
 // Check for Jest worker to prevent auto-start during test imports
 if (!process.env.JEST_WORKER_ID) {
   main().catch((error) => {
-    if (logger) {
-      logger.error('Fatal error in P3 High-Value partition main', { error });
-    } else {
-      console.error('Fatal error in P3 High-Value partition main (logger unavailable):', error);
+    // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails
+    try {
+      if (logger) {
+        logger.error('Fatal error in P3 High-Value partition main', { error });
+      } else {
+        console.error('Fatal error in P3 High-Value partition main (logger unavailable):', error);
+      }
+    } catch (logError) {
+      // Last resort - write to stderr directly
+      process.stderr.write(`FATAL: ${error}\nLOG ERROR: ${logError}\n`);
     }
     process.exit(1);
   });

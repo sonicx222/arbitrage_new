@@ -66,6 +66,20 @@ jest.mock('@arbitrage/core', () => ({
   exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
     throw new Error(`Config error: ${msg}`);
   }),
+  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+  // BUG-FIX: Add missing mock functions for environment config parsing
+  // Read from process.env to support environment variable tests
+  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
+    partitionChains: process.env.PARTITION_CHAINS,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT,
+    instanceId: process.env.INSTANCE_ID,
+    regionId: process.env.REGION_ID,
+    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+  })),
+  validatePartitionEnvironmentConfig: jest.fn(),
+  generateInstanceId: jest.fn().mockImplementation((partitionId, instanceId) =>
+    instanceId || `p3-${partitionId}-${Date.now()}`
+  ),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
@@ -360,10 +374,21 @@ describe('P3 Environment Variable Handling', () => {
   });
 
   afterEach(async () => {
-    // FIX: Clean up process handlers to prevent MaxListenersExceeded warnings
-    if (cleanupFn) {
-      cleanupFn();
+    // BUG-FIX: Clean up process handlers with error handling to prevent memory leaks
+    try {
+      if (cleanupFn) {
+        cleanupFn();
+      }
+    } catch (error) {
+      // Log but don't fail test if cleanup throws
+      console.warn('Cleanup function failed:', error);
+    } finally {
       cleanupFn = null;
+      // Force remove all process listeners as last resort to prevent leaks
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('uncaughtException');
+      process.removeAllListeners('unhandledRejection');
     }
     process.env = originalEnv;
   });

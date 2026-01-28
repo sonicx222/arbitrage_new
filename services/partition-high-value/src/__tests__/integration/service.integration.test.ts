@@ -66,6 +66,20 @@ jest.mock('@arbitrage/core', () => ({
   createPartitionHealthServer: jest.fn().mockReturnValue(mockHealthServer),
   setupDetectorEventHandlers: jest.fn(),
   setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()),
+  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+  // BUG-FIX: Add missing mock functions for environment config parsing
+  // Read from process.env to support environment variable tests
+  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
+    partitionChains: process.env.PARTITION_CHAINS,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT,
+    instanceId: process.env.INSTANCE_ID,
+    regionId: process.env.REGION_ID,
+    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+  })),
+  validatePartitionEnvironmentConfig: jest.fn(),
+  generateInstanceId: jest.fn().mockImplementation((partitionId, instanceId) =>
+    instanceId || `p3-${partitionId}-${Date.now()}`
+  ),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
