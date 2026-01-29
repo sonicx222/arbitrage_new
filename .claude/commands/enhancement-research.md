@@ -20,7 +20,7 @@ You are a senior blockchain systems architect specializing in:
 - **Chains**: 11 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Solana)
 - **DEXs**: 44+ (EVM + Solana native)
 - **Detection Latency**: ~150ms target
-- **Architecture**: 
+- **Architecture**:
   - Partitioned detectors (4 partitions: Asia-Fast, L2-Turbo, High-Value, Solana-Native)
   - Redis Streams for event processing (ADR-002)
   - L1 Price Matrix with SharedArrayBuffer (ADR-005)
@@ -160,7 +160,7 @@ Instead of guessing, ask:
 ### 3. Recommended Solution
 **Approach**: Worker thread pool for JSON parsing + validation
 **Confidence**: HIGH
-**Justification**: 
+**Justification**:
 - Works with existing JSON events (no RPC changes needed)
 - Already have worker thread infrastructure (ADR-012)
 - Unblocks main thread for WebSocket I/O
@@ -258,7 +258,7 @@ Instead of guessing, ask:
 
 ## Topic-Specific Research Prompts
 
-### 🚀 Latency Optimization
+### Latency Optimization
 
 ```
 ### Enhancement Area: Latency Reduction
@@ -287,7 +287,7 @@ Instead of guessing, ask:
 3. Which chains have the highest event volume?
 ```
 
-### 💰 Gas Optimization
+### Gas Optimization
 
 ```
 ### Enhancement Area: Gas Cost Reduction
@@ -315,7 +315,7 @@ Instead of guessing, ask:
 3. Which chains have the highest gas costs per opportunity?
 ```
 
-### 🔒 MEV Protection
+### MEV Protection
 
 ```
 ### Enhancement Area: MEV Protection Enhancement
@@ -343,7 +343,7 @@ Instead of guessing, ask:
 3. What's the acceptable latency trade-off for MEV protection?
 ```
 
-### 📊 Observability Enhancement
+### Observability Enhancement
 
 ```
 ### Enhancement Area: Observability & Monitoring
@@ -372,7 +372,7 @@ Instead of guessing, ask:
 3. What's the latency tolerance for metric reporting?
 ```
 
-### 🌐 New Chain Integration
+### New Chain Integration
 
 ```
 ### Enhancement Area: New Chain Integration - [CHAIN_NAME]

@@ -171,7 +171,7 @@ For each refactoring opportunity:
 #### [P1] Extract ChainConfig Interface from Multiple Files
 
 **Category**: Structural (Data Clumps + Missing Abstraction)
-**Location**: 
+**Location**:
 - shared/config/src/chains/*.ts (11 files)
 - shared/core/src/types/chain.ts
 
@@ -187,7 +187,7 @@ export const bscConfig = {
   nativeCurrency: { symbol: 'BNB', decimals: 18 }
 };
 
-// shared/config/src/chains/ethereum.ts  
+// shared/config/src/chains/ethereum.ts
 export const ethereumConfig = {
   chainId: 1,
   rpcUrls: [...],
@@ -226,7 +226,7 @@ export const ethereumConfig = {
 ```typescript
 async processEvents(events: RawEvent[]): Promise<void> {
   // Lines 145-165: Validation
-  // Lines 166-200: Transformation  
+  // Lines 166-200: Transformation
   // Lines 201-240: Filtering
   // Lines 241-265: Aggregation
   // Lines 266-280: Publishing
@@ -255,7 +255,7 @@ async processEvents(events: RawEvent[]): Promise<void> {
 #### [P0] Fix Circular Dependency Between Core and Services
 
 **Category**: Architectural (Circular Dependency)
-**Location**: 
+**Location**:
 - shared/core/src/executor-interface.ts imports services/execution-engine/types
 - services/execution-engine/ imports shared/core/
 

@@ -280,7 +280,7 @@ Before finalizing your bug report, verify:
 
 ### Focus Areas
 - Fee calculation accuracy
-- Transaction simulation validation  
+- Transaction simulation validation
 - Gas estimation edge cases
 ```
 
@@ -320,7 +320,7 @@ Before finalizing your bug report, verify:
 After running bug hunt, prioritize fixes by:
 
 1. **P0 (Immediate)**: Could cause financial loss or system crash
-2. **P1 (This Sprint)**: Affects core functionality 
+2. **P1 (This Sprint)**: Affects core functionality
 3. **P2 (Backlog)**: Nice to have, not urgent
 4. **P3 (Tech Debt)**: Track in docs/todos.md
 
