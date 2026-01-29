@@ -262,6 +262,93 @@ export const DEFAULT_QUEUE_CONFIG: QueueConfig = {
 };
 
 // =============================================================================
+// Consumer Configuration (Fix 3.1: Configurable constants)
+// =============================================================================
+
+/**
+ * Consumer configuration defaults.
+ * These can be overridden via environment variables for production tuning.
+ */
+export interface ConsumerConfig {
+  /** Number of messages to fetch per read (default: 10) */
+  batchSize: number;
+  /** Blocking read timeout in ms (default: 1000) */
+  blockMs: number;
+  /** Shutdown ACK timeout in ms (default: 5000) */
+  shutdownAckTimeoutMs: number;
+}
+
+export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
+  batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 10, 1, 100),
+  blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 1000, 100, 10000),
+  shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
+};
+
+// =============================================================================
+// Supported Chains (Fix BUG #3: Chain validation)
+// =============================================================================
+
+/**
+ * List of supported chain identifiers for validation.
+ * Must be kept in sync with @arbitrage/config CHAINS.
+ *
+ * @see shared/config/src/chains/index.js
+ */
+export const SUPPORTED_CHAINS = new Set([
+  'ethereum',
+  'arbitrum',
+  'bsc',
+  'polygon',
+  'optimism',
+  'base',
+  'avalanche',
+  'fantom',
+  'zksync',
+  'linea',
+  'solana',
+] as const);
+
+export type SupportedChain = typeof SUPPORTED_CHAINS extends Set<infer T> ? T : never;
+
+/**
+ * Check if a chain identifier is supported.
+ */
+export function isSupportedChain(chain: string): chain is SupportedChain {
+  return SUPPORTED_CHAINS.has(chain as SupportedChain);
+}
+
+// =============================================================================
+// Validation Error Codes (Fix 6.1: Consistent error handling)
+// =============================================================================
+
+/**
+ * Validation error codes for opportunity consumer.
+ * Provides structured error identification for debugging and metrics.
+ */
+export enum ValidationErrorCode {
+  EMPTY_MESSAGE = '[VAL_EMPTY] Message has no data',
+  NOT_OBJECT = '[VAL_NOT_OBJECT] Message data is not an object',
+  MISSING_ID = '[VAL_MISSING_ID] Missing or invalid id',
+  MISSING_TYPE = '[VAL_MISSING_TYPE] Missing or invalid type',
+  INVALID_TYPE = '[VAL_INVALID_TYPE] Unknown opportunity type',
+  STREAM_INIT = '[VAL_STREAM_INIT] Stream initialization message (skipped)',
+  MISSING_TOKEN_IN = '[VAL_MISSING_TOKEN_IN] Missing or invalid tokenIn',
+  MISSING_TOKEN_OUT = '[VAL_MISSING_TOKEN_OUT] Missing or invalid tokenOut',
+  MISSING_AMOUNT = '[VAL_MISSING_AMOUNT] Missing amountIn',
+  INVALID_AMOUNT = '[VAL_INVALID_AMOUNT] Invalid amountIn format',
+  ZERO_AMOUNT = '[VAL_ZERO_AMOUNT] amountIn must be positive',
+  MISSING_BUY_CHAIN = '[VAL_MISSING_BUY_CHAIN] Cross-chain: missing buyChain',
+  MISSING_SELL_CHAIN = '[VAL_MISSING_SELL_CHAIN] Cross-chain: missing sellChain',
+  SAME_CHAIN = '[VAL_SAME_CHAIN] Cross-chain: buyChain equals sellChain',
+  UNSUPPORTED_BUY_CHAIN = '[VAL_UNSUPPORTED_BUY_CHAIN] Cross-chain: unsupported buyChain',
+  UNSUPPORTED_SELL_CHAIN = '[VAL_UNSUPPORTED_SELL_CHAIN] Cross-chain: unsupported sellChain',
+  EXPIRED = '[VAL_EXPIRED] Opportunity has expired',
+  LOW_CONFIDENCE = '[VAL_LOW_CONFIDENCE] Confidence below threshold',
+  LOW_PROFIT = '[VAL_LOW_PROFIT] Expected profit below threshold',
+  DUPLICATE = '[VAL_DUPLICATE] Already executing',
+}
+
+// =============================================================================
 // Execution Statistics
 // =============================================================================
 
@@ -282,8 +369,8 @@ export interface ExecutionStats {
   lockConflicts: number;
   /** Executions that timed out */
   executionTimeouts: number;
-  /** Errors during message processing (parse errors, etc.) */
-  messageProcessingErrors: number;
+  /** Validation errors for incoming messages (malformed, invalid type, etc.) */
+  validationErrors: number;
   /** Provider reconnection attempts */
   providerReconnections: number;
   /** Provider health check failures */
@@ -329,7 +416,7 @@ export function createInitialStats(): ExecutionStats {
     queueRejects: 0,
     lockConflicts: 0,
     executionTimeouts: 0,
-    messageProcessingErrors: 0,
+    validationErrors: 0,
     providerReconnections: 0,
     providerHealthCheckFailures: 0,
     // Simulation metrics

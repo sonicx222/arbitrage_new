@@ -29,6 +29,13 @@ const createMockStateManager = () => ({
   getState: jest.fn().mockReturnValue('running'),
 });
 
+/**
+ * Fix 4.1: Complete mock stats with all ExecutionStats fields.
+ * Missing risk management fields would cause TypeScript errors.
+ *
+ * @see ExecutionStats in types.ts
+ * @see createInitialStats() for canonical initialization
+ */
 const createMockStats = (): ExecutionStats => ({
   opportunitiesReceived: 0,
   executionAttempts: 0,
@@ -38,7 +45,7 @@ const createMockStats = (): ExecutionStats => ({
   queueRejects: 0,
   lockConflicts: 0,
   executionTimeouts: 0,
-  messageProcessingErrors: 0,
+  validationErrors: 0,
   providerReconnections: 0,
   providerHealthCheckFailures: 0,
   simulationsPerformed: 0,
@@ -47,6 +54,12 @@ const createMockStats = (): ExecutionStats => ({
   simulationErrors: 0,
   circuitBreakerTrips: 0,
   circuitBreakerBlocks: 0,
+  // Fix 4.1: Add missing risk management fields (Phase 3: Task 3.4.5)
+  riskEVRejections: 0,
+  riskPositionSizeRejections: 0,
+  riskDrawdownBlocks: 0,
+  riskCautionCount: 0,
+  riskHaltCount: 0,
 });
 
 const createMockConfig = (overrides: Partial<ProviderServiceConfig> = {}): ProviderServiceConfig => ({

@@ -9,32 +9,45 @@
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
  */
 
-import { ethers } from 'ethers';
+// Fix 9.1: Removed unused ethers import - now using shared decodeRevertData
 import {
-  ISimulationProvider,
   SimulationProviderConfig,
-  SimulationProviderHealth,
-  SimulationMetrics,
   SimulationRequest,
   SimulationResult,
   SimulationProviderType,
   CHAIN_IDS,
-  SIMULATION_DEFAULTS,
-  CircularBuffer,
+  decodeRevertData,
+  isDeprecatedChain,
+  getDeprecationWarning,
 } from './types';
+import { BaseSimulationProvider } from './base-simulation-provider';
 
 // =============================================================================
 // Alchemy Chain URLs
 // =============================================================================
 
+/**
+ * Fix 4.3: Complete Alchemy chain URL mapping for all supported chains.
+ * Missing chains would silently fallback to eth-mainnet causing incorrect simulations.
+ *
+ * @see CHAIN_IDS in types.ts for supported chains
+ * @see https://docs.alchemy.com/reference/alchemy-api-quickstart for chain slugs
+ */
 const ALCHEMY_CHAIN_URLS: Record<string, string> = {
   ethereum: 'eth-mainnet',
+  /** @deprecated Goerli testnet is deprecated. Use sepolia instead. */
   goerli: 'eth-goerli',
   sepolia: 'eth-sepolia',
   arbitrum: 'arb-mainnet',
   optimism: 'opt-mainnet',
   polygon: 'polygon-mainnet',
   base: 'base-mainnet',
+  // Fix 4.3: Added missing chains
+  bsc: 'bnb-mainnet',
+  avalanche: 'avax-mainnet',
+  fantom: 'fantom-mainnet',
+  zksync: 'zksync-mainnet',
+  linea: 'linea-mainnet',
 };
 
 // =============================================================================
@@ -46,25 +59,26 @@ const ALCHEMY_CHAIN_URLS: Record<string, string> = {
  *
  * Uses Alchemy's JSON-RPC API for transaction simulation.
  * Falls back to eth_call for basic simulation.
+ *
+ * Fix 1.1 & 9.1: Now extends BaseSimulationProvider to eliminate ~150 lines
+ * of duplicate code for metrics, health tracking, and success rate calculation.
  */
-export class AlchemySimulationProvider implements ISimulationProvider {
+export class AlchemySimulationProvider extends BaseSimulationProvider {
   readonly type: SimulationProviderType = 'alchemy';
-  readonly chain: string;
 
-  private readonly config: SimulationProviderConfig;
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly timeoutMs: number;
-
-  private metrics: SimulationMetrics;
-  private health: SimulationProviderHealth;
-
-  // Rolling window for success rate calculation (O(1) circular buffer)
-  private readonly recentResults = new CircularBuffer<boolean>(100);
 
   constructor(config: SimulationProviderConfig) {
-    this.config = config;
-    this.chain = config.chain;
+    super(config);
+
+    // Fix 7.1: Warn about deprecated chains
+    if (isDeprecatedChain(config.chain)) {
+      const warning = getDeprecationWarning(config.chain);
+      if (warning) {
+        console.warn(`[AlchemySimulationProvider] ${warning}`);
+      }
+    }
 
     // Validate required fields when enabled
     if (config.enabled) {
@@ -75,71 +89,45 @@ export class AlchemySimulationProvider implements ISimulationProvider {
 
     this.apiKey = config.apiKey || '';
     this.baseUrl = config.apiUrl || this.buildBaseUrl(config.chain);
-    this.timeoutMs = config.timeoutMs || SIMULATION_DEFAULTS.timeoutMs;
-
-    this.metrics = this.createEmptyMetrics();
-    this.health = this.createInitialHealth();
   }
 
-  /**
-   * Check if provider is available and enabled
-   */
-  isEnabled(): boolean {
-    return this.config.enabled;
-  }
+  // ===========================================================================
+  // BaseSimulationProvider Abstract Method Implementation
+  // ===========================================================================
 
   /**
-   * Simulate a transaction using Alchemy API
+   * Execute the actual simulation request using Alchemy API.
    */
-  async simulate(request: SimulationRequest): Promise<SimulationResult> {
-    const startTime = Date.now();
-    this.metrics.totalSimulations++;
+  protected async executeSimulation(
+    request: SimulationRequest,
+    startTime: number
+  ): Promise<SimulationResult> {
+    const url = this.getApiUrl();
+    const body = this.buildRequestBody(request);
 
-    if (!this.isEnabled()) {
-      return this.createErrorResult(startTime, 'Alchemy provider is disabled');
-    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const result = await this.executeSimulation(request, startTime);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-      // Update health and metrics based on result
-      if (result.success) {
-        this.recordSuccess(startTime);
-        if (result.wouldRevert) {
-          this.metrics.predictedReverts++;
-        }
-      } else {
-        this.recordFailure(result.error);
+      if (!response.ok) {
+        return this.createErrorResult(
+          startTime,
+          `Alchemy API error: ${response.status} ${response.statusText}`
+        );
       }
 
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.recordFailure(errorMessage);
-      return this.createErrorResult(startTime, errorMessage);
+      const data = (await response.json()) as AlchemyJsonRpcResponse;
+      return this.parseSimulationResponse(data, startTime);
+    } finally {
+      clearTimeout(timeoutId);
     }
-  }
-
-  /**
-   * Get current health status
-   */
-  getHealth(): SimulationProviderHealth {
-    return { ...this.health };
-  }
-
-  /**
-   * Get current metrics
-   */
-  getMetrics(): SimulationMetrics {
-    return { ...this.metrics };
-  }
-
-  /**
-   * Reset metrics
-   */
-  resetMetrics(): void {
-    this.metrics = this.createEmptyMetrics();
-    this.recentResults.clear();
   }
 
   /**
@@ -168,7 +156,7 @@ export class AlchemySimulationProvider implements ISimulationProvider {
         });
 
         if (response.ok) {
-          const data = await response.json() as AlchemyJsonRpcResponse;
+          const data = (await response.json()) as AlchemyJsonRpcResponse;
           if (data.result) {
             return { healthy: true, message: 'Alchemy API is reachable' };
           }
@@ -194,42 +182,10 @@ export class AlchemySimulationProvider implements ISimulationProvider {
   // ===========================================================================
 
   /**
-   * Execute the actual simulation request
-   */
-  private async executeSimulation(
-    request: SimulationRequest,
-    startTime: number
-  ): Promise<SimulationResult> {
-    const url = this.getApiUrl();
-    const body = this.buildRequestBody(request);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        return this.createErrorResult(
-          startTime,
-          `Alchemy API error: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const data = await response.json() as AlchemyJsonRpcResponse;
-      return this.parseSimulationResponse(data, startTime);
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  /**
-   * Build Alchemy simulation request body
+   * Build Alchemy simulation request body.
+   *
+   * Fix 7.3: Added stateOverrides support for Alchemy provider.
+   * Uses the third parameter of eth_call for state overrides.
    */
   private buildRequestBody(request: SimulationRequest): AlchemyJsonRpcRequest {
     const tx = request.transaction;
@@ -248,16 +204,59 @@ export class AlchemySimulationProvider implements ISimulationProvider {
       txParams.gas = '0x' + Number(tx.gasLimit).toString(16);
     }
 
-    const blockTag = request.blockNumber
-      ? '0x' + request.blockNumber.toString(16)
-      : 'latest';
+    const blockTag = request.blockNumber ? '0x' + request.blockNumber.toString(16) : 'latest';
+
+    // Build params array
+    const params: unknown[] = [txParams, blockTag];
+
+    // Fix 7.3: Add state overrides if provided
+    // Alchemy accepts state overrides as the third parameter to eth_call
+    if (request.stateOverrides && Object.keys(request.stateOverrides).length > 0) {
+      const stateOverrides = this.convertStateOverrides(request.stateOverrides);
+      params.push(stateOverrides);
+    }
 
     return {
       jsonrpc: '2.0',
       id: 1,
       method: 'eth_call',
-      params: [txParams, blockTag],
+      params,
     };
+  }
+
+  /**
+   * Convert state overrides to Alchemy's expected format.
+   *
+   * Fix 7.3: Implements state override conversion for Alchemy.
+   * Format: { address: { balance, nonce, code, state, stateDiff } }
+   */
+  private convertStateOverrides(
+    overrides: Record<
+      string,
+      { balance?: bigint; nonce?: number; code?: string; storage?: Record<string, string> }
+    >
+  ): Record<string, AlchemyStateOverride> {
+    const result: Record<string, AlchemyStateOverride> = {};
+
+    for (const [address, override] of Object.entries(overrides)) {
+      result[address] = {};
+
+      if (override.balance !== undefined) {
+        result[address].balance = '0x' + override.balance.toString(16);
+      }
+      if (override.nonce !== undefined) {
+        result[address].nonce = '0x' + override.nonce.toString(16);
+      }
+      if (override.code !== undefined) {
+        result[address].code = override.code;
+      }
+      if (override.storage !== undefined) {
+        // Alchemy uses 'state' for complete state replacement
+        result[address].state = override.storage;
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -290,60 +289,24 @@ export class AlchemySimulationProvider implements ISimulationProvider {
   }
 
   /**
-   * Decode revert reason from error data
+   * Decode revert reason from error data.
+   *
+   * Fix 9.1: Now uses shared decodeRevertData utility from types.ts
+   * to eliminate code duplication across providers.
    */
   private decodeRevertReason(error: AlchemyJsonRpcError): string {
-    // If there's error data, try to decode it
+    // If there's error data, try to decode it using shared utility
     if (error.data) {
-      const data = error.data;
-
-      // Error(string) selector: 0x08c379a0
-      if (data.startsWith('0x08c379a0')) {
-        try {
-          const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-          const decoded = abiCoder.decode(['string'], '0x' + data.slice(10));
-          return `Error: ${decoded[0]}`;
-        } catch {
-          // Fall through to raw data
-        }
+      const decoded = decodeRevertData(error.data);
+      if (decoded) {
+        return decoded;
       }
-
-      // Panic(uint256) selector: 0x4e487b71
-      if (data.startsWith('0x4e487b71')) {
-        try {
-          const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-          const decoded = abiCoder.decode(['uint256'], '0x' + data.slice(10));
-          const panicCode = Number(decoded[0]);
-          return `Panic(${panicCode}): ${this.getPanicMessage(panicCode)}`;
-        } catch {
-          // Fall through to raw data
-        }
-      }
-
       // Return raw data if unable to decode
-      return `Revert: ${data}`;
+      return `Revert: ${error.data}`;
     }
 
     // Return error message if no data
     return error.message || 'execution reverted';
-  }
-
-  /**
-   * Get human-readable panic message
-   */
-  private getPanicMessage(code: number): string {
-    const panicMessages: Record<number, string> = {
-      0x01: 'Assertion failed',
-      0x11: 'Arithmetic overflow/underflow',
-      0x12: 'Division by zero',
-      0x21: 'Invalid enum value',
-      0x22: 'Invalid storage access',
-      0x31: 'Empty array pop',
-      0x32: 'Array out of bounds',
-      0x41: 'Memory allocation overflow',
-      0x51: 'Zero initialized variable',
-    };
-    return panicMessages[code] || 'Unknown panic';
   }
 
   /**
@@ -360,112 +323,6 @@ export class AlchemySimulationProvider implements ISimulationProvider {
   private getApiUrl(): string {
     return `${this.baseUrl}/v2/${this.apiKey}`;
   }
-
-  /**
-   * Create error result
-   */
-  private createErrorResult(startTime: number, error: string): SimulationResult {
-    return {
-      success: false,
-      wouldRevert: false,
-      error,
-      provider: 'alchemy',
-      latencyMs: Date.now() - startTime,
-    };
-  }
-
-  /**
-   * Create empty metrics object
-   */
-  private createEmptyMetrics(): SimulationMetrics {
-    return {
-      totalSimulations: 0,
-      successfulSimulations: 0,
-      failedSimulations: 0,
-      predictedReverts: 0,
-      averageLatencyMs: 0,
-      fallbackUsed: 0,
-      cacheHits: 0,
-      lastUpdated: Date.now(),
-    };
-  }
-
-  /**
-   * Create initial health status
-   */
-  private createInitialHealth(): SimulationProviderHealth {
-    return {
-      healthy: true,
-      lastCheck: Date.now(),
-      consecutiveFailures: 0,
-      averageLatencyMs: 0,
-      successRate: 1.0,
-    };
-  }
-
-  /**
-   * Record successful simulation
-   */
-  private recordSuccess(startTime: number): void {
-    const latency = Date.now() - startTime;
-
-    this.metrics.successfulSimulations++;
-    this.updateAverageLatency(latency);
-
-    this.health.consecutiveFailures = 0;
-    this.health.healthy = true;
-    this.health.lastCheck = Date.now();
-
-    this.recentResults.pushOverwrite(true);
-    this.updateSuccessRate();
-  }
-
-  /**
-   * Record failed simulation
-   */
-  private recordFailure(error?: string): void {
-    this.metrics.failedSimulations++;
-
-    this.health.consecutiveFailures++;
-    this.health.lastError = error;
-    this.health.lastCheck = Date.now();
-
-    if (this.health.consecutiveFailures >= SIMULATION_DEFAULTS.maxConsecutiveFailures) {
-      this.health.healthy = false;
-    }
-
-    this.recentResults.pushOverwrite(false);
-    this.updateSuccessRate();
-  }
-
-  /**
-   * Update average latency (rolling average)
-   */
-  private updateAverageLatency(latency: number): void {
-    const total = this.metrics.successfulSimulations;
-    if (total === 1) {
-      this.metrics.averageLatencyMs = latency;
-      this.health.averageLatencyMs = latency;
-    } else {
-      this.metrics.averageLatencyMs =
-        (this.metrics.averageLatencyMs * (total - 1) + latency) / total;
-      this.health.averageLatencyMs = this.metrics.averageLatencyMs;
-    }
-    this.metrics.lastUpdated = Date.now();
-  }
-
-  /**
-   * Update success rate from recent results
-   */
-  private updateSuccessRate(): void {
-    if (this.recentResults.length === 0) {
-      this.health.successRate = 1.0;
-      return;
-    }
-
-    const successes = this.recentResults.countWhere((r) => r);
-    this.health.successRate = successes / this.recentResults.length;
-  }
 }
 
 // =============================================================================
@@ -478,6 +335,19 @@ interface AlchemyTransactionParams {
   data: string;
   value?: string;
   gas?: string;
+}
+
+/**
+ * Fix 7.3: State override type for Alchemy eth_call.
+ *
+ * @see https://docs.alchemy.com/reference/eth-call
+ */
+interface AlchemyStateOverride {
+  balance?: string;
+  nonce?: string;
+  code?: string;
+  state?: Record<string, string>;
+  stateDiff?: Record<string, string>;
 }
 
 interface AlchemyJsonRpcRequest {
@@ -507,6 +377,8 @@ interface AlchemyJsonRpcError {
 /**
  * Create an Alchemy simulation provider
  */
-export function createAlchemyProvider(config: SimulationProviderConfig): AlchemySimulationProvider {
+export function createAlchemyProvider(
+  config: SimulationProviderConfig
+): AlchemySimulationProvider {
   return new AlchemySimulationProvider(config);
 }

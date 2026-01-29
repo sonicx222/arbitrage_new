@@ -218,27 +218,28 @@ export class ExecutionEngineService {
     // Prevents accidental deployment with simulation mode enabled in production
     // which would cause the engine to NOT execute real transactions (capital drain risk)
     const isProduction = process.env.NODE_ENV === 'production';
-    if (isProduction && this.isSimulationMode) {
-      throw new Error(
-        '[CRITICAL] Simulation mode is enabled in production environment. ' +
-        'This would prevent real transaction execution. ' +
-        'Either set NODE_ENV to a non-production value or disable simulation mode. ' +
-        'Set SIMULATION_MODE_PRODUCTION_OVERRIDE=true to explicitly allow (dangerous).'
-      );
-    }
+    const hasOverride = process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE === 'true';
 
-    // Allow explicit override for production testing scenarios (with extra warning)
-    if (isProduction && process.env.SIMULATION_MODE_PRODUCTION_OVERRIDE === 'true') {
-      // This is a deliberate override - log prominently but allow
-      console.error(
-        '\n' +
-        '╔══════════════════════════════════════════════════════════════════╗\n' +
-        '║  ⚠️  DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION  ⚠️   ║\n' +
-        '║                                                                  ║\n' +
-        '║  No real transactions will be executed!                          ║\n' +
-        '║  Remove SIMULATION_MODE_PRODUCTION_OVERRIDE for live trading.    ║\n' +
-        '╚══════════════════════════════════════════════════════════════════╝\n'
-      );
+    if (isProduction && this.isSimulationMode) {
+      if (hasOverride) {
+        // This is a deliberate override - log prominently but allow
+        console.error(
+          '\n' +
+          '╔══════════════════════════════════════════════════════════════════╗\n' +
+          '║  ⚠️  DANGER: SIMULATION MODE OVERRIDE ACTIVE IN PRODUCTION  ⚠️   ║\n' +
+          '║                                                                  ║\n' +
+          '║  No real transactions will be executed!                          ║\n' +
+          '║  Remove SIMULATION_MODE_PRODUCTION_OVERRIDE for live trading.    ║\n' +
+          '╚══════════════════════════════════════════════════════════════════╝\n'
+        );
+      } else {
+        throw new Error(
+          '[CRITICAL] Simulation mode is enabled in production environment. ' +
+          'This would prevent real transaction execution. ' +
+          'Either set NODE_ENV to a non-production value or disable simulation mode. ' +
+          'Set SIMULATION_MODE_PRODUCTION_OVERRIDE=true to explicitly allow (dangerous).'
+        );
+      }
     }
 
     // Initialize queue config

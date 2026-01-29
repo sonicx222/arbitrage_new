@@ -314,10 +314,13 @@ export class HotForkSynchronizer {
 
   /**
    * Sync the fork to the latest block.
+   *
+   * Fix 5.1: Added check for 'stopped' state to prevent race condition
+   * where stop() is called during an in-flight sync operation.
    */
   private async syncToLatestBlock(): Promise<void> {
-    // Skip if paused or already syncing
-    if (this.state === 'paused' || this.isSyncing) {
+    // Fix 5.1: Skip if stopped, paused, or already syncing
+    if (this.state === 'stopped' || this.state === 'paused' || this.isSyncing) {
       return;
     }
 
@@ -333,9 +336,21 @@ export class HotForkSynchronizer {
     try {
       const currentBlock = await this.sourceProvider.getBlockNumber();
 
+      // Fix 5.1: Re-check state after async operation to handle stop() during sync.
+      // Use isStopped() helper to avoid TypeScript type narrowing issues.
+      if (this.isStopped()) {
+        return;
+      }
+
       // Only reset if there's a new block
       if (currentBlock > this.lastSyncedBlock) {
         await this.anvilManager.resetToBlock(currentBlock);
+
+        // Fix 5.1: Re-check state after reset operation
+        if (this.isStopped()) {
+          return;
+        }
+
         this.lastSyncedBlock = currentBlock;
 
         // Fix 10.5: Track block timestamp for adaptive interval calculation
@@ -344,12 +359,14 @@ export class HotForkSynchronizer {
         }
       }
 
-      // Update metrics on success
-      this.metrics.successfulSyncs++;
-      this.metrics.consecutiveFailures = 0;
-      this.metrics.lastSyncedBlock = this.lastSyncedBlock;
-      this.metrics.lastSyncTime = Date.now();
-      this.updateAverageLatency(Date.now() - startTime);
+      // Update metrics on success (only if still running)
+      if (!this.isStopped()) {
+        this.metrics.successfulSyncs++;
+        this.metrics.consecutiveFailures = 0;
+        this.metrics.lastSyncedBlock = this.lastSyncedBlock;
+        this.metrics.lastSyncTime = Date.now();
+        this.updateAverageLatency(Date.now() - startTime);
+      }
     } catch (error) {
       this.metrics.failedSyncs++;
       this.metrics.consecutiveFailures++;
@@ -458,6 +475,15 @@ export class HotForkSynchronizer {
       this.minSyncIntervalMs,
       Math.min(targetInterval, this.maxSyncIntervalMs)
     );
+  }
+
+  /**
+   * Fix 5.1: Helper to check if state is stopped.
+   * Using a method defeats TypeScript type narrowing, allowing re-checks
+   * after async operations where state may have changed.
+   */
+  private isStopped(): boolean {
+    return this.state === 'stopped';
   }
 
   /**

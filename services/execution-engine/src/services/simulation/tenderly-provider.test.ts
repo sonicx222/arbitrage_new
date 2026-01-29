@@ -457,12 +457,20 @@ describe('TenderlyProvider', () => {
   // ===========================================================================
 
   describe('health', () => {
-    test('should start with healthy status', () => {
+    /**
+     * Fix 4.4: Providers now start with unknown state (healthy: false)
+     * until first successful request validates them. This prevents
+     * optimistic selection of untested providers.
+     */
+    test('should start with unknown health status until validated', () => {
       provider = new TenderlyProvider(createValidConfig());
 
       const health = provider.getHealth();
-      expect(health.healthy).toBe(true);
+      // Fix 4.4: Initial state is unknown (healthy: false) until validated
+      expect(health.healthy).toBe(false);
       expect(health.consecutiveFailures).toBe(0);
+      expect(health.successRate).toBe(0);
+      expect(health.lastCheck).toBe(0); // No check performed yet
     });
 
     test('should mark unhealthy after consecutive failures', async () => {

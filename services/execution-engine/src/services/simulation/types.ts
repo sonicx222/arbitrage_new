@@ -247,7 +247,9 @@ export interface ISimulationProvider {
 // =============================================================================
 
 /**
- * Configuration for simulation service
+ * Configuration for simulation service.
+ *
+ * Fix 10.4: Added healthCheckIntervalMs for configurable health check frequency.
  */
 export interface SimulationServiceConfig {
   /** Minimum profit threshold for simulation (skip small trades) */
@@ -262,6 +264,13 @@ export interface SimulationServiceConfig {
   useFallback?: boolean;
   /** Cache TTL in ms for identical simulations */
   cacheTtlMs?: number;
+  /**
+   * Fix 10.4: Health check interval in ms for provider health monitoring.
+   * Lower values detect degradation faster but increase overhead.
+   * For hot-path arbitrage, 15-30 seconds is recommended.
+   * Default: 60000 (60 seconds)
+   */
+  healthCheckIntervalMs?: number;
 }
 
 /**
@@ -416,12 +425,17 @@ export const SIMULATION_DEFAULTS = {
 };
 
 /**
- * Tenderly API configuration
+ * Tenderly API configuration.
+ *
+ * Fix 2.2: Updated freeMonthlyLimit to 25000 (correct value from Tenderly docs).
+ * The previous value of 500 was outdated.
+ *
+ * @see https://docs.tenderly.co/account/pricing
  */
 export const TENDERLY_CONFIG = {
   apiUrl: 'https://api.tenderly.co/api/v1',
   simulateEndpoint: '/account/{accountSlug}/project/{projectSlug}/simulate',
-  freeMonthlyLimit: 500,
+  freeMonthlyLimit: 25000, // Fix 2.2: Correct value (was 500)
 };
 
 /**
@@ -500,4 +514,90 @@ export function updateRollingAverage(
   if (totalCount <= 0) return newValue;
   if (totalCount === 1) return newValue;
   return (currentAverage * (totalCount - 1) + newValue) / totalCount;
+}
+
+/**
+ * Fix 9.2: Shared panic message decoding for Solidity Panic(uint256) errors.
+ * Previously duplicated in AlchemySimulationProvider and LocalSimulationProvider.
+ *
+ * @see https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require
+ */
+export const PANIC_MESSAGES: Record<number, string> = {
+  0x00: 'Generic compiler panic',
+  0x01: 'Assertion failed',
+  0x11: 'Arithmetic overflow/underflow',
+  0x12: 'Division by zero',
+  0x21: 'Invalid enum value',
+  0x22: 'Invalid storage access',
+  0x31: 'Empty array pop',
+  0x32: 'Array out of bounds',
+  0x41: 'Memory allocation overflow',
+  0x51: 'Zero initialized variable',
+};
+
+/**
+ * Get human-readable panic message for Solidity Panic(uint256) codes.
+ *
+ * @param code - Panic code (uint256)
+ * @returns Human-readable message
+ */
+export function getPanicMessage(code: number): string {
+  return PANIC_MESSAGES[code] || `Unknown panic (code: 0x${code.toString(16)})`;
+}
+
+/**
+ * Decode revert data to extract error message.
+ * Handles Error(string) and Panic(uint256) selectors.
+ *
+ * @param data - Hex-encoded revert data
+ * @returns Decoded error message or undefined if unknown format
+ */
+export function decodeRevertData(data: string): string | undefined {
+  // Lazy import to avoid circular deps at module load time
+  const { ethers } = require('ethers');
+
+  try {
+    // Error(string) selector: 0x08c379a0
+    if (data.startsWith('0x08c379a0') && data.length > 10) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const decoded = abiCoder.decode(['string'], '0x' + data.slice(10));
+      return `Error: ${decoded[0]}`;
+    }
+
+    // Panic(uint256) selector: 0x4e487b71
+    if (data.startsWith('0x4e487b71') && data.length > 10) {
+      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+      const decoded = abiCoder.decode(['uint256'], '0x' + data.slice(10));
+      const panicCode = Number(decoded[0]);
+      return `Panic(${panicCode}): ${getPanicMessage(panicCode)}`;
+    }
+
+    // Custom error (unknown selector)
+    if (data.startsWith('0x') && data.length > 10) {
+      return `Custom error: ${data.slice(0, 10)}...`;
+    }
+
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Fix 7.1: Check if a chain is deprecated and log a warning.
+ * Returns true if the chain is deprecated.
+ */
+export function isDeprecatedChain(chain: string): boolean {
+  const deprecatedChains = ['goerli'];
+  return deprecatedChains.includes(chain.toLowerCase());
+}
+
+/**
+ * Get deprecation warning message for a chain.
+ */
+export function getDeprecationWarning(chain: string): string | undefined {
+  const warnings: Record<string, string> = {
+    goerli: 'Goerli testnet is deprecated. Use Sepolia for testnet simulation.',
+  };
+  return warnings[chain.toLowerCase()];
 }

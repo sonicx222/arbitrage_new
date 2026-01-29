@@ -50,8 +50,14 @@ export interface SimulationServiceOptions {
  * - Success rate
  * - Configured priority
  */
-// Cache TTL for provider ordering (1 second for hot-path optimization)
-const PROVIDER_ORDER_CACHE_TTL_MS = 1000;
+/**
+ * Fix PERF 10.3: Increased cache TTL from 1s to 5s for hot-path optimization.
+ * Provider health changes are relatively slow (network issues, rate limits),
+ * so 5s is still responsive while reducing re-sorting overhead by 5x.
+ * Additionally, the cache is invalidated immediately on any provider failure,
+ * so stale orderings don't persist when health degrades.
+ */
+const PROVIDER_ORDER_CACHE_TTL_MS = 5000;
 
 // Maximum cache size to prevent unbounded memory growth
 const MAX_CACHE_SIZE = 500;
@@ -76,6 +82,10 @@ export class SimulationService implements ISimulationService {
   private cachedProviderOrder: ISimulationProvider[] = [];
   private providerOrderCacheTime = 0;
 
+  // Fix 10.4: Cache for hasEnabledProvider check (hot-path optimization)
+  private hasEnabledProviderCache = false;
+  private hasEnabledProviderCacheTime = 0;
+
   // Simulation result cache for request deduplication
   private readonly simulationCache = new Map<string, CacheEntry>();
 
@@ -96,6 +106,8 @@ export class SimulationService implements ISimulationService {
       providerPriority: options.config?.providerPriority ?? SIMULATION_DEFAULTS.providerPriority,
       useFallback: options.config?.useFallback ?? true,
       cacheTtlMs: options.config?.cacheTtlMs ?? SIMULATION_DEFAULTS.cacheTtlMs,
+      // Fix 10.4: Added configurable health check interval
+      healthCheckIntervalMs: options.config?.healthCheckIntervalMs ?? SIMULATION_DEFAULTS.healthCheckIntervalMs,
     };
 
     // Fix 7.2: Validate provider priority configuration
@@ -247,14 +259,31 @@ export class SimulationService implements ISimulationService {
   /**
    * Fast check if any provider is enabled.
    * Used by shouldSimulate() to avoid expensive getOrderedProviders() call.
+   *
+   * Fix 10.4: Uses caching to avoid iteration on every shouldSimulate() call.
+   * Cache is invalidated when provider order is invalidated (on failure).
    */
   private hasEnabledProvider(): boolean {
+    const now = Date.now();
+
+    // Return cached value if still valid
+    if (now - this.hasEnabledProviderCacheTime < PROVIDER_ORDER_CACHE_TTL_MS) {
+      return this.hasEnabledProviderCache;
+    }
+
+    // Recalculate and cache
+    let hasEnabled = false;
     for (const provider of this.providers.values()) {
       if (provider.isEnabled()) {
-        return true;
+        hasEnabled = true;
+        break;
       }
     }
-    return false;
+
+    this.hasEnabledProviderCache = hasEnabled;
+    this.hasEnabledProviderCacheTime = now;
+
+    return hasEnabled;
   }
 
   /**
@@ -327,6 +356,10 @@ export class SimulationService implements ISimulationService {
   /**
    * Try to simulate using a specific provider with timeout protection.
    *
+   * Fix 3.1: Uses provider-specific timeout instead of global default.
+   * This allows fine-tuning timeouts per provider (e.g., shorter for local,
+   * longer for Tenderly when rate-limited).
+   *
    * Fix 4.1: Uses createCancellableTimeout to prevent timer leaks.
    * The timeout is always cancelled in the finally block, ensuring
    * no orphaned timers accumulate over time.
@@ -343,7 +376,12 @@ export class SimulationService implements ISimulationService {
     provider: ISimulationProvider,
     request: SimulationRequest
   ): Promise<SimulationResult> {
-    const timeoutMs = SIMULATION_DEFAULTS.timeoutMs;
+    // Fix 3.1: Use provider-specific timeout from health metrics,
+    // falling back to default if no latency data yet
+    const health = provider.getHealth();
+    const timeoutMs = health.averageLatencyMs > 0
+      ? Math.max(health.averageLatencyMs * 3, SIMULATION_DEFAULTS.timeoutMs) // 3x avg latency or default
+      : SIMULATION_DEFAULTS.timeoutMs;
     const startTime = Date.now();
 
     // Fix 4.1: Use cancellable timeout to prevent timer leaks
@@ -357,6 +395,12 @@ export class SimulationService implements ISimulationService {
         provider.simulate(request),
         timeoutPromise,
       ]);
+
+      // Fix 5.1: Invalidate cache on failure so degraded providers get re-scored quickly
+      if (!result.success) {
+        this.invalidateProviderOrderCache();
+      }
+
       return result;
     } catch (error) {
       const errorMessage = getErrorMessage(error);
@@ -369,11 +413,31 @@ export class SimulationService implements ISimulationService {
         elapsedMs: Date.now() - startTime,
       });
 
+      // Fix 5.1: Invalidate cache on error so degraded providers get re-scored quickly
+      this.invalidateProviderOrderCache();
+
       return this.createErrorResult(errorMessage, provider.type);
     } finally {
       // Fix 4.1: Always cancel the timeout to prevent timer leak
       cancelTimeout();
     }
+  }
+
+  /**
+   * Fix 5.1: Invalidate provider order cache.
+   *
+   * Called when a provider fails to ensure degraded providers are
+   * re-scored quickly rather than waiting for the cache TTL to expire.
+   * This is important for hot-path arbitrage where provider health
+   * can change rapidly.
+   *
+   * Fix 10.4: Also invalidates hasEnabledProvider cache.
+   */
+  private invalidateProviderOrderCache(): void {
+    this.cachedProviderOrder = [];
+    this.providerOrderCacheTime = 0;
+    // Fix 10.4: Also invalidate hasEnabledProvider cache
+    this.hasEnabledProviderCacheTime = 0;
   }
 
   /**
@@ -477,22 +541,29 @@ export class SimulationService implements ISimulationService {
   // ===========================================================================
 
   /**
-   * Generate cache key from simulation request
+   * Generate cache key from simulation request.
    *
-   * Key is based on chain, transaction params, and block number
+   * Fix 9.4: Improved key generation to avoid collisions.
+   * Uses length-prefixed fields to prevent collisions from values
+   * containing the separator character.
+   *
+   * Key is based on chain, transaction params, and block number.
    */
   private getCacheKey(request: SimulationRequest): string {
     const tx = request.transaction;
-    // Create deterministic key from request params
-    const parts = [
-      request.chain,
-      tx.from?.toString().toLowerCase() ?? '',
-      tx.to?.toString().toLowerCase() ?? '',
-      tx.data?.toString() ?? '',
-      tx.value?.toString() ?? '0',
-      request.blockNumber?.toString() ?? 'latest',
-    ];
-    return parts.join(':');
+
+    // Extract values, normalizing addresses to lowercase
+    const chain = request.chain;
+    const from = (tx.from?.toString() ?? '').toLowerCase();
+    const to = (tx.to?.toString() ?? '').toLowerCase();
+    const data = tx.data?.toString() ?? '';
+    const value = tx.value?.toString() ?? '0';
+    const block = request.blockNumber?.toString() ?? 'latest';
+
+    // Fix 9.4: Use length-prefixed format to prevent collisions
+    // Format: chain|from_len:from|to_len:to|data_len:data|value|block
+    // This prevents collisions when values contain the separator
+    return `${chain}|${from.length}:${from}|${to.length}:${to}|${data.length}:${data}|${value}|${block}`;
   }
 
   /**

@@ -17,10 +17,15 @@
 
 import { ethers } from 'ethers';
 import type { AnvilForkManager } from './anvil-manager';
-import { isWethAddress, createCancellableTimeout } from './types';
+// Fix 9.3: Import shared SimulationLog type for consistent log typing
+// Fix 6.3: Import shared rolling average utility
+import { isWethAddress, createCancellableTimeout, SimulationLog, updateRollingAverage } from './types';
 
 /**
  * Extended simulation result with logs for execution price calculation.
+ *
+ * Fix 9.3: Uses shared SimulationLog type from types.ts for consistent
+ * log structure across the codebase.
  */
 interface ExtendedSimulationResult {
   success: boolean;
@@ -30,7 +35,7 @@ interface ExtendedSimulationResult {
   revertReason?: string;
   error?: string;
   /** Transaction logs for parsing actual swap amounts */
-  logs?: Array<{ topics: string[]; data: string; address: string }>;
+  logs?: SimulationLog[]; // Fix 9.3: Use shared type instead of inline definition
 }
 
 // =============================================================================
@@ -67,6 +72,8 @@ export interface PendingSwapIntent {
 
 /**
  * Configuration for PendingStateSimulator.
+ *
+ * Fix 10.5: Added maxSnapshotPoolSize for configurable snapshot pool.
  */
 export interface PendingStateSimulatorConfig {
   /** AnvilForkManager instance to use for simulation */
@@ -79,6 +86,12 @@ export interface PendingStateSimulatorConfig {
   timeoutMs?: number;
   /** Known pool registry for pool detection */
   poolRegistry?: Map<string, PoolInfo>;
+  /**
+   * Fix 10.5: Maximum number of snapshots to keep in the reuse pool.
+   * Higher values reduce snapshot creation overhead but consume more memory.
+   * Default: 5
+   */
+  maxSnapshotPoolSize?: number;
 }
 
 /**
@@ -204,9 +217,32 @@ export class PendingStateSimulator {
     this.abiCache = new Map();
     this.initializeAbiCache();
 
-    // Fix 10.5: Initialize snapshot pool
+    // Fix 10.5: Initialize snapshot pool with configurable size
     this.snapshotPool = [];
-    this.maxSnapshotPoolSize = 5;
+    this.maxSnapshotPoolSize = config.maxSnapshotPoolSize ?? 5; // Fix 10.5: Now configurable
+  }
+
+  /**
+   * Fix 10.2: Pre-warm the snapshot pool for optimal hot-path performance.
+   *
+   * Call this method after AnvilForkManager is started to pre-create snapshots.
+   * This eliminates first-simulation latency spikes caused by snapshot creation.
+   *
+   * @returns Number of snapshots created
+   */
+  async warmupSnapshotPool(): Promise<number> {
+    let created = 0;
+    for (let i = this.snapshotPool.length; i < this.maxSnapshotPoolSize; i++) {
+      try {
+        const snapshot = await this.anvilManager.createSnapshot();
+        this.snapshotPool.push(snapshot);
+        created++;
+      } catch {
+        // If snapshot creation fails, stop warming up
+        break;
+      }
+    }
+    return created;
   }
 
   /**
@@ -243,21 +279,28 @@ export class PendingStateSimulator {
   }
 
   /**
-   * Fix 10.5: Return snapshot to pool for reuse (or discard if pool is full).
-   * Reverts the snapshot to make it reusable for future simulations.
+   * Fix 10.5 + Fix 4.3 (CRITICAL): Return snapshot to pool for reuse.
+   *
+   * IMPORTANT: In Anvil/Hardhat, `evm_revert` CONSUMES the snapshot (one-time use).
+   * After reverting, the original snapshot ID is INVALID and cannot be reused.
+   *
+   * Fix 4.3: After reverting, create a NEW snapshot and add that to the pool,
+   * rather than trying to reuse the consumed snapshot ID.
    */
   private async releaseSnapshot(snapshotId: string): Promise<void> {
     try {
-      // Revert to snapshot to make state clean for reuse
+      // Revert to snapshot to restore clean state (this CONSUMES the snapshot)
       await this.anvilManager.revertToSnapshot(snapshotId);
 
-      // Only keep if pool isn't full
+      // Fix 4.3: The original snapshotId is now INVALID (consumed by revert).
+      // Create a NEW snapshot from the clean state to add to the pool.
       if (this.snapshotPool.length < this.maxSnapshotPoolSize) {
-        this.snapshotPool.push(snapshotId);
+        const newSnapshot = await this.anvilManager.createSnapshot();
+        this.snapshotPool.push(newSnapshot);
       }
-      // Otherwise snapshot is simply discarded (Anvil will clean up)
+      // Otherwise don't create new snapshot (pool is full, save resources)
     } catch {
-      // If revert fails, don't add to pool
+      // If revert fails, don't add to pool (state may be corrupted)
     }
   }
 
@@ -374,10 +417,12 @@ export class PendingStateSimulator {
     const results: PendingSwapSimulationResult[] = [];
     let snapshotId: string | undefined;
 
-    // Fix 4.2: Calculate timeout based on number of intents (with reasonable bounds)
+    // Fix 4.2 & 10.5: Calculate timeout based on number of intents with AGGRESSIVE bounds
+    // For competitive arbitrage, opportunities are stale after 1-2 seconds
+    // Batch timeout should be at most 10 seconds to avoid wasting resources on stale ops
     const batchTimeoutMs = Math.min(
       this.timeoutMs * intents.length,
-      60000 // Hard cap at 60 seconds for any batch
+      10000 // Fix 10.5: Hard cap at 10 seconds (not 60) for competitive speed
     );
     const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<PendingSwapSimulationResult[]>(
       batchTimeoutMs,
@@ -994,15 +1039,14 @@ export class PendingStateSimulator {
 
   /**
    * Update rolling average latency.
+   * Fix 6.3: Uses shared updateRollingAverage utility to eliminate duplication.
    */
   private updateAverageLatency(latencyMs: number): void {
-    const total = this.metrics.totalSimulations;
-    if (total === 1) {
-      this.metrics.averageLatencyMs = latencyMs;
-    } else {
-      this.metrics.averageLatencyMs =
-        (this.metrics.averageLatencyMs * (total - 1) + latencyMs) / total;
-    }
+    this.metrics.averageLatencyMs = updateRollingAverage(
+      this.metrics.averageLatencyMs,
+      latencyMs,
+      this.metrics.totalSimulations
+    );
     this.metrics.lastUpdated = Date.now();
   }
 

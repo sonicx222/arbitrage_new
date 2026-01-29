@@ -2,19 +2,16 @@
  * Tenderly Simulation Provider
  *
  * Implements transaction simulation using the Tenderly Simulation API.
- * Tenderly provides 500 free simulations per month, making it suitable
- * for pre-flight transaction validation.
+ * Tenderly provides 25,000 free simulations per month (Fix 2.1: corrected from 500),
+ * making it suitable for pre-flight transaction validation.
  *
  * @see https://docs.tenderly.co/simulations-and-forks/simulation-api
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
  */
 
-import { ethers } from 'ethers';
 import {
-  ISimulationProvider,
   SimulationProviderConfig,
   SimulationProviderHealth,
-  SimulationMetrics,
   SimulationRequest,
   SimulationResult,
   SimulationProviderType,
@@ -23,8 +20,10 @@ import {
   CHAIN_IDS,
   SIMULATION_DEFAULTS,
   TENDERLY_CONFIG,
-  CircularBuffer,
+  isDeprecatedChain,
+  getDeprecationWarning,
 } from './types';
+import { BaseSimulationProvider } from './base-simulation-provider';
 
 // =============================================================================
 // Tenderly Provider Implementation
@@ -35,27 +34,33 @@ import {
  *
  * Uses Tenderly's Simulation API to validate transactions before submission.
  * Provides detailed simulation results including state changes and logs.
+ *
+ * Fix 1.1 & 9.1: Now extends BaseSimulationProvider to eliminate ~150 lines
+ * of duplicate code for metrics, health tracking, and success rate calculation.
  */
-export class TenderlyProvider implements ISimulationProvider {
+export class TenderlyProvider extends BaseSimulationProvider {
   readonly type: SimulationProviderType = 'tenderly';
-  readonly chain: string;
 
-  private readonly config: SimulationProviderConfig;
   private readonly apiUrl: string;
   private readonly apiKey: string;
   private readonly accountSlug: string;
   private readonly projectSlug: string;
-  private readonly timeoutMs: number;
 
-  private metrics: SimulationMetrics;
-  private health: SimulationProviderHealth;
-
-  // Rolling window for success rate calculation (O(1) circular buffer)
-  private readonly recentResults = new CircularBuffer<boolean>(100);
+  // Rate limit tracking (Tenderly free tier: 25,000 simulations/month)
+  private requestsUsedThisMonth = 0;
+  private rateLimitResetDate: Date;
+  private readonly monthlyRequestLimit: number;
 
   constructor(config: SimulationProviderConfig) {
-    this.config = config;
-    this.chain = config.chain;
+    super(config);
+
+    // Fix 7.1: Warn about deprecated chains
+    if (isDeprecatedChain(config.chain)) {
+      const warning = getDeprecationWarning(config.chain);
+      if (warning) {
+        console.warn(`[TenderlyProvider] ${warning}`);
+      }
+    }
 
     // Validate required fields when enabled
     if (config.enabled) {
@@ -74,71 +79,71 @@ export class TenderlyProvider implements ISimulationProvider {
     this.accountSlug = config.accountSlug || '';
     this.projectSlug = config.projectSlug || '';
     this.apiUrl = config.apiUrl || TENDERLY_CONFIG.apiUrl;
-    this.timeoutMs = config.timeoutMs || SIMULATION_DEFAULTS.timeoutMs;
 
-    this.metrics = this.createEmptyMetrics();
-    this.health = this.createInitialHealth();
+    // Initialize rate limit tracking
+    this.monthlyRequestLimit = TENDERLY_CONFIG.freeMonthlyLimit;
+    this.rateLimitResetDate = this.getNextMonthStart();
   }
 
-  /**
-   * Check if provider is available and enabled
-   */
-  isEnabled(): boolean {
-    return this.config.enabled;
-  }
+  // ===========================================================================
+  // BaseSimulationProvider Abstract Method Implementation
+  // ===========================================================================
 
   /**
-   * Simulate a transaction using Tenderly API
+   * Execute the actual simulation request using Tenderly API.
+   *
+   * Fix 2.1: Rate limit counter is incremented here for ALL API requests,
+   * regardless of success or failure. Tenderly counts all requests toward
+   * the monthly limit.
+   *
+   * Fix DOC 2.1: Check rate limit exhaustion BEFORE making the request.
+   * If exhausted, return an error immediately instead of wasting API calls.
    */
-  async simulate(request: SimulationRequest): Promise<SimulationResult> {
-    const startTime = Date.now();
-    this.metrics.totalSimulations++;
-
-    if (!this.isEnabled()) {
-      return this.createErrorResult(startTime, 'Tenderly provider is disabled');
+  protected async executeSimulation(
+    request: SimulationRequest,
+    startTime: number
+  ): Promise<SimulationResult> {
+    // Fix DOC 2.1: Check if rate limit is exhausted before making request
+    if (!this.isWithinRateLimit()) {
+      return this.createErrorResult(
+        startTime,
+        `Tenderly rate limit exhausted (${this.requestsUsedThisMonth}/${this.monthlyRequestLimit} requests used this month). ` +
+          `Limit resets on ${this.rateLimitResetDate.toISOString()}`
+      );
     }
+
+    const chainId = this.getChainId(request.chain);
+    const body = this.buildRequestBody(request, chainId);
+
+    const url = `${this.apiUrl}/account/${this.accountSlug}/project/${this.projectSlug}/simulate`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const result = await this.executeSimulation(request, startTime);
+      // Fix 2.1: Increment rate limit counter BEFORE the request
+      // because Tenderly counts all API calls toward the limit
+      this.incrementRateLimitCounter();
 
-      // Update health and metrics based on result
-      if (result.success) {
-        this.recordSuccess(startTime);
-        if (result.wouldRevert) {
-          this.metrics.predictedReverts++;
-        }
-      } else {
-        this.recordFailure(result.error);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        return this.createErrorResult(
+          startTime,
+          `Tenderly API error: ${response.status} ${response.statusText}`
+        );
       }
 
-      return result;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.recordFailure(errorMessage);
-      return this.createErrorResult(startTime, errorMessage);
+      const data = (await response.json()) as TenderlySimulationResponse;
+      return this.parseSimulationResponse(data, startTime);
+    } finally {
+      clearTimeout(timeoutId);
     }
-  }
-
-  /**
-   * Get current health status
-   */
-  getHealth(): SimulationProviderHealth {
-    return { ...this.health };
-  }
-
-  /**
-   * Get current metrics
-   */
-  getMetrics(): SimulationMetrics {
-    return { ...this.metrics };
-  }
-
-  /**
-   * Reset metrics
-   */
-  resetMetrics(): void {
-    this.metrics = this.createEmptyMetrics();
-    this.recentResults.clear();
   }
 
   /**
@@ -178,45 +183,65 @@ export class TenderlyProvider implements ISimulationProvider {
   }
 
   // ===========================================================================
-  // Private Methods
+  // Override: Include rate limit info in health
   // ===========================================================================
 
   /**
-   * Execute the actual simulation request
+   * Get current health status including rate limit information.
+   * Overrides base implementation to add Tenderly-specific rate limit data.
    */
-  private async executeSimulation(
-    request: SimulationRequest,
-    startTime: number
-  ): Promise<SimulationResult> {
-    const chainId = this.getChainId(request.chain);
-    const body = this.buildRequestBody(request, chainId);
+  override getHealth(): SimulationProviderHealth {
+    // Check if we need to reset the rate limit counter
+    this.checkRateLimitReset();
 
-    const url = `${this.apiUrl}/account/${this.accountSlug}/project/${this.projectSlug}/simulate`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        return this.createErrorResult(
-          startTime,
-          `Tenderly API error: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const data = await response.json() as TenderlySimulationResponse;
-      return this.parseSimulationResponse(data, startTime);
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    return {
+      ...super.getHealth(),
+      // Include rate limit information
+      requestsUsed: this.requestsUsedThisMonth,
+      requestLimit: this.monthlyRequestLimit,
+    };
   }
+
+  // ===========================================================================
+  // Rate Limit Methods (Tenderly-specific)
+  // ===========================================================================
+
+  /**
+   * Check if the rate limit has been exceeded.
+   * Returns true if more requests can be made this month.
+   */
+  isWithinRateLimit(): boolean {
+    this.checkRateLimitReset();
+    return this.requestsUsedThisMonth < this.monthlyRequestLimit;
+  }
+
+  /**
+   * Get the remaining requests available this month.
+   */
+  getRemainingRequests(): number {
+    this.checkRateLimitReset();
+    return Math.max(0, this.monthlyRequestLimit - this.requestsUsedThisMonth);
+  }
+
+  /**
+   * Get rate limit usage as a percentage (0-100).
+   */
+  getRateLimitUsagePercent(): number {
+    this.checkRateLimitReset();
+    return (this.requestsUsedThisMonth / this.monthlyRequestLimit) * 100;
+  }
+
+  /**
+   * Reset rate limit tracking (for testing or manual reset).
+   */
+  resetRateLimit(): void {
+    this.requestsUsedThisMonth = 0;
+    this.rateLimitResetDate = this.getNextMonthStart();
+  }
+
+  // ===========================================================================
+  // Private Methods
+  // ===========================================================================
 
   /**
    * Build Tenderly simulation request body
@@ -231,7 +256,7 @@ export class TenderlyProvider implements ISimulationProvider {
       network_id: chainId,
       from: tx.from as string,
       to: tx.to as string,
-      input: tx.data as string || '0x',
+      input: (tx.data as string) || '0x',
       value: tx.value ? tx.value.toString() : '0',
       gas: tx.gasLimit ? Number(tx.gasLimit) : 8000000,
       save: false,
@@ -280,7 +305,8 @@ export class TenderlyProvider implements ISimulationProvider {
 
     // Revert reason
     if (!simulation.status) {
-      result.revertReason = simulation.error_message || txInfo?.call_trace?.error || 'Unknown revert';
+      result.revertReason =
+        simulation.error_message || txInfo?.call_trace?.error || 'Unknown revert';
     }
 
     // Return value
@@ -325,10 +351,15 @@ export class TenderlyProvider implements ISimulationProvider {
   }
 
   /**
-   * Convert state overrides to Tenderly format
+   * Convert state overrides to Tenderly format.
+   * Fix 7.3: Tenderly already supports state overrides, this method converts
+   * our internal format to Tenderly's expected format.
    */
   private convertStateOverrides(
-    overrides: Record<string, { balance?: bigint; nonce?: number; code?: string; storage?: Record<string, string> }>
+    overrides: Record<
+      string,
+      { balance?: bigint; nonce?: number; code?: string; storage?: Record<string, string> }
+    >
   ): Record<string, TenderlyStateObject> {
     const result: Record<string, TenderlyStateObject> = {};
 
@@ -371,109 +402,34 @@ export class TenderlyProvider implements ISimulationProvider {
   }
 
   /**
-   * Create error result
+   * Increment the rate limit counter.
+   *
+   * Fix 2.1: Called for ALL API requests (not just successes).
+   * Tenderly counts all requests toward the monthly limit.
    */
-  private createErrorResult(startTime: number, error: string): SimulationResult {
-    return {
-      success: false,
-      wouldRevert: false,
-      error,
-      provider: 'tenderly',
-      latencyMs: Date.now() - startTime,
-    };
+  private incrementRateLimitCounter(): void {
+    this.checkRateLimitReset();
+    this.requestsUsedThisMonth++;
   }
 
   /**
-   * Create empty metrics object
+   * Check if the rate limit counter should be reset (new month).
    */
-  private createEmptyMetrics(): SimulationMetrics {
-    return {
-      totalSimulations: 0,
-      successfulSimulations: 0,
-      failedSimulations: 0,
-      predictedReverts: 0,
-      averageLatencyMs: 0,
-      fallbackUsed: 0,
-      cacheHits: 0,
-      lastUpdated: Date.now(),
-    };
-  }
-
-  /**
-   * Create initial health status
-   */
-  private createInitialHealth(): SimulationProviderHealth {
-    return {
-      healthy: true,
-      lastCheck: Date.now(),
-      consecutiveFailures: 0,
-      averageLatencyMs: 0,
-      successRate: 1.0,
-    };
-  }
-
-  /**
-   * Record successful simulation
-   */
-  private recordSuccess(startTime: number): void {
-    const latency = Date.now() - startTime;
-
-    this.metrics.successfulSimulations++;
-    this.updateAverageLatency(latency);
-
-    this.health.consecutiveFailures = 0;
-    this.health.healthy = true;
-    this.health.lastCheck = Date.now();
-
-    this.recentResults.pushOverwrite(true);
-    this.updateSuccessRate();
-  }
-
-  /**
-   * Record failed simulation
-   */
-  private recordFailure(error?: string): void {
-    this.metrics.failedSimulations++;
-
-    this.health.consecutiveFailures++;
-    this.health.lastError = error;
-    this.health.lastCheck = Date.now();
-
-    if (this.health.consecutiveFailures >= SIMULATION_DEFAULTS.maxConsecutiveFailures) {
-      this.health.healthy = false;
+  private checkRateLimitReset(): void {
+    const now = new Date();
+    if (now >= this.rateLimitResetDate) {
+      this.requestsUsedThisMonth = 0;
+      this.rateLimitResetDate = this.getNextMonthStart();
     }
-
-    this.recentResults.pushOverwrite(false);
-    this.updateSuccessRate();
   }
 
   /**
-   * Update average latency (rolling average)
+   * Get the start of the next month (UTC).
    */
-  private updateAverageLatency(latency: number): void {
-    const total = this.metrics.successfulSimulations;
-    if (total === 1) {
-      this.metrics.averageLatencyMs = latency;
-      this.health.averageLatencyMs = latency;
-    } else {
-      this.metrics.averageLatencyMs =
-        (this.metrics.averageLatencyMs * (total - 1) + latency) / total;
-      this.health.averageLatencyMs = this.metrics.averageLatencyMs;
-    }
-    this.metrics.lastUpdated = Date.now();
-  }
-
-  /**
-   * Update success rate from recent results
-   */
-  private updateSuccessRate(): void {
-    if (this.recentResults.length === 0) {
-      this.health.successRate = 1.0;
-      return;
-    }
-
-    const successes = this.recentResults.countWhere((r) => r);
-    this.health.successRate = successes / this.recentResults.length;
+  private getNextMonthStart(): Date {
+    const now = new Date();
+    // Get first day of next month at midnight UTC
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0, 0));
   }
 }
 

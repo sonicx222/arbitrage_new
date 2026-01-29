@@ -18,7 +18,9 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { ethers } from 'ethers';
-import { CHAIN_IDS } from './types';
+// Fix 6.2: Import shared error message utility for consistent error handling
+// Fix 6.3: Import shared rolling average utility to eliminate duplication
+import { CHAIN_IDS, getSimulationErrorMessage, updateRollingAverage } from './types';
 
 // =============================================================================
 // Types
@@ -127,8 +129,12 @@ export interface AnvilForkMetrics {
 // Constants
 // =============================================================================
 
-// Fix 3.2: Changed from 8545 to 8546 to avoid conflict with standard Ethereum nodes
-const DEFAULT_PORT = 8546;
+/**
+ * Fix 3.1 + 3.2: Anvil port configuration.
+ * - Supports ANVIL_PORT environment variable for deployment flexibility
+ * - Default changed from 8545 to 8546 to avoid conflict with standard Ethereum nodes
+ */
+const DEFAULT_PORT = parseInt(process.env.ANVIL_PORT || '8546', 10);
 const DEFAULT_ANVIL_PATH = 'anvil';
 const DEFAULT_CACHE_SIZE = 500;
 const DEFAULT_ACCOUNTS = 1;
@@ -263,7 +269,8 @@ export class AnvilForkManager {
       this.health.lastCheck = Date.now();
     } catch (error) {
       this.state = 'error';
-      this.lastError = error instanceof Error ? error.message : String(error);
+      // Fix 6.2: Use shared utility for consistent error handling
+      this.lastError = getSimulationErrorMessage(error);
       this.health.healthy = false;
       this.health.lastError = this.lastError;
       throw error;
@@ -353,7 +360,8 @@ export class AnvilForkManager {
 
       return result;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Fix 6.2: Use shared utility for consistent error handling
+      const errorMessage = getSimulationErrorMessage(error);
 
       this.metrics.failedSimulations++;
       this.updateAverageLatency(Date.now() - startTime);
@@ -665,15 +673,14 @@ export class AnvilForkManager {
 
   /**
    * Update rolling average latency.
+   * Fix 6.3: Uses shared updateRollingAverage utility to eliminate duplication.
    */
   private updateAverageLatency(latencyMs: number): void {
-    const total = this.metrics.totalSimulations;
-    if (total === 1) {
-      this.metrics.averageLatencyMs = latencyMs;
-    } else {
-      this.metrics.averageLatencyMs =
-        (this.metrics.averageLatencyMs * (total - 1) + latencyMs) / total;
-    }
+    this.metrics.averageLatencyMs = updateRollingAverage(
+      this.metrics.averageLatencyMs,
+      latencyMs,
+      this.metrics.totalSimulations
+    );
     this.metrics.lastUpdated = Date.now();
   }
 

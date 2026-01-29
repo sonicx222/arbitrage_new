@@ -9,8 +9,18 @@
  * - Backpressure coupling with queue service
  * - Deferred ACK after execution completion
  * - Dead letter queue for processing failures
+ * - Comprehensive validation with structured error codes
+ *
+ * Architecture Note (ADR-002):
+ * This consumer reads from EXECUTION_REQUESTS stream (forwarded by coordinator),
+ * NOT directly from the OPPORTUNITIES stream. This broker pattern provides:
+ * - Leader election for opportunity deduplication
+ * - Pre-filtering by coordinator
+ * - Centralized routing decisions
  *
  * @see engine.ts (parent service)
+ * @see docs/architecture/ARCHITECTURE_V2.md Section 5.4
+ * @see docs/architecture/adr/ADR-002-redis-streams.md
  */
 
 import {
@@ -21,7 +31,26 @@ import {
 } from '@arbitrage/core';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { Logger, ExecutionStats, QueueService } from '../types';
+import type {
+  Logger,
+  ExecutionStats,
+  QueueService,
+  ConsumerConfig,
+} from '../types';
+import { DEFAULT_CONSUMER_CONFIG } from '../types';
+
+// REFACTOR 9.1: Import validation types and functions from extracted module
+import {
+  validateMessageStructure,
+  validateBusinessRules as validateBusinessRulesFunc,
+  type ValidationResult,
+  type ValidationFailure,
+  type BusinessRuleResult,
+} from './validation';
+
+// =============================================================================
+// Configuration Interface
+// =============================================================================
 
 export interface OpportunityConsumerConfig {
   logger: Logger;
@@ -31,13 +60,62 @@ export interface OpportunityConsumerConfig {
   instanceId: string;
   /** Callback when opportunity is queued successfully */
   onOpportunityQueued?: (opportunity: ArbitrageOpportunity) => void;
+  /** Consumer configuration overrides */
+  consumerConfig?: Partial<ConsumerConfig>;
 }
 
 export interface PendingMessageInfo {
   streamName: string;
   groupName: string;
   messageId: string;
+  /** Timestamp when message was queued (for TTL cleanup) */
+  queuedAt: number;
 }
+
+// =============================================================================
+// REFACTOR 9.1: Validation types moved to ./validation.ts
+// Types imported: ValidationResult, BusinessRuleResult, SubValidationResult
+// Functions imported: validateMessageStructure, validateBusinessRulesFunc
+// =============================================================================
+
+// =============================================================================
+// DLQ Stream Name Constant
+// =============================================================================
+
+/**
+ * Dead Letter Queue stream name.
+ * Messages that fail validation are moved here for analysis.
+ * @see ARCHITECTURE_V2.md Section 5.3 (Message Channels)
+ */
+const DLQ_STREAM = 'stream:dead-letter-queue';
+
+/**
+ * BUG FIX 4.1: Maximum age for pending messages before cleanup.
+ * Messages older than this are considered orphaned (execution never completed)
+ * and are ACKed to prevent Redis PEL growth.
+ *
+ * Value: 10 minutes - well beyond normal execution timeout (55s) with safety margin.
+ */
+const PENDING_MESSAGE_MAX_AGE_MS = 10 * 60 * 1000;
+
+// =============================================================================
+// Type Safety Design Decision (REFACTOR 9.2)
+// =============================================================================
+//
+// The `as unknown as ArbitrageOpportunity` cast at the end of validateMessage()
+// is intentional. A type guard was considered but provides less value because:
+//
+// 1. Explicit field checks give specific error codes (MISSING_ID, MISSING_TYPE, etc.)
+// 2. TypeScript can't track all the field validations we perform
+// 3. The cast is safe because we've validated all required fields
+// 4. A type guard would duplicate validation logic without better error messages
+//
+// If the ArbitrageOpportunity type changes, add new validation checks and
+// update ValidationErrorCode accordingly.
+
+// =============================================================================
+// OpportunityConsumer Class
+// =============================================================================
 
 export class OpportunityConsumer {
   private readonly logger: Logger;
@@ -46,6 +124,7 @@ export class OpportunityConsumer {
   private readonly stats: ExecutionStats;
   private readonly instanceId: string;
   private readonly onOpportunityQueued?: (opportunity: ArbitrageOpportunity) => void;
+  private readonly config: ConsumerConfig;
 
   private streamConsumer: StreamConsumer | null = null;
   private consumerGroup: ConsumerGroupConfig;
@@ -60,16 +139,27 @@ export class OpportunityConsumer {
     this.instanceId = config.instanceId;
     this.onOpportunityQueued = config.onOpportunityQueued;
 
+    // Merge config with defaults
+    this.config = {
+      ...DEFAULT_CONSUMER_CONFIG,
+      ...config.consumerConfig,
+    };
+
     // Define consumer group configuration
-    // FIX: Consume from EXECUTION_REQUESTS (forwarded by coordinator leader)
-    // This ensures only leader-approved opportunities are executed (ARCHITECTURE_V2.md Section 4.1)
+    // Architecture Note: Consumes from EXECUTION_REQUESTS (forwarded by coordinator leader)
+    // This ensures only leader-approved opportunities are executed
+    // @see ARCHITECTURE_V2.md Section 5.4 - Broker Pattern
     this.consumerGroup = {
       streamName: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
       groupName: 'execution-engine-group',
       consumerName: this.instanceId,
-      startId: '$'
+      startId: '$',
     };
   }
+
+  // ===========================================================================
+  // Lifecycle Methods
+  // ===========================================================================
 
   /**
    * Create consumer group for Redis Streams.
@@ -79,12 +169,13 @@ export class OpportunityConsumer {
       await this.streamsClient.createConsumerGroup(this.consumerGroup);
       this.logger.info('Consumer group ready', {
         stream: this.consumerGroup.streamName,
-        group: this.consumerGroup.groupName
+        group: this.consumerGroup.groupName,
       });
     } catch (error) {
+      // Log but don't throw - group may already exist (BUSYGROUP error is expected)
       this.logger.error('Failed to create consumer group', {
-        error,
-        stream: this.consumerGroup.streamName
+        error: getErrorMessage(error),
+        stream: this.consumerGroup.streamName,
       });
     }
   }
@@ -98,78 +189,66 @@ export class OpportunityConsumer {
       handler: async (message) => {
         await this.handleStreamMessage(message);
       },
-      batchSize: 10,
-      blockMs: 1000,
+      batchSize: this.config.batchSize,
+      blockMs: this.config.blockMs,
       autoAck: false, // Deferred ACK after execution
       logger: {
         error: (msg: string, ctx?: Record<string, unknown>) => this.logger.error(msg, ctx),
-        debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx)
+        debug: (msg: string, ctx?: Record<string, unknown>) => this.logger.debug(msg, ctx),
       },
       onPauseStateChange: (isPaused) => {
         this.logger.info('Stream consumer pause state changed', {
           isPaused,
-          queueSize: this.queueService.size()
+          queueSize: this.queueService.size(),
         });
-      }
+      },
     });
 
     // Couple backpressure to stream consumer
+    // RACE FIX 5.2: Guard against null streamConsumer during initialization/shutdown
     this.queueService.onPauseStateChange((isPaused) => {
+      if (!this.streamConsumer) {
+        // Log at debug level - this can happen during startup/shutdown
+        this.logger.debug('Backpressure signal ignored - stream consumer not ready', {
+          isPaused,
+        });
+        return;
+      }
       if (isPaused) {
-        this.streamConsumer?.pause();
+        this.streamConsumer.pause();
       } else {
-        this.streamConsumer?.resume();
+        this.streamConsumer.resume();
       }
     });
 
     this.streamConsumer.start();
     this.logger.info('Stream consumer started with blocking reads', {
       stream: this.consumerGroup.streamName,
-      blockMs: 1000
+      batchSize: this.config.batchSize,
+      blockMs: this.config.blockMs,
     });
   }
 
   /**
    * Stop consuming opportunities.
    *
-   * BUG-FIX: ACK all pending messages before shutdown to prevent redelivery storms.
-   * Without this, unacked messages would be redelivered on restart, potentially
-   * causing duplicate execution attempts for opportunities that were in-flight.
+   * Performance Optimization: Uses batch ACK pattern for efficient cleanup.
+   * All pending messages are ACKed before shutdown to prevent redelivery storms.
    */
   async stop(): Promise<void> {
+    // Stop stream consumer first
     if (this.streamConsumer) {
       await this.streamConsumer.stop();
       this.streamConsumer = null;
     }
 
-    // BUG-FIX: ACK all pending messages before clearing to prevent redelivery storm
-    // This ensures opportunities that were queued but not yet executed are not
-    // redelivered on restart (they will need to be re-detected by the coordinator)
+    // Batch ACK all pending messages using pipeline pattern
     if (this.pendingMessages.size > 0) {
       this.logger.info('ACKing pending messages during shutdown', {
         count: this.pendingMessages.size,
       });
 
-      const ackPromises: Promise<void>[] = [];
-      for (const [id, info] of this.pendingMessages) {
-        const ackPromise = this.streamsClient.xack(info.streamName, info.groupName, info.messageId)
-          .then(() => {
-            this.logger.debug('ACKed pending message during shutdown', { id });
-          })
-          .catch((error) => {
-            this.logger.warn('Failed to ACK pending message during shutdown', {
-              id,
-              error: getErrorMessage(error),
-            });
-          });
-        ackPromises.push(ackPromise);
-      }
-
-      // Wait for all ACKs with a reasonable timeout
-      await Promise.race([
-        Promise.allSettled(ackPromises),
-        new Promise<void>((resolve) => setTimeout(resolve, 5000)), // 5s timeout
-      ]);
+      await this.batchAckPendingMessages();
     }
 
     // Clear local state
@@ -178,134 +257,222 @@ export class OpportunityConsumer {
   }
 
   /**
+   * Batch ACK pending messages efficiently.
+   * Uses Promise.allSettled with timeout for resilience.
+   *
+   * Performance Analysis (PERF 10.4):
+   * - Current: Parallelized xack calls with Promise.allSettled + timeout guard
+   * - Alternative: Redis MULTI/EXEC pipeline for true batching
+   *
+   * Design Decision: Parallelized approach is sufficient because:
+   * 1. Shutdown is not hot-path - happens once at process termination
+   * 2. Typical pending count at shutdown is <100 messages (maxConcurrentExecutions=5)
+   * 3. Pipeline would require changes to RedisStreamsClient interface
+   * 4. Parallelized calls complete in O(max_latency) not O(n*latency)
+   *
+   * Revisit if: pending count at shutdown regularly exceeds 1000 messages
+   */
+  private async batchAckPendingMessages(): Promise<void> {
+    const ackPromises: Promise<void>[] = [];
+
+    for (const [id, info] of this.pendingMessages) {
+      const ackPromise = this.streamsClient
+        .xack(info.streamName, info.groupName, info.messageId)
+        .then(() => {
+          this.logger.debug('ACKed pending message during shutdown', { id });
+        })
+        .catch((error) => {
+          this.logger.warn('Failed to ACK pending message during shutdown', {
+            id,
+            error: getErrorMessage(error),
+          });
+        });
+      ackPromises.push(ackPromise);
+    }
+
+    // Wait for all ACKs with configurable timeout
+    await Promise.race([
+      Promise.allSettled(ackPromises),
+      new Promise<void>((resolve) =>
+        setTimeout(resolve, this.config.shutdownAckTimeoutMs)
+      ),
+    ]);
+  }
+
+  // ===========================================================================
+  // Message Handling
+  // ===========================================================================
+
+  /**
    * Handle individual stream message with deferred ACK pattern.
    *
    * ACK strategy:
-   * - Empty messages: ACK immediately
+   * - System messages (stream-init): ACK immediately, no DLQ
+   * - Empty/invalid messages: ACK immediately, move to DLQ
    * - Rejected opportunities (validation/backpressure): ACK immediately
    * - Queued opportunities: Deferred ACK after execution completes
    */
   private async handleStreamMessage(
     message: { id: string; data: unknown }
   ): Promise<void> {
-    try {
-      if (!message.data) {
-        this.logger.warn('Skipping message with no data', { messageId: message.id });
-        // ACK empty messages to prevent redelivery
-        await this.streamsClient.xack(
-          this.consumerGroup.streamName,
-          this.consumerGroup.groupName,
-          message.id
-        );
-        return;
-      }
+    // Validate message structure and content
+    const validation = this.validateMessage(message);
 
-      const opportunity = message.data as unknown as ArbitrageOpportunity;
+    if (!validation.valid) {
+      // Handle validation failure
+      await this.handleValidationFailure(message, validation);
+      return;
+    }
 
-      // Runtime validation: verify required fields exist to catch malformed data early
-      // This prevents cryptic runtime errors later in the execution pipeline
-      if (!opportunity || typeof opportunity !== 'object') {
-        throw new Error('Invalid opportunity: message data is not an object');
-      }
-      if (!opportunity.id || typeof opportunity.id !== 'string') {
-        throw new Error('Invalid opportunity: missing or invalid id');
-      }
-      if (!opportunity.type || typeof opportunity.type !== 'string') {
-        throw new Error('Invalid opportunity: missing or invalid type');
-      }
+    const opportunity = validation.opportunity;
 
-      // BUG-FIX: Add comprehensive validation for required fields
-      // This prevents crashes in execution strategies due to missing data
-      if (!opportunity.tokenIn || typeof opportunity.tokenIn !== 'string') {
-        throw new Error('Invalid opportunity: missing or invalid tokenIn');
-      }
-      if (!opportunity.tokenOut || typeof opportunity.tokenOut !== 'string') {
-        throw new Error('Invalid opportunity: missing or invalid tokenOut');
-      }
+    // Handle the opportunity - returns true if successfully queued
+    const wasQueued = this.handleArbitrageOpportunity(opportunity);
 
-      // Validate amountIn is present and can be converted to BigInt
-      if (!opportunity.amountIn) {
-        throw new Error('Invalid opportunity: missing amountIn');
-      }
-      try {
-        const amountBigInt = BigInt(opportunity.amountIn);
-        if (amountBigInt <= 0n) {
-          throw new Error('Invalid opportunity: amountIn must be positive');
-        }
-      } catch (e) {
-        throw new Error(`Invalid opportunity: amountIn is not a valid number: ${opportunity.amountIn}`);
-      }
-
-      // Validate chain fields for cross-chain opportunities
-      if (opportunity.type === 'cross-chain') {
-        if (!opportunity.buyChain || typeof opportunity.buyChain !== 'string') {
-          throw new Error('Invalid cross-chain opportunity: missing or invalid buyChain');
-        }
-        if (!opportunity.sellChain || typeof opportunity.sellChain !== 'string') {
-          throw new Error('Invalid cross-chain opportunity: missing or invalid sellChain');
-        }
-        if (opportunity.buyChain === opportunity.sellChain) {
-          throw new Error('Invalid cross-chain opportunity: buyChain and sellChain must be different');
-        }
-      }
-
-      // Handle the opportunity - returns true if successfully queued
-      const wasQueued = this.handleArbitrageOpportunity(opportunity);
-
-      if (wasQueued) {
-        // Store message info for deferred ACK after execution
-        this.pendingMessages.set(opportunity.id, {
-          streamName: this.consumerGroup.streamName,
-          groupName: this.consumerGroup.groupName,
-          messageId: message.id
+    if (wasQueued) {
+      // BUG FIX 4.2: Handle duplicate opportunity IDs properly
+      // If we already have a pending message for this ID, ACK the OLD message first
+      // to prevent orphaned entries in Redis PEL (Pending Entries List)
+      const existingPending = this.pendingMessages.get(opportunity.id);
+      if (existingPending) {
+        this.logger.warn('Duplicate opportunity ID in pending messages - ACKing previous', {
+          id: opportunity.id,
+          existingMessageId: existingPending.messageId,
+          newMessageId: message.id,
         });
-      } else {
-        // Opportunity was rejected - ACK immediately to prevent redelivery
-        // Rejected opportunities shouldn't be retried (they'll just fail again)
-        await this.streamsClient.xack(
-          this.consumerGroup.streamName,
-          this.consumerGroup.groupName,
-          message.id
-        );
+        // ACK the previous message to prevent PEL leak
+        // Fire-and-forget: don't block on ACK since it's cleanup
+        // Note: Call xack directly instead of ackMessage to ensure .catch() works
+        // (ackMessage has its own try-catch that swallows errors)
+        this.streamsClient
+          .xack(existingPending.streamName, existingPending.groupName, existingPending.messageId)
+          .catch((err) => {
+            this.logger.warn('Failed to ACK orphaned duplicate message', {
+              messageId: existingPending.messageId,
+              error: getErrorMessage(err),
+            });
+          });
       }
-    } catch (error) {
-      // Always ACK on processing error to prevent infinite redelivery
-      this.stats.messageProcessingErrors++;
-      this.logger.error('Message processing error - ACKing to prevent redelivery loop', {
-        messageId: message.id,
-        error: getErrorMessage(error)
-      });
 
-      // Move to Dead Letter Queue and ACK
-      await this.moveToDeadLetterQueue(message, error as Error);
-      await this.streamsClient.xack(
-        this.consumerGroup.streamName,
-        this.consumerGroup.groupName,
-        message.id
-      );
+      // Store message info for deferred ACK after execution
+      this.pendingMessages.set(opportunity.id, {
+        streamName: this.consumerGroup.streamName,
+        groupName: this.consumerGroup.groupName,
+        messageId: message.id,
+        queuedAt: Date.now(),
+      });
+    } else {
+      // Opportunity was rejected - ACK immediately to prevent redelivery
+      await this.ackMessage(message.id);
     }
   }
 
   /**
-   * Handle arbitrage opportunity by validating and enqueueing.
+   * Handle validation failure by ACKing and optionally moving to DLQ.
+   */
+  private async handleValidationFailure(
+    message: { id: string; data: unknown },
+    validation: ValidationFailure
+  ): Promise<void> {
+    // System messages (like stream-init) are ACKed silently
+    if (validation.isSystemMessage) {
+      this.logger.debug('Skipping system message', {
+        messageId: message.id,
+        code: validation.code,
+      });
+      await this.ackMessage(message.id);
+      return;
+    }
+
+    // Increment validation error counter for non-system validation failures
+    this.stats.validationErrors++;
+
+    const errorMessage = validation.details
+      ? `${validation.code}: ${validation.details}`
+      : validation.code;
+
+    // FIX 6.2: Use warn instead of error - validation failures are expected
+    // (malformed messages from upstream), not system errors
+    this.logger.warn('Message validation failed - moving to DLQ', {
+      messageId: message.id,
+      code: validation.code,
+      details: validation.details,
+    });
+
+    // Move to Dead Letter Queue for analysis
+    await this.moveToDeadLetterQueue(message, new Error(errorMessage));
+
+    // ACK to prevent infinite redelivery
+    await this.ackMessage(message.id);
+  }
+
+  // ===========================================================================
+  // Validation (REFACTOR 9.1: Delegates to ./validation.ts)
+  // ===========================================================================
+
+  /**
+   * Validate incoming message structure and content.
+   * REFACTOR 9.1: Delegates to validateMessageStructure from ./validation.ts
+   *
+   * @returns ValidationResult - Either success with parsed opportunity or failure with error code
+   */
+  private validateMessage(message: { id: string; data: unknown }): ValidationResult {
+    return validateMessageStructure(message);
+  }
+
+  // ===========================================================================
+  // Opportunity Handling
+  // ===========================================================================
+
+  /**
+   * Handle arbitrage opportunity by validating business rules and enqueueing.
+   *
+   * BUG FIX 4.1: Uses atomic check-and-add pattern for duplicate detection.
+   * The opportunity ID is added to activeExecutions IMMEDIATELY after successful
+   * enqueue (not after dequeue by engine) to prevent race conditions where
+   * duplicate messages pass the check before either is marked active.
+   *
    * @returns true if successfully queued, false if rejected
    */
   private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): boolean {
     this.stats.opportunitiesReceived++;
 
     try {
-      // Validate opportunity
-      if (!this.validateOpportunity(opportunity)) {
+      // Validate business rules
+      const businessValidation = this.validateBusinessRules(opportunity);
+      if (!businessValidation.valid) {
         this.stats.opportunitiesRejected++;
+        this.logger.debug('Opportunity rejected by business rules', {
+          id: opportunity.id,
+          code: businessValidation.code,
+          details: businessValidation.details,
+        });
         return false;
       }
 
+      // BUG FIX 4.1: Atomic check-and-add for duplicate detection
+      // Check AND mark active in a single synchronous block to prevent race conditions
+      // where two concurrent messages both pass the check before either is marked
+      if (this.activeExecutions.has(opportunity.id)) {
+        this.stats.opportunitiesRejected++;
+        this.logger.debug('Opportunity rejected: already queued or executing', {
+          id: opportunity.id,
+        });
+        return false;
+      }
+
+      // Mark active BEFORE enqueue to prevent race condition
+      // If enqueue fails, we'll remove it from activeExecutions
+      this.activeExecutions.add(opportunity.id);
+
       // Try to enqueue
       if (!this.queueService.enqueue(opportunity)) {
+        // Rollback: remove from activeExecutions since enqueue failed
+        this.activeExecutions.delete(opportunity.id);
         this.stats.queueRejects++;
         this.logger.warn('Opportunity rejected due to queue backpressure', {
           id: opportunity.id,
-          queueSize: this.queueService.size()
+          queueSize: this.queueService.size(),
         });
         return false;
       }
@@ -314,7 +481,7 @@ export class OpportunityConsumer {
         id: opportunity.id,
         type: opportunity.type,
         profit: opportunity.expectedProfit,
-        queueSize: this.queueService.size()
+        queueSize: this.queueService.size(),
       });
 
       // Notify callback
@@ -324,46 +491,56 @@ export class OpportunityConsumer {
 
       return true;
     } catch (error) {
-      this.logger.error('Failed to handle arbitrage opportunity', { error });
+      // Rollback: ensure we don't leave orphaned entries on error
+      this.activeExecutions.delete(opportunity.id);
+      // BUG FIX 4.2: Track as rejection since opportunity was not processed
+      this.stats.opportunitiesRejected++;
+      this.logger.error('Failed to handle arbitrage opportunity', {
+        id: opportunity.id,
+        error: getErrorMessage(error),
+      });
       return false;
     }
   }
 
   /**
-   * Validate opportunity before enqueueing.
+   * Validate opportunity against business rules.
+   * REFACTOR 9.1: Delegates to validateBusinessRulesFunc from ./validation.ts
+   *
+   * @returns BusinessRuleResult indicating pass or fail
    */
-  private validateOpportunity(opportunity: ArbitrageOpportunity): boolean {
-    // Check confidence threshold
-    if (opportunity.confidence < ARBITRAGE_CONFIG.confidenceThreshold) {
-      this.logger.debug('Opportunity rejected: low confidence', {
-        id: opportunity.id,
-        confidence: opportunity.confidence
-      });
-      return false;
-    }
+  private validateBusinessRules(opportunity: ArbitrageOpportunity): BusinessRuleResult {
+    return validateBusinessRulesFunc(opportunity, {
+      confidenceThreshold: ARBITRAGE_CONFIG.confidenceThreshold,
+      minProfitPercentage: ARBITRAGE_CONFIG.minProfitPercentage,
+    });
+  }
 
-    // Check profit threshold
-    if ((opportunity.expectedProfit ?? 0) < ARBITRAGE_CONFIG.minProfitPercentage) {
-      this.logger.debug('Opportunity rejected: insufficient profit', {
-        id: opportunity.id,
-        profit: opportunity.expectedProfit
-      });
-      return false;
-    }
+  // ===========================================================================
+  // ACK Operations
+  // ===========================================================================
 
-    // Check if already in local tracking
-    if (this.activeExecutions.has(opportunity.id)) {
-      this.logger.debug('Opportunity rejected: already executing', {
-        id: opportunity.id
+  /**
+   * ACK a message immediately.
+   */
+  private async ackMessage(messageId: string): Promise<void> {
+    try {
+      await this.streamsClient.xack(
+        this.consumerGroup.streamName,
+        this.consumerGroup.groupName,
+        messageId
+      );
+    } catch (error) {
+      this.logger.error('Failed to ACK message', {
+        messageId,
+        error: getErrorMessage(error),
       });
-      return false;
     }
-
-    return true;
   }
 
   /**
    * ACK message after successful execution.
+   * Called by engine after execution completes.
    */
   async ackMessageAfterExecution(opportunityId: string): Promise<void> {
     const pendingInfo = this.pendingMessages.get(opportunityId);
@@ -380,37 +557,57 @@ export class OpportunityConsumer {
     } catch (error) {
       this.logger.error('Failed to ACK message after execution', {
         opportunityId,
-        error: getErrorMessage(error)
+        error: getErrorMessage(error),
       });
     }
   }
 
+  // ===========================================================================
+  // Dead Letter Queue
+  // ===========================================================================
+
   /**
    * Move failed messages to Dead Letter Queue.
+   * Stores essential information for debugging without the full message payload.
    */
   private async moveToDeadLetterQueue(
     message: { id: string; data: unknown },
     error: Error
   ): Promise<void> {
     try {
-      await this.streamsClient.xadd('stream:dead-letter-queue', {
+      // Extract essential fields for DLQ analysis (avoid storing full payload)
+      const data = message.data as Record<string, unknown> | null;
+      const dlqData = {
         originalMessageId: message.id,
         originalStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
-        data: message.data,
+        opportunityId: data?.id ?? 'unknown',
+        opportunityType: data?.type ?? 'unknown',
         error: error.message,
         timestamp: Date.now(),
-        service: 'execution-engine'
-      });
+        service: 'execution-engine',
+        instanceId: this.instanceId,
+      };
+
+      await this.streamsClient.xadd(DLQ_STREAM, dlqData);
     } catch (dlqError) {
       this.logger.error('Failed to move message to DLQ', {
         messageId: message.id,
-        error: (dlqError as Error).message
+        error: getErrorMessage(dlqError),
       });
     }
   }
 
+  // ===========================================================================
+  // Active Execution Tracking
+  // ===========================================================================
+
   /**
    * Mark opportunity as actively executing (for duplicate detection).
+   * Called by engine when execution starts.
+   *
+   * NOTE: This is now idempotent - the ID is already added by handleArbitrageOpportunity()
+   * immediately after enqueue to fix BUG 4.1 (race condition). This method is kept
+   * for backwards compatibility and explicit documentation of the execution lifecycle.
    */
   markActive(opportunityId: string): void {
     this.activeExecutions.add(opportunityId);
@@ -418,9 +615,21 @@ export class OpportunityConsumer {
 
   /**
    * Remove opportunity from active set.
+   * Called by engine when execution completes (success or failure).
+   *
+   * CRITICAL: This must be called after execution completes to allow
+   * re-processing of opportunities with the same ID.
    */
   markComplete(opportunityId: string): void {
     this.activeExecutions.delete(opportunityId);
+  }
+
+  /**
+   * Check if an opportunity is currently active (queued or executing).
+   * Useful for external status checks.
+   */
+  isActive(opportunityId: string): boolean {
+    return this.activeExecutions.has(opportunityId);
   }
 
   /**
@@ -436,6 +645,92 @@ export class OpportunityConsumer {
   getPendingCount(): number {
     return this.pendingMessages.size;
   }
+
+  // ===========================================================================
+  // Pending Message Cleanup (BUG FIX 4.1)
+  // ===========================================================================
+
+  /**
+   * Clean up stale pending messages to prevent memory leaks.
+   *
+   * BUG FIX 4.1: Messages that exceed PENDING_MESSAGE_MAX_AGE_MS are considered
+   * orphaned (execution completed without ACK, or engine crashed). These are
+   * ACKed to prevent Redis PEL growth and memory leaks.
+   *
+   * This method should be called periodically (e.g., from health monitoring).
+   *
+   * @returns Number of stale messages cleaned up
+   */
+  async cleanupStalePendingMessages(): Promise<number> {
+    const now = Date.now();
+    const staleIds: string[] = [];
+
+    // Identify stale messages
+    for (const [id, info] of this.pendingMessages) {
+      if (now - info.queuedAt > PENDING_MESSAGE_MAX_AGE_MS) {
+        staleIds.push(id);
+      }
+    }
+
+    if (staleIds.length === 0) {
+      return 0;
+    }
+
+    this.logger.warn('Cleaning up stale pending messages', {
+      count: staleIds.length,
+      maxAgeMs: PENDING_MESSAGE_MAX_AGE_MS,
+    });
+
+    // ACK and remove stale messages
+    let cleanedCount = 0;
+    for (const id of staleIds) {
+      const info = this.pendingMessages.get(id);
+      if (!info) continue;
+
+      try {
+        await this.streamsClient.xack(info.streamName, info.groupName, info.messageId);
+        this.pendingMessages.delete(id);
+        this.activeExecutions.delete(id); // Also clean up active tracking
+        cleanedCount++;
+
+        this.logger.debug('Cleaned up stale pending message', {
+          id,
+          messageId: info.messageId,
+          ageMs: now - info.queuedAt,
+        });
+      } catch (error) {
+        this.logger.error('Failed to ACK stale pending message', {
+          id,
+          error: getErrorMessage(error),
+        });
+      }
+    }
+
+    return cleanedCount;
+  }
+
+  /**
+   * Get information about stale pending messages (for monitoring).
+   *
+   * @returns Array of opportunity IDs with their age in ms
+   */
+  getStalePendingInfo(): Array<{ id: string; ageMs: number }> {
+    const now = Date.now();
+    const stale: Array<{ id: string; ageMs: number }> = [];
+
+    for (const [id, info] of this.pendingMessages) {
+      const ageMs = now - info.queuedAt;
+      if (ageMs > PENDING_MESSAGE_MAX_AGE_MS) {
+        stale.push({ id, ageMs });
+      }
+    }
+
+    return stale;
+  }
+
+  // ===========================================================================
+  // Pause/Resume
+  // ===========================================================================
 
   /**
    * Pause stream consumption.

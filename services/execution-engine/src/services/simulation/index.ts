@@ -24,15 +24,26 @@ export type {
 
 export {
   CHAIN_IDS,
+  WETH_ADDRESSES,
   SIMULATION_DEFAULTS,
   TENDERLY_CONFIG,
   ALCHEMY_CONFIG,
   CircularBuffer,
+  // Fix 1.1: Export shared utilities that were defined but not exported
+  getWethAddress,
+  isWethAddress,
+  getSimulationErrorMessage,
+  createCancellableTimeout,
+  updateRollingAverage,
 } from './types';
+
+// Base Provider (for extension)
+export { BaseSimulationProvider } from './base-simulation-provider';
 
 // Providers
 export { TenderlyProvider, createTenderlyProvider } from './tenderly-provider';
 export { AlchemySimulationProvider, createAlchemyProvider } from './alchemy-provider';
+export { LocalSimulationProvider, createLocalProvider } from './local-provider';
 
 // Service
 export {

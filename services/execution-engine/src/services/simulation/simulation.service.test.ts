@@ -728,9 +728,10 @@ describe('SimulationService', () => {
         },
       });
 
-      // Add 500+ entries to trigger eviction (MAX_CACHE_SIZE = 500)
-      // Use different 'from' addresses to generate unique cache keys
-      for (let i = 0; i < 450; i++) {
+      // Fix 8.3: Add 510 entries to exceed MAX_CACHE_SIZE (500) and trigger eviction.
+      // Cleanup triggers at 80% (400 entries) and hard limit is 500.
+      // Use different 'from' addresses to generate unique cache keys.
+      for (let i = 0; i < 510; i++) {
         const uniqueFrom = `0x${i.toString(16).padStart(40, '0')}`;
         const request = createSimulationRequest({
           transaction: {

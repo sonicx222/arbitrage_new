@@ -328,10 +328,97 @@ Total Target: <100ms detection, <10s for bridge opportunities
 | Stream | Producer | Consumer | Volume | Retention |
 |--------|----------|----------|--------|-----------|
 | `stream:price-updates` | Detectors | Cross-Chain, Dashboard | ~50/sec | 1 hour |
-| `stream:opportunities` | Analyzers | Executor, Dashboard | ~10/min | 24 hours |
+| `stream:opportunities` | Analyzers | Coordinator | ~10/min | 24 hours |
+| `stream:execution-requests` | Coordinator | Execution Engine | ~10/min | 24 hours |
 | `stream:whale-alerts` | Detectors | All | ~5/hour | 24 hours |
 | `stream:volume-aggregates` | Detectors | Analyzer | ~20/min | 1 hour |
 | `stream:health` | All | Coordinator | ~10/min | 1 hour |
+| `stream:dead-letter-queue` | All | Ops/Monitoring | ~1/hour | 7 days |
+
+### 5.4 Opportunity Execution Flow (Broker Pattern)
+
+The Execution Engine does NOT consume directly from `stream:opportunities`.
+Instead, a broker pattern is used where the Coordinator forwards approved
+opportunities to the Execution Engine via `stream:execution-requests`.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         OPPORTUNITY EXECUTION FLOW                          │
+│                                                                             │
+│  Analyzers                    Coordinator                   Execution       │
+│  ────────                    ───────────                    Engine          │
+│                                                                             │
+│  ┌─────────┐   stream:       ┌─────────────┐   stream:      ┌───────────┐  │
+│  │ Cross-  │  opportunities  │  Global     │  execution-   │ Execution │  │
+│  │ Chain   │ ───────────────►│ Coordinator │  requests     │  Engine   │  │
+│  │Analyzer │                 │  (Leader)   │ ─────────────►│           │  │
+│  └─────────┘                 └─────────────┘                └───────────┘  │
+│                                    │                              │         │
+│  ┌─────────┐                       │                              │         │
+│  │   ML    │ ───────────────►      │                              │         │
+│  │Predictor│                       │                              │         │
+│  └─────────┘                       │                              │         │
+│                                    ▼                              ▼         │
+│                              ┌──────────┐                  ┌──────────┐     │
+│                              │ Pre-exec │                  │ Execute  │     │
+│                              │ Filters: │                  │  Trade:  │     │
+│                              │ • Leader │                  │ • Gas    │     │
+│                              │   only   │                  │ • Nonce  │     │
+│                              │ • Circuit│                  │ • MEV    │     │
+│                              │   breaker│                  │ • Bridge │     │
+│                              │ • Risk   │                  │          │     │
+│                              └──────────┘                  └──────────┘     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Why the Broker Pattern?**
+
+1. **Leader Election Deduplication**: Only the coordinator leader forwards
+   opportunities, preventing duplicate executions across multiple instances.
+
+2. **Pre-Execution Filtering**: Coordinator can apply global filters:
+   - Operational circuit breaker status
+   - Global risk limits
+   - Cross-instance deduplication
+
+3. **Routing Decisions**: Coordinator can route to specific executors:
+   - Chain-specific execution engines
+   - Standby activation (ADR-007)
+   - Load balancing across instances
+
+4. **Audit Trail**: Centralized forwarding provides clear observability
+   of which opportunities were approved for execution.
+
+**Consumer Group Pattern**
+
+The Execution Engine uses Redis consumer groups for reliable delivery:
+
+```typescript
+// Consumer group: execution-engine-group
+// Each instance gets unique consumer name (instanceId)
+// Guarantees: exactly-once delivery per opportunity
+consumerGroup = {
+  streamName: 'stream:execution-requests',
+  groupName: 'execution-engine-group',
+  consumerName: instanceId,  // e.g., 'exec-primary-1'
+  startId: '$'  // Only new messages
+};
+```
+
+**Deferred ACK Pattern**
+
+Messages are ACKed only after execution completes to ensure reliability:
+
+```
+Message Received → Validate → Queue → Execute → ACK
+       │              │          │        │       │
+       │              │          │        │       └── Success: ACK
+       │              │          │        └────────── Failure: ACK + DLQ
+       │              │          └─────────────────── Queued: Defer ACK
+       │              └────────────────────────────── Invalid: ACK + DLQ
+       └───────────────────────────────────────────── Empty: ACK immediately
+```
 
 ---
 

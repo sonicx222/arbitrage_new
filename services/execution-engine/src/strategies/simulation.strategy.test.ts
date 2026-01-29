@@ -55,7 +55,7 @@ const createMockContext = (): StrategyContext => ({
     lockConflicts: 0,
     executionTimeouts: 0,
     queueRejects: 0,
-    messageProcessingErrors: 0,
+    validationErrors: 0,
     providerHealthCheckFailures: 0,
     providerReconnections: 0,
     simulationsPerformed: 0,

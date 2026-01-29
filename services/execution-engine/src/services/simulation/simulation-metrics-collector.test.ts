@@ -44,7 +44,15 @@ const createMockPerfLogger = () => ({
   logMetrics: jest.fn<(metrics: object) => void>(),
 });
 
-/** Create mock execution stats */
+/**
+ * Create mock execution stats.
+ *
+ * Fix 8.1: Complete mock stats with all ExecutionStats fields.
+ * Missing risk management fields would cause TypeScript errors.
+ *
+ * @see ExecutionStats in types.ts
+ * @see createInitialStats() for canonical initialization
+ */
 const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStats => ({
   opportunitiesReceived: 100,
   executionAttempts: 80,
@@ -54,7 +62,7 @@ const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStat
   queueRejects: 5,
   lockConflicts: 2,
   executionTimeouts: 3,
-  messageProcessingErrors: 1,
+  validationErrors: 1,
   providerReconnections: 2,
   providerHealthCheckFailures: 1,
   simulationsPerformed: 60,
@@ -63,6 +71,12 @@ const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStat
   simulationErrors: 2,
   circuitBreakerTrips: 0,
   circuitBreakerBlocks: 0,
+  // Fix 8.1: Add missing risk management fields (Phase 3: Task 3.4.5)
+  riskEVRejections: 0,
+  riskPositionSizeRejections: 0,
+  riskDrawdownBlocks: 0,
+  riskCautionCount: 0,
+  riskHaltCount: 0,
   ...overrides,
 });
 
