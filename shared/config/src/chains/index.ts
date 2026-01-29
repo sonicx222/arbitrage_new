@@ -332,3 +332,19 @@ export const TESTNET_CHAINS: Record<string, Chain> = {
 export function getAllChains(): Record<string, Chain> {
   return { ...CHAINS, ...TESTNET_CHAINS };
 }
+
+// =============================================================================
+// CHAIN URL BUILDER (P2-CONFIG)
+// Utility for building chain URLs with consistent env var resolution
+// =============================================================================
+export {
+  buildChainUrls,
+  buildChainUrlsWithApiKeys,
+  buildSolanaUrls,
+  createAlchemyConfig,
+  createInfuraConfig,
+  STANDARD_FALLBACK_PROVIDERS,
+  ChainUrlConfig,
+  ApiKeyUrlConfig,
+  ChainUrls,
+} from './chain-url-builder';

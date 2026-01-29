@@ -326,3 +326,81 @@ export {
   getRiskConfigWithCapital,
   validateRiskConfig,
 } from './risk-config';
+
+// =============================================================================
+// CANONICAL ADDRESSES (P3-CONFIG)
+// Single source of truth for all contract addresses
+// =============================================================================
+export {
+  // Aave V3 pools
+  AAVE_V3_POOLS,
+  getAaveV3Pool,
+  hasAaveV3,
+  // Native tokens
+  NATIVE_TOKENS,
+  getNativeToken,
+  // Stablecoins
+  STABLECOINS,
+  getStablecoin,
+  getChainStablecoins,
+  // DEX routers
+  DEX_ROUTERS,
+  getDexRouter,
+  // Bridge contracts
+  BRIDGE_CONTRACTS,
+  getBridgeContract,
+  // Solana programs
+  SOLANA_PROGRAMS,
+  getSolanaProgram,
+  // Validation utilities
+  isValidEthereumAddress,
+  isValidSolanaAddress,
+  normalizeAddress,
+  addressesEqual,
+  // Type exports
+  EVMChainId,
+  ChainId,
+  TestnetChainId,
+} from './addresses';
+
+// =============================================================================
+// ZOD SCHEMA VALIDATION (P3-CONFIG)
+// Runtime validation for config objects
+// =============================================================================
+export {
+  // Primitive schemas
+  EthereumAddressSchema,
+  SolanaAddressSchema,
+  BasisPointsSchema,
+  PercentageDecimalSchema,
+  // Config schemas
+  ChainSchema,
+  ChainRegistrySchema,
+  DexSchema,
+  DexTypeSchema,
+  FactoryConfigSchema,
+  FactoryTypeSchema,
+  FactoryRegistrySchema,
+  TokenSchema,
+  FlashLoanProviderSchema,
+  FlashLoanProvidersSchema,
+  BridgeCostConfigSchema,
+  BridgeCostsSchema,
+  ServiceConfigSchema,
+  // Validation helpers
+  validateWithDetails,
+  validateOrThrow,
+  createValidator,
+  validateChain,
+  validateDex,
+  validateFactory,
+  validateFlashLoanProvider,
+  validateBridgeCost,
+  // Registry validators
+  validateChainRegistry,
+  validateFactoryRegistry as validateFactoryRegistrySchema,
+  validateFlashLoanProviders,
+  validateBridgeCosts,
+  // Re-export zod for custom schema creation
+  z,
+} from './schemas';

@@ -20,6 +20,7 @@
  */
 
 import { DEXES } from './dexes';
+import { CHAINS } from './chains';
 
 // =============================================================================
 // Types
@@ -719,6 +720,68 @@ for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
 }
 
 // =============================================================================
+// P0-CONFIG: Validate factory registry at load time
+// This prevents runtime failures from misconfigured factories.
+// =============================================================================
+
+/**
+ * Validate factory registry at module load.
+ * Throws if critical validation errors are found.
+ * Skipped in test environment to allow partial configs.
+ */
+function validateFactoryRegistryAtLoad(): void {
+  // Skip validation in test environment to allow flexible test fixtures
+  if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+    return;
+  }
+
+  const errors: string[] = [];
+
+  for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
+    const chainDexes = DEXES[chain] || [];
+    const dexByName = new Map(chainDexes.map(d => [d.name, d]));
+
+    for (const factory of factories) {
+      // P0: Check DEX name exists - prevents orphaned factory configs
+      const dex = dexByName.get(factory.dexName);
+      if (!dex) {
+        errors.push(
+          `[CRITICAL] Factory '${factory.dexName}' on ${chain} not found in DEXES config. ` +
+          `Either add DEX to DEXES[${chain}] or remove factory from DEX_FACTORY_REGISTRY.`
+        );
+        continue;
+      }
+
+      // P0: Check chain consistency - prevents misrouted subscriptions
+      if (factory.chain !== chain) {
+        errors.push(
+          `[CRITICAL] Factory '${factory.dexName}' chain mismatch: ` +
+          `factory.chain='${factory.chain}' but registry key='${chain}'. ` +
+          `Update factory.chain to match registry key.`
+        );
+      }
+
+      // Note: Address format and factory address match are WARNING-level
+      // and checked by validateFactoryRegistry() for debugging
+    }
+  }
+
+  if (errors.length > 0) {
+    const errorMessage = [
+      'Factory registry validation failed at load time:',
+      ...errors.map((e, i) => `  ${i + 1}. ${e}`),
+      '',
+      'Fix these issues to start the service.',
+    ].join('\n');
+
+    throw new Error(errorMessage);
+  }
+}
+
+// Run validation at module load (production only)
+validateFactoryRegistryAtLoad();
+
+// =============================================================================
 // Helper Functions
 // =============================================================================
 
@@ -944,3 +1007,69 @@ export function validateFactoryRegistry(): string[] {
 
   return errors;
 }
+
+// =============================================================================
+// Load-Time Validation (P0-CONFIG)
+// =============================================================================
+
+/**
+ * Validates factory registry at module load time.
+ * Throws if critical validation errors are found to prevent runtime failures.
+ *
+ * Called automatically when this module is imported.
+ *
+ * @throws {Error} If any validation error is found
+ * @see docs/refactoring-roadmap.md - P0-CONFIG
+ */
+function validateFactoryRegistryAtLoadTime(): void {
+  // Skip validation in test environment to allow mocking
+  if (process.env.NODE_ENV === 'test' || process.env.SKIP_CONFIG_VALIDATION === 'true') {
+    return;
+  }
+
+  const errors: string[] = [];
+
+  for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
+    // Validate chain exists in CHAINS config
+    if (!CHAINS[chain]) {
+      errors.push(`Factory registry references unknown chain: ${chain}`);
+      continue;
+    }
+
+    // Validate each factory
+    for (const factory of factories) {
+      // Validate address format (40 hex chars after 0x)
+      if (!/^0x[a-fA-F0-9]{40}$/.test(factory.address)) {
+        errors.push(
+          `Invalid factory address format for ${factory.dexName} on ${chain}: ${factory.address}`
+        );
+      }
+
+      // Validate chain field matches registry key
+      if (factory.chain !== chain) {
+        errors.push(
+          `Factory chain mismatch for ${factory.dexName}: expected ${chain}, got ${factory.chain}`
+        );
+      }
+
+      // Validate DEX exists in DEXES config for this chain
+      const chainDexes = DEXES[chain] || [];
+      const dexExists = chainDexes.some(d => d.name === factory.dexName);
+      if (!dexExists) {
+        errors.push(
+          `Factory ${factory.dexName} on ${chain} not found in DEXES config`
+        );
+      }
+    }
+  }
+
+  // Throw aggregated error if any validation failed
+  if (errors.length > 0) {
+    throw new Error(
+      `Factory registry validation failed:\n  - ${errors.join('\n  - ')}`
+    );
+  }
+}
+
+// Run validation at module load time
+validateFactoryRegistryAtLoadTime();

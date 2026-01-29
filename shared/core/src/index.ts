@@ -194,6 +194,40 @@ export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './r
 export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
 export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './resilience/expert-self-healing-manager';
 export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
+
+// Simple Circuit Breaker (lightweight failure tracking)
+export {
+  SimpleCircuitBreaker,
+  createSimpleCircuitBreaker
+} from './circuit-breaker';
+export type {
+  SimpleCircuitBreakerOptions,
+  SimpleCircuitBreakerStatus
+} from './circuit-breaker';
+
+// Interval Manager (centralized interval management)
+export {
+  IntervalManager,
+  createIntervalManager
+} from './interval-manager';
+export type {
+  IntervalInfo,
+  IntervalManagerStats
+} from './interval-manager';
+
+// Publishing Service (centralized message publishing)
+export {
+  PublishingService,
+  createPublishingService,
+  STANDARD_BATCHER_CONFIGS
+} from './publishing';
+export type {
+  PublishableMessageType,
+  PublishingBatcherConfig,
+  PublishingServiceDeps,
+  PublishingBatchers
+} from './publishing';
+
 export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './monitoring/enhanced-health-monitor';
 export {
   StreamHealthMonitor,
@@ -1137,3 +1171,21 @@ export {
   // Formatting
   formatWeiAsEth,
 } from './utils';
+
+// =============================================================================
+// DETECTOR MODULE (Phase 1 Refactoring)
+// Connection management extracted from base-detector for SRP
+// =============================================================================
+
+export {
+  initializeDetectorConnections,
+  disconnectDetectorConnections,
+  DEFAULT_BATCHER_CONFIG,
+  DEFAULT_SWAP_FILTER_CONFIG,
+} from './detector';
+
+export type {
+  DetectorConnectionConfig,
+  DetectorConnectionResources,
+  EventFilterHandlers,
+} from './detector';

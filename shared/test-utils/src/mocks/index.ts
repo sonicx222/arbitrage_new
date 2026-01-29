@@ -33,3 +33,21 @@ export type {
   PartitionConfigOptions,
   MockHttpServer,
 } from './partition-service.mock';
+
+// Provider mocks (ethers.js)
+export {
+  createMockProvider,
+  createMockWallet,
+  createEthereumProvider,
+  createBscProvider,
+  createArbitrumProvider,
+  createPolygonProvider,
+  createMockContractCallResponse,
+  resetMockProvider
+} from './provider.mock';
+
+export type {
+  MockProviderOptions,
+  MockWalletOptions,
+  MockProvider
+} from './provider.mock';

@@ -84,6 +84,9 @@ export * from './setup';
 // Redis Test Helper (Task 2.2: Test Isolation)
 export * from './redis-test-helper';
 
+// Timer Helpers (P2-TEST: Standardize timer management)
+export * from './helpers';
+
 // =============================================================================
 // Legacy Exports (kept for backward compatibility)
 // =============================================================================
