@@ -23,6 +23,18 @@ This is a professional multi-chain arbitrage trading system with:
 - **Architecture**: Partitioned detectors, Redis Streams, WebSocket event processing
 - **Key Modules**: Execution engine, Cross-chain detector, Coordinator, Risk management
 
+### ⚡ CRITICAL PERFORMANCE REQUIREMENT
+> **Hot-path latency target: <50ms** (price-update → detection → execution)
+
+The following modules are in the HOT PATH and are extremely latency-sensitive:
+- `shared/core/src/price-matrix.ts` - L1 cache, SharedArrayBuffer
+- `shared/core/src/partitioned-detector.ts` - Opportunity detection
+- `services/execution-engine/` - Trade execution
+- `services/unified-detector/` - Event processing
+- WebSocket handlers - Event ingestion
+
+**Performance bugs in hot-path code are P0 (Critical)**.
+
 ### Critical Rules (Anti-Hallucination)
 - **NEVER** report a bug unless you can point to the exact line(s) causing it
 - **NEVER** assume code behavior without tracing the actual implementation
@@ -30,6 +42,13 @@ This is a professional multi-chain arbitrage trading system with:
 - **IF** something looks suspicious but you can't prove it, label as "NEEDS VERIFICATION"
 - **PREFER** under-reporting to over-reporting (false positives waste developer time)
 - **ALWAYS** check if a pattern exists elsewhere in the codebase before flagging
+
+### Critical Rules (Performance Bugs)
+- **ALWAYS** flag blocking operations in hot-path code (sync I/O, unbounded loops)
+- **ALWAYS** flag O(n) searches in hot paths (array.find, array.filter) → should use Map/Set
+- **ALWAYS** flag unnecessary allocations in tight loops (spread operators, new objects)
+- **FLAG** any pattern that could regress the <50ms latency target
+- **Performance bugs in hot-path modules are automatically P0**
 
 ### Analysis Process (Think Step-by-Step)
 Before reporting any issue, work through these steps:
@@ -220,9 +239,37 @@ Run this mental checklist for every module:
 - [ ] Chain ID validation before cross-chain operations
 - [ ] Timestamp synchronization across chains
 
+### Performance (Hot-Path)
+- [ ] No `array.find()` or `array.filter()` in hot paths → use Map/Set
+- [ ] No spread operators (`...`) in tight loops → mutate instead
+- [ ] No `JSON.parse()`/`JSON.stringify()` in hot paths → use cached/binary
+- [ ] No sync I/O in event handlers (`fs.readFileSync`, etc.)
+- [ ] No unbounded loops (`while(true)` without yield)
+- [ ] SharedArrayBuffer used correctly with Atomics
+
 ---
 
 ## Targeted Analysis Commands
+
+### Find O(n) array searches in hot paths (should be Map/Set)
+// turbo
+```bash
+grep -rn "\.find\(\|\.filter\(" shared/core/src/ services/execution-engine/ services/unified-detector/ --include="*.ts" | grep -v test
+```
+
+### Find spread operators in loops (performance anti-pattern)
+// turbo
+```bash
+grep -rn "\.\.\..*\(for\|while\|map\|forEach\)" shared/core/src/ services/execution-engine/ --include="*.ts" | grep -v test
+```
+
+### Find sync I/O in hot paths
+// turbo
+```bash
+grep -rn "Sync\(" shared/core/src/ services/ --include="*.ts" | grep -v test | grep -v node_modules
+```
+
+---
 
 ### Find potential || vs ?? issues
 // turbo
