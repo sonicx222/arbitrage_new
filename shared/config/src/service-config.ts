@@ -7,6 +7,8 @@
  * @see P1-5: Bridge cost configuration
  */
 
+import { AAVE_V3_POOLS } from './addresses';
+
 // =============================================================================
 // FLASH LOAN CONSTANTS (Fix 1.1: Centralized constants)
 // =============================================================================
@@ -113,27 +115,27 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   // FIX 3.1.3-1: Corrected Ethereum Aave V3 Pool address (was 0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF)
   // SYNC: Must match contracts/deployments/addresses.ts AAVE_V3_POOL_ADDRESSES
   ethereum: {
-    address: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
+    address: AAVE_V3_POOLS.ethereum,
     protocol: 'aave_v3',
     fee: 9  // 0.09% flash loan fee
   },
   polygon: {
-    address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
+    address: AAVE_V3_POOLS.polygon,
     protocol: 'aave_v3',
     fee: 9
   },
   arbitrum: {
-    address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
+    address: AAVE_V3_POOLS.arbitrum,
     protocol: 'aave_v3',
     fee: 9
   },
   base: {
-    address: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
+    address: AAVE_V3_POOLS.base,
     protocol: 'aave_v3',
     fee: 9
   },
   optimism: {
-    address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
+    address: AAVE_V3_POOLS.optimism,
     protocol: 'aave_v3',
     fee: 9
   },
@@ -145,7 +147,7 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   },
   // S3.2.1-FIX: Added Avalanche Aave V3 flash loan provider
   avalanche: {
-    address: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',  // Aave V3 Pool on Avalanche
+    address: AAVE_V3_POOLS.avalanche,  // Aave V3 Pool on Avalanche
     protocol: 'aave_v3',
     fee: 9  // 0.09% flash loan fee
   },
@@ -406,3 +408,4 @@ export function getAllBridgeOptionsFast(
   const routeKey: BridgeCostKey = `${sourceChain}:${targetChain}`;
   return BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
 }
+

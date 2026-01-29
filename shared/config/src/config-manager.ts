@@ -206,6 +206,21 @@ export class ConfigManager {
       }
     }
 
+    // STRICT_CONFIG_VALIDATION Handling
+    // If strict validation is explicitly disabled, accept missing configuration
+    const strictEnv = process.env.STRICT_CONFIG_VALIDATION;
+    const forceStrict = strictEnv === 'true' || strictEnv === '1';
+    const forceRelaxed = strictEnv === 'false' || strictEnv === '0';
+
+    // In development, require strict validation unless disabled
+    // In production, require strict validation unless disabled coverage
+    // Logic: If error exists, but relaxed mode is ON, move errors to warnings
+    if (errors.length > 0 && forceRelaxed) {
+      warnings.push(...errors.map(e => `[RELAXED] ${e}`));
+      // Clear errors to pass validation
+      errors.length = 0;
+    }
+
     return {
       valid: errors.length === 0,
       errors,

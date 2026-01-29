@@ -24,6 +24,7 @@
 
 import { CHAINS } from './chains';
 import { getPartitionFromEnv } from './partitions';
+import { configManager } from './config-manager';
 
 // =============================================================================
 // CHAIN-AWARE ENVIRONMENT VALIDATION
@@ -42,7 +43,8 @@ import { getPartitionFromEnv } from './partitions';
  * @returns Array of missing environment variable names
  */
 export function validateChainEnvironment(chainIds?: string[]): string[] {
-  const missing: string[] = [];
+  // ConfigManager is now the source of truth
+  // This function registers dynamic chain rules and validates
 
   // Determine which chains to validate
   let chainsToValidate: string[];
@@ -53,6 +55,8 @@ export function validateChainEnvironment(chainIds?: string[]): string[] {
     chainsToValidate = partition ? [...partition.chains] : [];
   }
 
+  const missing: string[] = [];
+
   for (const chainId of chainsToValidate) {
     const chain = CHAINS[chainId];
     if (!chain) continue;
@@ -62,6 +66,15 @@ export function validateChainEnvironment(chainIds?: string[]): string[] {
     // Check RPC URL - required if chain config has placeholder
     if (chain.rpcUrl.includes('${') || chain.rpcUrl.includes('process.env')) {
       const rpcEnvVar = `${envPrefix}_RPC_URL`;
+
+      // Register with ConfigManager
+      configManager.addRule(rpcEnvVar, {
+        required: true,
+        validate: (v: string) => v.startsWith('http') || v.startsWith('ws'),
+        errorMessage: `RPC URL required for ${chain.name} (${rpcEnvVar})`
+      });
+
+      // Maintain backward compatibility return
       if (!process.env[rpcEnvVar]) {
         missing.push(rpcEnvVar);
       }
@@ -70,6 +83,14 @@ export function validateChainEnvironment(chainIds?: string[]): string[] {
     // Check WS URL - required if chain config has placeholder
     if (chain.wsUrl && (chain.wsUrl.includes('${') || chain.wsUrl.includes('process.env'))) {
       const wsEnvVar = `${envPrefix}_WS_URL`;
+
+      // Register with ConfigManager
+      configManager.addRule(wsEnvVar, {
+        required: true,
+        validate: (v: string) => v.startsWith('ws') || v.startsWith('http'), // ws or http used
+        errorMessage: `WebSocket URL required for ${chain.name} (${wsEnvVar})`
+      });
+
       if (!process.env[wsEnvVar]) {
         missing.push(wsEnvVar);
       }
@@ -81,74 +102,37 @@ export function validateChainEnvironment(chainIds?: string[]): string[] {
 
 // Validate required environment variables at startup (skip in test environment)
 // P0-3 FIX: Use partition-aware validation instead of hardcoding Ethereum requirement
-// This allows non-Ethereum partitions (P1 Asia-Fast, P4 Solana-Native) to start independently
-// P0-4 FIX: Enforce validation in production to prevent partial configuration issues
-// P0-5 FIX: Stricter validation in development to catch configuration issues early
-// Issue 3.1 FIX: Consistent validation across all environments
+// Issue 3.1 FIX: Standardized via ConfigManager
 if (process.env.NODE_ENV !== 'test') {
-  // Partition-aware validation: only require env vars for chains in the current partition
-  const missingEnvVars = validateChainEnvironment();
+  // Register dynamic chain rules
+  validateChainEnvironment();
 
-  // Determine validation strictness:
-  // - STRICT_CONFIG_VALIDATION=true: Always fail on missing env vars (opt-in for CI/staging)
-  // - STRICT_CONFIG_VALIDATION=false: Never fail, only warn (opt-out for local dev)
-  // - Default: Strict in ALL environments when PARTITION_ID is set or any chains are missing
-  // Issue 3.1 FIX: Development mode now fails consistently, not just for Ethereum
-  const strictValidation = process.env.STRICT_CONFIG_VALIDATION;
-  const forceStrict = strictValidation === 'true' || strictValidation === '1';
-  const forceWarn = strictValidation === 'false' || strictValidation === '0';
+  try {
+    // Validate all rules (including default ones from ConfigManager)
+    configManager.validateOrThrow();
+  } catch (error) {
+    // If validation failed, verify if it was due to chains (for helpful message)
+    // Note: ConfigManager already printed errors
 
-  if (missingEnvVars.length > 0) {
-    const errorContext = process.env.PARTITION_ID
-      ? `partition ${process.env.PARTITION_ID}`
-      : 'configured chains';
-
-    if (forceWarn) {
-      // Explicit opt-out - warn with detailed information
-      console.warn(
-        `CONFIG WARNING: Missing environment variables for ${errorContext}: ${missingEnvVars.join(', ')}. ` +
-        `Validation bypassed via STRICT_CONFIG_VALIDATION=false. ` +
-        `Chains with missing config will fail at runtime.`
-      );
-    } else if (process.env.PARTITION_ID || process.env.NODE_ENV === 'production' || forceStrict) {
-      // Partition mode, production, or explicit strict mode: fail immediately
-      throw new Error(
-        `CRITICAL CONFIG ERROR: Missing environment variables for ${errorContext}: ${missingEnvVars.join(', ')}. ` +
-        `Either configure the missing variables or set STRICT_CONFIG_VALIDATION=false to bypass (not recommended).`
-      );
-    } else {
-      // Issue 3.1 FIX: Development mode - CONSISTENT strict behavior
-      // ALL missing chain configs now fail, not just Ethereum
-      // This prevents silent configuration issues that only surface at runtime
-      // Rationale: Silent warnings led to developers starting services that would fail at runtime
-      // when accessing chains other than Ethereum. Consistent failure ensures early detection.
+    // Supplement with helpful resolution message if chain vars are missing
+    const missingChainVars = validateChainEnvironment();
+    if (missingChainVars.length > 0) {
       console.error(
         `\n${'='.repeat(80)}\n` +
         `CONFIG ERROR: Missing chain environment variables\n` +
         `${'='.repeat(80)}\n` +
-        `Missing: ${missingEnvVars.join(', ')}\n\n` +
-        `This error occurs because chain configuration is incomplete.\n` +
-        `To fix this, choose one of the following options:\n\n` +
-        `  1. Set the missing environment variables:\n` +
-        `     ${missingEnvVars.map(v => `export ${v}="your_url_here"`).join('\n     ')}\n\n` +
-        `  2. Set PARTITION_ID to only validate chains you're working with:\n` +
-        `     export PARTITION_ID=asia-fast    # For BSC, Polygon, Avalanche, Fantom\n` +
-        `     export PARTITION_ID=l2-turbo     # For Arbitrum, Optimism, Base\n` +
-        `     export PARTITION_ID=high-value   # For Ethereum, zkSync, Linea\n` +
-        `     export PARTITION_ID=solana-native # For Solana only\n\n` +
-        `  3. Bypass validation (not recommended - will fail at runtime):\n` +
-        `     export STRICT_CONFIG_VALIDATION=false\n` +
+        `Missing: ${missingChainVars.join(', ')}\n\n` +
+        `Resolution Options:\n` +
+        `  1. Set environment variables:\n` +
+        `     ${missingChainVars.map(v => `export ${v}="<url>"`).join('\n     ')}\n` +
+        `  2. Check PARTITION_ID matches your working chains.\n` +
+        `  3. Bypass (NOT RECOMMENDED): export STRICT_CONFIG_VALIDATION=false\n` +
         `${'='.repeat(80)}\n`
       );
-
-      // Issue 3.1 FIX: Fail for ANY missing chain config, not just Ethereum
-      // This ensures consistent behavior and prevents runtime failures
-      throw new Error(
-        `CONFIG ERROR: Missing chain configuration for: ${missingEnvVars.join(', ')}. ` +
-        `See error output above for resolution options. ` +
-        `Set STRICT_CONFIG_VALIDATION=false to bypass (not recommended).`
-      );
     }
+
+    // Re-throw to stop process
+    throw error;
   }
 }
 

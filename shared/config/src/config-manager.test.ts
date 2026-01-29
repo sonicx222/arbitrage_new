@@ -241,8 +241,8 @@ describe('ConfigManager', () => {
     });
 
     it('should log warnings before throwing', () => {
-      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { });
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
 
       delete process.env.REDIS_URL;
 
@@ -349,40 +349,78 @@ describe('ConfigManager', () => {
       expect(result.valid).toBe(true);
       expect(result.warnings.filter((w: string) => w.includes('OPTIONAL_VAR'))).toHaveLength(0);
     });
+    expect(result.warnings.filter((w: string) => w.includes('OPTIONAL_VAR'))).toHaveLength(0);
+  });
+});
+
+describe('STRICT_CONFIG_VALIDATION', () => {
+  beforeEach(() => {
+    process.env.REDIS_URL = 'redis://localhost:6379';
   });
 
-  describe('getEnv helper', () => {
-    beforeEach(() => {
-      process.env.REDIS_URL = 'redis://localhost:6379';
-    });
+  it('should demote errors to warnings when STRICT_CONFIG_VALIDATION is false', () => {
+    process.env.STRICT_CONFIG_VALIDATION = 'false';
+    delete process.env.REDIS_URL;
 
-    it('should return environment variable value', () => {
-      process.env.MY_VAR = 'my-value';
+    const result = ConfigManager.getInstance().validate();
 
-      const manager = ConfigManager.getInstance();
-      expect(manager.getEnv('MY_VAR')).toBe('my-value');
-    });
-
-    it('should return default value if not set', () => {
-      delete process.env.MY_VAR;
-
-      const manager = ConfigManager.getInstance();
-      expect(manager.getEnv('MY_VAR', 'default')).toBe('default');
-    });
-
-    it('should return undefined if not set and no default', () => {
-      delete process.env.MY_VAR;
-
-      const manager = ConfigManager.getInstance();
-      expect(manager.getEnv('MY_VAR')).toBeUndefined();
-    });
+    expect(result.valid).toBe(true); // Should be valid despite missing required var
+    expect(result.errors).toHaveLength(0);
+    expect(result.warnings.some((w: string) => w.includes('[RELAXED]'))).toBe(true);
   });
 
-  describe('exported singleton', () => {
-    it('should export a pre-configured singleton', () => {
-      expect(configManager).toBeDefined();
-      expect(typeof configManager.validate).toBe('function');
-      expect(typeof configManager.validateOrThrow).toBe('function');
-    });
+  it('should enforce errors when STRICT_CONFIG_VALIDATION is true', () => {
+    process.env.STRICT_CONFIG_VALIDATION = 'true';
+    delete process.env.REDIS_URL;
+
+    const result = ConfigManager.getInstance().validate();
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
   });
+
+  it('should default to strict validation (errors are errors)', () => {
+    delete process.env.STRICT_CONFIG_VALIDATION;
+    delete process.env.REDIS_URL;
+
+    const result = ConfigManager.getInstance().validate();
+
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('getEnv helper', () => {
+  beforeEach(() => {
+    process.env.REDIS_URL = 'redis://localhost:6379';
+  });
+
+  it('should return environment variable value', () => {
+    process.env.MY_VAR = 'my-value';
+
+    const manager = ConfigManager.getInstance();
+    expect(manager.getEnv('MY_VAR')).toBe('my-value');
+  });
+
+  it('should return default value if not set', () => {
+    delete process.env.MY_VAR;
+
+    const manager = ConfigManager.getInstance();
+    expect(manager.getEnv('MY_VAR', 'default')).toBe('default');
+  });
+
+  it('should return undefined if not set and no default', () => {
+    delete process.env.MY_VAR;
+
+    const manager = ConfigManager.getInstance();
+    expect(manager.getEnv('MY_VAR')).toBeUndefined();
+  });
+});
+
+describe('exported singleton', () => {
+  it('should export a pre-configured singleton', () => {
+    expect(configManager).toBeDefined();
+    expect(typeof configManager.validate).toBe('function');
+    expect(typeof configManager.validateOrThrow).toBe('function');
+  });
+});
 });
