@@ -23,6 +23,22 @@ This is a multi-chain arbitrage trading system with:
 - **Architecture**: Partitioned detectors, Redis Streams, Worker threads
 - **Scope**: 11 chains, 44+ DEXs
 
+### ⚡ CRITICAL PERFORMANCE REQUIREMENT
+> **Hot-path latency target: <50ms** (price-update → detection → execution)
+
+The following modules are in the HOT PATH and are extremely latency-sensitive:
+- `shared/core/src/price-matrix.ts` - L1 cache, SharedArrayBuffer
+- `shared/core/src/partitioned-detector.ts` - Opportunity detection
+- `services/execution-engine/` - Trade execution
+- `services/unified-detector/` - Event processing
+- WebSocket handlers - Event ingestion
+
+**Refactoring hot-path code requires extra scrutiny**:
+- Measure latency before/after any change
+- Avoid adding abstractions that increase call depth
+- Prefer inline code over function calls in tight loops
+- Never trade latency for "cleaner" code in hot paths
+
 ### Critical Rules (Anti-Hallucination)
 - **NEVER** suggest refactoring without tracing actual usage patterns
 - **NEVER** recommend changes without understanding the "why" behind current design
@@ -30,6 +46,17 @@ This is a multi-chain arbitrage trading system with:
 - **ALWAYS** verify refactoring won't break existing tests or contracts
 - **PREFER** incremental improvements over "big bang" rewrites
 - **QUANTIFY** impact: LOC reduction, complexity reduction, coupling reduction
+
+### Critical Rules (Performance-Aware Refactoring)
+- **NEVER** refactor hot-path code without latency benchmarks
+- **NEVER** add abstraction layers to hot-path modules for "cleanliness"
+- **IF** proposing hot-path changes, include latency impact assessment
+- **FLAG** any refactoring that touches: price-matrix, detector, execution-engine
+- **PRESERVE** intentional performance patterns:
+  - SharedArrayBuffer for cross-thread data
+  - Mutable objects instead of spread operators
+  - Map/Set instead of array searches
+  - Inline calculations instead of helper functions
 
 ---
 

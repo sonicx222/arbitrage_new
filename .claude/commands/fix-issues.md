@@ -22,7 +22,22 @@ This is a multi-chain arbitrage trading system with:
 - **Chains**: 11 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Solana)
 - **Architecture**: Partitioned detectors, Redis Streams, WebSocket event processing
 - **Stack**: TypeScript, Node.js, Worker threads
-- **Critical**: Latency-sensitive, must handle high event throughput
+
+### ⚡ CRITICAL PERFORMANCE REQUIREMENT
+> **Hot-path latency target: <50ms** (price-update → detection → execution)
+
+The following modules are in the HOT PATH and are extremely latency-sensitive:
+- `shared/core/src/price-matrix.ts` - L1 cache, SharedArrayBuffer
+- `shared/core/src/partitioned-detector.ts` - Opportunity detection
+- `services/execution-engine/` - Trade execution
+- `services/unified-detector/` - Event processing
+- WebSocket handlers - Event ingestion
+
+**Any change to hot-path code MUST**:
+- Avoid blocking operations (no sync I/O, no unbounded loops)
+- Minimize allocations (reuse buffers, avoid spread operators in loops)
+- Use O(1) or O(log n) lookups (Maps, not array.find())
+- Never regress existing latency benchmarks
 
 ### Critical Rules (Anti-Hallucination)
 - **NEVER** propose edits to code you have not fully inspected
@@ -31,6 +46,14 @@ This is a multi-chain arbitrage trading system with:
 - **ALWAYS** verify your fix handles edge cases present in the original
 - **ALWAYS** ensure your fix passes existing tests conceptually
 - **PREFER** minimal, targeted fixes over broad refactoring
+
+### Critical Rules (Performance)
+- **NEVER** add blocking operations to hot-path code
+- **NEVER** use `array.find()` or `array.filter()` in hot paths—use Map/Set
+- **NEVER** create unnecessary objects/arrays in tight loops
+- **IF** fixing hot-path code, measure before/after latency impact
+- **ALWAYS** prefer mutation over immutable patterns in hot paths
+- **FLAG** any fix that might regress the <50ms latency target
 
 ### Analysis Process (Before Proposing Any Fix)
 1. **Read the code** - View the entire file, not just the snippet
