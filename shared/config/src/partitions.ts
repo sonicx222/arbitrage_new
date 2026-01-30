@@ -233,7 +233,10 @@ export const PARTITIONS: PartitionConfig[] = [
     priority: 1,
     maxMemoryMB: 768, // 4 chains need more memory
     enabled: true,
-    healthCheckIntervalMs: 15000,
+    // P1-FIX 2.6: Reduced from 15000ms to 10000ms to match block times
+    // ADR-007 specifies health check should be ~2-3x block time
+    // BSC/Polygon have 2-5s blocks, so 10s is appropriate
+    healthCheckIntervalMs: 10000,
     failoverTimeoutMs: 60000
   },
   // P2: L2-Turbo - Fast Ethereum L2 rollups

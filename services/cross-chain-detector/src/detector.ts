@@ -160,6 +160,9 @@ const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
   healthCheckIntervalMs: isProduction ? 10000 : 30000,
   bridgeCleanupFrequency: 100,
   defaultTradeSizeUsd: 1000,
+  // P1-FIX 2.3: Configurable gas estimate for swap operations
+  // ~200k gas is typical for complex DEX swaps (Uniswap V3, multi-hop, etc.)
+  estimatedSwapGas: 200000,
   whaleConfig: DEFAULT_WHALE_CONFIG,
   mlConfig: DEFAULT_ML_CONFIG,
 };
@@ -176,16 +179,26 @@ const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
  * - fUSDT (Fantom) → USDT
  * - BTCB (BSC) → WBTC
  *
- * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1"
- * @returns Normalized token pair string
+ * P1-FIX 2.5: Now handles DEX prefixes correctly by only normalizing the last 2 parts.
+ * Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+ *
+ * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+ * @returns Normalized token pair string (always "TOKEN0_TOKEN1" format)
  */
 function normalizeTokenPair(tokenPair: string): string {
   const parts = tokenPair.split('_');
   if (parts.length < 2) return tokenPair;
 
-  // Normalize each token in the pair
-  const normalizedParts = parts.map(token => normalizeTokenForCrossChain(token));
-  return normalizedParts.join('_');
+  // P1-FIX 2.5: Handle DEX prefix by taking only the last 2 parts (token0 and token1)
+  // Format can be "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1" or "DEX_EXTRA_TOKEN0_TOKEN1"
+  const token0 = parts[parts.length - 2];
+  const token1 = parts[parts.length - 1];
+
+  // Normalize only the token symbols, not any prefix
+  const normalizedToken0 = normalizeTokenForCrossChain(token0);
+  const normalizedToken1 = normalizeTokenForCrossChain(token1);
+
+  return `${normalizedToken0}_${normalizedToken1}`;
 }
 
 // =============================================================================
@@ -856,7 +869,8 @@ export class CrossChainDetectorService {
       }
 
       // Estimate net profit (simplified - assumes same trade size as pending)
-      const estimatedGasCost = BigInt(intent.gasPrice) * BigInt(200000); // ~200k gas for swap
+      // P1-FIX 2.3: Use configurable gas estimate instead of hardcoded value
+      const estimatedGasCost = BigInt(intent.gasPrice) * BigInt(this.config.estimatedSwapGas ?? 200000);
       const amountInBigInt = BigInt(intent.amountIn);
       const grossProfit = (amountInBigInt * BigInt(Math.floor(priceDiffPercent * 10000))) / BigInt(10000);
       const netProfit = Number(grossProfit) - Number(estimatedGasCost);

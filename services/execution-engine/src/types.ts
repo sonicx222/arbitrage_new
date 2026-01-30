@@ -199,6 +199,15 @@ export const enum ExecutionErrorCode {
   POSITION_SIZE = '[ERR_POSITION_SIZE] Position size below minimum',
   DRAWDOWN_HALT = '[ERR_DRAWDOWN_HALT] Trading halted due to drawdown',
   DRAWDOWN_BLOCKED = '[ERR_DRAWDOWN_BLOCKED] Trade blocked by risk controls',
+
+  // P1-FIX 2.2: Additional error codes for better diagnostics
+  // These were identified as missing in the deep-dive analysis
+  INSUFFICIENT_BALANCE = '[ERR_INSUFFICIENT_BALANCE] Insufficient token balance for execution',
+  SLIPPAGE_EXCEEDED = '[ERR_SLIPPAGE_EXCEEDED] Actual slippage exceeded tolerance',
+  LIQUIDITY_ERROR = '[ERR_LIQUIDITY] Insufficient liquidity in pool',
+  DEADLINE_EXCEEDED = '[ERR_DEADLINE] Transaction deadline exceeded',
+  INVALID_PATH = '[ERR_INVALID_PATH] Invalid or unprofitable swap path',
+  REVERT_UNKNOWN = '[ERR_REVERT_UNKNOWN] Transaction reverted with unknown reason',
 }
 
 // =============================================================================

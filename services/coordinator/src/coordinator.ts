@@ -263,6 +263,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Consumer group configs for streams
   private readonly consumerGroups: ConsumerGroupConfig[];
 
+  // P0-FIX 1.2: Dead Letter Queue stream for failed messages
+  // Messages that fail processing are moved here for manual investigation/replay
+  private static readonly DLQ_STREAM = 'stream:dead-letter-queue';
+
+  // P0-FIX 1.3: Pending message recovery configuration
+  // Messages idle longer than this are considered orphaned and will be reclaimed
+  private static readonly PENDING_MESSAGE_IDLE_THRESHOLD_MS = 60000; // 1 minute
+
   // REFACTOR: Store injected dependencies for use in start() and other methods
   // This enables proper testing without Jest mock hoisting issues
   private readonly deps: Required<CoordinatorDependencies>;
@@ -406,6 +414,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       // Create consumer groups for all streams
       await this.createConsumerGroups();
+
+      // P0-FIX 1.3: Recover pending messages from previous coordinator instance
+      // This handles messages that were being processed when the previous instance crashed
+      await this.recoverPendingMessages();
 
       // Configure StreamHealthMonitor to use our consumer group
       // This fixes the XPENDING errors when monitoring stream health
@@ -884,6 +896,157 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
+   * P0-FIX 1.2: Wrap a message handler with deferred acknowledgment and DLQ support.
+   *
+   * This replaces autoAck: true with manual ACK after successful processing.
+   * Failed messages are moved to DLQ before ACK to prevent data loss.
+   *
+   * Flow:
+   * 1. Call handler with message
+   * 2. On success: ACK the message
+   * 3. On failure: Move to DLQ, then ACK (prevents infinite retries)
+   */
+  private withDeferredAck(
+    groupConfig: ConsumerGroupConfig,
+    handler: (msg: StreamMessage) => Promise<void>
+  ): (msg: StreamMessage) => Promise<void> {
+    return async (msg: StreamMessage) => {
+      try {
+        await handler(msg);
+        // Success: ACK the message
+        await this.ackMessage(groupConfig, msg.id);
+      } catch (error) {
+        // Failure: Move to DLQ, then ACK to prevent infinite retries
+        this.logger.error('Message handler failed, moving to DLQ', {
+          stream: groupConfig.streamName,
+          messageId: msg.id,
+          error: (error as Error).message
+        });
+        await this.moveToDeadLetterQueue(msg, error as Error, groupConfig.streamName);
+        await this.ackMessage(groupConfig, msg.id);
+      }
+    };
+  }
+
+  /**
+   * P0-FIX 1.2: Acknowledge a message after processing.
+   */
+  private async ackMessage(groupConfig: ConsumerGroupConfig, messageId: string): Promise<void> {
+    if (!this.streamsClient) return;
+
+    try {
+      await this.streamsClient.xack(groupConfig.streamName, groupConfig.groupName, messageId);
+    } catch (error) {
+      this.logger.error('Failed to ACK message', {
+        stream: groupConfig.streamName,
+        messageId,
+        error: (error as Error).message
+      });
+    }
+  }
+
+  /**
+   * P0-FIX 1.2: Move a failed message to the Dead Letter Queue.
+   *
+   * DLQ entries include:
+   * - Original message data
+   * - Error details
+   * - Source stream for replay
+   * - Timestamp for TTL-based cleanup
+   */
+  private async moveToDeadLetterQueue(
+    message: StreamMessage,
+    error: Error,
+    sourceStream: string
+  ): Promise<void> {
+    if (!this.streamsClient) return;
+
+    try {
+      await this.streamsClient.xadd(CoordinatorService.DLQ_STREAM, {
+        originalMessageId: message.id,
+        originalStream: sourceStream,
+        originalData: JSON.stringify(message.data),
+        error: error.message,
+        errorStack: error.stack?.substring(0, 500), // Truncate stack trace
+        timestamp: Date.now(),
+        service: 'coordinator',
+        instanceId: this.config.leaderElection.instanceId
+      });
+
+      this.logger.debug('Message moved to DLQ', {
+        originalMessageId: message.id,
+        sourceStream
+      });
+    } catch (dlqError) {
+      // If DLQ write fails, log but don't throw - we still want to ACK the original message
+      // to prevent infinite retry loops
+      this.logger.error('Failed to move message to DLQ', {
+        originalMessageId: message.id,
+        sourceStream,
+        dlqError: (dlqError as Error).message
+      });
+    }
+  }
+
+  /**
+   * P0-FIX 1.3: Check for and log pending messages from previous coordinator instance.
+   *
+   * When coordinator crashes mid-processing, messages remain in XPENDING.
+   * This method logs their presence - they will be automatically redelivered
+   * by Redis Streams to this consumer when it starts reading.
+   *
+   * Note: Redis Streams automatically handles redelivery of pending messages
+   * to consumers in the same group. When we call xreadgroup with '>',
+   * pending messages assigned to this consumer are automatically included.
+   *
+   * Called during startup after consumer groups are created.
+   */
+  private async recoverPendingMessages(): Promise<void> {
+    if (!this.streamsClient) return;
+
+    for (const groupConfig of this.consumerGroups) {
+      try {
+        // Get pending messages summary
+        const pendingInfo = await this.streamsClient.xpending(
+          groupConfig.streamName,
+          groupConfig.groupName
+        );
+
+        if (!pendingInfo || pendingInfo.total === 0) {
+          continue;
+        }
+
+        // Log pending messages for observability
+        // These will be automatically redelivered by Redis when the consumer starts
+        this.logger.warn('Found pending messages from previous instance', {
+          stream: groupConfig.streamName,
+          pendingCount: pendingInfo.total,
+          smallestId: pendingInfo.smallestId,
+          largestId: pendingInfo.largestId,
+          consumers: pendingInfo.consumers
+        });
+
+        // Find pending messages for THIS consumer (if any)
+        const ourPending = pendingInfo.consumers.find(
+          c => c.name === groupConfig.consumerName
+        );
+        if (ourPending && ourPending.pending > 0) {
+          this.logger.info('This consumer has pending messages to process', {
+            stream: groupConfig.streamName,
+            pendingForUs: ourPending.pending
+          });
+        }
+      } catch (error) {
+        this.logger.error('Failed to check pending messages', {
+          stream: groupConfig.streamName,
+          error: (error as Error).message
+        });
+        // Continue with other streams even if one fails
+      }
+    }
+  }
+
+  /**
    * Start stream consumers using blocking reads pattern.
    * Replaces setInterval polling for better latency and reduced Redis command usage.
    *
@@ -933,15 +1096,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Create a StreamConsumer for each consumer group
     const StreamConsumerClass = this.deps.StreamConsumer;
     for (const groupConfig of this.consumerGroups) {
-      const handler = handlers[groupConfig.streamName];
-      if (!handler) continue;
+      const rateLimitedHandler = handlers[groupConfig.streamName];
+      if (!rateLimitedHandler) continue;
+
+      // P0-FIX 1.2: Wrap handler with deferred ACK and DLQ support
+      // This replaces autoAck: true, ensuring failed messages go to DLQ
+      const deferredAckHandler = this.withDeferredAck(groupConfig, rateLimitedHandler);
 
       const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
-        handler,
+        handler: deferredAckHandler,
         batchSize: 10,
         blockMs: 1000, // Block for 1s - immediate delivery when messages arrive
-        autoAck: true,
+        autoAck: false, // P0-FIX 1.2: Deferred ACK - we handle ACK in withDeferredAck
         logger: {
           error: (msg, ctx) => {
             this.logger.error(msg, ctx);

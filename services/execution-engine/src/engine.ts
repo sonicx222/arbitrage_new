@@ -45,6 +45,8 @@ import {
   type TradingAllowedResult,
   type EVCalculation,
   type PositionSize,
+  // P0-FIX 1.7: Import for efficient O(n log k) eviction
+  findKSmallest,
 } from '@arbitrage/core';
 import { RISK_CONFIG } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
@@ -216,6 +218,9 @@ export class ExecutionEngineService {
   // Minimum time since first conflict before considering force release (20 seconds)
   // This gives legitimate lock holders time to complete
   private readonly CRASH_RECOVERY_MIN_AGE_MS = 20000;
+  // P0-FIX 1.7: Maximum size limit to prevent unbounded memory growth
+  // Under extreme load, tracker could grow unbounded without this limit
+  private readonly MAX_LOCK_CONFLICT_ENTRIES = 1000;
 
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
@@ -1247,15 +1252,41 @@ export class ExecutionEngineService {
   /**
    * SPRINT 1 FIX: Clean up stale entries from the lock conflict tracker.
    * Called periodically from health monitoring.
+   *
+   * P0-FIX 1.7: Also enforces size limit to prevent unbounded memory growth.
+   * Uses findKSmallest for O(n log k) eviction of oldest entries.
    */
   private cleanupStaleLockConflictTracking(): void {
     const now = Date.now();
     const staleThreshold = this.CRASH_RECOVERY_WINDOW_MS * 2; // 60 seconds
 
+    // Phase 1: Remove stale entries (older than threshold)
     for (const [id, info] of this.lockConflictTracker) {
       if (now - info.firstSeen > staleThreshold) {
         this.lockConflictTracker.delete(id);
       }
+    }
+
+    // P0-FIX 1.7 Phase 2: Enforce size limit by removing oldest entries
+    // This prevents unbounded memory growth under extreme load
+    if (this.lockConflictTracker.size > this.MAX_LOCK_CONFLICT_ENTRIES) {
+      const removeCount = this.lockConflictTracker.size - this.MAX_LOCK_CONFLICT_ENTRIES;
+
+      // Use findKSmallest for O(n log k) instead of sorting all entries O(n log n)
+      const oldestK = findKSmallest(
+        this.lockConflictTracker.entries(),
+        removeCount,
+        ([, a], [, b]) => a.firstSeen - b.firstSeen
+      );
+
+      for (const [id] of oldestK) {
+        this.lockConflictTracker.delete(id);
+      }
+
+      this.logger.debug('Lock conflict tracker size enforced', {
+        removedCount: removeCount,
+        newSize: this.lockConflictTracker.size
+      });
     }
   }
 

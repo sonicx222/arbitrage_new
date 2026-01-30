@@ -49,7 +49,9 @@ import {
   PartitionServiceConfig,
   getRedisStreamsClient,
   PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES
+  PARTITION_SERVICE_NAMES,
+  // P1-FIX 2.12: Use shared generateInstanceId for consistency with other partitions
+  generateInstanceId,
 } from '@arbitrage/core';
 import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 import { SolanaArbitrageDetector, SolanaArbitrageConfig, SolanaPoolInfo } from './arbitrage-detector';
@@ -131,7 +133,8 @@ const healthServerRef: { current: Server | null } = { current: null };
 const config: UnifiedDetectorConfig = {
   partitionId: P4_PARTITION_ID,
   chains: validateAndFilterChains(process.env.PARTITION_CHAINS, P4_CHAINS, logger),
-  instanceId: process.env.INSTANCE_ID || `p4-solana-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
+  // P1-FIX 2.12: Use shared generateInstanceId for consistency with other partitions
+  instanceId: generateInstanceId(P4_PARTITION_ID, process.env.INSTANCE_ID),
   regionId: process.env.REGION_ID || P4_REGION,
   enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
   healthCheckPort: parsePort(process.env.HEALTH_CHECK_PORT, P4_DEFAULT_PORT, logger)

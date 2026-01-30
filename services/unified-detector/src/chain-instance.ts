@@ -373,6 +373,15 @@ export class ChainDetectorInstance extends EventEmitter {
       factorySubscriptionEnabledChains: config.factorySubscriptionEnabledChains ?? [...FACTORY_SUBSCRIPTION_ENABLED_CHAINS],
       factorySubscriptionRolloutPercent: config.factorySubscriptionRolloutPercent ?? DEFAULT_FACTORY_SUBSCRIPTION_ROLLOUT_PERCENT
     };
+
+    // P0-FIX 1.1: Eagerly initialize factory event signature set to prevent race condition
+    // Previously this was lazily initialized in isFactoryEventSignature(), which could cause
+    // race conditions when multiple WebSocket messages arrive simultaneously during startup.
+    // Set construction is fast (microseconds), so eager initialization has no performance impact.
+    this.factoryEventSignatureSet = new Set([
+      ...Object.values(FactoryEventSignatures),
+      ...Object.values(AdditionalEventSignatures),
+    ].map(s => s.toLowerCase()));
   }
 
   // ===========================================================================
@@ -584,8 +593,10 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     // Task 2.1.3: Stop factory subscription service
+    // P0-FIX 1.5: Await async stop to ensure cleanup completes before clearing pairs
+    // Without await, factory events could arrive after pairsByAddress.clear() causing null dereference
     if (this.factorySubscriptionService) {
-      this.factorySubscriptionService.stop();
+      await this.factorySubscriptionService.stop();
       this.factorySubscriptionService = null;
     }
 
@@ -635,8 +646,8 @@ export class ChainDetectorInstance extends EventEmitter {
     this.snapshotVersion = 0;
     this.dexPoolCacheVersion = -1;
     this.dexPoolCache = null;
-    // BUG-FIX: Clear factory event signature set to free memory on restart
-    this.factoryEventSignatureSet = null;
+    // P0-FIX 1.1: factoryEventSignatureSet is now readonly and initialized in constructor
+    // It will be garbage collected when the instance is destroyed, no need to clear
 
     // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
     this.blockLatencies = [];
@@ -1297,6 +1308,11 @@ export class ChainDetectorInstance extends EventEmitter {
 
   // P2 FIX: Use WebSocketMessage type instead of any
   private handleWebSocketMessage(message: WebSocketMessage): void {
+    // P0-FIX 1.4: Guard against processing during shutdown
+    // This prevents race conditions where WebSocket messages arrive after stop() is called
+    // but before the WebSocket connection is fully disconnected
+    if (this.isStopping || !this.isRunning) return;
+
     try {
       // Route message based on type
       if (message.method === 'eth_subscription') {
@@ -1337,20 +1353,13 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   /**
-   * P0-FIX: Check if a topic0 is a factory event signature.
-   * Pre-computed set is built lazily for O(1) lookups.
+   * P0-FIX 1.1: Factory event signature set for O(1) lookups.
+   * Eagerly initialized in constructor to prevent race conditions.
+   * All signatures are pre-lowercased for fast comparison.
    */
-  private factoryEventSignatureSet: Set<string> | null = null;
+  private readonly factoryEventSignatureSet: Set<string>;
+
   private isFactoryEventSignature(topic0: string): boolean {
-    // Lazy initialization of factory event signature set
-    if (this.factoryEventSignatureSet === null) {
-      this.factoryEventSignatureSet = new Set([
-        // All primary factory event signatures
-        ...Object.values(FactoryEventSignatures),
-        // Additional signatures (Curve MetaPool, Balancer TokensRegistered)
-        ...Object.values(AdditionalEventSignatures),
-      ]);
-    }
     return this.factoryEventSignatureSet.has(topic0.toLowerCase());
   }
 

@@ -271,6 +271,8 @@ export interface DetectorConfig {
   bridgeCleanupFrequency?: number;
   /** Default trade size for cost estimation in USD (default: 1000) */
   defaultTradeSizeUsd?: number;
+  /** P1-FIX 2.3: Estimated gas for swap operations (default: 200000) */
+  estimatedSwapGas?: number;
   /** Whale analysis configuration */
   whaleConfig?: WhaleAnalysisConfig;
   /** ML prediction configuration */
