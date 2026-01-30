@@ -92,6 +92,7 @@ export class RiskManagementOrchestrator {
   private readonly drawdownBreaker: DrawdownCircuitBreaker | null;
   private readonly evCalculator: EVCalculator | null;
   private readonly positionSizer: KellyPositionSizer | null;
+  private readonly probabilityTracker: ExecutionProbabilityTracker | null;
   private readonly logger: Logger;
   private readonly stats: ExecutionStats;
 
@@ -99,6 +100,7 @@ export class RiskManagementOrchestrator {
     this.drawdownBreaker = deps.drawdownBreaker;
     this.evCalculator = deps.evCalculator;
     this.positionSizer = deps.positionSizer;
+    this.probabilityTracker = deps.probabilityTracker;
     this.logger = deps.logger;
     this.stats = deps.stats;
   }
@@ -276,10 +278,22 @@ export class RiskManagementOrchestrator {
     gasCost?: number;
     gasPrice?: bigint;
   }): void {
-    // Record to probability tracker for win rate learning
-    if (this.drawdownBreaker) {
-      const probabilityTracker = (this.drawdownBreaker as any).probabilityTracker;
-      // Note: probabilityTracker may be accessed through evCalculator in actual implementation
+    // FIX 2.1: Record to probability tracker for win rate learning
+    // Uses properly injected probabilityTracker instead of unsafe `as any` cast
+    if (this.probabilityTracker) {
+      this.probabilityTracker.recordOutcome({
+        chain: outcome.chain,
+        dex: outcome.dex,
+        pathLength: outcome.pathLength,
+        hourOfDay: new Date().getUTCHours(),
+        gasPrice: outcome.gasPrice ?? 0n,
+        success: outcome.success,
+        profit: outcome.actualProfit
+          ? BigInt(Math.floor(outcome.actualProfit * 1e18))
+          : undefined,
+        gasCost: outcome.gasCost ? BigInt(outcome.gasCost) : 0n,
+        timestamp: Date.now(),
+      });
     }
 
     // Update drawdown breaker with trade result

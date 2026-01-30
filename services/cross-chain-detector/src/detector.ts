@@ -1775,8 +1775,7 @@ export class CrossChainDetectorService {
       try {
         // P3-2 FIX: Use unified ServiceHealth with 'name' field
         // FIX 6.3: Standardized to 'lastHeartbeat' per ServiceHealth interface.
-        // 'timestamp' kept for coordinator compatibility until coordinator is updated.
-        // TODO: Remove 'timestamp' once coordinator uses 'lastHeartbeat' consistently.
+        // FIX 8.1: Removed deprecated 'timestamp' field - coordinator now uses 'lastHeartbeat' only
         const now = Date.now();
         const health = {
           name: 'cross-chain-detector',
@@ -1785,7 +1784,6 @@ export class CrossChainDetectorService {
           memoryUsage: process.memoryUsage().heapUsed,
           cpuUsage: 0,
           lastHeartbeat: now,    // FIX 6.3: Primary field per ServiceHealth interface
-          timestamp: now,        // Deprecated: kept for coordinator backwards compatibility
           // ADR-014: Use module getters for health metrics
           chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
           opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,

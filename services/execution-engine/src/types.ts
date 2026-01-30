@@ -487,6 +487,8 @@ export interface ExecutionStats {
   queueRejects: number;
   /** Executions skipped due to another instance holding the lock */
   lockConflicts: number;
+  /** Stale locks force-released due to crashed lock holder detection */
+  staleLockRecoveries: number;
   /** Executions that timed out */
   executionTimeouts: number;
   /** Validation errors for incoming messages (malformed, invalid type, etc.) */
@@ -535,6 +537,7 @@ export function createInitialStats(): ExecutionStats {
     failedExecutions: 0,
     queueRejects: 0,
     lockConflicts: 0,
+    staleLockRecoveries: 0,
     executionTimeouts: 0,
     validationErrors: 0,
     providerReconnections: 0,
@@ -1153,3 +1156,58 @@ export interface BridgePollingResult {
     sourceTxHash: string;
   };
 }
+
+/**
+ * FIX 3.1: Bridge Recovery State
+ *
+ * Persisted to Redis before bridge execution to enable recovery if shutdown
+ * occurs during bridge polling. This is a funds-at-risk scenario where:
+ * - Source chain: Transaction confirmed (funds sent to bridge)
+ * - Bridge: Tokens in transit (processing)
+ * - Destination: No action taken yet
+ *
+ * On engine restart, pending bridge states are loaded and polling resumes.
+ *
+ * @see CrossChainStrategy.persistBridgeRecoveryState
+ * @see CrossChainStrategy.recoverPendingBridges
+ */
+export interface BridgeRecoveryState {
+  /** Unique opportunity identifier */
+  opportunityId: string;
+  /** Bridge transaction ID (from bridge router) */
+  bridgeId: string;
+  /** Source chain transaction hash */
+  sourceTxHash: string;
+  /** Source chain identifier */
+  sourceChain: string;
+  /** Destination chain identifier */
+  destChain: string;
+  /** Token being bridged (e.g., 'USDC') */
+  bridgeToken: string;
+  /** Amount bridged (in wei string) */
+  bridgeAmount: string;
+  /** DEX to use for sell on destination */
+  sellDex: string;
+  /** Expected profit at time of bridge initiation */
+  expectedProfit: number;
+  /** Original tokenIn (for sell reversal) */
+  tokenIn: string;
+  /** Original tokenOut (= bridgeToken for sell) */
+  tokenOut: string;
+  /** Timestamp when bridge was initiated */
+  initiatedAt: number;
+  /** Bridge protocol (e.g., 'stargate', 'layerzero') */
+  bridgeProtocol: string;
+  /** Current status: 'pending' | 'bridging' | 'recovered' | 'failed' */
+  status: 'pending' | 'bridging' | 'recovered' | 'failed';
+  /** Last status check timestamp */
+  lastCheckAt?: number;
+  /** Error message if status is 'failed' */
+  errorMessage?: string;
+}
+
+/** Redis key prefix for bridge recovery state */
+export const BRIDGE_RECOVERY_KEY_PREFIX = 'bridge:recovery:';
+
+/** Maximum time to wait for a bridge before considering it failed (24 hours) */
+export const BRIDGE_RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;

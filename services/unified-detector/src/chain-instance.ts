@@ -482,9 +482,23 @@ export class ChainDetectorInstance extends EventEmitter {
 
       // Register whale alert handler to publish to Redis Streams
       // Store unsubscribe function for cleanup in performStop()
+      // FIX Race 4.1: Guard against publishing during shutdown with atomic reference capture
       this.whaleAlertUnsubscribe = this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
-        this.whaleAlertPublisher?.publishWhaleAlert(alert).catch(error => {
-          this.logger.error('Failed to publish whale alert', { error: (error as Error).message });
+        // Guard: Don't publish if stopping or not running (resources may be null)
+        if (this.isStopping || !this.isRunning) return;
+
+        // FIX Race 4.2: Capture publisher reference BEFORE async call to prevent
+        // race condition where publisher is nullified during shutdown while
+        // publish is in progress. Optional chaining handles null, but we also
+        // need to ensure the reference stays valid through the async operation.
+        const publisher = this.whaleAlertPublisher;
+        if (!publisher) return;
+
+        publisher.publishWhaleAlert(alert).catch(error => {
+          // FIX: Only log if still running to avoid noise during shutdown
+          if (!this.isStopping) {
+            this.logger.error('Failed to publish whale alert', { error: (error as Error).message });
+          }
         });
       });
 
@@ -1469,6 +1483,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
   // P2 FIX: Use EthereumBlockHeader type instead of any
   private handleNewBlock(block: EthereumBlockHeader): void {
+    // FIX Race 4.2: Guard against processing during shutdown (consistent with handleSyncEvent/handleSwapEvent)
+    if (this.isStopping || !this.isRunning) return;
+
     const blockNumber = parseInt(block.number, 16);
     const now = Date.now();
 

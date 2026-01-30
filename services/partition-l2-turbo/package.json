@@ -8,7 +8,10 @@
     "build": "tsc",
     "dev": "cross-env PARTITION_ID=l2-turbo ts-node src/index.ts",
     "start": "cross-env PARTITION_ID=l2-turbo node dist/index.js",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test": "jest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ --ext .ts"
   },
   "dependencies": {
     "@arbitrage/unified-detector": "*",

@@ -7,7 +7,11 @@
       "Bash(docker --version:*)",
       "Bash(set:*)",
       "Bash(set REDIS_URL=redis://localhost:6379:*)",
-      "Bash(TS_JEST_LOG=ts-jest.log npm test:*)"
+      "Bash(TS_JEST_LOG=ts-jest.log npm test:*)",
+      "WebFetch(domain:docs.alchemy.com)",
+      "WebFetch(domain:docs.infura.io)",
+      "WebFetch(domain:www.quicknode.com)",
+      "WebFetch(domain:publicnode.com)"
     ]
   }
 }

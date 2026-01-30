@@ -823,6 +823,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * FIX P1: Check and consume rate limit tokens for a stream.
    * Returns true if message should be processed, false if rate limited.
    * Uses token bucket algorithm for smooth rate limiting.
+   *
+   * FIX: Corrected token refill calculation - now adds tokens proportionally
+   * based on elapsed time rather than multiplying by full max tokens.
+   * Old buggy formula: tokens + (refillCount * MAX_TOKENS) could exceed max in one refill
+   * New correct formula: tokens + (elapsed / REFILL_MS * MAX_TOKENS) with proper capping
    */
   private checkRateLimit(streamName: string): boolean {
     const now = Date.now();
@@ -834,13 +839,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.streamRateLimiters.set(streamName, limiter);
     }
 
-    // Refill tokens based on elapsed time
+    // Refill tokens based on elapsed time (FIX: proportional refill, not multiplicative)
     const elapsed = now - limiter.lastRefill;
     if (elapsed >= this.RATE_LIMIT_REFILL_MS) {
-      const refillCount = Math.floor(elapsed / this.RATE_LIMIT_REFILL_MS);
+      // Calculate how many tokens to add based on elapsed time
+      // Rate: RATE_LIMIT_MAX_TOKENS per RATE_LIMIT_REFILL_MS
+      const tokensToAdd = Math.floor(
+        (elapsed / this.RATE_LIMIT_REFILL_MS) * this.RATE_LIMIT_MAX_TOKENS
+      );
       limiter.tokens = Math.min(
         this.RATE_LIMIT_MAX_TOKENS,
-        limiter.tokens + (refillCount * this.RATE_LIMIT_MAX_TOKENS)
+        limiter.tokens + tokensToAdd
       );
       limiter.lastRefill = now;
     }

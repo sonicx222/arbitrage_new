@@ -346,23 +346,35 @@ export interface ExecutionConfig extends ServiceConfig {
 }
 
 // =============================================================================
-// Error Types
+// Error Types (SPRINT 3 CONSOLIDATION)
 // =============================================================================
-// FIX 9.3: Canonical error type definitions for the arbitrage system.
+// CANONICAL error type definitions for the arbitrage system.
+// All new code should import from @arbitrage/types.
 //
-// IMPORTANT: These are the CANONICAL error types. Duplicates exist in:
-// - shared/core/src/domain-models.ts (ArbitrageError) - legacy, for backwards compat
-// - shared/core/src/resilience/error-handling.ts (ArbitrageError) - legacy
-// - shared/core/src/async/async-utils.ts (TimeoutError) - use this for async ops
-// - services/execution-engine/src/types.ts (TimeoutError) - execution-specific
+// Legacy locations (maintained for backward compatibility):
+// - shared/core/src/domain-models.ts (ArbitrageError) - re-exports from here
+// - shared/core/src/resilience/error-handling.ts (ArbitrageError) - re-exports from here
+// - shared/core/src/async/async-utils.ts (TimeoutError) - use local version for async-specific features
+// - services/execution-engine/src/types.ts (TimeoutError) - execution-specific version
 //
-// New code should import from @arbitrage/types. Future refactoring should
-// consolidate all error types here and update imports across the codebase.
+// Migration:
+// - OLD: import { ArbitrageError } from '@arbitrage/core'
+// - NEW: import { ArbitrageError, TimeoutError } from '@arbitrage/types'
 // =============================================================================
 
 /**
  * Base error class for arbitrage system errors.
  * Use this for errors that need to be caught and handled specifically.
+ *
+ * @example
+ * ```typescript
+ * throw new ArbitrageError(
+ *   'Failed to connect to DEX',
+ *   'DEX_CONNECTION_ERROR',
+ *   'execution-engine',
+ *   true // retryable
+ * );
+ * ```
  */
 export class ArbitrageError extends Error {
   constructor(
@@ -373,9 +385,15 @@ export class ArbitrageError extends Error {
   ) {
     super(message);
     this.name = 'ArbitrageError';
+    // Ensure instanceof works correctly across module boundaries
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
+/**
+ * Network-related errors (connection failures, timeouts, etc.)
+ * These are generally retryable.
+ */
 export class NetworkError extends ArbitrageError {
   constructor(message: string, service: string) {
     super(message, 'NETWORK_ERROR', service, true);
@@ -383,10 +401,38 @@ export class NetworkError extends ArbitrageError {
   }
 }
 
+/**
+ * Validation errors for invalid input data.
+ * These are not retryable without fixing the input.
+ */
 export class ValidationError extends ArbitrageError {
   constructor(message: string, service: string, public field: string) {
     super(message, 'VALIDATION_ERROR', service, false);
     this.name = 'ValidationError';
+  }
+}
+
+/**
+ * Timeout error for async operations that exceed their time limit.
+ * CANONICAL definition - use this for new code.
+ *
+ * @example
+ * ```typescript
+ * throw new TimeoutError('Bridge polling', 60000, 'cross-chain.strategy');
+ * ```
+ */
+export class TimeoutError extends Error {
+  constructor(
+    /** What operation timed out */
+    public readonly operation: string,
+    /** The timeout duration in milliseconds */
+    public readonly timeoutMs: number,
+    /** Optional service name for context */
+    public readonly service?: string
+  ) {
+    super(`Timeout: ${operation} exceeded ${timeoutMs}ms${service ? ` in ${service}` : ''}`);
+    this.name = 'TimeoutError';
+    Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 

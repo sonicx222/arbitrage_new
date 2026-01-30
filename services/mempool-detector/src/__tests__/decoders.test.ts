@@ -590,16 +590,32 @@ describe('UniswapV3Decoder', () => {
       expect(result!.tokenOut.toLowerCase()).toBe(USDC.toLowerCase());
     });
 
-    // Note: exactInput uses a struct with nested dynamic bytes (path), making manual
-    // calldata construction complex. The test fixture below may have incorrect ABI encoding.
-    // This test is intentionally skipped because:
-    // 1. exactInputSingle tests cover the core V3 decoding logic
-    // 2. Multi-hop path decoding is thoroughly tested in decodeV3Path tests below
-    // 3. Real-world transactions will have correct ABI encoding from contract calls
-    // TODO: Add integration test with real mainnet transaction calldata
-    it.skip('should decode exactInput with encoded path correctly', () => {
+    // FIX 7.1: exactInput test using ethers.js for proper ABI encoding
+    // Uses the Interface class to encode the struct correctly
+    it('should decode exactInput with encoded path correctly', () => {
+      const { Interface, solidityPacked } = require('ethers');
+
+      // Create properly encoded path: WETH -> 0.3% fee -> USDC
+      const encodedPath = solidityPacked(
+        ['address', 'uint24', 'address'],
+        [WETH, 3000, USDC]
+      );
+
+      // Encode the exactInput params using ABI encoder
+      const iface = new Interface([
+        'function exactInput((bytes path, address recipient, uint256 deadline, uint256 amountIn, uint256 amountOutMinimum)) returns (uint256 amountOut)',
+      ]);
+
+      const calldata = iface.encodeFunctionData('exactInput', [{
+        path: encodedPath,
+        recipient: '0x1234567890123456789012345678901234567890',
+        deadline: Math.floor(Date.now() / 1000) + 3600,
+        amountIn: BigInt('1000000000000000000'), // 1 ETH
+        amountOutMinimum: BigInt('900000000'), // 900 USDC
+      }]);
+
       const tx = createMockTx({
-        input: V3_EXACT_INPUT_CALLDATA,
+        input: calldata,
         to: UNISWAP_V3_ROUTER,
       });
 
@@ -607,8 +623,10 @@ describe('UniswapV3Decoder', () => {
 
       expect(result).not.toBeNull();
       expect(result!.type).toBe('uniswapV3');
-      expect(result!.path.length).toBeGreaterThanOrEqual(2);
-      expect(result!.tokenIn.toLowerCase()).toContain('c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'); // WETH
+      expect(result!.path.length).toBe(2);
+      expect(result!.tokenIn.toLowerCase()).toBe(WETH.toLowerCase());
+      expect(result!.tokenOut.toLowerCase()).toBe(USDC.toLowerCase());
+      expect(result!.amountIn).toBe(BigInt('1000000000000000000'));
     });
 
     it('should decode exactOutputSingle correctly', () => {
@@ -1154,16 +1172,45 @@ describe('OneInchDecoder', () => {
   });
 
   describe('decode', () => {
-    // Note: 1inch swap uses complex nested struct with dynamic bytes (permit, data),
-    // making manual calldata construction error-prone. The test fixture may have
-    // incorrect ABI encoding. This test is intentionally skipped because:
-    // 1. canDecode tests verify selector recognition works
-    // 2. Real-world transactions will have correct ABI encoding from contract calls
-    // 3. The decoder handles malformed data gracefully (returns null)
-    // TODO: Add integration test with real mainnet 1inch transaction calldata
-    it.skip('should decode swap correctly', () => {
+    // FIX 7.1: 1inch swap test using ethers.js for proper ABI encoding
+    it('should decode swap correctly', () => {
+      const { Interface, AbiCoder } = require('ethers');
+
+      // 1inch swap ABI with the SwapDescription struct
+      const iface = new Interface([
+        `function swap(
+          address executor,
+          (
+            address srcToken,
+            address dstToken,
+            address payable srcReceiver,
+            address payable dstReceiver,
+            uint256 amount,
+            uint256 minReturnAmount,
+            uint256 flags
+          ) desc,
+          bytes permit,
+          bytes data
+        ) returns (uint256 returnAmount, uint256 spentAmount)`
+      ]);
+
+      const calldata = iface.encodeFunctionData('swap', [
+        '0x1136b25047e142fa3018184793aec68fbb173ce4', // executor
+        {
+          srcToken: WETH,
+          dstToken: USDC,
+          srcReceiver: '0x1111111254eeb25477b68fb85ed929f73a960582',
+          dstReceiver: '0x1234567890123456789012345678901234567890',
+          amount: BigInt('1000000000000000000'), // 1 ETH
+          minReturnAmount: BigInt('900000000'), // ~900 USDC
+          flags: BigInt(0),
+        },
+        '0x', // empty permit
+        '0x', // empty data
+      ]);
+
       const tx = createMockTx({
-        input: ONEINCH_SWAP_CALLDATA,
+        input: calldata,
         to: ONEINCH_ROUTER,
         chainId: 1,
       });

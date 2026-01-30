@@ -152,18 +152,20 @@ const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, l
 // =============================================================================
 
 // Guard against multiple main() invocations (e.g., from integration tests)
-// Uses dual flags: mainStarted (completed) and mainStarting (in progress)
-// Safe in Node.js single-threaded event loop - synchronous check within one tick
-let mainStarted = false;
-let mainStarting = false;
+// FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)
+// This is cleaner and more explicit about the service lifecycle state
+type MainState = 'idle' | 'starting' | 'started' | 'failed';
+let mainState: MainState = 'idle';
 
 async function main(): Promise<void> {
   // Check-and-set guard prevents duplicate invocations within same event loop tick
-  if (mainStarted || mainStarting) {
-    logger.warn('main() already started or starting, ignoring duplicate invocation');
+  if (mainState !== 'idle') {
+    logger.warn('main() already started or starting, ignoring duplicate invocation', {
+      currentState: mainState
+    });
     return;
   }
-  mainStarting = true;
+  mainState = 'starting';
 
   logger.info('Starting P1 Asia-Fast Partition Service', {
     partitionId: P1_PARTITION_ID,
@@ -188,8 +190,7 @@ async function main(): Promise<void> {
     await detector.start();
 
     // BUG-FIX: Mark as fully started only after successful completion
-    mainStarted = true;
-    mainStarting = false;
+    mainState = 'started';
 
     logger.info('P1 Asia-Fast Partition Service started successfully', {
       partitionId: detector.getPartitionId(),
@@ -198,8 +199,8 @@ async function main(): Promise<void> {
     });
 
   } catch (error) {
-    // BUG-FIX: Reset starting flag on failure
-    mainStarting = false;
+    // BUG-FIX: Mark as failed instead of resetting to idle
+    mainState = 'failed';
 
     logger.error('Failed to start P1 Asia-Fast Partition Service', { error });
 

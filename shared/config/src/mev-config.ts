@@ -118,3 +118,58 @@ export const MEV_CONFIG = {
     minProfitForProtection: number;
   }>,
 };
+
+// =============================================================================
+// MEV Config Validation (SPRINT 3)
+// =============================================================================
+
+/**
+ * Get chain settings in a format suitable for validateConfigSync from @arbitrage/core.
+ * Use this to validate that MEV_CONFIG.chainSettings is synchronized with
+ * MEV_RISK_DEFAULTS.chainBasePriorityFees in mev-risk-analyzer.ts.
+ *
+ * @example
+ * ```typescript
+ * import { validateConfigSync } from '@arbitrage/core';
+ * import { getMevChainConfigForValidation } from '@arbitrage/config';
+ *
+ * const result = validateConfigSync(getMevChainConfigForValidation());
+ * if (!result.valid) {
+ *   console.warn('MEV config mismatch:', result.mismatches);
+ * }
+ * ```
+ */
+export function getMevChainConfigForValidation(): Array<{ chain: string; priorityFeeGwei: number }> {
+  return Object.entries(MEV_CONFIG.chainSettings).map(([chain, settings]) => ({
+    chain,
+    priorityFeeGwei: settings.priorityFeeGwei,
+  }));
+}
+
+/**
+ * Expected priority fee values for each chain.
+ * Use this for documentation and quick reference.
+ *
+ * IMPORTANT: These values MUST stay synchronized with:
+ * - MEV_RISK_DEFAULTS.chainBasePriorityFees in shared/core/src/mev-protection/mev-risk-analyzer.ts
+ *
+ * To validate synchronization, call:
+ * ```typescript
+ * import { validateConfigSync } from '@arbitrage/core';
+ * import { getMevChainConfigForValidation } from '@arbitrage/config';
+ * const result = validateConfigSync(getMevChainConfigForValidation());
+ * ```
+ */
+export const MEV_PRIORITY_FEE_SUMMARY = {
+  ethereum: 2.0,
+  bsc: 3.0,
+  polygon: 30.0,
+  arbitrum: 0.01,
+  optimism: 0.01,
+  base: 0.01,
+  zksync: 0.01,
+  linea: 0.01,
+  avalanche: 25.0,
+  fantom: 100.0,
+  solana: 0,
+} as const;

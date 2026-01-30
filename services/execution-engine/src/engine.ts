@@ -205,6 +205,18 @@ export class ExecutionEngineService {
   private readonly maxConcurrentExecutions = 5; // Limit parallel executions
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
 
+  // SPRINT 1 FIX: Lock holder crash recovery tracking
+  // Tracks repeated lock conflicts to detect crashed lock holders
+  // Key: opportunity ID, Value: { firstSeen: timestamp, count: number of conflicts }
+  private lockConflictTracker: Map<string, { firstSeen: number; count: number }> = new Map();
+  // After this many consecutive lock conflicts over CRASH_RECOVERY_WINDOW_MS, force release lock
+  private readonly CRASH_RECOVERY_CONFLICT_THRESHOLD = 3;
+  // Time window (ms) within which conflicts are considered consecutive (30 seconds)
+  private readonly CRASH_RECOVERY_WINDOW_MS = 30000;
+  // Minimum time since first conflict before considering force release (20 seconds)
+  // This gives legitimate lock holders time to complete
+  private readonly CRASH_RECOVERY_MIN_AGE_MS = 20000;
+
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
@@ -425,11 +437,25 @@ export class ExecutionEngineService {
       this.probabilityTracker = riskResult.probabilityTracker;
       this.riskManagementEnabled = riskResult.enabled;
 
+      // CRITICAL FIX: Throw on risk management failure in production
+      // Previously this only logged a warning, allowing trades to execute without
+      // proper risk controls (drawdown limits, position sizing). This is dangerous
+      // and could lead to capital loss.
       if (!riskResult.success && riskResult.error) {
-        this.logger.warn('Risk management initialization had issues', {
-          error: riskResult.error,
-          componentStatus: riskResult.componentStatus,
-        });
+        if (this.isSimulationMode) {
+          // In simulation mode, warn but continue (allows testing without full risk setup)
+          this.logger.warn('Risk management initialization had issues (simulation mode - continuing)', {
+            error: riskResult.error,
+            componentStatus: riskResult.componentStatus,
+          });
+        } else {
+          // In production mode, throw to prevent trading without risk controls
+          this.logger.error('Risk management initialization FAILED - cannot proceed without risk controls', {
+            error: riskResult.error,
+            componentStatus: riskResult.componentStatus,
+          });
+          throw new Error(`Risk management initialization failed: ${riskResult.error}. Cannot execute trades without proper risk controls.`);
+        }
       }
 
       // Initialize opportunity consumer
@@ -975,7 +1001,9 @@ export class ExecutionEngineService {
 
     // Fallback interval (1s) for edge cases and recovery
     // This catches any items that might be missed due to timing
+    // FIX Race 1.1: Check stateManager.isRunning() to prevent processing during shutdown
     this.executionProcessingInterval = setInterval(() => {
+      if (!this.stateManager.isRunning()) return;
       this.processQueueItems();
     }, 1000);
   }
@@ -1079,8 +1107,10 @@ export class ExecutionEngineService {
       return;
     }
 
+    const lockResourceId = `opportunity:${opportunity.id}`;
+
     const lockResult = await this.lockManager.withLock(
-      `opportunity:${opportunity.id}`,
+      lockResourceId,
       async () => {
         await this.executeWithTimeout(opportunity);
       },
@@ -1092,6 +1122,52 @@ export class ExecutionEngineService {
 
     if (!lockResult.success) {
       if (lockResult.reason === 'lock_not_acquired') {
+        // SPRINT 1 FIX: Crash recovery for stuck locks
+        // Track this conflict and check if lock holder may have crashed
+        const shouldForceRelease = this.trackLockConflict(opportunity.id);
+
+        if (shouldForceRelease) {
+          // Lock holder appears to have crashed - force release and retry
+          this.logger.warn('Detected potential crashed lock holder - force releasing lock', {
+            id: opportunity.id,
+            conflictCount: this.lockConflictTracker.get(opportunity.id)?.count
+          });
+
+          const released = await this.lockManager.forceRelease(lockResourceId);
+          if (released) {
+            this.stats.staleLockRecoveries++;
+            // Clear tracker and retry execution
+            this.lockConflictTracker.delete(opportunity.id);
+
+            // Retry with fresh lock acquisition
+            const retryResult = await this.lockManager.withLock(
+              lockResourceId,
+              async () => {
+                await this.executeWithTimeout(opportunity);
+              },
+              {
+                ttlMs: 120000,
+                retries: 0
+              }
+            );
+
+            if (retryResult.success) {
+              // Success after recovery - ACK the message
+              await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
+              return;
+            } else if (retryResult.reason === 'execution_error') {
+              // Had lock, execution failed - ACK to prevent infinite redelivery
+              this.logger.error('Opportunity execution failed after crash recovery', {
+                id: opportunity.id,
+                error: retryResult.error
+              });
+              await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
+              return;
+            }
+            // If retry still can't get lock, another instance recovered faster - fall through
+          }
+        }
+
         // Another instance is executing this opportunity - DO NOT ACK
         // Let Redis redeliver to the instance that holds the lock
         this.stats.lockConflicts++;
@@ -1114,11 +1190,73 @@ export class ExecutionEngineService {
         });
         // Fall through to ACK below
       }
+    } else {
+      // Success - clear any conflict tracking for this opportunity
+      this.lockConflictTracker.delete(opportunity.id);
     }
 
     // ACK the message only after we've processed it (success or execution_error)
     // This ensures messages aren't lost when lock conflicts occur
     await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
+  }
+
+  /**
+   * SPRINT 1 FIX: Track lock conflicts for crash recovery detection.
+   *
+   * When the same opportunity experiences multiple lock conflicts within a time window,
+   * it may indicate the lock holder has crashed without releasing the lock.
+   *
+   * @param opportunityId - The opportunity that couldn't acquire the lock
+   * @returns true if the lock should be force-released (holder likely crashed)
+   */
+  private trackLockConflict(opportunityId: string): boolean {
+    const now = Date.now();
+    const existing = this.lockConflictTracker.get(opportunityId);
+
+    if (existing) {
+      // Check if this conflict is within the tracking window
+      const age = now - existing.firstSeen;
+
+      if (age > this.CRASH_RECOVERY_WINDOW_MS) {
+        // Old entry - reset tracking
+        this.lockConflictTracker.set(opportunityId, { firstSeen: now, count: 1 });
+        return false;
+      }
+
+      // Increment conflict count
+      existing.count++;
+
+      // Check if we should force release:
+      // 1. Enough conflicts have occurred (threshold)
+      // 2. Enough time has passed (give legitimate holders a chance)
+      if (
+        existing.count >= this.CRASH_RECOVERY_CONFLICT_THRESHOLD &&
+        age >= this.CRASH_RECOVERY_MIN_AGE_MS
+      ) {
+        return true;
+      }
+
+      return false;
+    }
+
+    // First conflict for this opportunity - start tracking
+    this.lockConflictTracker.set(opportunityId, { firstSeen: now, count: 1 });
+    return false;
+  }
+
+  /**
+   * SPRINT 1 FIX: Clean up stale entries from the lock conflict tracker.
+   * Called periodically from health monitoring.
+   */
+  private cleanupStaleLockConflictTracking(): void {
+    const now = Date.now();
+    const staleThreshold = this.CRASH_RECOVERY_WINDOW_MS * 2; // 60 seconds
+
+    for (const [id, info] of this.lockConflictTracker) {
+      if (now - info.firstSeen > staleThreshold) {
+        this.lockConflictTracker.delete(id);
+      }
+    }
   }
 
   private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
@@ -1258,12 +1396,10 @@ export class ExecutionEngineService {
           });
 
           // Apply drawdown state multiplier to position size
+          // FIX 10.2: Use direct property mutation instead of object spread for performance
           if (drawdownCheck && positionSize.recommendedSize > 0n) {
             const multiplier = BigInt(Math.floor(drawdownCheck.sizeMultiplier * 10000));
-            positionSize = {
-              ...positionSize,
-              recommendedSize: (positionSize.recommendedSize * multiplier) / 10000n,
-            };
+            positionSize.recommendedSize = (positionSize.recommendedSize * multiplier) / 10000n;
           }
 
           if (!positionSize.shouldTrade || positionSize.recommendedSize === 0n) {
@@ -1443,6 +1579,9 @@ export class ExecutionEngineService {
       try {
         // Fix 4.2: Cleanup old gas baseline entries to prevent memory leak
         this.cleanupGasBaselines();
+
+        // SPRINT 1 FIX: Cleanup stale lock conflict tracking entries
+        this.cleanupStaleLockConflictTracking();
 
         const health: ServiceHealth = {
           name: 'execution-engine',

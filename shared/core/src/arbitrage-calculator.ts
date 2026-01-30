@@ -122,20 +122,22 @@ function emitDeprecationWarning(funcName: string): void {
  * This prevents precision loss for large BigInt values.
  *
  * P0-1 FIX: Uses scaled division to preserve precision.
- * P0-FIX 4.4: Now returns null for division by zero instead of 0.
+ * SPRINT 3 FIX: Returns null for division by zero (previously returned NaN).
+ * This is consistent with safeBigIntDivisionOrNull in price-calculator.ts.
  *
- * @deprecated Use safeBigIntDivision from components/price-calculator instead.
+ * @deprecated Use safeBigIntDivision or safeBigIntDivisionOrNull from components/price-calculator instead.
  * @param numerator - The BigInt numerator
  * @param denominator - The divisor BigInt (must be > 0)
  * @returns The result as a Number with preserved precision, or null if denominator is 0
  */
-export function safeBigIntDivision(numerator: bigint, denominator: bigint): number {
+export function safeBigIntDivision(numerator: bigint, denominator: bigint): number | null {
   emitDeprecationWarning('safeBigIntDivision');
 
-  // P0-FIX 4.4: Return NaN for division by zero to signal invalid operation
-  // This is safer than returning 0 which could be misinterpreted as a valid price
+  // SPRINT 3 FIX: Return null instead of NaN for division by zero
+  // null is more explicit and easier to handle than NaN
+  // Consistent with safeBigIntDivisionOrNull in components/price-calculator.ts
   if (denominator === 0n) {
-    return NaN;
+    return null;
   }
 
   // Scale up the numerator before division to preserve decimal places
@@ -166,8 +168,8 @@ export function calculatePriceFromReserves(reserve0: string, reserve1: string): 
     }
 
     const result = safeBigIntDivision(r0, r1);
-    // P0-FIX 4.4: Handle NaN from division by zero
-    return Number.isNaN(result) ? null : result;
+    // SPRINT 3 FIX: safeBigIntDivision now returns null directly for division by zero
+    return result;
   } catch {
     // Handle invalid BigInt strings gracefully
     return null;

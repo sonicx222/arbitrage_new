@@ -881,6 +881,108 @@ describe('Bug Fix Regression Tests', () => {
       expect(alerts).toHaveLength(1);
       expect(alerts[0]).toBe('chain2: whale-tx-2');
     });
+
+    /**
+     * SPRINT 2 FIX: Race condition where publisher is nullified during async publish
+     *
+     * Problem: During shutdown, whaleAlertPublisher can be set to null while
+     * an async publishWhaleAlert() call is in progress, causing the .catch()
+     * handler to fail.
+     *
+     * Fix: Capture publisher reference before async call so the reference
+     * stays valid even if this.whaleAlertPublisher is nullified.
+     */
+    it('should handle publisher null during async operation (SPRINT 2 FIX)', async () => {
+      let publishStarted = false;
+      let publishCompleted = false;
+      let publishError: Error | null = null;
+
+      // Simulate a publisher that takes time to complete
+      const mockPublisher = {
+        publishWhaleAlert: async (alert: unknown) => {
+          publishStarted = true;
+          // Simulate async delay
+          await new Promise(resolve => setTimeout(resolve, 50));
+          publishCompleted = true;
+        }
+      };
+
+      // Simulate the instance state
+      const instance = {
+        isStopping: false,
+        isRunning: true,
+        whaleAlertPublisher: mockPublisher as any,
+        logger: { error: jest.fn() },
+
+        // The FIXED version captures publisher reference before async call
+        handleWhaleAlertFixed(alert: unknown): void {
+          if (this.isStopping || !this.isRunning) return;
+
+          // FIX: Capture reference BEFORE async call
+          const publisher = this.whaleAlertPublisher;
+          if (!publisher) return;
+
+          publisher.publishWhaleAlert(alert).catch((error: Error) => {
+            // Only log if still running to avoid noise during shutdown
+            if (!this.isStopping) {
+              this.logger.error('Failed to publish whale alert', { error: error.message });
+              publishError = error;
+            }
+          });
+        }
+      };
+
+      // Start handling alert
+      instance.handleWhaleAlertFixed({ type: 'whale', tx: '0x123' });
+
+      // Immediately simulate shutdown (sets publisher to null)
+      instance.isStopping = true;
+      instance.whaleAlertPublisher = null as any;
+
+      // Wait for async operation to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verify the publish started and completed successfully
+      // even though publisher was nullified mid-operation
+      expect(publishStarted).toBe(true);
+      expect(publishCompleted).toBe(true);
+      expect(publishError).toBeNull();
+
+      // Error logging should not have been called (isStopping was true)
+      expect(instance.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('should skip publish when isStopping is true (SPRINT 2 FIX)', () => {
+      const publishCalls: unknown[] = [];
+      const mockPublisher = {
+        publishWhaleAlert: async (alert: unknown) => {
+          publishCalls.push(alert);
+        }
+      };
+
+      const instance = {
+        isStopping: true, // Already stopping
+        isRunning: false,
+        whaleAlertPublisher: mockPublisher as any,
+        logger: { error: jest.fn() },
+
+        handleWhaleAlert(alert: unknown): void {
+          // Guard: Don't publish if stopping
+          if (this.isStopping || !this.isRunning) return;
+
+          const publisher = this.whaleAlertPublisher;
+          if (!publisher) return;
+
+          publisher.publishWhaleAlert(alert);
+        }
+      };
+
+      // Try to handle alert while stopping
+      instance.handleWhaleAlert({ type: 'whale', tx: '0x456' });
+
+      // Publish should not have been called
+      expect(publishCalls).toHaveLength(0);
+    });
   });
 
   /**

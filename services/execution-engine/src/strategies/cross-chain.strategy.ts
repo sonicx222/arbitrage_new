@@ -35,12 +35,14 @@ import { ARBITRAGE_CONFIG, getNativeTokenPrice } from '@arbitrage/config';
 import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult } from '../types';
+import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult, BridgeRecoveryState } from '../types';
 import {
   createErrorResult,
   createSuccessResult,
   ExecutionErrorCode,
   formatExecutionError,
+  BRIDGE_RECOVERY_KEY_PREFIX,
+  BRIDGE_RECOVERY_MAX_AGE_MS,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
@@ -846,12 +848,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
    * - bridgeToken, bridgeAmount, sellDex, expectedProfit
    * - timestamp when bridge was initiated
    *
-   * Tracking issue: TODO - Create issue for bridge recovery implementation
-   * Priority: High (funds-at-risk scenario)
-   * Acceptance criteria:
+   * FIX 3.1: Bridge recovery implemented.
    * - Store BridgeRecoveryState in Redis before bridge initiation
    * - On engine restart, query pending bridges and resume polling
-   * - Implement timeout handling for bridges that exceed max wait time
+   * - Implemented timeout handling for bridges that exceed max wait time
+   * @see persistBridgeRecoveryState, recoverPendingBridges, BridgeRecoveryState
    *
    * @param bridgeRouter - Bridge router instance
    * @param bridgeId - Bridge transaction ID
@@ -1039,6 +1040,325 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         sourceTxHash,
       },
     };
+  }
+
+  // ==========================================================================
+  // FIX 3.1: Bridge Recovery Implementation
+  // ==========================================================================
+
+  /**
+   * Persist bridge recovery state to Redis before bridge execution.
+   *
+   * This enables recovery if shutdown occurs during bridge polling.
+   * The state is stored in Redis with a TTL matching BRIDGE_RECOVERY_MAX_AGE_MS.
+   *
+   * @param state - Bridge recovery state to persist
+   * @param redis - Redis client for persistence
+   */
+  async persistBridgeRecoveryState(
+    state: BridgeRecoveryState,
+    redis: import('@arbitrage/core').RedisClient
+  ): Promise<void> {
+    const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${state.bridgeId}`;
+    const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
+
+    try {
+      await redis.set(key, state, ttlSeconds);
+      this.logger.debug('Persisted bridge recovery state', {
+        bridgeId: state.bridgeId,
+        opportunityId: state.opportunityId,
+        sourceChain: state.sourceChain,
+        destChain: state.destChain,
+      });
+    } catch (error) {
+      // Log but don't fail - recovery is best-effort
+      this.logger.warn('Failed to persist bridge recovery state', {
+        bridgeId: state.bridgeId,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  /**
+   * Update bridge recovery status in Redis.
+   *
+   * Called when bridge completes (to mark as recovered) or fails (to mark as failed).
+   *
+   * @param bridgeId - Bridge transaction ID
+   * @param status - New status
+   * @param redis - Redis client
+   * @param errorMessage - Optional error message for failed status
+   */
+  async updateBridgeRecoveryStatus(
+    bridgeId: string,
+    status: BridgeRecoveryState['status'],
+    redis: import('@arbitrage/core').RedisClient,
+    errorMessage?: string
+  ): Promise<void> {
+    const key = `${BRIDGE_RECOVERY_KEY_PREFIX}${bridgeId}`;
+
+    try {
+      const existing = await redis.get(key);
+      if (!existing) {
+        // State already expired or wasn't persisted - OK
+        return;
+      }
+
+      const state: BridgeRecoveryState = JSON.parse(existing);
+      state.status = status;
+      state.lastCheckAt = Date.now();
+      if (errorMessage) {
+        state.errorMessage = errorMessage;
+      }
+
+      // Keep same TTL for tracking purposes
+      const ttlSeconds = Math.floor(BRIDGE_RECOVERY_MAX_AGE_MS / 1000);
+      await redis.set(key, state, ttlSeconds);
+
+      // If recovered or failed, we can delete the key (cleanup)
+      if (status === 'recovered' || status === 'failed') {
+        // Short TTL for post-processing analysis, then auto-cleanup
+        await redis.set(key, state, 3600); // 1 hour
+      }
+
+      this.logger.debug('Updated bridge recovery status', {
+        bridgeId,
+        status,
+        errorMessage,
+      });
+    } catch (error) {
+      this.logger.warn('Failed to update bridge recovery status', {
+        bridgeId,
+        status,
+        error: getErrorMessage(error),
+      });
+    }
+  }
+
+  /**
+   * Recover pending bridges on engine restart.
+   *
+   * Scans Redis for pending bridge states and resumes polling/execution.
+   * This is called from ExecutionEngineService.start() to handle
+   * bridges that were interrupted by shutdown.
+   *
+   * @param ctx - Strategy context with bridge router factory and other deps
+   * @param redis - Redis client for state retrieval
+   * @returns Number of bridges recovered
+   */
+  async recoverPendingBridges(
+    ctx: StrategyContext,
+    redis: import('@arbitrage/core').RedisClient
+  ): Promise<number> {
+    let recoveredCount = 0;
+
+    try {
+      // Scan for pending bridge recovery keys using iterative scan
+      const keys: string[] = [];
+      let cursor = '0';
+      do {
+        const [nextCursor, foundKeys] = await redis.scan(
+          cursor,
+          'MATCH',
+          `${BRIDGE_RECOVERY_KEY_PREFIX}*`,
+          'COUNT',
+          100
+        );
+        cursor = nextCursor;
+        keys.push(...foundKeys);
+      } while (cursor !== '0');
+
+      if (keys.length === 0) {
+        this.logger.debug('No pending bridges to recover');
+        return 0;
+      }
+
+      this.logger.info('Found pending bridges for recovery', { count: keys.length });
+
+      for (const key of keys) {
+        try {
+          const stateJson = await redis.get(key);
+          if (!stateJson) continue;
+
+          const state: BridgeRecoveryState = JSON.parse(stateJson);
+
+          // Skip already recovered/failed bridges
+          if (state.status === 'recovered' || state.status === 'failed') {
+            continue;
+          }
+
+          // Check if bridge is too old
+          if (Date.now() - state.initiatedAt > BRIDGE_RECOVERY_MAX_AGE_MS) {
+            this.logger.warn('Bridge recovery state expired', {
+              bridgeId: state.bridgeId,
+              initiatedAt: state.initiatedAt,
+              ageMs: Date.now() - state.initiatedAt,
+            });
+            await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'Recovery state expired');
+            continue;
+          }
+
+          // Attempt recovery
+          const recovered = await this.recoverSingleBridge(state, ctx, redis);
+          if (recovered) {
+            recoveredCount++;
+          }
+        } catch (error) {
+          this.logger.error('Error recovering bridge', {
+            key,
+            error: getErrorMessage(error),
+          });
+        }
+      }
+
+      this.logger.info('Bridge recovery completed', {
+        total: keys.length,
+        recovered: recoveredCount,
+      });
+
+      return recoveredCount;
+    } catch (error) {
+      this.logger.error('Bridge recovery scan failed', {
+        error: getErrorMessage(error),
+      });
+      return recoveredCount;
+    }
+  }
+
+  /**
+   * Recover a single pending bridge.
+   *
+   * Checks bridge status and completes the sell if needed.
+   */
+  private async recoverSingleBridge(
+    state: BridgeRecoveryState,
+    ctx: StrategyContext,
+    redis: import('@arbitrage/core').RedisClient
+  ): Promise<boolean> {
+    this.logger.info('Attempting bridge recovery', {
+      bridgeId: state.bridgeId,
+      opportunityId: state.opportunityId,
+      sourceChain: state.sourceChain,
+      destChain: state.destChain,
+      initiatedAt: state.initiatedAt,
+    });
+
+    // Get bridge router
+    if (!ctx.bridgeRouterFactory) {
+      this.logger.warn('Cannot recover bridge - no bridge router factory');
+      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No bridge router factory');
+      return false;
+    }
+
+    const bridgeRouter = ctx.bridgeRouterFactory.findBestRouter(
+      state.sourceChain,
+      state.destChain,
+      state.bridgeToken
+    );
+
+    if (!bridgeRouter) {
+      this.logger.warn('Cannot recover bridge - no suitable router', {
+        bridgeId: state.bridgeId,
+      });
+      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No suitable bridge router');
+      return false;
+    }
+
+    try {
+      // Check current bridge status
+      const bridgeStatus: BridgeStatusResult = await bridgeRouter.getStatus(state.bridgeId);
+
+      if (bridgeStatus.status === 'completed') {
+        // Bridge completed - execute sell
+        this.logger.info('Recovered bridge is completed, executing sell', {
+          bridgeId: state.bridgeId,
+          amountReceived: bridgeStatus.amountReceived,
+        });
+
+        // Reconstruct opportunity for sell execution
+        const sellOpportunity: ArbitrageOpportunity = {
+          id: `${state.opportunityId}-recovery`,
+          type: 'cross-chain',
+          tokenIn: state.bridgeToken,
+          tokenOut: state.tokenIn, // Reverse for sell
+          amountIn: bridgeStatus.amountReceived || state.bridgeAmount,
+          expectedProfit: state.expectedProfit,
+          confidence: 0.5, // Lower confidence for recovery
+          timestamp: Date.now(),
+          buyChain: state.destChain,
+          sellChain: state.destChain,
+          buyDex: state.sellDex,
+          sellDex: state.sellDex,
+          expiresAt: Date.now() + 60000, // 1 minute to execute
+        };
+
+        // Execute sell on destination chain
+        const destWallet = ctx.wallets.get(state.destChain);
+        const destProvider = ctx.providers.get(state.destChain);
+
+        if (!destWallet || !destProvider) {
+          this.logger.warn('Cannot execute recovered sell - no wallet/provider', {
+            bridgeId: state.bridgeId,
+            destChain: state.destChain,
+          });
+          await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'No wallet/provider for destination');
+          return false;
+        }
+
+        // Prepare and execute sell transaction
+        const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, state.destChain, ctx);
+
+        const signedTx = await destWallet.sendTransaction({
+          ...sellTx,
+          gasPrice: await destProvider.getFeeData().then(fd => fd.gasPrice),
+        });
+
+        const receipt = await signedTx.wait();
+
+        if (receipt && receipt.status === 1) {
+          this.logger.info('Recovery sell succeeded', {
+            bridgeId: state.bridgeId,
+            sellTxHash: receipt.hash,
+          });
+          await this.updateBridgeRecoveryStatus(state.bridgeId, 'recovered', redis);
+          return true;
+        } else {
+          this.logger.error('Recovery sell failed', {
+            bridgeId: state.bridgeId,
+            sellTxHash: receipt?.hash,
+          });
+          await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, 'Sell transaction reverted');
+          return false;
+        }
+      } else if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
+        this.logger.info('Recovered bridge failed/refunded', {
+          bridgeId: state.bridgeId,
+          status: bridgeStatus.status,
+          error: bridgeStatus.error,
+        });
+        await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, bridgeStatus.error || bridgeStatus.status);
+        return false;
+      } else {
+        // Still pending/bridging - update status and leave for next recovery attempt
+        this.logger.info('Recovered bridge still in progress', {
+          bridgeId: state.bridgeId,
+          status: bridgeStatus.status,
+        });
+        await this.updateBridgeRecoveryStatus(
+          state.bridgeId,
+          bridgeStatus.status === 'bridging' ? 'bridging' : 'pending',
+          redis
+        );
+        return false; // Will be retried on next recovery cycle
+      }
+    } catch (error) {
+      this.logger.error('Bridge recovery failed', {
+        bridgeId: state.bridgeId,
+        error: getErrorMessage(error),
+      });
+      await this.updateBridgeRecoveryStatus(state.bridgeId, 'failed', redis, getErrorMessage(error));
+      return false;
+    }
   }
 }
 

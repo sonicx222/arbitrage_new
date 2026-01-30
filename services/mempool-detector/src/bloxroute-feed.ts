@@ -205,6 +205,7 @@ export class BloXrouteFeed extends EventEmitter {
         this.ws = new WebSocket(url, { headers });
 
         // Set connection timeout
+        // FIX: Add .unref() to prevent timer from keeping process alive during tests/shutdown
         const timeout = this.config.connectionTimeout ?? DEFAULT_CONNECTION_TIMEOUT;
         this.connectionTimeoutTimer = setTimeout(() => {
           if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
@@ -214,6 +215,7 @@ export class BloXrouteFeed extends EventEmitter {
             reject(new Error(`Connection timeout after ${timeout}ms`));
           }
         }, timeout);
+        this.connectionTimeoutTimer.unref();
 
         this.ws.on('open', () => {
           this.clearConnectionTimeout();
@@ -639,6 +641,8 @@ export class BloXrouteFeed extends EventEmitter {
         }
       });
     }, delay);
+    // FIX: Add .unref() to prevent timer from keeping process alive during tests/shutdown
+    this.reconnectTimer.unref();
   }
 
   /**
@@ -696,6 +700,8 @@ export class BloXrouteFeed extends EventEmitter {
         }
       }
     }, interval);
+    // FIX: Add .unref() to prevent timer from keeping process alive during tests/shutdown
+    this.heartbeatTimer.unref();
   }
 
   /**

@@ -397,6 +397,9 @@ describe('Success Criteria: Feed Latency (<10ms)', () => {
   });
 
   it('should decode real transactions within 10ms latency budget', () => {
+    // FIX: Guard against empty test data to prevent NaN results
+    expect(ALL_REAL_SWAPS.length).toBeGreaterThan(0);
+
     const latencies: number[] = [];
 
     // Test latency with real mainnet data
@@ -410,11 +413,18 @@ describe('Success Criteria: Feed Latency (<10ms)', () => {
       latencies.push(end - start);
     }
 
-    const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
-    const maxLatency = Math.max(...latencies);
+    // FIX: Guard against empty latencies array to prevent NaN/Infinity
+    expect(latencies.length).toBeGreaterThan(0);
+
+    const avgLatency = latencies.length > 0
+      ? latencies.reduce((a, b) => a + b, 0) / latencies.length
+      : 0;
+    const maxLatency = latencies.length > 0
+      ? Math.max(...latencies)
+      : 0;
     const sortedLatencies = [...latencies].sort((a, b) => a - b);
     const p99Index = Math.floor(sortedLatencies.length * 0.99);
-    const p99Latency = sortedLatencies[p99Index] || maxLatency;
+    const p99Latency = sortedLatencies[p99Index] ?? maxLatency;
 
     console.log('\n=== DECODE LATENCY (Real Mainnet Data) ===');
     console.log(`Transactions tested: ${ALL_REAL_SWAPS.length}`);
@@ -429,7 +439,11 @@ describe('Success Criteria: Feed Latency (<10ms)', () => {
 
   it('should handle high-throughput decoding of real transactions within latency budget', () => {
     const iterations = 1000;
+
+    // FIX: Guard against missing test fixture
+    expect(REAL_V2_SWAP_EXACT_ETH_FOR_TOKENS).toBeDefined();
     const testTx = stripMetadata(REAL_V2_SWAP_EXACT_ETH_FOR_TOKENS);
+    expect(testTx).toBeDefined();
 
     const start = performance.now();
     for (let i = 0; i < iterations; i++) {
@@ -437,8 +451,10 @@ describe('Success Criteria: Feed Latency (<10ms)', () => {
     }
     const totalTime = performance.now() - start;
 
-    const avgLatencyPerDecode = totalTime / iterations;
-    const throughput = iterations / (totalTime / 1000);
+    // FIX: Guard against division by zero (if iterations is somehow 0)
+    const avgLatencyPerDecode = iterations > 0 ? totalTime / iterations : 0;
+    // FIX: Guard against division by zero in throughput calculation
+    const throughput = totalTime > 0 ? iterations / (totalTime / 1000) : 0;
 
     console.log('\n=== HIGH-THROUGHPUT DECODE PERFORMANCE ===');
     console.log(`Total decodes: ${iterations}`);
@@ -447,6 +463,8 @@ describe('Success Criteria: Feed Latency (<10ms)', () => {
     console.log(`Throughput: ${throughput.toFixed(0)} decodes/second`);
     console.log('==========================================\n');
 
+    // FIX: Ensure we have valid numeric result before assertion
+    expect(Number.isFinite(avgLatencyPerDecode)).toBe(true);
     expect(avgLatencyPerDecode).toBeLessThan(SUCCESS_CRITERIA.MAX_FEED_LATENCY_MS);
   });
 });
