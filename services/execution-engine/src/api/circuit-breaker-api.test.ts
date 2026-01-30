@@ -11,43 +11,53 @@
  * @see implementation_plan_v2.md Task 1.3.2
  */
 
-import { createServer, Server, IncomingMessage, ServerResponse } from 'http';
+import { jest, describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from '@jest/globals';
+import type { Mock } from 'jest-mock';
+import { createServer, Server } from 'http';
 import type { CircuitBreakerStatus } from '../services/circuit-breaker';
+import type { CircuitBreakerEngineInterface } from './circuit-breaker-api';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface MockEngine {
-  getCircuitBreakerStatus: jest.Mock;
-  forceCloseCircuitBreaker: jest.Mock;
-  forceOpenCircuitBreaker: jest.Mock;
-  isCircuitBreakerOpen: jest.Mock;
+/**
+ * Mock engine with properly typed Jest mock functions.
+ * Fix: Added proper Jest Mock type imports for type safety.
+ */
+interface MockEngine extends CircuitBreakerEngineInterface {
+  getCircuitBreakerStatus: Mock<() => CircuitBreakerStatus | null>;
+  forceCloseCircuitBreaker: Mock<() => void>;
+  forceOpenCircuitBreaker: Mock<(reason?: string) => void>;
+  isCircuitBreakerOpen: Mock<() => boolean>;
 }
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
-const createMockEngine = (): MockEngine => ({
-  getCircuitBreakerStatus: jest.fn().mockReturnValue({
-    state: 'CLOSED',
-    enabled: true,
-    consecutiveFailures: 0,
-    cooldownRemaining: 0,
-    lastStateChange: Date.now(),
-    metrics: {
-      totalFailures: 5,
-      totalSuccesses: 100,
-      timesTripped: 1,
-      totalOpenTimeMs: 30000,
-      lastTrippedAt: Date.now() - 60000,
-    },
-  } as CircuitBreakerStatus),
-  forceCloseCircuitBreaker: jest.fn(),
-  forceOpenCircuitBreaker: jest.fn(),
-  isCircuitBreakerOpen: jest.fn().mockReturnValue(false),
-});
+const createMockEngine = (): MockEngine => {
+  const engine: MockEngine = {
+    getCircuitBreakerStatus: jest.fn<() => CircuitBreakerStatus | null>().mockReturnValue({
+      state: 'CLOSED',
+      enabled: true,
+      consecutiveFailures: 0,
+      cooldownRemaining: 0,
+      lastStateChange: Date.now(),
+      metrics: {
+        totalFailures: 5,
+        totalSuccesses: 100,
+        timesTripped: 1,
+        totalOpenTimeMs: 30000,
+        lastTrippedAt: Date.now() - 60000,
+      },
+    }),
+    forceCloseCircuitBreaker: jest.fn<() => void>(),
+    forceOpenCircuitBreaker: jest.fn<(reason?: string) => void>(),
+    isCircuitBreakerOpen: jest.fn<() => boolean>().mockReturnValue(false),
+  };
+  return engine;
+};
 
 /**
  * Make HTTP request to test server

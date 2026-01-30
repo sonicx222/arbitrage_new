@@ -19,6 +19,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'http';
+import { timingSafeEqual } from 'crypto';
 import type { CircuitBreakerStatus } from '../services/circuit-breaker';
 
 // =============================================================================
@@ -78,7 +79,35 @@ function extractApiKey(req: IncomingMessage): string | null {
 }
 
 /**
- * Validate API key for protected endpoints
+ * Timing-safe string comparison to prevent timing attacks.
+ *
+ * Fix: Uses crypto.timingSafeEqual to prevent attackers from discovering
+ * the API key character by character through response time analysis.
+ *
+ * @param a - First string to compare
+ * @param b - Second string to compare
+ * @returns true if strings are equal
+ */
+function timingSafeCompare(a: string, b: string): boolean {
+  // Convert strings to buffers for timingSafeEqual
+  const aBuffer = Buffer.from(a, 'utf8');
+  const bBuffer = Buffer.from(b, 'utf8');
+
+  // If lengths differ, we still need constant-time comparison
+  // to avoid leaking length information
+  if (aBuffer.length !== bBuffer.length) {
+    // Compare against self to maintain constant time, then return false
+    timingSafeEqual(aBuffer, aBuffer);
+    return false;
+  }
+
+  return timingSafeEqual(aBuffer, bBuffer);
+}
+
+/**
+ * Validate API key for protected endpoints.
+ *
+ * Security: Uses timing-safe comparison to prevent timing attacks.
  */
 function validateApiKey(apiKey: string | null): { valid: boolean; error?: string } {
   const expectedKey = process.env.CIRCUIT_BREAKER_API_KEY;
@@ -92,7 +121,8 @@ function validateApiKey(apiKey: string | null): { valid: boolean; error?: string
     return { valid: false, error: 'API key not configured on server' };
   }
 
-  if (apiKey !== expectedKey) {
+  // Fix: Use timing-safe comparison to prevent timing attacks
+  if (!timingSafeCompare(apiKey, expectedKey)) {
     return { valid: false, error: 'Invalid API key' };
   }
 
@@ -154,43 +184,55 @@ async function parseBody(req: IncomingMessage): Promise<ParseBodyResult> {
 
 /**
  * Handle GET /circuit-breaker - Get status
+ *
+ * Performance: Caches timestamp at handler start for consistent responses.
  */
 function handleGetStatus(
   engine: CircuitBreakerEngineInterface,
   res: ServerResponse
 ): void {
+  // Performance: Cache timestamp at handler start
+  const timestamp = Date.now();
   const status = engine.getCircuitBreakerStatus();
 
   if (!status) {
     sendJson(res, 503, {
       error: 'Circuit breaker not available',
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
 
   sendJson(res, 200, {
     ...status,
-    timestamp: Date.now(),
+    timestamp,
   } as CircuitBreakerStatusResponse);
 }
 
 /**
  * Handle POST /circuit-breaker/close - Force close
+ *
+ * Fix: Now drains request body for consistency with handleForceOpen
+ * and to prevent connection issues if client sends unexpected body.
  */
 async function handleForceClose(
   engine: CircuitBreakerEngineInterface,
   req: IncomingMessage,
   res: ServerResponse
 ): Promise<void> {
+  // Performance: Cache timestamp at handler start for consistent responses
+  const timestamp = Date.now();
+
   // Validate API key
   const apiKey = extractApiKey(req);
   const validation = validateApiKey(apiKey);
 
   if (!validation.valid) {
+    // Fix: Drain request body before responding to prevent connection issues
+    await parseBody(req);
     sendJson(res, 401, {
       error: validation.error!,
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
@@ -198,12 +240,16 @@ async function handleForceClose(
   // Check if circuit breaker is available
   const statusBefore = engine.getCircuitBreakerStatus();
   if (!statusBefore) {
+    await parseBody(req);
     sendJson(res, 503, {
       error: 'Circuit breaker not available',
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
+
+  // Fix: Drain request body for consistency (ignore any body content)
+  await parseBody(req);
 
   // Force close
   engine.forceCloseCircuitBreaker();
@@ -215,26 +261,33 @@ async function handleForceClose(
     success: true,
     message: 'Circuit breaker force closed',
     status: statusAfter,
-    timestamp: Date.now(),
+    timestamp,
   } as CircuitBreakerActionResponse);
 }
 
 /**
  * Handle POST /circuit-breaker/open - Force open
+ *
+ * Performance: Caches timestamp at handler start for consistent responses.
  */
 async function handleForceOpen(
   engine: CircuitBreakerEngineInterface,
   req: IncomingMessage,
   res: ServerResponse
 ): Promise<void> {
+  // Performance: Cache timestamp at handler start for consistent responses
+  const timestamp = Date.now();
+
   // Validate API key
   const apiKey = extractApiKey(req);
   const validation = validateApiKey(apiKey);
 
   if (!validation.valid) {
+    // Drain request body before responding
+    await parseBody(req);
     sendJson(res, 401, {
       error: validation.error!,
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
@@ -242,9 +295,10 @@ async function handleForceOpen(
   // Check if circuit breaker is available
   const statusBefore = engine.getCircuitBreakerStatus();
   if (!statusBefore) {
+    await parseBody(req);
     sendJson(res, 503, {
       error: 'Circuit breaker not available',
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
@@ -254,7 +308,7 @@ async function handleForceOpen(
   if (!parseResult.success) {
     sendJson(res, 400, {
       error: parseResult.error || 'Invalid request body',
-      timestamp: Date.now(),
+      timestamp,
     } as ErrorResponse);
     return;
   }
@@ -271,7 +325,7 @@ async function handleForceOpen(
     success: true,
     message: `Circuit breaker force opened: ${reason}`,
     status: statusAfter,
-    timestamp: Date.now(),
+    timestamp,
   } as CircuitBreakerActionResponse);
 }
 
@@ -284,6 +338,9 @@ async function handleForceOpen(
  *
  * @param engine - Execution engine instance with circuit breaker methods
  * @returns Request handler function for HTTP server
+ *
+ * Performance: Timestamps are cached at the start of each request
+ * for consistent responses and reduced Date.now() calls.
  */
 export function createCircuitBreakerApiHandler(
   engine: CircuitBreakerEngineInterface
@@ -291,6 +348,8 @@ export function createCircuitBreakerApiHandler(
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url || '';
     const method = req.method || 'GET';
+    // Performance: Cache timestamp at request start for error responses
+    const timestamp = Date.now();
 
     try {
       // Route: GET /circuit-breaker
@@ -317,7 +376,7 @@ export function createCircuitBreakerApiHandler(
         if (url === '/circuit-breaker' || url === '/circuit-breaker/close' || url === '/circuit-breaker/open') {
           sendJson(res, 405, {
             error: 'Method not allowed',
-            timestamp: Date.now(),
+            timestamp,
           } as ErrorResponse);
           return;
         }
@@ -325,7 +384,7 @@ export function createCircuitBreakerApiHandler(
         // Unknown path under /circuit-breaker
         sendJson(res, 404, {
           error: 'Not found',
-          timestamp: Date.now(),
+          timestamp,
         } as ErrorResponse);
         return;
       }
@@ -333,12 +392,12 @@ export function createCircuitBreakerApiHandler(
       // Pass through to next handler (404 for unhandled)
       sendJson(res, 404, {
         error: 'Not found',
-        timestamp: Date.now(),
+        timestamp,
       } as ErrorResponse);
     } catch (error) {
       sendJson(res, 500, {
         error: `Internal server error: ${error instanceof Error ? error.message : 'unknown'}`,
-        timestamp: Date.now(),
+        timestamp,
       } as ErrorResponse);
     }
   };
