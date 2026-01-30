@@ -231,6 +231,8 @@ export class ChainDetectorInstance extends EventEmitter {
   // P0-PERF FIX: Token-indexed lookup for O(1) arbitrage pair matching
   // Key: normalized "token0_token1" where addresses are lowercase and alphabetically ordered
   private pairsByTokens: Map<string, ExtendedPair[]> = new Map();
+  // P2-FIX 3.3: Cached array of pair addresses to avoid repeated Array.from() calls
+  private pairAddressesCache: string[] = [];
 
   private status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   private eventsProcessed: number = 0;
@@ -639,6 +641,8 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairs.clear();
     this.pairsByAddress.clear();
     this.pairsByTokens.clear();
+    // P2-FIX 3.3: Clear cached pair addresses array
+    this.pairAddressesCache = [];
     // PERF-OPT: Clear snapshot cache to free memory
     this.snapshotCache = null;
     this.snapshotCacheTimestamp = 0;
@@ -1007,6 +1011,10 @@ export class ChainDetectorInstance extends EventEmitter {
       }
     }
 
+    // P2-FIX 3.3: Build cached pair addresses array once after loading all pairs
+    // This avoids repeated Array.from() calls in subscription methods
+    this.pairAddressesCache = Array.from(this.pairsByAddress.keys());
+
     this.logger.info(`Initialized ${this.pairs.size} pairs for monitoring`, {
       tokenPairGroups: this.pairsByTokens.size
     });
@@ -1121,7 +1129,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // Still subscribe to Sync/Swap events for existing pairs
     // These use the pair addresses we already have
-    const pairAddresses = Array.from(this.pairsByAddress.keys());
+    // P2-FIX 3.3: Use cached array instead of repeated Array.from()
+    const pairAddresses = this.pairAddressesCache;
 
     if (pairAddresses.length > 0) {
       // Subscribe to Sync events for existing pairs
@@ -1176,7 +1185,8 @@ export class ChainDetectorInstance extends EventEmitter {
     if (!this.wsManager) return;
 
     // Get monitored pair addresses for filtering
-    const pairAddresses = Array.from(this.pairsByAddress.keys());
+    // P2-FIX 3.3: Use cached array instead of repeated Array.from()
+    const pairAddresses = this.pairAddressesCache;
 
     // Subscribe to Sync events
     await this.wsManager.subscribe({
@@ -1274,6 +1284,8 @@ export class ChainDetectorInstance extends EventEmitter {
     // Add to tracking maps
     this.pairs.set(pairKey, newPair);
     this.pairsByAddress.set(pairAddressLower, newPair);
+    // P2-FIX 3.3: Also add to cached addresses array
+    this.pairAddressesCache.push(pairAddressLower);
 
     // P0-PERF FIX: Add to token-indexed lookup for O(1) arbitrage detection
     const tokenKey = this.getTokenPairKey(newPair.token0, newPair.token1);

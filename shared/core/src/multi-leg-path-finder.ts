@@ -93,6 +93,8 @@ interface PathState {
 interface ExecutionContext {
   startTime: number;
   tokenPairs: Map<string, DexPool[]>;
+  // P2-FIX 3.1: O(1) lookup index for pool by pair+dex (replaces O(n) .find())
+  poolByPairDex: Map<string, DexPool>;
 }
 
 /**
@@ -189,7 +191,9 @@ export class MultiLegPathFinder {
     // Previously startTime and tokenPairs were instance variables
     const ctx: ExecutionContext = {
       startTime: Date.now(),
-      tokenPairs: new Map()
+      tokenPairs: new Map(),
+      // P2-FIX 3.1: O(1) lookup index for pool by pair+dex
+      poolByPairDex: new Map(),
     };
 
     this.stats.totalCalls++;
@@ -214,7 +218,8 @@ export class MultiLegPathFinder {
     }
 
     // Group pools by token pairs for O(1) lookup
-    ctx.tokenPairs = this.groupPoolsByPairs(pools);
+    // P2-FIX 3.1: Pass ctx to also build poolByPairDex index
+    ctx.tokenPairs = this.groupPoolsByPairs(pools, ctx);
 
     // Count unique tokens
     const uniqueTokens = this.getUniqueTokens(pools);
@@ -609,8 +614,9 @@ export class MultiLegPathFinder {
 
   /**
    * Group pools by token pairs for O(1) lookup.
+   * P2-FIX 3.1: Also populates poolByPairDex for O(1) lookup by pair+dex.
    */
-  private groupPoolsByPairs(pools: DexPool[]): Map<string, DexPool[]> {
+  private groupPoolsByPairs(pools: DexPool[], ctx: ExecutionContext): Map<string, DexPool[]> {
     const pairs = new Map<string, DexPool[]>();
 
     for (const pool of pools) {
@@ -622,6 +628,13 @@ export class MultiLegPathFinder {
 
       pairs.get(pairKey)!.push(pool);
       pairs.get(reverseKey)!.push(pool);
+
+      // P2-FIX 3.1: Build O(1) index for pool by pair+dex
+      // Key format: "${pairKey}_${dex}" for direct lookup without iteration
+      const pairDexKey = `${pairKey}_${pool.dex}`;
+      const reverseDexKey = `${reverseKey}_${pool.dex}`;
+      ctx.poolByPairDex.set(pairDexKey, pool);
+      ctx.poolByPairDex.set(reverseDexKey, pool);
     }
 
     // Sort by liquidity
@@ -662,6 +675,7 @@ export class MultiLegPathFinder {
 
   /**
    * Get pools for a complete path.
+   * P2-FIX 3.1: Uses O(1) poolByPairDex index instead of O(n) .find()
    */
   private getPoolsForPath(
     tokens: string[],
@@ -673,8 +687,10 @@ export class MultiLegPathFinder {
 
     for (let i = 0; i < tokens.length - 1; i++) {
       const dex = dexes[i];
-      const poolsForPair = this.findBestPoolsForPair(tokens[i], tokens[i + 1], ctx);
-      const pool = poolsForPair.find(p => p.dex === dex);
+      // P2-FIX 3.1: O(1) lookup instead of O(n) .find()
+      const pairKey = `${tokens[i]}_${tokens[i + 1]}`;
+      const pairDexKey = `${pairKey}_${dex}`;
+      const pool = ctx.poolByPairDex.get(pairDexKey);
       if (pool) pools.push(pool);
     }
 

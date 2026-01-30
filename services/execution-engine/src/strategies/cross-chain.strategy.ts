@@ -45,10 +45,31 @@ import {
   BRIDGE_RECOVERY_MAX_AGE_MS,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
+// Phase 5.2: Flash loan support for destination chain
+import type { FlashLoanProviderFactory } from './flash-loan-providers/provider-factory';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
-  constructor(logger: Logger) {
+  // Phase 5.2: Optional flash loan provider factory for destination chain flash loans
+  private readonly flashLoanProviderFactory?: FlashLoanProviderFactory;
+
+  constructor(logger: Logger, flashLoanProviderFactory?: FlashLoanProviderFactory) {
     super(logger);
+    this.flashLoanProviderFactory = flashLoanProviderFactory;
+  }
+
+  /**
+   * Phase 5.2: Check if destination chain supports flash loans for the sell transaction.
+   * Using flash loans on destination chain provides:
+   * - Larger positions without holding capital on dest chain
+   * - Atomic execution (revert if unprofitable after bridge)
+   * - Reduced capital lockup during bridge waiting period
+   * - Protection against price movement during bridge delay
+   */
+  private isDestinationFlashLoanSupported(destChain: string): boolean {
+    if (!this.flashLoanProviderFactory) {
+      return false;
+    }
+    return this.flashLoanProviderFactory.isFullySupported(destChain);
   }
 
   async execute(
@@ -544,7 +565,23 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         amountIn: sellAmount,                    // Amount we received from bridge
         // Keep sell DEX reference
         buyDex: opportunity.sellDex || opportunity.buyDex,
+        // Phase 5.2: Set chain for sell opportunity
+        buyChain: destChain,
       };
+
+      // Phase 5.2: Check if destination chain supports flash loans
+      // Using flash loans provides atomic execution and protection against price movement
+      const useDestFlashLoan = this.isDestinationFlashLoanSupported(destChain);
+      if (useDestFlashLoan) {
+        this.logger.info('Destination chain supports flash loans - using atomic sell', {
+          opportunityId: opportunity.id,
+          destChain,
+          sellAmount,
+          bridgeToken,
+        });
+        // Mark the sell opportunity to use flash loan execution
+        sellOpportunity.useFlashLoan = true;
+      }
 
       const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, destChain, ctx);
 

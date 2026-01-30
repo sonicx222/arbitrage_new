@@ -86,6 +86,23 @@ export interface PriceUpdate {
   fee?: number; // DEX fee in decimal percentage (e.g., 0.003 = 0.3%)
 }
 
+/**
+ * Swap hop definition for N-hop flash loan execution.
+ * Phase 5.1: Supports triangular and multi-leg arbitrage paths.
+ *
+ * @see services/execution-engine/src/types.ts for full implementation
+ */
+export interface SwapHop {
+  /** DEX router address for this swap (optional if dex is provided) */
+  router?: string;
+  /** DEX name to resolve router from (used if router not specified) */
+  dex?: string;
+  /** Token to receive from this swap */
+  tokenOut: string;
+  /** Expected output amount for slippage calculation (optional) */
+  expectedOutput?: string;
+}
+
 export interface ArbitrageOpportunity {
   id: string;
   type?: 'simple' | 'cross-dex' | 'triangular' | 'quadrilateral' | 'multi-leg' | 'cross-chain' | 'predictive' | 'intra-dex' | 'flash-loan';
@@ -117,6 +134,12 @@ export interface ArbitrageOpportunity {
   bridgeCost?: number;
   /** Flag to force flash loan execution (Task 3.1.2) */
   useFlashLoan?: boolean;
+  /**
+   * Phase 5.1: N-hop swap path for triangular/multi-leg arbitrage.
+   * When present, FlashLoanStrategy uses buildNHopSwapSteps() for execution.
+   * The path must start with tokenIn and end with the same token (for flash loan repayment).
+   */
+  hops?: SwapHop[];
   // Additional fields for base-detector compatibility
   sourceChain?: string;
   targetChain?: string;

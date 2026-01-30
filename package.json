@@ -63,7 +63,8 @@
     "dev:partitions:down": "docker-compose -f docker-compose.partitions.yml down",
     "dev:partitions:logs": "docker-compose -f docker-compose.partitions.yml logs -f",
     "dev:partitions:status": "docker-compose -f docker-compose.partitions.yml ps",
-    "dev:partitions:restart": "docker-compose -f docker-compose.partitions.yml restart"
+    "dev:partitions:restart": "docker-compose -f docker-compose.partitions.yml restart",
+    "generate:error-selectors": "ts-node scripts/generate-error-selectors.ts"
   },
   "workspaces": [
     "shared/*",

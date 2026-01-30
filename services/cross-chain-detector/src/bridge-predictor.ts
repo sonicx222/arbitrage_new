@@ -1,7 +1,7 @@
 // Bridge Latency Prediction Engine
 // Uses machine learning to predict cross-chain bridge times and costs
 
-import { createLogger } from '@arbitrage/core';
+import { createLogger, CircularBuffer } from '@arbitrage/core';
 import { BridgeLatencyData, CrossChainBridge } from '@arbitrage/types';
 
 const logger = createLogger('bridge-predictor');
@@ -74,8 +74,12 @@ export interface BridgeMetrics {
   sampleCount: number;
 }
 
+// P2-FIX 3.2: Max history size for CircularBuffer
+const MAX_BRIDGE_HISTORY_SIZE = 1000;
+
 export class BridgeLatencyPredictor {
-  private bridgeHistory: Map<string, BridgeLatencyData[]> = new Map();
+  // P2-FIX 3.2: Use CircularBuffer for O(1) append instead of O(n) splice
+  private bridgeHistory: Map<string, CircularBuffer<BridgeLatencyData>> = new Map();
   private predictionModel: Map<string, any> = new Map(); // Simple statistical models
   private metricsCache: Map<string, BridgeMetrics> = new Map();
 
@@ -86,16 +90,18 @@ export class BridgeLatencyPredictor {
   // Predict latency and cost for a cross-chain bridge
   predictLatency(bridge: CrossChainBridge): BridgePrediction {
     const bridgeKey = `${bridge.sourceChain}-${bridge.targetChain}-${bridge.bridge}`;
-    const history = this.bridgeHistory.get(bridgeKey) || [];
+    const historyBuffer = this.bridgeHistory.get(bridgeKey);
 
-    if (history.length < 10) {
+    // P2-FIX 3.2: Use CircularBuffer size property
+    if (!historyBuffer || historyBuffer.size < 10) {
       // Not enough data, use conservative estimates
       return this.getConservativeEstimate(bridge);
     }
 
     // Use statistical model for prediction
     // NOTE: Per-prediction debug logging removed - fires during opportunity evaluation
-    return this.predictUsingModel(bridge, history);
+    // P2-FIX 3.2: Convert to array for model prediction
+    return this.predictUsingModel(bridge, historyBuffer.toArray());
   }
 
   // Update model with actual bridge completion data
@@ -108,11 +114,12 @@ export class BridgeLatencyPredictor {
   }): void {
     const bridgeKey = `${actualResult.bridge.sourceChain}-${actualResult.bridge.targetChain}-${actualResult.bridge.bridge}`;
 
+    // P2-FIX 3.2: Create CircularBuffer if not exists
     if (!this.bridgeHistory.has(bridgeKey)) {
-      this.bridgeHistory.set(bridgeKey, []);
+      this.bridgeHistory.set(bridgeKey, new CircularBuffer<BridgeLatencyData>(MAX_BRIDGE_HISTORY_SIZE));
     }
 
-    const history = this.bridgeHistory.get(bridgeKey)!;
+    const historyBuffer = this.bridgeHistory.get(bridgeKey)!;
     const dataPoint: BridgeLatencyData = {
       bridge: actualResult.bridge.bridge,
       sourceChain: actualResult.bridge.sourceChain,
@@ -127,37 +134,36 @@ export class BridgeLatencyPredictor {
       gasPrice: this.estimateGasPrice(actualResult.timestamp)
     };
 
-    history.push(dataPoint);
-
-    // FIX 10.4: Use splice instead of shift for better performance when trimming
-    // Batch trim when exceeding threshold to avoid frequent O(n) operations
-    const MAX_HISTORY_SIZE = 1000;
-    const TRIM_THRESHOLD = 1100; // Trim 100 entries at once
-    if (history.length > TRIM_THRESHOLD) {
-      history.splice(0, history.length - MAX_HISTORY_SIZE);
-    }
+    // P2-FIX 3.2: O(1) push with auto-eviction of oldest when full (replaces O(n) splice)
+    historyBuffer.pushOverwrite(dataPoint);
 
     // Update statistical model
-    this.updateStatisticalModel(bridgeKey, history);
+    // P2-FIX 3.2: Convert to array for model update
+    this.updateStatisticalModel(bridgeKey, historyBuffer.toArray());
 
     // Invalidate metrics cache
     this.metricsCache.delete(bridgeKey);
   }
 
   // Get bridge performance metrics
+  // P2-FIX 3.2: Updated to work with CircularBuffer
   getBridgeMetrics(bridgeKey: string): BridgeMetrics | null {
     if (this.metricsCache.has(bridgeKey)) {
       return this.metricsCache.get(bridgeKey)!;
     }
 
-    const history = this.bridgeHistory.get(bridgeKey);
-    if (!history || history.length === 0) {
+    const historyBuffer = this.bridgeHistory.get(bridgeKey);
+    // P2-FIX 3.2: Use CircularBuffer's size property
+    if (!historyBuffer || historyBuffer.size === 0) {
       return null;
     }
 
-    const successfulBridges = history.filter(h => h.success);
+    // P2-FIX 3.2: CircularBuffer has filter() method
+    const successfulBridges = historyBuffer.filter(h => h.success);
     const latencies = successfulBridges.map(h => h.latency);
     const costs = successfulBridges.map(h => h.cost);
+
+    const totalSize = historyBuffer.size;
 
     // B4-FIX: Handle case where all bridges failed (no successful bridges)
     // Return null if we have no successful bridges to calculate metrics from
@@ -170,7 +176,7 @@ export class BridgeLatencyPredictor {
         maxLatency: 0,
         avgCost: 0,
         successRate: 0,
-        sampleCount: history.length
+        sampleCount: totalSize
       };
       this.metricsCache.set(bridgeKey, failureMetrics);
       return failureMetrics;
@@ -182,8 +188,8 @@ export class BridgeLatencyPredictor {
       minLatency: Math.min(...latencies),
       maxLatency: Math.max(...latencies),
       avgCost: costs.reduce((a, b) => a + b, 0) / costs.length,
-      successRate: successfulBridges.length / history.length,
-      sampleCount: history.length
+      successRate: successfulBridges.length / totalSize,
+      sampleCount: totalSize
     };
 
     this.metricsCache.set(bridgeKey, metrics);
@@ -442,18 +448,30 @@ export class BridgeLatencyPredictor {
   }
 
   // Cleanup old data
+  // P2-FIX 3.2: Updated to work with CircularBuffer
   cleanup(maxAge: number = 30 * 24 * 60 * 60 * 1000): void { // 30 days
     const cutoffTime = Date.now() - maxAge;
 
-    for (const [bridgeKey, history] of this.bridgeHistory.entries()) {
-      const filteredHistory = history.filter(h => h.timestamp > cutoffTime);
-      this.bridgeHistory.set(bridgeKey, filteredHistory);
+    for (const [bridgeKey, historyBuffer] of this.bridgeHistory.entries()) {
+      // P2-FIX 3.2: CircularBuffer.filter() returns an array
+      const filteredData = historyBuffer.filter(h => h.timestamp > cutoffTime);
 
-      if (filteredHistory.length === 0) {
+      if (filteredData.length === 0) {
+        // No recent data - remove the bridge entirely
         this.bridgeHistory.delete(bridgeKey);
         this.predictionModel.delete(bridgeKey);
         this.metricsCache.delete(bridgeKey);
+      } else if (filteredData.length < historyBuffer.size) {
+        // Some old data removed - create new buffer with filtered data
+        const newBuffer = new CircularBuffer<BridgeLatencyData>(MAX_BRIDGE_HISTORY_SIZE);
+        for (const dataPoint of filteredData) {
+          newBuffer.pushOverwrite(dataPoint);
+        }
+        this.bridgeHistory.set(bridgeKey, newBuffer);
+        // Invalidate caches since data changed
+        this.metricsCache.delete(bridgeKey);
       }
+      // If filteredData.length === historyBuffer.size, no cleanup needed
     }
 
     logger.info('Bridge predictor cleanup completed', {
