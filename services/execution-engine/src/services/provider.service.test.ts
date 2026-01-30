@@ -311,13 +311,13 @@ describe('ProviderServiceImpl - Health Map', () => {
   });
 
   test('should return copy of health map', () => {
-    // Set up some health data
-    (service as any).providerHealth.set('chain1', {
+    // Set up some health data using the helper method
+    (service as any).updateProviderHealth('chain1', {
       healthy: true,
       lastCheck: Date.now(),
       consecutiveFailures: 0,
     });
-    (service as any).providerHealth.set('chain2', {
+    (service as any).updateProviderHealth('chain2', {
       healthy: false,
       lastCheck: Date.now(),
       consecutiveFailures: 2,
@@ -332,11 +332,124 @@ describe('ProviderServiceImpl - Health Map', () => {
     expect(healthMap.get('chain2')?.healthy).toBe(false);
   });
 
-  test('should count healthy providers correctly', () => {
-    (service as any).providerHealth.set('chain1', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
-    (service as any).providerHealth.set('chain2', { healthy: false, lastCheck: 0, consecutiveFailures: 1 });
-    (service as any).providerHealth.set('chain3', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
+  /**
+   * Fix 10.2: Test that healthy count uses cached value and updates correctly.
+   */
+  test('should count healthy providers correctly with cached count (Fix 10.2)', () => {
+    // Use the helper method which updates the cache
+    (service as any).updateProviderHealth('chain1', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
+    (service as any).updateProviderHealth('chain2', { healthy: false, lastCheck: 0, consecutiveFailures: 1 });
+    (service as any).updateProviderHealth('chain3', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
 
     expect(service.getHealthyCount()).toBe(2);
+
+    // Now transition chain2 to healthy
+    (service as any).updateProviderHealth('chain2', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
+    expect(service.getHealthyCount()).toBe(3);
+
+    // Transition chain1 to unhealthy
+    (service as any).updateProviderHealth('chain1', { healthy: false, lastCheck: 0, consecutiveFailures: 1 });
+    expect(service.getHealthyCount()).toBe(2);
+  });
+
+  /**
+   * Fix 10.2: Test that clear() resets the cached healthy count.
+   */
+  test('should reset cached healthy count on clear (Fix 10.2)', () => {
+    (service as any).updateProviderHealth('chain1', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
+    expect(service.getHealthyCount()).toBe(1);
+
+    service.clear();
+
+    expect(service.getHealthyCount()).toBe(0);
+  });
+});
+
+// =============================================================================
+// Test Suite: Health Check Guard (Fix 5.2)
+// =============================================================================
+
+describe('ProviderServiceImpl - Health Check Guard (Fix 5.2)', () => {
+  let service: ProviderServiceImpl;
+  let mockConfig: ProviderServiceConfig;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers();
+    mockConfig = createMockConfig();
+    service = new ProviderServiceImpl(mockConfig);
+  });
+
+  afterEach(() => {
+    service.clear();
+    jest.useRealTimers();
+  });
+
+  /**
+   * Fix 5.2: Test that concurrent health checks are prevented.
+   */
+  test('should skip health check if previous check is still in progress', async () => {
+    const slowHealthCheck = jest.fn<() => Promise<number>>().mockImplementation(
+      () => new Promise(resolve => setTimeout(() => resolve(12345), 60000))
+    );
+
+    const mockProvider = { getBlockNumber: slowHealthCheck };
+
+    // Set up provider
+    (service as any).providers.set('testchain', mockProvider);
+    (service as any).providerHealth.set('testchain', {
+      healthy: true,
+      lastCheck: Date.now(),
+      consecutiveFailures: 0,
+    });
+
+    // Start health checks
+    service.startHealthChecks();
+
+    // First interval fires - starts slow health check
+    jest.advanceTimersByTime(30000);
+
+    // Second interval fires - should skip due to guard
+    jest.advanceTimersByTime(30000);
+
+    // The slow health check should only have been called once
+    // (second call was skipped due to isCheckingHealth guard)
+    expect(slowHealthCheck).toHaveBeenCalledTimes(1);
+
+    // Check the debug log was called for skipping
+    expect(mockConfig.logger.debug).toHaveBeenCalledWith(
+      'Skipping health check - previous check still in progress'
+    );
+  });
+
+  /**
+   * Fix 5.2: Test that guard is reset after health check cycle completes.
+   * Verifies isCheckingHealth flag is properly reset in finally block.
+   */
+  test('should reset guard after health check cycle completes', async () => {
+    const fastHealthCheck = jest.fn<() => Promise<number>>().mockResolvedValue(12345);
+    const mockProvider = { getBlockNumber: fastHealthCheck };
+
+    (service as any).providers.set('testchain', mockProvider);
+    (service as any).providerHealth.set('testchain', {
+      healthy: true,
+      lastCheck: Date.now(),
+      consecutiveFailures: 0,
+    });
+
+    // Verify initial state - guard should be false
+    expect((service as any).isCheckingHealth).toBe(false);
+
+    // Manually simulate what the interval does
+    (service as any).isCheckingHealth = true;
+    try {
+      await (service as any).checkAndReconnectProvider('testchain', mockProvider);
+    } finally {
+      (service as any).isCheckingHealth = false;
+    }
+
+    // Guard should be reset after completion
+    expect((service as any).isCheckingHealth).toBe(false);
+    expect(fastHealthCheck).toHaveBeenCalledTimes(1);
   });
 });

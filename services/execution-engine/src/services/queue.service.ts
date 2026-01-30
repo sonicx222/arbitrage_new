@@ -186,19 +186,33 @@ export class QueueServiceImpl implements QueueService {
    * isProcessingQueue flag, so we don't need the async delay.
    *
    * This saves ~1-4ms latency per item in competitive arbitrage scenarios.
+   *
+   * Fix 10.1: Added try-catch to prevent callback exceptions from:
+   * 1. Crashing the enqueue operation
+   * 2. Leaving the queue in an inconsistent state (item added but signal failed)
    */
   private signalItemAvailable(): void {
     if (this.itemAvailableCallback && !this.isPaused()) {
-      // Direct call - callback is expected to have re-entrancy protection
-      this.itemAvailableCallback();
+      try {
+        // Direct call - callback is expected to have re-entrancy protection
+        this.itemAvailableCallback();
+      } catch (error) {
+        // Fix 10.1: Log but don't throw - item is already in queue
+        this.logger.error('itemAvailableCallback threw an exception', {
+          error: error instanceof Error ? error.message : String(error),
+          queueSize: this.queue.length,
+        });
+      }
     }
   }
 
   /**
    * Update backpressure state based on queue size.
    * Uses hysteresis to prevent thrashing:
-   * - Pause at high water mark
-   * - Resume at low water mark (not immediately when below high)
+   * - Pause when queue size >= highWaterMark (at or above)
+   * - Resume when queue size <= lowWaterMark (at or below)
+   *
+   * Fix 6.3: Clarified comments to match code behavior (>= and <= thresholds).
    */
   private updateBackpressure(): void {
     const queueSize = this.queue.length;

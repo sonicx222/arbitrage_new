@@ -47,6 +47,18 @@ export class ProviderServiceImpl implements IProviderService {
   // Callback for provider reconnection (allows engine to clear stale state)
   private onProviderReconnectCallback: ((chainName: string) => void) | null = null;
 
+  /**
+   * Fix 5.2: Guard to prevent concurrent health check iterations.
+   * If health check takes longer than interval, skip the overlapping check.
+   */
+  private isCheckingHealth = false;
+
+  /**
+   * Fix 10.2: Cached healthy provider count for O(1) access.
+   * Updated whenever provider health changes.
+   */
+  private cachedHealthyCount = 0;
+
   constructor(config: ProviderServiceConfig) {
     this.logger = config.logger;
     this.stateManager = config.stateManager;
@@ -72,6 +84,7 @@ export class ProviderServiceImpl implements IProviderService {
         this.providers.set(chainName, provider);
 
         // Initialize health tracking for this provider
+        // Note: Use direct set here since this is initial state (no previous health to compare)
         this.providerHealth.set(chainName, {
           healthy: false, // Will be verified in validateConnectivity
           lastCheck: 0,
@@ -79,6 +92,7 @@ export class ProviderServiceImpl implements IProviderService {
         });
       } catch (error) {
         this.logger.warn(`Failed to initialize provider for ${chainName}`, { error });
+        // Note: Use direct set here since this is initial state
         this.providerHealth.set(chainName, {
           healthy: false,
           lastCheck: Date.now(),
@@ -110,8 +124,8 @@ export class ProviderServiceImpl implements IProviderService {
           )
         ]);
 
-        // Mark as healthy
-        this.providerHealth.set(chainName, {
+        // Mark as healthy - Fix 10.2: Use helper to update cache
+        this.updateProviderHealth(chainName, {
           healthy: true,
           lastCheck: Date.now(),
           consecutiveFailures: 0
@@ -120,13 +134,13 @@ export class ProviderServiceImpl implements IProviderService {
 
         this.logger.debug(`Provider connectivity verified for ${chainName}`);
       } catch (error) {
-        // Mark as unhealthy
+        // Mark as unhealthy - Fix 10.2: Use helper to update cache
         const health = this.providerHealth.get(chainName) || {
           healthy: false,
           lastCheck: 0,
           consecutiveFailures: 0
         };
-        this.providerHealth.set(chainName, {
+        this.updateProviderHealth(chainName, {
           ...health,
           healthy: false,
           lastCheck: Date.now(),
@@ -157,6 +171,10 @@ export class ProviderServiceImpl implements IProviderService {
 
   /**
    * Start periodic provider health checks for reconnection.
+   *
+   * Fix 5.2: Added guard to prevent concurrent health check iterations.
+   * If a health check cycle takes longer than 30 seconds (e.g., slow RPCs,
+   * reconnection attempts), skip the overlapping check to prevent state corruption.
    */
   startHealthChecks(): void {
     // Check provider health every 30 seconds
@@ -164,13 +182,24 @@ export class ProviderServiceImpl implements IProviderService {
       // Early exit if not running
       if (!this.stateManager.isRunning()) return;
 
-      for (const [chainName, provider] of this.providers) {
-        // Check state before each provider check to abort early during shutdown
-        if (!this.stateManager.isRunning()) {
-          this.logger.debug('Aborting provider health checks - service stopping');
-          return;
+      // Fix 5.2: Skip if previous health check is still running
+      if (this.isCheckingHealth) {
+        this.logger.debug('Skipping health check - previous check still in progress');
+        return;
+      }
+
+      this.isCheckingHealth = true;
+      try {
+        for (const [chainName, provider] of this.providers) {
+          // Check state before each provider check to abort early during shutdown
+          if (!this.stateManager.isRunning()) {
+            this.logger.debug('Aborting provider health checks - service stopping');
+            return;
+          }
+          await this.checkAndReconnectProvider(chainName, provider);
         }
-        await this.checkAndReconnectProvider(chainName, provider);
+      } finally {
+        this.isCheckingHealth = false;
       }
     }, 30000);
   }
@@ -212,7 +241,8 @@ export class ProviderServiceImpl implements IProviderService {
         });
       }
 
-      this.providerHealth.set(chainName, {
+      // Fix 10.2: Use helper to update cache
+      this.updateProviderHealth(chainName, {
         healthy: true,
         lastCheck: Date.now(),
         consecutiveFailures: 0
@@ -220,7 +250,8 @@ export class ProviderServiceImpl implements IProviderService {
     } catch (error) {
       // Provider unhealthy - attempt reconnection
       const newFailures = health.consecutiveFailures + 1;
-      this.providerHealth.set(chainName, {
+      // Fix 10.2: Use helper to update cache
+      this.updateProviderHealth(chainName, {
         healthy: false,
         lastCheck: Date.now(),
         consecutiveFailures: newFailures,
@@ -263,7 +294,8 @@ export class ProviderServiceImpl implements IProviderService {
 
       // Replace old provider
       this.providers.set(chainName, newProvider);
-      this.providerHealth.set(chainName, {
+      // Fix 10.2: Use helper to update cache
+      this.updateProviderHealth(chainName, {
         healthy: true,
         lastCheck: Date.now(),
         consecutiveFailures: 0
@@ -358,12 +390,33 @@ export class ProviderServiceImpl implements IProviderService {
     return new Map(this.providerHealth);
   }
 
+  /**
+   * Get count of healthy providers.
+   *
+   * Fix 10.2: Returns cached count for O(1) access instead of O(n) iteration.
+   * Cache is updated automatically via updateProviderHealth().
+   */
   getHealthyCount(): number {
-    let count = 0;
-    for (const health of this.providerHealth.values()) {
-      if (health.healthy) count++;
+    return this.cachedHealthyCount;
+  }
+
+  /**
+   * Fix 10.2: Update provider health and recalculate cached healthy count.
+   * This ensures the count stays in sync with health changes.
+   */
+  private updateProviderHealth(chainName: string, health: ProviderHealth): void {
+    const previousHealth = this.providerHealth.get(chainName);
+    const wasHealthy = previousHealth?.healthy ?? false;
+    const isNowHealthy = health.healthy;
+
+    this.providerHealth.set(chainName, health);
+
+    // Update cached count based on health transition
+    if (!wasHealthy && isNowHealthy) {
+      this.cachedHealthyCount++;
+    } else if (wasHealthy && !isNowHealthy) {
+      this.cachedHealthyCount--;
     }
-    return count;
   }
 
   registerWallet(chain: string, wallet: ethers.Wallet): void {
@@ -393,5 +446,7 @@ export class ProviderServiceImpl implements IProviderService {
     this.providers.clear();
     this.wallets.clear();
     this.providerHealth.clear();
+    // Fix 10.2: Reset cached count
+    this.cachedHealthyCount = 0;
   }
 }

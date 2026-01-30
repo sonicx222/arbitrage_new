@@ -131,6 +131,17 @@ export function createSimulationMetricsCollector(
   } = config;
 
   let collectionInterval: NodeJS.Timeout | null = null;
+  /**
+   * Internal stopped flag for this collector instance.
+   *
+   * Analysis Note (Finding 1.1): This variable IS used correctly:
+   * - Set to false in start() to indicate collector is active
+   * - Set to true in stop() to prevent double-stopping
+   * - Checked in stop() to short-circuit if already stopped
+   *
+   * This is DISTINCT from stateManager.isRunning() which tracks the PARENT
+   * service state. The `stopped` flag tracks THIS collector's state.
+   */
   let stopped = false;
 
   // ===========================================================================

@@ -5,9 +5,8 @@
  * with health scoring and automatic fallback.
  */
 
-// @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { ethers } from 'ethers';
+import type { Mock } from 'jest-mock';
 import { SimulationService } from './simulation.service';
 import type {
   ISimulationProvider,
@@ -15,60 +14,65 @@ import type {
   SimulationResult,
   SimulationProviderHealth,
   SimulationMetrics,
-  SimulationServiceConfig,
   SimulationProviderType,
 } from './types';
+import type { Logger } from '../../types';
 
 // =============================================================================
 // Mock Provider Factory
 // =============================================================================
 
-type MockedProvider = {
-  type: SimulationProviderType;
-  chain: string;
-  isEnabled: jest.Mock;
-  simulate: jest.Mock;
-  getHealth: jest.Mock;
-  getMetrics: jest.Mock;
-  resetMetrics: jest.Mock;
-  healthCheck: jest.Mock;
-};
+/**
+ * Mock provider type with properly typed Jest mock functions.
+ * Fix: Removed @ts-nocheck by using proper type definitions.
+ */
+interface MockedProvider extends ISimulationProvider {
+  isEnabled: Mock<() => boolean>;
+  simulate: Mock<(request: SimulationRequest) => Promise<SimulationResult>>;
+  getHealth: Mock<() => SimulationProviderHealth>;
+  getMetrics: Mock<() => SimulationMetrics>;
+  resetMetrics: Mock<() => void>;
+  healthCheck: Mock<() => Promise<{ healthy: boolean; message: string }>>;
+}
 
 const createMockProvider = (
   type: SimulationProviderType,
   _overrides: Partial<ISimulationProvider> = {}
-): MockedProvider => ({
-  type,
-  chain: 'ethereum',
-  isEnabled: jest.fn().mockReturnValue(true),
-  simulate: jest.fn().mockResolvedValue({
-    success: true,
-    wouldRevert: false,
-    provider: type,
-    latencyMs: 100,
-  } as SimulationResult),
-  getHealth: jest.fn().mockReturnValue({
-    healthy: true,
-    lastCheck: Date.now(),
-    consecutiveFailures: 0,
-    averageLatencyMs: 100,
-    successRate: 1.0,
-  } as SimulationProviderHealth),
-  getMetrics: jest.fn().mockReturnValue({
-    totalSimulations: 0,
-    successfulSimulations: 0,
-    failedSimulations: 0,
-    predictedReverts: 0,
-    averageLatencyMs: 0,
-    fallbackUsed: 0,
-    cacheHits: 0,
-    lastUpdated: Date.now(),
-  } as SimulationMetrics),
-  resetMetrics: jest.fn(),
-  healthCheck: jest.fn().mockResolvedValue({ healthy: true, message: 'OK' }),
-});
+): MockedProvider => {
+  const provider: MockedProvider = {
+    type,
+    chain: 'ethereum',
+    isEnabled: jest.fn<() => boolean>().mockReturnValue(true),
+    simulate: jest.fn<(request: SimulationRequest) => Promise<SimulationResult>>().mockResolvedValue({
+      success: true,
+      wouldRevert: false,
+      provider: type,
+      latencyMs: 100,
+    }),
+    getHealth: jest.fn<() => SimulationProviderHealth>().mockReturnValue({
+      healthy: true,
+      lastCheck: Date.now(),
+      consecutiveFailures: 0,
+      averageLatencyMs: 100,
+      successRate: 1.0,
+    }),
+    getMetrics: jest.fn<() => SimulationMetrics>().mockReturnValue({
+      totalSimulations: 0,
+      successfulSimulations: 0,
+      failedSimulations: 0,
+      predictedReverts: 0,
+      averageLatencyMs: 0,
+      fallbackUsed: 0,
+      cacheHits: 0,
+      lastUpdated: Date.now(),
+    }),
+    resetMetrics: jest.fn<() => void>(),
+    healthCheck: jest.fn<() => Promise<{ healthy: boolean; message: string }>>().mockResolvedValue({ healthy: true, message: 'OK' }),
+  };
+  return provider;
+};
 
-const createMockLogger = () => ({
+const createMockLogger = (): Logger => ({
   info: jest.fn(),
   error: jest.fn(),
   warn: jest.fn(),
@@ -95,7 +99,7 @@ describe('SimulationService', () => {
   let service: SimulationService;
   let mockTenderlyProvider: MockedProvider;
   let mockAlchemyProvider: MockedProvider;
-  let mockLogger: ReturnType<typeof createMockLogger>;
+  let mockLogger: Logger;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -784,6 +788,134 @@ describe('SimulationService', () => {
       await service.simulate(request1);
       await service.simulate(request2);
       expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // ===========================================================================
+  // Request Coalescing Tests (Fix 5.1)
+  // ===========================================================================
+
+  describe('request coalescing (Fix 5.1)', () => {
+    test('should coalesce concurrent requests for the same simulation', async () => {
+      // Set up a slow provider that takes 200ms
+      let resolveSimulation: (result: SimulationResult) => void;
+      mockTenderlyProvider.simulate.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveSimulation = resolve;
+          })
+      );
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 5000,
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      // Start two concurrent requests for the same simulation
+      const promise1 = service.simulate(request);
+      const promise2 = service.simulate(request);
+
+      // Verify only ONE simulation call was made (second was coalesced)
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1);
+
+      // Resolve the simulation
+      resolveSimulation!({
+        success: true,
+        wouldRevert: false,
+        provider: 'tenderly',
+        latencyMs: 200,
+      });
+
+      // Both promises should resolve with the same result
+      const [result1, result2] = await Promise.all([promise1, promise2]);
+      expect(result1).toEqual(result2);
+      expect(result1.success).toBe(true);
+
+      // Verify coalescing was logged
+      expect(mockLogger.debug).toHaveBeenCalledWith(
+        'Simulation request coalesced',
+        expect.any(Object)
+      );
+    });
+
+    test('should not coalesce requests for different simulations', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          cacheTtlMs: 5000,
+        },
+      });
+
+      const request1 = createSimulationRequest({
+        transaction: {
+          from: '0x1111111111111111111111111111111111111111',
+          to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+          data: '0x12345678',
+          value: 0n,
+          gasLimit: 200000n,
+        },
+      });
+
+      const request2 = createSimulationRequest({
+        transaction: {
+          from: '0x2222222222222222222222222222222222222222',
+          to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
+          data: '0x12345678',
+          value: 0n,
+          gasLimit: 200000n,
+        },
+      });
+
+      // Different requests should not coalesce
+      await Promise.all([service.simulate(request1), service.simulate(request2)]);
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(2);
+    });
+
+    test('should clean up pending requests after completion', async () => {
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+      });
+
+      const request = createSimulationRequest();
+
+      // First request
+      await service.simulate(request);
+
+      // Verify pending requests map is empty
+      expect((service as any).pendingRequests.size).toBe(0);
+
+      // Second request should trigger new simulation (not coalesce with completed one)
+      await service.simulate(request);
+
+      // Should have been called once for first, then hit cache for second
+      // (cache hit, not coalescing)
+      expect(mockTenderlyProvider.simulate).toHaveBeenCalledTimes(1);
+    });
+
+    test('should clean up pending requests even on error', async () => {
+      mockTenderlyProvider.simulate.mockRejectedValue(new Error('API error'));
+
+      service = new SimulationService({
+        providers: [mockTenderlyProvider],
+        logger: mockLogger as any,
+        config: {
+          useFallback: false,
+        },
+      });
+
+      const request = createSimulationRequest();
+
+      await service.simulate(request);
+
+      // Verify pending requests map is empty even after error
+      expect((service as any).pendingRequests.size).toBe(0);
     });
   });
 

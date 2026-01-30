@@ -22,6 +22,8 @@ import {
   SimulationProviderType,
   SIMULATION_DEFAULTS,
   createCancellableTimeout,
+  isDeprecatedChain,
+  getDeprecationWarning,
 } from './types';
 
 // =============================================================================
@@ -95,6 +97,15 @@ export class SimulationService implements ISimulationService {
 
   // Simulation result cache for request deduplication
   private readonly simulationCache = new Map<string, CacheEntry>();
+
+  /**
+   * Fix 5.1: Pending request map for request coalescing.
+   * If two requests for the same key arrive simultaneously:
+   * - First request starts simulation, stores promise in pendingRequests
+   * - Second request finds pending promise, awaits it instead of starting new simulation
+   * This prevents wasted work under high load and avoids race conditions.
+   */
+  private readonly pendingRequests = new Map<string, Promise<SimulationResult>>();
 
   /**
    * Fix 4.2: Periodic cache cleanup interval.
@@ -234,11 +245,25 @@ export class SimulationService implements ISimulationService {
   }
 
   /**
-   * Simulate a transaction using the best available provider
+   * Simulate a transaction using the best available provider.
+   *
+   * Fix 5.1: Implements request coalescing to prevent duplicate simulations.
+   * If a simulation for the same request is already in progress, the caller
+   * waits for that result instead of starting a duplicate simulation.
    */
   async simulate(request: SimulationRequest): Promise<SimulationResult> {
     if (this.stopped) {
       return this.createErrorResult('Simulation service is stopped');
+    }
+
+    // Fix: Warn about deprecated chains (e.g., Goerli)
+    if (isDeprecatedChain(request.chain)) {
+      const warning = getDeprecationWarning(request.chain);
+      this.logger.warn('Deprecated chain detected', {
+        chain: request.chain,
+        warning,
+        hint: 'Update to a supported chain to avoid unexpected behavior',
+      });
     }
 
     // Check cache first (only for successful results)
@@ -250,6 +275,33 @@ export class SimulationService implements ISimulationService {
       return cached;
     }
 
+    // Fix 5.1: Check if simulation is already in progress for this key
+    const pending = this.pendingRequests.get(cacheKey);
+    if (pending) {
+      this.logger.debug('Simulation request coalesced', { cacheKey });
+      return pending;
+    }
+
+    // Fix 5.1: Create promise for this simulation and store in pending map
+    const simulationPromise = this.executeSimulationWithFallback(request, cacheKey);
+    this.pendingRequests.set(cacheKey, simulationPromise);
+
+    try {
+      return await simulationPromise;
+    } finally {
+      // Fix 5.1: Always clean up pending request
+      this.pendingRequests.delete(cacheKey);
+    }
+  }
+
+  /**
+   * Fix 5.1: Internal method that executes simulation with fallback logic.
+   * Extracted from simulate() to support request coalescing.
+   */
+  private async executeSimulationWithFallback(
+    request: SimulationRequest,
+    cacheKey: string
+  ): Promise<SimulationResult> {
     // Get ordered list of providers to try
     const orderedProviders = this.getOrderedProviders();
 
@@ -344,6 +396,9 @@ export class SimulationService implements ISimulationService {
    *
    * Fix 10.4: Uses caching to avoid iteration on every shouldSimulate() call.
    * Cache is invalidated when provider order is invalidated (on failure).
+   *
+   * Analysis Note (Finding 10.4): This optimization is ALREADY implemented.
+   * The hasEnabledProviderCache avoids O(n) provider iteration on hot-path.
    */
   private hasEnabledProvider(): boolean {
     const now = Date.now();
@@ -439,6 +494,9 @@ export class SimulationService implements ISimulationService {
 
     // Clear the cache to free memory
     this.simulationCache.clear();
+
+    // Fix 5.1: Clear pending requests (they will reject on next await)
+    this.pendingRequests.clear();
 
     this.logger.info('SimulationService stopped');
   }
@@ -639,6 +697,10 @@ export class SimulationService implements ISimulationService {
    *
    * Fix 9.4 + Fix 4.3: Improved key generation to avoid collisions.
    * Uses length-prefixed fields for ALL values to prevent collisions.
+   *
+   * Analysis Note (Finding 10.3): Cache key optimization is ALREADY implemented.
+   * The length-prefixed format avoids expensive JSON.stringify() and provides
+   * O(1) key construction with collision-proof semantics.
    *
    * Key is based on chain, transaction params, and block number.
    */

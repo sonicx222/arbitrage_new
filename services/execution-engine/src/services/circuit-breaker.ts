@@ -226,27 +226,32 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
 
   /**
    * Transition to a new state
+   *
+   * Performance optimization: Cache Date.now() at start of function
+   * to avoid multiple system calls (each Date.now() is a syscall).
    */
   function transitionTo(newState: CircuitBreakerState, reason: string): void {
     if (state === newState) return;
 
+    // Performance: Cache timestamp once for all operations in this transition
+    const now = Date.now();
     const previousState = state;
 
     // Track time in OPEN state
     if (previousState === 'OPEN' && openedAt !== null) {
-      totalOpenTimeMs += Date.now() - openedAt;
+      totalOpenTimeMs += now - openedAt;
       openedAt = null;
     }
 
     // Set new state
     state = newState;
-    lastStateChange = Date.now();
+    lastStateChange = now;
 
     // Handle state entry
     if (newState === 'OPEN') {
-      openedAt = Date.now();
+      openedAt = now;
       timesTripped++;
-      lastTrippedAt = Date.now();
+      lastTrippedAt = now;
     } else if (newState === 'HALF_OPEN') {
       halfOpenAttempts = 0;
     }
@@ -428,9 +433,20 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
         break;
 
       case 'OPEN':
-        // Success while OPEN (shouldn't happen normally) - no-op
-        logger.debug('Success recorded while circuit OPEN (ignoring)', {
+        // Fix 4.3: Document edge case where success can be recorded while OPEN.
+        //
+        // This CAN happen legitimately in the following scenario:
+        // 1. Thread A calls canExecute() → returns false (circuit OPEN)
+        // 2. Cooldown expires, Thread B calls canExecute() → transitions to HALF_OPEN, returns true
+        // 3. Thread A's stale execution (started before circuit opened) completes successfully
+        // 4. Thread A calls recordSuccess() but circuit is now HALF_OPEN (not OPEN)
+        //
+        // However, if the circuit is truly in OPEN state when recordSuccess is called,
+        // it means there's a logic error in the caller (executing when canExecute() was false).
+        // We log and ignore rather than throw to avoid cascading failures.
+        logger.debug('Success recorded while circuit OPEN (ignoring - possible stale execution)', {
           state,
+          hint: 'This can occur when execution started before circuit opened',
         });
         break;
     }

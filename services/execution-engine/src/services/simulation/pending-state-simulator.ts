@@ -23,6 +23,7 @@ import type { Logger } from '../../types';
 // Fix 6.3: Import shared rolling average utility
 // Fix 6.2: Import getSimulationErrorMessage for consistent error handling
 // Fix 9.4: Import extractRevertReason for consistent revert reason extraction
+// Fix: Import BaseMetrics for metrics interface consistency
 import {
   isWethAddress,
   createCancellableTimeout,
@@ -30,6 +31,7 @@ import {
   updateRollingAverage,
   getSimulationErrorMessage,
   extractRevertReason,
+  BaseMetrics,
 } from './types';
 
 // =============================================================================
@@ -182,12 +184,15 @@ export interface PoolInfo {
 /**
  * Metrics for simulator operations.
  */
-export interface SimulatorMetrics {
+/**
+ * Metrics for pending state simulator operations.
+ * @extends BaseMetrics for consistency with other metrics interfaces
+ */
+export interface SimulatorMetrics extends BaseMetrics {
   totalSimulations: number;
   successfulSimulations: number;
   failedSimulations: number;
   averageLatencyMs: number;
-  lastUpdated: number;
 }
 
 // =============================================================================
@@ -243,6 +248,12 @@ export class PendingStateSimulator {
   /**
    * Fix 10.5: Pool of reusable snapshots for simulation.
    * Instead of creating new snapshots each time, reuse existing ones.
+   *
+   * Analysis Note (Finding 4.1): This snapshot pool provides implicit mutex
+   * protection for batch simulations. Each simulation acquires a snapshot from
+   * the pool, uses it exclusively, then returns it. This prevents race conditions
+   * where concurrent simulations could invalidate each other's snapshots.
+   * The pool size limits concurrent simulations, providing natural backpressure.
    */
   private readonly snapshotPool: string[];
   private readonly maxSnapshotPoolSize: number;
@@ -348,29 +359,52 @@ export class PendingStateSimulator {
    *
    * Fix 4.3: After reverting, create a NEW snapshot and add that to the pool,
    * rather than trying to reuse the consumed snapshot ID.
+   *
+   * Fix: Improved error handling to ensure pool refill failures don't affect
+   * the overall release operation, and log warnings when pool runs low.
    */
   private async releaseSnapshot(snapshotId: string): Promise<void> {
+    let revertSucceeded = false;
+
     try {
       // Revert to snapshot to restore clean state (this CONSUMES the snapshot)
       await this.anvilManager.revertToSnapshot(snapshotId);
-
-      // Fix 4.3: The original snapshotId is now INVALID (consumed by revert).
-      // Create a NEW snapshot from the clean state to add to the pool.
-      if (this.snapshotPool.length < this.maxSnapshotPoolSize) {
-        const newSnapshot = await this.anvilManager.createSnapshot();
-        this.snapshotPool.push(newSnapshot);
-      }
-      // Otherwise don't create new snapshot (pool is full, save resources)
+      revertSucceeded = true;
     } catch (error) {
       // Fix 4.1: Log snapshot release failures for debugging and monitoring.
       // If revert fails, don't add to pool (state may be corrupted).
       // This can happen if Anvil process crashed or network issues occurred.
-      this.logger.warn('Failed to release snapshot', {
+      this.logger.warn('Failed to revert snapshot', {
         snapshotId,
         error: getSimulationErrorMessage(error),
         poolSize: this.snapshotPool.length,
         maxPoolSize: this.maxSnapshotPoolSize,
       });
+      return; // Don't attempt to create new snapshot if revert failed
+    }
+
+    // Fix 4.3: The original snapshotId is now INVALID (consumed by revert).
+    // Create a NEW snapshot from the clean state to add to the pool.
+    if (revertSucceeded && this.snapshotPool.length < this.maxSnapshotPoolSize) {
+      try {
+        const newSnapshot = await this.anvilManager.createSnapshot();
+        this.snapshotPool.push(newSnapshot);
+      } catch (createError) {
+        // Fix: Separate try-catch for snapshot creation to prevent silent failures
+        // Log warning but don't fail - pool will refill on subsequent releases
+        this.logger.warn('Failed to create snapshot for pool refill', {
+          error: getSimulationErrorMessage(createError),
+          poolSize: this.snapshotPool.length,
+          maxPoolSize: this.maxSnapshotPoolSize,
+        });
+
+        // Warn if pool is getting critically low
+        if (this.snapshotPool.length === 0) {
+          this.logger.error('Snapshot pool exhausted - performance may degrade', {
+            hint: 'Consider calling warmupSnapshotPool() or increasing maxSnapshotPoolSize',
+          });
+        }
+      }
     }
   }
 
@@ -531,12 +565,19 @@ export class PendingStateSimulator {
       // Fix 4.2: Always cancel timeout to prevent timer leak
       cancelTimeout();
 
-      // Revert to initial state
+      // Revert to initial state (batch snapshots are NOT pooled)
+      // Note: Unlike releaseSnapshot(), batch operations use dedicated snapshots
+      // that are consumed after revert. We intentionally don't add to pool here
+      // because batch ops may leave the state in an unpredictable condition.
       if (snapshotId) {
         try {
           await this.anvilManager.revertToSnapshot(snapshotId);
-        } catch {
-          // Cleanup error
+        } catch (cleanupError) {
+          // Fix: Log cleanup failures for debugging (was silently ignored)
+          this.logger.debug('Batch snapshot cleanup failed', {
+            snapshotId,
+            error: getSimulationErrorMessage(cleanupError),
+          });
         }
       }
     }

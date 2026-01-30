@@ -125,7 +125,7 @@ export interface StateOverride {
  *
  * @see Logger in ../../types.ts
  */
-import type { Logger } from '../../types';
+import { type Logger, createServiceLogger } from '../../types';
 
 /**
  * Type alias for Logger for backwards compatibility.
@@ -134,21 +134,18 @@ import type { Logger } from '../../types';
 export type SimulationLogger = Logger;
 
 /**
- * Console-based fallback logger.
- * Used when no logger is provided in config.
+ * Create a simulation service logger with the specified prefix.
  *
- * Fix 6.1: Structured console logger that matches SimulationLogger interface.
+ * Fix: Now uses standardized createServiceLogger from types.ts
+ * for consistent Pino-based structured logging across all services.
+ *
+ * @param prefix - Logger name/prefix (e.g., 'simulation-service', 'tenderly-provider')
+ * @returns Logger instance
+ *
+ * @deprecated Use createServiceLogger from '../../types' directly for new code
  */
-export const createConsoleLogger = (prefix: string): SimulationLogger => ({
-  info: (message: string, meta?: Record<string, unknown>) =>
-    console.log(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
-  warn: (message: string, meta?: Record<string, unknown>) =>
-    console.warn(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
-  error: (message: string, meta?: Record<string, unknown>) =>
-    console.error(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
-  debug: (message: string, meta?: Record<string, unknown>) =>
-    console.debug(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
-});
+export const createConsoleLogger = (prefix: string): SimulationLogger =>
+  createServiceLogger(`simulation:${prefix}`);
 
 /**
  * Configuration for simulation provider
@@ -206,9 +203,22 @@ export interface SimulationProviderHealth {
 }
 
 /**
- * Simulation provider metrics
+ * Base metrics interface that all metrics types should extend.
+ * Provides a common structure for metrics tracking across services.
+ *
+ * Fix: Added for consistency across SimulationMetrics, SynchronizerMetrics,
+ * and SimulatorMetrics interfaces.
  */
-export interface SimulationMetrics {
+export interface BaseMetrics {
+  /** Last updated timestamp (Unix ms) */
+  lastUpdated: number;
+}
+
+/**
+ * Simulation provider metrics
+ * @extends BaseMetrics
+ */
+export interface SimulationMetrics extends BaseMetrics {
   /** Total simulations attempted */
   totalSimulations: number;
   /** Successful simulations */
@@ -223,8 +233,6 @@ export interface SimulationMetrics {
   fallbackUsed: number;
   /** Cache hits (if caching enabled) */
   cacheHits: number;
-  /** Last updated timestamp */
-  lastUpdated: number;
 }
 
 // =============================================================================

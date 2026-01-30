@@ -20,6 +20,8 @@ export type {
   ISimulationProvider,
   SimulationServiceConfig,
   ISimulationService,
+  // Fix: Export BaseMetrics for consistent metrics interfaces across services
+  BaseMetrics,
 } from './types';
 
 export {

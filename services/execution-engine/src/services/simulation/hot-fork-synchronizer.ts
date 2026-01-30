@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import { createPinoLogger, CircularBuffer, type ILogger } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
+import type { BaseMetrics } from './types';
 
 // =============================================================================
 // Types
@@ -71,14 +72,15 @@ export interface HotForkSynchronizerConfig {
 
 /**
  * Synchronizer state.
+ * Fix: Added 'starting' state for async initialization tracking.
  */
-export type SynchronizerState = 'stopped' | 'running' | 'paused' | 'error';
+export type SynchronizerState = 'stopped' | 'starting' | 'running' | 'paused' | 'error';
 
 /**
  * Metrics for synchronizer operations.
- * Fix 6.3: Added lastUpdated field for consistency with other metrics interfaces.
+ * @extends BaseMetrics for consistency with other metrics interfaces
  */
-export interface SynchronizerMetrics {
+export interface SynchronizerMetrics extends BaseMetrics {
   /** Total sync attempts */
   totalSyncs: number;
   /** Successful syncs */
@@ -93,8 +95,6 @@ export interface SynchronizerMetrics {
   lastSyncTime: number;
   /** Average sync latency in ms */
   averageSyncLatencyMs: number;
-  /** Fix 6.3: Last updated timestamp (for consistency with other metrics interfaces) */
-  lastUpdated: number;
 }
 
 // =============================================================================
@@ -148,6 +148,11 @@ export class HotForkSynchronizer {
   private metrics: SynchronizerMetrics;
   private isSyncing: boolean = false;
   /**
+   * Fix: Track async start operation for autoStart race condition prevention.
+   * Consumers can await this promise to ensure the synchronizer is fully started.
+   */
+  private startPromise: Promise<void> | null = null;
+  /**
    * Fix 10.5 + Fix 4.2: Track block timestamps for adaptive interval calculation.
    * Uses CircularBuffer for O(1) pushOverwrite instead of O(n) array.shift().
    */
@@ -171,14 +176,49 @@ export class HotForkSynchronizer {
     // Fix 4.2: Initialize CircularBuffer for O(1) block timestamp tracking
     this.blockTimestamps = new CircularBuffer<number>(ADAPTIVE_WINDOW_SIZE);
 
+    /**
+     * Fix: autoStart race condition prevention.
+     * - Set state to 'starting' immediately to indicate async initialization
+     * - Track the start promise so consumers can await via waitForReady()
+     * - On failure, set state to 'error' for visibility
+     */
     if (config.autoStart) {
-      this.start().catch((err) => {
-        // Fix 3.2: Use logger instead of console.error
-        this.logger.error('Auto-start failed', {
-          error: err instanceof Error ? err.message : String(err),
+      this.state = 'starting';
+      this.startPromise = this.start()
+        .catch((err) => {
+          this.logger.error('Auto-start failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          this.state = 'error';
+        })
+        .finally(() => {
+          // Clear the promise once resolved/rejected
+          this.startPromise = null;
         });
-        this.state = 'error';
-      });
+    }
+  }
+
+  /**
+   * Wait for the synchronizer to be ready (for autoStart consumers).
+   *
+   * Fix: Provides a way to await async initialization when autoStart is used.
+   * Returns immediately if already started or not using autoStart.
+   *
+   * @throws Error if autoStart failed (state will be 'error')
+   *
+   * @example
+   * const sync = new HotForkSynchronizer({ autoStart: true, ... });
+   * await sync.waitForReady(); // Safe to use now
+   */
+  async waitForReady(): Promise<void> {
+    // If there's an active start promise, wait for it
+    if (this.startPromise) {
+      await this.startPromise;
+    }
+
+    // Check if autoStart failed
+    if (this.state === 'error') {
+      throw new Error('HotForkSynchronizer failed to start - check logs for details');
     }
   }
 
@@ -192,9 +232,13 @@ export class HotForkSynchronizer {
    * @throws Error if Anvil fork is not running
    */
   async start(): Promise<void> {
+    // Already running - no-op
     if (this.state === 'running') {
       return;
     }
+
+    // Fix: Allow start() to proceed when in 'starting' state (from autoStart)
+    // This handles the case where start() is called explicitly while autoStart is pending
 
     // Verify Anvil is running
     if (this.anvilManager.getState() !== 'running') {
@@ -436,6 +480,10 @@ export class HotForkSynchronizer {
   /**
    * Fix 10.5 + Fix 4.2: Calculate optimal sync interval based on block production rate.
    *
+   * Analysis Note (Finding 10.5): Adaptive sync interval is ALREADY implemented.
+   * This method dynamically adjusts sync frequency based on block production rate,
+   * using CircularBuffer for O(1) timestamp tracking instead of array.shift().
+   *
    * Algorithm:
    * - If blocks are coming quickly, decrease interval (sync more often)
    * - If blocks are coming slowly, increase interval (reduce polling)
@@ -482,12 +530,12 @@ export class HotForkSynchronizer {
   }
 
   /**
-   * Fix 5.1: Helper to check if state is stopped.
+   * Fix 5.1: Helper to check if state is stopped or errored.
    * Using a method defeats TypeScript type narrowing, allowing re-checks
    * after async operations where state may have changed.
    */
   private isStopped(): boolean {
-    return this.state === 'stopped';
+    return this.state === 'stopped' || this.state === 'error';
   }
 
   /**

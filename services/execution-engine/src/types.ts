@@ -541,6 +541,55 @@ export interface Logger {
   debug: (message: string, meta?: Record<string, unknown>) => void;
 }
 
+/**
+ * Create a service logger with the specified name.
+ *
+ * Fix: Standardized logger factory function for consistent logger creation
+ * across all execution engine services. Uses Pino for proper structured
+ * logging with LOG_LEVEL environment variable support.
+ *
+ * @param name - Service name (e.g., 'circuit-breaker', 'queue-service')
+ * @returns Logger instance compatible with the Logger interface
+ *
+ * @example
+ * const logger = createServiceLogger('my-service');
+ * logger.info('Service started', { version: '1.0.0' });
+ */
+export function createServiceLogger(name: string): Logger {
+  return createPinoLogger(name);
+}
+
+/**
+ * Cache of lazily-created loggers by name.
+ * Prevents creating multiple logger instances for the same service.
+ */
+const loggerCache = new Map<string, Logger>();
+
+/**
+ * Get or create a cached service logger.
+ *
+ * Use this when you need a logger in a static/module context where
+ * creating a logger at construction time is not possible.
+ *
+ * @param name - Service name
+ * @returns Cached logger instance
+ *
+ * @example
+ * // In a module-level function:
+ * function utilityFunction() {
+ *   const logger = getServiceLogger('utility');
+ *   logger.debug('Utility called');
+ * }
+ */
+export function getServiceLogger(name: string): Logger {
+  let logger = loggerCache.get(name);
+  if (!logger) {
+    logger = createServiceLogger(name);
+    loggerCache.set(name, logger);
+  }
+  return logger;
+}
+
 // =============================================================================
 // Base Health Interface (Fix 9.2)
 // =============================================================================

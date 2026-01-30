@@ -367,9 +367,6 @@ describe('QueueService - Event Signaling', () => {
   let mockLogger: Logger;
   let itemAvailableCallback: jest.Mock;
 
-  // Helper to flush setImmediate callbacks
-  const flushImmediate = () => new Promise(resolve => setImmediate(resolve));
-
   beforeEach(() => {
     jest.clearAllMocks();
     mockLogger = createMockLogger();
@@ -391,39 +388,72 @@ describe('QueueService - Event Signaling', () => {
     queue.clear();
   });
 
-  it('should signal when item is enqueued', async () => {
+  /**
+   * Fix 2.1: Updated test to reflect synchronous callback behavior.
+   * The callback is now called directly (not via setImmediate) for hot-path optimization.
+   */
+  it('should signal synchronously when item is enqueued', () => {
     queue.enqueue(createMockOpportunity('opp-1'));
 
-    // Callback is called via setImmediate - wait for it
-    await flushImmediate();
-
+    // Callback is now called synchronously (Fix 2.1 - hot-path optimization)
     expect(itemAvailableCallback).toHaveBeenCalled();
   });
 
-  it('should not signal when queue is paused', async () => {
+  it('should not signal when queue is paused', () => {
     queue.pause();
 
     // When paused, enqueue returns false and no signal is sent
     const result = queue.enqueue(createMockOpportunity('opp-1'));
     expect(result).toBe(false);
 
-    await flushImmediate();
-
     expect(itemAvailableCallback).not.toHaveBeenCalled();
   });
 
-  it('should signal pending items on resume', async () => {
+  it('should signal pending items on resume', () => {
     // Add item first (while not paused)
     queue.enqueue(createMockOpportunity('opp-1'));
-    await flushImmediate();
     itemAvailableCallback.mockClear();
 
     // Pause and resume with items in queue
     queue.pause();
     queue.resume();
 
-    await flushImmediate();
+    // Callback should be called synchronously on resume
     expect(itemAvailableCallback).toHaveBeenCalled();
+  });
+
+  /**
+   * Fix 10.1: Test that callback exceptions don't crash enqueue.
+   * The signalItemAvailable method should catch exceptions and log them
+   * without disrupting the queue operation.
+   */
+  it('should not crash when itemAvailable callback throws (Fix 10.1)', () => {
+    // Set up callback that throws
+    const throwingCallback = jest.fn(() => {
+      throw new Error('Callback exception');
+    });
+    queue.onItemAvailable(throwingCallback);
+
+    // Enqueue should still succeed
+    const result = queue.enqueue(createMockOpportunity('opp-1'));
+    expect(result).toBe(true);
+    expect(queue.size()).toBe(1);
+
+    // Callback was called and threw
+    expect(throwingCallback).toHaveBeenCalled();
+
+    // Error was logged (not thrown)
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      'itemAvailableCallback threw an exception',
+      expect.objectContaining({
+        error: 'Callback exception',
+        queueSize: 1,
+      })
+    );
+
+    // Queue is still functional
+    expect(queue.dequeue()?.id).toBe('opp-1');
+    expect(queue.size()).toBe(0);
   });
 });
 
