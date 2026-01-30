@@ -127,13 +127,10 @@ export class SwapDecoderRegistry {
 
   /**
    * Get decoder statistics.
+   * FIX 6.1: Return all stats from the underlying registry for consistency.
    */
-  getStats(): { decoderCount: number; routerCount: number } {
-    const stats = this.registry.getStats();
-    return {
-      decoderCount: stats.decoderCount,
-      routerCount: stats.routerCount,
-    };
+  getStats(): { decoderCount: number; routerCount: number; selectorCount: number; chainCount: number } {
+    return this.registry.getStats();
   }
 }
 

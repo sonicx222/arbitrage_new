@@ -15,7 +15,8 @@
 
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
-import type { Logger } from '@arbitrage/core';
+import { CircularBuffer, type Logger } from '@arbitrage/core';
+import { CHAIN_NAME_TO_ID } from '@arbitrage/config';
 import type {
   BloXrouteFeedConfig,
   BloXrouteMessage,
@@ -119,11 +120,9 @@ export class BloXrouteFeed extends EventEmitter {
   private routerFilterSet: Set<string> | null = null;
   private traderFilterSet: Set<string> | null = null;
 
-  // Circular buffer for latency samples (O(1) insertion, avoids array shift)
+  // FIX 9.3: Use CircularBuffer from @arbitrage/core for O(1) latency tracking
   private static readonly LATENCY_BUFFER_SIZE = 100;
-  private latencyBuffer: number[] = new Array(BloXrouteFeed.LATENCY_BUFFER_SIZE).fill(0);
-  private latencyBufferIndex = 0;
-  private latencyBufferCount = 0;
+  private latencyBuffer: CircularBuffer<number>;
 
   // Health metrics
   private metrics: {
@@ -152,6 +151,9 @@ export class BloXrouteFeed extends EventEmitter {
 
     this.config = options.config;
     this.logger = options.logger;
+
+    // FIX 9.3: Initialize CircularBuffer from @arbitrage/core
+    this.latencyBuffer = new CircularBuffer<number>(BloXrouteFeed.LATENCY_BUFFER_SIZE);
 
     // Pre-compute lowercase filter sets for O(1) hot path lookup
     if (this.config.includeRouters && this.config.includeRouters.length > 0) {
@@ -518,7 +520,8 @@ export class BloXrouteFeed extends EventEmitter {
   }
 
   /**
-   * FIX 3.3: Get default chainId based on configured chains.
+   * FIX 3.2/3.3/9.1: Get default chainId based on configured chains.
+   * Uses shared CHAIN_NAME_TO_ID from @arbitrage/config for consistency.
    * Returns undefined if no default can be determined (safer than assuming Ethereum).
    */
   private getDefaultChainId(): number | undefined {
@@ -526,20 +529,8 @@ export class BloXrouteFeed extends EventEmitter {
       return undefined;
     }
 
-    // Map chain name to chainId
-    const chainNameToId: Record<string, number> = {
-      ethereum: 1,
-      bsc: 56,
-      polygon: 137,
-      arbitrum: 42161,
-      optimism: 10,
-      base: 8453,
-      avalanche: 43114,
-      fantom: 250,
-    };
-
     const firstChain = this.config.chains[0].toLowerCase();
-    return chainNameToId[firstChain];
+    return CHAIN_NAME_TO_ID[firstChain];
   }
 
   /**
@@ -572,29 +563,26 @@ export class BloXrouteFeed extends EventEmitter {
   }
 
   /**
-   * Record latency sample using circular buffer (O(1) operation).
+   * FIX 9.3: Record latency sample using CircularBuffer from @arbitrage/core.
+   * Uses O(1) pushOverwrite for rolling window behavior.
    */
   private recordLatency(latencyMs: number): void {
-    this.latencyBuffer[this.latencyBufferIndex] = latencyMs;
-    this.latencyBufferIndex =
-      (this.latencyBufferIndex + 1) % BloXrouteFeed.LATENCY_BUFFER_SIZE;
-    if (this.latencyBufferCount < BloXrouteFeed.LATENCY_BUFFER_SIZE) {
-      this.latencyBufferCount++;
-    }
+    this.latencyBuffer.pushOverwrite(latencyMs);
   }
 
   /**
-   * Get average latency from circular buffer.
+   * FIX 9.3: Get average latency from CircularBuffer.
    */
   private getAverageLatency(): number {
-    if (this.latencyBufferCount === 0) {
+    if (this.latencyBuffer.isEmpty) {
       return 0;
     }
+    const samples = this.latencyBuffer.toArray();
     let sum = 0;
-    for (let i = 0; i < this.latencyBufferCount; i++) {
-      sum += this.latencyBuffer[i];
+    for (let i = 0; i < samples.length; i++) {
+      sum += samples[i];
     }
-    return sum / this.latencyBufferCount;
+    return sum / samples.length;
   }
 
   /**

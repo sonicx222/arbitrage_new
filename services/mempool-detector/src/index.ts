@@ -33,6 +33,7 @@ import { BloXrouteFeed, createBloXrouteFeed } from './bloxroute-feed';
 import { SwapDecoderRegistry, createSwapDecoderRegistry, CHAIN_NAME_TO_ID } from './swap-decoder';
 import {
   DEFAULT_PENDING_OPPORTUNITIES_STREAM,
+  DEFAULT_MEMPOOL_DETECTOR_PORT,
   type MempoolDetectorConfig,
   type MempoolDetectorHealth,
   type RawPendingTransaction,
@@ -49,7 +50,7 @@ import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIn
  * Default service configuration.
  */
 export const DEFAULT_CONFIG: Partial<MempoolDetectorConfig> = {
-  healthCheckPort: MEMPOOL_CONFIG.service.port || 3007,
+  healthCheckPort: MEMPOOL_CONFIG.service.port || DEFAULT_MEMPOOL_DETECTOR_PORT,
   opportunityStream: MEMPOOL_CONFIG.streams.pendingOpportunities || 'stream:pending-opportunities',
   minSwapSizeUsd: MEMPOOL_CONFIG.filters.minSwapSizeUsd || 1000,
   maxBufferSize: MEMPOOL_CONFIG.service.maxBufferSize || 10000,
@@ -172,10 +173,6 @@ export class MempoolDetectorService extends EventEmitter {
   // FIX 4.2/10.4: Use CircularBuffer for O(1) latency tracking
   private latencyBuffer: CircularBuffer<number>;
 
-  // FIX 10.3: Cached timestamp to reduce Date.now() calls
-  private cachedTimestamp = 0;
-  private timestampUpdateInterval: NodeJS.Timeout | null = null;
-
   // Statistics (FIX 6.3: All metrics are now used)
   private stats = {
     txReceived: 0,
@@ -272,9 +269,6 @@ export class MempoolDetectorService extends EventEmitter {
     });
 
     try {
-      // FIX 10.3: Start timestamp cache update
-      this.startTimestampCache();
-
       // FIX 2.1: Initialize swap decoder
       this.swapDecoder = createSwapDecoderRegistry(this.logger);
 
@@ -330,9 +324,6 @@ export class MempoolDetectorService extends EventEmitter {
    * Cleanup all resources.
    */
   private async cleanup(): Promise<void> {
-    // Stop timestamp cache
-    this.stopTimestampCache();
-
     // Close health server
     if (this.healthServer) {
       await new Promise<void>((resolve) => {
@@ -642,16 +633,25 @@ export class MempoolDetectorService extends EventEmitter {
     const startTime = getHighResTime();
 
     try {
+      // FIX 4.2: Guard against uninitialized decoder
+      if (!this.swapDecoder) {
+        this.logger.error('swapDecoder not initialized - cannot process transaction');
+        return;
+      }
+
       // FIX 2.1: Decode transaction to extract swap intent
       const chainNumericId = CHAIN_NAME_TO_ID[chainId.toLowerCase()] ?? tx.chainId ?? 1;
-      const swapIntent = this.swapDecoder?.decode(tx, chainNumericId);
+      const swapIntent = this.swapDecoder.decode(tx, chainNumericId);
 
       if (!swapIntent) {
-        // Not a swap transaction - this is expected for most transactions
-        // Only increment decode failures if input looked like a swap attempt
-        if (tx.input && tx.input.length > 10) {
+        // FIX 6.2: Only count as failure if selector was recognized but decode failed
+        // Most transactions are NOT swaps - only count failures for actual swap attempts
+        const selector = tx.input?.slice(0, 10)?.toLowerCase();
+        if (selector && this.swapDecoder.getDecoderForSelector(selector)) {
+          // Selector was recognized but decode failed - this is a true failure
           this.stats.txDecodeFailures++;
         }
+        // Non-swap transactions (no recognized selector) are expected - don't count as failures
         return;
       }
 
@@ -701,9 +701,13 @@ export class MempoolDetectorService extends EventEmitter {
         this.txBuffer.pushOverwrite({ tx, chainId });
       }
 
-      // Emit event for consumers
-      this.emit('pendingTx', { tx, chainId, swapIntent });
-      this.emit('swapIntent', swapIntent);
+      // FIX 10.2.4: Only emit events if there are listeners (hot path optimization)
+      if (this.listenerCount('pendingTx') > 0) {
+        this.emit('pendingTx', { tx, chainId, swapIntent });
+      }
+      if (this.listenerCount('swapIntent') > 0) {
+        this.emit('swapIntent', swapIntent);
+      }
 
     } catch (error) {
       this.stats.txDecodeFailures++;
@@ -718,27 +722,6 @@ export class MempoolDetectorService extends EventEmitter {
   // ===========================================================================
   // Private Methods - Performance Optimizations
   // ===========================================================================
-
-  /**
-   * FIX 10.3: Start timestamp cache update interval.
-   * Reduces Date.now() calls on hot path.
-   */
-  private startTimestampCache(): void {
-    this.cachedTimestamp = Date.now();
-    this.timestampUpdateInterval = setInterval(() => {
-      this.cachedTimestamp = Date.now();
-    }, 10); // Update every 10ms - sufficient for latency tracking
-  }
-
-  /**
-   * FIX 10.3: Stop timestamp cache update.
-   */
-  private stopTimestampCache(): void {
-    if (this.timestampUpdateInterval) {
-      clearInterval(this.timestampUpdateInterval);
-      this.timestampUpdateInterval = null;
-    }
-  }
 
   /**
    * FIX 4.2/10.4: Calculate percentile from circular buffer.

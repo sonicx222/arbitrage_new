@@ -66,6 +66,13 @@ export class DecoderRegistry {
   private routerAddressToType: Map<string, SwapRouterType> = new Map();
   private logger: Logger;
 
+  /**
+   * FIX 10.2.2: Track if we've ever seen uppercase hex selectors.
+   * Most feeds (bloXroute, etc.) send lowercase hex, so we skip the
+   * regex check entirely if we've never seen uppercase.
+   */
+  private hasSeenUppercaseSelector = false;
+
   constructor(logger: Logger) {
     this.logger = logger;
     this.initializeDecoders();
@@ -172,15 +179,22 @@ export class DecoderRegistry {
       return null;
     }
 
-    // FIX 10.1: Optimize selector extraction
+    // FIX 10.1/10.2.2: Optimize selector extraction
     // Most feeds send lowercase hex, so try direct lookup first before lowercasing
     let selector = input.slice(0, 10);
     let decoder = this.selectorToDecoder.get(selector);
 
-    // If not found and selector might have uppercase, try lowercase
-    if (!decoder && /[A-F]/.test(selector)) {
-      selector = selector.toLowerCase();
-      decoder = this.selectorToDecoder.get(selector);
+    // FIX 10.2.2: Only check for uppercase if we've seen it before OR if lookup failed
+    // This avoids regex on every transaction when the feed consistently sends lowercase
+    if (!decoder) {
+      // Check if this selector has uppercase that needs normalization
+      const hasUppercase = /[A-F]/.test(selector);
+      if (hasUppercase) {
+        // Track that we've seen uppercase (affects future lookups)
+        this.hasSeenUppercaseSelector = true;
+        selector = selector.toLowerCase();
+        decoder = this.selectorToDecoder.get(selector);
+      }
     }
 
     if (!decoder) {

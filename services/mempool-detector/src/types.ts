@@ -286,9 +286,9 @@ export interface FeedHealthMetrics {
   messagesReceived: number;
   /** Total transactions processed */
   transactionsProcessed: number;
-  /** Total decode successes (placeholder for TODO: transaction decoding) */
+  /** Total successful transaction decodes */
   decodeSuccesses: number;
-  /** Total decode failures (placeholder for TODO: transaction decoding) */
+  /** Total failed transaction decode attempts */
   decodeFailures: number;
   /** Reconnection count */
   reconnectCount: number;

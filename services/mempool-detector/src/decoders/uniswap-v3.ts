@@ -164,8 +164,6 @@ export class UniswapV3Decoder extends BaseDecoder {
    * @returns Array of token addresses, or empty array if invalid
    */
   decodeV3Path(encodedPath: string): string[] {
-    const path: string[] = [];
-
     const pathData = encodedPath.startsWith('0x') ? encodedPath.slice(2) : encodedPath;
 
     // Constants for path parsing
@@ -205,13 +203,19 @@ export class UniswapV3Decoder extends BaseDecoder {
       // Still try to extract what we can for debugging
     }
 
+    // FIX 10.2.3: Pre-allocate path array based on expected token count
+    // Formula: 1 (first token) + (pathLengthAfterFirst / hopSize) additional tokens
+    const expectedTokenCount = 1 + Math.floor(pathLengthAfterFirst / hopSize);
+    const path: string[] = new Array(expectedTokenCount);
+    let pathIndex = 0;
+
     // First token (20 bytes = 40 hex chars)
     const firstToken = pathData.slice(0, TOKEN_HEX_CHARS);
     if (!this.isValidHexToken(firstToken)) {
       this.logger.debug('V3 path: invalid first token', { firstToken });
       return [];
     }
-    path.push('0x' + firstToken.toLowerCase());
+    path[pathIndex++] = '0x' + firstToken.toLowerCase();
 
     // Extract subsequent tokens
     // Each hop: skip fee (6 chars), extract token (40 chars)
@@ -226,8 +230,13 @@ export class UniswapV3Decoder extends BaseDecoder {
         break;
       }
 
-      path.push('0x' + token.toLowerCase());
+      path[pathIndex++] = '0x' + token.toLowerCase();
       offset += hopSize; // Move to next hop (token + fee)
+    }
+
+    // FIX 10.2.3: Trim array if we didn't fill all slots (early exit due to validation)
+    if (pathIndex < expectedTokenCount) {
+      path.length = pathIndex;
     }
 
     // FIX 4.4: Validate we got at least 2 tokens (minimum for a swap)
