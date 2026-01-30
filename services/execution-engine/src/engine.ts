@@ -31,32 +31,29 @@ import {
   NonceManager,
   getNonceManager,
   MevProviderFactory,
-  MevGlobalConfig,
   BridgeRouterFactory,
-  createBridgeRouterFactory,
   getErrorMessage,
   // Phase 3: Capital Risk Management (Task 3.4.5)
   DrawdownCircuitBreaker,
-  getDrawdownCircuitBreaker,
   resetDrawdownCircuitBreaker,
   EVCalculator,
-  getEVCalculator,
   resetEVCalculator,
   KellyPositionSizer,
-  getKellyPositionSizer,
   resetKellyPositionSizer,
   ExecutionProbabilityTracker,
-  getExecutionProbabilityTracker,
   resetExecutionProbabilityTracker,
-  type DrawdownConfig,
-  type EVConfig,
-  type PositionSizerConfig,
-  type ExecutionProbabilityConfig,
   type TradingAllowedResult,
   type EVCalculation,
   type PositionSize,
 } from '@arbitrage/core';
-import { MEV_CONFIG, RISK_CONFIG } from '@arbitrage/config';
+import { RISK_CONFIG } from '@arbitrage/config';
+// FIX 1.1: Import initialization module instead of duplicating initialization logic
+import {
+  initializeMevProviders,
+  initializeRiskManagement,
+  initializeBridgeRouter,
+  resetInitializationState,
+} from './initialization';
 import type { ArbitrageOpportunity, ServiceHealth } from '@arbitrage/types';
 
 // Internal modules
@@ -383,11 +380,20 @@ export class ExecutionEngineService {
         await this.providerService.initialize();
         this.providerService.initializeWallets();
 
-        // Initialize MEV protection
-        this.initializeMevProviders();
+        // FIX 1.1: Use initialization module instead of duplicate private methods
+        // Initialize MEV protection using module
+        const mevResult = await initializeMevProviders(this.providerService, this.logger);
+        this.mevProviderFactory = mevResult.factory;
+        if (!mevResult.success && mevResult.error) {
+          this.logger.warn('MEV initialization had issues', { error: mevResult.error });
+        }
 
-        // Initialize bridge router
-        this.initializeBridgeRouter();
+        // Initialize bridge router using module
+        const bridgeResult = initializeBridgeRouter(this.providerService, this.logger);
+        this.bridgeRouterFactory = bridgeResult.factory;
+        if (!bridgeResult.success && bridgeResult.error) {
+          this.logger.warn('Bridge router initialization had issues', { error: bridgeResult.error });
+        }
 
         // Start nonce manager
         this.nonceManager.start();
@@ -410,8 +416,21 @@ export class ExecutionEngineService {
       // Initialize circuit breaker (Phase 1.3.1)
       this.initializeCircuitBreaker();
 
+      // FIX 1.1: Use initialization module for risk management
       // Initialize capital risk management (Phase 3: Task 3.4.5)
-      this.initializeRiskManagement();
+      const riskResult = initializeRiskManagement(this.logger, { skipValidation: false });
+      this.drawdownBreaker = riskResult.drawdownBreaker;
+      this.evCalculator = riskResult.evCalculator;
+      this.positionSizer = riskResult.positionSizer;
+      this.probabilityTracker = riskResult.probabilityTracker;
+      this.riskManagementEnabled = riskResult.enabled;
+
+      if (!riskResult.success && riskResult.error) {
+        this.logger.warn('Risk management initialization had issues', {
+          error: riskResult.error,
+          componentStatus: riskResult.componentStatus,
+        });
+      }
 
       // Initialize opportunity consumer
       this.opportunityConsumer = new OpportunityConsumer({
@@ -554,6 +573,9 @@ export class ExecutionEngineService {
       this.probabilityTracker = null;
       this.riskManagementEnabled = false;
 
+      // FIX 1.1: Reset initialization module state to allow re-initialization
+      resetInitializationState();
+
       this.logger.info('Execution Engine Service stopped');
     });
 
@@ -583,78 +605,8 @@ export class ExecutionEngineService {
   // Initialization
   // ===========================================================================
 
-  private initializeMevProviders(): void {
-    if (!MEV_CONFIG.enabled || !this.providerService) {
-      this.logger.info('MEV protection disabled by configuration');
-      return;
-    }
-
-    const mevGlobalConfig: MevGlobalConfig = {
-      enabled: MEV_CONFIG.enabled,
-      flashbotsAuthKey: MEV_CONFIG.flashbotsAuthKey,
-      bloxrouteAuthHeader: MEV_CONFIG.bloxrouteAuthHeader,
-      flashbotsRelayUrl: MEV_CONFIG.flashbotsRelayUrl,
-      submissionTimeoutMs: MEV_CONFIG.submissionTimeoutMs,
-      maxRetries: MEV_CONFIG.maxRetries,
-      fallbackToPublic: MEV_CONFIG.fallbackToPublic,
-    };
-
-    this.mevProviderFactory = new MevProviderFactory(mevGlobalConfig);
-
-    let providersInitialized = 0;
-    for (const chainName of this.providerService.getWallets().keys()) {
-      const provider = this.providerService.getProvider(chainName);
-      const wallet = this.providerService.getWallet(chainName);
-
-      if (provider && wallet) {
-        const chainSettings = MEV_CONFIG.chainSettings[chainName];
-        if (chainSettings?.enabled !== false) {
-          try {
-            const mevProvider = this.mevProviderFactory.createProvider({
-              chain: chainName,
-              provider,
-              wallet,
-            });
-
-            providersInitialized++;
-            this.logger.info(`MEV provider initialized for ${chainName}`, {
-              strategy: mevProvider.strategy,
-              enabled: mevProvider.isEnabled(),
-            });
-          } catch (error) {
-            this.logger.warn(`Failed to initialize MEV provider for ${chainName}`, {
-              error: getErrorMessage(error),
-            });
-          }
-        }
-      }
-    }
-
-    this.logger.info('MEV protection initialization complete', {
-      providersInitialized,
-      globalEnabled: MEV_CONFIG.enabled,
-    });
-  }
-
-  private initializeBridgeRouter(): void {
-    if (!this.providerService) return;
-
-    try {
-      this.bridgeRouterFactory = createBridgeRouterFactory({
-        defaultProtocol: 'stargate',
-        providers: this.providerService.getProviders(),
-      });
-
-      this.logger.info('Bridge router initialized', {
-        protocols: this.bridgeRouterFactory.getAvailableProtocols(),
-        chainsWithProviders: Array.from(this.providerService.getProviders().keys()),
-      });
-    } catch (error) {
-      this.logger.error('Failed to initialize bridge router', {
-        error: getErrorMessage(error),
-      });
-    }
-  }
+  // FIX 1.1/9.3: Removed duplicate initializeMevProviders() - now in initialization module
+  // FIX 1.1/9.3: Removed duplicate initializeBridgeRouter() - now in initialization module
 
   private initializeStrategies(): void {
     // Create strategy instances
@@ -779,88 +731,7 @@ export class ExecutionEngineService {
     }
   }
 
-  /**
-   * Initialize capital risk management components (Phase 3: Task 3.4.5).
-   *
-   * Creates and configures:
-   * - ExecutionProbabilityTracker: Historical win probability tracking
-   * - EVCalculator: Expected value calculation for trade decisions
-   * - KellyPositionSizer: Position sizing using Kelly Criterion
-   * - DrawdownCircuitBreaker: Capital protection via state machine
-   *
-   * @see ADR-021: Capital Risk Management
-   * @see docs/reports/implementation_plan_v3.md Section 3.4
-   */
-  private initializeRiskManagement(): void {
-    if (!RISK_CONFIG.enabled) {
-      this.logger.info('Capital risk management disabled by configuration');
-      return;
-    }
-
-    try {
-      // Initialize Execution Probability Tracker (Task 3.4.1)
-      const probabilityConfig: Partial<ExecutionProbabilityConfig> = {
-        minSamples: RISK_CONFIG.probability.minSamples,
-        defaultWinProbability: RISK_CONFIG.probability.defaultWinProbability,
-        maxOutcomesPerKey: RISK_CONFIG.probability.maxOutcomesPerKey,
-        cleanupIntervalMs: RISK_CONFIG.probability.cleanupIntervalMs,
-        outcomeRelevanceWindowMs: RISK_CONFIG.probability.outcomeRelevanceWindowMs,
-        persistToRedis: RISK_CONFIG.probability.persistToRedis,
-        redisKeyPrefix: RISK_CONFIG.probability.redisKeyPrefix,
-      };
-      this.probabilityTracker = getExecutionProbabilityTracker(probabilityConfig);
-
-      // Initialize EV Calculator (Task 3.4.2)
-      const evConfig: Partial<EVConfig> = {
-        minEVThreshold: RISK_CONFIG.ev.minEVThreshold,
-        minWinProbability: RISK_CONFIG.ev.minWinProbability,
-        maxLossPerTrade: RISK_CONFIG.ev.maxLossPerTrade,
-        useHistoricalGasCost: RISK_CONFIG.ev.useHistoricalGasCost,
-        defaultGasCost: RISK_CONFIG.ev.defaultGasCost,
-        defaultProfitEstimate: RISK_CONFIG.ev.defaultProfitEstimate,
-      };
-      this.evCalculator = getEVCalculator(this.probabilityTracker, evConfig);
-
-      // Initialize Position Sizer (Task 3.4.3)
-      const positionConfig: Partial<PositionSizerConfig> = {
-        kellyMultiplier: RISK_CONFIG.positionSizing.kellyMultiplier,
-        maxSingleTradeFraction: RISK_CONFIG.positionSizing.maxSingleTradeFraction,
-        minTradeFraction: RISK_CONFIG.positionSizing.minTradeFraction,
-        totalCapital: RISK_CONFIG.totalCapital,
-        enabled: RISK_CONFIG.positionSizing.enabled,
-      };
-      this.positionSizer = getKellyPositionSizer(positionConfig);
-
-      // Initialize Drawdown Circuit Breaker (Task 3.4.4)
-      const drawdownConfig: Partial<DrawdownConfig> = {
-        maxDailyLoss: RISK_CONFIG.drawdown.maxDailyLoss,
-        cautionThreshold: RISK_CONFIG.drawdown.cautionThreshold,
-        maxConsecutiveLosses: RISK_CONFIG.drawdown.maxConsecutiveLosses,
-        recoveryMultiplier: RISK_CONFIG.drawdown.recoveryMultiplier,
-        recoveryWinsRequired: RISK_CONFIG.drawdown.recoveryWinsRequired,
-        haltCooldownMs: RISK_CONFIG.drawdown.haltCooldownMs,
-        totalCapital: RISK_CONFIG.totalCapital,
-        enabled: RISK_CONFIG.drawdown.enabled,
-      };
-      this.drawdownBreaker = getDrawdownCircuitBreaker(drawdownConfig);
-
-      this.riskManagementEnabled = true;
-
-      this.logger.info('Capital risk management initialized', {
-        maxDailyLoss: `${RISK_CONFIG.drawdown.maxDailyLoss * 100}%`,
-        cautionThreshold: `${RISK_CONFIG.drawdown.cautionThreshold * 100}%`,
-        kellyMultiplier: RISK_CONFIG.positionSizing.kellyMultiplier,
-        maxSingleTrade: `${RISK_CONFIG.positionSizing.maxSingleTradeFraction * 100}%`,
-        minEVThreshold: RISK_CONFIG.ev.minEVThreshold.toString(),
-      });
-    } catch (error) {
-      this.logger.error('Failed to initialize capital risk management', {
-        error: getErrorMessage(error),
-      });
-      // Continue without risk management - log warning
-      this.riskManagementEnabled = false;
-    }
-  }
+  // FIX 1.1/9.3: Removed duplicate initializeRiskManagement() - now in initialization module
 
   /**
    * Initialize the transaction simulation service (Phase 1.1).
@@ -2052,6 +1923,8 @@ export class ExecutionEngineService {
   /**
    * FIX 5.1: Extracted provider initialization logic for promise-based mutex pattern.
    * Called by performActivation when providers need to be initialized.
+   *
+   * FIX 1.1: Uses initialization module instead of duplicate private methods.
    */
   private async initializeProviders(): Promise<void> {
     if (!this.providerService) {
@@ -2062,11 +1935,20 @@ export class ExecutionEngineService {
     await this.providerService.initialize();
     this.providerService.initializeWallets();
 
-    // Initialize MEV protection
-    this.initializeMevProviders();
+    // FIX 1.1: Use initialization module instead of duplicate private methods
+    // Initialize MEV protection using module
+    const mevResult = await initializeMevProviders(this.providerService, this.logger);
+    this.mevProviderFactory = mevResult.factory;
+    if (!mevResult.success && mevResult.error) {
+      this.logger.warn('MEV initialization had issues', { error: mevResult.error });
+    }
 
-    // Initialize bridge router
-    this.initializeBridgeRouter();
+    // Initialize bridge router using module
+    const bridgeResult = initializeBridgeRouter(this.providerService, this.logger);
+    this.bridgeRouterFactory = bridgeResult.factory;
+    if (!bridgeResult.success && bridgeResult.error) {
+      this.logger.warn('Bridge router initialization had issues', { error: bridgeResult.error });
+    }
 
     // Start nonce manager
     if (this.nonceManager) {
