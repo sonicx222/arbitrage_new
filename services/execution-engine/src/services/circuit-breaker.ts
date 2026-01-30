@@ -169,14 +169,24 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
   if (cooldownPeriodMs < 0) {
     throw new Error('Circuit breaker cooldownPeriodMs must be non-negative');
   }
+  // Bug 4.1 Fix: Validate halfOpenMaxAttempts >= 1
+  // Without this, setting halfOpenMaxAttempts = 0 would cause:
+  // - canExecute() to always return false in HALF_OPEN state
+  // - The circuit would never close (infinite HALF_OPEN)
+  // - System would be stuck blocking all executions
+  if (halfOpenMaxAttempts < 1) {
+    throw new Error('Circuit breaker halfOpenMaxAttempts must be at least 1');
+  }
 
-  // Resolved config
-  const resolvedConfig: ResolvedCircuitBreakerConfig = {
+  // Resolved config - frozen for performance (Perf 10.5)
+  // Object.freeze() prevents accidental mutation and allows returning
+  // the same reference from getConfig() instead of creating copies
+  const resolvedConfig: Readonly<ResolvedCircuitBreakerConfig> = Object.freeze({
     failureThreshold,
     cooldownPeriodMs,
     halfOpenMaxAttempts,
     enabled: initialEnabled,
-  };
+  });
 
   // State
   let state: CircuitBreakerState = 'CLOSED';
@@ -493,10 +503,14 @@ export function createCircuitBreaker(options: CircuitBreakerOptions): CircuitBre
   }
 
   /**
-   * Get resolved configuration
+   * Get resolved configuration.
+   *
+   * Perf 10.5: Returns the frozen config object directly instead of
+   * creating a copy. This saves memory allocation on every call.
+   * The object is frozen at initialization so callers cannot mutate it.
    */
-  function getConfig(): ResolvedCircuitBreakerConfig {
-    return { ...resolvedConfig };
+  function getConfig(): Readonly<ResolvedCircuitBreakerConfig> {
+    return resolvedConfig;
   }
 
   /**

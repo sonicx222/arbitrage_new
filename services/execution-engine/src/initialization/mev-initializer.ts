@@ -25,7 +25,17 @@ import type { ProviderServiceImpl } from '../services/provider.service';
 import type { MevInitializationResult, InitializationLogger } from './types';
 import { createDisabledMevResult } from './types';
 
-/** Timeout for individual provider initialization (prevents hanging) */
+/**
+ * Timeout for individual provider initialization (prevents hanging).
+ *
+ * Doc 2.3: This timeout is intentionally NOT externally configurable.
+ * Rationale:
+ * - 30s is generous for any MEV provider initialization (network + auth)
+ * - In competitive arbitrage, if provider takes >30s, it's likely broken
+ * - Allowing external config risks users setting dangerously high values
+ *   that would delay startup without benefit
+ * - If this needs adjustment, it should be a code change with review
+ */
 const PROVIDER_INIT_TIMEOUT_MS = 30_000;
 
 /**
@@ -186,10 +196,12 @@ export async function initializeMevProviders(
     durationMs: Math.round(durationMs),
   });
 
+  // Bug 4.4 Fix: Include skippedChains in result for debugging visibility
   return {
     factory,
     providersInitialized,
     success: true,
     failedChains: failedChains.length > 0 ? failedChains : undefined,
+    skippedChains: skippedChains.length > 0 ? skippedChains : undefined,
   };
 }

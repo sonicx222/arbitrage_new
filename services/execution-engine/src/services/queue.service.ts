@@ -190,6 +190,16 @@ export class QueueServiceImpl implements QueueService {
    * Fix 10.1: Added try-catch to prevent callback exceptions from:
    * 1. Crashing the enqueue operation
    * 2. Leaving the queue in an inconsistent state (item added but signal failed)
+   *
+   * Thread Safety Note (Fix 5.2):
+   * =============================
+   * The callback (typically engine's processQueueItems) MUST remain synchronous
+   * until it sets its re-entrancy guard flag. If the callback has an await point
+   * before setting its guard, concurrent signals could cause multiple processing
+   * runs. The current engine implementation is safe because:
+   * 1. processQueueItems() sets isProcessingQueue=true synchronously at entry
+   * 2. No await point exists before the guard check
+   * 3. All subsequent async operations happen AFTER the guard is set
    */
   private signalItemAvailable(): void {
     if (this.itemAvailableCallback && !this.isPaused()) {
@@ -221,12 +231,12 @@ export class QueueServiceImpl implements QueueService {
 
     // Update backpressure state atomically
     if (this.paused) {
-      // If paused, only release when below low water mark (hysteresis)
+      // If paused, only release when at or below low water mark (hysteresis)
       if (queueSize <= this.config.lowWaterMark) {
         this.paused = false;
       }
     } else {
-      // If not paused, engage at high water mark
+      // If not paused, engage at or above high water mark
       if (queueSize >= this.config.highWaterMark) {
         this.paused = true;
       }

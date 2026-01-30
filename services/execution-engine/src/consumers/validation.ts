@@ -123,17 +123,42 @@ export interface BusinessRuleConfig {
 /**
  * Valid opportunity types.
  * Using Set for O(1) lookup.
+ *
+ * Fix 7.3: Documented alignment with actually supported strategies.
+ *
+ * Supported types and their strategy mapping:
+ * - 'simple': IntraChainStrategy (single-chain DEX arbitrage)
+ * - 'cross-dex': IntraChainStrategy (same as 'simple', different discovery source)
+ * - 'triangular': IntraChainStrategy (A->B->C->A within single chain)
+ * - 'flash-loan': FlashLoanStrategy (flash loan arbitrage)
+ * - 'cross-chain': CrossChainStrategy (multi-chain bridge arbitrage)
+ *
+ * Fallback routing (validation passes, routes to IntraChainStrategy):
+ * - 'quadrilateral': Would need 4-hop strategy
+ * - 'multi-leg': Would need N-hop strategy
+ * - 'predictive': Would need predictive strategy
+ * - 'intra-dex': Single-pool arbitrage
+ *
+ * Design decision: We allow all types through validation because:
+ * 1. The strategy-factory routes unsupported types to IntraChainStrategy as fallback
+ * 2. This allows the discovery service to evolve without breaking execution
+ * 3. Actual strategy compatibility is checked at execution time
+ *
+ * @see strategy-factory.ts for type-to-strategy mapping
  */
 export const VALID_OPPORTUNITY_TYPES = new Set([
-  'simple',
-  'cross-dex',
-  'triangular',
-  'quadrilateral',
-  'multi-leg',
-  'cross-chain',
-  'predictive',
-  'intra-dex',
-  'flash-loan',
+  // Primary supported types with dedicated strategies
+  'simple',           // IntraChainStrategy
+  'cross-dex',        // IntraChainStrategy (different discovery source)
+  'triangular',       // IntraChainStrategy (multi-hop)
+  'flash-loan',       // FlashLoanStrategy
+  'cross-chain',      // CrossChainStrategy
+
+  // Secondary types that route to IntraChainStrategy fallback
+  'quadrilateral',    // Falls back to IntraChainStrategy
+  'multi-leg',        // Falls back to IntraChainStrategy
+  'predictive',       // Falls back to IntraChainStrategy
+  'intra-dex',        // Falls back to IntraChainStrategy
 ]);
 
 /**

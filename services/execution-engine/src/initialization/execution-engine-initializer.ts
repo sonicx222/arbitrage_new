@@ -6,13 +6,16 @@
  *
  * NOT part of hot path - called once during initialization.
  *
- * Initialization Order:
+ * Initialization Order (sequential):
  * 1. MEV providers (async, depends on providerService)
  * 2. Risk management (sync, reads from config only - no providerService dependency)
  * 3. Bridge router (sync, depends on providerService)
  *
- * MEV and Risk can run in parallel since Risk doesn't depend on providers.
- * Bridge router runs after to ensure providers are fully initialized.
+ * Note: While MEV and Risk could theoretically run in parallel (Risk doesn't
+ * depend on providers), they run sequentially for simplicity and debuggability.
+ * The total initialization time is dominated by MEV provider network calls,
+ * so parallelizing with the fast sync Risk init provides negligible benefit.
+ * Bridge router runs last to ensure providers are fully initialized.
  *
  * @see ADR-017: MEV Protection Enhancement
  * @see ADR-021: Capital Risk Management
@@ -156,6 +159,18 @@ export async function initializeExecutionEngine(
  * Note: This does NOT clean up resources from initialized components.
  * Components like MEV providers, risk trackers, etc. may still hold state.
  * The caller is responsible for cleaning up those resources.
+ *
+ * Thread Safety Note (Fix 5.3):
+ * =============================
+ * In containerized environments (Docker, K8s), process restarts create fresh
+ * module state, so the isInitialized flag is naturally reset. However, in
+ * scenarios where the module is retained but the service is "soft restarted":
+ * - The isInitialized flag remains true
+ * - Calling initializeExecutionEngine() will throw
+ * - This is INTENTIONAL to prevent double-initialization bugs
+ *
+ * If you need to re-initialize in tests, call resetInitializationState() first.
+ * In production, prefer a full process restart over soft restart.
  *
  * @internal
  */

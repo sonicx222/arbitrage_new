@@ -18,7 +18,7 @@ import { OpportunityConsumer, OpportunityConsumerConfig } from './opportunity.co
 import type { Logger, ExecutionStats, QueueService } from '../types';
 import { ValidationErrorCode } from '../types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { validateMessageStructure, ValidationFailure } from './validation';
+import { validateMessageStructure, ValidationFailure, VALID_OPPORTUNITY_TYPES } from './validation';
 
 // =============================================================================
 // Mock Implementations
@@ -1049,16 +1049,11 @@ describe('OpportunityConsumer - Type Validation', () => {
   });
 
   it('should accept all valid opportunity types', async () => {
-    const validTypes = [
-      'simple',
-      'cross-dex',
-      'triangular',
-      'quadrilateral',
-      'multi-leg',
-      'predictive',
-      'intra-dex',
-      'flash-loan',
-    ];
+    // Fix 8.2: Import valid types from validation.ts to ensure sync
+    // Filter out 'cross-chain' as it requires additional buyChain/sellChain fields
+    const validTypes = Array.from(VALID_OPPORTUNITY_TYPES).filter(
+      (type) => type !== 'cross-chain'
+    );
 
     for (let i = 0; i < validTypes.length; i++) {
       const validOpp = {

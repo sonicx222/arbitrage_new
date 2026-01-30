@@ -416,6 +416,18 @@ export class OpportunityConsumer {
    * enqueue (not after dequeue by engine) to prevent race conditions where
    * duplicate messages pass the check before either is marked active.
    *
+   * Thread Safety Note (Fix 5.1):
+   * =============================
+   * This method is safe in Node.js single-threaded model because:
+   * 1. The has() check and add() are executed synchronously without await points
+   * 2. No event loop tick can interleave between check and add
+   * 3. Set operations are atomic in the V8 engine
+   *
+   * WARNING: If this code is ever used with worker_threads sharing state:
+   * - The activeExecutions Set would need to be protected by a mutex
+   * - Consider using Atomics.wait/notify or SharedArrayBuffer patterns
+   * - Alternatively, use a Redis-based distributed lock for multi-process safety
+   *
    * @returns true if successfully queued, false if rejected
    */
   private handleArbitrageOpportunity(opportunity: ArbitrageOpportunity): boolean {

@@ -31,6 +31,10 @@ export type InitializationLogger = ServiceLogger;
 /**
  * Result from MEV provider initialization.
  * Includes success flag and detailed error information for diagnostics.
+ *
+ * Bug 4.4 Fix: Added skippedChains to track chains that were intentionally
+ * skipped (no provider, disabled in config, etc.) vs chains that failed
+ * to initialize. This aids debugging and operational visibility.
  */
 export interface MevInitializationResult {
   /** The MEV provider factory, or null if disabled/failed */
@@ -43,6 +47,13 @@ export interface MevInitializationResult {
   error?: string;
   /** Chains that failed to initialize (for partial failures) */
   failedChains?: string[];
+  /**
+   * Bug 4.4 Fix: Chains that were intentionally skipped.
+   * Reasons include: no provider/wallet available, not configured, disabled, or
+   * requires incompatible provider (e.g., Jito for Solana).
+   * Useful for debugging why certain chains don't have MEV protection.
+   */
+  skippedChains?: string[];
 }
 
 /**
