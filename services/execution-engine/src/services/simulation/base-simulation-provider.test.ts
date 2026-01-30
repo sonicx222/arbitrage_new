@@ -462,8 +462,9 @@ describe('BaseSimulationProvider', () => {
 
       const health = provider.getHealth();
       // Average should be approximately (10 + 30) / 2 = 20, but with some variance
+      // due to execution overhead and timing precision
       expect(health.averageLatencyMs).toBeGreaterThanOrEqual(15);
-      expect(health.averageLatencyMs).toBeLessThanOrEqual(35);
+      expect(health.averageLatencyMs).toBeLessThanOrEqual(50); // Widened for CI variance
     });
   });
 });

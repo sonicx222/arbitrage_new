@@ -1,9 +1,12 @@
 /**
  * Alchemy Simulation Provider
  *
- * Implements transaction simulation using Alchemy's eth_call and
- * alchemy_simulateExecution endpoints. Provides an alternative to
- * Tenderly for transaction simulation.
+ * Implements transaction simulation using Alchemy's eth_call endpoint.
+ * Provides an alternative to Tenderly for transaction simulation.
+ *
+ * Fix 7.3: Removed mention of alchemy_simulateExecution as it's not implemented.
+ * The provider uses standard eth_call for simulation which is sufficient for
+ * detecting reverts and validating transactions before execution.
  *
  * @see https://docs.alchemy.com/reference/eth-call
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
@@ -73,10 +76,14 @@ export class AlchemySimulationProvider extends BaseSimulationProvider {
     super(config);
 
     // Fix 7.1: Warn about deprecated chains
+    // Fix 6.1: Use logger instead of console.warn
     if (isDeprecatedChain(config.chain)) {
       const warning = getDeprecationWarning(config.chain);
       if (warning) {
-        console.warn(`[AlchemySimulationProvider] ${warning}`);
+        this.logger.warn('Deprecated chain detected', {
+          chain: config.chain,
+          warning,
+        });
       }
     }
 
@@ -97,6 +104,8 @@ export class AlchemySimulationProvider extends BaseSimulationProvider {
 
   /**
    * Execute the actual simulation request using Alchemy API.
+   *
+   * Fix 9.1: Uses fetchWithTimeout helper for consistent timeout handling.
    */
   protected async executeSimulation(
     request: SimulationRequest,
@@ -105,33 +114,28 @@ export class AlchemySimulationProvider extends BaseSimulationProvider {
     const url = this.getApiUrl();
     const body = this.buildRequestBody(request);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    // Fix 9.1: Use fetchWithTimeout helper
+    const response = await this.fetchWithTimeout(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        return this.createErrorResult(
-          startTime,
-          `Alchemy API error: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const data = (await response.json()) as AlchemyJsonRpcResponse;
-      return this.parseSimulationResponse(data, startTime);
-    } finally {
-      clearTimeout(timeoutId);
+    if (!response.ok) {
+      return this.createErrorResult(
+        startTime,
+        `Alchemy API error: ${response.status} ${response.statusText}`
+      );
     }
+
+    const data = (await response.json()) as AlchemyJsonRpcResponse;
+    return this.parseSimulationResponse(data, startTime);
   }
 
   /**
    * Check connection/health of the provider
+   *
+   * Fix 9.1: Uses fetchWithTimeout helper for consistent timeout handling.
    */
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
     try {
@@ -144,31 +148,24 @@ export class AlchemySimulationProvider extends BaseSimulationProvider {
         params: [],
       };
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+      // Fix 9.1: Use fetchWithTimeout helper
+      const response = await this.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-
-        if (response.ok) {
-          const data = (await response.json()) as AlchemyJsonRpcResponse;
-          if (data.result) {
-            return { healthy: true, message: 'Alchemy API is reachable' };
-          }
+      if (response.ok) {
+        const data = (await response.json()) as AlchemyJsonRpcResponse;
+        if (data.result) {
+          return { healthy: true, message: 'Alchemy API is reachable' };
         }
-
-        return {
-          healthy: false,
-          message: `Alchemy API returned ${response.status}: ${response.statusText}`,
-        };
-      } finally {
-        clearTimeout(timeoutId);
       }
+
+      return {
+        healthy: false,
+        message: `Alchemy API returned ${response.status}: ${response.statusText}`,
+      };
     } catch (error) {
       return {
         healthy: false,

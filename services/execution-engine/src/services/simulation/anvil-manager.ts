@@ -11,6 +11,11 @@
  * - Query pool reserves after applying transactions
  * - Create/revert snapshots for rollback capability
  *
+ * Environment Variables (Fix 3.2):
+ * - ANVIL_PORT: Port for Anvil to listen on (default: 8546)
+ *   Set to avoid port conflicts in containerized deployments.
+ *   Example: ANVIL_PORT=8547
+ *
  * @see Phase 2: Pending-State Simulation Engine (Implementation Plan v3.0)
  * @see Task 2.3.1: Anvil Fork Manager
  * @see https://book.getfoundry.sh/reference/anvil/

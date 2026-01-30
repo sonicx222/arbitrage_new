@@ -7,6 +7,11 @@
  * - Health monitoring and automatic reconnection
  * - Wallet management
  *
+ * Environment Variables (Fix 3.2):
+ * - {CHAIN_NAME}_PRIVATE_KEY: Private key for wallet on each chain
+ *   Chain name is uppercase (e.g., ETHEREUM_PRIVATE_KEY, ARBITRUM_PRIVATE_KEY)
+ *   Required for transaction signing on the respective chain.
+ *
  * @see engine.ts (parent service)
  */
 

@@ -24,10 +24,12 @@ import {
   SimulationRequest,
   SimulationResult,
   SimulationProviderType,
+  SimulationLogger,
   SIMULATION_DEFAULTS,
   CircularBuffer,
   getSimulationErrorMessage,
   updateRollingAverage,
+  createConsoleLogger,
 } from './types';
 
 // =============================================================================
@@ -97,11 +99,20 @@ export abstract class BaseSimulationProvider implements ISimulationProvider {
    */
   protected readonly rollingWindowSize: number;
 
+  /**
+   * Fix 6.1: Logger instance for structured logging.
+   * Uses console-based fallback if not provided in config.
+   */
+  protected readonly logger: SimulationLogger;
+
   constructor(config: SimulationProviderConfig, rollingWindowSize = 100) {
     this.config = config;
     this.chain = config.chain;
     this.timeoutMs = config.timeoutMs || SIMULATION_DEFAULTS.timeoutMs;
     this.rollingWindowSize = rollingWindowSize;
+
+    // Fix 6.1: Initialize logger from config or use console fallback
+    this.logger = config.logger ?? createConsoleLogger(config.type);
 
     this.metrics = this.createEmptyMetrics();
     this.health = this.createInitialHealth();
@@ -215,6 +226,33 @@ export abstract class BaseSimulationProvider implements ISimulationProvider {
       provider: this.type,
       latencyMs: Date.now() - startTime,
     };
+  }
+
+  /**
+   * Fix 9.1: Helper for fetch operations with timeout and proper cancellation.
+   * Uses AbortController for true HTTP request cancellation.
+   *
+   * @param url - URL to fetch
+   * @param options - Fetch options (method, headers, body)
+   * @param timeoutMs - Timeout in milliseconds (defaults to this.timeoutMs)
+   * @returns Fetch Response or throws on timeout/error
+   */
+  protected async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs: number = this.timeoutMs
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   /**

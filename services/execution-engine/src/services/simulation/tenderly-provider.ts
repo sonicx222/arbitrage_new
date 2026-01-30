@@ -55,10 +55,14 @@ export class TenderlyProvider extends BaseSimulationProvider {
     super(config);
 
     // Fix 7.1: Warn about deprecated chains
+    // Fix 6.1: Use logger instead of console.warn
     if (isDeprecatedChain(config.chain)) {
       const warning = getDeprecationWarning(config.chain);
       if (warning) {
-        console.warn(`[TenderlyProvider] ${warning}`);
+        this.logger.warn('Deprecated chain detected', {
+          chain: config.chain,
+          warning,
+        });
       }
     }
 
@@ -117,63 +121,51 @@ export class TenderlyProvider extends BaseSimulationProvider {
 
     const url = `${this.apiUrl}/account/${this.accountSlug}/project/${this.projectSlug}/simulate`;
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    // Fix 2.1: Increment rate limit counter BEFORE the request
+    // because Tenderly counts all API calls toward the limit
+    this.incrementRateLimitCounter();
 
-    try {
-      // Fix 2.1: Increment rate limit counter BEFORE the request
-      // because Tenderly counts all API calls toward the limit
-      this.incrementRateLimitCounter();
+    // Fix 9.1: Use fetchWithTimeout helper for consistent timeout handling
+    const response = await this.fetchWithTimeout(url, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        return this.createErrorResult(
-          startTime,
-          `Tenderly API error: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const data = (await response.json()) as TenderlySimulationResponse;
-      return this.parseSimulationResponse(data, startTime);
-    } finally {
-      clearTimeout(timeoutId);
+    if (!response.ok) {
+      return this.createErrorResult(
+        startTime,
+        `Tenderly API error: ${response.status} ${response.statusText}`
+      );
     }
+
+    const data = (await response.json()) as TenderlySimulationResponse;
+    return this.parseSimulationResponse(data, startTime);
   }
 
   /**
    * Check connection/health of the provider
+   *
+   * Fix 9.1: Uses fetchWithTimeout helper for consistent timeout handling.
    */
   async healthCheck(): Promise<{ healthy: boolean; message: string }> {
     try {
       const url = `${this.apiUrl}/account/${this.accountSlug}/project/${this.projectSlug}`;
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+      // Fix 9.1: Use fetchWithTimeout helper
+      const response = await this.fetchWithTimeout(url, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
 
-      try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: this.getHeaders(),
-          signal: controller.signal,
-        });
-
-        if (response.ok) {
-          return { healthy: true, message: 'Tenderly API is reachable' };
-        }
-
-        return {
-          healthy: false,
-          message: `Tenderly API returned ${response.status}: ${response.statusText}`,
-        };
-      } finally {
-        clearTimeout(timeoutId);
+      if (response.ok) {
+        return { healthy: true, message: 'Tenderly API is reachable' };
       }
+
+      return {
+        healthy: false,
+        message: `Tenderly API returned ${response.status}: ${response.statusText}`,
+      };
     } catch (error) {
       return {
         healthy: false,

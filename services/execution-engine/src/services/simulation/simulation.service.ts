@@ -62,6 +62,13 @@ const PROVIDER_ORDER_CACHE_TTL_MS = 5000;
 // Maximum cache size to prevent unbounded memory growth
 const MAX_CACHE_SIZE = 500;
 
+/**
+ * Fix 4.2: Periodic cache cleanup interval.
+ * Runs every 30 seconds to remove expired entries even when no simulations are running.
+ * This prevents stale entries from accumulating.
+ */
+const CACHE_CLEANUP_INTERVAL_MS = 30000;
+
 /** Cache entry for simulation results */
 interface CacheEntry {
   result: SimulationResult;
@@ -89,6 +96,12 @@ export class SimulationService implements ISimulationService {
   // Simulation result cache for request deduplication
   private readonly simulationCache = new Map<string, CacheEntry>();
 
+  /**
+   * Fix 4.2: Periodic cache cleanup interval.
+   * Prevents stale entries from accumulating when no simulations are running.
+   */
+  private cacheCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(options: SimulationServiceOptions) {
     this.logger = options.logger;
 
@@ -113,10 +126,42 @@ export class SimulationService implements ISimulationService {
     // Fix 7.2: Validate provider priority configuration
     this.validateProviderPriority();
 
+    // Fix 4.2: Start periodic cache cleanup
+    this.startCacheCleanup();
+
     this.logger.info('SimulationService initialized', {
       providers: Array.from(this.providers.keys()),
       config: this.config,
     });
+  }
+
+  /**
+   * Fix 4.2: Start periodic cache cleanup.
+   * Removes expired entries even when no simulations are running.
+   */
+  private startCacheCleanup(): void {
+    // Avoid multiple intervals
+    if (this.cacheCleanupInterval) {
+      return;
+    }
+
+    this.cacheCleanupInterval = setInterval(() => {
+      // Self-clear if stopped (per code conventions)
+      if (this.stopped) {
+        if (this.cacheCleanupInterval) {
+          clearInterval(this.cacheCleanupInterval);
+          this.cacheCleanupInterval = null;
+        }
+        return;
+      }
+
+      // Cleanup expired entries
+      this.cleanupCache();
+
+      this.logger.debug('Periodic cache cleanup', {
+        cacheSize: this.simulationCache.size,
+      });
+    }, CACHE_CLEANUP_INTERVAL_MS);
   }
 
   /**
@@ -143,11 +188,48 @@ export class SimulationService implements ISimulationService {
   }
 
   /**
-   * Initialize the service
+   * Initialize the service.
+   *
+   * Fix 10.2: Pre-warm provider health status during initialization.
+   * This ensures the first simulation request doesn't start with all
+   * providers showing healthy=false and successRate=0.
    */
   async initialize(): Promise<void> {
+    // Fix 10.2: Pre-warm provider health status
+    // Run health checks in parallel for faster startup
+    const healthCheckPromises: Promise<void>[] = [];
+    for (const [type, provider] of this.providers) {
+      if (provider.isEnabled()) {
+        healthCheckPromises.push(
+          provider.healthCheck()
+            .then((result) => {
+              this.logger.debug('Provider health check warmup complete', {
+                provider: type,
+                healthy: result.healthy,
+                message: result.message,
+              });
+            })
+            .catch((err) => {
+              // Non-fatal: log and continue - provider will be marked unhealthy
+              this.logger.warn('Provider health check warmup failed', {
+                provider: type,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            })
+        );
+      }
+    }
+
+    // Wait for all health checks to complete (with timeout protection)
+    if (healthCheckPromises.length > 0) {
+      await Promise.allSettled(healthCheckPromises);
+    }
+
     this.logger.info('SimulationService initialization complete', {
       providerCount: this.providers.size,
+      enabledProviders: Array.from(this.providers.entries())
+        .filter(([_, p]) => p.isEnabled())
+        .map(([type, _]) => type),
     });
   }
 
@@ -339,6 +421,8 @@ export class SimulationService implements ISimulationService {
 
   /**
    * Stop the service
+   *
+   * Fix 4.2: Also clears the cache cleanup interval.
    */
   stop(): void {
     if (this.stopped) {
@@ -346,6 +430,16 @@ export class SimulationService implements ISimulationService {
     }
 
     this.stopped = true;
+
+    // Fix 4.2: Stop periodic cache cleanup
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+
+    // Clear the cache to free memory
+    this.simulationCache.clear();
+
     this.logger.info('SimulationService stopped');
   }
 
@@ -543,9 +637,8 @@ export class SimulationService implements ISimulationService {
   /**
    * Generate cache key from simulation request.
    *
-   * Fix 9.4: Improved key generation to avoid collisions.
-   * Uses length-prefixed fields to prevent collisions from values
-   * containing the separator character.
+   * Fix 9.4 + Fix 4.3: Improved key generation to avoid collisions.
+   * Uses length-prefixed fields for ALL values to prevent collisions.
    *
    * Key is based on chain, transaction params, and block number.
    */
@@ -560,10 +653,18 @@ export class SimulationService implements ISimulationService {
     const value = tx.value?.toString() ?? '0';
     const block = request.blockNumber?.toString() ?? 'latest';
 
-    // Fix 9.4: Use length-prefixed format to prevent collisions
-    // Format: chain|from_len:from|to_len:to|data_len:data|value|block
-    // This prevents collisions when values contain the separator
-    return `${chain}|${from.length}:${from}|${to.length}:${to}|${data.length}:${data}|${value}|${block}`;
+    // Fix 4.3: Use length-prefixed format for ALL fields to prevent collisions
+    // Even though chain names are controlled internally, this makes the cache
+    // key format completely collision-proof and consistent.
+    // Format: len:chain|len:from|len:to|len:data|len:value|len:block
+    return [
+      `${chain.length}:${chain}`,
+      `${from.length}:${from}`,
+      `${to.length}:${to}`,
+      `${data.length}:${data}`,
+      `${value.length}:${value}`,
+      `${block.length}:${block}`,
+    ].join('|');
   }
 
   /**

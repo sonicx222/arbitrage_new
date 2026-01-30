@@ -35,12 +35,38 @@ export {
   getSimulationErrorMessage,
   createCancellableTimeout,
   updateRollingAverage,
+  // Fix 9.4: Export shared revert reason extraction utility
+  extractRevertReason,
 } from './types';
 
 // Base Provider (for extension)
 export { BaseSimulationProvider } from './base-simulation-provider';
 
-// Providers
+/**
+ * Simulation Providers
+ *
+ * Provider hierarchy (from ADR-016 + Phase 2 amendments):
+ *
+ * 1. TenderlyProvider (Primary) - Full-featured simulation with state changes and logs
+ *    - Best accuracy, detailed execution traces
+ *    - 25,000 free simulations/month
+ *    - Recommended for production
+ *
+ * 2. AlchemyProvider (Secondary/Fallback) - eth_call based simulation
+ *    - Good for basic revert detection
+ *    - Practically unlimited (300M compute units/month free tier)
+ *    - Used when Tenderly quota exhausted or unavailable
+ *
+ * 3. LocalSimulationProvider (Tertiary/Fallback) - Lightweight eth_call simulation
+ *    - Uses existing RPC provider (no additional API keys)
+ *    - No rate limits, no external dependencies
+ *    - Limited accuracy: no state changes, no detailed logs
+ *    - Fix 1.1/1.2: Added as third-tier fallback for resilience
+ *    - Useful when external simulation providers are unavailable
+ *
+ * Configure provider priority in SimulationServiceConfig.providerPriority
+ * Default: ['tenderly', 'alchemy', 'local']
+ */
 export { TenderlyProvider, createTenderlyProvider } from './tenderly-provider';
 export { AlchemySimulationProvider, createAlchemyProvider } from './alchemy-provider';
 export { LocalSimulationProvider, createLocalProvider } from './local-provider';

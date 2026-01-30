@@ -16,10 +16,37 @@
  */
 
 import { ethers } from 'ethers';
+import { createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
+import type { Logger } from '../../types';
 // Fix 9.3: Import shared SimulationLog type for consistent log typing
 // Fix 6.3: Import shared rolling average utility
-import { isWethAddress, createCancellableTimeout, SimulationLog, updateRollingAverage } from './types';
+// Fix 6.2: Import getSimulationErrorMessage for consistent error handling
+// Fix 9.4: Import extractRevertReason for consistent revert reason extraction
+import {
+  isWethAddress,
+  createCancellableTimeout,
+  SimulationLog,
+  updateRollingAverage,
+  getSimulationErrorMessage,
+  extractRevertReason,
+} from './types';
+
+// =============================================================================
+// Default Logger (Fix 4.1)
+// =============================================================================
+
+/**
+ * Lazy-initialized Pino logger for when no logger is provided.
+ * Uses Pino for proper structured logging with LOG_LEVEL support.
+ */
+let _defaultLogger: ILogger | null = null;
+function getDefaultLogger(): ILogger {
+  if (!_defaultLogger) {
+    _defaultLogger = createPinoLogger('pending-state-simulator');
+  }
+  return _defaultLogger;
+}
 
 /**
  * Extended simulation result with logs for execution price calculation.
@@ -74,6 +101,8 @@ export interface PendingSwapIntent {
  * Configuration for PendingStateSimulator.
  *
  * Fix 10.5: Added maxSnapshotPoolSize for configurable snapshot pool.
+ * Fix 4.1: Added logger for structured logging.
+ * Fix 10.4: Added maxBatchTimeoutMs for configurable batch timeout.
  */
 export interface PendingStateSimulatorConfig {
   /** AnvilForkManager instance to use for simulation */
@@ -92,6 +121,17 @@ export interface PendingStateSimulatorConfig {
    * Default: 5
    */
   maxSnapshotPoolSize?: number;
+  /**
+   * Fix 4.1: Logger instance for structured logging.
+   * Uses Pino logger with LOG_LEVEL support if not provided.
+   */
+  logger?: Logger;
+  /**
+   * Fix 10.4: Maximum batch simulation timeout in ms.
+   * Hard cap for batch simulations to prevent stale opportunities.
+   * Default: 10000 (10 seconds)
+   */
+  maxBatchTimeoutMs?: number;
 }
 
 /**
@@ -156,6 +196,12 @@ export interface SimulatorMetrics {
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_POOLS = 10;
+/**
+ * Fix 10.4: Default maximum batch timeout.
+ * For competitive arbitrage, opportunities become stale after 1-2 seconds.
+ * 10 seconds is the hard cap to avoid wasting resources on stale ops.
+ */
+const DEFAULT_MAX_BATCH_TIMEOUT_MS = 10000;
 
 // =============================================================================
 // PendingStateSimulator Implementation
@@ -201,6 +247,16 @@ export class PendingStateSimulator {
   private readonly snapshotPool: string[];
   private readonly maxSnapshotPoolSize: number;
 
+  /**
+   * Fix 4.1: Logger instance for structured logging.
+   */
+  private readonly logger: Logger;
+
+  /**
+   * Fix 10.4: Maximum batch timeout in milliseconds.
+   */
+  private readonly maxBatchTimeoutMs: number;
+
   constructor(config: PendingStateSimulatorConfig) {
     this.anvilManager = config.anvilManager;
     this.defaultPools = config.defaultPools ?? [];
@@ -208,6 +264,12 @@ export class PendingStateSimulator {
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.poolRegistry = config.poolRegistry ?? new Map();
     this.metrics = this.createEmptyMetrics();
+
+    // Fix 4.1: Initialize logger
+    this.logger = config.logger ?? getDefaultLogger();
+
+    // Fix 10.4: Initialize batch timeout
+    this.maxBatchTimeoutMs = config.maxBatchTimeoutMs ?? DEFAULT_MAX_BATCH_TIMEOUT_MS;
 
     // Fix 10.2: Build token pair index for fast lookups
     this.poolTokenIndex = new Map();
@@ -299,8 +361,16 @@ export class PendingStateSimulator {
         this.snapshotPool.push(newSnapshot);
       }
       // Otherwise don't create new snapshot (pool is full, save resources)
-    } catch {
-      // If revert fails, don't add to pool (state may be corrupted)
+    } catch (error) {
+      // Fix 4.1: Log snapshot release failures for debugging and monitoring.
+      // If revert fails, don't add to pool (state may be corrupted).
+      // This can happen if Anvil process crashed or network issues occurred.
+      this.logger.warn('Failed to release snapshot', {
+        snapshotId,
+        error: getSimulationErrorMessage(error),
+        poolSize: this.snapshotPool.length,
+        maxPoolSize: this.maxSnapshotPoolSize,
+      });
     }
   }
 
@@ -417,12 +487,12 @@ export class PendingStateSimulator {
     const results: PendingSwapSimulationResult[] = [];
     let snapshotId: string | undefined;
 
-    // Fix 4.2 & 10.5: Calculate timeout based on number of intents with AGGRESSIVE bounds
+    // Fix 4.2 & 10.4: Calculate timeout based on number of intents with AGGRESSIVE bounds
     // For competitive arbitrage, opportunities are stale after 1-2 seconds
-    // Batch timeout should be at most 10 seconds to avoid wasting resources on stale ops
+    // Batch timeout capped by configurable maxBatchTimeoutMs to avoid wasting resources on stale ops
     const batchTimeoutMs = Math.min(
       this.timeoutMs * intents.length,
-      10000 // Fix 10.5: Hard cap at 10 seconds (not 60) for competitive speed
+      this.maxBatchTimeoutMs // Fix 10.4: Now configurable (default: 10 seconds)
     );
     const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<PendingSwapSimulationResult[]>(
       batchTimeoutMs,
@@ -690,7 +760,7 @@ export class PendingStateSimulator {
 
       return {
         success: false,
-        revertReason: this.extractRevertReason(errorMessage),
+        revertReason: extractRevertReason(errorMessage),
         error: errorMessage,
         latencyMs: Date.now() - startTime,
       };
@@ -726,6 +796,24 @@ export class PendingStateSimulator {
 
   /**
    * Query reserves for multiple pools.
+   *
+   * Fix 10.3: Performance optimization opportunity documented.
+   *
+   * Current implementation: Uses Promise.all() for parallel individual RPC calls.
+   * This is efficient for local Anvil fork where RPC latency is minimal (~1ms per call).
+   *
+   * Future optimization: For remote RPC or higher pool counts, consider:
+   * 1. Multicall3 batching (0xcA11bde05977b3631167028862bE2a173976CA11)
+   *    - Single RPC call for all pool queries
+   *    - Reduces network round-trips
+   *    - Recommended when querying >5 pools over network
+   *
+   * 2. ethers.js JSON-RPC batching (provider.send with batch)
+   *    - Groups multiple eth_call into single HTTP request
+   *    - Less efficient than multicall but simpler to implement
+   *
+   * For local Anvil fork simulation, the current parallel approach is optimal
+   * as it avoids the overhead of multicall encoding/decoding.
    */
   private async queryPoolReserves(
     pools: string[]
@@ -733,12 +821,13 @@ export class PendingStateSimulator {
     const reserves = new Map<string, [bigint, bigint]>();
     const poolsToQuery = pools.slice(0, this.maxPoolsPerSimulation);
 
+    // Parallel queries - optimal for local Anvil fork where latency is ~1ms
     const promises = poolsToQuery.map(async (pool) => {
       try {
         const [reserve0, reserve1] = await this.anvilManager.getPoolReserves(pool);
         reserves.set(pool, [reserve0, reserve1]);
       } catch {
-        // Skip pools that fail to query
+        // Skip pools that fail to query (may not be V2-style pairs)
       }
     });
 
@@ -1015,26 +1104,6 @@ export class PendingStateSimulator {
     }
 
     return { executionPrice, actualAmountOut };
-  }
-
-  /**
-   * Extract revert reason from error message.
-   */
-  private extractRevertReason(errorMessage: string): string {
-    const patterns = [
-      /execution reverted:\s*(.+)/i,
-      /revert\s*(.+)/i,
-      /reason:\s*(.+)/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = errorMessage.match(pattern);
-      if (match && match[1]) {
-        return match[1].trim();
-      }
-    }
-
-    return errorMessage;
   }
 
   /**

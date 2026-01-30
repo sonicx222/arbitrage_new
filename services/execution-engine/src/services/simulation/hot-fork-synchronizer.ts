@@ -15,7 +15,7 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, type ILogger } from '@arbitrage/core';
+import { createPinoLogger, CircularBuffer, type ILogger } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 
@@ -147,8 +147,11 @@ export class HotForkSynchronizer {
   private lastSyncedBlock: number = 0;
   private metrics: SynchronizerMetrics;
   private isSyncing: boolean = false;
-  /** Fix 10.5: Track block timestamps for adaptive interval calculation */
-  private blockTimestamps: number[] = [];
+  /**
+   * Fix 10.5 + Fix 4.2: Track block timestamps for adaptive interval calculation.
+   * Uses CircularBuffer for O(1) pushOverwrite instead of O(n) array.shift().
+   */
+  private readonly blockTimestamps: CircularBuffer<number>;
   private currentSyncIntervalMs: number;
 
   constructor(config: HotForkSynchronizerConfig) {
@@ -164,6 +167,9 @@ export class HotForkSynchronizer {
     this.minSyncIntervalMs = config.minSyncIntervalMs ?? DEFAULT_MIN_SYNC_INTERVAL_MS;
     this.maxSyncIntervalMs = config.maxSyncIntervalMs ?? DEFAULT_MAX_SYNC_INTERVAL_MS;
     this.currentSyncIntervalMs = this.baseSyncIntervalMs;
+
+    // Fix 4.2: Initialize CircularBuffer for O(1) block timestamp tracking
+    this.blockTimestamps = new CircularBuffer<number>(ADAPTIVE_WINDOW_SIZE);
 
     if (config.autoStart) {
       this.start().catch((err) => {
@@ -420,18 +426,15 @@ export class HotForkSynchronizer {
   }
 
   /**
-   * Fix 10.5: Record a block timestamp for interval calculation.
+   * Fix 10.5 + Fix 4.2: Record a block timestamp for interval calculation.
+   * Uses O(1) pushOverwrite instead of O(n) array.shift().
    */
   private recordBlockTimestamp(timestamp: number): void {
-    this.blockTimestamps.push(timestamp);
-    // Keep only recent timestamps within the window
-    if (this.blockTimestamps.length > ADAPTIVE_WINDOW_SIZE) {
-      this.blockTimestamps.shift();
-    }
+    this.blockTimestamps.pushOverwrite(timestamp);
   }
 
   /**
-   * Fix 10.5: Calculate optimal sync interval based on block production rate.
+   * Fix 10.5 + Fix 4.2: Calculate optimal sync interval based on block production rate.
    *
    * Algorithm:
    * - If blocks are coming quickly, decrease interval (sync more often)
@@ -458,13 +461,14 @@ export class HotForkSynchronizer {
       return this.baseSyncIntervalMs;
     }
 
-    // Calculate average block time from recent timestamps
-    const intervals: number[] = [];
-    for (let i = 1; i < this.blockTimestamps.length; i++) {
-      intervals.push(this.blockTimestamps[i] - this.blockTimestamps[i - 1]);
+    // Fix 4.2: Calculate average block time using CircularBuffer reduce()
+    // This computes intervals between consecutive timestamps in O(n)
+    const timestamps = this.blockTimestamps.toArray();
+    let totalInterval = 0;
+    for (let i = 1; i < timestamps.length; i++) {
+      totalInterval += timestamps[i] - timestamps[i - 1];
     }
-
-    const avgBlockTime = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    const avgBlockTime = totalInterval / (timestamps.length - 1);
 
     // Target sync interval should be slightly less than avg block time
     // to catch new blocks quickly, but not waste resources polling too fast

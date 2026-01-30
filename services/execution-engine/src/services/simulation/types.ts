@@ -2,7 +2,7 @@
  * Transaction Simulation Types and Interfaces
  *
  * Provides abstractions for transaction simulation across different providers:
- * - Tenderly for comprehensive simulation (500 free/month)
+ * - Tenderly for comprehensive simulation (25,000 free/month)
  * - Alchemy for alternative simulation
  *
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
@@ -116,7 +116,44 @@ export interface StateOverride {
 }
 
 /**
+ * Standardized logging interface for simulation providers.
+ * Compatible with console, pino, and other logging libraries.
+ *
+ * Fix 6.1/9.2: Consolidated with Logger from ../../types.ts.
+ * SimulationLogger is now a type alias for backwards compatibility.
+ * Both types have identical interfaces - use either interchangeably.
+ *
+ * @see Logger in ../../types.ts
+ */
+import type { Logger } from '../../types';
+
+/**
+ * Type alias for Logger for backwards compatibility.
+ * Identical interface - use Logger or SimulationLogger interchangeably.
+ */
+export type SimulationLogger = Logger;
+
+/**
+ * Console-based fallback logger.
+ * Used when no logger is provided in config.
+ *
+ * Fix 6.1: Structured console logger that matches SimulationLogger interface.
+ */
+export const createConsoleLogger = (prefix: string): SimulationLogger => ({
+  info: (message: string, meta?: Record<string, unknown>) =>
+    console.log(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
+  warn: (message: string, meta?: Record<string, unknown>) =>
+    console.warn(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
+  error: (message: string, meta?: Record<string, unknown>) =>
+    console.error(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
+  debug: (message: string, meta?: Record<string, unknown>) =>
+    console.debug(`[${prefix}] ${message}`, meta ? JSON.stringify(meta) : ''),
+});
+
+/**
  * Configuration for simulation provider
+ *
+ * Fix 6.1: Added logger property for structured logging.
  */
 export interface SimulationProviderConfig {
   /** Provider type identifier */
@@ -139,6 +176,11 @@ export interface SimulationProviderConfig {
   apiUrl?: string;
   /** Timeout for simulation requests in ms */
   timeoutMs?: number;
+  /**
+   * Fix 6.1: Logger instance for structured logging.
+   * If not provided, uses console-based fallback logger.
+   */
+  logger?: SimulationLogger;
 }
 
 /**
@@ -412,15 +454,36 @@ export function getSimulationErrorMessage(error: unknown): string {
 }
 
 /**
- * Default configuration values
+ * Default configuration values.
+ *
+ * Fix 2.2/1.2: Enhanced documentation for healthCheckIntervalMs and providerPriority.
  */
 export const SIMULATION_DEFAULTS = {
+  /** Timeout for simulation requests */
   timeoutMs: 5000,
-  minProfitForSimulation: 50, // $50 minimum
+  /** Minimum expected profit ($) to trigger simulation - skip for small trades */
+  minProfitForSimulation: 50,
+  /** Time-critical threshold (ms) - skip simulation if opportunity age exceeds this */
   timeCriticalThresholdMs: 2000,
+  /** Cache TTL for deduplication (ms) */
   cacheTtlMs: 5000,
+  /** Max consecutive failures before marking provider unhealthy */
   maxConsecutiveFailures: 3,
+  /**
+   * Health check interval (ms).
+   * Default: 60000 (60s). For hot-path arbitrage, recommend 15000-30000ms
+   * to detect provider issues faster. Lower values increase API usage.
+   */
   healthCheckIntervalMs: 60000,
+  /**
+   * Provider priority order for failover.
+   * - tenderly: Best accuracy (detailed state changes, logs)
+   * - alchemy: Good fallback (eth_call, practically unlimited)
+   * - local: Last resort (uses existing RPC, no rate limits, limited accuracy)
+   *
+   * Fix 1.2: 'local' added as third-tier fallback for resilience when
+   * external simulation providers are unavailable.
+   */
   providerPriority: ['tenderly', 'alchemy', 'local'] as SimulationProviderType[],
 };
 
@@ -439,10 +502,30 @@ export const TENDERLY_CONFIG = {
 };
 
 /**
- * Alchemy simulation configuration
+ * Alchemy simulation configuration.
+ *
+ * Fix 7.2/9.3: Added useful configuration metadata instead of empty object.
+ * The Alchemy provider builds URLs dynamically using chain-specific base URLs.
+ *
+ * @see AlchemySimulationProvider in alchemy-provider.ts
+ * @see https://docs.alchemy.com/reference/alchemy-api-quickstart
  */
 export const ALCHEMY_CONFIG = {
-  simulateEndpoint: '/v2/{apiKey}/eth_call',
+  /**
+   * URL template for building chain-specific Alchemy endpoints.
+   * Chains are mapped in ALCHEMY_CHAIN_URLS in alchemy-provider.ts.
+   */
+  urlTemplate: 'https://{chainSlug}.g.alchemy.com/v2/{apiKey}',
+  /**
+   * Alchemy free tier compute units per month (300M CU).
+   * eth_call costs ~26 CU, so effectively unlimited for simulation.
+   * @see https://docs.alchemy.com/reference/compute-units
+   */
+  freeMonthlyComputeUnits: 300_000_000,
+  /**
+   * Approximate compute units per eth_call operation.
+   */
+  computeUnitsPerCall: 26,
 };
 
 // =============================================================================
@@ -549,12 +632,17 @@ export function getPanicMessage(code: number): string {
  * Decode revert data to extract error message.
  * Handles Error(string) and Panic(uint256) selectors.
  *
+ * Fix 4.3: Uses top-level ethers import instead of lazy require() for:
+ * - Better performance (no module resolution overhead per call)
+ * - ES module compliance (no CommonJS require in ES modules)
+ * - Tree-shaking support
+ *
  * @param data - Hex-encoded revert data
  * @returns Decoded error message or undefined if unknown format
  */
 export function decodeRevertData(data: string): string | undefined {
-  // Lazy import to avoid circular deps at module load time
-  const { ethers } = require('ethers');
+  // Fix 4.3: Use top-level ethers import instead of require()
+  // ethers is already imported at the top of this file
 
   try {
     // Error(string) selector: 0x08c379a0
@@ -600,4 +688,31 @@ export function getDeprecationWarning(chain: string): string | undefined {
     goerli: 'Goerli testnet is deprecated. Use Sepolia for testnet simulation.',
   };
   return warnings[chain.toLowerCase()];
+}
+
+/**
+ * Fix 9.4: Shared utility to extract revert reason from error messages.
+ *
+ * Previously duplicated in anvil-manager.ts and pending-state-simulator.ts.
+ * Consolidated here for consistency and maintainability.
+ *
+ * @param errorMessage - Error message string to parse
+ * @returns Extracted revert reason or original message if no pattern matches
+ */
+export function extractRevertReason(errorMessage: string): string {
+  const patterns = [
+    /execution reverted:\s*(.+)/i,
+    /revert\s*(.+)/i,
+    /reason:\s*(.+)/i,
+    /VM Exception while processing transaction: revert\s*(.+)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = errorMessage.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return errorMessage;
 }

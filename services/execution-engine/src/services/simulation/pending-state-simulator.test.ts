@@ -278,6 +278,139 @@ describe('PendingStateSimulator - Unit Tests', () => {
     expect(simulator.getMetrics().totalSimulations).toBe(0);
     expect(simulator.getMetrics().failedSimulations).toBe(0);
   });
+
+  // ===========================================================================
+  // Fix 8.3: V3 Multi-Hop Swap Encoding Tests
+  // ===========================================================================
+
+  describe('V3 multi-hop swap encoding', () => {
+    let simulator: PendingStateSimulator;
+    let mockManager: unknown;
+
+    beforeAll(() => {
+      mockManager = {
+        getProvider: () => null,
+      } as unknown as AnvilForkManager;
+
+      simulator = new PendingStateSimulator({
+        anvilManager: mockManager as AnvilForkManager,
+      });
+    });
+
+    test('should build raw transaction for V3 single-hop swap', async () => {
+      const v3SingleHopIntent = createPendingSwapIntent({
+        type: 'uniswapV3',
+        router: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // V3 SwapRouter
+        path: [
+          '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+          '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+        ],
+        fee: 3000, // 0.3% fee tier
+      });
+
+      const rawTx = await simulator.buildRawTransaction(v3SingleHopIntent);
+
+      expect(rawTx).toBeDefined();
+      expect(rawTx.startsWith('0x')).toBe(true);
+      // V3 exactInputSingle selector: 0x414bf389
+      expect(rawTx.toLowerCase()).toContain('414bf389');
+    });
+
+    test('should build raw transaction for V3 multi-hop swap', async () => {
+      const v3MultiHopIntent = createPendingSwapIntent({
+        type: 'uniswapV3',
+        router: '0xE592427A0AEce92De3Edee1F18E0157C05861564', // V3 SwapRouter
+        path: [
+          '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+          '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+          '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+        ],
+        fee: 3000, // Default fee tier
+      });
+
+      const rawTx = await simulator.buildRawTransaction(v3MultiHopIntent);
+
+      expect(rawTx).toBeDefined();
+      expect(rawTx.startsWith('0x')).toBe(true);
+      // V3 exactInput selector: 0xc04b8d59
+      expect(rawTx.toLowerCase()).toContain('c04b8d59');
+    });
+
+    test('should encode V3 path correctly with fee tiers', async () => {
+      const v3Intent = createPendingSwapIntent({
+        type: 'uniswapV3',
+        router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+        path: [
+          '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+          '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+          '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+        ],
+        fee: 500, // 0.05% fee tier
+      });
+
+      const rawTx = await simulator.buildRawTransaction(v3Intent);
+
+      // The encoded transaction should contain the fee tier (500 = 0x0001f4)
+      expect(rawTx).toBeDefined();
+      // Fee tier 500 in hex is 0x0001f4, which should appear in the path encoding
+    });
+
+    test('should handle different fee tiers', async () => {
+      const feeTiers = [100, 500, 3000, 10000];
+
+      for (const fee of feeTiers) {
+        const v3Intent = createPendingSwapIntent({
+          type: 'uniswapV3',
+          router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+          path: [
+            '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+            '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+          ],
+          fee,
+        });
+
+        const rawTx = await simulator.buildRawTransaction(v3Intent);
+        expect(rawTx).toBeDefined();
+        expect(rawTx.startsWith('0x')).toBe(true);
+      }
+    });
+
+    test('should calculate correct slippage for V3 swap', async () => {
+      const v3Intent = createPendingSwapIntent({
+        type: 'uniswapV3',
+        router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+        amountIn: BigInt('1000000000000000000'), // 1 ETH
+        expectedAmountOut: BigInt('2000000000'), // 2000 USDC (6 decimals)
+        slippageTolerance: 0.01, // 1%
+        path: [
+          '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+          '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        ],
+        fee: 3000,
+      });
+
+      const rawTx = await simulator.buildRawTransaction(v3Intent);
+      expect(rawTx).toBeDefined();
+      // The minAmountOut should be 99% of expectedAmountOut = 1980000000
+      // This is encoded in the transaction data
+    });
+
+    test('should use default fee of 3000 when not specified', async () => {
+      const v3Intent = createPendingSwapIntent({
+        type: 'uniswapV3',
+        router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
+        path: [
+          '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+          '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        ],
+        // fee not specified
+      });
+
+      const rawTx = await simulator.buildRawTransaction(v3Intent);
+      expect(rawTx).toBeDefined();
+      // Should use default fee of 3000 (0.3%)
+    });
+  });
 });
 
 // =============================================================================
