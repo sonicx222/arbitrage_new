@@ -35,7 +35,7 @@ import { ARBITRAGE_CONFIG, getNativeTokenPrice } from '@arbitrage/config';
 import { getErrorMessage, BRIDGE_DEFAULTS, getDefaultPrice } from '@arbitrage/core';
 import type { BridgeStatusResult } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import type { StrategyContext, ExecutionResult, Logger, BridgePollingResult } from '../types';
 import {
   createErrorResult,
   createSuccessResult,
@@ -87,7 +87,22 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     }
 
     // Find suitable bridge router
+    // Fix 4.1: Validate bridge token matches opportunity tokenOut
+    // The bridge token must be what we receive from the buy side (tokenOut)
     const bridgeToken = opportunity.tokenOut || 'USDC';
+
+    // Fix 4.1: Log warning if tokenOut is missing but we're defaulting to USDC
+    // This could lead to bridge/swap mismatches if the actual tokenOut is different
+    if (!opportunity.tokenOut) {
+      this.logger.warn('Cross-chain: Missing tokenOut, defaulting to USDC bridge token', {
+        opportunityId: opportunity.id,
+        sourceChain,
+        destChain,
+        defaultBridgeToken: 'USDC',
+        tokenIn: opportunity.tokenIn,
+      });
+    }
+
     const bridgeRouter = ctx.bridgeRouterFactory.findBestRouter(sourceChain, destChain, bridgeToken);
 
     if (!bridgeRouter) {
@@ -108,6 +123,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       destChain,
       bridgeToken,
       bridgeProtocol: bridgeRouter.protocol,
+      tokenIn: opportunity.tokenIn,
+      tokenOut: opportunity.tokenOut,
     });
 
     try {
@@ -150,7 +167,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!bridgeQuote.valid) {
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.BRIDGE_QUOTE}: ${bridgeQuote.error}`,
+          formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, bridgeQuote.error),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -161,22 +178,58 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const ethPriceUsd = getDefaultPrice('ETH');
       const expectedProfit = opportunity.expectedProfit || 0;
 
-      // Ensure totalFee is bigint (might be string from JSON or bigint from direct call)
-      // BUG-FIX: Wrap BigInt conversion in try/catch to handle malformed strings
+      // Fix 2.2: Ensure totalFee is bigint with proper handling of all formats
+      // The bridge quote may return:
+      // - bigint: Direct BigInt value
+      // - string: Integer string like "123456" (from JSON serialization)
+      // - string: Float string like "123.45" (INVALID for BigInt, but some APIs return this)
+      // - number: JavaScript number
+      // - undefined/null: Missing value
       let totalFeeBigInt: bigint;
       try {
-        totalFeeBigInt = typeof bridgeQuote.totalFee === 'string'
-          ? BigInt(bridgeQuote.totalFee)
-          : BigInt(bridgeQuote.totalFee ?? 0);
+        const rawFee = bridgeQuote.totalFee;
+
+        if (typeof rawFee === 'bigint') {
+          totalFeeBigInt = rawFee;
+        } else if (typeof rawFee === 'string') {
+          // Fix 2.2: Handle float strings by truncating to integer
+          // BigInt("123.45") throws SyntaxError, so we need to handle this case
+          if (rawFee.includes('.')) {
+            // Float string - truncate to integer (wei values shouldn't have decimals)
+            const floatValue = parseFloat(rawFee);
+            if (!Number.isFinite(floatValue)) {
+              throw new Error(`Non-finite float value: ${rawFee}`);
+            }
+            totalFeeBigInt = BigInt(Math.floor(floatValue));
+            this.logger.warn('[WARN_BRIDGE_FEE_FORMAT] Bridge fee was float string, truncated to integer', {
+              opportunityId: opportunity.id,
+              original: rawFee,
+              converted: totalFeeBigInt.toString(),
+            });
+          } else {
+            // Integer string - direct conversion
+            totalFeeBigInt = BigInt(rawFee);
+          }
+        } else if (typeof rawFee === 'number') {
+          // JavaScript number - convert to BigInt (truncate if float)
+          if (!Number.isFinite(rawFee)) {
+            throw new Error(`Non-finite number value: ${rawFee}`);
+          }
+          totalFeeBigInt = BigInt(Math.floor(rawFee));
+        } else {
+          // undefined, null, or other - default to 0
+          totalFeeBigInt = 0n;
+        }
       } catch (error) {
         this.logger.error('Invalid bridge fee format', {
           opportunityId: opportunity.id,
           totalFee: bridgeQuote.totalFee,
+          totalFeeType: typeof bridgeQuote.totalFee,
           error: getErrorMessage(error),
         });
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.BRIDGE_QUOTE}: Invalid bridge fee format: ${bridgeQuote.totalFee}`,
+          formatExecutionError(ExecutionErrorCode.BRIDGE_QUOTE, `Invalid bridge fee format: ${bridgeQuote.totalFee}`),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -201,7 +254,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.HIGH_FEES}: ${bridgeProfitability.reason}`,
+          formatExecutionError(ExecutionErrorCode.HIGH_FEES, bridgeProfitability.reason),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -216,7 +269,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       if (!sourceValidation.valid) {
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.NO_WALLET}: ${sourceValidation.error}`,
+          formatExecutionError(ExecutionErrorCode.NO_WALLET, sourceValidation.error),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -239,7 +292,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           // Fix 4.3: Return error instead of continuing with undefined nonce
           return createErrorResult(
             opportunity.id,
-            `${ExecutionErrorCode.NONCE_ERROR}: Failed to get nonce for bridge transaction: ${errorMessage}`,
+            formatExecutionError(ExecutionErrorCode.NONCE_ERROR, `Failed to get nonce for bridge transaction: ${errorMessage}`),
             sourceChain,
             opportunity.buyDex || 'unknown'
           );
@@ -292,7 +345,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
             return createErrorResult(
               opportunity.id,
-              `${ExecutionErrorCode.SIMULATION_REVERT}: destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`,
+              formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `destination sell simulation predicted revert - ${simulationResult.revertReason || 'unknown reason'}`),
               sourceChain,
               opportunity.buyDex || 'unknown'
             );
@@ -307,6 +360,25 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       }
 
       // Step 3: Execute bridge
+      //
+      // Note (Issue 4.3): MEV protection is NOT applied to bridge transactions.
+      // ===========================================================================
+      // The bridgeRouter.execute() method handles transaction submission internally.
+      // To add MEV protection would require:
+      // 1. Modifying BridgeRouter interface to return a prepared transaction
+      // 2. Applying MEV protection externally before sending
+      // 3. Then confirming the transaction with the bridge router
+      //
+      // Current mitigation:
+      // - Bridge transactions are typically not as MEV-vulnerable as DEX swaps
+      //   because they don't reveal profitable arbitrage paths directly
+      // - The bridge protocols (Stargate, LayerZero) often have their own
+      //   mempool protection mechanisms
+      // - Most MEV extraction happens on the destination chain sell (which IS protected)
+      //
+      // Future improvement: Add MEV protection to BridgeRouter interface if needed.
+      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/157
+      // ===========================================================================
       const bridgeResult = await this.withTransactionTimeout(
         () => bridgeRouter.execute({
           quote: bridgeQuote,
@@ -325,7 +397,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.BRIDGE_EXEC}: ${bridgeResult.error}`,
+          formatExecutionError(ExecutionErrorCode.BRIDGE_EXEC, bridgeResult.error),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );
@@ -343,112 +415,44 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       });
 
       // Step 4: Wait for bridge completion
-      // Fix 5.2: Enhanced polling with transition handling
-      // Fix 4.3: Added iteration limit to prevent infinite loops
+      // Refactor 9.3: Extracted polling logic to separate method for readability
       const bridgeId = bridgeResult.bridgeId!;
-      const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
-      const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
-      const bridgeStartTime = Date.now();
+      const pollingResult = await this.pollBridgeCompletion(
+        bridgeRouter,
+        bridgeId,
+        opportunity.id,
+        sourceChain,
+        bridgeResult.sourceTxHash || '',
+        ctx
+      );
 
-      // Fix 4.3: Calculate maximum iterations based on wait time and minimum poll interval
-      // This prevents infinite loops if getStatus consistently returns non-terminal status
-      const minPollInterval = Math.min(pollInterval, 5000); // At least 5s between polls
-      const maxIterations = Math.ceil(maxWaitTime / minPollInterval) + 10; // +10 buffer for timing variance
-      let iterationCount = 0;
-
-      let bridgeCompleted = false;
-      let lastSeenStatus = 'pending';
-      // BUG-4.2-FIX: Store the amount received from bridge for destination sell
-      let bridgedAmountReceived: string | undefined;
-
-      while (Date.now() - bridgeStartTime < maxWaitTime && iterationCount < maxIterations) {
-        iterationCount++;
-        // Check for shutdown
-        if (!ctx.stateManager.isRunning()) {
-          this.logger.warn('Bridge polling interrupted by shutdown', {
-            opportunityId: opportunity.id,
-            bridgeId,
-          });
-          return createErrorResult(
-            opportunity.id,
-            ExecutionErrorCode.SHUTDOWN,
-            sourceChain,
-            opportunity.buyDex || 'unknown',
-            bridgeResult.sourceTxHash
-          );
-        }
-
-        const bridgeStatus: BridgeStatusResult = await bridgeRouter.getStatus(bridgeId);
-
-        // Fix 5.2: Log status transitions for debugging race conditions
-        if (bridgeStatus.status !== lastSeenStatus) {
-          this.logger.debug('Bridge status changed', {
-            opportunityId: opportunity.id,
-            bridgeId,
-            previousStatus: lastSeenStatus,
-            newStatus: bridgeStatus.status,
-            elapsedMs: Date.now() - bridgeStartTime,
-          });
-          lastSeenStatus = bridgeStatus.status;
-        }
-
-        if (bridgeStatus.status === 'completed') {
-          bridgeCompleted = true;
-          // BUG-4.2-FIX: Store bridged amount for destination sell
-          bridgedAmountReceived = bridgeStatus.amountReceived;
-          this.logger.info('Bridge completed', {
-            opportunityId: opportunity.id,
-            bridgeId,
-            destTxHash: bridgeStatus.destTxHash,
-            amountReceived: bridgeStatus.amountReceived,
-          });
-          break;
-        }
-
-        if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
-          return createErrorResult(
-            opportunity.id,
-            `${ExecutionErrorCode.BRIDGE_FAILED}: ${bridgeStatus.error || bridgeStatus.status}`,
-            sourceChain,
-            opportunity.buyDex || 'unknown',
-            bridgeResult.sourceTxHash
-          );
-        }
-
-        // Fix 5.2: Add exponential backoff for long-running bridges
-        // Reduces RPC load during extended waiting periods
-        const elapsedMs = Date.now() - bridgeStartTime;
-        const dynamicPollInterval = elapsedMs > 60000
-          ? Math.min(pollInterval * 2, 30000) // Double interval after 1 minute, cap at 30s
-          : pollInterval;
-
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, dynamicPollInterval));
-      }
-
-      if (!bridgeCompleted) {
-        // NOTE: Nonce was already confirmed at line 265-267 after bridge execution succeeded.
-        // We don't need to confirm again here - the source chain transaction was submitted
-        // successfully, we're just waiting for the destination chain to receive it.
-
-        // Fix 4.3: Include iteration count for debugging infinite loop scenarios
-        const timedOutByTime = Date.now() - bridgeStartTime >= maxWaitTime;
-        const timedOutByIterations = iterationCount >= maxIterations;
-
-        this.logger.warn('Bridge timeout - funds may still be in transit', {
-          opportunityId: opportunity.id,
-          bridgeId,
-          elapsedMs: Date.now() - bridgeStartTime,
-          iterationCount,
-          maxIterations,
-          timedOutByTime,
-          timedOutByIterations,
-          lastStatus: lastSeenStatus,
-        });
-
+      if (!pollingResult.completed) {
+        // Bridge failed or timed out
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.BRIDGE_TIMEOUT}: timeout after ${iterationCount} polls - transaction may still complete`,
+          formatExecutionError(pollingResult.error!.code, pollingResult.error!.message),
+          sourceChain,
+          opportunity.buyDex || 'unknown',
+          pollingResult.error!.sourceTxHash
+        );
+      }
+
+      // Bug 4.1 Fix: Validate bridgedAmountReceived is present after successful poll
+      // If poll completed successfully but amountReceived is missing, this indicates
+      // a bug in the bridge router or protocol - treat as execution error
+      const bridgedAmountReceived = pollingResult.amountReceived;
+      if (!bridgedAmountReceived) {
+        this.logger.error('Bridge completed but amountReceived is missing', {
+          opportunityId: opportunity.id,
+          bridgeId,
+          destTxHash: pollingResult.destTxHash,
+        });
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(
+            ExecutionErrorCode.BRIDGE_EXEC,
+            'Bridge completed but amountReceived not reported - cannot proceed with sell'
+          ),
           sourceChain,
           opportunity.buyDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -468,7 +472,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.NO_WALLET}: ${destValidation.error}. Funds bridged but sell not executed.`,
+          formatExecutionError(ExecutionErrorCode.NO_WALLET, `${destValidation.error}. Funds bridged but sell not executed.`),
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -526,8 +530,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // BUG-4.2-FIX: Create a "sell opportunity" with reversed tokens for destination swap
       // After bridging, we have bridgeToken (= tokenOut) on destination chain
       // We want to SELL bridgeToken -> tokenIn (reverse of the buy direction)
-      // The bridged amount is what we're selling, not the original amountIn
-      const sellAmount = bridgedAmountReceived || opportunity.amountIn || '0';
+      // Bug 4.1 Fix: bridgedAmountReceived is now guaranteed to be defined (validated above)
+      const sellAmount = bridgedAmountReceived;
       const sellOpportunity: ArbitrageOpportunity = {
         ...opportunity,
         // Fix 4.2: Reverse the token direction for the sell on destination chain
@@ -578,6 +582,36 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       const destGasPrice = await this.getOptimalGasPrice(destChain, ctx);
       if (sellNonce !== undefined) {
         sellTx.nonce = sellNonce;
+      }
+
+      // Bug 4.2 Fix: Verify destination provider health before sending sell transaction
+      // After bridge wait (potentially minutes), provider could have disconnected
+      const destProvider = ctx.providers.get(destChain);
+      if (destProvider) {
+        const isDestProviderHealthy = await this.isProviderHealthy(destProvider, destChain, ctx);
+        if (!isDestProviderHealthy) {
+          // Mark sell nonce as failed since we won't attempt the transaction
+          if (ctx.nonceManager && sellNonce !== undefined) {
+            ctx.nonceManager.failTransaction(destChain, sellNonce, 'Provider unhealthy');
+          }
+
+          this.logger.error('Destination provider unhealthy after bridge - sell not attempted', {
+            opportunityId: opportunity.id,
+            destChain,
+            bridgeTxHash: bridgeResult.sourceTxHash,
+          });
+
+          return createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.NO_PROVIDER,
+              `Destination provider (${destChain}) unhealthy after bridge. Funds bridged but sell not executed.`
+            ),
+            destChain,
+            opportunity.sellDex || 'unknown',
+            bridgeResult.sourceTxHash
+          );
+        }
       }
 
       // Fix 9.3: Apply MEV protection to destination sell transaction
@@ -676,7 +710,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.SELL_FAILED}: Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`,
+          formatExecutionError(ExecutionErrorCode.SELL_FAILED, `Bridge succeeded but sell failed: ${getErrorMessage(sellError)}`),
           destChain,
           opportunity.sellDex || 'unknown',
           bridgeResult.sourceTxHash
@@ -691,8 +725,31 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Fix 3.3: Use chain-specific native token prices for accurate gas cost calculation
       // Different chains have different native tokens (ETH, MATIC, BNB, etc.)
-      const sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
-      const destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
+      let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
+      let destNativeTokenPriceUsd = getNativeTokenPrice(destChain, { suppressWarning: true });
+
+      // Bug 4.1 Fix: Validate native token prices are not zero or invalid
+      // If getNativeTokenPrice returns 0 (unsupported chain with suppressWarning),
+      // calculations would produce incorrect results (zero gas costs, inflated profits)
+      const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000; // Conservative ETH estimate as fallback
+      if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
+        this.logger.warn('Invalid source chain native token price, using fallback', {
+          opportunityId: opportunity.id,
+          sourceChain,
+          originalPrice: sourceNativeTokenPriceUsd,
+          fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+        });
+        sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+      }
+      if (!Number.isFinite(destNativeTokenPriceUsd) || destNativeTokenPriceUsd <= 0) {
+        this.logger.warn('Invalid dest chain native token price, using fallback', {
+          opportunityId: opportunity.id,
+          destChain,
+          originalPrice: destNativeTokenPriceUsd,
+          fallbackPrice: DEFAULT_NATIVE_TOKEN_PRICE_USD,
+        });
+        destNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+      }
 
       // Calculate bridge gas cost in source chain's native token, then convert to USD
       const bridgeGasCostNative = bridgeResult.gasUsed
@@ -749,10 +806,240 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.EXECUTION_ERROR}: Cross-chain execution error: ${getErrorMessage(error)}`,
+        formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Cross-chain execution error: ${getErrorMessage(error)}`),
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
     }
   }
+
+  // ===========================================================================
+  // Bridge Polling (Refactor 9.3)
+  // ===========================================================================
+
+  /**
+   * Refactor 9.3: Poll bridge for completion status.
+   *
+   * Extracted from execute() to improve readability and testability.
+   * This method handles the polling loop with:
+   * - Timeout detection (time-based and iteration-based)
+   * - Status transition logging
+   * - Exponential backoff for long-running bridges
+   * - Shutdown detection
+   *
+   * ## Fix 5.1: Bridge Recovery Considerations
+   *
+   * **IMPORTANT**: If shutdown occurs during bridge polling, funds may be stuck:
+   * - Source chain: Transaction already confirmed (funds sent to bridge)
+   * - Bridge: Tokens in transit (processing)
+   * - Destination: No action taken yet
+   *
+   * To recover interrupted bridges, on restart the engine should:
+   * 1. Query Redis for pending bridge transactions (stored in BridgeRecoveryState)
+   * 2. Check bridge status via bridgeRouter.getStatus(bridgeId)
+   * 3. If completed: Execute the sell side using stored opportunity data
+   * 4. If failed/refunded: Log and mark as resolved
+   * 5. If still pending: Resume polling
+   *
+   * The following state should be persisted before bridge execution:
+   * - opportunityId, bridgeId, sourceTxHash, sourceChain, destChain
+   * - bridgeToken, bridgeAmount, sellDex, expectedProfit
+   * - timestamp when bridge was initiated
+   *
+   * Tracking issue: TODO - Create issue for bridge recovery implementation
+   * Priority: High (funds-at-risk scenario)
+   * Acceptance criteria:
+   * - Store BridgeRecoveryState in Redis before bridge initiation
+   * - On engine restart, query pending bridges and resume polling
+   * - Implement timeout handling for bridges that exceed max wait time
+   *
+   * @param bridgeRouter - Bridge router instance
+   * @param bridgeId - Bridge transaction ID
+   * @param opportunityId - Opportunity ID for logging
+   * @param sourceChain - Source chain for error results
+   * @param sourceTxHash - Source transaction hash
+   * @param ctx - Strategy context (for shutdown detection)
+   * @returns Polling result with completion status or error
+   */
+  protected async pollBridgeCompletion(
+    bridgeRouter: NonNullable<ReturnType<NonNullable<StrategyContext['bridgeRouterFactory']>['getRouter']>>,
+    bridgeId: string,
+    opportunityId: string,
+    sourceChain: string,
+    sourceTxHash: string,
+    ctx: StrategyContext
+  ): Promise<BridgePollingResult> {
+    const maxWaitTime = BRIDGE_DEFAULTS.maxBridgeWaitMs;
+    const pollInterval = BRIDGE_DEFAULTS.statusPollIntervalMs;
+    const bridgeStartTime = Date.now();
+
+    // Fix 4.3: Calculate maximum iterations based on wait time and minimum poll interval
+    const minPollInterval = Math.min(pollInterval, 5000);
+    const maxIterations = Math.ceil(maxWaitTime / minPollInterval) + 10;
+    let iterationCount = 0;
+
+    let lastSeenStatus = 'pending';
+
+    // Race 5.3 Fix: Pre-compute deadline
+    const pollDeadline = bridgeStartTime + maxWaitTime;
+
+    while (iterationCount < maxIterations) {
+      iterationCount++;
+
+      // Race 5.3 Fix: Check time FIRST
+      const now = Date.now();
+      if (now >= pollDeadline) {
+        break;
+      }
+
+      // Check for shutdown
+      if (!ctx.stateManager.isRunning()) {
+        this.logger.warn('Bridge polling interrupted by shutdown', {
+          opportunityId,
+          bridgeId,
+        });
+        return {
+          completed: false,
+          error: {
+            code: ExecutionErrorCode.SHUTDOWN,
+            message: 'Polling interrupted by shutdown',
+            sourceTxHash,
+          },
+        };
+      }
+
+      // Bug 4.2 Fix: Wrap getStatus() in try/catch to handle RPC/network errors
+      // Without this, an exception would cause the entire cross-chain execution to fail
+      // without proper error handling or nonce cleanup
+      let bridgeStatus: BridgeStatusResult;
+      try {
+        bridgeStatus = await bridgeRouter.getStatus(bridgeId);
+      } catch (statusError) {
+        // Log the error and continue polling - transient network errors shouldn't abort
+        this.logger.warn('Bridge status check failed, will retry', {
+          opportunityId,
+          bridgeId,
+          iterationCount,
+          error: getErrorMessage(statusError),
+        });
+        // Wait before retry to avoid hammering the API
+        await new Promise(resolve => setTimeout(resolve, Math.min(pollInterval, 5000)));
+        continue;
+      }
+
+      // Fix 3.2: Check for shutdown AFTER async operation completes
+      // The shutdown may have occurred during the getStatus() network call.
+      // Without this check, we would continue processing a stale result
+      // while the service is partially torn down.
+      if (!ctx.stateManager.isRunning()) {
+        this.logger.warn('Bridge polling interrupted by shutdown after status fetch', {
+          opportunityId,
+          bridgeId,
+          lastStatus: bridgeStatus.status,
+        });
+        return {
+          completed: false,
+          error: {
+            code: ExecutionErrorCode.SHUTDOWN,
+            message: 'Polling interrupted by shutdown after status fetch',
+            sourceTxHash,
+          },
+        };
+      }
+
+      // Log status transitions
+      if (bridgeStatus.status !== lastSeenStatus) {
+        this.logger.debug('Bridge status changed', {
+          opportunityId,
+          bridgeId,
+          previousStatus: lastSeenStatus,
+          newStatus: bridgeStatus.status,
+          elapsedMs: Date.now() - bridgeStartTime,
+        });
+        lastSeenStatus = bridgeStatus.status;
+      }
+
+      if (bridgeStatus.status === 'completed') {
+        this.logger.info('Bridge completed', {
+          opportunityId,
+          bridgeId,
+          destTxHash: bridgeStatus.destTxHash,
+          amountReceived: bridgeStatus.amountReceived,
+        });
+        return {
+          completed: true,
+          amountReceived: bridgeStatus.amountReceived,
+          destTxHash: bridgeStatus.destTxHash,
+        };
+      }
+
+      if (bridgeStatus.status === 'failed' || bridgeStatus.status === 'refunded') {
+        return {
+          completed: false,
+          error: {
+            code: ExecutionErrorCode.BRIDGE_FAILED,
+            message: bridgeStatus.error || bridgeStatus.status,
+            sourceTxHash,
+          },
+        };
+      }
+
+      // Race 5.3 Fix: Check time again AFTER status fetch
+      const nowAfterFetch = Date.now();
+      if (nowAfterFetch >= pollDeadline) {
+        break;
+      }
+
+      // Perf 10.3 Fix: More aggressive exponential backoff
+      // Start backoff earlier (30s instead of 60s) and cap at 20s instead of 30s
+      // This reduces API load while maintaining reasonable responsiveness
+      const elapsedMs = nowAfterFetch - bridgeStartTime;
+      let dynamicPollInterval: number;
+      if (elapsedMs > 120000) {
+        // After 2 minutes: maximum backoff (20s)
+        dynamicPollInterval = 20000;
+      } else if (elapsedMs > 60000) {
+        // After 1 minute: double the interval (cap at 15s)
+        dynamicPollInterval = Math.min(pollInterval * 2, 15000);
+      } else if (elapsedMs > 30000) {
+        // After 30 seconds: 1.5x the interval
+        dynamicPollInterval = Math.min(Math.floor(pollInterval * 1.5), 10000);
+      } else {
+        // First 30 seconds: use configured interval
+        dynamicPollInterval = pollInterval;
+      }
+
+      // Don't wait longer than remaining time
+      const remainingTime = pollDeadline - nowAfterFetch;
+      const effectivePollInterval = Math.min(dynamicPollInterval, remainingTime);
+
+      await new Promise(resolve => setTimeout(resolve, effectivePollInterval));
+    }
+
+    // Timeout
+    const timedOutByTime = Date.now() - bridgeStartTime >= maxWaitTime;
+    const timedOutByIterations = iterationCount >= maxIterations;
+
+    this.logger.warn('Bridge timeout - funds may still be in transit', {
+      opportunityId,
+      bridgeId,
+      elapsedMs: Date.now() - bridgeStartTime,
+      iterationCount,
+      maxIterations,
+      timedOutByTime,
+      timedOutByIterations,
+      lastStatus: lastSeenStatus,
+    });
+
+    return {
+      completed: false,
+      error: {
+        code: ExecutionErrorCode.BRIDGE_TIMEOUT,
+        message: `timeout after ${iterationCount} polls - transaction may still complete`,
+        sourceTxHash,
+      },
+    };
+  }
 }
+
+// Refactor 9.3: BridgePollingResult moved to ../types.ts for reusability

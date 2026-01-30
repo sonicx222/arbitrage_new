@@ -490,3 +490,159 @@ describe('ExecutionStrategyFactory - Edge Cases', () => {
     expect(resolution.type).toBe('intra-chain');
   });
 });
+
+// =============================================================================
+// Test Suite: Fix 2.1 & 2.2 - Triangular and Quadrilateral Types
+// =============================================================================
+
+describe('ExecutionStrategyFactory - Triangular/Quadrilateral (Fix 2.1 & 2.2)', () => {
+  let factory: ExecutionStrategyFactory;
+  let mockLogger: Logger;
+
+  beforeEach(() => {
+    mockLogger = createMockLogger();
+    factory = new ExecutionStrategyFactory({
+      logger: mockLogger,
+      isSimulationMode: false,
+    });
+  });
+
+  describe('triangular opportunities', () => {
+    it('should resolve triangular type to flash-loan strategy', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'triangular' });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('triangular');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+      expect(resolution.reason).toBe('Triangular arbitrage (3-hop) via flash loan');
+    });
+
+    it('should throw error when flash-loan strategy not registered for triangular', () => {
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'triangular' });
+
+      expect(() => factory.resolve(opportunity)).toThrow(
+        'Flash loan opportunity but no flash-loan strategy registered'
+      );
+    });
+
+    it('should report hasStrategy("triangular") based on flash-loan registration', () => {
+      expect(factory.hasStrategy('triangular')).toBe(false);
+
+      factory.registerFlashLoanStrategy(createMockStrategy('flash-loan'));
+
+      expect(factory.hasStrategy('triangular')).toBe(true);
+    });
+  });
+
+  describe('quadrilateral opportunities', () => {
+    it('should resolve quadrilateral type to flash-loan strategy', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'quadrilateral' });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('quadrilateral');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+      expect(resolution.reason).toBe('Quadrilateral arbitrage (4-hop) via flash loan');
+    });
+
+    it('should throw error when flash-loan strategy not registered for quadrilateral', () => {
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'quadrilateral' });
+
+      expect(() => factory.resolve(opportunity)).toThrow(
+        'Flash loan opportunity but no flash-loan strategy registered'
+      );
+    });
+
+    it('should report hasStrategy("quadrilateral") based on flash-loan registration', () => {
+      expect(factory.hasStrategy('quadrilateral')).toBe(false);
+
+      factory.registerFlashLoanStrategy(createMockStrategy('flash-loan'));
+
+      expect(factory.hasStrategy('quadrilateral')).toBe(true);
+    });
+  });
+
+  describe('flash-loan opportunities', () => {
+    it('should resolve explicit flash-loan type', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'flash-loan' });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('flash-loan');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+      expect(resolution.reason).toBe('Opportunity requires flash loan execution');
+    });
+
+    it('should resolve useFlashLoan flag to flash-loan strategy', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      const opportunity = createMockOpportunity({
+        type: 'simple',
+        useFlashLoan: true,
+      });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('flash-loan');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+    });
+  });
+
+  describe('strategy priority', () => {
+    it('should prioritize simulation over triangular', () => {
+      factory.setSimulationMode(true);
+      const simulationStrategy = createMockStrategy('simulation');
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      factory.registerSimulationStrategy(simulationStrategy);
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+
+      const opportunity = createMockOpportunity({ type: 'triangular' });
+      const resolution = factory.resolve(opportunity);
+
+      expect(resolution.type).toBe('simulation');
+      expect(resolution.strategy).toBe(simulationStrategy);
+    });
+
+    it('should prioritize triangular over cross-chain', () => {
+      const flashLoanStrategy = createMockStrategy('flash-loan');
+      const crossChainStrategy = createMockStrategy('cross-chain');
+      const intraChainStrategy = createMockStrategy('intra-chain');
+      factory.registerFlashLoanStrategy(flashLoanStrategy);
+      factory.registerCrossChainStrategy(crossChainStrategy);
+      factory.registerIntraChainStrategy(intraChainStrategy);
+
+      // Opportunity with both triangular type AND cross-chain indicators
+      const opportunity = createMockOpportunity({
+        type: 'triangular',
+        buyChain: 'ethereum',
+        sellChain: 'arbitrum', // Different chains
+      });
+      const resolution = factory.resolve(opportunity);
+
+      // Flash-loan/triangular takes priority
+      expect(resolution.type).toBe('triangular');
+      expect(resolution.strategy).toBe(flashLoanStrategy);
+    });
+  });
+});

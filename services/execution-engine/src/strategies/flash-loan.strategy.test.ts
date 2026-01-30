@@ -648,12 +648,16 @@ describe('FlashLoanStrategy', () => {
   // Gas Estimation
   // ===========================================================================
 
-  describe('estimateGas', () => {
-    it('should estimate gas for flash loan transaction', async () => {
+  // Deprecated 7.3 Fix: estimateGasLegacy method has been removed.
+  // All gas estimation should use estimateGasFromTransaction (public method).
+  describe('estimateGasFromTransaction', () => {
+    it('should estimate gas for prepared transaction', async () => {
       const opportunity = createMockOpportunity();
       const ctx = createMockContext();
 
-      const estimatedGas = await strategy.estimateGas(opportunity, 'ethereum', ctx);
+      // First prepare the transaction, then estimate gas from it
+      const tx = await strategy.prepareFlashLoanContractTransaction(opportunity, 'ethereum', ctx);
+      const estimatedGas = await strategy.estimateGasFromTransaction(tx, 'ethereum', ctx);
 
       expect(estimatedGas).toBeGreaterThan(0n);
     });
@@ -665,9 +669,11 @@ describe('FlashLoanStrategy', () => {
       const provider = ctx.providers.get('ethereum')!;
       (provider.estimateGas as jest.Mock).mockRejectedValue(new Error('Estimation failed'));
 
-      const estimatedGas = await strategy.estimateGas(opportunity, 'ethereum', ctx);
+      // Use a simple prepared transaction
+      const tx = await strategy.prepareFlashLoanContractTransaction(opportunity, 'ethereum', ctx);
+      const estimatedGas = await strategy.estimateGasFromTransaction(tx, 'ethereum', ctx);
 
-      // Should return default estimate (e.g., 500000)
+      // Should return default estimate (500000n)
       expect(estimatedGas).toBe(500000n);
     });
   });

@@ -18,8 +18,84 @@ import {
   type MevProviderFactory,
   type BridgeRouterFactory,
 } from '@arbitrage/core';
+// Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
+import { CHAINS } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
+
+// =============================================================================
+// Extended Opportunity Types (Finding 1.2 Fix)
+// =============================================================================
+
+/**
+ * Finding 1.2 Fix: Extended ArbitrageOpportunity with N-hop swap path support.
+ *
+ * The base ArbitrageOpportunity type from @arbitrage/types doesn't include the
+ * `hops` field used for multi-hop flash loan arbitrage. This extended type
+ * provides proper typing for N-hop opportunities without type assertion hacks.
+ *
+ * Usage in FlashLoanStrategy:
+ * ```typescript
+ * function execute(opportunity: ArbitrageOpportunity | NHopArbitrageOpportunity, ctx: StrategyContext) {
+ *   if (isNHopOpportunity(opportunity)) {
+ *     // Type-safe access to opportunity.hops
+ *     const steps = this.buildNHopSwapSteps(opportunity.hops);
+ *   }
+ * }
+ * ```
+ *
+ * @see FlashLoanStrategy.buildNHopSwapSteps
+ */
+export interface SwapHop {
+  /** Router address for this hop (optional - uses default DEX if not specified) */
+  router?: string;
+  /** DEX name for this hop (optional - for logging/metrics) */
+  dex?: string;
+  /** Output token address for this hop */
+  tokenOut: string;
+  /** Expected output amount in wei (optional - for validation) */
+  expectedOutput?: string;
+}
+
+/**
+ * ArbitrageOpportunity extended with N-hop path information.
+ *
+ * @see SwapHop for individual hop definition
+ */
+export interface NHopArbitrageOpportunity extends ArbitrageOpportunity {
+  /**
+   * Multi-hop swap path for complex arbitrage routes.
+   *
+   * Each hop defines: router -> tokenOut
+   * The tokenIn for hop[n] is the tokenOut from hop[n-1] (or opportunity.tokenIn for hop[0]).
+   *
+   * Example 3-hop path: WETH -> USDC -> DAI -> WETH
+   * ```
+   * hops: [
+   *   { tokenOut: USDC_ADDRESS, router: UNISWAP_ROUTER },
+   *   { tokenOut: DAI_ADDRESS, router: SUSHISWAP_ROUTER },
+   *   { tokenOut: WETH_ADDRESS, router: CURVE_ROUTER },
+   * ]
+   * ```
+   */
+  hops: SwapHop[];
+}
+
+/**
+ * Type guard to check if opportunity has N-hop path.
+ *
+ * @param opportunity - The opportunity to check
+ * @returns True if the opportunity has a valid hops array
+ */
+export function isNHopOpportunity(
+  opportunity: ArbitrageOpportunity
+): opportunity is NHopArbitrageOpportunity {
+  return (
+    'hops' in opportunity &&
+    Array.isArray((opportunity as NHopArbitrageOpportunity).hops) &&
+    (opportunity as NHopArbitrageOpportunity).hops.length > 0
+  );
+}
 
 // Lazy-initialized logger for module-level utilities
 let _typesLogger: ILogger | null = null;
@@ -63,7 +139,20 @@ export interface ExecutionResult {
  * return createErrorResult(id, `${ExecutionErrorCode.GAS_SPIKE} on ${chain}`, chain, dex);
  * ```
  */
-export enum ExecutionErrorCode {
+/**
+ * Refactor 9.4: const enum for hot-path optimization.
+ *
+ * Using `const enum` instead of regular `enum` provides:
+ * 1. Zero runtime overhead - values are inlined at compile time
+ * 2. Smaller bundle size - no enum object generated
+ * 3. Better minification - strings are inlined directly
+ *
+ * Trade-off: Cannot iterate over enum values at runtime (e.g., Object.values()).
+ * This is acceptable because error codes are only used for comparison, not iteration.
+ *
+ * Performance impact: Eliminates property lookup on every error creation.
+ */
+export const enum ExecutionErrorCode {
   // Chain/Provider errors
   NO_CHAIN = '[ERR_NO_CHAIN] No chain specified for opportunity',
   NO_WALLET = '[ERR_NO_WALLET] No wallet available for chain',
@@ -216,15 +305,22 @@ export function formatExecutionError(
 }
 
 /**
+ * Perf 10.4: Pre-compiled regex for error code extraction.
+ * Creating new RegExp on every call is wasteful for hot paths.
+ */
+const ERR_CODE_REGEX = /\[ERR_([A-Z_]+)\]/;
+
+/**
  * Fix 6.1: Extract the error code identifier from a formatted error message.
  *
  * Useful for categorizing errors in logs and metrics.
+ * Perf 10.4: Uses pre-compiled regex for hot-path optimization.
  *
  * @param errorMessage - Full error message
  * @returns The error code identifier (e.g., "ERR_NO_WALLET") or null if not found
  */
 export function extractErrorCode(errorMessage: string): string | null {
-  const match = errorMessage.match(/\[ERR_([A-Z_]+)\]/);
+  const match = errorMessage.match(ERR_CODE_REGEX);
   return match ? `ERR_${match[1]}` : null;
 }
 
@@ -289,32 +385,30 @@ export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
 // =============================================================================
 
 /**
- * List of supported chain identifiers for validation.
- * Must be kept in sync with @arbitrage/config CHAINS.
+ * Fix 3.1: Derive SUPPORTED_CHAINS from @arbitrage/config CHAINS.
  *
- * @see shared/config/src/chains/index.js
+ * Previously, this was a hardcoded list that could drift from the config.
+ * Now it's dynamically derived at module load time, ensuring consistency.
+ *
+ * The Set provides O(1) lookup for chain validation.
+ *
+ * @see shared/config/src/chains/index.ts (source of truth)
  */
-export const SUPPORTED_CHAINS = new Set([
-  'ethereum',
-  'arbitrum',
-  'bsc',
-  'polygon',
-  'optimism',
-  'base',
-  'avalanche',
-  'fantom',
-  'zksync',
-  'linea',
-  'solana',
-] as const);
+export const SUPPORTED_CHAINS: Set<string> = new Set(Object.keys(CHAINS));
 
-export type SupportedChain = typeof SUPPORTED_CHAINS extends Set<infer T> ? T : never;
+/**
+ * Type representing supported chain identifiers.
+ * Derived from CHAINS config keys for type safety.
+ */
+export type SupportedChain = keyof typeof CHAINS;
 
 /**
  * Check if a chain identifier is supported.
+ *
+ * Fix 3.1: Now validates against dynamically derived SUPPORTED_CHAINS set.
  */
 export function isSupportedChain(chain: string): chain is SupportedChain {
-  return SUPPORTED_CHAINS.has(chain as SupportedChain);
+  return SUPPORTED_CHAINS.has(chain);
 }
 
 // =============================================================================
@@ -486,19 +580,36 @@ export interface ProviderHealth extends BaseHealth {
 }
 
 // =============================================================================
-// Simulation Configuration (DEV/TEST MODE)
+// Simulation Configuration (DEV/TEST MODE - "Dry Run")
 // =============================================================================
 
 /**
  * Configuration for DEV simulation mode (SimulationStrategy).
  *
- * Fix 2.2: This is NOT the transaction simulation service (Tenderly/Alchemy).
- * This controls the "dry run" mode where the engine simulates execution
- * without actually submitting blockchain transactions. Used for testing
- * and development purposes.
+ * Doc 2.2: IMPORTANT NAMING CLARIFICATION
+ * =======================================
+ * This system has TWO different "simulation" concepts - do not confuse them:
  *
- * @see SimulationStrategy (strategies/simulation.strategy.ts)
- * @see services/simulation/ for actual transaction simulation (pre-flight checks)
+ * 1. **SimulationConfig** (THIS interface):
+ *    - Purpose: "Dry run" mode for testing the execution engine
+ *    - Location: types.ts (here) + SimulationStrategy
+ *    - Usage: Development/testing without real blockchain transactions
+ *    - Effect: No actual trades, no real money, mock results
+ *    - Controlled by: `config.simulation.enabled = true`
+ *
+ * 2. **ISimulationService** (services/simulation/):
+ *    - Purpose: Pre-flight transaction checks using Tenderly/Alchemy
+ *    - Location: services/simulation/types.ts
+ *    - Usage: Production - validate transactions BEFORE submitting
+ *    - Effect: Real simulation, detects potential reverts
+ *    - Controlled by: `MEV_CONFIG.simulateBeforeSubmit = true`
+ *
+ * Summary:
+ * - SimulationConfig = Fake execution for testing
+ * - ISimulationService = Real pre-flight checks for production safety
+ *
+ * @see SimulationStrategy (strategies/simulation.strategy.ts) - dry run strategy
+ * @see services/simulation/ for actual pre-flight simulation service
  */
 export interface SimulationConfig {
   /** Enable simulation mode - bypasses blockchain transactions (dev/test only) */
@@ -938,4 +1049,30 @@ export interface ProviderService {
   getWallet(chain: string): ethers.Wallet | undefined;
   /** Get all wallets */
   getWallets(): Map<string, ethers.Wallet>;
+}
+
+// =============================================================================
+// Bridge Types (Refactor 9.3)
+// =============================================================================
+
+/**
+ * Refactor 9.3: Result type for bridge polling.
+ *
+ * Provides a typed result for the polling operation that clearly indicates
+ * success/failure and associated data. Moved from cross-chain.strategy.ts
+ * for reusability.
+ */
+export interface BridgePollingResult {
+  /** Whether the bridge transfer completed */
+  completed: boolean;
+  /** Amount received on destination chain (in wei string) */
+  amountReceived?: string;
+  /** Destination chain transaction hash */
+  destTxHash?: string;
+  /** Error information if polling failed */
+  error?: {
+    code: ExecutionErrorCode;
+    message: string;
+    sourceTxHash: string;
+  };
 }

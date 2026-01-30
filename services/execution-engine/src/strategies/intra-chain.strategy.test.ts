@@ -206,6 +206,13 @@ describe('IntraChainStrategy - Simulation Integration', () => {
 
     // Mock calculateActualProfit
     jest.spyOn(strat as any, 'calculateActualProfit').mockResolvedValue(95);
+
+    // Fix 3.1/8.4: Mock isProviderHealthy to avoid Promise.race timing issues in tests
+    // This is needed because submitTransaction now performs provider health checks
+    jest.spyOn(strat as any, 'isProviderHealthy').mockResolvedValue(true);
+
+    // Fix 3.1/8.4: Mock refreshGasPriceForSubmission to avoid real provider calls
+    jest.spyOn(strat as any, 'refreshGasPriceForSubmission').mockResolvedValue(BigInt('30000000000'));
   };
 
   beforeEach(() => {
@@ -535,6 +542,12 @@ describe('IntraChainStrategy - Edge Cases', () => {
       gasPrice: BigInt('30000000000'),
     }));
     jest.spyOn(strat as any, 'calculateActualProfit').mockResolvedValue(95);
+
+    // Fix 3.1/8.4: Mock isProviderHealthy to avoid Promise.race timing issues in tests
+    jest.spyOn(strat as any, 'isProviderHealthy').mockResolvedValue(true);
+
+    // Fix 3.1/8.4: Mock refreshGasPriceForSubmission to avoid real provider calls
+    jest.spyOn(strat as any, 'refreshGasPriceForSubmission').mockResolvedValue(BigInt('30000000000'));
   };
 
   beforeEach(() => {
@@ -557,6 +570,34 @@ describe('IntraChainStrategy - Edge Cases', () => {
     // Should log warning and proceed (graceful degradation)
     expect(mockLogger.warn).toHaveBeenCalled();
     expect(result.success).toBe(true);
+  });
+
+  // Test Gap 8.3 Fix: Test unhealthy provider scenario
+  it('should fail gracefully when provider is unhealthy', async () => {
+    const mockSimService = createMockSimulationService({
+      shouldSimulate: jest.fn().mockReturnValue(true),
+      simulate: jest.fn().mockResolvedValue({
+        success: true,
+        wouldRevert: false,
+        provider: 'tenderly',
+        latencyMs: 100,
+      } as SimulationResult),
+    });
+    const ctx = createMockContext({ simulationService: mockSimService });
+    const opportunity = createMockOpportunity();
+
+    // Override isProviderHealthy to return false
+    jest.spyOn(strategy as any, 'isProviderHealthy').mockResolvedValue(false);
+
+    const result = await strategy.execute(opportunity, ctx);
+
+    // Should fail because provider is unhealthy
+    expect(result.success).toBe(false);
+    // The actual error code is ERR_PROVIDER_UNHEALTHY (from submitTransaction health check)
+    expect(result.error).toContain('ERR_PROVIDER_UNHEALTHY');
+    // Transaction should NOT be attempted
+    const wallet = ctx.wallets.get('ethereum');
+    expect(wallet?.sendTransaction).not.toHaveBeenCalled();
   });
 
   it('should pass correct parameters to simulation service', async () => {

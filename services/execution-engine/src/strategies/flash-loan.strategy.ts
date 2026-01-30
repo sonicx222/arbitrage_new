@@ -42,7 +42,6 @@ import { ethers } from 'ethers';
 import {
   ARBITRAGE_CONFIG,
   FLASH_LOAN_PROVIDERS,
-  MEV_CONFIG,
   DEXES,
   getNativeTokenPrice,
   getTokenDecimals,
@@ -53,12 +52,13 @@ import {
 } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
   createErrorResult,
   createSuccessResult,
   ExecutionErrorCode,
   formatExecutionError,
+  isNHopOpportunity,
 } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
@@ -88,9 +88,12 @@ if (AAVE_V3_FEE_BPS !== EXPECTED_AAVE_V3_FEE_BPS) {
 const DEFAULT_GAS_ESTIMATE = 500000n;
 
 /**
- * Pre-computed slippage multiplier for minAmountOut calculation
+ * Inconsistency 6.3 Fix: Removed duplicate DEFAULT_SLIPPAGE_BPS constant.
+ * Now using this.slippageBps from BaseExecutionStrategy (Refactor 9.2).
+ *
+ * For static contexts (outside class methods), use ARBITRAGE_CONFIG.slippageTolerance
+ * directly, but prefer the base class constant for consistency.
  */
-const DEFAULT_SLIPPAGE_BPS = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
 
 /**
  * Supported flash loan protocols by this strategy.
@@ -251,18 +254,21 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Fix 3.2: Validate contract addresses are valid Ethereum addresses
-    const isProduction = process.env.NODE_ENV === 'production';
+    // Issue 3.1 Fix: Zero address handling is now consistent with provider-factory.ts
+    // Zero address should ALWAYS fail fast (in ALL environments) to prevent silent failures at runtime
     for (const [chain, address] of Object.entries(config.contractAddresses)) {
       if (!ethers.isAddress(address)) {
         throw new Error(`[ERR_CONFIG] Invalid contract address for chain '${chain}': ${address}`);
       }
-      // Fix 3.2: Zero address guard - throw in production, warn in dev/test
+      // Issue 3.1 Fix: Zero address is invalid in ALL environments
+      // Rationale: A zero address will cause all transactions to fail silently at execution time.
+      // It's better to fail fast during strategy initialization than during a trade attempt.
       if (address === '0x0000000000000000000000000000000000000000') {
-        const message = `[ERR_ZERO_ADDRESS] Contract address for chain '${chain}' is zero address - this is almost certainly a misconfiguration`;
-        if (isProduction) {
-          throw new Error(message);
-        }
-        logger.warn('[WARN_CONFIG] Contract address is zero address - likely misconfigured (would throw in production)', { chain });
+        throw new Error(
+          `[ERR_ZERO_ADDRESS] Contract address for chain '${chain}' is zero address. ` +
+          `This is almost certainly a misconfiguration. Deploy the FlashLoanArbitrage contract ` +
+          `and configure the correct address before using this strategy.`
+        );
       }
     }
 
@@ -272,6 +278,22 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         if (!ethers.isAddress(router)) {
           throw new Error(`[ERR_CONFIG] Invalid router address for chain '${chain}': ${router}`);
         }
+      }
+    }
+
+    // Issue 3.1 Fix: Warn if contract exists for a chain but no approved routers
+    // This will cause getRouterForDex() to fall back to DEXES config, which may
+    // not have the router approved in the FlashLoanArbitrage contract
+    for (const chain of Object.keys(config.contractAddresses)) {
+      const routers = config.approvedRouters[chain];
+      if (!routers || routers.length === 0) {
+        // Use console.warn since logger isn't available in constructor
+        // This is a startup-time validation, not a runtime log
+        console.warn(
+          `[WARN] FlashLoanStrategy: Chain '${chain}' has contract address but no approved routers. ` +
+          `getRouterForDex() will fall back to DEXES config. Ensure those routers are approved ` +
+          `in FlashLoanArbitrage contract, otherwise transactions will fail.`
+        );
       }
     }
 
@@ -360,6 +382,30 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       );
     }
 
+    // Bug 4.1 Fix: Validate buyPrice is valid before execution
+    // Invalid price would cause division by zero or wildly incorrect calculations
+    // in profit conversion (USD -> token units). Abort early instead of using fallback.
+    const buyPriceValid = opportunity.buyPrice !== undefined &&
+                          opportunity.buyPrice !== null &&
+                          Number.isFinite(opportunity.buyPrice) &&
+                          opportunity.buyPrice > 0;
+    if (!buyPriceValid) {
+      this.logger.error('[ERR_INVALID_PRICE] Cannot execute flash loan with invalid buyPrice', {
+        opportunityId: opportunity.id,
+        buyPrice: opportunity.buyPrice,
+        chain,
+      });
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(
+          ExecutionErrorCode.INVALID_OPPORTUNITY,
+          `Invalid buyPrice: ${opportunity.buyPrice}. Cannot calculate profit in token units.`
+        ),
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
     try {
       // Finding 10.3 Fix: Parallelize independent operations for latency reduction
       // getOptimalGasPrice and verifyOpportunityPrices don't depend on each other
@@ -382,20 +428,51 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         );
       }
 
-      // Issue 10.3 Fix: Prepare transaction once and reuse for gas estimation
-      // This eliminates the double transaction preparation
-      const flashLoanTx = await this.prepareFlashLoanContractTransaction(
-        opportunity,
-        chain,
-        ctx
-      );
+      // Fix 10.3: Parallelize independent operations for latency reduction
+      // prepareFlashLoanContractTransaction and calculateExpectedProfitOnChain are independent
+      // Both only need the opportunity, chain, and context - no interdependency
+      const [flashLoanTx, onChainProfit] = await Promise.all([
+        this.prepareFlashLoanContractTransaction(opportunity, chain, ctx),
+        // calculateExpectedProfitOnChain can run in parallel since it only reads pool state
+        this.calculateExpectedProfitOnChain(opportunity, chain, ctx),
+      ]);
 
-      // Estimate gas using the prepared transaction
+      // Estimate gas using the prepared transaction (must wait for flashLoanTx)
       const estimatedGas = await this.estimateGasFromTransaction(flashLoanTx, chain, ctx);
 
       // Issue 6.2 Fix: Use getNativeTokenPrice() for accurate ETH/native token price
       // The previous code incorrectly used opportunity.buyPrice (token price, not ETH)
       const nativeTokenPriceUsd = getNativeTokenPrice(chain, { suppressWarning: true });
+      if (onChainProfit) {
+        const onChainProfitEth = parseFloat(ethers.formatEther(onChainProfit.expectedProfit));
+        const onChainProfitUsd = onChainProfitEth * nativeTokenPriceUsd;
+
+        // If on-chain profit is significantly lower than expected, log warning
+        const offChainProfit = opportunity.expectedProfit || 0;
+        const profitDivergence = offChainProfit > 0
+          ? Math.abs(onChainProfitUsd - offChainProfit) / offChainProfit
+          : 0;
+
+        if (profitDivergence > 0.2) { // >20% divergence
+          this.logger.warn('On-chain profit diverges from expected', {
+            opportunityId: opportunity.id,
+            offChainProfitUsd: offChainProfit,
+            onChainProfitUsd,
+            divergencePercent: (profitDivergence * 100).toFixed(1),
+          });
+        }
+
+        // Use on-chain profit for profitability analysis if available
+        // (it's more accurate than off-chain estimation)
+        if (onChainProfitUsd < offChainProfit * 0.5) {
+          // On-chain profit is less than 50% of expected - likely unprofitable
+          this.logger.warn('On-chain profit significantly lower than expected', {
+            opportunityId: opportunity.id,
+            offChainProfitUsd: offChainProfit,
+            onChainProfitUsd,
+          });
+        }
+      }
 
       // Analyze profitability (flash loan vs direct, accounting for fees)
       const profitAnalysis = this.analyzeProfitability({
@@ -457,147 +534,69 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // Apply MEV protection
       const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);
 
-      // Get nonce from NonceManager
-      let nonce: number | undefined;
-      if (ctx.nonceManager) {
-        try {
-          nonce = await ctx.nonceManager.getNextNonce(chain);
-          protectedTx.nonce = nonce;
-          this.logger.debug('Nonce allocated from NonceManager', { chain, nonce });
-        } catch (error) {
-          this.logger.error('Failed to get nonce from NonceManager', {
-            chain,
-            error: getErrorMessage(error),
-          });
-          throw error;
-        }
-      }
-
-      // TODO (Fix 9.3): Refactor to use submitTransaction() from BaseExecutionStrategy
-      // Priority: Low | Effort: 1 day | Risk: Medium (regression risk)
+      // Fix 1.1/7.2: Use submitTransaction() from BaseExecutionStrategy
+      // This provides:
+      // 1. Provider health check (Race 5.4 fix) - isProviderHealthy() before submission
+      // 2. Gas price refresh (Fix 5.1) - refreshGasPriceForSubmission() just before tx
+      // 3. Per-chain nonce locking (Fix 3.1) - prevents nonce race conditions
+      // 4. Concurrent nonce tracking (Fix 5.1) - checkConcurrentNonceAccess() warning
+      // 5. Automatic MEV eligibility check and protected submission
+      // 6. Proper nonce lifecycle management (allocation, confirmation, failure)
       //
-      // Current state: FlashLoanStrategy has its own transaction submission logic that
-      // duplicates parts of submitTransaction(). The code is working but not DRY.
-      //
-      // Benefits of refactoring:
-      // 1. Single source of truth for transaction submission
-      // 2. Automatic adoption of future submitTransaction improvements
-      // 3. Reduced maintenance burden
-      //
-      // Challenges:
-      // 1. FlashLoanStrategy has flash-loan-specific error handling
-      // 2. Nonce management is handled slightly differently
-      // 3. High risk of regression in production-critical code
-      //
-      // Recommendation: Keep current implementation stable until a comprehensive
-      // refactor with full test coverage can be performed.
-      //
-      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/xxx
+      // Previous code had its own submission logic that was duplicated and missing
+      // these protections. Now all strategies use the same battle-tested submission path.
 
-      try {
-        // Fix 6.3 & 9.1: Use shared MEV eligibility check helper
-        const { shouldUseMev: shouldUseMevProtection, mevProvider, chainSettings } = this.checkMevEligibility(
-          chain,
-          ctx,
-          opportunity.expectedProfit
-        );
+      const submitResult = await this.submitTransaction(protectedTx, chain, ctx, {
+        opportunityId: opportunity.id,
+        expectedProfit: opportunity.expectedProfit,
+        initialGasPrice: gasPrice,
+      });
 
-        let receipt: ethers.TransactionReceipt | null = null;
-        let txHash: string | undefined;
-
-        if (shouldUseMevProtection && mevProvider) {
-          // Use MEV provider for protected submission
-          this.logger.info('Using MEV protected submission for flash loan', {
-            chain,
-            strategy: mevProvider.strategy,
-            opportunityId: opportunity.id,
-          });
-
-          const mevResult = await this.withTransactionTimeout(
-            () => mevProvider.sendProtectedTransaction(protectedTx, {
-              simulate: MEV_CONFIG.simulateBeforeSubmit,
-              priorityFeeGwei: chainSettings?.priorityFeeGwei,
-            }),
-            'mevProtectedSubmission'
-          );
-
-          if (!mevResult.success) {
-            throw new Error(`MEV protected submission failed: ${mevResult.error}`);
-          }
-
-          txHash = mevResult.transactionHash;
-
-          // Get receipt
-          if (txHash && provider) {
-            receipt = await this.withTransactionTimeout(
-              () => provider.getTransactionReceipt(txHash!),
-              'getReceipt'
-            );
-          }
-
-          this.logger.info('Flash loan MEV transaction successful', {
-            chain,
-            strategy: mevResult.strategy,
-            txHash,
-            usedFallback: mevResult.usedFallback,
-            latencyMs: mevResult.latencyMs,
-          });
-        } else {
-          // Standard transaction submission
-          const txResponse = await this.withTransactionTimeout(
-            () => wallet.sendTransaction(protectedTx),
-            'sendTransaction'
-          );
-
-          txHash = txResponse.hash;
-
-          receipt = await this.withTransactionTimeout(
-            () => txResponse.wait(),
-            'waitForReceipt'
-          );
-        }
-
-        if (!receipt) {
-          if (ctx.nonceManager && nonce !== undefined) {
-            ctx.nonceManager.failTransaction(chain, nonce, 'No receipt received');
-          }
-          throw new Error('Transaction receipt not received');
-        }
-
-        // Confirm nonce
-        if (ctx.nonceManager && nonce !== undefined) {
-          ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
-        }
-
-        // Calculate actual profit
-        const actualProfit = await this.calculateActualProfit(receipt, opportunity);
-
-        this.logger.info('Flash loan arbitrage executed successfully', {
-          opportunityId: opportunity.id,
-          txHash: receipt.hash,
-          actualProfit,
-          gasUsed: Number(receipt.gasUsed),
-          chain,
-        });
-
-        return createSuccessResult(
+      // Fix 6.2: Return error result directly instead of throwing
+      // This ensures consistent pattern per Doc 4.1 in index.ts:
+      // execute() methods should return ExecutionResult, not throw
+      if (!submitResult.success) {
+        // submitTransaction handles nonce management internally
+        return createErrorResult(
           opportunity.id,
-          receipt.hash,
+          formatExecutionError(
+            ExecutionErrorCode.FLASH_LOAN_ERROR,
+            submitResult.error || 'Transaction submission failed'
+          ),
           chain,
-          opportunity.buyDex || 'unknown',
-          {
-            actualProfit,
-            gasUsed: Number(receipt.gasUsed),
-            gasCost: parseFloat(ethers.formatEther(receipt.gasUsed * (receipt.gasPrice || gasPrice))),
-          }
+          opportunity.buyDex || 'unknown'
         );
-      } catch (error) {
-        // Mark transaction as failed in NonceManager
-        if (ctx.nonceManager && nonce !== undefined) {
-          ctx.nonceManager.failTransaction(chain, nonce, getErrorMessage(error));
-        }
-        throw error;
       }
+
+      // Calculate actual profit from receipt
+      const actualProfit = submitResult.receipt
+        ? await this.calculateActualProfit(submitResult.receipt, opportunity)
+        : undefined;
+
+      this.logger.info('Flash loan arbitrage executed successfully', {
+        opportunityId: opportunity.id,
+        txHash: submitResult.txHash,
+        actualProfit,
+        gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
+        chain,
+        usedMevProtection: submitResult.usedMevProtection,
+      });
+
+      return createSuccessResult(
+        opportunity.id,
+        submitResult.txHash || submitResult.receipt?.hash || '',
+        chain,
+        opportunity.buyDex || 'unknown',
+        {
+          actualProfit,
+          gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
+          gasCost: submitResult.receipt
+            ? parseFloat(ethers.formatEther(
+                submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice || gasPrice)
+              ))
+            : undefined,
+        }
+      );
     } catch (error) {
       const errorMessage = getErrorMessage(error);
 
@@ -745,7 +744,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     params: SwapStepsParams
   ): SwapStep[] {
     const { buyRouter, sellRouter, intermediateToken, slippageBps, chain } = params;
-    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : DEFAULT_SLIPPAGE_BPS;
+    // Inconsistency 6.3 Fix: Use base class slippageBps instead of duplicate constant
+    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : this.slippageBps;
 
     const amountIn = BigInt(opportunity.amountIn!);
     const expectedProfitUsd = opportunity.expectedProfit || 0;
@@ -763,25 +763,23 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     );
     const minIntermediateOut = expectedIntermediateAmount - (expectedIntermediateAmount * slippage / BPS_DENOMINATOR);
 
-    // Fix 4.1 & 4.2: Convert USD profit to token units correctly
-    // profitInTokens = profitUsd / tokenPriceUsd
-    // Fix 4.2: Validate buyPrice is valid before using
+    // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
+    // This method may be called from execute() which now validates buyPrice,
+    // but also from tests or other code paths. Defensive programming requires validation here.
     const buyPriceValid = opportunity.buyPrice !== undefined &&
                           opportunity.buyPrice !== null &&
                           Number.isFinite(opportunity.buyPrice) &&
                           opportunity.buyPrice > 0;
 
     if (!buyPriceValid) {
-      this.logger.warn('[WARN_PRICE] Invalid buyPrice, using fallback of 1 for profit calculation', {
-        opportunityId: opportunity.id,
-        buyPrice: opportunity.buyPrice,
-        chain,
-      });
+      throw new Error(
+        `[ERR_INVALID_PRICE] Cannot build swap steps with invalid buyPrice: ${opportunity.buyPrice}. ` +
+        `This would cause incorrect profit calculations.`
+      );
     }
 
-    // TypeScript doesn't infer that buyPriceValid being true means buyPrice is defined,
-    // so we use explicit numeric fallback
-    const tokenPriceUsd: number = buyPriceValid ? opportunity.buyPrice! : 1;
+    // TypeScript now knows buyPrice is valid, but still needs assertion for type narrowing
+    const tokenPriceUsd: number = opportunity.buyPrice!;
     const profitInTokenUnits = expectedProfitUsd / tokenPriceUsd;
 
     // Fix 7.1: Use actual token decimals for profit calculation
@@ -830,13 +828,21 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   ): bigint {
     const amountIn = BigInt(opportunity.amountIn!);
 
-    // Fix 4.2: Properly validate buyPrice (|| 1 doesn't catch buyPrice === 0)
+    // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
+    // Using a fallback of 1 would produce wildly incorrect intermediate amounts
     const buyPriceValid = opportunity.buyPrice !== undefined &&
                           opportunity.buyPrice !== null &&
                           Number.isFinite(opportunity.buyPrice) &&
                           opportunity.buyPrice > 0;
-    // TypeScript requires explicit assertion since conditional check doesn't narrow type
-    const buyPrice: number = buyPriceValid ? opportunity.buyPrice! : 1;
+
+    if (!buyPriceValid) {
+      throw new Error(
+        `[ERR_INVALID_PRICE] Cannot estimate intermediate amount with invalid buyPrice: ${opportunity.buyPrice}`
+      );
+    }
+
+    // TypeScript now knows buyPrice is valid
+    const buyPrice: number = opportunity.buyPrice!;
 
     // Fix 4.1: Use 1e18 precision to handle very small prices
     const PRECISION = 1e18;
@@ -901,7 +907,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     params: NHopSwapStepsParams
   ): SwapStep[] {
     const { hops, slippageBps, chain } = params;
-    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : DEFAULT_SLIPPAGE_BPS;
+    // Inconsistency 6.3 Fix: Use base class slippageBps instead of duplicate constant
+    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : this.slippageBps;
 
     if (!opportunity.tokenIn) {
       throw new Error('[ERR_INVALID_OPPORTUNITY] tokenIn is required for N-hop path building');
@@ -1014,30 +1021,73 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       throw new Error(`No FlashLoanArbitrage contract configured for chain: ${chain}`);
     }
 
-    // Get router addresses
-    const buyRouter = this.getRouterForDex(chain, opportunity.buyDex);
-    const sellRouter = this.getRouterForDex(chain, opportunity.sellDex || opportunity.buyDex);
+    // Finding 1.2 Fix: Support N-hop paths when opportunity defines them
+    // Check if opportunity has multi-hop path (triangular+ arbitrage)
+    // Uses proper type guard instead of type assertion hack
+    let swapSteps: SwapStep[];
 
-    if (!buyRouter || !sellRouter) {
-      throw new Error(`No router found for DEX on chain: ${chain}`);
+    if (isNHopOpportunity(opportunity)) {
+      // N-hop path detected - use buildNHopSwapSteps
+      this.logger.info('Using N-hop swap path', {
+        opportunityId: opportunity.id,
+        hopCount: opportunity.hops.length,
+      });
+
+      const nhopParams: NHopSwapStepsParams = {
+        hops: opportunity.hops.map(hop => {
+          // Resolve router from dex name if not provided directly
+          const router = hop.router || this.getRouterForDex(chain, hop.dex);
+          if (!router) {
+            throw new Error(`No router found for hop DEX '${hop.dex}' on chain: ${chain}`);
+          }
+          return {
+            router,
+            tokenOut: hop.tokenOut,
+            expectedOutput: hop.expectedOutput ? BigInt(hop.expectedOutput) : undefined,
+          };
+        }),
+        slippageBps: Number(this.slippageBps),
+        chain,
+      };
+
+      swapSteps = this.buildNHopSwapSteps(opportunity, nhopParams);
+    } else {
+      // Default 2-hop path (standard arbitrage)
+      // Get router addresses
+      const buyRouter = this.getRouterForDex(chain, opportunity.buyDex);
+      const sellRouter = this.getRouterForDex(chain, opportunity.sellDex || opportunity.buyDex);
+
+      if (!buyRouter || !sellRouter) {
+        throw new Error(`No router found for DEX on chain: ${chain}`);
+      }
+
+      // Build swap steps (Fix 7.1: pass chain for decimals lookup)
+      swapSteps = this.buildSwapSteps(opportunity, {
+        buyRouter,
+        sellRouter,
+        intermediateToken: opportunity.tokenOut!,
+        chain,
+      });
     }
 
-    // Build swap steps (Fix 7.1: pass chain for decimals lookup)
-    const swapSteps = this.buildSwapSteps(opportunity, {
-      buyRouter,
-      sellRouter,
-      intermediateToken: opportunity.tokenOut!,
-      chain,
-    });
-
-    // Fix 4.1: Convert USD profit to token units
+    // Bug 4.1 Fix: Convert USD profit to token units with strict validation
     // expectedProfit is in USD, but contract expects minProfit in token units (flash-loaned asset)
     // Formula: profitInTokens = expectedProfitUsd / tokenPriceUsd
-    // Use explicit zero check since || would not catch buyPrice === 0
     const expectedProfitUsd = opportunity.expectedProfit || 0;
-    const tokenPriceUsd = (opportunity.buyPrice !== undefined && opportunity.buyPrice !== null && opportunity.buyPrice > 0)
-      ? opportunity.buyPrice
-      : 1;
+
+    // Validate buyPrice strictly - throw if invalid
+    const buyPriceValid = opportunity.buyPrice !== undefined &&
+                          opportunity.buyPrice !== null &&
+                          Number.isFinite(opportunity.buyPrice) &&
+                          opportunity.buyPrice > 0;
+
+    if (!buyPriceValid) {
+      throw new Error(
+        `[ERR_INVALID_PRICE] Cannot prepare flash loan transaction with invalid buyPrice: ${opportunity.buyPrice}`
+      );
+    }
+
+    const tokenPriceUsd = opportunity.buyPrice!;
 
     // Finding 7.1 Fix: Get actual token decimals from config instead of assuming 18
     // This is critical for tokens like USDC (6), USDT (6), WBTC (8)
@@ -1061,7 +1111,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     // Prepare transaction
     const wallet = ctx.wallets.get(chain)!;
-    const from = await wallet.getAddress();
+    // Perf 10.2: Use cached wallet address
+    const from = await this.getWalletAddress(wallet);
 
     return {
       to: contractAddress,
@@ -1133,38 +1184,6 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   // ===========================================================================
   // Gas Estimation
   // ===========================================================================
-
-  /**
-   * Estimate gas for flash loan transaction.
-   *
-   * @param opportunity - Arbitrage opportunity
-   * @param chain - Chain identifier
-   * @param ctx - Strategy context
-   * @returns Estimated gas units
-   */
-  async estimateGas(
-    opportunity: ArbitrageOpportunity,
-    chain: string,
-    ctx: StrategyContext
-  ): Promise<bigint> {
-    const provider = ctx.providers.get(chain);
-    if (!provider) {
-      return DEFAULT_GAS_ESTIMATE;
-    }
-
-    try {
-      const tx = await this.prepareFlashLoanContractTransaction(opportunity, chain, ctx);
-      const estimated = await provider.estimateGas(tx);
-      return estimated;
-    } catch (error) {
-      this.logger.warn('Gas estimation failed, using default', {
-        chain,
-        error: getErrorMessage(error),
-      });
-      return DEFAULT_GAS_ESTIMATE;
-    }
-  }
-
   // ===========================================================================
   // Router Validation
   // ===========================================================================

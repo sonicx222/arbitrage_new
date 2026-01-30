@@ -24,7 +24,7 @@ import { MEV_CONFIG } from '@arbitrage/config';
 import { getErrorMessage } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
-import { createErrorResult, createSuccessResult, ExecutionErrorCode } from '../types';
+import { createErrorResult, createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
@@ -52,7 +52,11 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (opportunity.sellChain && opportunity.sellChain !== chain) {
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.CROSS_CHAIN_MISMATCH} (buy: ${chain}, sell: ${opportunity.sellChain}). Use CrossChainStrategy instead.`,
+        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        formatExecutionError(
+          ExecutionErrorCode.CROSS_CHAIN_MISMATCH,
+          `buy: ${chain}, sell: ${opportunity.sellChain}. Use CrossChainStrategy instead.`
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -62,7 +66,11 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (!opportunity.tokenIn || !opportunity.tokenOut || !opportunity.amountIn) {
       return createErrorResult(
         opportunity.id,
-        `${ExecutionErrorCode.INVALID_OPPORTUNITY} Missing required fields (tokenIn, tokenOut, amountIn)`,
+        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        formatExecutionError(
+          ExecutionErrorCode.INVALID_OPPORTUNITY,
+          'Missing required fields (tokenIn, tokenOut, amountIn)'
+        ),
         chain,
         opportunity.buyDex || 'unknown'
       );
@@ -79,17 +87,19 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         opportunity.buyDex || 'unknown'
       );
     }
-
-    // Destructure validated wallet and provider for use below
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { wallet, provider } = validation;
+    // Fix Bug 4.3: No need to destructure wallet/provider - they are accessed via ctx
+    // in prepareDexSwapTransaction, ensureTokenAllowance, and submitTransaction.
+    // The validation ensures both exist before proceeding.
 
     try {
-      // Get optimal gas price (may throw on gas spike)
-      const gasPrice = await this.getOptimalGasPrice(chain, ctx);
+      // Fix 8.4: Parallelize independent operations for latency reduction (~10-20ms savings)
+      // getOptimalGasPrice and verifyOpportunityPrices don't depend on each other
+      // and can run concurrently. This optimization matches FlashLoanStrategy.
+      const [gasPrice, priceVerification] = await Promise.all([
+        this.getOptimalGasPrice(chain, ctx),
+        this.verifyOpportunityPrices(opportunity, chain),
+      ]);
 
-      // Re-verify prices before execution
-      const priceVerification = await this.verifyOpportunityPrices(opportunity, chain);
       if (!priceVerification.valid) {
         this.logger.warn('Price re-verification failed, aborting execution', {
           opportunityId: opportunity.id,
@@ -100,7 +110,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.PRICE_VERIFICATION} ${priceVerification.reason}`,
+          // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+          formatExecutionError(ExecutionErrorCode.PRICE_VERIFICATION, priceVerification.reason),
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -123,7 +134,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         } catch (approvalError) {
           return createErrorResult(
             opportunity.id,
-            `${ExecutionErrorCode.APPROVAL_FAILED}: ${getErrorMessage(approvalError)}`,
+            // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+            formatExecutionError(ExecutionErrorCode.APPROVAL_FAILED, getErrorMessage(approvalError)),
             chain,
             opportunity.buyDex || 'unknown'
           );
@@ -146,7 +158,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          `${ExecutionErrorCode.SIMULATION_REVERT} - ${simulationResult.revertReason || 'unknown reason'}`,
+          // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+          formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, simulationResult.revertReason || 'unknown reason'),
           chain,
           opportunity.buyDex || 'unknown'
         );

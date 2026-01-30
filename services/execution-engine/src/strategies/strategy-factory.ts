@@ -10,8 +10,34 @@
  * - Testability: Strategy selection can be tested independently
  * - Type Safety: Proper typing for strategy resolution
  *
+ * ## Important: "Simulation" Naming Clarification (Doc 1.4)
+ *
+ * The system has TWO distinct "simulation" concepts - do not confuse them:
+ *
+ * ### 1. SimulationStrategy (Dev/Test Mode)
+ * - **Purpose**: Dry-run mode for development and testing
+ * - **Location**: simulation.strategy.ts
+ * - **Config**: SimulationConfig in types.ts (enabled, successRate, etc.)
+ * - **Behavior**: Does NOT execute real transactions. Returns mock results.
+ * - **Use Case**: Testing strategy selection, integration tests, dev environment
+ *
+ * ### 2. ISimulationService (Pre-flight Transaction Simulation)
+ * - **Purpose**: Verify transaction will succeed BEFORE submitting to mempool
+ * - **Location**: services/simulation/types.ts
+ * - **Providers**: Tenderly, Alchemy, custom providers
+ * - **Behavior**: Simulates the transaction against current chain state
+ * - **Use Case**: Preventing failed transactions, MEV detection, gas estimation
+ *
+ * ### How They Interact
+ * - SimulationStrategy REPLACES real execution (for testing)
+ * - ISimulationService PRECEDES real execution (for safety)
+ * - Both can be enabled simultaneously (simulation mode + pre-flight checks)
+ * - Production typically has: SimulationStrategy OFF, ISimulationService ON
+ *
  * @see engine.ts (consumer)
  * @see ARCHITECTURE_V2.md Section 4.3 (Strategy Pattern)
+ * @see types.ts SimulationConfig (for SimulationStrategy config)
+ * @see services/simulation/types.ts ISimulationService (for pre-flight simulation)
  */
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -27,9 +53,17 @@ import type {
 // =============================================================================
 
 /**
- * Strategy type identifiers
+ * Strategy type identifiers.
+ *
+ * Fix 2.1 & 2.2: Added 'triangular' and 'quadrilateral' types per docs/strategies.md.
+ * - triangular: 3-hop arbitrage (A -> B -> C -> A), uses flash-loan strategy
+ * - quadrilateral: 4-hop arbitrage (A -> B -> C -> D -> A), uses flash-loan strategy
+ *
+ * Both triangular and quadrilateral route to flash-loan strategy since they require
+ * capital-free execution via flash loans. The flash-loan strategy supports N-hop
+ * swap paths via buildNHopSwapSteps().
  */
-export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan';
+export type StrategyType = 'simulation' | 'cross-chain' | 'intra-chain' | 'flash-loan' | 'triangular' | 'quadrilateral';
 
 /**
  * Strategy resolution result
@@ -206,20 +240,36 @@ export class ExecutionStrategyFactory {
       };
     }
 
-    // Priority 2: Flash loan opportunities
-    // Check for explicit flash-loan type or useFlashLoan flag
+    // Priority 2: Flash loan opportunities (including triangular and quadrilateral)
+    // Fix 2.1 & 2.2: Added support for 'triangular' and 'quadrilateral' types
+    // These multi-hop arbitrage strategies require flash loans for capital-free execution
     const isFlashLoanOpportunity =
       opportunity.type === 'flash-loan' ||
+      opportunity.type === 'triangular' ||
+      opportunity.type === 'quadrilateral' ||
       opportunity.useFlashLoan === true;
 
     if (isFlashLoanOpportunity) {
       if (!this.strategies.flashLoan) {
         throw new Error('[ERR_NO_STRATEGY] Flash loan opportunity but no flash-loan strategy registered');
       }
+
+      // Determine the resolved type for logging/metrics
+      let resolvedType: StrategyType = 'flash-loan';
+      let reason = 'Opportunity requires flash loan execution';
+
+      if (opportunity.type === 'triangular') {
+        resolvedType = 'triangular';
+        reason = 'Triangular arbitrage (3-hop) via flash loan';
+      } else if (opportunity.type === 'quadrilateral') {
+        resolvedType = 'quadrilateral';
+        reason = 'Quadrilateral arbitrage (4-hop) via flash loan';
+      }
+
       return {
-        type: 'flash-loan',
+        type: resolvedType,
         strategy: this.strategies.flashLoan,
-        reason: 'Opportunity requires flash loan execution',
+        reason,
       };
     }
 
@@ -285,6 +335,9 @@ export class ExecutionStrategyFactory {
 
   /**
    * Check if a strategy type is registered.
+   *
+   * Fix 2.1 & 2.2: 'triangular' and 'quadrilateral' check flashLoan strategy
+   * since they both use the flash-loan strategy for execution.
    */
   hasStrategy(type: StrategyType): boolean {
     switch (type) {
@@ -295,6 +348,9 @@ export class ExecutionStrategyFactory {
       case 'intra-chain':
         return !!this.strategies.intraChain;
       case 'flash-loan':
+      case 'triangular':
+      case 'quadrilateral':
+        // Fix 2.1 & 2.2: Multi-hop strategies use flash-loan strategy
         return !!this.strategies.flashLoan;
       default:
         return false;

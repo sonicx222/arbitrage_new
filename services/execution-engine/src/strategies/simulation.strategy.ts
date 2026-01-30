@@ -10,6 +10,16 @@
  * - Performance testing and benchmarking
  * - Demo/presentation purposes
  *
+ * ## Fix 1.1: Context Validation
+ * Unlike real strategies, SimulationStrategy intentionally skips full context
+ * validation (wallet, provider) since no real transactions occur. However,
+ * it now logs warnings when context is incomplete to help catch configuration
+ * issues during testing.
+ *
+ * ## Fix 4.3: Stats Tracking
+ * SimulationStrategy now updates ctx.stats to ensure metrics remain consistent
+ * between simulation and production modes.
+ *
  * @see engine.ts (parent service)
  */
 
@@ -20,6 +30,7 @@ import type {
   Logger,
   ResolvedSimulationConfig
 } from '../types';
+import { createErrorResult, createSuccessResult, ExecutionErrorCode } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
 
 export class SimulationStrategy extends BaseExecutionStrategy {
@@ -32,10 +43,39 @@ export class SimulationStrategy extends BaseExecutionStrategy {
 
   async execute(
     opportunity: ArbitrageOpportunity,
-    _ctx: StrategyContext
+    ctx: StrategyContext
   ): Promise<ExecutionResult> {
     const chain = opportunity.buyChain || 'ethereum';
+    const dex = opportunity.buyDex || 'unknown';
     const expectedProfit = opportunity.expectedProfit || 0;
+
+    // Fix 1.1: Validate basic opportunity structure (consistent with real strategies)
+    if (!opportunity.id) {
+      return createErrorResult(
+        opportunity.id || 'unknown',
+        ExecutionErrorCode.INVALID_OPPORTUNITY,
+        chain,
+        dex
+      );
+    }
+
+    // Fix 1.1: Log warning if context is incomplete (helps catch config issues in tests)
+    // This mirrors real strategy validation without failing (since no real tx occurs)
+    if (!ctx.wallets?.get(chain)) {
+      this.logger.debug('SimulationStrategy: No wallet for chain (expected in simulation mode)', {
+        chain,
+        opportunityId: opportunity.id,
+      });
+    }
+    if (!ctx.providers?.get(chain)) {
+      this.logger.debug('SimulationStrategy: No provider for chain (expected in simulation mode)', {
+        chain,
+        opportunityId: opportunity.id,
+      });
+    }
+
+    // Fix 4.3: Track simulation skip in stats (simulations skipped because we're in simulation mode)
+    ctx.stats.simulationsSkipped++;
 
     // Simulate execution latency
     await this.simulateLatency(this.config.executionLatencyMs);
@@ -55,18 +95,12 @@ export class SimulationStrategy extends BaseExecutionStrategy {
     // Generate simulated transaction hash
     const simulatedTxHash = this.generateSimulatedTxHash();
 
-    const result: ExecutionResult = {
-      opportunityId: opportunity.id,
-      success: isSuccess,
-      transactionHash: isSuccess ? simulatedTxHash : undefined,
-      actualProfit: isSuccess ? simulatedProfit : undefined,
-      gasUsed: isSuccess ? simulatedGasUsed : undefined,
-      gasCost: isSuccess ? simulatedGasCost : undefined,
-      error: isSuccess ? undefined : 'Simulated execution failure (random)',
-      timestamp: Date.now(),
-      chain,
-      dex: opportunity.buyDex || 'unknown'
-    };
+    // Fix 4.3: Update execution stats to match real strategy behavior
+    if (isSuccess) {
+      ctx.stats.successfulExecutions++;
+    } else {
+      ctx.stats.failedExecutions++;
+    }
 
     // Log simulated execution if enabled
     if (this.config.logSimulatedExecutions) {
@@ -75,14 +109,35 @@ export class SimulationStrategy extends BaseExecutionStrategy {
         opportunityId: opportunity.id,
         success: isSuccess,
         expectedProfit,
-        simulatedProfit: result.actualProfit,
+        simulatedProfit,
         simulatedGasCost,
-        simulatedTxHash: result.transactionHash,
+        simulatedTxHash,
         type: opportunity.type
       });
     }
 
-    return result;
+    // Fix 6.2: Use createSuccessResult/createErrorResult helpers for consistency
+    // This ensures SimulationStrategy produces results identical in structure to real strategies
+    if (isSuccess) {
+      return createSuccessResult(
+        opportunity.id,
+        simulatedTxHash,
+        chain,
+        dex,
+        {
+          actualProfit: simulatedProfit,
+          gasUsed: simulatedGasUsed,
+          gasCost: simulatedGasCost,
+        }
+      );
+    } else {
+      return createErrorResult(
+        opportunity.id,
+        'Simulated execution failure (random)',
+        chain,
+        dex
+      );
+    }
   }
 
   /**

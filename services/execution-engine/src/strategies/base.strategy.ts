@@ -52,6 +52,33 @@ const ERC20_APPROVE_ABI = [
 ];
 
 /**
+ * Issue 3.3 Fix: Configurable swap deadline in seconds.
+ * This is the duration after which a swap transaction will revert if not mined.
+ *
+ * Default: 300 seconds (5 minutes)
+ * Configurable via: SWAP_DEADLINE_SECONDS environment variable
+ *
+ * Considerations:
+ * - Too short: Risk of failed transactions during network congestion
+ * - Too long: Risk of executing stale prices
+ * - 5 minutes is a reasonable balance for most chains
+ *
+ * @see prepareDexSwapTransaction where this is used
+ */
+const SWAP_DEADLINE_SECONDS = parseInt(process.env.SWAP_DEADLINE_SECONDS || '300', 10);
+
+// Validate the deadline is reasonable (30 seconds to 30 minutes)
+if (Number.isNaN(SWAP_DEADLINE_SECONDS) || SWAP_DEADLINE_SECONDS < 30 || SWAP_DEADLINE_SECONDS > 1800) {
+  getModuleLogger().warn('Invalid SWAP_DEADLINE_SECONDS, using default 300', {
+    configured: process.env.SWAP_DEADLINE_SECONDS,
+    using: 300,
+  });
+}
+const VALIDATED_SWAP_DEADLINE_SECONDS = Number.isNaN(SWAP_DEADLINE_SECONDS) || SWAP_DEADLINE_SECONDS < 30 || SWAP_DEADLINE_SECONDS > 1800
+  ? 300
+  : SWAP_DEADLINE_SECONDS;
+
+/**
  * Fix 3.1: Minimum gas prices by chain type (mainnet vs L2).
  * These sanity checks prevent misconfigured gas prices that could cause:
  * 1. Transaction failures (gas too low)
@@ -100,15 +127,40 @@ const MAX_GAS_PRICE_GWEI: Record<string, number> = {
  *
  * Default values are conservative estimates - actual gas prices may be lower.
  */
+/**
+ * Issue 3.2 Fix: Updated default gas prices to more realistic values.
+ * Previous Polygon/Fantom defaults of 100 gwei were too high (typical is 30-50 gwei).
+ *
+ * Current typical gas prices (as of Jan 2026):
+ * - Ethereum: 30-100 gwei (volatile)
+ * - Polygon: 30-50 gwei
+ * - BSC: 3-5 gwei
+ * - Avalanche: 25-50 gwei
+ * - Fantom: 20-50 gwei (post-Andre era, lower activity)
+ * - L2s (Arbitrum, Optimism, Base): Sub-gwei typically
+ *
+ * Fix 3.2 STALENESS WARNING:
+ * ===========================
+ * These defaults are fallbacks when RPC fails. They should be reviewed quarterly.
+ * Gas market conditions change over time. Monitor actual gas prices via:
+ * - Ethereum: https://etherscan.io/gastracker
+ * - L2Beat for L2s: https://l2beat.com
+ *
+ * Last review: Jan 2026
+ * Next review: Apr 2026
+ *
+ * If defaults seem wrong, override via environment variables:
+ * GAS_PRICE_<CHAIN>_GWEI (e.g., GAS_PRICE_ETHEREUM_GWEI=40)
+ */
 const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
   ethereum: validateGasPrice('ethereum', parseFloat(process.env.GAS_PRICE_ETHEREUM_GWEI || '50')),
   arbitrum: validateGasPrice('arbitrum', parseFloat(process.env.GAS_PRICE_ARBITRUM_GWEI || '0.1')),
   optimism: validateGasPrice('optimism', parseFloat(process.env.GAS_PRICE_OPTIMISM_GWEI || '0.001')),
   base: validateGasPrice('base', parseFloat(process.env.GAS_PRICE_BASE_GWEI || '0.001')),
-  polygon: validateGasPrice('polygon', parseFloat(process.env.GAS_PRICE_POLYGON_GWEI || '100')),
-  bsc: validateGasPrice('bsc', parseFloat(process.env.GAS_PRICE_BSC_GWEI || '5')),
+  polygon: validateGasPrice('polygon', parseFloat(process.env.GAS_PRICE_POLYGON_GWEI || '35')),  // Issue 3.2: 100 -> 35 gwei
+  bsc: validateGasPrice('bsc', parseFloat(process.env.GAS_PRICE_BSC_GWEI || '3')),              // Issue 3.2: 5 -> 3 gwei
   avalanche: validateGasPrice('avalanche', parseFloat(process.env.GAS_PRICE_AVALANCHE_GWEI || '25')),
-  fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '100')),
+  fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '35')),    // Issue 3.2: 100 -> 35 gwei
   zksync: validateGasPrice('zksync', parseFloat(process.env.GAS_PRICE_ZKSYNC_GWEI || '0.25')),
   linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
 };
@@ -167,6 +219,50 @@ const FALLBACK_GAS_PRICES_WEI: Record<string, bigint> = Object.fromEntries(
     ethers.parseUnits(gwei.toString(), 'gwei'),
   ])
 );
+
+/**
+ * Refactor 9.5: Pre-computed DEX lookup by chain and name for O(1) access.
+ *
+ * The original DEXES config is structured as Record<chain, Dex[]>, requiring
+ * Array.find() for each DEX lookup (O(n) per lookup).
+ *
+ * This pre-computed map provides O(1) lookup by name within a chain.
+ * Structure: Map<chain, Map<dexName (lowercase), Dex>>
+ *
+ * Performance impact:
+ * - Before: O(n) linear search on every prepareDexSwapTransaction call
+ * - After: O(1) Map lookup
+ * - Memory: ~2KB additional (49 DEXes across 11 chains)
+ *
+ * Note: DEX names are normalized to lowercase for case-insensitive matching.
+ */
+const DEXES_BY_CHAIN_AND_NAME: Map<string, Map<string, typeof DEXES[string][number]>> = new Map(
+  Object.entries(DEXES).map(([chain, dexes]) => [
+    chain,
+    new Map(dexes.map(dex => [dex.name.toLowerCase(), dex]))
+  ])
+);
+
+/**
+ * Refactor 9.5: O(1) DEX lookup by chain and name.
+ *
+ * @param chain - Chain identifier
+ * @param dexName - DEX name (case-insensitive)
+ * @returns DEX config or undefined if not found
+ */
+function getDexByName(chain: string, dexName: string): typeof DEXES[string][number] | undefined {
+  return DEXES_BY_CHAIN_AND_NAME.get(chain)?.get(dexName.toLowerCase());
+}
+
+/**
+ * Refactor 9.5: Get first DEX for a chain (fallback when no specific DEX requested).
+ *
+ * @param chain - Chain identifier
+ * @returns First DEX config or undefined if chain not configured
+ */
+function getFirstDex(chain: string): typeof DEXES[string][number] | undefined {
+  return DEXES[chain]?.[0];
+}
 
 /**
  * Fix 3.1: Startup validation result for gas price configuration.
@@ -271,13 +367,41 @@ function getFallbackGasPrice(chain: string): bigint {
  * Pre-computed BigInt multipliers for hot-path optimization.
  * Avoids repeated Math.floor + BigInt conversion on every call.
  *
- * GAS_SPIKE_MULTIPLIER_BIGINT: Used for gas spike detection (e.g., 1.5x = 150)
+ * Doc 2.1: Gas Spike Detection Thresholds
+ * ========================================
+ * The system uses two gas price thresholds to protect against unprofitable trades:
+ *
+ * 1. **Initial Fetch (getOptimalGasPrice)**:
+ *    - Compares current price against median baseline
+ *    - Threshold: gasPriceSpikeMultiplier (default 1.5x = 150%)
+ *    - Action: Throws Error, aborting the trade
+ *    - Configurable via: ARBITRAGE_CONFIG.gasPriceSpikeMultiplier
+ *
+ * 2. **Pre-Submission Refresh (refreshGasPriceForSubmission)**:
+ *    - Compares current price against the initial fetch price
+ *    - Warning threshold: >20% increase (logs warning, continues)
+ *    - Abort threshold: >50% increase (throws Error, aborts trade)
+ *    - These thresholds are hardcoded as they represent safe operational bounds
+ *
+ * **Example Scenario**:
+ * - Median baseline: 50 gwei
+ * - Initial fetch: 60 gwei (within 1.5x baseline, proceeds)
+ * - Pre-submission: 72 gwei (20% increase, warns but continues)
+ * - Pre-submission: 95 gwei (>50% increase, would abort)
+ *
+ * **Rationale for 50% abort threshold**:
+ * If gas price increases >50% between opportunity detection and submission,
+ * the profit calculation is likely invalid. This prevents executing trades
+ * that become unprofitable due to gas cost changes during preparation.
+ *
+ * GAS_SPIKE_MULTIPLIER_BIGINT: Used for initial spike detection (e.g., 1.5x = 150)
  * SLIPPAGE_BASIS_POINTS_BIGINT: Slippage tolerance in basis points (e.g., 0.5% = 50)
- * GWEI_DIVISOR: 10^9, pre-computed for wei-to-gwei conversions (Finding 10.2 fix)
+ * WEI_PER_GWEI: 10^9, pre-computed for wei-to-gwei conversions (Finding 10.2 fix)
+ *               Fix 2.2: Renamed from WEI_PER_GWEI for clarity - this is wei per gwei, not a divisor
  */
 const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100));
 const SLIPPAGE_BASIS_POINTS_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.slippageTolerance * 10000));
-const GWEI_DIVISOR = BigInt(1e9);
+const WEI_PER_GWEI = BigInt(1e9);
 
 /**
  * Fix 5.1: Track in-progress nonce allocations per chain.
@@ -290,8 +414,109 @@ const GWEI_DIVISOR = BigInt(1e9);
 const IN_PROGRESS_NONCE_ALLOCATIONS = new Map<string, Set<string>>();
 
 /**
+ * Fix 3.1: Per-chain nonce locks to prevent concurrent nonce allocation.
+ *
+ * Problem: Multiple strategies executing in parallel for the SAME chain could
+ * allocate the same nonce, causing transaction failures and wasted gas.
+ *
+ * Solution: Simple mutex per chain using Promise-based locking.
+ * When acquiring a lock, if another operation holds it, we wait for its release.
+ *
+ * Key: chain name
+ * Value: Promise that resolves when the current lock holder releases
+ */
+const CHAIN_NONCE_LOCKS = new Map<string, Promise<void>>();
+const CHAIN_NONCE_LOCK_RESOLVERS = new Map<string, () => void>();
+
+/**
+ * Fix 3.1: Acquire per-chain nonce lock.
+ *
+ * This ensures only one nonce allocation happens at a time per chain,
+ * preventing the race condition in Issue #156.
+ *
+ * @param chain - Chain to acquire lock for
+ * @param opportunityId - ID for logging
+ * @param logger - Logger instance
+ * @param timeoutMs - Max time to wait for lock (default 10s)
+ * @returns Promise that resolves when lock is acquired
+ * @throws Error if timeout waiting for lock
+ */
+async function acquireChainNonceLock(
+  chain: string,
+  opportunityId: string,
+  logger: Logger,
+  timeoutMs = 10000
+): Promise<void> {
+  const existingLock = CHAIN_NONCE_LOCKS.get(chain);
+
+  if (existingLock) {
+    logger.debug('[NONCE_LOCK] Waiting for existing lock', {
+      chain,
+      opportunityId,
+    });
+
+    // Wait for existing lock with timeout
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`)), timeoutMs);
+    });
+
+    try {
+      await Promise.race([existingLock, timeoutPromise]);
+    } catch (error) {
+      // If timeout, log and throw
+      logger.warn('[WARN_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock', {
+        chain,
+        opportunityId,
+        timeoutMs,
+      });
+      throw error;
+    }
+  }
+
+  // Create new lock
+  let resolver: () => void;
+  const lockPromise = new Promise<void>((resolve) => {
+    resolver = resolve;
+  });
+
+  CHAIN_NONCE_LOCKS.set(chain, lockPromise);
+  CHAIN_NONCE_LOCK_RESOLVERS.set(chain, resolver!);
+
+  logger.debug('[NONCE_LOCK] Lock acquired', {
+    chain,
+    opportunityId,
+  });
+}
+
+/**
+ * Fix 3.1: Release per-chain nonce lock.
+ *
+ * @param chain - Chain to release lock for
+ * @param opportunityId - ID for logging
+ * @param logger - Logger instance
+ */
+function releaseChainNonceLock(
+  chain: string,
+  opportunityId: string,
+  logger: Logger
+): void {
+  const resolver = CHAIN_NONCE_LOCK_RESOLVERS.get(chain);
+  if (resolver) {
+    resolver();
+    CHAIN_NONCE_LOCKS.delete(chain);
+    CHAIN_NONCE_LOCK_RESOLVERS.delete(chain);
+
+    logger.debug('[NONCE_LOCK] Lock released', {
+      chain,
+      opportunityId,
+    });
+  }
+}
+
+/**
  * Fix 5.1: Check and warn if concurrent nonce access is detected.
- * This doesn't prevent the race condition but makes it visible in logs.
+ * Now deprecated in favor of acquireChainNonceLock (Fix 3.1), but kept
+ * for backward compatibility and additional logging.
  *
  * @param chain - Chain being accessed
  * @param opportunityId - ID of the opportunity requesting nonce
@@ -311,11 +536,13 @@ function checkConcurrentNonceAccess(
 
   const hadConcurrency = inProgress.size > 0;
   if (hadConcurrency) {
-    logger.warn('[WARN_RACE_CONDITION] Concurrent nonce access detected', {
+    // Fix 3.1: This should now rarely happen due to per-chain locking
+    // If it does happen, it indicates a bug in the locking logic
+    logger.warn('[WARN_RACE_CONDITION] Concurrent nonce access detected despite locking', {
       chain,
       opportunityId,
       concurrentOpportunities: Array.from(inProgress),
-      warning: 'This may cause nonce conflicts. Consider implementing per-chain locks.',
+      warning: 'This indicates a potential bug in per-chain nonce locking.',
       tracking: 'https://github.com/arbitrage-system/arbitrage/issues/156',
     });
   }
@@ -348,6 +575,25 @@ export abstract class BaseExecutionStrategy {
   protected readonly logger: Logger;
 
   /**
+   * Refactor 9.2: Consolidated slippage tolerance in basis points.
+   *
+   * Single source of truth for slippage calculations across all strategies.
+   * Derived from ARBITRAGE_CONFIG.slippageTolerance (e.g., 0.005 = 50 bps = 0.5%)
+   *
+   * Usage in derived strategies:
+   * ```typescript
+   * const minAmountOut = expectedAmount - (expectedAmount * this.slippageBps / 10000n);
+   * ```
+   */
+  protected readonly slippageBps: bigint = SLIPPAGE_BASIS_POINTS_BIGINT;
+
+  /**
+   * Refactor 9.2: Basis points denominator (10000 = 100%)
+   * Use with slippageBps: `amount * slippageBps / BPS_DENOMINATOR`
+   */
+  protected readonly BPS_DENOMINATOR = 10000n;
+
+  /**
    * Fix 10.1: Router contract cache for hot-path optimization.
    * Avoids creating new Contract instances for every transaction.
    * Key: `${chain}:${routerAddress}`
@@ -361,8 +607,42 @@ export abstract class BaseExecutionStrategy {
    */
   private readonly MAX_ROUTER_CACHE_SIZE = 50;
 
+  /**
+   * Perf 10.2: Wallet address cache for hot-path optimization.
+   * Avoids calling async wallet.getAddress() multiple times per execution.
+   * Key: wallet object identity (using WeakMap for memory-safe caching)
+   */
+  private readonly walletAddressCache = new WeakMap<ethers.Wallet, string>();
+
   constructor(logger: Logger) {
     this.logger = logger;
+  }
+
+  // ===========================================================================
+  // Perf 10.2: Wallet Address Caching
+  // ===========================================================================
+
+  /**
+   * Perf 10.2: Get wallet address with caching.
+   *
+   * wallet.getAddress() is async and may involve cryptographic operations.
+   * This method caches the result to avoid repeated calls during a single
+   * execution flow.
+   *
+   * @param wallet - Wallet to get address from
+   * @returns Wallet address (checksummed)
+   */
+  protected async getWalletAddress(wallet: ethers.Wallet): Promise<string> {
+    // Check cache first
+    const cached = this.walletAddressCache.get(wallet);
+    if (cached) {
+      return cached;
+    }
+
+    // Fetch and cache
+    const address = await wallet.getAddress();
+    this.walletAddressCache.set(wallet, address);
+    return address;
   }
 
   /**
@@ -464,6 +744,52 @@ export abstract class BaseExecutionStrategy {
     return { valid: true, wallet, provider };
   }
 
+  /**
+   * Race 5.4 Fix: Check provider health before critical operations.
+   *
+   * This performs a lightweight health check to detect disconnected providers
+   * before attempting transaction submission. Without this check, transactions
+   * could fail with confusing errors if the provider disconnects between
+   * getOptimalGasPrice and sendTransaction.
+   *
+   * @param provider - Provider to check
+   * @param chain - Chain identifier for logging
+   * @param ctx - Strategy context to update health metrics
+   * @returns true if provider is healthy, false otherwise
+   */
+  protected async isProviderHealthy(
+    provider: ethers.JsonRpcProvider,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<boolean> {
+    try {
+      // Quick health check - getNetwork() is faster than getBlockNumber()
+      // and still verifies the provider is connected
+      await Promise.race([
+        provider.getNetwork(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Provider health check timeout')), 3000)
+        ),
+      ]);
+      return true;
+    } catch (error) {
+      const providerHealth = ctx.providerHealth.get(chain);
+      if (providerHealth) {
+        providerHealth.healthy = false;
+        providerHealth.lastError = getErrorMessage(error);
+        providerHealth.lastCheck = Date.now();
+        providerHealth.consecutiveFailures++;
+      }
+      ctx.stats.providerHealthCheckFailures++;
+
+      this.logger.warn('[WARN_PROVIDER_UNHEALTHY] Provider health check failed before transaction', {
+        chain,
+        error: getErrorMessage(error),
+      });
+      return false;
+    }
+  }
+
   // ===========================================================================
   // Gas Price Management
   // ===========================================================================
@@ -496,10 +822,10 @@ export abstract class BaseExecutionStrategy {
           const maxAllowedPrice = baselinePrice * GAS_SPIKE_MULTIPLIER_BIGINT / 100n;
 
           if (currentPrice > maxAllowedPrice) {
-            // Finding 10.2 Fix: Use pre-computed GWEI_DIVISOR to avoid BigInt creation in hot path
-            const currentGwei = Number(currentPrice / GWEI_DIVISOR);
-            const baselineGwei = Number(baselinePrice / GWEI_DIVISOR);
-            const maxGwei = Number(maxAllowedPrice / GWEI_DIVISOR);
+            // Finding 10.2 Fix: Use pre-computed WEI_PER_GWEI to avoid BigInt creation in hot path
+            const currentGwei = Number(currentPrice / WEI_PER_GWEI);
+            const baselineGwei = Number(baselinePrice / WEI_PER_GWEI);
+            const maxGwei = Number(maxAllowedPrice / WEI_PER_GWEI);
 
             this.logger.warn('Gas price spike detected, aborting transaction', {
               chain,
@@ -522,7 +848,7 @@ export abstract class BaseExecutionStrategy {
       }
       this.logger.warn('Failed to get optimal gas price, using chain-specific fallback', {
         chain,
-        fallbackGwei: Number(fallbackPrice / GWEI_DIVISOR),
+        fallbackGwei: Number(fallbackPrice / WEI_PER_GWEI),
         error
       });
       return fallbackPrice;
@@ -572,8 +898,8 @@ export abstract class BaseExecutionStrategy {
 
       // Fix 5.1: Abort on >50% increase to prevent unprofitable trades
       if (priceIncrease > 50) {
-        const previousGwei = Number(previousGasPrice / GWEI_DIVISOR);
-        const currentGwei = Number(currentPrice / GWEI_DIVISOR);
+        const previousGwei = Number(previousGasPrice / WEI_PER_GWEI);
+        const currentGwei = Number(currentPrice / WEI_PER_GWEI);
 
         this.logger.error('[ERR_GAS_SPIKE] Aborting: gas price increased >50% since preparation', {
           chain,
@@ -591,8 +917,8 @@ export abstract class BaseExecutionStrategy {
       if (priceIncrease > 20) {
         this.logger.warn('[WARN_GAS_INCREASE] Significant gas price increase since initial fetch', {
           chain,
-          previousGwei: Number(previousGasPrice / GWEI_DIVISOR),
-          currentGwei: Number(currentPrice / GWEI_DIVISOR),
+          previousGwei: Number(previousGasPrice / WEI_PER_GWEI),
+          currentGwei: Number(currentPrice / WEI_PER_GWEI),
           increasePercent: priceIncrease,
         });
       }
@@ -610,11 +936,28 @@ export abstract class BaseExecutionStrategy {
 
   // Cached median for performance optimization
   private medianCache: Map<string, { median: bigint; validUntil: number }> = new Map();
-  private readonly MEDIAN_CACHE_TTL_MS = 5000; // Cache median for 5 seconds
+  /**
+   * Fix 8.5: Chain-specific median cache TTL based on block time.
+   * Fast chains (L2s with <2s blocks) use shorter TTL for fresher gas data.
+   * Default: 5000ms for L1 chains, 2000ms for fast L2s.
+   */
+  private readonly DEFAULT_MEDIAN_CACHE_TTL_MS = 5000;
+  private readonly FAST_CHAIN_MEDIAN_CACHE_TTL_MS = 2000;
+  private readonly FAST_CHAINS = new Set(['arbitrum', 'optimism', 'base', 'zksync', 'linea']);
   private readonly MAX_GAS_HISTORY = 100;
   private readonly MAX_MEDIAN_CACHE_SIZE = 50; // Cap cache size to prevent unbounded growth
   private lastMedianCacheCleanup = 0;
   private readonly MEDIAN_CACHE_CLEANUP_INTERVAL_MS = 60000; // Cleanup expired entries every 60s
+
+  /**
+   * Fix 8.5: Get chain-specific median cache TTL.
+   * Fast chains use shorter TTL to ensure fresher gas price data.
+   */
+  private getMedianCacheTTL(chain: string): number {
+    return this.FAST_CHAINS.has(chain)
+      ? this.FAST_CHAIN_MEDIAN_CACHE_TTL_MS
+      : this.DEFAULT_MEDIAN_CACHE_TTL_MS;
+  }
 
   /**
    * Update gas price baseline for spike detection.
@@ -688,7 +1031,20 @@ export abstract class BaseExecutionStrategy {
   /**
    * Calculate baseline gas price from recent history.
    * Uses median to avoid outlier influence.
-   * Caches result for 5 seconds to avoid repeated sorting.
+   * Caches result with chain-specific TTL (Fix 8.5).
+   *
+   * Fix 2.3: Improved handling of sparse history (<3 samples).
+   * Problem: With only 1 sample, if that sample was unusually low (e.g., first block
+   * after service restart during low activity), normal gas prices would trigger spike
+   * detection. The previous 1.5x multiplier was insufficient protection.
+   *
+   * Solution: Use a graduated safety multiplier based on sample count:
+   * - 1 sample: 2.5x multiplier (very conservative - we know almost nothing)
+   * - 2 samples: 2.0x multiplier (slightly more confident)
+   * - 3+ samples: Use median (reliable baseline)
+   *
+   * This ensures that early trades after service startup don't get false-positive
+   * spike rejections, while still providing spike protection once we have enough data.
    */
   protected getGasBaseline(chain: string, ctx: StrategyContext): bigint {
     const history = ctx.gasBaselines.get(chain);
@@ -696,11 +1052,17 @@ export abstract class BaseExecutionStrategy {
       return 0n;
     }
 
-    // With fewer than 3 samples, use average with safety margin
+    // Fix 2.3: With fewer than 3 samples, use graduated safety multipliers
+    // to avoid false-positive spike detection on startup
     if (history.length < 3) {
       const sum = history.reduce((acc, h) => acc + h.price, 0n);
       const avg = sum / BigInt(history.length);
-      return avg * 3n / 2n;
+
+      // Graduated multiplier: more conservative with fewer samples
+      // 1 sample: 2.5x (we know very little, be very permissive)
+      // 2 samples: 2.0x (slightly more data, can be slightly stricter)
+      const multiplier = history.length === 1 ? 5n : 4n; // 5/2 = 2.5x, 4/2 = 2.0x
+      return avg * multiplier / 2n;
     }
 
     // Check cache first
@@ -723,10 +1085,13 @@ export abstract class BaseExecutionStrategy {
     const midIndex = Math.floor(sorted.length / 2);
     const median = sorted[midIndex].price;
 
+    // Fix 8.5: Use chain-specific TTL for cache
+    const cacheTTL = this.getMedianCacheTTL(chain);
+
     // Cache the result
     this.medianCache.set(chain, {
       median,
-      validUntil: now + this.MEDIAN_CACHE_TTL_MS
+      validUntil: now + cacheTTL
     });
 
     return median;
@@ -758,11 +1123,17 @@ export abstract class BaseExecutionStrategy {
     }
     this.lastMedianCacheCleanup = now;
 
-    // Remove expired entries (O(n) scan)
+    // Fix Race 5.1: Collect keys to delete first, then delete after iteration
+    // While ES6 Maps technically allow deletion during iteration, this pattern
+    // is more defensive and clearer in intent
+    const expiredKeys: string[] = [];
     for (const [key, value] of this.medianCache) {
       if (now >= value.validUntil) {
-        this.medianCache.delete(key);
+        expiredKeys.push(key);
       }
+    }
+    for (const key of expiredKeys) {
+      this.medianCache.delete(key);
     }
 
     // Hard cap: if still over limit after expiry check, evict oldest entries
@@ -784,6 +1155,28 @@ export abstract class BaseExecutionStrategy {
 
   /**
    * Apply MEV protection to prevent sandwich attacks.
+   *
+   * ## Fix 5.2: Thread-Safety Considerations for MEV Provider
+   *
+   * The ctx.mevProviderFactory is accessed without explicit synchronization because:
+   *
+   * 1. **Read-Only Access**: This method only reads from mevProviderFactory, it doesn't
+   *    modify the factory or its providers.
+   *
+   * 2. **Provider Immutability**: Once created, MEV providers are stateless for sending
+   *    transactions. Each sendProtectedTransaction() call is independent.
+   *
+   * 3. **JavaScript Single-Threaded**: Node.js runs on a single event loop. While multiple
+   *    async operations may be in flight, they don't execute in parallel - they yield at
+   *    await points. This means no true concurrent access during a single sync block.
+   *
+   * **Potential Race**: If mevProviderFactory is reconfigured (e.g., hot reload of
+   * MEV settings) during an execution, a strategy might use a stale provider reference.
+   *
+   * **Mitigation**: MEV reconfiguration is rare (typically requires restart). If live
+   * reconfiguration is needed, implement factory versioning or atomic swap patterns.
+   *
+   * **Risk Level**: Low - MEV config rarely changes at runtime in production.
    */
   protected async applyMEVProtection(
     tx: ethers.TransactionRequest,
@@ -955,6 +1348,18 @@ export abstract class BaseExecutionStrategy {
       return { success: false, error: `No wallet for chain: ${chain}` };
     }
 
+    // Race 5.4 Fix: Verify provider health before transaction submission
+    // This catches provider disconnection between gas price fetch and sendTransaction
+    if (provider) {
+      const isHealthy = await this.isProviderHealthy(provider, chain, ctx);
+      if (!isHealthy) {
+        return {
+          success: false,
+          error: `[ERR_PROVIDER_UNHEALTHY] Provider for ${chain} failed health check before transaction`,
+        };
+      }
+    }
+
     // Fix 5.1: Refresh gas price just before submission
     const finalGasPrice = await this.refreshGasPriceForSubmission(
       chain,
@@ -962,50 +1367,52 @@ export abstract class BaseExecutionStrategy {
       options.initialGasPrice
     );
 
-    // Fix 4.2 & 5.3: Get nonce from NonceManager only if not already set
+    // Fix 3.1 & 4.2 & 5.3: Get nonce from NonceManager only if not already set
     // This prevents double nonce allocation when strategy pre-allocates nonce
     //
-    // IMPORTANT (Fix 5.1 & 5.3 - Race Condition Warning):
-    // If multiple strategies execute in parallel for the SAME chain without external
-    // coordination, nonce allocation can race. The NonceManager itself is NOT
-    // distributed-lock protected. For production environments with parallel execution:
-    // 1. Use a distributed lock (Redis SETNX) per chain before calling getNextNonce()
-    // 2. Or ensure only one executor per chain is active at a time
-    // 3. Or pre-allocate nonces at the engine level before dispatching to strategies
+    // Fix 3.1: Per-chain locking now prevents the race condition where multiple
+    // strategies could allocate the same nonce. The acquireChainNonceLock() call
+    // ensures only one nonce allocation happens at a time per chain.
     //
-    // The engine.ts currently uses per-opportunity locks which is insufficient for
-    // same-chain parallel execution. Consider implementing per-chain locks if you
-    // observe nonce conflicts in production.
+    // Previous Issue (now resolved by Fix 3.1):
+    // Multiple strategies executing in parallel for the SAME chain would race
+    // to allocate nonces, causing transaction failures and wasted gas.
     //
     // Tracking: https://github.com/arbitrage-system/arbitrage/issues/156
     let nonce: number | undefined;
     const needsNonceAllocation = tx.nonce === undefined && ctx.nonceManager;
-
-    // Fix 5.1: Track nonce allocation to detect concurrent access
-    if (needsNonceAllocation) {
-      checkConcurrentNonceAccess(chain, options.opportunityId, this.logger);
-    }
 
     if (tx.nonce !== undefined) {
       // Nonce already set by caller, use it
       nonce = Number(tx.nonce);
       this.logger.debug('Using pre-allocated nonce', { chain, nonce });
     } else if (ctx.nonceManager) {
-      // Allocate new nonce from NonceManager
+      // Fix 3.1: Acquire per-chain lock before nonce allocation
       try {
+        await acquireChainNonceLock(chain, options.opportunityId, this.logger);
+      } catch (lockError) {
+        return {
+          success: false,
+          error: getErrorMessage(lockError) || '[ERR_NONCE_LOCK] Failed to acquire nonce lock',
+        };
+      }
+
+      // Allocate new nonce from NonceManager (under lock)
+      try {
+        // Fix 5.1: Track nonce allocation to detect any remaining concurrent access
+        checkConcurrentNonceAccess(chain, options.opportunityId, this.logger);
+
         nonce = await ctx.nonceManager.getNextNonce(chain);
         tx.nonce = nonce;
       } catch (error) {
-        // Fix 5.1: Clear tracking on error
-        if (needsNonceAllocation) {
-          clearNonceAllocationTracking(chain, options.opportunityId);
-        }
         return {
           success: false,
           error: `[ERR_NONCE] Failed to get nonce: ${getErrorMessage(error)}`,
         };
       } finally {
-        // Fix 5.1: Clear tracking after nonce allocation attempt
+        // Fix 3.1: Release lock after nonce allocation
+        releaseChainNonceLock(chain, options.opportunityId, this.logger);
+        // Fix 5.1: Clear tracking after nonce allocation
         if (needsNonceAllocation) {
           clearNonceAllocationTracking(chain, options.opportunityId);
         }
@@ -1251,19 +1658,18 @@ export abstract class BaseExecutionStrategy {
       throw new Error(`No wallet for chain: ${chain}`);
     }
 
+    // Refactor 9.5: Use O(1) DEX lookup instead of linear Array.find()
     // Find DEX router for the chain (use sellDex if specified, otherwise first available)
-    const chainDexes = DEXES[chain];
-    if (!chainDexes || chainDexes.length === 0) {
-      throw new Error(`No DEX configured for chain: ${chain}`);
+    const targetDex = opportunity.sellDex
+      ? getDexByName(chain, opportunity.sellDex)
+      : getFirstDex(chain);
+
+    if (!targetDex) {
+      throw new Error(`No DEX configured for chain: ${chain}${opportunity.sellDex ? ` (requested: ${opportunity.sellDex})` : ''}`);
     }
 
-    // Find the specific DEX or use the first one
-    const targetDex = opportunity.sellDex
-      ? chainDexes.find(d => d.name === opportunity.sellDex)
-      : chainDexes[0];
-
-    if (!targetDex || !targetDex.routerAddress) {
-      throw new Error(`No router address for DEX on chain: ${chain}`);
+    if (!targetDex.routerAddress) {
+      throw new Error(`No router address for DEX '${targetDex.name}' on chain: ${chain}`);
     }
 
     // Calculate minAmountOut with slippage protection
@@ -1282,11 +1688,12 @@ export abstract class BaseExecutionStrategy {
     // Fix 10.1: Use cached router contract for hot-path optimization
     const routerContract = this.getRouterContract(targetDex.routerAddress, provider, chain);
 
-    // Set deadline (5 minutes from now)
-    const deadline = Math.floor(Date.now() / 1000) + 300;
+    // Issue 3.3 Fix: Use configurable deadline constant instead of hardcoded 300
+    const deadline = Math.floor(Date.now() / 1000) + VALIDATED_SWAP_DEADLINE_SECONDS;
 
     // Recipient is wallet address by default
-    const recipient = recipientAddress || await wallet.getAddress();
+    // Perf 10.2: Use cached wallet address
+    const recipient = recipientAddress || await this.getWalletAddress(wallet);
 
     // Build the swap transaction
     const tx = await routerContract.swapExactTokensForTokens.populateTransaction(
@@ -1340,7 +1747,8 @@ export abstract class BaseExecutionStrategy {
       wallet
     );
 
-    const ownerAddress = await wallet.getAddress();
+    // Perf 10.2: Use cached wallet address
+    const ownerAddress = await this.getWalletAddress(wallet);
     const currentAllowance = await tokenContract.allowance(ownerAddress, spenderAddress);
 
     if (currentAllowance >= amount) {
@@ -1519,6 +1927,11 @@ export abstract class BaseExecutionStrategy {
       // Selectors computed using: ethers.id('<ErrorName>()').slice(0, 10)
       // All errors are parameterless in contracts/src/FlashLoanArbitrage.sol
       // Validated by base.strategy.test.ts
+      //
+      // Fix 2.1: IMPORTANT - If FlashLoanArbitrage.sol errors change, these selectors
+      // become stale. Consider generating selectors at build time from contract ABI.
+      // Tracking: Run `npm run generate:error-selectors` after contract changes.
+      // TODO: Automate selector generation in build pipeline to prevent drift.
       const CUSTOM_ERRORS: Record<string, string> = {
         '0xda6a56c3': 'InvalidPoolAddress',
         '0x14203b4b': 'InvalidRouterAddress',

@@ -3,7 +3,47 @@
  *
  * Re-exports all execution strategies and the strategy factory.
  *
+ * ## Strategy Architecture Overview
+ *
+ * All strategies extend `BaseExecutionStrategy` which provides:
+ * - Gas price management with spike detection
+ * - MEV protection integration
+ * - Per-chain nonce locking (Fix 3.1)
+ * - Transaction submission with health checks
+ * - Price verification
+ *
+ * ## Error Handling Pattern (Doc 4.1)
+ *
+ * Strategies follow a consistent error handling pattern:
+ *
+ * 1. **execute() method NEVER throws** to its caller
+ *    - Always returns `ExecutionResult` (success or error)
+ *    - All errors are caught and wrapped in `createErrorResult()`
+ *
+ * 2. **Internal methods CAN throw**
+ *    - `buildSwapSteps()`, `prepareFlashLoanContractTransaction()`, etc.
+ *    - These are caught by execute()'s outer try/catch
+ *
+ * 3. **Error codes from ExecutionErrorCode enum**
+ *    - Provides consistent, type-safe error identification
+ *    - Enables error categorization for monitoring/alerting
+ *
+ * Example pattern:
+ * ```typescript
+ * async execute(opportunity, ctx): Promise<ExecutionResult> {
+ *   try {
+ *     // Internal methods may throw
+ *     const result = await this.internalMethod();
+ *     return createSuccessResult(...);
+ *   } catch (error) {
+ *     // All errors converted to ExecutionResult
+ *     return createErrorResult(..., ExecutionErrorCode.FLASH_LOAN_ERROR, ...);
+ *   }
+ * }
+ * ```
+ *
  * @see engine.ts (parent service)
+ * @see types.ts ExecutionErrorCode (error codes enum)
  */
 
 export {

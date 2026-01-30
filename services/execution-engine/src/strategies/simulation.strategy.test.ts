@@ -6,10 +6,15 @@
  * - Integration testing with full pipeline
  * - Performance testing and benchmarking
  * - Demo/presentation purposes
+ *
+ * ## Fix 8.1: Added tests for:
+ * - Fix 1.1: Context validation logging
+ * - Fix 4.3: Stats tracking (simulationsSkipped, successfulExecutions, failedExecutions)
  */
 
 import { SimulationStrategy } from './simulation.strategy';
 import type { StrategyContext, Logger, ResolvedSimulationConfig } from '../types';
+import { ExecutionErrorCode } from '../types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================
@@ -497,6 +502,142 @@ describe('SimulationStrategy', () => {
       const result = await executePromise;
 
       expect(result.gasUsed).toBe(500000);
+    });
+  });
+
+  // ===========================================================================
+  // Fix 1.1: Context Validation Logging Tests
+  // ===========================================================================
+
+  describe('context validation (Fix 1.1)', () => {
+    it('should log debug when wallet is missing for chain', async () => {
+      Math.random = jest.fn().mockReturnValue(0.5);
+
+      const config = createDefaultConfig();
+      const strategy = new SimulationStrategy(logger, config);
+      // Use a chain that doesn't exist in the default context
+      const opportunity = createMockOpportunity({ buyChain: 'polygon' });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        'SimulationStrategy: No wallet for chain (expected in simulation mode)',
+        expect.objectContaining({
+          chain: 'polygon',
+          opportunityId: opportunity.id,
+        })
+      );
+    });
+
+    it('should log debug when provider is missing for chain', async () => {
+      Math.random = jest.fn().mockReturnValue(0.5);
+
+      const config = createDefaultConfig();
+      const strategy = new SimulationStrategy(logger, config);
+      // Use a chain that doesn't exist in the default context
+      const opportunity = createMockOpportunity({ buyChain: 'bsc' });
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      expect(logger.debug).toHaveBeenCalledWith(
+        'SimulationStrategy: No provider for chain (expected in simulation mode)',
+        expect.objectContaining({
+          chain: 'bsc',
+          opportunityId: opportunity.id,
+        })
+      );
+    });
+
+    it('should return error for opportunity without id', async () => {
+      const config = createDefaultConfig();
+      const strategy = new SimulationStrategy(logger, config);
+      const opportunity = createMockOpportunity({ id: '' });
+
+      // Note: No timer advancement needed for validation failure (returns immediately)
+      const result = await strategy.execute(opportunity, ctx);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(ExecutionErrorCode.INVALID_OPPORTUNITY);
+    });
+  });
+
+  // ===========================================================================
+  // Fix 4.3: Stats Tracking Tests
+  // ===========================================================================
+
+  describe('stats tracking (Fix 4.3)', () => {
+    it('should increment simulationsSkipped counter', async () => {
+      Math.random = jest.fn().mockReturnValue(0.5);
+
+      const config = createDefaultConfig();
+      const strategy = new SimulationStrategy(logger, config);
+      const opportunity = createMockOpportunity();
+      const initialSkipped = ctx.stats.simulationsSkipped;
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      expect(ctx.stats.simulationsSkipped).toBe(initialSkipped + 1);
+    });
+
+    it('should increment successfulExecutions on success', async () => {
+      // Mock to always succeed
+      Math.random = jest.fn().mockReturnValue(0.5);
+
+      const config = createDefaultConfig({ successRate: 1.0 });
+      const strategy = new SimulationStrategy(logger, config);
+      const opportunity = createMockOpportunity();
+      const initialSuccessful = ctx.stats.successfulExecutions;
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      expect(ctx.stats.successfulExecutions).toBe(initialSuccessful + 1);
+    });
+
+    it('should increment failedExecutions on failure', async () => {
+      // Mock to always fail
+      let callCount = 0;
+      Math.random = jest.fn(() => {
+        callCount++;
+        if (callCount === 1) return 0.5; // latency
+        return 0.95; // fail with successRate 0.9
+      });
+
+      const config = createDefaultConfig({ successRate: 0.9 });
+      const strategy = new SimulationStrategy(logger, config);
+      const opportunity = createMockOpportunity();
+      const initialFailed = ctx.stats.failedExecutions;
+
+      const executePromise = strategy.execute(opportunity, ctx);
+      jest.advanceTimersByTime(100);
+      await executePromise;
+
+      expect(ctx.stats.failedExecutions).toBe(initialFailed + 1);
+    });
+
+    it('should track stats across multiple executions', async () => {
+      Math.random = jest.fn().mockReturnValue(0.5);
+
+      const config = createDefaultConfig({ successRate: 1.0 });
+      const strategy = new SimulationStrategy(logger, config);
+
+      // Execute 3 times
+      for (let i = 0; i < 3; i++) {
+        const opportunity = createMockOpportunity({ id: `opp-${i}` });
+        const executePromise = strategy.execute(opportunity, ctx);
+        jest.advanceTimersByTime(100);
+        await executePromise;
+      }
+
+      expect(ctx.stats.simulationsSkipped).toBe(3);
+      expect(ctx.stats.successfulExecutions).toBe(3);
     });
   });
 });
