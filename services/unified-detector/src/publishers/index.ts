@@ -11,3 +11,9 @@ export type {
   WhaleAlertPublisherConfig,
   ExtendedPairInfo
 } from './whale-alert.publisher';
+
+export { OpportunityPublisher } from './opportunity.publisher';
+export type {
+  OpportunityPublisherConfig,
+  OpportunityPublisherStats
+} from './opportunity.publisher';

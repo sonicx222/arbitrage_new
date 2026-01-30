@@ -17,9 +17,10 @@
 
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from './unified-detector';
-import { createLogger, parsePort } from '@arbitrage/core';
+import { createLogger, parsePort, getRedisStreamsClient, RedisStreamsClient } from '@arbitrage/core';
 import { getPartition } from '@arbitrage/config';
 import { DEFAULT_HEALTH_CHECK_PORT } from './constants';
+import { OpportunityPublisher } from './publishers';
 
 // =============================================================================
 // Configuration
@@ -29,6 +30,10 @@ const logger = createLogger('unified-detector:main');
 
 // Store server reference for graceful shutdown
 let healthServer: Server | null = null;
+
+// Store publisher and streams client references for lifecycle management
+let opportunityPublisher: OpportunityPublisher | null = null;
+let streamsClient: RedisStreamsClient | null = null;
 
 // FIX Inconsistency 6.2: Use parsePort for consistent port validation
 const healthCheckPort = parsePort(process.env.HEALTH_CHECK_PORT, DEFAULT_HEALTH_CHECK_PORT, logger);
@@ -216,8 +221,22 @@ detector.on('opportunity', (opp) => {
     buyDex: opp.buyDex,
     sellDex: opp.sellDex,
     profit: opp.expectedProfit,
-    percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
+    percentage: opp.profitPercentage?.toFixed(2) + '%'  // profitPercentage is already a percentage value
   });
+
+  // Publish opportunity to Redis Streams for Coordinator/Execution Engine
+  // FIX P0: Fire-and-forget pattern with explicit error handling
+  // - EventEmitter doesn't await async handlers, causing unhandled rejections
+  // - Using .catch() ensures errors are logged, not thrown as unhandled rejections
+  // - This is intentional: we don't want to block the detector's event loop
+  if (opportunityPublisher) {
+    opportunityPublisher.publish(opp).catch((error) => {
+      logger.error('Failed to publish opportunity (fire-and-forget)', {
+        opportunityId: opp.id,
+        error: (error as Error).message,
+      });
+    });
+  }
 });
 
 detector.on('chainError', ({ chainId, error }) => {
@@ -264,6 +283,24 @@ async function shutdown(signal: string): Promise<void> {
     detector.removeAllListeners();
 
     await detector.stop();
+
+    // Log publisher stats before cleanup
+    if (opportunityPublisher) {
+      const stats = opportunityPublisher.getStats();
+      logger.info('OpportunityPublisher stats at shutdown', {
+        published: stats.published,
+        failed: stats.failed,
+      });
+      opportunityPublisher = null;
+    }
+
+    // FIX P3: Clear streamsClient reference (singleton cleanup happens in detector.stop())
+    // Note: getRedisStreamsClient() returns a singleton shared by both index.ts and
+    // UnifiedChainDetector. The actual disconnect is handled by detector.stop() which
+    // calls streamsClient.disconnect(). We just clear our reference here.
+    // Setting to null prevents accidental use after shutdown.
+    streamsClient = null;
+
     logger.info('Shutdown complete');
     process.exit(0);
   } catch (error) {
@@ -301,6 +338,18 @@ async function main(): Promise<void> {
   });
 
   try {
+    // Initialize Redis Streams client for opportunity publishing
+    streamsClient = await getRedisStreamsClient();
+    logger.info('Redis Streams client initialized for opportunity publishing');
+
+    // Initialize opportunity publisher
+    opportunityPublisher = new OpportunityPublisher({
+      logger,
+      streamsClient,
+      partitionId: config.partitionId,
+    });
+    logger.info('OpportunityPublisher initialized');
+
     // Start health check server first
     healthServer = createHealthServer(config.healthCheckPort || DEFAULT_HEALTH_CHECK_PORT);
 
