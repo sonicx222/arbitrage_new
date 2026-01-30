@@ -10,8 +10,8 @@
 export { OpportunityConsumer } from './opportunity.consumer';
 export type { OpportunityConsumerConfig, PendingMessageInfo } from './opportunity.consumer';
 
-// Re-export validation error code from types for testing
-export { ValidationErrorCode } from '../types';
+// Re-export validation error code and constants from types for testing
+export { ValidationErrorCode, DLQ_STREAM } from '../types';
 
 // REFACTOR 9.1: Re-export validation module for external use
 export {

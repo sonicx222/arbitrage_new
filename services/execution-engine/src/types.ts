@@ -372,13 +372,38 @@ export interface ConsumerConfig {
   blockMs: number;
   /** Shutdown ACK timeout in ms (default: 5000) */
   shutdownAckTimeoutMs: number;
+  /**
+   * Maximum age for pending messages before cleanup.
+   * Messages older than this are considered orphaned and ACKed to prevent Redis PEL growth.
+   * Default: 10 minutes (600000ms) - well beyond normal execution timeout (55s).
+   */
+  pendingMessageMaxAgeMs: number;
+  /**
+   * Interval for stale pending message cleanup in health monitoring.
+   * Set to 0 to disable automatic cleanup.
+   * Default: 60000ms (1 minute)
+   */
+  stalePendingCleanupIntervalMs: number;
 }
 
 export const DEFAULT_CONSUMER_CONFIG: ConsumerConfig = {
   batchSize: parseEnvTimeout('CONSUMER_BATCH_SIZE', 10, 1, 100),
   blockMs: parseEnvTimeout('CONSUMER_BLOCK_MS', 1000, 100, 10000),
   shutdownAckTimeoutMs: parseEnvTimeout('CONSUMER_SHUTDOWN_ACK_TIMEOUT_MS', 5000, 1000, 30000),
+  pendingMessageMaxAgeMs: parseEnvTimeout('CONSUMER_PENDING_MAX_AGE_MS', 10 * 60 * 1000, 60000, 3600000),
+  stalePendingCleanupIntervalMs: parseEnvTimeout('CONSUMER_STALE_CLEANUP_INTERVAL_MS', 60000, 0, 300000),
 };
+
+// =============================================================================
+// Stream Constants
+// =============================================================================
+
+/**
+ * Dead Letter Queue stream name.
+ * Messages that fail validation are moved here for analysis.
+ * @see ARCHITECTURE_V2.md Section 5.3 (Message Channels)
+ */
+export const DLQ_STREAM = 'stream:dead-letter-queue';
 
 // =============================================================================
 // Supported Chains (Fix BUG #3: Chain validation)
@@ -437,6 +462,7 @@ export enum ValidationErrorCode {
   UNSUPPORTED_BUY_CHAIN = '[VAL_UNSUPPORTED_BUY_CHAIN] Cross-chain: unsupported buyChain',
   UNSUPPORTED_SELL_CHAIN = '[VAL_UNSUPPORTED_SELL_CHAIN] Cross-chain: unsupported sellChain',
   EXPIRED = '[VAL_EXPIRED] Opportunity has expired',
+  INVALID_EXPIRES_AT = '[VAL_INVALID_EXPIRES_AT] Invalid expiresAt format (must be number)',
   LOW_CONFIDENCE = '[VAL_LOW_CONFIDENCE] Confidence below threshold',
   LOW_PROFIT = '[VAL_LOW_PROFIT] Expected profit below threshold',
   DUPLICATE = '[VAL_DUPLICATE] Already executing',
@@ -741,6 +767,8 @@ export interface ExecutionEngineConfig {
   circuitBreakerConfig?: CircuitBreakerConfig;
   /** Phase 2 pending state simulation configuration */
   pendingStateConfig?: PendingStateEngineConfig;
+  /** Consumer configuration for opportunity stream processing */
+  consumerConfig?: Partial<ConsumerConfig>;
 }
 
 /**

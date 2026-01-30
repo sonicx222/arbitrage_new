@@ -37,7 +37,7 @@ import type {
   QueueService,
   ConsumerConfig,
 } from '../types';
-import { DEFAULT_CONSUMER_CONFIG } from '../types';
+import { DEFAULT_CONSUMER_CONFIG, DLQ_STREAM } from '../types';
 
 // REFACTOR 9.1: Import validation types and functions from extracted module
 import {
@@ -79,24 +79,8 @@ export interface PendingMessageInfo {
 // =============================================================================
 
 // =============================================================================
-// DLQ Stream Name Constant
+// Note: DLQ_STREAM constant is now imported from '../types' for centralization
 // =============================================================================
-
-/**
- * Dead Letter Queue stream name.
- * Messages that fail validation are moved here for analysis.
- * @see ARCHITECTURE_V2.md Section 5.3 (Message Channels)
- */
-const DLQ_STREAM = 'stream:dead-letter-queue';
-
-/**
- * BUG FIX 4.1: Maximum age for pending messages before cleanup.
- * Messages older than this are considered orphaned (execution never completed)
- * and are ACKed to prevent Redis PEL growth.
- *
- * Value: 10 minutes - well beyond normal execution timeout (55s) with safety margin.
- */
-const PENDING_MESSAGE_MAX_AGE_MS = 10 * 60 * 1000;
 
 // =============================================================================
 // Type Safety Design Decision (REFACTOR 9.2)
@@ -653,21 +637,22 @@ export class OpportunityConsumer {
   /**
    * Clean up stale pending messages to prevent memory leaks.
    *
-   * BUG FIX 4.1: Messages that exceed PENDING_MESSAGE_MAX_AGE_MS are considered
+   * BUG FIX 4.1: Messages that exceed config.pendingMessageMaxAgeMs are considered
    * orphaned (execution completed without ACK, or engine crashed). These are
    * ACKed to prevent Redis PEL growth and memory leaks.
    *
-   * This method should be called periodically (e.g., from health monitoring).
+   * This method is called periodically from engine health monitoring.
    *
    * @returns Number of stale messages cleaned up
    */
   async cleanupStalePendingMessages(): Promise<number> {
     const now = Date.now();
+    const maxAgeMs = this.config.pendingMessageMaxAgeMs;
     const staleIds: string[] = [];
 
     // Identify stale messages
     for (const [id, info] of this.pendingMessages) {
-      if (now - info.queuedAt > PENDING_MESSAGE_MAX_AGE_MS) {
+      if (now - info.queuedAt > maxAgeMs) {
         staleIds.push(id);
       }
     }
@@ -678,7 +663,7 @@ export class OpportunityConsumer {
 
     this.logger.warn('Cleaning up stale pending messages', {
       count: staleIds.length,
-      maxAgeMs: PENDING_MESSAGE_MAX_AGE_MS,
+      maxAgeMs,
     });
 
     // ACK and remove stale messages
@@ -716,16 +701,25 @@ export class OpportunityConsumer {
    */
   getStalePendingInfo(): Array<{ id: string; ageMs: number }> {
     const now = Date.now();
+    const maxAgeMs = this.config.pendingMessageMaxAgeMs;
     const stale: Array<{ id: string; ageMs: number }> = [];
 
     for (const [id, info] of this.pendingMessages) {
       const ageMs = now - info.queuedAt;
-      if (ageMs > PENDING_MESSAGE_MAX_AGE_MS) {
+      if (ageMs > maxAgeMs) {
         stale.push({ id, ageMs });
       }
     }
 
     return stale;
+  }
+
+  /**
+   * Get the configured pending message max age in milliseconds.
+   * Useful for testing and monitoring.
+   */
+  getPendingMessageMaxAgeMs(): number {
+    return this.config.pendingMessageMaxAgeMs;
   }
 
   // ===========================================================================

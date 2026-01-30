@@ -73,7 +73,9 @@ import {
   StandbyConfig,
   CircuitBreakerConfig,
   PendingStateEngineConfig,
+  ConsumerConfig,
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
+  DEFAULT_CONSUMER_CONFIG,
   EXECUTION_TIMEOUT_MS,
   SHUTDOWN_TIMEOUT_MS,
   createInitialStats,
@@ -191,6 +193,7 @@ export class ExecutionEngineService {
   private readonly standbyConfig: StandbyConfig;
   private readonly circuitBreakerConfig: Required<CircuitBreakerConfig>;
   private readonly pendingStateConfig: PendingStateEngineConfig; // Phase 2 config
+  private readonly consumerConfig: Partial<ConsumerConfig> | undefined; // Consumer tuning
   private isActivated = false; // Track if standby has been activated
   private activationPromise: Promise<boolean> | null = null; // Atomic mutex for activation (ADR-007)
   // FIX 5.1: Promise-based mutex for provider initialization (replaces boolean flag)
@@ -208,6 +211,7 @@ export class ExecutionEngineService {
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
+  private stalePendingCleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(config: ExecutionEngineConfig = {}) {
     // Initialize simulation config
@@ -279,6 +283,9 @@ export class ExecutionEngineService {
       maxConsecutiveFailures: config.pendingStateConfig?.maxConsecutiveFailures ?? 5,
       simulationTimeoutMs: config.pendingStateConfig?.simulationTimeoutMs ?? 5000,
     };
+
+    // Store consumer config for passing to OpportunityConsumer
+    this.consumerConfig = config.consumerConfig;
 
     // Use injected dependencies or defaults
     this.logger = config.logger ?? createLogger('execution-engine');
@@ -412,7 +419,8 @@ export class ExecutionEngineService {
         streamsClient: this.streamsClient,
         queueService: this.queueService,
         stats: this.stats,
-        instanceId: this.instanceId
+        instanceId: this.instanceId,
+        consumerConfig: this.consumerConfig,
       });
 
       // Create consumer groups and start consuming
@@ -564,6 +572,10 @@ export class ExecutionEngineService {
     if (this.healthMonitoringInterval) {
       clearInterval(this.healthMonitoringInterval);
       this.healthMonitoringInterval = null;
+    }
+    if (this.stalePendingCleanupInterval) {
+      clearInterval(this.stalePendingCleanupInterval);
+      this.stalePendingCleanupInterval = null;
     }
   }
 
@@ -1582,6 +1594,7 @@ export class ExecutionEngineService {
               queueSize: this.queueService?.size() ?? 0,
               queuePaused: this.queueService?.isPaused() ?? false,
               activeExecutions: this.opportunityConsumer?.getActiveCount() ?? 0,
+              pendingMessages: this.opportunityConsumer?.getPendingCount() ?? 0,
               stats: this.stats,
               // Include simulation metrics (Phase 1.1.3)
               simulationMetrics: simulationMetrics ?? null,
@@ -1598,6 +1611,36 @@ export class ExecutionEngineService {
         this.logger.error('Execution engine health monitoring failed', { error });
       }
     }, 30000);
+
+    // Start stale pending message cleanup interval
+    // FIX: Integrates cleanupStalePendingMessages() into health monitoring
+    const cleanupIntervalMs = this.consumerConfig?.stalePendingCleanupIntervalMs
+      ?? DEFAULT_CONSUMER_CONFIG.stalePendingCleanupIntervalMs;
+
+    if (cleanupIntervalMs > 0) {
+      this.stalePendingCleanupInterval = setInterval(async () => {
+        if (!this.stateManager.isRunning()) return;
+        if (!this.opportunityConsumer) return;
+
+        try {
+          const cleanedCount = await this.opportunityConsumer.cleanupStalePendingMessages();
+          if (cleanedCount > 0) {
+            this.logger.info('Cleaned up stale pending messages', {
+              cleanedCount,
+              intervalMs: cleanupIntervalMs,
+            });
+          }
+        } catch (error) {
+          this.logger.error('Failed to cleanup stale pending messages', {
+            error: getErrorMessage(error),
+          });
+        }
+      }, cleanupIntervalMs);
+
+      this.logger.debug('Stale pending message cleanup interval started', {
+        intervalMs: cleanupIntervalMs,
+      });
+    }
   }
 
   /**

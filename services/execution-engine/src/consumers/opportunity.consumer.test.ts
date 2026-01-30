@@ -10,14 +10,15 @@
  * - Active execution tracking
  * - Stream-init message handling (BUG #2 fix)
  * - Chain support validation (BUG #3 fix)
- * - Expiration validation (TODO fix)
- * - Configurable consumer config
+ * - Expiration validation (string timestamp support)
+ * - Configurable consumer config (pendingMessageMaxAgeMs)
  */
 
 import { OpportunityConsumer, OpportunityConsumerConfig } from './opportunity.consumer';
 import type { Logger, ExecutionStats, QueueService } from '../types';
 import { ValidationErrorCode } from '../types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import { validateMessageStructure, ValidationFailure } from './validation';
 
 // =============================================================================
 // Mock Implementations
@@ -944,7 +945,7 @@ describe('OpportunityConsumer - Chain Validation (BUG #3 Fix)', () => {
 });
 
 // =============================================================================
-// Test Suite: Expiration Validation (TODO Fix)
+// Test Suite: Expiration Validation (Enhanced with String Timestamp Support)
 // =============================================================================
 
 describe('OpportunityConsumer - Expiration Validation', () => {
@@ -1910,5 +1911,218 @@ describe('Exception Path Stats Tracking (BUG FIX 4.2)', () => {
       'Failed to handle arbitrage opportunity',
       expect.objectContaining({ id: validOpp.id })
     );
+  });
+});
+
+// =============================================================================
+// Configurable ConsumerConfig Tests
+// =============================================================================
+
+describe('Configurable ConsumerConfig', () => {
+  let mockLogger: Logger;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockQueueService: QueueService;
+  let mockStats: ExecutionStats;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockQueueService = createMockQueueService();
+    mockStats = createMockStats();
+  });
+
+  it('should use default pendingMessageMaxAgeMs when not configured', async () => {
+    const consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance',
+    });
+
+    // Default is 10 minutes (600000ms)
+    expect(consumer.getPendingMessageMaxAgeMs()).toBe(10 * 60 * 1000);
+    await consumer.stop();
+  });
+
+  it('should use custom pendingMessageMaxAgeMs when configured', async () => {
+    const customMaxAgeMs = 5 * 60 * 1000; // 5 minutes
+
+    const consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance',
+      consumerConfig: {
+        pendingMessageMaxAgeMs: customMaxAgeMs,
+      },
+    });
+
+    expect(consumer.getPendingMessageMaxAgeMs()).toBe(customMaxAgeMs);
+    await consumer.stop();
+  });
+
+  it('should clean up based on custom pendingMessageMaxAgeMs', async () => {
+    const customMaxAgeMs = 2 * 60 * 1000; // 2 minutes
+
+    const consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance',
+      consumerConfig: {
+        pendingMessageMaxAgeMs: customMaxAgeMs,
+      },
+    });
+
+    const pendingMessages = (consumer as any).pendingMessages as Map<string, any>;
+
+    // Add a message that is 3 minutes old (should be stale with 2min max)
+    pendingMessages.set('opp-stale', {
+      streamName: 'stream:execution-requests',
+      groupName: 'execution-engine-group',
+      messageId: '100-0',
+      queuedAt: Date.now() - 3 * 60 * 1000,
+    });
+
+    // Add a message that is 1 minute old (should NOT be stale with 2min max)
+    pendingMessages.set('opp-recent', {
+      streamName: 'stream:execution-requests',
+      groupName: 'execution-engine-group',
+      messageId: '200-0',
+      queuedAt: Date.now() - 1 * 60 * 1000,
+    });
+
+    const cleanedCount = await consumer.cleanupStalePendingMessages();
+
+    expect(cleanedCount).toBe(1);
+    expect(pendingMessages.has('opp-stale')).toBe(false);
+    expect(pendingMessages.has('opp-recent')).toBe(true);
+
+    await consumer.stop();
+  });
+});
+
+// =============================================================================
+// String Timestamp Validation Tests
+// =============================================================================
+
+describe('String Timestamp Validation (expiresAt)', () => {
+  let mockLogger: Logger;
+  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let mockQueueService: QueueService;
+  let mockStats: ExecutionStats;
+  let consumer: OpportunityConsumer;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockLogger = createMockLogger();
+    mockStreamsClient = createMockStreamsClient();
+    mockQueueService = createMockQueueService();
+    mockStats = createMockStats();
+
+    consumer = new OpportunityConsumer({
+      logger: mockLogger,
+      streamsClient: mockStreamsClient as any,
+      queueService: mockQueueService,
+      stats: mockStats,
+      instanceId: 'test-instance',
+    });
+  });
+
+  afterEach(async () => {
+    await consumer.stop();
+  });
+
+  it('should accept valid numeric string expiresAt', () => {
+    const futureTimestamp = Date.now() + 60000; // 1 minute in future
+
+    const result = validateMessageStructure({
+      id: 'msg-1',
+      data: {
+        id: 'opp-1',
+        type: 'simple',
+        tokenIn: '0xtoken1',
+        tokenOut: '0xtoken2',
+        amountIn: '1000000000000000000',
+        expiresAt: String(futureTimestamp), // String timestamp
+      },
+    });
+
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject invalid string expiresAt format', () => {
+    const result = validateMessageStructure({
+      id: 'msg-1',
+      data: {
+        id: 'opp-1',
+        type: 'simple',
+        tokenIn: '0xtoken1',
+        tokenOut: '0xtoken2',
+        amountIn: '1000000000000000000',
+        expiresAt: 'invalid-timestamp', // Invalid format
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect((result as ValidationFailure).code).toBe(ValidationErrorCode.INVALID_EXPIRES_AT);
+  });
+
+  it('should reject expired string timestamp', () => {
+    const pastTimestamp = Date.now() - 60000; // 1 minute in past
+
+    const result = validateMessageStructure({
+      id: 'msg-1',
+      data: {
+        id: 'opp-1',
+        type: 'simple',
+        tokenIn: '0xtoken1',
+        tokenOut: '0xtoken2',
+        amountIn: '1000000000000000000',
+        expiresAt: String(pastTimestamp), // Expired string timestamp
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect((result as ValidationFailure).code).toBe(ValidationErrorCode.EXPIRED);
+  });
+
+  it('should reject non-numeric non-number expiresAt types', () => {
+    const result = validateMessageStructure({
+      id: 'msg-1',
+      data: {
+        id: 'opp-1',
+        type: 'simple',
+        tokenIn: '0xtoken1',
+        tokenOut: '0xtoken2',
+        amountIn: '1000000000000000000',
+        expiresAt: { timestamp: Date.now() }, // Object instead of number/string
+      },
+    });
+
+    expect(result.valid).toBe(false);
+    expect((result as ValidationFailure).code).toBe(ValidationErrorCode.INVALID_EXPIRES_AT);
+  });
+
+  it('should accept valid number expiresAt (existing behavior)', () => {
+    const futureTimestamp = Date.now() + 60000;
+
+    const result = validateMessageStructure({
+      id: 'msg-1',
+      data: {
+        id: 'opp-1',
+        type: 'simple',
+        tokenIn: '0xtoken1',
+        tokenOut: '0xtoken2',
+        amountIn: '1000000000000000000',
+        expiresAt: futureTimestamp, // Number timestamp
+      },
+    });
+
+    expect(result.valid).toBe(true);
   });
 });

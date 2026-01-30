@@ -242,12 +242,45 @@ export function validateMessageStructure(
   }
 
   // Validate expiration (if provided)
-  if (data.expiresAt && typeof data.expiresAt === 'number') {
-    if (data.expiresAt < Date.now()) {
+  // FIX: Handle both number and string timestamps robustly
+  if (data.expiresAt !== undefined && data.expiresAt !== null) {
+    let expiresAtMs: number;
+
+    if (typeof data.expiresAt === 'number') {
+      expiresAtMs = data.expiresAt;
+    } else if (typeof data.expiresAt === 'string') {
+      // Only accept numeric strings (e.g., "1706626800000")
+      if (!NUMERIC_PATTERN.test(data.expiresAt)) {
+        return {
+          valid: false,
+          code: ValidationErrorCode.INVALID_EXPIRES_AT,
+          details: `Invalid format: ${data.expiresAt}`,
+        };
+      }
+      expiresAtMs = Number(data.expiresAt);
+      // Check for NaN or invalid conversion
+      if (!Number.isFinite(expiresAtMs)) {
+        return {
+          valid: false,
+          code: ValidationErrorCode.INVALID_EXPIRES_AT,
+          details: `Cannot parse: ${data.expiresAt}`,
+        };
+      }
+    } else {
+      // Reject non-number, non-string types
+      return {
+        valid: false,
+        code: ValidationErrorCode.INVALID_EXPIRES_AT,
+        details: `Expected number or numeric string, got ${typeof data.expiresAt}`,
+      };
+    }
+
+    // Check if already expired
+    if (expiresAtMs < Date.now()) {
       return {
         valid: false,
         code: ValidationErrorCode.EXPIRED,
-        details: `Expired ${Date.now() - data.expiresAt}ms ago`,
+        details: `Expired ${Date.now() - expiresAtMs}ms ago`,
       };
     }
   }
