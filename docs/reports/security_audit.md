@@ -1,26 +1,58 @@
 # Security Audit Report
 
 **Audit Date**: January 14, 2026
-**Last Updated**: January 14, 2026
-**Overall Rating**: 🟢 LOW RISK
+**Last Updated**: January 31, 2026
+**Overall Rating**: 🟡 MEDIUM RISK (remediation in progress)
 
 ## 📊 Executive Summary
 
-| Category | Risk Level |
-|----------|------------|
-| **NPM Dependencies** | 🟢 LOW |
-| **Code Security** | 🟢 LOW |
-| **Architecture Security** | 🟢 LOW |
-| **Data Security** | 🟢 LOW |
-| **Transaction Security** | 🟢 LOW |
+| Category | Risk Level | Status |
+|----------|------------|--------|
+| **Secrets Management** | 🔴 CRITICAL | Remediation Required |
+| **NPM Dependencies** | 🟢 LOW | Resolved |
+| **Code Security** | 🟢 LOW | Resolved |
+| **Architecture Security** | 🟢 LOW | Resolved |
+| **Data Security** | 🟢 LOW | Resolved |
+| **Transaction Security** | 🟢 LOW | Resolved |
 
 ### Key Findings
+- **🔴 CRITICAL**: API keys were committed to git history - requires immediate rotation
 - **Zero Vulnerabilities**: All high-severity npm vulnerabilities fixed.
 - **Hardened Auth**: Timing attack protection implemented on all auth endpoints.
 - **Input Sanitization**: Comprehensive Joi validation on all API requests.
 - **Safe Redis**: Channel validation and size limits implemented to prevent injection.
 - **MEV Protection**: Full EIP-1559 transaction protection with priority fee capping.
 - **Slippage Protection**: On-chain minAmountOut enforcement prevents partial fill losses.
+
+---
+
+## 🔴 CRITICAL: Secrets Exposure Incident (January 31, 2026)
+
+### Issue
+API keys were committed to git history in `.env` and `.env.local` files.
+
+### Compromised Credentials
+| Provider | Key Type | Action Required |
+|----------|----------|-----------------|
+| dRPC | API Key | ROTATE |
+| Ankr | API Key | ROTATE |
+| Infura | API Key | ROTATE |
+| Alchemy | API Key | ROTATE |
+| QuickNode | API Key | ROTATE |
+| Helius | API Key | ROTATE |
+
+### Remediation Steps
+1. ✅ Files removed from git tracking
+2. ✅ `.gitignore` strengthened
+3. ✅ `.env.example` template created (safe to commit)
+4. ⏳ Git history cleanup pending (`scripts/cleanup-git-history.sh`)
+5. ⏳ Force push to GitHub required
+6. ⏳ API key rotation required at each provider
+
+### Prevention Measures Implemented
+- Comprehensive `.gitignore` for all `.env*` patterns
+- Pre-commit guidance in `docs/security/SECRETS_MANAGEMENT.md`
+- Enable GitHub secret scanning (recommended)
 
 ---
 
@@ -99,8 +131,29 @@ Critical security fixes are covered by regression tests in `shared/core/src/fixe
 ---
 
 ## 🔧 Remaining Recommendations
-- [ ] Implement Hardware Security Module (HSM) for production wallet keys.
-- [ ] Add automated security scanning (Snyk/GitHub Security) to the CI pipeline.
-- [ ] Periodic penetration testing of the Coordinator dashboard.
-- [ ] Integrate Flashbots Protect RPC for Ethereum mainnet transactions.
-- [ ] Add monitoring for gas price anomalies across chains.
+
+### Immediate (Before Production)
+- [x] Remove exposed `.env` files from git tracking
+- [x] Clean git history of committed secrets
+- [ ] **ROTATE ALL COMPROMISED API KEYS** (see provider list above)
+- [ ] Enable GitHub Secret Scanning and Push Protection
+- [ ] Set up AWS Secrets Manager or HashiCorp Vault
+
+### Short-term (Next Sprint)
+- [ ] Implement Hardware Security Module (HSM) for production wallet keys
+- [ ] Add pre-commit hooks to prevent secret commits
+- [ ] Add automated security scanning (Snyk/GitHub Security) to CI pipeline
+- [ ] Move test private keys from `setupTests.ts` to test config file
+
+### Long-term
+- [ ] Periodic penetration testing of the Coordinator dashboard
+- [ ] Integrate Flashbots Protect RPC for Ethereum mainnet transactions
+- [ ] Add monitoring for gas price anomalies across chains
+- [ ] Implement secret rotation automation
+
+---
+
+## 📚 Related Documentation
+- [Secrets Management Guide](../security/SECRETS_MANAGEMENT.md)
+- [Git History Cleanup Script](../../scripts/cleanup-git-history.sh)
+- [Environment Template](.env.example)
