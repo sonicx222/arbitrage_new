@@ -144,7 +144,17 @@ export {
   MAINNET_CHAIN_IDS,
   MainnetChainId,
   TESTNET_CHAINS,
-  getAllChains
+  getAllChains,
+  // 6-Provider Shield exports
+  PROVIDER_CONFIGS,
+  CHAIN_NETWORK_NAMES,
+  ProviderTier,
+  getProviderUrlsForChain,
+  getTimeBasedProviderOrder,
+  getTrafficAllocation,
+  calculateProviderBudget,
+  type ProviderConfig,
+  type ProviderBudget,
 } from './chains';
 
 // =============================================================================

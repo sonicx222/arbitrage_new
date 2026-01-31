@@ -4,11 +4,31 @@
  * Provides a centralized utility for building chain RPC and WebSocket URLs
  * with consistent environment variable resolution and fallback patterns.
  *
- * This reduces code duplication across chain configurations and provides
- * a single point of maintenance for URL construction logic.
+ * Updated to implement the 6-Provider Shield Architecture:
+ * Priority: dRPC → Ankr → PublicNode → Infura → Alchemy → QuickNode
  *
  * @see P2-CONFIG from refactoring-roadmap.md
+ * @see docs/reports/RPC_DEEP_DIVE_ANALYSIS.md
  */
+
+// Re-export provider configuration
+export {
+  PROVIDER_CONFIGS,
+  CHAIN_NETWORK_NAMES,
+  ProviderTier,
+  buildDrpcUrl,
+  buildAnkrUrl,
+  buildPublicNodeUrl,
+  buildInfuraUrl,
+  buildAlchemyUrl,
+  buildBlastApiUrl,
+  getProviderUrlsForChain,
+  getTimeBasedProviderOrder,
+  getTrafficAllocation,
+  calculateProviderBudget,
+  type ProviderConfig,
+  type ProviderBudget
+} from './provider-config';
 
 /**
  * Configuration for building chain URLs
@@ -210,24 +230,74 @@ export function buildSolanaUrls(network: 'mainnet' | 'devnet' = 'mainnet'): Chai
 
 // =============================================================================
 // PRE-CONFIGURED URL BUILDERS FOR COMMON PATTERNS
+// Updated for 6-Provider Shield Architecture
 // =============================================================================
 
 /**
  * Standard EVM chain fallback URL providers
+ * Priority order: dRPC → Ankr → PublicNode → Infura → Alchemy → BlastAPI
  */
 export const STANDARD_FALLBACK_PROVIDERS = {
+  /**
+   * dRPC - PRIMARY (210M CU/month, 40-100 RPS)
+   * Highest capacity provider, use as primary for all chains
+   */
+  drpc: (chain: string, apiKey?: string) => {
+    const key = apiKey || process.env.DRPC_API_KEY;
+    if (key) {
+      return {
+        rpc: `https://lb.drpc.org/ogrpc?network=${chain}&dkey=${key}`,
+        ws: `wss://lb.drpc.org/ogws?network=${chain}&dkey=${key}`,
+      };
+    }
+    // Fallback to public (limited)
+    return {
+      rpc: `https://${chain}.drpc.org`,
+      ws: `wss://${chain}.drpc.org`,
+    };
+  },
+
+  /**
+   * Ankr - SECONDARY (200M credits/month, 30 RPS)
+   * Second highest capacity, excellent chain coverage
+   */
+  ankr: (chain: string, apiKey?: string) => {
+    const key = apiKey || process.env.ANKR_API_KEY;
+    if (key) {
+      return {
+        rpc: `https://rpc.ankr.com/${chain}/${key}`,
+        ws: `wss://rpc.ankr.com/${chain}/${key}`,
+      };
+    }
+    // Fallback to public (rate limited)
+    return {
+      rpc: `https://rpc.ankr.com/${chain}`,
+      ws: `wss://rpc.ankr.com/${chain}`,
+    };
+  },
+
+  /**
+   * PublicNode - OVERFLOW/BURST (Unlimited, ~100-200 RPS)
+   * No API key required - instant fallback
+   */
   publicNode: (chain: string) => ({
     rpc: `https://${chain}.publicnode.com`,
     ws: `wss://${chain}.publicnode.com`,
   }),
+
+  /**
+   * BlastAPI - PUBLIC FALLBACK
+   * Free public endpoints, no key required
+   */
   blastApi: (chain: string) => ({
     rpc: `https://${chain}-mainnet.public.blastapi.io`,
     ws: `wss://${chain}-mainnet.public.blastapi.io`,
   }),
-  drpc: (chain: string) => ({
-    rpc: `https://${chain}.drpc.org`,
-    ws: `wss://${chain}.drpc.org`,
-  }),
+
+  /**
+   * 1RPC - PRIVACY-FOCUSED FALLBACK
+   * Free, privacy-preserving, HTTP only
+   */
   oneRpc: (chain: string) => ({
     rpc: `https://1rpc.io/${chain}`,
     // 1rpc doesn't provide WebSocket
@@ -254,4 +324,102 @@ export function createInfuraConfig(network: string): ApiKeyUrlConfig {
     rpcUrlTemplate: (key) => `https://${network}.infura.io/v3/${key}`,
     wsUrlTemplate: (key) => `wss://${network}.infura.io/ws/v3/${key}`,
   };
+}
+
+/**
+ * dRPC API key configuration generator (PRIMARY - 210M CU/month)
+ * Uses load-balanced endpoint for best performance
+ */
+export function createDrpcConfig(network: string): ApiKeyUrlConfig {
+  return {
+    apiKeyEnvVar: 'DRPC_API_KEY',
+    rpcUrlTemplate: (key) => `https://lb.drpc.org/ogrpc?network=${network}&dkey=${key}`,
+    wsUrlTemplate: (key) => `wss://lb.drpc.org/ogws?network=${network}&dkey=${key}`,
+  };
+}
+
+/**
+ * Ankr API key configuration generator (SECONDARY - 200M credits/month)
+ */
+export function createAnkrConfig(network: string): ApiKeyUrlConfig {
+  return {
+    apiKeyEnvVar: 'ANKR_API_KEY',
+    rpcUrlTemplate: (key) => `https://rpc.ankr.com/${network}/${key}`,
+    wsUrlTemplate: (key) => `wss://rpc.ankr.com/${network}/${key}`,
+  };
+}
+
+/**
+ * Build chain URLs with the optimized 6-Provider Shield priority order.
+ *
+ * Resolution order:
+ * 1. Explicit environment variable (e.g., ETHEREUM_RPC_URL)
+ * 2. dRPC (highest capacity - 210M CU/month)
+ * 3. Ankr (second highest - 200M credits/month)
+ * 4. Infura (if supported for chain)
+ * 5. Alchemy (if supported for chain)
+ * 6. Default public URL
+ *
+ * @param config - Base URL configuration
+ * @param chainName - Chain name for provider lookup
+ * @returns Resolved URLs with optimized provider priority
+ */
+export function buildChainUrlsOptimized(
+  config: ChainUrlConfig,
+  chainName: string
+): ChainUrls {
+  const envPrefix = config.chainEnvPrefix.toUpperCase();
+
+  // Check explicit env vars first
+  const explicitRpcUrl = process.env[`${envPrefix}_RPC_URL`];
+  const explicitWsUrl = process.env[`${envPrefix}_WS_URL`];
+
+  if (explicitRpcUrl && explicitWsUrl) {
+    return {
+      rpcUrl: explicitRpcUrl,
+      wsUrl: explicitWsUrl,
+      wsFallbackUrls: config.wsFallbackUrls || [],
+      rpcFallbackUrls: config.rpcFallbackUrls || [],
+    };
+  }
+
+  // Priority order: dRPC → Ankr → Infura → Alchemy → default
+  const apiKeyConfigs: ApiKeyUrlConfig[] = [
+    createDrpcConfig(chainName),
+    createAnkrConfig(chainName),
+  ];
+
+  // Map chain names to provider network names for Infura/Alchemy
+  const chainToInfura: Record<string, string> = {
+    ethereum: 'mainnet',
+    arbitrum: 'arbitrum-mainnet',
+    polygon: 'polygon-mainnet',
+    optimism: 'optimism-mainnet',
+    avalanche: 'avalanche-mainnet',
+    linea: 'linea-mainnet',
+    zksync: 'zksync-mainnet',
+  };
+
+  const chainToAlchemy: Record<string, string> = {
+    ethereum: 'eth',
+    arbitrum: 'arb',
+    polygon: 'polygon',
+    optimism: 'opt',
+    base: 'base',
+    avalanche: 'avax',
+    fantom: 'fantom',
+    zksync: 'zksync',
+  };
+
+  const infuraNetwork = chainToInfura[chainName.toLowerCase()];
+  if (infuraNetwork) {
+    apiKeyConfigs.push(createInfuraConfig(infuraNetwork));
+  }
+
+  const alchemyNetwork = chainToAlchemy[chainName.toLowerCase()];
+  if (alchemyNetwork) {
+    apiKeyConfigs.push(createAlchemyConfig(alchemyNetwork));
+  }
+
+  return buildChainUrlsWithApiKeys(config, apiKeyConfigs);
 }

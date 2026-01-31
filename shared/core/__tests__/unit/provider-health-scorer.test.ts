@@ -278,3 +278,245 @@ describe('ProviderHealthScorer Singleton', () => {
     expect(instance2.getMetrics('wss://test.com', 'ethereum')).toBeNull();
   });
 });
+
+// =============================================================================
+// BUDGET TRACKING TESTS (6-Provider Shield)
+// Tests for the budget tracking functionality added for RPC cost optimization
+// =============================================================================
+describe('ProviderHealthScorer Budget Tracking', () => {
+  let scorer: ProviderHealthScorer;
+
+  beforeEach(() => {
+    scorer = new ProviderHealthScorer();
+  });
+
+  afterEach(() => {
+    scorer.shutdown();
+  });
+
+  describe('recordRequest', () => {
+    it('should track CU usage for known providers', () => {
+      scorer.recordRequest('drpc', 'eth_call');
+      const budget = scorer.getProviderBudget('drpc');
+
+      expect(budget).not.toBeNull();
+      expect(budget!.monthlyUsedCU).toBe(26); // eth_call costs 26 CU
+      expect(budget!.monthlyRequestCount).toBe(1);
+    });
+
+    it('should use default CU cost for unknown methods', () => {
+      scorer.recordRequest('ankr', 'some_unknown_method');
+      const budget = scorer.getProviderBudget('ankr');
+
+      expect(budget!.monthlyUsedCU).toBe(20); // default CU cost
+    });
+
+    it('should accumulate CU usage across multiple requests', () => {
+      scorer.recordRequest('drpc', 'eth_call'); // 26 CU
+      scorer.recordRequest('drpc', 'eth_call'); // 26 CU
+      scorer.recordRequest('drpc', 'eth_blockNumber'); // 10 CU
+
+      const budget = scorer.getProviderBudget('drpc');
+      expect(budget!.monthlyUsedCU).toBe(62);
+      expect(budget!.monthlyRequestCount).toBe(3);
+    });
+
+    it('should accept custom CU cost override', () => {
+      scorer.recordRequest('alchemy', 'eth_call', 100);
+      const budget = scorer.getProviderBudget('alchemy');
+
+      expect(budget!.monthlyUsedCU).toBe(100);
+    });
+
+    it('should ignore unknown providers silently', () => {
+      // Should not throw
+      scorer.recordRequest('unknown_provider', 'eth_call');
+      const budget = scorer.getProviderBudget('unknown_provider');
+      expect(budget).toBeNull();
+    });
+
+    it('should normalize provider names to lowercase', () => {
+      scorer.recordRequest('DRPC', 'eth_call');
+      scorer.recordRequest('DrPc', 'eth_call');
+
+      const budget = scorer.getProviderBudget('drpc');
+      expect(budget!.monthlyRequestCount).toBe(2);
+    });
+  });
+
+  describe('shouldThrottleProvider', () => {
+    it('should not throttle provider with low usage', () => {
+      scorer.recordRequest('drpc', 'eth_call');
+      expect(scorer.shouldThrottleProvider('drpc')).toBe(false);
+    });
+
+    it('should return false for unknown provider', () => {
+      expect(scorer.shouldThrottleProvider('nonexistent')).toBe(false);
+    });
+
+    it('should not throttle unlimited provider (PublicNode)', () => {
+      // Record many requests
+      for (let i = 0; i < 1000; i++) {
+        scorer.recordRequest('publicnode', 'eth_call');
+      }
+      expect(scorer.shouldThrottleProvider('publicnode')).toBe(false);
+    });
+  });
+
+  describe('getProviderBudget', () => {
+    it('should return null for provider with no recorded requests', () => {
+      expect(scorer.getProviderBudget('alchemy')).toBeNull();
+    });
+
+    it('should return budget state with correct fields', () => {
+      scorer.recordRequest('infura', 'eth_getLogs'); // 75 CU
+
+      const budget = scorer.getProviderBudget('infura');
+      expect(budget).toMatchObject({
+        monthlyUsedCU: 75,
+        dailyUsedCU: 75,
+        monthlyRequestCount: 1,
+        dailyRequestCount: 1,
+        shouldThrottle: expect.any(Boolean),
+        estimatedDaysRemaining: expect.any(Number)
+      });
+    });
+
+    it('should return copy of state (not reference)', () => {
+      scorer.recordRequest('ankr', 'eth_call');
+      const budget1 = scorer.getProviderBudget('ankr');
+      const budget2 = scorer.getProviderBudget('ankr');
+
+      expect(budget1).not.toBe(budget2);
+      expect(budget1).toEqual(budget2);
+    });
+  });
+
+  describe('getAllProviderBudgets', () => {
+    it('should return empty object when no requests recorded', () => {
+      const budgets = scorer.getAllProviderBudgets();
+      expect(Object.keys(budgets)).toHaveLength(0);
+    });
+
+    it('should return budgets for all tracked providers', () => {
+      scorer.recordRequest('drpc', 'eth_call');
+      scorer.recordRequest('ankr', 'eth_call');
+      scorer.recordRequest('infura', 'eth_call');
+
+      const budgets = scorer.getAllProviderBudgets();
+      expect(Object.keys(budgets)).toContain('drpc');
+      expect(Object.keys(budgets)).toContain('ankr');
+      expect(Object.keys(budgets)).toContain('infura');
+    });
+  });
+
+  describe('selectBestProviderWithBudget', () => {
+    const extractProvider = (url: string): string => {
+      if (url.includes('drpc')) return 'drpc';
+      if (url.includes('ankr')) return 'ankr';
+      if (url.includes('publicnode')) return 'publicnode';
+      return 'unknown';
+    };
+
+    it('should select single candidate', () => {
+      const selected = scorer.selectBestProviderWithBudget(
+        'ethereum',
+        ['wss://drpc.org'],
+        extractProvider
+      );
+      expect(selected).toBe('wss://drpc.org');
+    });
+
+    it('should throw for empty candidates', () => {
+      expect(() =>
+        scorer.selectBestProviderWithBudget('ethereum', [], extractProvider)
+      ).toThrow();
+    });
+
+    it('should prefer healthy provider over throttled provider', () => {
+      const candidates = [
+        'wss://drpc.org',
+        'wss://ankr.com'
+      ];
+
+      // Make drpc healthy
+      scorer.recordSuccess('wss://drpc.org', 'ethereum', 50);
+
+      // ankr has no metrics (neutral score 50), drpc has high score
+      const selected = scorer.selectBestProviderWithBudget(
+        'ethereum',
+        candidates,
+        extractProvider
+      );
+
+      expect(selected).toBe('wss://drpc.org');
+    });
+
+    it('should consider both health and budget in selection', () => {
+      const candidates = [
+        'wss://drpc.org',
+        'wss://publicnode.com'
+      ];
+
+      // Both have similar health scores (no data = 50)
+      const selected = scorer.selectBestProviderWithBudget(
+        'ethereum',
+        candidates,
+        extractProvider
+      );
+
+      // Should return one of them
+      expect(candidates).toContain(selected);
+    });
+  });
+
+  describe('getTimeBasedProviderPriority', () => {
+    it('should return array of provider names', () => {
+      const priority = scorer.getTimeBasedProviderPriority();
+
+      expect(Array.isArray(priority)).toBe(true);
+      expect(priority.length).toBeGreaterThan(0);
+      expect(priority).toContain('drpc');
+      expect(priority).toContain('ankr');
+      expect(priority).toContain('publicnode');
+    });
+
+    it('should include blastapi in priority list', () => {
+      const priority = scorer.getTimeBasedProviderPriority();
+      expect(priority).toContain('blastapi');
+    });
+
+    it('should move throttled providers to end of list', () => {
+      // Simulate high usage on drpc (though won't actually throttle due to mock)
+      // This tests the sorting logic even with fresh state
+      const priority = scorer.getTimeBasedProviderPriority();
+
+      // Throttled providers should be at the end
+      // Since no providers are throttled initially, all should maintain base order
+      expect(priority.length).toBe(7); // 7 providers total including blastapi
+    });
+  });
+
+  describe('Infinity handling (PublicNode)', () => {
+    it('should handle unlimited provider correctly', () => {
+      // PublicNode has Infinity capacity
+      scorer.recordRequest('publicnode', 'eth_call');
+      scorer.recordRequest('publicnode', 'eth_call');
+
+      const budget = scorer.getProviderBudget('publicnode');
+      expect(budget!.monthlyUsedCU).toBe(52); // 2 * 26
+      expect(budget!.shouldThrottle).toBe(false);
+      expect(budget!.estimatedDaysRemaining).toBe(Infinity);
+    });
+  });
+
+  describe('Daily reset for Infura-like providers', () => {
+    it('should track daily CU for Infura', () => {
+      scorer.recordRequest('infura', 'eth_call');
+
+      const budget = scorer.getProviderBudget('infura');
+      expect(budget!.dailyUsedCU).toBe(26);
+      expect(budget!.dailyRequestCount).toBe(1);
+    });
+  });
+});

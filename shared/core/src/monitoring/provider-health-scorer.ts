@@ -4,16 +4,155 @@
  * S3.3: Tracks health metrics for RPC providers and enables intelligent
  * fallback selection based on latency, reliability, and data freshness.
  *
+ * Updated with 6-Provider Shield budget tracking:
+ * - Track monthly/daily CU usage per provider
+ * - Proactive throttling at 80% capacity
+ * - Time-based provider priority rotation
+ *
  * Features:
  * - Track latency, success rate, and block freshness per provider
  * - Weighted scoring for intelligent provider selection
  * - Rolling windows for metrics to prevent stale data
+ * - Budget tracking for proactive rate limit avoidance
  * - Singleton pattern for shared access across WebSocket managers
  *
  * @see ADR-003: Partitioned Chain Detectors
+ * @see docs/reports/RPC_DEEP_DIVE_ANALYSIS.md
  */
 
 import { createLogger, Logger } from '../logger';
+import { PROVIDER_CONFIGS } from '@arbitrage/config';
+
+/**
+ * Provider budget configuration from 6-Provider Shield analysis
+ */
+export interface ProviderBudgetConfig {
+  /** Provider name (e.g., 'drpc', 'ankr') */
+  name: string;
+  /** Monthly compute unit limit */
+  monthlyLimitCU: number;
+  /** Daily limit (for providers like Infura with daily reset) */
+  dailyLimitCU?: number;
+  /** Whether this provider has daily reset (like Infura) */
+  hasDailyReset?: boolean;
+  /** RPS limit for this provider */
+  rpsLimit: number;
+}
+
+/**
+ * Provider budget tracking state
+ */
+export interface ProviderBudgetState {
+  /** Compute units used this month */
+  monthlyUsedCU: number;
+  /** Compute units used today (for daily-reset providers) */
+  dailyUsedCU: number;
+  /** Last reset timestamp (month start) */
+  lastMonthlyReset: number;
+  /** Last daily reset timestamp */
+  lastDailyReset: number;
+  /** Request count this month */
+  monthlyRequestCount: number;
+  /** Request count today */
+  dailyRequestCount: number;
+  /** Whether provider should be throttled (>80% capacity) */
+  shouldThrottle: boolean;
+  /** Estimated days remaining at current usage rate */
+  estimatedDaysRemaining: number;
+}
+
+/**
+ * Derive budget configurations from the canonical PROVIDER_CONFIGS.
+ * This ensures a single source of truth for provider data from @arbitrage/config.
+ * This avoids duplication while allowing budget-specific extensions.
+ */
+function deriveBudgetConfigs(): Record<string, ProviderBudgetConfig> {
+  const budgets: Record<string, ProviderBudgetConfig> = {};
+
+  for (const [key, config] of Object.entries(PROVIDER_CONFIGS)) {
+    budgets[key] = {
+      name: config.name,
+      monthlyLimitCU: config.monthlyCapacityCU,
+      rpsLimit: config.rpsLimit,
+      // Add daily reset for Infura-like providers
+      ...(config.dailyReset ? {
+        dailyLimitCU: 3_000_000, // Infura: 3M/day
+        hasDailyReset: true
+      } : {})
+    };
+  }
+
+  return budgets;
+}
+
+/**
+ * Default provider budget configurations derived from PROVIDER_CONFIGS.
+ * Single source of truth from @arbitrage/config package.
+ */
+export const DEFAULT_PROVIDER_BUDGETS: Record<string, ProviderBudgetConfig> = deriveBudgetConfigs();
+
+/**
+ * Compute unit costs by RPC method (Alchemy reference).
+ * Used to estimate CU consumption per request.
+ *
+ * @see https://docs.alchemy.com/reference/compute-units
+ */
+export const METHOD_CU_COSTS: Record<string, number> = {
+  // Free methods
+  'eth_chainId': 0,
+  'net_version': 0,
+  'web3_clientVersion': 0,
+
+  // Light methods (10-20 CU)
+  'eth_blockNumber': 10,
+  'eth_gasPrice': 10,
+  'eth_maxPriorityFeePerGas': 10,
+  'eth_feeHistory': 10,
+  'eth_syncing': 10,
+  'eth_getBalance': 19,
+  'eth_getTransactionCount': 26,
+  'eth_getCode': 26,
+  'eth_getStorageAt': 17,
+
+  // Medium methods (15-30 CU)
+  'eth_getBlockByNumber': 16,
+  'eth_getBlockByHash': 16,
+  'eth_getTransactionByHash': 17,
+  'eth_getTransactionReceipt': 15,
+  'eth_call': 26,
+
+  // Heavy methods (50+ CU)
+  'eth_getLogs': 75,
+  'eth_estimateGas': 87,
+  'eth_createAccessList': 100,
+  'debug_traceTransaction': 300,
+  'debug_traceCall': 300,
+  'trace_block': 500,
+  'trace_transaction': 300,
+
+  // Transaction methods (high CU)
+  'eth_sendRawTransaction': 200,
+
+  // Subscription methods (per-second cost)
+  'eth_subscribe': 10,
+  'eth_unsubscribe': 10,
+
+  // Solana methods (approximate Helius/Triton costs)
+  'getAccountInfo': 10,
+  'getBalance': 10,
+  'getBlock': 50,
+  'getBlockHeight': 10,
+  'getLatestBlockhash': 10,
+  'getProgramAccounts': 100,
+  'getSignaturesForAddress': 75,
+  'getSlot': 10,
+  'getTransaction': 30,
+  'sendTransaction': 200,
+  'simulateTransaction': 100,
+
+  // Default for unknown methods
+  'default': 20
+};
 
 /**
  * Health metrics for a single provider
@@ -109,6 +248,19 @@ export class ProviderHealthScorer {
   private config: Required<ProviderHealthScorerConfig>;
   private logger: Logger;
   private decayTimer: NodeJS.Timeout | null = null;
+
+  /** Budget tracking for 6-Provider Shield */
+  private providerBudgets: Map<string, ProviderBudgetState> = new Map();
+  private budgetConfigs: Record<string, ProviderBudgetConfig> = DEFAULT_PROVIDER_BUDGETS;
+
+  /**
+   * Performance optimization: Cached date values to avoid repeated new Date() calls.
+   * Refreshed every minute (sufficient for budget calculations).
+   */
+  private cachedUtcHour = 0;
+  private cachedDayOfMonth = 1;
+  private lastDateCacheUpdate = 0;
+  private static readonly DATE_CACHE_TTL_MS = 60000; // Refresh every 60 seconds
 
   constructor(config: ProviderHealthScorerConfig = {}) {
     this.config = {
@@ -467,6 +619,300 @@ export class ProviderHealthScorer {
   shutdown(): void {
     this.stopDecay();
     this.clear();
+    this.providerBudgets.clear();
+  }
+
+  // ===========================================================================
+  // PERFORMANCE: CACHED DATE ACCESSORS
+  // ===========================================================================
+
+  /**
+   * Refresh cached date values if stale.
+   * Called lazily when date values are needed.
+   */
+  private refreshDateCacheIfNeeded(): void {
+    const now = Date.now();
+    if (now - this.lastDateCacheUpdate > ProviderHealthScorer.DATE_CACHE_TTL_MS) {
+      const date = new Date();
+      this.cachedUtcHour = date.getUTCHours();
+      this.cachedDayOfMonth = date.getDate();
+      this.lastDateCacheUpdate = now;
+    }
+  }
+
+  /**
+   * Get cached UTC hour (0-23). Refreshes cache if stale.
+   * Use this instead of new Date().getUTCHours() in hot paths.
+   */
+  private getCachedUtcHour(): number {
+    this.refreshDateCacheIfNeeded();
+    return this.cachedUtcHour;
+  }
+
+  /**
+   * Get cached day of month (1-31). Refreshes cache if stale.
+   * Use this instead of new Date().getDate() in hot paths.
+   */
+  private getCachedDayOfMonth(): number {
+    this.refreshDateCacheIfNeeded();
+    return this.cachedDayOfMonth;
+  }
+
+  // ===========================================================================
+  // BUDGET TRACKING FOR 6-PROVIDER SHIELD
+  // ===========================================================================
+
+  /**
+   * Record a request for budget tracking.
+   * Call this for every RPC request to track usage against provider limits.
+   *
+   * @param providerName - Provider identifier (e.g., 'drpc', 'ankr')
+   * @param method - RPC method called (for CU estimation)
+   * @param customCU - Optional custom CU cost (overrides method-based estimation)
+   */
+  recordRequest(providerName: string, method = 'default', customCU?: number): void {
+    const normalizedName = providerName.toLowerCase();
+    const config = this.budgetConfigs[normalizedName];
+
+    if (!config) {
+      // Unknown provider, skip budget tracking
+      return;
+    }
+
+    const state = this.getOrCreateBudgetState(normalizedName);
+    const now = Date.now();
+
+    // Check for daily reset (for Infura-like providers)
+    if (config.hasDailyReset) {
+      const hoursSinceReset = (now - state.lastDailyReset) / (1000 * 60 * 60);
+      if (hoursSinceReset >= 24) {
+        state.dailyUsedCU = 0;
+        state.dailyRequestCount = 0;
+        state.lastDailyReset = now;
+        this.logger.debug('Daily budget reset', { provider: normalizedName });
+      }
+    }
+
+    // Check for monthly reset
+    const daysSinceReset = (now - state.lastMonthlyReset) / (1000 * 60 * 60 * 24);
+    if (daysSinceReset >= 30) {
+      state.monthlyUsedCU = 0;
+      state.monthlyRequestCount = 0;
+      state.lastMonthlyReset = now;
+      this.logger.debug('Monthly budget reset', { provider: normalizedName });
+    }
+
+    // Estimate CU cost
+    const cuCost = customCU ?? METHOD_CU_COSTS[method] ?? METHOD_CU_COSTS.default;
+
+    // Update usage
+    state.monthlyUsedCU += cuCost;
+    state.monthlyRequestCount++;
+    state.dailyUsedCU += cuCost;
+    state.dailyRequestCount++;
+
+    // Calculate throttle status
+    this.updateBudgetStatus(normalizedName, state, config);
+  }
+
+  /**
+   * Get or create budget state for a provider
+   */
+  private getOrCreateBudgetState(providerName: string): ProviderBudgetState {
+    let state = this.providerBudgets.get(providerName);
+
+    if (!state) {
+      const now = Date.now();
+      state = {
+        monthlyUsedCU: 0,
+        dailyUsedCU: 0,
+        lastMonthlyReset: now,
+        lastDailyReset: now,
+        monthlyRequestCount: 0,
+        dailyRequestCount: 0,
+        shouldThrottle: false,
+        estimatedDaysRemaining: 30
+      };
+      this.providerBudgets.set(providerName, state);
+    }
+
+    return state;
+  }
+
+  /**
+   * Update budget status and throttle recommendation
+   */
+  private updateBudgetStatus(
+    providerName: string,
+    state: ProviderBudgetState,
+    config: ProviderBudgetConfig
+  ): void {
+    // Handle unlimited providers (e.g., PublicNode with Infinity capacity)
+    // These providers should never be throttled based on CU usage
+    if (!Number.isFinite(config.monthlyLimitCU)) {
+      state.shouldThrottle = false;
+      state.estimatedDaysRemaining = Infinity;
+      return;
+    }
+
+    const dayOfMonth = this.getCachedDayOfMonth();
+    const daysInMonth = 30;
+    const daysRemaining = daysInMonth - dayOfMonth;
+
+    // Calculate usage percentage
+    const monthlyUsagePercent = (state.monthlyUsedCU / config.monthlyLimitCU) * 100;
+    const dailyUsagePercent = config.dailyLimitCU
+      ? (state.dailyUsedCU / config.dailyLimitCU) * 100
+      : 0;
+
+    // Estimate daily burn rate
+    const now = Date.now();
+    const daysSinceReset = Math.max(1, (now - state.lastMonthlyReset) / (1000 * 60 * 60 * 24));
+    const dailyBurnRate = state.monthlyUsedCU / daysSinceReset;
+
+    // Estimate days remaining at current burn rate
+    const remaining = config.monthlyLimitCU - state.monthlyUsedCU;
+    state.estimatedDaysRemaining = dailyBurnRate > 0
+      ? Math.floor(remaining / dailyBurnRate)
+      : daysRemaining;
+
+    // Determine if throttling is needed
+    // Throttle if: >80% monthly used OR daily limit exceeded OR will exhaust before month end
+    state.shouldThrottle =
+      monthlyUsagePercent > 80 ||
+      dailyUsagePercent > 90 ||
+      state.estimatedDaysRemaining < daysRemaining;
+
+    if (state.shouldThrottle && monthlyUsagePercent > 70) {
+      this.logger.warn('Provider approaching budget limit', {
+        provider: providerName,
+        monthlyUsagePercent: monthlyUsagePercent.toFixed(1),
+        dailyUsagePercent: dailyUsagePercent.toFixed(1),
+        estimatedDaysRemaining: state.estimatedDaysRemaining
+      });
+    }
+  }
+
+  /**
+   * Check if a provider should be throttled due to budget constraints
+   *
+   * @param providerName - Provider identifier
+   * @returns true if provider should be deprioritized
+   */
+  shouldThrottleProvider(providerName: string): boolean {
+    const state = this.providerBudgets.get(providerName.toLowerCase());
+    return state?.shouldThrottle ?? false;
+  }
+
+  /**
+   * Get budget status for a provider
+   *
+   * @param providerName - Provider identifier
+   * @returns Budget state or null if not tracked
+   */
+  getProviderBudget(providerName: string): ProviderBudgetState | null {
+    const state = this.providerBudgets.get(providerName.toLowerCase());
+    return state ? { ...state } : null;
+  }
+
+  /**
+   * Get budget status for all providers
+   */
+  getAllProviderBudgets(): Record<string, ProviderBudgetState> {
+    const result: Record<string, ProviderBudgetState> = {};
+    for (const [name, state] of this.providerBudgets) {
+      result[name] = { ...state };
+    }
+    return result;
+  }
+
+  /**
+   * Select the best provider considering both health scores and budget constraints
+   *
+   * @param chainId - Chain identifier
+   * @param candidates - List of candidate URLs
+   * @param providerExtractor - Function to extract provider name from URL
+   * @returns Best available URL considering health and budget
+   */
+  selectBestProviderWithBudget(
+    chainId: string,
+    candidates: string[],
+    providerExtractor: (url: string) => string
+  ): string {
+    if (candidates.length === 0) {
+      throw new Error('No candidate providers provided');
+    }
+
+    if (candidates.length === 1) {
+      return candidates[0];
+    }
+
+    // Score each candidate considering both health and budget
+    let bestUrl = candidates[0];
+    let bestScore = -Infinity;
+
+    for (const url of candidates) {
+      const healthScore = this.getHealthScore(url, chainId);
+      const providerName = providerExtractor(url);
+      const shouldThrottle = this.shouldThrottleProvider(providerName);
+
+      // Penalize throttled providers by 50%
+      const effectiveScore = shouldThrottle ? healthScore * 0.5 : healthScore;
+
+      if (effectiveScore > bestScore) {
+        bestScore = effectiveScore;
+        bestUrl = url;
+      }
+    }
+
+    this.logger.debug('Selected best provider with budget consideration', {
+      chainId,
+      selectedUrl: bestUrl,
+      score: bestScore,
+      candidateCount: candidates.length
+    });
+
+    return bestUrl;
+  }
+
+  /**
+   * Get providers ordered by priority considering time of day and budget.
+   *
+   * Implements time-based load distribution from RPC_DEEP_DIVE_ANALYSIS.md:
+   * - Early UTC (00:00-08:00): Infura primary (fresh daily allocation)
+   * - Mid-day UTC (08:00-20:00): dRPC primary (highest capacity)
+   * - Late UTC (20:00-24:00): Ankr/PublicNode (absorb Infura overflow)
+   *
+   * @returns Provider names in priority order (throttled providers moved to end)
+   */
+  getTimeBasedProviderPriority(): string[] {
+    const hour = this.getCachedUtcHour();
+    let basePriority: string[];
+
+    if (hour < 8) {
+      // Early UTC: Use Infura first (fresh daily allocation)
+      basePriority = ['infura', 'drpc', 'ankr', 'publicnode', 'alchemy', 'quicknode', 'blastapi'];
+    } else if (hour < 20) {
+      // Mid-day: Use dRPC primary (highest capacity)
+      basePriority = ['drpc', 'ankr', 'publicnode', 'infura', 'alchemy', 'quicknode', 'blastapi'];
+    } else {
+      // Late UTC: Spread across Ankr/PublicNode
+      basePriority = ['ankr', 'publicnode', 'drpc', 'alchemy', 'infura', 'quicknode', 'blastapi'];
+    }
+
+    // Re-order based on throttle status (move throttled providers to end)
+    const throttled: string[] = [];
+    const notThrottled: string[] = [];
+
+    for (const provider of basePriority) {
+      if (this.shouldThrottleProvider(provider)) {
+        throttled.push(provider);
+      } else {
+        notThrottled.push(provider);
+      }
+    }
+
+    return [...notThrottled, ...throttled];
   }
 
   /**

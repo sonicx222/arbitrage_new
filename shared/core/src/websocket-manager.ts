@@ -1,9 +1,16 @@
 // WebSocket Manager
 // Handles WebSocket connections with reconnection logic, event subscription, and message handling
+//
+// Updated with 6-Provider Shield Architecture:
+// - Time-based provider priority rotation
+// - Budget-aware provider selection
+// - Proactive throttling before rate limits hit
+//
+// @see docs/reports/RPC_DEEP_DIVE_ANALYSIS.md
 
 import WebSocket from 'ws';
 import { createLogger } from './logger';
-import { getProviderHealthScorer, ProviderHealthScorer } from './monitoring/provider-health-scorer';
+import { getProviderHealthScorer, ProviderHealthScorer, METHOD_CU_COSTS } from './monitoring/provider-health-scorer';
 
 export interface WebSocketConfig {
   url: string;
@@ -167,6 +174,9 @@ export class WebSocketManager {
   /** S3.3: Whether to use intelligent fallback selection (default true) */
   private useIntelligentFallback = true;
 
+  /** Whether to use budget-aware provider selection (6-Provider Shield) */
+  private useBudgetAwareSelection = true;
+
   constructor(config: WebSocketConfig) {
     this.config = {
       reconnectInterval: 1000,  // Base delay for exponential backoff
@@ -211,7 +221,41 @@ export class WebSocketManager {
   }
 
   /**
+   * Extract provider name from URL for budget tracking.
+   * Maps common provider URL patterns to their names.
+   */
+  private extractProviderFromUrl(url: string): string {
+    const lowerUrl = url.toLowerCase();
+
+    // Check for API-key providers (more specific patterns first)
+    if (lowerUrl.includes('drpc.org') || lowerUrl.includes('lb.drpc.org')) return 'drpc';
+    if (lowerUrl.includes('ankr.com') || lowerUrl.includes('rpc.ankr.com')) return 'ankr';
+    if (lowerUrl.includes('publicnode.com')) return 'publicnode';
+    if (lowerUrl.includes('infura.io')) return 'infura';
+    if (lowerUrl.includes('alchemy.com') || lowerUrl.includes('alchemyapi.io')) return 'alchemy';
+    if (lowerUrl.includes('quicknode') || lowerUrl.includes('quiknode')) return 'quicknode';
+    if (lowerUrl.includes('blastapi.io')) return 'blastapi';
+
+    // Chain-specific RPCs
+    if (lowerUrl.includes('1rpc.io')) return '1rpc';
+    if (lowerUrl.includes('llamarpc.com')) return 'llamarpc';
+    if (lowerUrl.includes('binance.org')) return 'binance';
+    if (lowerUrl.includes('arbitrum.io')) return 'arbitrum-official';
+    if (lowerUrl.includes('optimism.io')) return 'optimism-official';
+    if (lowerUrl.includes('base.org')) return 'base-official';
+    if (lowerUrl.includes('polygon-rpc.com')) return 'polygon-official';
+
+    // Solana-specific
+    if (lowerUrl.includes('helius')) return 'helius';
+    if (lowerUrl.includes('triton')) return 'triton';
+    if (lowerUrl.includes('solana.com') || lowerUrl.includes('mainnet-beta.solana')) return 'solana-official';
+
+    return 'unknown';
+  }
+
+  /**
    * S3.3: Select the best available fallback URL using health scoring.
+   * Updated with budget-aware selection from 6-Provider Shield.
    * Falls back to round-robin if all candidates have similar scores.
    *
    * @returns The best available URL or null if all are excluded
@@ -231,6 +275,25 @@ export class WebSocketManager {
 
     if (!this.useIntelligentFallback || candidates.length === 1) {
       return candidates[0];
+    }
+
+    // Use budget-aware selection if enabled (6-Provider Shield)
+    if (this.useBudgetAwareSelection) {
+      const selectedUrl = this.healthScorer.selectBestProviderWithBudget(
+        this.chainId,
+        candidates,
+        (url) => this.extractProviderFromUrl(url)
+      );
+
+      this.logger.info('Selected best fallback URL via budget-aware scoring', {
+        chainId: this.chainId,
+        selectedUrl,
+        provider: this.extractProviderFromUrl(selectedUrl),
+        candidateCount: candidates.length,
+        score: this.healthScorer.getHealthScore(selectedUrl, this.chainId)
+      });
+
+      return selectedUrl;
     }
 
     // Use health scorer for intelligent selection
@@ -296,6 +359,42 @@ export class WebSocketManager {
    */
   setIntelligentFallback(enabled: boolean): void {
     this.useIntelligentFallback = enabled;
+  }
+
+  /**
+   * Enable or disable budget-aware provider selection (6-Provider Shield).
+   *
+   * @param enabled - Whether to consider provider budgets in selection
+   */
+  setBudgetAwareSelection(enabled: boolean): void {
+    this.useBudgetAwareSelection = enabled;
+  }
+
+  /**
+   * Record a request for budget tracking.
+   * Call this for subscription messages to track provider usage.
+   *
+   * @param method - RPC method called (default: 'eth_subscribe')
+   */
+  recordRequestForBudget(method = 'eth_subscribe'): void {
+    const currentUrl = this.getCurrentUrl();
+    const providerName = this.extractProviderFromUrl(currentUrl);
+    this.healthScorer.recordRequest(providerName, method);
+  }
+
+  /**
+   * Get the current provider name for the active connection.
+   */
+  getCurrentProvider(): string {
+    return this.extractProviderFromUrl(this.getCurrentUrl());
+  }
+
+  /**
+   * Get provider priority order based on time of day and budget status.
+   * Useful for deciding which provider URL to try first.
+   */
+  getTimeBasedProviderPriority(): string[] {
+    return this.healthScorer.getTimeBasedProviderPriority();
   }
 
   async connect(): Promise<void> {
@@ -617,6 +716,10 @@ export class WebSocketManager {
       this.qualityMetrics.lastMessageTime = Date.now();
       this.qualityMetrics.messagesReceived++;
 
+      // NOTE: Budget tracking is NOT done for inbound messages.
+      // Budget is only tracked for outbound requests (subscriptions, RPC calls).
+      // Inbound messages (subscription data) don't consume CU quota.
+
       // S3.3: Handle pending subscription confirmations
       if (message.id !== undefined && this.pendingConfirmations?.has(message.id)) {
         const confirmation = this.pendingConfirmations.get(message.id);
@@ -676,6 +779,12 @@ export class WebSocketManager {
       };
 
       this.ws.send(JSON.stringify(message));
+
+      // 6-Provider Shield: Track outbound requests for budget management
+      if (this.useBudgetAwareSelection) {
+        this.recordRequestForBudget(subscription.method);
+      }
+
       this.logger.debug(`Sent subscription`, { id: subscription.id, method: subscription.method });
     } catch (error) {
       this.logger.error('Failed to send subscription', { error, subscription });
@@ -817,7 +926,11 @@ export class WebSocketManager {
    * S3.3: Detect data gaps after reconnection.
    * Compares last known block to current block and emits 'dataGap' event if blocks were missed.
    *
-   * @returns Information about any detected gap, or null if no gap
+   * @experimental This method is a placeholder for future RPC integration.
+   * Currently, gap detection relies on the passive `checkForDataGap()` method
+   * which triggers when new block messages arrive.
+   *
+   * @returns Information about any detected gap, or null if no gap (always null currently)
    */
   async detectDataGaps(): Promise<{
     fromBlock: number;
@@ -831,11 +944,11 @@ export class WebSocketManager {
       return null;
     }
 
-    // Query current block via eth_blockNumber (would need RPC, emit event instead)
-    // For now, rely on next message to detect gaps
-    // This method is called after reconnection to check for gaps
+    // TODO: Query current block via eth_blockNumber RPC call
+    // For now, rely on checkForDataGap() which triggers on incoming block messages
+    // This passive approach detects gaps when the next block arrives
 
-    return null; // Will be enhanced with RPC integration
+    return null;
   }
 
   /**
