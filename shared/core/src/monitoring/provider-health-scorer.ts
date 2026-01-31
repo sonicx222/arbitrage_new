@@ -4,15 +4,19 @@
  * S3.3: Tracks health metrics for RPC providers and enables intelligent
  * fallback selection based on latency, reliability, and data freshness.
  *
+<<<<<<< HEAD
  * Updated with 6-Provider Shield budget tracking:
  * - Track monthly/daily CU usage per provider
  * - Proactive throttling at 80% capacity
  * - Time-based provider priority rotation
  *
+=======
+>>>>>>> 86319a2fd04cb6150af71a5e7a72ddfed5b50ebe
  * Features:
  * - Track latency, success rate, and block freshness per provider
  * - Weighted scoring for intelligent provider selection
  * - Rolling windows for metrics to prevent stale data
+<<<<<<< HEAD
  * - Budget tracking for proactive rate limit avoidance
  * - Singleton pattern for shared access across WebSocket managers
  *
@@ -153,6 +157,14 @@ export const METHOD_CU_COSTS: Record<string, number> = {
   // Default for unknown methods
   'default': 20
 };
+=======
+ * - Singleton pattern for shared access across WebSocket managers
+ *
+ * @see ADR-003: Partitioned Chain Detectors
+ */
+
+import { createLogger, Logger } from '../logger';
+>>>>>>> 86319a2fd04cb6150af71a5e7a72ddfed5b50ebe
 
 /**
  * Health metrics for a single provider
@@ -249,6 +261,7 @@ export class ProviderHealthScorer {
   private logger: Logger;
   private decayTimer: NodeJS.Timeout | null = null;
 
+<<<<<<< HEAD
   /** Budget tracking for 6-Provider Shield */
   private providerBudgets: Map<string, ProviderBudgetState> = new Map();
   private budgetConfigs: Record<string, ProviderBudgetConfig> = DEFAULT_PROVIDER_BUDGETS;
@@ -262,6 +275,8 @@ export class ProviderHealthScorer {
   private lastDateCacheUpdate = 0;
   private static readonly DATE_CACHE_TTL_MS = 60000; // Refresh every 60 seconds
 
+=======
+>>>>>>> 86319a2fd04cb6150af71a5e7a72ddfed5b50ebe
   constructor(config: ProviderHealthScorerConfig = {}) {
     this.config = {
       latencyWeight: config.latencyWeight ?? 0.3,
@@ -619,6 +634,7 @@ export class ProviderHealthScorer {
   shutdown(): void {
     this.stopDecay();
     this.clear();
+<<<<<<< HEAD
     this.providerBudgets.clear();
   }
 
@@ -913,6 +929,8 @@ export class ProviderHealthScorer {
     }
 
     return [...notThrottled, ...throttled];
+=======
+>>>>>>> 86319a2fd04cb6150af71a5e7a72ddfed5b50ebe
   }
 
   /**
