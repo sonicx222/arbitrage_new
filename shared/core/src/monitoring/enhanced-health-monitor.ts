@@ -155,6 +155,9 @@ export class EnhancedHealthMonitor {
       this.monitoringTimer = undefined;
       logger.info('Enhanced health monitoring stopped');
     }
+    // R12 FIX: Clear state to prevent memory leak on restart
+    this.lastAlerts.clear();
+    this.metricsBuffer.length = 0;
   }
 
   // Record a health metric
@@ -413,6 +416,38 @@ export class EnhancedHealthMonitor {
       } catch (error) {
         logger.error('Error evaluating alert rule', { rule: rule.name, error });
       }
+    }
+
+    // R12 FIX: Periodic cleanup of stale lastAlerts to prevent memory leak
+    // Clean up entries older than 1 hour when map exceeds threshold
+    if (this.lastAlerts.size > 100) {
+      this.cleanupStaleAlerts(now);
+    }
+  }
+
+  /**
+   * R12 FIX: Clean up stale alert timestamps to prevent memory leak.
+   * Removes entries older than 1 hour.
+   */
+  private cleanupStaleAlerts(now: number): void {
+    const maxAge = 3600000; // 1 hour
+    const toDelete: string[] = [];
+
+    for (const [key, timestamp] of this.lastAlerts) {
+      if (now - timestamp > maxAge) {
+        toDelete.push(key);
+      }
+    }
+
+    for (const key of toDelete) {
+      this.lastAlerts.delete(key);
+    }
+
+    if (toDelete.length > 0) {
+      logger.debug('Cleaned up stale alert timestamps', {
+        removed: toDelete.length,
+        remaining: this.lastAlerts.size,
+      });
     }
   }
 

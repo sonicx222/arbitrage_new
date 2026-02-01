@@ -8,8 +8,8 @@
  * - Error handling for missing strategies
  */
 
-import { ExecutionStrategyFactory, createStrategyFactory, StrategyType } from './strategy-factory';
-import type { ExecutionStrategy, StrategyContext, ExecutionResult, Logger } from '../types';
+import { ExecutionStrategyFactory, createStrategyFactory, StrategyType } from '../../../src/strategies/strategy-factory';
+import type { ExecutionStrategy, StrategyContext, ExecutionResult, Logger } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================

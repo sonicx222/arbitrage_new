@@ -7,7 +7,7 @@
 
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import type { Mock } from 'jest-mock';
-import { SimulationService } from './simulation.service';
+import { SimulationService } from '../../../../src/services/simulation/simulation.service';
 import type {
   ISimulationProvider,
   SimulationRequest,
@@ -15,8 +15,8 @@ import type {
   SimulationProviderHealth,
   SimulationMetrics,
   SimulationProviderType,
-} from './types';
-import type { Logger } from '../../types';
+} from '../../../../src/services/simulation/types';
+import type { Logger } from '../../../../src/types';
 
 // =============================================================================
 // Mock Provider Factory

@@ -36,7 +36,17 @@ import { CHAINS, ARBITRAGE_CONFIG } from '@arbitrage/config';
 
 describe('Cross-Chain Configuration', () => {
   describe('Supported Chains', () => {
-    it('should have all supported chains configured', () => {
+    /**
+     * GIVEN: System is configured for cross-chain arbitrage
+     * WHEN: Querying supported chains
+     * THEN: All production chains should be available
+     *
+     * **Business Value:**
+     * Ensures the system can discover arbitrage opportunities across all
+     * major EVM chains (Ethereum, L2s, sidechains). Missing chain configuration
+     * would result in missed profitable opportunities.
+     */
+    it('should support all production chains for cross-chain arbitrage', () => {
       expect(CHAINS.ethereum).toBeDefined();
       expect(CHAINS.arbitrum).toBeDefined();
       expect(CHAINS.optimism).toBeDefined();
@@ -45,7 +55,17 @@ describe('Cross-Chain Configuration', () => {
       expect(CHAINS.bsc).toBeDefined();
     });
 
-    it('should have unique chain IDs', () => {
+    /**
+     * GIVEN: Multiple chains configured in the system
+     * WHEN: Validating chain configurations
+     * THEN: Each chain should have unique chain ID
+     *
+     * **Business Value:**
+     * Prevents transaction routing errors. If two chains shared the same
+     * chain ID, transactions could be sent to the wrong network, resulting
+     * in failed trades and capital loss.
+     */
+    it('should prevent chain ID conflicts for transaction routing', () => {
       const chainIds = new Set<number>();
       const chains = ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc'];
 
@@ -58,13 +78,33 @@ describe('Cross-Chain Configuration', () => {
   });
 
   describe('Arbitrage Thresholds', () => {
-    it('should have different min profit thresholds per chain', () => {
+    /**
+     * GIVEN: Different chains have different gas costs
+     * WHEN: Configuring minimum profit thresholds
+     * THEN: Each chain should have appropriate threshold tuned for its gas costs
+     *
+     * **Business Value:**
+     * Prevents executing unprofitable trades. Ethereum's high gas costs
+     * ($50-200) require higher minimum profits than L2s ($1-5) to remain
+     * profitable after transaction fees.
+     */
+    it('should tune profit thresholds based on chain-specific gas costs', () => {
       expect(ARBITRAGE_CONFIG.chainMinProfits.ethereum).toBeDefined();
       expect(ARBITRAGE_CONFIG.chainMinProfits.arbitrum).toBeDefined();
       expect(ARBITRAGE_CONFIG.chainMinProfits.polygon).toBeDefined();
     });
 
-    it('should have Ethereum with highest threshold (gas costs)', () => {
+    /**
+     * GIVEN: Ethereum has highest gas costs (~$50-200 per trade)
+     * WHEN: Comparing minimum profit thresholds
+     * THEN: Ethereum threshold should be higher than L2 thresholds
+     *
+     * **Business Value:**
+     * Protects capital by filtering out Ethereum opportunities that would
+     * be profitable on L2s but unprofitable on mainnet due to gas costs.
+     * Prevents gas-expensive failed trades.
+     */
+    it('should require higher profit on Ethereum to compensate for high gas costs', () => {
       expect(ARBITRAGE_CONFIG.chainMinProfits.ethereum).toBeGreaterThan(
         ARBITRAGE_CONFIG.chainMinProfits.arbitrum
       );
@@ -109,8 +149,19 @@ describe('CrossChainDetectorService Logic', () => {
   });
 
   describe('Cross-Chain Opportunity Detection', () => {
-    it('should detect profitable cross-chain arbitrage', () => {
-      // Same token, different prices on different chains
+    /**
+     * GIVEN: Same token priced differently on Ethereum ($2500) and Arbitrum ($2530)
+     * WHEN: Calculating net profit after bridge and gas costs
+     * THEN: Should identify as profitable opportunity ($95 net profit)
+     *
+     * **Business Value:**
+     * Cross-chain arbitrage exploits price discrepancies across chains.
+     * When price difference (1.2%) exceeds total costs (bridge $15 + gas $10),
+     * the opportunity is profitable. This test verifies the core profit
+     * calculation logic that protects capital.
+     */
+    it('should identify cross-chain opportunities exceeding all costs', () => {
+      // Given: Same token, different prices on different chains
       const ethPriceOnEthereum = 2500;
       const ethPriceOnArbitrum = 2530; // 1.2% higher
 
@@ -120,15 +171,28 @@ describe('CrossChainDetectorService Logic', () => {
       const bridgeCosts = 15;
       const gasCosts = 10;
 
+      // When: Calculating net profit
       const netProfit = grossProfit - bridgeCosts - gasCosts;
 
+      // Then: Should be profitable
       expect(priceDiff).toBeCloseTo(0.012, 3); // ~1.2%
       expect(grossProfit).toBeCloseTo(120, 0);
       expect(netProfit).toBeCloseTo(95, 0);
       expect(netProfit).toBeGreaterThan(0);
     });
 
-    it('should reject unprofitable cross-chain opportunities', () => {
+    /**
+     * GIVEN: Small price difference (0.2%) between chains
+     * WHEN: Bridge and gas costs exceed gross profit
+     * THEN: Should reject as unprofitable
+     *
+     * **Business Value:**
+     * Prevents capital loss from executing trades where costs exceed gains.
+     * A 0.2% price difference generates only $20 gross profit on $10k trade,
+     * but bridge ($15) + gas ($10) = $25 costs result in -$5 net loss.
+     * Filtering prevents wasting gas on unprofitable trades.
+     */
+    it('should filter out opportunities where costs exceed profit', () => {
       const ethPriceOnEthereum = 2500;
       const ethPriceOnArbitrum = 2505; // Only 0.2% higher
 
@@ -145,7 +209,17 @@ describe('CrossChainDetectorService Logic', () => {
   });
 
   describe('Opportunity Filtering', () => {
-    it('should sort opportunities by net profit', () => {
+    /**
+     * GIVEN: Multiple opportunities with different net profits
+     * WHEN: Prioritizing for execution
+     * THEN: Should sort by net profit (highest first)
+     *
+     * **Business Value:**
+     * Ensures execution engine processes most profitable opportunities first.
+     * Critical when execution capacity is limited (gas budget, RPC rate limits)
+     * or when opportunities are short-lived. Maximizes profit per execution slot.
+     */
+    it('should prioritize highest-profit opportunities for execution', () => {
       const opportunities = [
         { token: 'WETH', netProfit: 50, confidence: 0.9 },
         { token: 'USDC', netProfit: 150, confidence: 0.85 },
@@ -159,7 +233,18 @@ describe('CrossChainDetectorService Logic', () => {
       expect(sorted[2].netProfit).toBe(50);
     });
 
-    it('should filter by minimum confidence', () => {
+    /**
+     * GIVEN: Opportunities with varying confidence scores
+     * WHEN: Filtering by minimum confidence threshold (0.7)
+     * THEN: Should exclude low-confidence opportunities
+     *
+     * **Business Value:**
+     * Reduces failed trades from stale prices or low-liquidity pairs.
+     * Low confidence (0.3) indicates price data may be outdated or slippage
+     * may be high. Even if gross profit looks attractive ($200), low confidence
+     * signals higher execution risk. Filtering prevents wasting gas on likely failures.
+     */
+    it('should exclude low-confidence opportunities to reduce failed trades', () => {
       const opportunities = [
         { token: 'WETH', netProfit: 100, confidence: 0.9 },
         { token: 'USDC', netProfit: 200, confidence: 0.3 },  // Low confidence
@@ -173,7 +258,18 @@ describe('CrossChainDetectorService Logic', () => {
       expect(filtered.some(o => o.token === 'USDC')).toBe(false);
     });
 
-    it('should filter by minimum net profit', () => {
+    /**
+     * GIVEN: Opportunities with varying net profits
+     * WHEN: Filtering by minimum profitability threshold ($20)
+     * THEN: Should exclude marginal opportunities below threshold
+     *
+     * **Business Value:**
+     * Prevents execution of barely-profitable trades that may become
+     * unprofitable due to small price movements or gas price spikes.
+     * $5 net profit provides no buffer for slippage or gas fluctuations.
+     * Minimum threshold ($20) ensures reasonable profit margin after execution risk.
+     */
+    it('should exclude marginal opportunities below profitability threshold', () => {
       const opportunities = [
         { token: 'WETH', netProfit: 100, confidence: 0.9 },
         { token: 'USDC', netProfit: 5, confidence: 0.95 },   // Low profit

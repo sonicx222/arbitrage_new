@@ -21,6 +21,26 @@ import { getChainName } from '@arbitrage/config';
 // Mock Logger
 // =============================================================================
 
+/**
+ * Creates a mock logger for testing pending opportunity validation.
+ *
+ * **Mock Configuration:**
+ * - All log methods (info, error, warn, debug) are Jest spies
+ * - No actual logging during tests
+ * - Allows verification of error/warning logging for invalid opportunities
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockLogger = createMockLogger();
+ * const handler = createMockHandler(mockLogger);
+ *
+ * // Verify error logging for invalid opportunity
+ * await handler.handlePendingOpportunity(invalidOpp);
+ * expect(mockLogger.error).toHaveBeenCalledWith(
+ *   expect.stringContaining('Invalid')
+ * );
+ * ```
+ */
 const createMockLogger = () => ({
   info: jest.fn(),
   error: jest.fn(),
@@ -179,6 +199,16 @@ describe('Pending Opportunity Validation', () => {
     return true;
   }
 
+  /**
+   * GIVEN: A well-formed pending opportunity from mempool detector
+   * WHEN: Validating all required fields
+   * THEN: Should accept as valid
+   *
+   * **Business Value:**
+   * Ensures the validation logic accepts legitimate mempool opportunities.
+   * These opportunities allow front-running or back-running large swaps
+   * for profitable arbitrage before they're included in a block.
+   */
   it('should validate a valid pending opportunity', () => {
     const opp = createPendingOpportunity();
     expect(validatePendingOpportunity(opp)).toBe(true);
@@ -203,11 +233,31 @@ describe('Pending Opportunity Validation', () => {
     expect(validatePendingOpportunity(opp as any)).toBe(false);
   });
 
+  /**
+   * GIVEN: Pending opportunity missing transaction hash
+   * WHEN: Validating the opportunity
+   * THEN: Should reject as invalid
+   *
+   * **Business Value:**
+   * Transaction hash is critical for tracking the mempool transaction.
+   * Without it, we cannot monitor whether the transaction was included,
+   * failed, or replaced, leading to incorrect arbitrage calculations.
+   */
   it('should reject opportunity with missing hash', () => {
     const opp = createPendingOpportunity({ hash: '' });
     expect(validatePendingOpportunity(opp)).toBe(false);
   });
 
+  /**
+   * GIVEN: Pending opportunity with invalid chainId (0 or negative)
+   * WHEN: Validating the opportunity
+   * THEN: Should reject as invalid
+   *
+   * **Business Value:**
+   * Invalid chainId would cause transaction routing failures. Sending
+   * transactions to wrong chain results in failed trades and wasted gas.
+   * Validation prevents capital loss from misconfigured opportunities.
+   */
   it('should reject opportunity with invalid chainId', () => {
     const opp = createPendingOpportunity({ chainId: 0 });
     expect(validatePendingOpportunity(opp)).toBe(false);

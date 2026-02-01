@@ -13,7 +13,19 @@
       "WebFetch(domain:www.quicknode.com)",
       "WebFetch(domain:publicnode.com)",
       "Bash(git mv:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(test:*)",
+      "Bash(chmod:*)",
+      "Bash(tee:*)",
+      "Bash(node scripts/analyze-performance.js:*)",
+      "Bash(for i in 1 2 3)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(done)",
+      "Bash(for file in \"s3.2.1-avalanche-configuration\" \"s3.2.2-fantom-configuration\" \"s1.3-price-matrix\")",
+      "Bash(do echo \"=== Testing $file \\(3 runs\\) ===\")",
+      "Bash(do npm test -- --selectProjects integration --testPathPattern=\"$file\")",
+      "Bash(rimraf:*)",
+      "Bash(npx rimraf:*)"
     ]
   }
 }

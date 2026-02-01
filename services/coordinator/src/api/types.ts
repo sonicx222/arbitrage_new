@@ -15,8 +15,9 @@ import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 
 /**
  * Alert severity levels.
+ * R2: Added 'warning' for stream consumer alerts
  */
-export type AlertSeverity = 'low' | 'high' | 'critical';
+export type AlertSeverity = 'low' | 'warning' | 'high' | 'critical';
 
 /**
  * Alert structure - used throughout coordinator, notifier, and API responses.

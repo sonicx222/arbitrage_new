@@ -474,10 +474,17 @@ describe('CoordinatorService Integration', () => {
       // During grace period, alerts are suppressed if no services have reported
       (coordinator as any).startTime = Date.now() - 70000; // 70 seconds ago
 
+      // R2: For tests without healthMonitor, also set healthMonitor's start time
+      if ((coordinator as any).healthMonitor) {
+        (coordinator as any).healthMonitor.start();
+        (coordinator as any).healthMonitor['startTime'] = Date.now() - 70000;
+      }
+
       // Trigger alert check
       (coordinator as any).checkForAlerts();
 
-      const cooldowns = (coordinator as any).alertCooldowns;
+      // R2: Use getAlertCooldowns() which delegates to healthMonitor if available
+      const cooldowns = coordinator.getAlertCooldowns();
       expect(cooldowns.size).toBeGreaterThan(0);
     });
 
@@ -491,12 +498,13 @@ describe('CoordinatorService Integration', () => {
 
       // First alert should be sent
       (coordinator as any).sendAlert(alert);
-      expect((coordinator as any).alertCooldowns.has('TEST_ALERT_system')).toBe(true);
+      // R2: Use getAlertCooldowns() which delegates to healthMonitor if available
+      expect(coordinator.getAlertCooldowns().has('TEST_ALERT_system')).toBe(true);
 
       // Second alert within cooldown should be ignored (no change to cooldown time)
-      const firstCooldown = (coordinator as any).alertCooldowns.get('TEST_ALERT_system');
+      const firstCooldown = coordinator.getAlertCooldowns().get('TEST_ALERT_system');
       (coordinator as any).sendAlert(alert);
-      const secondCooldown = (coordinator as any).alertCooldowns.get('TEST_ALERT_system');
+      const secondCooldown = coordinator.getAlertCooldowns().get('TEST_ALERT_system');
 
       // Cooldown timestamp shouldn't change
       expect(firstCooldown).toBe(secondCooldown);

@@ -24,7 +24,12 @@ import "./interfaces/IFlashLoanReceiver.sol";
  * - Emergency pause functionality
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 1.1.0
+ * @custom:version 1.2.0
+ *
+ * ## Changelog v1.2.0 (Bug Hunt Fixes)
+ * - Fix P2-1: Added amount validation (amount > 0) to prevent gas waste and ensure slippage protection
+ * - Fix P2-2: Added deadline parameter for transaction staleness protection (industry standard)
+ * - BREAKING CHANGE: executeArbitrage() now requires deadline parameter
  *
  * ## Changelog v1.1.0
  * - Fix 4.3: Added SwapPathAssetMismatch validation for swapPath[0].tokenIn == asset
@@ -181,6 +186,8 @@ contract FlashLoanArbitrage is
     error InvalidRecipient();
     error ETHTransferFailed();
     error InvalidSwapDeadline();
+    error InvalidAmount();
+    error TransactionTooOld();
 
     // ==========================================================================
     // Constructor
@@ -208,13 +215,24 @@ contract FlashLoanArbitrage is
      * @param amount The amount to flash loan
      * @param swapPath Array of swap steps defining the arbitrage path
      * @param minProfit Minimum required profit (reverts if not achieved)
+     * @param deadline Absolute deadline (block.timestamp) - reverts if current block is after deadline
      */
     function executeArbitrage(
         address asset,
         uint256 amount,
         SwapStep[] calldata swapPath,
-        uint256 minProfit
+        uint256 minProfit,
+        uint256 deadline
     ) external nonReentrant whenNotPaused {
+        // Fix P2-1: Validate amount is non-zero to prevent gas waste and ensure slippage protection
+        // Without this check, amount=0 bypasses slippage validation (line 243 condition)
+        if (amount == 0) revert InvalidAmount();
+
+        // Fix P2-2: Validate transaction is not stale using user-specified deadline
+        // This protects against transactions being mined in poor market conditions after delays.
+        // Industry standard: Uniswap, Sushiswap, etc. all use absolute deadlines.
+        if (block.timestamp > deadline) revert TransactionTooOld();
+
         if (swapPath.length == 0) revert EmptySwapPath();
 
         // Fix 4.3: Validate first swap step starts with the flash-loaned asset
@@ -545,8 +563,12 @@ contract FlashLoanArbitrage is
      * Current implementation prioritizes correctness and gas efficiency over
      * latency. The sequential approach is safer for production use.
      *
+     * Note: This view function does NOT validate amount > 0 or check deadlines
+     * since those are execution-time validations. Callers should validate inputs
+     * before calling executeArbitrage().
+     *
      * @param asset The asset to flash loan
-     * @param amount The amount to flash loan
+     * @param amount The amount to flash loan (caller should ensure > 0)
      * @param swapPath Array of swap steps
      * @return expectedProfit The expected profit after all fees
      * @return flashLoanFee The flash loan fee

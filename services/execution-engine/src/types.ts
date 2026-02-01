@@ -4,6 +4,21 @@
  * Shared types and interfaces for the execution engine modules.
  *
  * @see engine.ts (main service)
+ *
+ * ## Phase 3 Type Consolidation Notes:
+ *
+ * Several types are now consolidated in @arbitrage/types and imported here:
+ * - ExecutionResult: Canonical interface for execution results
+ * - createErrorResult, createSuccessResult, createSkippedResult: Factory functions
+ * - extractErrorCode: Error code extraction helper
+ * - BaseHealth: Base health interface for consistency
+ *
+ * The local `const enum ExecutionErrorCode` is INTENTIONALLY kept here (not imported)
+ * because it uses `const enum` for hot-path optimization (zero runtime overhead).
+ * The shared version uses a regular `enum` which has runtime overhead.
+ *
+ * @see shared/types/execution.ts - Shared types (regular enum)
+ * @see shared/types/common.ts - Common utility types
  */
 
 import { ethers } from 'ethers';
@@ -23,7 +38,26 @@ import { CHAINS } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
 import { TimeoutError } from '@arbitrage/types';
+// Phase 3: Import consolidated types from @arbitrage/types
+import {
+  ExecutionResult,
+  createErrorResult,
+  createSuccessResult,
+  createSkippedResult,
+  extractErrorCode,
+  BaseHealth,
+} from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
+
+// =============================================================================
+// Re-exports for backward compatibility (Phase 3)
+// =============================================================================
+// These re-exports ensure existing imports from './types' continue to work
+// after consolidation to @arbitrage/types.
+
+export type { ExecutionResult };
+export { createErrorResult, createSuccessResult, createSkippedResult, extractErrorCode };
+export type { BaseHealth };
 
 // =============================================================================
 // Extended Opportunity Types (Finding 1.2 Fix)
@@ -109,25 +143,10 @@ function getTypesLogger(): ILogger {
 }
 
 // =============================================================================
-// Execution Result
-// =============================================================================
-
-export interface ExecutionResult {
-  opportunityId: string;
-  success: boolean;
-  transactionHash?: string;
-  actualProfit?: number;
-  gasUsed?: number;
-  gasCost?: number;
-  error?: string;
-  timestamp: number;
-  chain: string;
-  dex: string;
-}
-
-// =============================================================================
 // Error Codes (Fix 9.3 & 6.1: Type-safe error codes)
 // =============================================================================
+// NOTE: ExecutionResult interface is now imported from @arbitrage/types and
+// re-exported above for backward compatibility.
 
 /**
  * Standardized error codes for execution strategies.
@@ -215,78 +234,8 @@ export const enum ExecutionErrorCode {
 // =============================================================================
 // ExecutionResult Factory Helpers
 // =============================================================================
-
-/**
- * Create a failed ExecutionResult.
- * Consolidates error result creation pattern used across strategies.
- *
- * @param error - Error message. Prefer using ExecutionErrorCode enum for consistency.
- */
-export function createErrorResult(
-  opportunityId: string,
-  error: string,
-  chain: string,
-  dex: string,
-  transactionHash?: string
-): ExecutionResult {
-  return {
-    opportunityId,
-    success: false,
-    error,
-    timestamp: Date.now(),
-    chain,
-    dex,
-    transactionHash,
-  };
-}
-
-/**
- * Create a skipped ExecutionResult (not executed due to risk controls).
- * Used when opportunity is rejected before execution attempt.
- */
-export function createSkippedResult(
-  opportunityId: string,
-  reason: string,
-  chain: string,
-  dex: string
-): ExecutionResult {
-  return {
-    opportunityId,
-    success: false,
-    error: reason,
-    timestamp: Date.now(),
-    chain,
-    dex,
-  };
-}
-
-/**
- * Create a successful ExecutionResult.
- * Consolidates success result creation pattern used across strategies.
- */
-export function createSuccessResult(
-  opportunityId: string,
-  transactionHash: string,
-  chain: string,
-  dex: string,
-  options?: {
-    actualProfit?: number;
-    gasUsed?: number;
-    gasCost?: number;
-  }
-): ExecutionResult {
-  return {
-    opportunityId,
-    success: true,
-    transactionHash,
-    timestamp: Date.now(),
-    chain,
-    dex,
-    actualProfit: options?.actualProfit,
-    gasUsed: options?.gasUsed,
-    gasCost: options?.gasCost,
-  };
-}
+// NOTE: createErrorResult, createSuccessResult, and createSkippedResult are now
+// imported from @arbitrage/types and re-exported above for backward compatibility.
 
 /**
  * Fix 6.1: Format error code with optional details.
@@ -315,25 +264,7 @@ export function formatExecutionError(
   return `${code}: ${details}`;
 }
 
-/**
- * Perf 10.4: Pre-compiled regex for error code extraction.
- * Creating new RegExp on every call is wasteful for hot paths.
- */
-const ERR_CODE_REGEX = /\[ERR_([A-Z_]+)\]/;
-
-/**
- * Fix 6.1: Extract the error code identifier from a formatted error message.
- *
- * Useful for categorizing errors in logs and metrics.
- * Perf 10.4: Uses pre-compiled regex for hot-path optimization.
- *
- * @param errorMessage - Full error message
- * @returns The error code identifier (e.g., "ERR_NO_WALLET") or null if not found
- */
-export function extractErrorCode(errorMessage: string): string | null {
-  const match = errorMessage.match(ERR_CODE_REGEX);
-  return match ? `ERR_${match[1]}` : null;
-}
+// NOTE: extractErrorCode is now imported from @arbitrage/types and re-exported above.
 
 // =============================================================================
 // Flash Loan Parameters
@@ -631,34 +562,9 @@ export function getServiceLogger(name: string): Logger {
 }
 
 // =============================================================================
-// Base Health Interface (Fix 9.2)
-// =============================================================================
-
-/**
- * Fix 9.2: Base health interface for consistency across all health types.
- *
- * All health-related interfaces should extend this base interface to ensure
- * they have a consistent core set of fields. This makes it easier to aggregate
- * health status across the system.
- *
- * @example
- * interface ServiceHealth extends BaseHealth {
- *   activeConnections: number;
- *   queueSize: number;
- * }
- */
-export interface BaseHealth {
-  /** Whether the component is healthy */
-  healthy: boolean;
-  /** Last health check timestamp */
-  lastCheck: number;
-  /** Last error message if any */
-  lastError?: string;
-}
-
-// =============================================================================
 // Provider Health
 // =============================================================================
+// NOTE: BaseHealth is now imported from @arbitrage/types and re-exported above.
 
 /**
  * Provider health status.

@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { CHAINS } from './index';
+import { CHAINS } from '../../src/index';
 
 // Production mainnet chains (excludes devnet/testnet)
 const MAINNET_CHAIN_IDS = [

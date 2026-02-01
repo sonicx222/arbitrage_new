@@ -524,3 +524,9 @@ export function parseGasEstimate(value: string | number | bigint | undefined): b
     return 0n;
   }
 }
+
+// =============================================================================
+// Test Support Types
+// =============================================================================
+
+export * from './src/test-support';

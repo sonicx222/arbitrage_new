@@ -221,6 +221,7 @@ describe('P1 Asia-Fast Partition Service', () => {
   describe('Module Exports', () => {
     it('should export detector instance', async () => {
       // Import after mocks are set up
+      jest.resetModules();
       const { detector } = await import('../../index');
       expect(detector).toBeDefined();
       expect(typeof detector.start).toBe('function');
@@ -228,6 +229,7 @@ describe('P1 Asia-Fast Partition Service', () => {
     });
 
     it('should export config object', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config).toBeDefined();
       expect(config.partitionId).toBe('asia-fast');
@@ -238,6 +240,7 @@ describe('P1 Asia-Fast Partition Service', () => {
     });
 
     it('should export partition constants', async () => {
+      jest.resetModules();
       const { P1_PARTITION_ID, P1_CHAINS, P1_REGION } = await import('../../index');
       expect(P1_PARTITION_ID).toBe('asia-fast');
       expect(P1_CHAINS).toContain('bsc');
@@ -245,6 +248,7 @@ describe('P1 Asia-Fast Partition Service', () => {
     });
 
     it('should export cleanupProcessHandlers function', async () => {
+      jest.resetModules();
       const { cleanupProcessHandlers } = await import('../../index');
       expect(cleanupProcessHandlers).toBeDefined();
       expect(typeof cleanupProcessHandlers).toBe('function');
@@ -253,11 +257,13 @@ describe('P1 Asia-Fast Partition Service', () => {
 
   describe('Configuration', () => {
     it('should use correct partition ID', async () => {
+      jest.resetModules();
       const { P1_PARTITION_ID } = await import('../../index');
       expect(P1_PARTITION_ID).toBe('asia-fast');
     });
 
     it('should configure 4 chains for asia-fast partition', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.chains).toHaveLength(4);
       expect(config.chains).toEqual(
@@ -266,11 +272,13 @@ describe('P1 Asia-Fast Partition Service', () => {
     });
 
     it('should use default port 3001', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.healthCheckPort).toBe(3001);
     });
 
     it('should use asia-southeast1 region', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.regionId).toBe('asia-southeast1');
     });

@@ -10,13 +10,13 @@
 // @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import { BaseSimulationProvider } from './base-simulation-provider';
+import { BaseSimulationProvider } from '../../../../src/services/simulation/base-simulation-provider';
 import type {
   SimulationProviderConfig,
   SimulationRequest,
   SimulationResult,
   SimulationProviderType,
-} from './types';
+} from '../../../../src/services/simulation/types';
 
 // =============================================================================
 // Test Implementation of BaseSimulationProvider

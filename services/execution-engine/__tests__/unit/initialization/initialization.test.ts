@@ -18,8 +18,8 @@ import {
   resetInitializationState,
   isInitializationComplete,
   getLastPartialResults,
-} from './index';
-import type { InitializationLogger } from './types';
+} from '../../../src/initialization/index';
+import type { InitializationLogger } from '../../../src/initialization/types';
 
 // =============================================================================
 // Mock Dependencies
@@ -518,7 +518,7 @@ describe('Initialization Module', () => {
 
 describe('Type Helpers', () => {
   test('createDisabledMevResult returns correct structure', async () => {
-    const { createDisabledMevResult } = await import('./types');
+    const { createDisabledMevResult } = await import('../../../src/initialization/types');
     const result = createDisabledMevResult();
 
     expect(result.factory).toBeNull();
@@ -527,7 +527,7 @@ describe('Type Helpers', () => {
   });
 
   test('createDisabledRiskResult returns correct structure', async () => {
-    const { createDisabledRiskResult } = await import('./types');
+    const { createDisabledRiskResult } = await import('../../../src/initialization/types');
     const result = createDisabledRiskResult();
 
     expect(result.enabled).toBe(false);
@@ -545,7 +545,7 @@ describe('Type Helpers', () => {
   });
 
   test('createFailedRiskResult includes error and partial components', async () => {
-    const { createFailedRiskResult } = await import('./types');
+    const { createFailedRiskResult } = await import('../../../src/initialization/types');
     const result = createFailedRiskResult('Test error', {
       componentStatus: {
         probabilityTracker: true,
@@ -562,7 +562,7 @@ describe('Type Helpers', () => {
   });
 
   test('createDisabledBridgeResult returns correct structure', async () => {
-    const { createDisabledBridgeResult } = await import('./types');
+    const { createDisabledBridgeResult } = await import('../../../src/initialization/types');
     const result = createDisabledBridgeResult();
 
     expect(result.factory).toBeNull();
@@ -573,7 +573,7 @@ describe('Type Helpers', () => {
   });
 
   test('createFailedBridgeResult includes error', async () => {
-    const { createFailedBridgeResult } = await import('./types');
+    const { createFailedBridgeResult } = await import('../../../src/initialization/types');
     const result = createFailedBridgeResult('Connection failed');
 
     expect(result.factory).toBeNull();

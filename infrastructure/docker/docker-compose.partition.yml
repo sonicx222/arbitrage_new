@@ -69,8 +69,10 @@ services:
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      # FIX P3-1: Standardize to 15s interval per ADR-007 (was 10s)
+      # Consistent with docker-compose.yml and health-check.sh default
+      interval: 15s
+      timeout: 10s
       retries: 3
     networks:
       - arbitrage-network

@@ -52,23 +52,22 @@ function generateRealisticPrices(count: number): BatchUpdate[] {
 describe('S1.3 L1 Price Matrix Integration Tests', () => {
   let matrix: PriceMatrix;
 
+  // P2-1: Initialize matrix once in beforeAll for performance
   beforeAll(() => {
     resetPriceMatrix();
+    matrix = new PriceMatrix(); // Created once, reused across all tests
+  });
+
+  // P2-1: Reset state before each test for isolation
+  beforeEach(() => {
+    matrix.resetState(); // Fast: clears stats, written slots, and price data
   });
 
   afterAll(() => {
-    resetPriceMatrix();
-  });
-
-  beforeEach(() => {
-    resetPriceMatrix();
-    matrix = new PriceMatrix();
-  });
-
-  afterEach(() => {
     if (matrix) {
-      matrix.destroy();
+      matrix.destroy(); // Clean up once at the end
     }
+    resetPriceMatrix();
   });
 
   // =========================================================================

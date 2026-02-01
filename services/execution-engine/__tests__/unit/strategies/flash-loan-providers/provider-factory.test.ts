@@ -10,11 +10,11 @@
  * @see provider-factory.ts
  */
 
-import { FlashLoanProviderFactory, createFlashLoanProviderFactory } from './provider-factory';
-import { AaveV3FlashLoanProvider } from './aave-v3.provider';
-import { UnsupportedFlashLoanProvider } from './unsupported.provider';
-import type { FlashLoanProviderConfig } from './types';
-import type { Logger } from '../../types';
+import { FlashLoanProviderFactory, createFlashLoanProviderFactory } from '../../../../src/strategies/flash-loan-providers/provider-factory';
+import { AaveV3FlashLoanProvider } from '../../../../src/strategies/flash-loan-providers/aave-v3.provider';
+import { UnsupportedFlashLoanProvider } from '../../../../src/strategies/flash-loan-providers/unsupported.provider';
+import type { FlashLoanProviderConfig } from '../../../../src/strategies/flash-loan-providers/types';
+import type { Logger } from '../../../../src/types';
 
 // Mock the config module
 jest.mock('@arbitrage/config', () => ({
@@ -40,6 +40,14 @@ jest.mock('@arbitrage/config', () => ({
       fee: 30,
     },
   },
+  // Fix: Add FLASH_LOAN_ARBITRAGE_ABI to mock (required by aave-v3.provider.ts)
+  FLASH_LOAN_ARBITRAGE_ABI: [
+    'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit) external',
+    'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+  ],
+  // Fix: Add other required constants
+  AAVE_V3_FEE_BPS: 9,
+  BPS_DENOMINATOR_BIGINT: BigInt(10000),
 }));
 
 // =============================================================================

@@ -75,6 +75,15 @@ import {
 
 import { ChainStats } from './unified-detector';
 import { WhaleAlertPublisher, ExtendedPairInfo } from './publishers';
+// R3 Refactor: Use extracted detection modules
+import {
+  SimpleArbitrageDetector,
+  createSimpleArbitrageDetector,
+  SnapshotManager,
+  createSnapshotManager,
+  type PairSnapshot,
+  type ExtendedPair as DetectionExtendedPair,
+} from './detection';
 // REFACTOR: Import simulation handler for modular simulation logic
 import {
   ChainSimulationHandler,
@@ -82,11 +91,13 @@ import {
   SimulationCallbacks
 } from './simulation';
 // FIX Config 3.1/3.2: Import utility functions and constants
+// P0-2 FIX: Import centralized validateFee (FIX 9.3)
 import {
   parseIntEnvVar,
   parseFloatEnvVar,
   toWebSocketUrl,
   isUnstableChain,
+  validateFee,
 } from './types';
 import {
   DEFAULT_SIMULATION_UPDATE_INTERVAL_MS,
@@ -146,27 +157,8 @@ interface ExtendedPair extends Pair {
   lastUpdate: number;
 }
 
-/**
- * Snapshot of pair data for thread-safe arbitrage detection.
- * Captures reserve values at a point in time to avoid race conditions
- * when reserves are updated by concurrent Sync events.
- *
- * PERF 10.1: Includes cached BigInt values to avoid repeated conversions
- * during arbitrage calculations.
- */
-interface PairSnapshot {
-  address: string;
-  dex: string;
-  token0: string;
-  token1: string;
-  reserve0: string;
-  reserve1: string;
-  fee: number;
-  blockNumber: number;
-  // PERF 10.1: Cached BigInt values for hot-path calculations
-  reserve0BigInt: bigint;
-  reserve1BigInt: bigint;
-}
+// R3 Refactor: PairSnapshot interface moved to detection/simple-arbitrage-detector.ts
+// Now imported from './detection' module
 
 // P2 FIX: Proper type for Ethereum RPC log events
 interface EthereumLog {
@@ -260,6 +252,10 @@ export class ChainDetectorInstance extends EventEmitter {
   private triangularDetector: CrossDexTriangularArbitrage;
   private lastTriangularCheck: number = 0;
   private readonly TRIANGULAR_CHECK_INTERVAL_MS = 500;
+
+  // R3: Extracted detection modules
+  private simpleArbitrageDetector: SimpleArbitrageDetector;
+  private snapshotManager: SnapshotManager;
 
   // Multi-leg path finding (5-7 token paths)
   private multiLegPathFinder: MultiLegPathFinder | null = null;
@@ -360,6 +356,10 @@ export class ChainDetectorInstance extends EventEmitter {
       minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.003,
       maxSlippage: ARBITRAGE_CONFIG.slippageTolerance || 0.10
     });
+
+    // R3: Initialize extracted detection modules
+    this.simpleArbitrageDetector = createSimpleArbitrageDetector(this.chainId, this.detectorConfig);
+    this.snapshotManager = createSnapshotManager({ cacheTtlMs: SNAPSHOT_CACHE_TTL_MS });
 
     // Initialize pair activity tracker for volatility-based prioritization
     // Uses singleton to share state across chain instances (useful for cross-chain hot pairs)
@@ -643,7 +643,9 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairsByTokens.clear();
     // P2-FIX 3.3: Clear cached pair addresses array
     this.pairAddressesCache = [];
-    // PERF-OPT: Clear snapshot cache to free memory
+    // R3 Refactor: Clear SnapshotManager caches
+    this.snapshotManager.clear();
+    // PERF-OPT: Clear local snapshot cache to free memory (legacy - kept for safety)
     this.snapshotCache = null;
     this.snapshotCacheTimestamp = 0;
     // FIX Perf 10.3: Reset version counters for clean restart
@@ -839,6 +841,8 @@ export class ChainDetectorInstance extends EventEmitter {
       });
 
       // FIX Bug 4.2 & Race 5.1: Atomic snapshot cache invalidation (same as handleSyncEvent)
+      // R3 Refactor: Delegate cache invalidation to SnapshotManager
+      this.snapshotManager.invalidateCache();
       this.snapshotVersion++;
       this.snapshotCache = null;
       this.dexPoolCache = null;
@@ -981,7 +985,7 @@ export class ChainDetectorInstance extends EventEmitter {
           // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
           // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
           // Validate fee at source to catch config errors early
-          const feePercentage = this.validateFee(dexFeeToPercentage(dex.fee ?? 30));
+          const feePercentage = validateFee(dexFeeToPercentage(dex.fee ?? 30));
 
           const pair: ExtendedPair = {
             address: pairAddress,
@@ -1414,6 +1418,8 @@ export class ChainDetectorInstance extends EventEmitter {
         // The reader will either: (a) see old version + old cache (valid), or
         // (b) see new version + null cache (will rebuild)
         // Never: (c) see old version + null cache (which would cause stale rebuild)
+        // R3 Refactor: Delegate cache invalidation to SnapshotManager
+        this.snapshotManager.invalidateCache();
         this.snapshotVersion++;
         this.snapshotCache = null;
         this.dexPoolCache = null; // Also invalidate DexPool cache
@@ -1575,34 +1581,17 @@ export class ChainDetectorInstance extends EventEmitter {
 
   /**
    * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
-   * Captures all mutable values at a point in time.
    *
-   * PERF 10.1: Pre-computes BigInt values during snapshot creation to avoid
-   * repeated conversions during hot-path arbitrage calculations.
+   * R3 Refactor: Delegates to extracted SnapshotManager.
    */
   private createPairSnapshot(pair: ExtendedPair): PairSnapshot | null {
-    // Skip pairs without initialized reserves
-    if (!pair.reserve0 || !pair.reserve1 || pair.reserve0 === '0' || pair.reserve1 === '0') {
-      return null;
+    // R3: Delegate to snapshot manager with fee validation
+    const snapshot = this.snapshotManager.createPairSnapshot(pair);
+    if (snapshot) {
+      // Apply local fee validation
+      snapshot.fee = validateFee(pair.fee);
     }
-
-    // PERF 10.1: Convert to BigInt once during snapshot creation
-    const reserve0BigInt = BigInt(pair.reserve0);
-    const reserve1BigInt = BigInt(pair.reserve1);
-
-    return {
-      address: pair.address,
-      dex: pair.dex,
-      token0: pair.token0,
-      token1: pair.token1,
-      reserve0: pair.reserve0,
-      reserve1: pair.reserve1,
-      fee: this.validateFee(pair.fee), // Validate fee for safe calculations
-      blockNumber: pair.blockNumber,
-      // PERF 10.1: Cached BigInt values
-      reserve0BigInt,
-      reserve1BigInt,
-    };
+    return snapshot;
   }
 
   /**
@@ -1615,28 +1604,8 @@ export class ChainDetectorInstance extends EventEmitter {
    * reduces CPU overhead for high-frequency update scenarios.
    */
   private createPairsSnapshot(): Map<string, PairSnapshot> {
-    const now = Date.now();
-
-    // PERF-OPT: Return cached snapshot if still valid
-    if (this.snapshotCache && (now - this.snapshotCacheTimestamp) < SNAPSHOT_CACHE_TTL_MS) {
-      return this.snapshotCache;
-    }
-
-    // Cache expired or missing - create new snapshot
-    const snapshots = new Map<string, PairSnapshot>();
-
-    for (const [key, pair] of this.pairs.entries()) {
-      const snapshot = this.createPairSnapshot(pair);
-      if (snapshot) {
-        snapshots.set(key, snapshot);
-      }
-    }
-
-    // Update cache
-    this.snapshotCache = snapshots;
-    this.snapshotCacheTimestamp = now;
-
-    return snapshots;
+    // R3 Refactor: Delegate to SnapshotManager for caching logic
+    return this.snapshotManager.createPairsSnapshot(this.pairs as Map<string, DetectionExtendedPair>);
   }
 
   private checkArbitrageOpportunity(updatedPair: ExtendedPair): void {
@@ -1754,131 +1723,15 @@ export class ChainDetectorInstance extends EventEmitter {
     return chainMinProfits[this.chainId] ?? 0.003; // Default 0.3%
   }
 
+  /**
+   * R3 Refactor: Delegates to extracted SimpleArbitrageDetector.
+   */
   private calculateArbitrage(
     pair1: PairSnapshot,
     pair2: PairSnapshot
   ): ArbitrageOpportunity | null {
-    // PERF 10.1: Use pre-cached BigInt values from snapshot instead of converting
-    const reserve1_0 = pair1.reserve0BigInt;
-    const reserve1_1 = pair1.reserve1BigInt;
-    const reserve2_0 = pair2.reserve0BigInt;
-    const reserve2_1 = pair2.reserve1BigInt;
-
-    if (reserve1_0 === 0n || reserve1_1 === 0n || reserve2_0 === 0n || reserve2_1 === 0n) {
-      return null;
-    }
-
-    // P0-1 FIX: Use precision-safe price calculation to prevent precision loss
-    // for large BigInt values (reserves can be > 2^53)
-    const price1 = calculatePriceFromBigIntReserves(reserve1_0, reserve1_1);
-    const price2Raw = calculatePriceFromBigIntReserves(reserve2_0, reserve2_1);
-
-    // Handle null returns (shouldn't happen since we checked for zero reserves above)
-    if (price1 === null || price2Raw === null) {
-      return null;
-    }
-
-    // FIX Bug 4.1: Validate prices BEFORE any division to prevent Infinity/overflow
-    // This is more efficient than checking after - avoids unnecessary computation
-    // Threshold: 1e-15 ensures 1/price stays within safe float range (< 1e15)
-    const MIN_SAFE_PRICE = 1e-15;
-    const MAX_SAFE_PRICE = 1e15;
-
-    if (!Number.isFinite(price1) || price1 < MIN_SAFE_PRICE || price1 > MAX_SAFE_PRICE) {
-      return null;
-    }
-    if (!Number.isFinite(price2Raw) || price2Raw < MIN_SAFE_PRICE || price2Raw > MAX_SAFE_PRICE) {
-      return null;
-    }
-
-    // BUG FIX: Adjust price for reverse order pairs
-    // If tokens are in reverse order, invert the price for accurate comparison
-    // Safe to divide now - we've validated price2Raw is within bounds
-    const isReversed = this.isReverseOrder(pair1, pair2);
-    const price2 = isReversed ? 1 / price2Raw : price2Raw;
-
-    const minPrice = Math.min(price1, price2);
-
-    // Calculate price difference as a percentage of the lower price
-    const priceDiff = Math.abs(price1 - price2) / minPrice;
-
-    // Use config-based profit threshold (not hardcoded)
-    const minProfitThreshold = this.getMinProfitThreshold();
-
-    // Calculate fee-adjusted profit
-    // Fees are stored as decimals (e.g., 0.003 for 0.3%)
-    // Use validateFee for defensive validation in case snapshots come from external sources
-    const totalFees = this.validateFee(pair1.fee) + this.validateFee(pair2.fee);
-    const netProfitPct = priceDiff - totalFees;
-
-    // Check if profitable after fees
-    if (netProfitPct < minProfitThreshold) {
-      return null;
-    }
-
-    // Determine buy/sell sides based on prices
-    const buyFromPair1 = price1 < price2;
-    const buyPair = buyFromPair1 ? pair1 : pair2;
-    const sellPair = buyFromPair1 ? pair2 : pair1;
-
-    // CRITICAL FIX: Calculate tokenIn, tokenOut, and amountIn for execution engine
-    // For simple arbitrage: buy token1 on cheaper DEX, sell on expensive DEX
-    // tokenIn = the token we're buying (token1), tokenOut = the token we're selling (token0)
-    const tokenIn = buyPair.token1;  // We buy token1 with token0
-    const tokenOut = buyPair.token0; // We end up with token0 after selling token1
-
-    // CRITICAL FIX: Calculate optimal amountIn based on reserves
-    // Use a conservative percentage of the smaller reserve to limit price impact
-    // The buy pair's reserve1 represents available token1 liquidity
-    const buyReserve1 = buyFromPair1 ? reserve1_1 : reserve2_1;
-    const sellReserve1 = buyFromPair1 ? reserve2_1 : reserve1_1;
-
-    // Use 1% of the smaller liquidity pool to minimize slippage
-    // This is conservative but safe for production
-    const maxTradePercent = 0.01; // 1% of pool
-    const smallerReserve = buyReserve1 < sellReserve1 ? buyReserve1 : sellReserve1;
-    const amountIn = (smallerReserve * BigInt(Math.floor(maxTradePercent * 10000))) / 10000n;
-
-    // Skip if calculated amount is too small (dust)
-    if (amountIn < 1000n) {
-      return null;
-    }
-
-    // CRITICAL FIX: Calculate expectedProfit as ABSOLUTE value (not percentage)
-    // The execution engine treats expectedProfit as wei value to convert via: BigInt(Math.floor(opportunity.expectedProfit * 1e18))
-    // So we need to provide profit in the base unit (e.g., 0.005 ETH = 0.005)
-    // expectedProfit = amountIn * netProfitPct (in token units)
-    const expectedProfitAbsolute = Number(amountIn) * netProfitPct;
-
-    const opportunity: ArbitrageOpportunity = {
-      id: `${this.chainId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      type: 'simple', // Standardized with base-detector.ts
-      chain: this.chainId,
-      buyDex: buyPair.dex,
-      sellDex: sellPair.dex,
-      buyPair: buyPair.address,
-      sellPair: sellPair.address,
-      token0: pair1.token0,
-      token1: pair1.token1,
-      // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
-      tokenIn,
-      tokenOut,
-      amountIn: amountIn.toString(),
-      buyPrice: Math.min(price1, price2),
-      sellPrice: Math.max(price1, price2),
-      profitPercentage: netProfitPct * 100, // Convert to percentage for display
-      // CRITICAL FIX: expectedProfit is now ABSOLUTE value (required by engine.ts:1380)
-      expectedProfit: expectedProfitAbsolute,
-      estimatedProfit: 0, // To be calculated by execution engine
-      gasEstimate: String(this.detectorConfig.gasEstimate),
-      confidence: this.detectorConfig.confidence,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + this.detectorConfig.expiryMs,
-      blockNumber: pair1.blockNumber,
-      status: 'pending'
-    };
-
-    return opportunity;
+    // R3: Delegate to extracted detector
+    return this.simpleArbitrageDetector.calculateArbitrage(pair1, pair2);
   }
 
   private async emitOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
@@ -1899,31 +1752,7 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
   // Triangular/Quadrilateral Arbitrage Detection
   // ===========================================================================
-
-  /**
-   * Convert PairSnapshot to DexPool format required by CrossDexTriangularArbitrage.
-   */
-  private convertPairSnapshotToDexPool(snapshot: PairSnapshot): DexPool {
-    const reserve0 = BigInt(snapshot.reserve0);
-    const reserve1 = BigInt(snapshot.reserve1);
-
-    // P0-1 FIX: Use precision-safe price calculation (consistent with calculateArbitrage)
-    const price = calculatePriceFromBigIntReserves(reserve1, reserve0) ?? 0;
-
-    // Estimate liquidity from reserves (simplified USD estimation)
-    const liquidity = Number(reserve0) * price * 2;
-
-    return {
-      dex: snapshot.dex,
-      token0: snapshot.token0,
-      token1: snapshot.token1,
-      reserve0: snapshot.reserve0,
-      reserve1: snapshot.reserve1,
-      fee: Math.round(this.validateFee(snapshot.fee) * 10000), // Convert to basis points
-      liquidity,
-      price
-    };
-  }
+  // R3 Refactor: convertPairSnapshotToDexPool moved to SnapshotManager
 
   /**
    * Check for triangular and quadrilateral arbitrage opportunities.
@@ -1946,21 +1775,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (pairsSnapshot.size < 3) return;
 
-    // FIX Race 5.1: Capture version ONCE at the start to avoid TOCTOU race
-    // Between checking dexPoolCacheVersion === snapshotVersion and using cache,
-    // a Sync event could increment snapshotVersion making our cache stale
-    const capturedVersion = this.snapshotVersion;
-
-    // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
-    let pools: DexPool[];
-    if (this.dexPoolCache && this.dexPoolCacheVersion === capturedVersion) {
-      pools = this.dexPoolCache;
-    } else {
-      pools = Array.from(pairsSnapshot.values())
-        .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
-      this.dexPoolCache = pools;
-      this.dexPoolCacheVersion = capturedVersion; // Use captured version, not current
-    }
+    // R3 Refactor: Delegate DexPool caching to SnapshotManager
+    // SnapshotManager handles version-based cache invalidation (Race 5.1, Perf 10.3)
+    const pools = this.snapshotManager.getDexPools(pairsSnapshot);
 
     // BUG-1 FIX: Use token addresses instead of symbols
     // DexPool.token0/token1 contain addresses, so baseTokens must also be addresses
@@ -2065,19 +1882,9 @@ export class ChainDetectorInstance extends EventEmitter {
     if (pairsSnapshot.size < 5 || !this.multiLegPathFinder) return;
     this.lastMultiLegCheck = now;
 
-    // FIX Race 5.1: Capture version ONCE at the start to avoid TOCTOU race
-    const capturedVersion = this.snapshotVersion;
-
-    // FIX Perf 10.3: Use version-based cache invalidation for accurate DexPool caching
-    let pools: DexPool[];
-    if (this.dexPoolCache && this.dexPoolCacheVersion === capturedVersion) {
-      pools = this.dexPoolCache;
-    } else {
-      pools = Array.from(pairsSnapshot.values())
-        .map(snapshot => this.convertPairSnapshotToDexPool(snapshot));
-      this.dexPoolCache = pools;
-      this.dexPoolCacheVersion = capturedVersion; // Use captured version, not current
-    }
+    // R3 Refactor: Delegate DexPool caching to SnapshotManager
+    // SnapshotManager handles version-based cache invalidation (Race 5.1, Perf 10.3)
+    const pools = this.snapshotManager.getDexPools(pairsSnapshot);
 
     // BUG-1 FIX: Use token addresses instead of symbols (same fix as triangular)
     const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
@@ -2160,33 +1967,8 @@ export class ChainDetectorInstance extends EventEmitter {
     return token?.symbol || address.slice(0, 8);
   }
 
-  /**
-   * Validate and sanitize fee value for safe calculations.
-   * Returns the fee if valid, or the default (0.003 = 0.3%) if invalid.
-   *
-   * Guards against:
-   * - NaN (from invalid conversions)
-   * - Infinity (from division errors)
-   * - Negative values (invalid fees)
-   * - Fees > 100% (clearly incorrect)
-   */
-  private validateFee(fee: number | undefined, defaultFee: number = 0.003): number {
-    // Return default for missing fees (normal case - don't log)
-    if (fee === undefined || fee === null) {
-      return defaultFee;
-    }
-    // Log warning only for explicitly INVALID fees (NaN, Infinity, negative, >100%)
-    // These indicate a bug in fee conversion or configuration
-    if (!Number.isFinite(fee) || fee < 0 || fee > 1) {
-      this.logger.warn('Invalid fee detected, using default', {
-        providedFee: fee,
-        defaultFee,
-        reason: !Number.isFinite(fee) ? 'not finite' : fee < 0 ? 'negative' : 'exceeds 100%'
-      });
-      return defaultFee;
-    }
-    return fee;
-  }
+  // P0-2 FIX: Removed private validateFee() - now uses centralized version from ./types
+  // See: FIX 9.3 in ./types.ts for the canonical implementation
 
   // ===========================================================================
   // Public Getters

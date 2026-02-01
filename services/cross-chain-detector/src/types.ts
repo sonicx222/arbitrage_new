@@ -5,9 +5,16 @@
  * and reduce maintenance burden.
  *
  * @see ADR-014: Modular Detector Components
+ *
+ * ## Phase 3 Type Consolidation Notes:
+ *
+ * The logger interface is now consolidated in @arbitrage/types (ILogger).
+ * ModuleLogger is kept as a type alias for backward compatibility.
+ *
+ * @see shared/types/common.ts - ILogger definition
  */
 
-import { PriceUpdate } from '@arbitrage/types';
+import { PriceUpdate, ILogger } from '@arbitrage/types';
 
 // =============================================================================
 // Token Pair Format Constants and Utilities
@@ -96,13 +103,10 @@ export function normalizeToInternalFormat(tokenPair: string): string {
 /**
  * Minimal logger interface for dependency injection.
  * Compatible with Winston logger and testing mocks.
+ *
+ * Phase 3: Now aliases ILogger from @arbitrage/types for consistency.
  */
-export interface ModuleLogger {
-  info: (message: string, meta?: object) => void;
-  error: (message: string, meta?: object) => void;
-  warn: (message: string, meta?: object) => void;
-  debug: (message: string, meta?: object) => void;
-}
+export type ModuleLogger = ILogger;
 
 // =============================================================================
 // Price Data Structures

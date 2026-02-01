@@ -65,8 +65,19 @@ export interface ProviderBudgetState {
  * Derive budget configurations from the canonical PROVIDER_CONFIGS.
  * This ensures a single source of truth for provider data from @arbitrage/config.
  * This avoids duplication while allowing budget-specific extensions.
+ *
+ * NOTE: PROVIDER_CONFIGS may be undefined in test environments where
+ * @arbitrage/config fails to initialize (e.g., missing REDIS_URL before
+ * setupTestEnv() runs). We handle this gracefully by returning an empty
+ * object, which means budget tracking won't work but won't crash either.
  */
 function deriveBudgetConfigs(): Record<string, ProviderBudgetConfig> {
+  // Guard against undefined PROVIDER_CONFIGS (can happen in test environments
+  // due to module loading order - config validates before env vars are set)
+  if (!PROVIDER_CONFIGS || typeof PROVIDER_CONFIGS !== 'object') {
+    return {};
+  }
+
   const budgets: Record<string, ProviderBudgetConfig> = {};
 
   for (const [key, config] of Object.entries(PROVIDER_CONFIGS)) {

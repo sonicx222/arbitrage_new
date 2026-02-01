@@ -16,6 +16,7 @@ import { ethers } from 'ethers';
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
 import { Dex, Token } from '../../types';
+import type { Resettable } from '@arbitrage/types';
 
 // =============================================================================
 // Dependency Injection Interfaces
@@ -133,7 +134,7 @@ const V3_FEE_TIERS = [100, 500, 3000, 10000];
 // Pair Discovery Service
 // =============================================================================
 
-export class PairDiscoveryService extends EventEmitter {
+export class PairDiscoveryService extends EventEmitter implements Resettable {
   private logger: PairDiscoveryLogger;
   private config: PairDiscoveryConfig;
   private providers: Map<string, ethers.JsonRpcProvider> = new Map();
@@ -730,6 +731,43 @@ export class PairDiscoveryService extends EventEmitter {
       avgQueryLatencyMs: 0
     };
     this.queryLatencies = [];
+  }
+
+  /**
+   * Reset service state for test isolation
+   *
+   * Clears runtime state (stats, circuit breakers, latencies) while preserving
+   * expensive resources (providers, factory contracts, configuration).
+   *
+   * Use this in beforeEach() when sharing a service instance across tests
+   * (created once in beforeAll()) to ensure test isolation.
+   *
+   * @internal For testing only
+   */
+  resetState(): void {
+    // Reset statistics
+    this.stats = {
+      totalQueries: 0,
+      cacheHits: 0,
+      factoryQueries: 0,
+      create2Computations: 0,
+      failedQueries: 0,
+      circuitBreakerTrips: 0,
+      avgQueryLatencyMs: 0
+    };
+
+    // Reset circuit breaker state
+    this.failureCount.clear();
+    this.circuitOpenUntil.clear();
+
+    // Reset latency tracking
+    this.queryLatencies = [];
+
+    // Reset concurrency tracking
+    this.activeQueries = 0;
+
+    // Don't reset providers, factoryContracts, or config - these are expensive to recreate
+    // Don't reset EventEmitter listeners - tests should manage their own subscriptions
   }
 
   /**

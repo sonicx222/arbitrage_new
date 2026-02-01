@@ -264,12 +264,14 @@ describe('FlashLoanArbitrage', () => {
       ];
 
       // Even with 0 minProfit from caller, should fail due to global minimum
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('10'),
           swapPath,
-          0 // Caller specifies 0, but global minimum is 1 WETH
+          0, // Caller specifies 0, but global minimum is 1 WETH
+          deadline
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientProfit');
     });
@@ -450,12 +452,14 @@ describe('FlashLoanArbitrage', () => {
       ];
 
       // Execute flash loan arbitrage
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          minProfit
+          minProfit,
+          deadline
         )
       ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
     });
@@ -500,12 +504,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          minProfit
+          minProfit,
+          deadline
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientProfit');
     });
@@ -535,12 +541,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          minProfit
+          minProfit,
+          deadline
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'RouterNotApproved');
     });
@@ -559,12 +567,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('10'),
           swapPath,
-          0
+          0,
+          deadline
         )
       ).to.be.revertedWith('Pausable: paused');
     });
@@ -612,12 +622,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          ethers.parseEther('0.01')
+          ethers.parseEther('0.01'),
+          deadline
         )
       ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
     });
@@ -676,12 +688,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          ethers.parseEther('0.01')
+          ethers.parseEther('0.01'),
+          deadline
         )
       ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
     });
@@ -689,12 +703,14 @@ describe('FlashLoanArbitrage', () => {
     it('should revert on empty swap path', async () => {
       const { flashLoanArbitrage, weth } = await loadFixture(deployContractsFixture);
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('10'),
           [], // Empty path
-          0
+          0,
+          deadline
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'EmptySwapPath');
     });
@@ -723,12 +739,14 @@ describe('FlashLoanArbitrage', () => {
 
       // Note: The revert comes from MockDexRouter's internal check, not our contract
       // In production with real DEXes, this would also revert but from the router
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('1'),
           swapPath,
-          0
+          0,
+          deadline
         )
       ).to.be.revertedWith('Insufficient output amount');
     });
@@ -767,12 +785,14 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('10'),
           swapPath,
-          0
+          0,
+          deadline
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapPath');
     });
@@ -822,11 +842,13 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       const tx = await flashLoanArbitrage.executeArbitrage(
         await weth.getAddress(),
         flashLoanAmount,
         swapPath,
-        minProfit
+        minProfit,
+        deadline
       );
 
       // Verify profit tracking
@@ -871,12 +893,14 @@ describe('FlashLoanArbitrage', () => {
 
       // Just check the event is emitted with the correct asset and amount
       // Profit and timestamp are dynamic values
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           flashLoanAmount,
           swapPath,
-          0
+          0,
+          deadline
         )
       ).to.emit(flashLoanArbitrage, 'ArbitrageExecuted');
     });
@@ -922,11 +946,13 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await flashLoanArbitrage.executeArbitrage(
         await weth.getAddress(),
         flashLoanAmount,
         swapPath,
-        0
+        0,
+        deadline
       );
 
       const poolBalanceAfter = await weth.balanceOf(await aavePool.getAddress());
@@ -1023,12 +1049,14 @@ describe('FlashLoanArbitrage', () => {
       ];
 
       // Reentrancy attempt should fail
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
           await weth.getAddress(),
           ethers.parseEther('1'),
           swapPath,
-          0
+          0,
+          deadline
         )
       ).to.be.reverted;
     });
@@ -1104,11 +1132,13 @@ describe('FlashLoanArbitrage', () => {
         },
       ];
 
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       const tx = await flashLoanArbitrage.executeArbitrage(
         await weth.getAddress(),
         ethers.parseEther('10'),
         swapPath,
-        0
+        0,
+        deadline
       );
 
       const receipt = await tx.wait();
@@ -1249,12 +1279,14 @@ describe('FlashLoanArbitrage', () => {
         ];
 
         // Should revert with SwapPathAssetMismatch
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
         await expect(
           flashLoanArbitrage.executeArbitrage(
             await weth.getAddress(),  // Flash loan WETH
             ethers.parseEther('10'),
             swapPath,
-            0
+            0,
+            deadline
           )
         ).to.be.revertedWithCustomError(flashLoanArbitrage, 'SwapPathAssetMismatch');
       });
@@ -1306,12 +1338,14 @@ describe('FlashLoanArbitrage', () => {
           },
         ];
 
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
         await expect(
           flashLoanArbitrage.executeArbitrage(
             await weth.getAddress(),
             ethers.parseEther('10'),
             swapPath,
-            0
+            0,
+            deadline
           )
         ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientSlippageProtection');
       });
@@ -1343,12 +1377,14 @@ describe('FlashLoanArbitrage', () => {
 
         // Should not revert on validation (may revert on profit check)
         // We're just testing the slippage validation passes
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
         await expect(
           flashLoanArbitrage.executeArbitrage(
             await weth.getAddress(),
             ethers.parseEther('10'),
             swapPath,
-            0
+            0,
+            deadline
           )
         ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'InsufficientSlippageProtection');
       });
@@ -1420,12 +1456,14 @@ describe('FlashLoanArbitrage', () => {
 
         // Should work - router validation is optimized to skip repeated routers
         // Will likely revert on profit, but that's expected
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
         await expect(
           flashLoanArbitrage.executeArbitrage(
             await weth.getAddress(),
             ethers.parseEther('10'),
             swapPath,
-            0
+            0,
+            deadline
           )
         ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'RouterNotApproved');
       });
@@ -1464,6 +1502,139 @@ describe('FlashLoanArbitrage', () => {
 
         // Profit should be 0 due to truncation
         expect(profit).to.equal(0n);
+      });
+    });
+
+    describe('P2-1: Amount Validation', () => {
+      it('should revert when amount is zero', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            0, // Zero amount - should revert
+            swapPath,
+            0,
+            deadline
+          )
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidAmount');
+      });
+
+      it('should accept positive amounts', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        // Set exchange rates for profitable arbitrage
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter2.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), ethers.parseUnits('0.00051', 18));
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter2.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        // Should not revert with InvalidAmount
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('1'), // Positive amount
+            swapPath,
+            0,
+            deadline
+          )
+        ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidAmount');
+      });
+    });
+
+    describe('P2-2: Transaction Deadline', () => {
+      it('should revert when deadline has passed', async () => {
+        const { flashLoanArbitrage, dexRouter1, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        // Use a deadline in the past
+        const pastDeadline = (await ethers.provider.getBlock('latest'))!.timestamp - 1;
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('1'),
+            swapPath,
+            0,
+            pastDeadline
+          )
+        ).to.be.revertedWithCustomError(flashLoanArbitrage, 'TransactionTooOld');
+      });
+
+      it('should accept future deadlines', async () => {
+        const { flashLoanArbitrage, dexRouter1, dexRouter2, weth, usdc } = await loadFixture(deployContractsFixture);
+
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+        await flashLoanArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+
+        // Set exchange rates for profitable arbitrage
+        await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
+        await dexRouter2.setExchangeRate(await usdc.getAddress(), await weth.getAddress(), ethers.parseUnits('0.00051', 18));
+
+        const swapPath = [
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await weth.getAddress(),
+            tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter2.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+
+        // Use a deadline in the future
+        const futureDeadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        await expect(
+          flashLoanArbitrage.executeArbitrage(
+            await weth.getAddress(),
+            ethers.parseEther('1'),
+            swapPath,
+            0,
+            futureDeadline
+          )
+        ).to.not.be.revertedWithCustomError(flashLoanArbitrage, 'TransactionTooOld');
       });
     });
   });

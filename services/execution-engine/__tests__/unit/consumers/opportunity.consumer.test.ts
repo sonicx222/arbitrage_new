@@ -14,11 +14,11 @@
  * - Configurable consumer config (pendingMessageMaxAgeMs)
  */
 
-import { OpportunityConsumer, OpportunityConsumerConfig } from './opportunity.consumer';
-import type { Logger, ExecutionStats, QueueService } from '../types';
-import { ValidationErrorCode } from '../types';
+import { OpportunityConsumer, OpportunityConsumerConfig } from '../../../src/consumers/opportunity.consumer';
+import type { Logger, ExecutionStats, QueueService } from '../../../src/types';
+import { ValidationErrorCode } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import { validateMessageStructure, ValidationFailure, VALID_OPPORTUNITY_TYPES } from './validation';
+import { validateMessageStructure, ValidationFailure, VALID_OPPORTUNITY_TYPES } from '../../../src/consumers/validation';
 
 // =============================================================================
 // Mock Implementations
@@ -55,6 +55,7 @@ const createMockStats = (): ExecutionStats => ({
   riskDrawdownBlocks: 0,
   riskCautionCount: 0,
   riskHaltCount: 0,
+  staleLockRecoveries: 0,
 });
 
 const createMockQueueService = (overrides: Partial<QueueService> = {}): QueueService => ({

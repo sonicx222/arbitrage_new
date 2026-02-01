@@ -20,11 +20,11 @@ import {
   DrawdownCircuitBreaker,
   getDrawdownCircuitBreaker,
   resetDrawdownCircuitBreaker,
-} from './drawdown-circuit-breaker';
+} from '../../../src/risk/drawdown-circuit-breaker';
 import type {
   DrawdownConfig,
   TradeResult,
-} from './types';
+} from '../../../src/risk/types';
 
 // =============================================================================
 // Test Helpers

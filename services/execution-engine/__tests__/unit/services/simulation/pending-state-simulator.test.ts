@@ -17,8 +17,8 @@ import {
   PendingStateSimulator,
   type PendingStateSimulatorConfig,
   type PendingSwapIntent,
-} from './pending-state-simulator';
-import { AnvilForkManager, type AnvilForkConfig } from './anvil-manager';
+} from '../../../../src/services/simulation/pending-state-simulator';
+import { AnvilForkManager, type AnvilForkConfig } from '../../../../src/services/simulation/anvil-manager';
 
 // =============================================================================
 // Test Configuration

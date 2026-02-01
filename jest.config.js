@@ -47,8 +47,12 @@ module.exports = {
   // Per-file setup - uses the new setup file with proper singleton resets
   setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/setup/jest-setup.ts'],
 
-  // Parallelization
-  maxWorkers: process.env.CI ? 2 : '50%',
+  // P2-3.1: Removed global maxWorkers - now configured per-project for optimal performance
+  // Different test types have different parallelization needs:
+  // - Unit tests: High parallelism (CPU-bound, no shared resources)
+  // - Integration tests: Moderate (I/O-bound, shared Redis)
+  // - Performance tests: Serial only (measuring performance)
+  // maxWorkers: process.env.CI ? 2 : '50%',  // REMOVED - now per-project
 
   // Test timeout - default for non-project runs (projects override this)
   // Matches unit test timeout for consistency
@@ -92,6 +96,21 @@ module.exports = {
   // Fail fast in CI
   bail: process.env.CI ? 1 : 0,
 
+  // Reporters - Add slow test reporter for performance tracking
+  reporters: [
+    'default',
+    [
+      '<rootDir>/shared/test-utils/src/reporters/slow-test-reporter.js',
+      {
+        unitThreshold: 100, // Unit tests should be <100ms
+        integrationThreshold: 5000, // Integration tests should be <5s
+        e2eThreshold: 30000, // E2E tests should be <30s
+        outputFile: 'slow-tests.json',
+        failOnSlow: false // Don't fail CI yet - just report (set to true later if desired)
+      }
+    ]
+  ],
+
   // Projects configuration for categorized test runs
   // Run with: npm run test:unit, npm run test:integration, npm run test:e2e, npm run test:performance
   // Note: Using projectConfig (not baseConfig) to avoid including root-only options like verbose, bail, reporters
@@ -99,7 +118,12 @@ module.exports = {
     {
       displayName: 'unit',
       testMatch: ['**/__tests__/unit/**/*.test.ts', '**/__tests__/unit/**/*.spec.ts'],
-      testTimeout: 10000,
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.unit.setup.ts'
+      ],
+      // P2-3.1: High parallelism for unit tests (CPU-bound, no shared resources)
+      maxWorkers: process.env.CI ? 4 : '75%',
       ...projectConfig
     },
     {
@@ -108,25 +132,45 @@ module.exports = {
         '**/__tests__/integration/**/*.test.ts',
         '**/tests/integration/**/*.test.ts'
       ],
-      testTimeout: 60000,
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.integration.setup.ts'
+      ],
+      // P2-3.1: Moderate parallelism for integration tests (I/O-bound, shared Redis)
+      maxWorkers: process.env.CI ? 2 : '50%',
       ...projectConfig
     },
     {
       displayName: 'e2e',
       testMatch: ['**/tests/e2e/**/*.test.ts'],
-      testTimeout: 120000,
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.e2e.setup.ts'
+      ],
+      // P2-3.1: Low parallelism for e2e tests (full system tests, potential conflicts)
+      maxWorkers: process.env.CI ? 1 : 2,
       ...projectConfig
     },
     {
       displayName: 'performance',
       testMatch: ['**/tests/performance/**/*.test.ts', '**/tests/performance/**/*.perf.ts'],
-      testTimeout: 300000,
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.performance.setup.ts'
+      ],
+      // P2-3.1: MUST be serial - measuring performance requires no interference
+      maxWorkers: 1,
       ...projectConfig
     },
     {
       displayName: 'smoke',
       testMatch: ['**/tests/smoke/**/*.test.ts', '**/tests/smoke/**/*.smoke.ts'],
-      testTimeout: 30000,
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.smoke.setup.ts'
+      ],
+      // P2-3.1: Low parallelism for smoke tests (quick checks, may share resources)
+      maxWorkers: process.env.CI ? 1 : 2,
       ...projectConfig
     }
   ]

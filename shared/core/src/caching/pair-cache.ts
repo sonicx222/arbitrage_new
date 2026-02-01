@@ -16,6 +16,7 @@
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
 import { getRedisClient, RedisClient } from '../redis';
+import type { Resettable } from '@arbitrage/types';
 
 // =============================================================================
 // Types
@@ -94,7 +95,7 @@ export interface PairCacheServiceDeps {
 // Pair Cache Service
 // =============================================================================
 
-export class PairCacheService extends EventEmitter {
+export class PairCacheService extends EventEmitter implements Resettable {
   private logger = createLogger('pair-cache');
   private config: PairCacheConfig;
   private redis: RedisClient | null = null;
@@ -581,6 +582,36 @@ export class PairCacheService extends EventEmitter {
       batchOperations: 0,
       errors: 0
     };
+  }
+
+  /**
+   * Reset service state for test isolation
+   *
+   * Clears runtime state (statistics) while preserving expensive resources
+   * (Redis connection, configuration, initialization state).
+   *
+   * Use this in beforeEach() when sharing a service instance across tests
+   * (created once in beforeAll()) to ensure test isolation.
+   *
+   * @internal For testing only
+   */
+  resetState(): void {
+    // Reset statistics
+    this.stats = {
+      totalLookups: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      nullHits: 0,
+      setOperations: 0,
+      deleteOperations: 0,
+      batchOperations: 0,
+      errors: 0
+    };
+
+    // Don't reset redis connection - it's expensive to recreate
+    // Don't reset initialized flag - service should stay initialized
+    // Don't reset config - configuration should be constant
+    // Don't reset EventEmitter listeners - tests should manage their own subscriptions
   }
 }
 

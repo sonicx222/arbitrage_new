@@ -54,3 +54,73 @@ export {
   SimulationService,
   createSimulationService,
 } from './simulation';
+
+// =============================================================================
+// R4 Extracted Services (from base.strategy.ts)
+// =============================================================================
+
+// Gas price optimization service
+export {
+  GasPriceOptimizer,
+  validateGasPriceConfiguration,
+  validateGasPrice,
+  getFallbackGasPrice,
+  // Constants
+  GAS_SPIKE_MULTIPLIER_BIGINT,
+  WEI_PER_GWEI,
+  MIN_GAS_PRICE_GWEI,
+  MAX_GAS_PRICE_GWEI,
+  DEFAULT_GAS_PRICES_GWEI,
+  FALLBACK_GAS_PRICES_WEI,
+  // Types
+  type GasConfigValidationResult,
+  type GasBaselineEntry,
+  type GasPriceOptimizerConfig,
+} from './gas-price-optimizer';
+
+// Nonce allocation manager
+export {
+  NonceAllocationManager,
+  getDefaultNonceAllocationManager,
+  resetDefaultNonceAllocationManager,
+  // Standalone functions (backward compatibility)
+  acquireChainNonceLock,
+  releaseChainNonceLock,
+  checkConcurrentNonceAccess,
+  clearNonceAllocationTracking,
+  // Types
+  type NonceAllocationManagerConfig,
+} from './nonce-allocation-manager';
+
+// MEV protection service
+export {
+  MevProtectionService,
+  checkMevEligibility,
+  // Types
+  type MevEligibilityResult,
+  type MevProtectionServiceConfig,
+} from './mev-protection-service';
+
+// Bridge profitability analyzer
+export {
+  BridgeProfitabilityAnalyzer,
+  checkBridgeProfitability,
+  // Types
+  type BridgeProfitabilityOptions,
+  type BridgeProfitabilityResult,
+  type BridgeProfitabilityAnalyzerConfig,
+} from './bridge-profitability-analyzer';
+
+// =============================================================================
+// P1 FIX: Lock Conflict Tracker (extracted from engine.ts)
+// =============================================================================
+
+// Lock conflict tracker for crash recovery
+export {
+  LockConflictTracker,
+  getLockConflictTracker,
+  resetLockConflictTracker,
+  // Types
+  type ConflictInfo,
+  type LockConflictTrackerConfig,
+} from './lock-conflict-tracker';

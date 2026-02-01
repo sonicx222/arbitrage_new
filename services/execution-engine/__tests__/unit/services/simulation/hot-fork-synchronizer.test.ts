@@ -10,8 +10,8 @@
 // @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import { HotForkSynchronizer, type SynchronizerState } from './hot-fork-synchronizer';
-import type { AnvilForkManager } from './anvil-manager';
+import { HotForkSynchronizer, type SynchronizerState } from '../../../../src/services/simulation/hot-fork-synchronizer';
+import type { AnvilForkManager } from '../../../../src/services/simulation/anvil-manager';
 
 // =============================================================================
 // Mock Factories

@@ -156,3 +156,5 @@ typechain/
 typechain-types/
 deployments/localhost/
 .openzeppelin/
+slow-tests.json
+slow-tests.previous.json

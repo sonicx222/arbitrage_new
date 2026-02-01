@@ -9,8 +9,8 @@
  */
 
 import { ethers } from 'ethers';
-import { IntraChainStrategy } from './intra-chain.strategy';
-import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import { IntraChainStrategy } from '../../../src/strategies/intra-chain.strategy';
+import type { StrategyContext, ExecutionResult, Logger } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   ISimulationService,
@@ -19,7 +19,7 @@ import type {
   SimulationMetrics,
   SimulationProviderHealth,
   SimulationProviderType,
-} from '../services/simulation/types';
+} from '../../../src/services/simulation/types';
 
 // =============================================================================
 // Mock Implementations

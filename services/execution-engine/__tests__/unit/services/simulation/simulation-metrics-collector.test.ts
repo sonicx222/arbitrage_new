@@ -12,9 +12,9 @@ import {
   SimulationMetricsCollector,
   SimulationMetricsCollectorConfig,
   SimulationMetricsSnapshot,
-} from './simulation-metrics-collector';
-import type { ISimulationService, SimulationMetrics, SimulationProviderHealth, SimulationProviderType } from './types';
-import type { ExecutionStats } from '../../types';
+} from '../../../../src/services/simulation/simulation-metrics-collector';
+import type { ISimulationService, SimulationMetrics, SimulationProviderHealth, SimulationProviderType } from '../../../../src/services/simulation/types';
+import type { ExecutionStats } from '../../../../src/types';
 
 // =============================================================================
 // Test Helpers

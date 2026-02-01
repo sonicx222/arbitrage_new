@@ -8,11 +8,11 @@
 // @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import { AlchemySimulationProvider } from './alchemy-provider';
+import { AlchemySimulationProvider } from '../../../../src/services/simulation/alchemy-provider';
 import type {
   SimulationProviderConfig,
   SimulationRequest,
-} from './types';
+} from '../../../../src/services/simulation/types';
 
 // =============================================================================
 // Mock Factories

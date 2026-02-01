@@ -15,10 +15,10 @@ jest.mock('@arbitrage/config', () => ({
 
 import { ethers } from 'ethers';
 import { getNativeTokenPrice } from '@arbitrage/config';
-import { FlashLoanStrategy, FlashLoanStrategyConfig } from './flash-loan.strategy';
+import { FlashLoanStrategy, FlashLoanStrategyConfig } from '../../../src/strategies/flash-loan.strategy';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
-import type { StrategyContext, Logger, ExecutionStats, ProviderHealth } from '../types';
-import { createInitialStats } from '../types';
+import type { StrategyContext, Logger, ExecutionStats, ProviderHealth } from '../../../src/types';
+import { createInitialStats } from '../../../src/types';
 
 // =============================================================================
 // Mocks

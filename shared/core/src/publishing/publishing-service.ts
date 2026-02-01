@@ -25,6 +25,8 @@ import { RedisStreamsClient, type StreamBatcher } from '../redis-streams';
 import type { RedisClient } from '../redis';
 import type { ServiceLogger } from '../logging/types';
 import type { SwapEventFilter, WhaleAlert, VolumeAggregate } from '../analytics/swap-event-filter';
+// R7 Consolidation: Use shared retry utility
+import { retryWithLogging } from '../resilience/retry-mechanism';
 
 // =============================================================================
 // Types
@@ -289,39 +291,16 @@ export class PublishingService {
   /**
    * Publish with retry and exponential backoff.
    * Use for critical messages that must not be lost.
+   *
+   * R7 Consolidation: Now delegates to shared retryWithLogging utility.
    */
   async publishWithRetry(
     publishFn: () => Promise<void>,
     operationName: string,
     maxRetries = 3
   ): Promise<void> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await publishFn();
-        return; // Success
-      } catch (error) {
-        lastError = error as Error;
-
-        if (attempt < maxRetries) {
-          // Exponential backoff: 100ms, 200ms, 400ms...
-          const backoffMs = 100 * Math.pow(2, attempt - 1);
-          this.logger.warn(`${operationName} publish failed, retrying in ${backoffMs}ms`, {
-            attempt,
-            maxRetries,
-            error: lastError.message,
-          });
-          await this.sleep(backoffMs);
-        }
-      }
-    }
-
-    // All retries exhausted
-    this.logger.error(`${operationName} publish failed after ${maxRetries} attempts`, {
-      error: lastError,
-      operationName,
-    });
+    // R7 Consolidation: Delegate to shared utility
+    await retryWithLogging(publishFn, operationName, this.logger, { maxRetries });
   }
 
   // ===========================================================================

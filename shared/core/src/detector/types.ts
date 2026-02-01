@@ -1,17 +1,24 @@
 /**
- * Detector Connection Manager Types
+ * Detector Module Types
  * Extracted from base-detector.ts for single-responsibility principle.
  *
- * This module contains type definitions for detector connection initialization.
+ * This module contains type definitions for:
+ * - Detector connection initialization (Phase 1)
+ * - Pair initialization service (Phase 1.5)
+ *
  * NOT part of hot-path operations.
  *
  * @see ADR-002: Redis Streams Architecture
+ * @see MIGRATION_PLAN.md
  */
 
 import type { RedisClient } from '../redis';
 import type { RedisStreamsClient, StreamBatcher } from '../redis-streams';
 import type { SwapEventFilter } from '../analytics/swap-event-filter';
 import type { ServiceLogger } from '../logging';
+import type { PairDiscoveryService } from '../pair-discovery';
+import type { PairCacheService } from '../caching/pair-cache';
+import type { Dex, Token, Pair } from '../../../types/src';
 
 /**
  * Configuration for detector connection initialization.
@@ -75,3 +82,67 @@ export const DEFAULT_SWAP_FILTER_CONFIG = {
   dedupWindowMs: 5000,
   aggregationWindowMs: 5000,
 } as const;
+
+// =============================================================================
+// Pair Initialization Service Types (Phase 1.5)
+// =============================================================================
+
+/**
+ * Configuration for pair initialization.
+ */
+export interface PairInitializationConfig {
+  /** Chain identifier */
+  chain: string;
+  /** Logger instance for operation logging */
+  logger: ServiceLogger;
+  /** Array of DEXs to discover pairs on */
+  dexes: Dex[];
+  /** Array of tokens to create pairs from */
+  tokens: Token[];
+  /** Pair discovery service instance (optional) */
+  pairDiscoveryService?: PairDiscoveryService | null;
+  /** Pair cache service instance (optional) */
+  pairCacheService?: PairCacheService | null;
+}
+
+/**
+ * Result of a successful pair discovery.
+ * Contains all the data needed to register a pair in the detector.
+ */
+export interface DiscoveredPairResult {
+  /** The full pair key (e.g., "uniswap_v2_WETH/USDC") */
+  pairKey: string;
+  /** The pair data */
+  pair: Pair;
+  /** Source DEX name */
+  dex: string;
+}
+
+/**
+ * Result of the pair initialization process.
+ */
+export interface PairInitializationResult {
+  /** Array of discovered pairs */
+  pairs: DiscoveredPairResult[];
+  /** Number of pairs discovered */
+  pairsDiscovered: number;
+  /** Number of pairs that failed to be discovered */
+  pairsFailed: number;
+  /** Initialization duration in milliseconds */
+  durationMs: number;
+}
+
+/**
+ * Interface for pair address resolution.
+ * Abstracts the cache-first lookup strategy.
+ */
+export interface PairAddressResolver {
+  /**
+   * Resolve a pair address using cache-first strategy.
+   * @param dex - The DEX to look up the pair on
+   * @param token0 - First token
+   * @param token1 - Second token
+   * @returns The pair address or null if not found
+   */
+  resolve(dex: Dex, token0: Token, token1: Token): Promise<string | null>;
+}

@@ -386,3 +386,96 @@ export async function retryAdvanced<T>(
 
   throw lastError;
 }
+
+// =============================================================================
+// R7 Consolidation: Retry with Logging Utility
+// =============================================================================
+
+/**
+ * Logger interface for retryWithLogging.
+ * Compatible with ServiceLogger and console.
+ * Uses Record<string, unknown> for meta to match LogMeta type.
+ */
+export interface RetryLogger {
+  warn: (message: string, meta?: Record<string, unknown>) => void;
+  error: (message: string, meta?: Record<string, unknown>) => void;
+}
+
+/**
+ * Configuration for retryWithLogging.
+ */
+export interface RetryWithLoggingConfig {
+  /** Maximum number of retry attempts (default: 3) */
+  maxRetries?: number;
+  /** Initial delay in milliseconds (default: 100) */
+  initialDelayMs?: number;
+  /** Backoff multiplier (default: 2) */
+  backoffMultiplier?: number;
+}
+
+/**
+ * Retry with exponential backoff and integrated logging.
+ *
+ * R7 Consolidation: This utility replaces duplicate publishWithRetry implementations
+ * found in base-detector.ts and publishing-service.ts.
+ *
+ * Features:
+ * - Exponential backoff (100ms, 200ms, 400ms by default)
+ * - Logs warning on each retry attempt
+ * - Logs error on final failure
+ * - Does NOT throw - errors are logged and execution continues
+ *
+ * @param fn - The async function to retry
+ * @param operationName - Human-readable name for logging (e.g., "whale alert")
+ * @param logger - Logger instance with warn() and error() methods
+ * @param config - Optional retry configuration
+ *
+ * @example
+ * ```typescript
+ * await retryWithLogging(
+ *   () => this.publishWhaleAlert(alert),
+ *   'whale alert',
+ *   this.logger
+ * );
+ * ```
+ */
+export async function retryWithLogging(
+  fn: () => Promise<void>,
+  operationName: string,
+  logger: RetryLogger,
+  config: RetryWithLoggingConfig = {}
+): Promise<void> {
+  const {
+    maxRetries = 3,
+    initialDelayMs = 100,
+    backoffMultiplier = 2,
+  } = config;
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await fn();
+      return; // Success
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt < maxRetries) {
+        // Exponential backoff: initialDelayMs * backoffMultiplier^(attempt-1)
+        const backoffMs = initialDelayMs * Math.pow(backoffMultiplier, attempt - 1);
+        logger.warn(`${operationName} publish failed, retrying in ${backoffMs}ms`, {
+          attempt,
+          maxRetries,
+          error: lastError.message,
+        });
+        await new Promise(resolve => setTimeout(resolve, backoffMs));
+      }
+    }
+  }
+
+  // All retries exhausted - log error with full context
+  logger.error(`${operationName} publish failed after ${maxRetries} attempts`, {
+    error: lastError,
+    operationName,
+  });
+}

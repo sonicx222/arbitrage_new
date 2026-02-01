@@ -44,7 +44,13 @@ export {
   retryAdvanced,
   ErrorCategory,
   classifyError,
-  isRetryableError as isRetryableErrorCheck
+  isRetryableError as isRetryableErrorCheck,
+  // R7 Consolidation: Retry with logging utility
+  retryWithLogging
+} from './retry-mechanism';
+export type {
+  RetryLogger,
+  RetryWithLoggingConfig
 } from './retry-mechanism';
 
 // Circuit Breaker

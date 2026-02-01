@@ -8,7 +8,7 @@
 // @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import { TenderlyProvider } from './tenderly-provider';
+import { TenderlyProvider } from '../../../../src/services/simulation/tenderly-provider';
 import type {
   SimulationProviderConfig,
   SimulationRequest,

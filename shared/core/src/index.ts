@@ -1,8 +1,47 @@
+/**
+ * @arbitrage/core - Core Library
+ *
+ * R8: Public API Surface Reduction
+ *
+ * This module provides the public API for the arbitrage system. Exports are
+ * organized into three categories:
+ *
+ * ## PUBLIC API (Stable)
+ * Core services, utilities, and types that are part of the stable public API.
+ * These exports follow semantic versioning and won't have breaking changes
+ * in minor releases.
+ *
+ * ## INTERNAL API (Unstable)
+ * Implementation details, testing utilities, and low-level APIs. These may
+ * change between minor versions. For testing utilities and reset functions,
+ * prefer importing from '@arbitrage/core/internal':
+ *
+ * ```typescript
+ * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core/internal';
+ * ```
+ *
+ * ## DEPRECATED API
+ * Exports marked for removal in v2.0.0. For migration guidance, import from
+ * '@arbitrage/core/deprecated':
+ *
+ * ```typescript
+ * import { calculateIntraChainArbitrage } from '@arbitrage/core/deprecated';
+ * ```
+ *
+ * @module @arbitrage/core
+ * @version 1.0.0
+ */
+
+// =============================================================================
+// PUBLIC API: Core Services
+// =============================================================================
+
 // Core utilities exports
 export {
   RedisClient,
   RedisOperationError,
   getRedisClient,
+  /** @internal Use '@arbitrage/core/internal' for test cleanup functions */
   resetRedisInstance
 } from './redis';
 export type { RedisClientDeps, RedisConstructor } from './redis';
@@ -10,6 +49,20 @@ export type { RedisClientDeps, RedisConstructor } from './redis';
 // P1-3-FIX: Standardized singleton pattern utilities
 // P1-FIX: Added createConfigurableSingleton for singletons needing config on first init
 export { createAsyncSingleton, createSingleton, createConfigurableSingleton, singleton } from './async/async-singleton';
+
+// R6: Centralized Service Registry for singleton lifecycle management
+export {
+  ServiceRegistry,
+  getServiceRegistry,
+  resetServiceRegistry,
+  registerService,
+  getService
+} from './async/service-registry';
+export type {
+  ServiceRegistration,
+  RegisteredServiceHealth,
+  RegistryHealth
+} from './async/service-registry';
 
 // P2-2 FIX: Reusable AsyncMutex utility
 export {
@@ -172,8 +225,11 @@ export {
   // P1-2 fix: Error classification utilities
   ErrorCategory,
   classifyError,
-  isRetryableError
+  isRetryableError,
+  // R7 Consolidation: Retry with logging utility
+  retryWithLogging
 } from './resilience/retry-mechanism';
+export type { RetryLogger, RetryWithLoggingConfig } from './resilience/retry-mechanism';
 export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './resilience/graceful-degradation';
 
 // Cross-Region Health (ADR-007)
@@ -747,7 +803,10 @@ export {
   // Typed environment config utilities (standardized across P1-P4)
   parsePartitionEnvironmentConfig,
   validatePartitionEnvironmentConfig,
-  generateInstanceId
+  generateInstanceId,
+  // R9: Partition Service Runner Factory
+  createPartitionServiceRunner,
+  runPartitionService
 } from './partition-service-utils';
 export type {
   PartitionServiceConfig,
@@ -755,7 +814,11 @@ export type {
   PartitionDetectorInterface,
   ProcessHandlerCleanup,
   // Typed environment config type
-  PartitionEnvironmentConfig
+  PartitionEnvironmentConfig,
+  // R9: Partition Service Runner types
+  ServiceLifecycleState,
+  PartitionServiceRunnerOptions,
+  PartitionServiceRunner
 } from './partition-service-utils';
 
 // Partition Router (S3.1.7 - Detector Migration)
@@ -963,11 +1026,21 @@ export {
   MinHeap,
   findKSmallest,
   findKLargest,
+  // R1: LRU Cache for bounded memoization
+  LRUCache,
+  createLRUCache,
+  // R1: Numeric Rolling Window with O(1) average
+  NumericRollingWindow,
+  createNumericRollingWindow,
 } from './data-structures';
 
 export type {
   CircularBufferConfig,
   CircularBufferStats,
+  // R1: LRU Cache stats
+  LRUCacheStats,
+  // R1: Numeric Rolling Window stats
+  NumericRollingWindowStats,
 } from './data-structures';
 
 // =============================================================================
@@ -1189,12 +1262,39 @@ export {
   disconnectDetectorConnections,
   DEFAULT_BATCHER_CONFIG,
   DEFAULT_SWAP_FILTER_CONFIG,
+  // Phase 1.5: Pair Initialization Service
+  initializePairs,
+  resolvePairAddress,
+  createTokenPairKey,
+  buildFullPairKey,
+  // R5: Health Monitor
+  DetectorHealthMonitor,
+  createDetectorHealthMonitor,
+  // R5: Factory Integration
+  FactoryIntegrationService,
+  createFactoryIntegrationService,
 } from './detector';
 
 export type {
   DetectorConnectionConfig,
   DetectorConnectionResources,
   EventFilterHandlers,
+  // Phase 1.5: Pair Initialization Service types
+  PairInitializationConfig,
+  PairInitializationResult,
+  DiscoveredPairResult,
+  PairAddressResolver,
+  // R5: Health Monitor types
+  HealthMonitorConfig,
+  DetectorHealthStatus,
+  HealthMonitorDeps,
+  HealthMonitorRedis,
+  HealthMonitorPerfLogger,
+  // R5: Factory Integration types
+  FactoryIntegrationConfig,
+  FactoryIntegrationHandlers,
+  FactoryIntegrationDeps,
+  FactoryIntegrationResult,
 } from './detector';
 
 // =============================================================================
@@ -1251,3 +1351,42 @@ export {
   lazy,
   lazyAsync,
 } from './utils/performance-utils';
+
+// =============================================================================
+// R8: ALTERNATIVE IMPORT PATHS
+// =============================================================================
+
+/**
+ * Internal API Re-exports
+ *
+ * These exports are provided for backward compatibility. For new code, prefer
+ * importing directly from '@arbitrage/core/internal' to make the internal
+ * nature explicit:
+ *
+ * ```typescript
+ * // Preferred: explicit internal import
+ * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core/internal';
+ *
+ * // Backward compatible: still works
+ * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core';
+ * ```
+ *
+ * @see internal/index.ts for the full list of internal exports
+ */
+export * from './internal';
+
+/**
+ * Deprecated API Re-exports
+ *
+ * These exports are provided for backward compatibility. They will be removed
+ * in v2.0.0. Import from '@arbitrage/core/deprecated' for migration guidance:
+ *
+ * ```typescript
+ * // Explicit deprecated import (recommended during migration)
+ * import { calculateIntraChainArbitrage } from '@arbitrage/core/deprecated';
+ * ```
+ *
+ * @see deprecated/index.ts for migration documentation
+ * @deprecated Will be removed in v2.0.0
+ */
+export * from './deprecated';

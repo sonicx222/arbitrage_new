@@ -5,8 +5,8 @@
  * The configuration has been split into organized submodules for maintainability:
  *
  * - chains/: Blockchain configurations (11 chains)
- * - dexes/: DEX configurations (54 DEXes)
- * - tokens/: Token configurations (143 tokens)
+ * - dexes/: DEX configurations (49 DEXes)
+ * - tokens/: Token configurations (112 tokens)
  * - thresholds.ts: Performance and arbitrage thresholds
  * - mev-config.ts: MEV protection settings
  * - event-config.ts: Event monitoring settings

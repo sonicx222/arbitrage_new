@@ -45,9 +45,9 @@ import {
   type TradingAllowedResult,
   type EVCalculation,
   type PositionSize,
-  // P0-FIX 1.7: Import for efficient O(n log k) eviction
-  findKSmallest,
 } from '@arbitrage/core';
+// P1 FIX: Import extracted lock conflict tracker
+import { LockConflictTracker } from './services/lock-conflict-tracker';
 import { RISK_CONFIG } from '@arbitrage/config';
 // FIX 1.1: Import initialization module instead of duplicating initialization logic
 import {
@@ -207,20 +207,9 @@ export class ExecutionEngineService {
   private readonly maxConcurrentExecutions = 5; // Limit parallel executions
   private isProcessingQueue = false; // Guard against concurrent processQueueItems calls
 
-  // SPRINT 1 FIX: Lock holder crash recovery tracking
+  // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
-  // Key: opportunity ID, Value: { firstSeen: timestamp, count: number of conflicts }
-  private lockConflictTracker: Map<string, { firstSeen: number; count: number }> = new Map();
-  // After this many consecutive lock conflicts over CRASH_RECOVERY_WINDOW_MS, force release lock
-  private readonly CRASH_RECOVERY_CONFLICT_THRESHOLD = 3;
-  // Time window (ms) within which conflicts are considered consecutive (30 seconds)
-  private readonly CRASH_RECOVERY_WINDOW_MS = 30000;
-  // Minimum time since first conflict before considering force release (20 seconds)
-  // This gives legitimate lock holders time to complete
-  private readonly CRASH_RECOVERY_MIN_AGE_MS = 20000;
-  // P0-FIX 1.7: Maximum size limit to prevent unbounded memory growth
-  // Under extreme load, tracker could grow unbounded without this limit
-  private readonly MAX_LOCK_CONFLICT_ENTRIES = 1000;
+  private lockConflictTracker = new LockConflictTracker();
 
   // Intervals
   private executionProcessingInterval: NodeJS.Timeout | null = null;
@@ -1128,21 +1117,21 @@ export class ExecutionEngineService {
     if (!lockResult.success) {
       if (lockResult.reason === 'lock_not_acquired') {
         // SPRINT 1 FIX: Crash recovery for stuck locks
-        // Track this conflict and check if lock holder may have crashed
-        const shouldForceRelease = this.trackLockConflict(opportunity.id);
+        // P1 FIX: Use extracted LockConflictTracker for crash detection
+        const shouldForceRelease = this.lockConflictTracker.recordConflict(opportunity.id);
 
         if (shouldForceRelease) {
           // Lock holder appears to have crashed - force release and retry
           this.logger.warn('Detected potential crashed lock holder - force releasing lock', {
             id: opportunity.id,
-            conflictCount: this.lockConflictTracker.get(opportunity.id)?.count
+            conflictCount: this.lockConflictTracker.getConflictInfo(opportunity.id)?.count
           });
 
           const released = await this.lockManager.forceRelease(lockResourceId);
           if (released) {
             this.stats.staleLockRecoveries++;
             // Clear tracker and retry execution
-            this.lockConflictTracker.delete(opportunity.id);
+            this.lockConflictTracker.clear(opportunity.id);
 
             // Retry with fresh lock acquisition
             const retryResult = await this.lockManager.withLock(
@@ -1197,7 +1186,7 @@ export class ExecutionEngineService {
       }
     } else {
       // Success - clear any conflict tracking for this opportunity
-      this.lockConflictTracker.delete(opportunity.id);
+      this.lockConflictTracker.clear(opportunity.id);
     }
 
     // ACK the message only after we've processed it (success or execution_error)
@@ -1205,90 +1194,8 @@ export class ExecutionEngineService {
     await this.opportunityConsumer?.ackMessageAfterExecution(opportunity.id);
   }
 
-  /**
-   * SPRINT 1 FIX: Track lock conflicts for crash recovery detection.
-   *
-   * When the same opportunity experiences multiple lock conflicts within a time window,
-   * it may indicate the lock holder has crashed without releasing the lock.
-   *
-   * @param opportunityId - The opportunity that couldn't acquire the lock
-   * @returns true if the lock should be force-released (holder likely crashed)
-   */
-  private trackLockConflict(opportunityId: string): boolean {
-    const now = Date.now();
-    const existing = this.lockConflictTracker.get(opportunityId);
-
-    if (existing) {
-      // Check if this conflict is within the tracking window
-      const age = now - existing.firstSeen;
-
-      if (age > this.CRASH_RECOVERY_WINDOW_MS) {
-        // Old entry - reset tracking
-        this.lockConflictTracker.set(opportunityId, { firstSeen: now, count: 1 });
-        return false;
-      }
-
-      // Increment conflict count
-      existing.count++;
-
-      // Check if we should force release:
-      // 1. Enough conflicts have occurred (threshold)
-      // 2. Enough time has passed (give legitimate holders a chance)
-      if (
-        existing.count >= this.CRASH_RECOVERY_CONFLICT_THRESHOLD &&
-        age >= this.CRASH_RECOVERY_MIN_AGE_MS
-      ) {
-        return true;
-      }
-
-      return false;
-    }
-
-    // First conflict for this opportunity - start tracking
-    this.lockConflictTracker.set(opportunityId, { firstSeen: now, count: 1 });
-    return false;
-  }
-
-  /**
-   * SPRINT 1 FIX: Clean up stale entries from the lock conflict tracker.
-   * Called periodically from health monitoring.
-   *
-   * P0-FIX 1.7: Also enforces size limit to prevent unbounded memory growth.
-   * Uses findKSmallest for O(n log k) eviction of oldest entries.
-   */
-  private cleanupStaleLockConflictTracking(): void {
-    const now = Date.now();
-    const staleThreshold = this.CRASH_RECOVERY_WINDOW_MS * 2; // 60 seconds
-
-    // Phase 1: Remove stale entries (older than threshold)
-    for (const [id, info] of this.lockConflictTracker) {
-      if (now - info.firstSeen > staleThreshold) {
-        this.lockConflictTracker.delete(id);
-      }
-    }
-
-    // P0-FIX 1.7 Phase 2: Enforce size limit by removing oldest entries
-    // This prevents unbounded memory growth under extreme load
-    if (this.lockConflictTracker.size > this.MAX_LOCK_CONFLICT_ENTRIES) {
-      const removeCount = this.lockConflictTracker.size - this.MAX_LOCK_CONFLICT_ENTRIES;
-
-      // Use findKSmallest for O(n log k) instead of sorting all entries O(n log n)
-      const oldestK = findKSmallest(
-        this.lockConflictTracker.entries(),
-        removeCount,
-        ([, a], [, b]) => a.firstSeen - b.firstSeen
-      );
-
-      for (const [id] of oldestK) {
-        this.lockConflictTracker.delete(id);
-      }
-
-      this.logger.debug('Lock conflict tracker size enforced', {
-        removedCount: removeCount,
-        newSize: this.lockConflictTracker.size
-      });
-    }
-  }
+  // P1 FIX: Lock conflict tracking methods moved to LockConflictTracker class
+  // See: services/lock-conflict-tracker.ts
 
   private async executeWithTimeout(opportunity: ArbitrageOpportunity): Promise<void> {
     let timeoutId: NodeJS.Timeout | null = null;
@@ -1611,8 +1518,8 @@ export class ExecutionEngineService {
         // Fix 4.2: Cleanup old gas baseline entries to prevent memory leak
         this.cleanupGasBaselines();
 
-        // SPRINT 1 FIX: Cleanup stale lock conflict tracking entries
-        this.cleanupStaleLockConflictTracking();
+        // P1 FIX: Cleanup stale lock conflict tracking entries
+        this.lockConflictTracker.cleanup();
 
         const health: ServiceHealth = {
           name: 'execution-engine',

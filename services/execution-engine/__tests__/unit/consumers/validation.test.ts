@@ -19,8 +19,8 @@ import {
   type ValidationResult,
   type BusinessRuleResult,
   type BusinessRuleConfig,
-} from './validation';
-import { ValidationErrorCode } from '../types';
+} from '../../../src/consumers/validation';
+import { ValidationErrorCode } from '../../../src/types';
 
 // =============================================================================
 // Test Utilities

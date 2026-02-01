@@ -15,13 +15,34 @@ import {
   CircuitBreakerState,
   CircuitBreakerEvent,
   createCircuitBreaker,
-} from './circuit-breaker';
-import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from '../types';
+} from '../../../src/services/circuit-breaker';
+import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from '../../../src/types';
 
 // =============================================================================
 // Test Helpers
 // =============================================================================
 
+/**
+ * Creates a mock logger for testing CircuitBreaker.
+ *
+ * **Mock Configuration:**
+ * - All log methods (info, warn, error, debug) are Jest spies
+ * - No actual console output during tests
+ * - Allows verification of logging behavior (e.g., warnings on force-close)
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockLogger = createMockLogger();
+ * const cb = createCircuitBreaker({ logger: mockLogger });
+ *
+ * // Verify circuit breaker logged a warning
+ * expect(mockLogger.warn).toHaveBeenCalledWith(
+ *   expect.stringContaining('disabled')
+ * );
+ * ```
+ *
+ * @returns Mock logger with Jest spy methods
+ */
 function createMockLogger() {
   return {
     info: jest.fn(),
@@ -31,6 +52,37 @@ function createMockLogger() {
   };
 }
 
+/**
+ * Creates a mock event emitter that captures CircuitBreakerEvent emissions.
+ *
+ * **Mock Configuration:**
+ * - `emit` is a Jest spy that captures all events
+ * - `getEvents()` returns array of all emitted events
+ * - `clear()` resets the events array for test isolation
+ *
+ * **Purpose:**
+ * Allows tests to verify circuit breaker state transitions by inspecting
+ * the emitted events (e.g., CLOSED → OPEN when threshold is reached).
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockEventEmitter = createMockEventEmitter();
+ * const cb = createCircuitBreaker({ onStateChange: mockEventEmitter.emit });
+ *
+ * // Trip the circuit
+ * for (let i = 0; i < 5; i++) cb.recordFailure();
+ *
+ * // Verify state change event was emitted
+ * expect(mockEventEmitter.emit).toHaveBeenCalledWith(
+ *   expect.objectContaining({
+ *     previousState: 'CLOSED',
+ *     newState: 'OPEN'
+ *   })
+ * );
+ * ```
+ *
+ * @returns Mock event emitter with event capture and inspection methods
+ */
 function createMockEventEmitter() {
   const events: CircuitBreakerEvent[] = [];
   return {
@@ -42,7 +94,28 @@ function createMockEventEmitter() {
   };
 }
 
-// Helper to advance time in tests
+/**
+ * Advances Jest fake timers for testing time-dependent circuit breaker behavior.
+ *
+ * **Purpose:**
+ * Circuit breaker uses cooldown periods and timestamps. This helper advances
+ * Jest's fake timers to test cooldown expiry, HALF_OPEN transitions, etc.
+ *
+ * **Usage:**
+ * ```typescript
+ * // Trip circuit (enters OPEN state with 60s cooldown)
+ * for (let i = 0; i < 5; i++) cb.recordFailure();
+ *
+ * // Wait for cooldown to expire
+ * advanceTime(60001);
+ *
+ * // Should now transition to HALF_OPEN
+ * expect(cb.canExecute()).toBe(true);
+ * expect(cb.getState()).toBe('HALF_OPEN');
+ * ```
+ *
+ * @param ms - Milliseconds to advance timers
+ */
 function advanceTime(ms: number): void {
   jest.advanceTimersByTime(ms);
 }
@@ -73,7 +146,15 @@ describe('CircuitBreaker', () => {
   // ===========================================================================
 
   describe('constructor and defaults', () => {
-    it('should initialize with CLOSED state', () => {
+    /**
+     * GIVEN: A new circuit breaker instance with no configuration
+     * WHEN: The circuit breaker is created
+     * THEN: It should be ready to protect executions (CLOSED state allows execution)
+     *
+     * **Business Value**: Ensures the circuit breaker starts in a safe state,
+     * allowing executions to proceed normally until failures occur.
+     */
+    it('should be ready to protect executions when first created', () => {
       circuitBreaker = createCircuitBreaker({
         logger: mockLogger,
         onStateChange: mockEventEmitter.emit,
@@ -84,7 +165,15 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.canExecute()).toBe(true);
     });
 
-    it('should use default config values', () => {
+    /**
+     * GIVEN: No explicit configuration is provided
+     * WHEN: Creating a circuit breaker
+     * THEN: Sensible defaults should be applied (5 failures, 5min cooldown, 2 attempts)
+     *
+     * **Business Value**: Developers can use circuit breaker with reasonable
+     * protection without needing to research optimal thresholds.
+     */
+    it('should use sensible defaults when no configuration is provided', () => {
       circuitBreaker = createCircuitBreaker({
         logger: mockLogger,
         onStateChange: mockEventEmitter.emit,
@@ -96,7 +185,15 @@ describe('CircuitBreaker', () => {
       expect(config.halfOpenMaxAttempts).toBe(DEFAULT_CIRCUIT_BREAKER_CONFIG.halfOpenMaxAttempts);
     });
 
-    it('should accept custom config values', () => {
+    /**
+     * GIVEN: Custom thresholds and cooldown periods
+     * WHEN: Creating a circuit breaker with explicit configuration
+     * THEN: Configuration should be respected for tuning risk tolerance
+     *
+     * **Business Value**: Different execution contexts (e.g., testnet vs mainnet,
+     * low-value vs high-value opportunities) can use appropriate risk thresholds.
+     */
+    it('should allow tuning failure thresholds for different risk tolerances', () => {
       circuitBreaker = createCircuitBreaker({
         logger: mockLogger,
         onStateChange: mockEventEmitter.emit,
@@ -120,7 +217,15 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.isEnabled()).toBe(true);
     });
 
-    it('should allow starting disabled via config', () => {
+    /**
+     * GIVEN: Configuration with enabled=false
+     * WHEN: Creating a circuit breaker
+     * THEN: Circuit breaker should always allow execution (bypass mode for testing)
+     *
+     * **Business Value**: Allows testing execution logic without circuit breaker
+     * interference, useful for debugging specific failures.
+     */
+    it('should allow creating a bypassed circuit breaker for testing', () => {
       circuitBreaker = createCircuitBreaker({
         logger: mockLogger,
         onStateChange: mockEventEmitter.emit,
@@ -147,7 +252,15 @@ describe('CircuitBreaker', () => {
       });
     });
 
-    it('should track consecutive failures', () => {
+    /**
+     * GIVEN: Circuit breaker is recording execution failures
+     * WHEN: Multiple failures occur in sequence
+     * THEN: Consecutive failure count should increment to detect threshold approach
+     *
+     * **Business Value**: Tracks failure progression to determine when to halt
+     * executions and prevent capital drain.
+     */
+    it('should count failures to detect when threshold is approaching', () => {
       circuitBreaker.recordFailure();
       expect(circuitBreaker.getConsecutiveFailures()).toBe(1);
 
@@ -155,7 +268,16 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.getConsecutiveFailures()).toBe(2);
     });
 
-    it('should reset failure count on success', () => {
+    /**
+     * GIVEN: Circuit breaker has tracked some failures
+     * WHEN: A successful execution is recorded
+     * THEN: Failure history should be cleared (problem is resolved)
+     *
+     * **Business Value**: Allows system to recover naturally when executions
+     * succeed, without manual intervention. One success indicates the underlying
+     * issue (e.g., network instability, gas price spike) has resolved.
+     */
+    it('should clear failure history when execution succeeds', () => {
       circuitBreaker.recordFailure();
       circuitBreaker.recordFailure();
       expect(circuitBreaker.getConsecutiveFailures()).toBe(2);
@@ -164,12 +286,22 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.getConsecutiveFailures()).toBe(0);
     });
 
-    it('should trip circuit after reaching threshold', () => {
-      // Record failures up to threshold
+    /**
+     * GIVEN: Circuit breaker has recorded consecutive failures
+     * WHEN: Failure count reaches the configured threshold (5)
+     * THEN: Circuit should trip (OPEN state) and block all new executions
+     *
+     * **Business Value**: Prevents continued capital loss when executions are
+     * consistently failing. Stops the bleeding by halting all new executions
+     * until the issue can be investigated.
+     */
+    it('should stop all executions after consecutive failures exceed threshold', () => {
+      // Given: Recording failures up to threshold
       for (let i = 0; i < 5; i++) {
         circuitBreaker.recordFailure();
       }
 
+      // Then: Circuit trips and blocks executions
       expect(circuitBreaker.getState()).toBe('OPEN');
       expect(circuitBreaker.isOpen()).toBe(true);
       expect(circuitBreaker.canExecute()).toBe(false);
@@ -190,7 +322,16 @@ describe('CircuitBreaker', () => {
       );
     });
 
-    it('should not trip before reaching threshold', () => {
+    /**
+     * GIVEN: Circuit breaker is tracking failures below threshold
+     * WHEN: Failure count has not reached threshold (4 of 5)
+     * THEN: Executions should continue to be allowed
+     *
+     * **Business Value**: Allows tolerance for occasional failures without
+     * prematurely halting executions. Only trips when pattern of consecutive
+     * failures indicates systemic issue.
+     */
+    it('should continue allowing executions until failure threshold is reached', () => {
       for (let i = 0; i < 4; i++) {
         circuitBreaker.recordFailure();
       }
@@ -214,30 +355,49 @@ describe('CircuitBreaker', () => {
       });
     });
 
-    it('should remain OPEN during cooldown period', () => {
-      // Trip the circuit
+    /**
+     * GIVEN: Circuit has tripped and entered OPEN state
+     * WHEN: Cooldown period has not yet expired
+     * THEN: Circuit should continue blocking all executions
+     *
+     * **Business Value**: Provides time for underlying issues (network problems,
+     * gas price spikes, RPC failures) to resolve before attempting recovery.
+     * Prevents premature retry attempts that would waste gas.
+     */
+    it('should continue blocking executions during cooldown period', () => {
+      // Given: Trip the circuit
       for (let i = 0; i < 3; i++) {
         circuitBreaker.recordFailure();
       }
       expect(circuitBreaker.getState()).toBe('OPEN');
 
-      // Advance time but not past cooldown
-      advanceTime(30000); // 30 seconds
+      // When: Advance time but not past cooldown (30 of 60 seconds)
+      advanceTime(30000);
 
+      // Then: Continue blocking executions
       expect(circuitBreaker.getState()).toBe('OPEN');
       expect(circuitBreaker.canExecute()).toBe(false);
     });
 
-    it('should transition to HALF_OPEN after cooldown expires', () => {
-      // Trip the circuit
+    /**
+     * GIVEN: Circuit has completed cooldown period
+     * WHEN: First execution is attempted after cooldown
+     * THEN: Circuit should allow limited test executions (HALF_OPEN state)
+     *
+     * **Business Value**: Enables cautious recovery by allowing a few test
+     * executions to verify the underlying issue has resolved before fully
+     * reopening and risking capital on potentially still-failing executions.
+     */
+    it('should allow limited test executions after cooldown expires', () => {
+      // Given: Trip the circuit
       for (let i = 0; i < 3; i++) {
         circuitBreaker.recordFailure();
       }
 
-      // Advance past cooldown
+      // When: Advance past cooldown (60 seconds + 1ms)
       advanceTime(60001);
 
-      // Attempt to execute should transition to HALF_OPEN
+      // Then: Attempt to execute should transition to HALF_OPEN
       expect(circuitBreaker.canExecute()).toBe(true);
       expect(circuitBreaker.getState()).toBe('HALF_OPEN');
     });
@@ -262,13 +422,21 @@ describe('CircuitBreaker', () => {
       );
     });
 
-    it('should report remaining cooldown time', () => {
-      // Trip the circuit
+    /**
+     * GIVEN: Circuit is in cooldown period
+     * WHEN: Querying remaining cooldown time
+     * THEN: Should provide accurate time remaining until recovery attempts
+     *
+     * **Business Value**: Allows operators to monitor when the circuit will
+     * attempt recovery, aiding in incident response and coordination.
+     */
+    it('should provide visibility into when recovery attempts can begin', () => {
+      // Given: Trip the circuit
       for (let i = 0; i < 3; i++) {
         circuitBreaker.recordFailure();
       }
 
-      // Check cooldown remaining
+      // When: Check cooldown remaining
       const remaining = circuitBreaker.getCooldownRemaining();
       expect(remaining).toBeGreaterThan(0);
       expect(remaining).toBeLessThanOrEqual(60000);
@@ -301,13 +469,31 @@ describe('CircuitBreaker', () => {
       circuitBreaker.canExecute(); // Trigger HALF_OPEN
     });
 
-    it('should allow limited executions in HALF_OPEN state', () => {
+    /**
+     * GIVEN: Circuit has entered HALF_OPEN state after cooldown
+     * WHEN: Attempting to check if execution is allowed
+     * THEN: Limited test executions should be permitted
+     *
+     * **Business Value**: Enables cautious testing of whether the underlying
+     * issue has resolved, without fully reopening and risking capital on
+     * potentially still-failing executions.
+     */
+    it('should enable cautious testing of whether issue is resolved', () => {
       expect(circuitBreaker.getState()).toBe('HALF_OPEN');
       // First call should return true (attempt 1 of 2)
       expect(circuitBreaker.canExecute()).toBe(true);
     });
 
-    it('should enforce halfOpenMaxAttempts limit', () => {
+    /**
+     * GIVEN: Circuit is in HALF_OPEN state with max attempts configured (2)
+     * WHEN: Execution attempts exceed the configured limit
+     * THEN: Further attempts should be blocked to prevent excessive testing
+     *
+     * **Business Value**: Prevents too many test executions during recovery,
+     * limiting potential capital loss if the issue is not yet resolved.
+     * Forces another cooldown period for more recovery time.
+     */
+    it('should prevent too many test executions during recovery', () => {
       // Reset to create fresh circuit breaker with maxAttempts = 2
       circuitBreaker.stop();
       circuitBreaker = createCircuitBreaker({
@@ -335,14 +521,32 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.canExecute()).toBe(false);
     });
 
-    it('should close circuit after successful execution in HALF_OPEN', () => {
+    /**
+     * GIVEN: Circuit is in HALF_OPEN state (testing recovery)
+     * WHEN: A test execution succeeds
+     * THEN: Circuit should fully reopen to normal operations (CLOSED state)
+     *
+     * **Business Value**: Enables automatic recovery when the underlying issue
+     * (network instability, gas spike, etc.) has resolved. Resumes normal
+     * execution flow without manual intervention.
+     */
+    it('should resume normal operations after successful test execution', () => {
       circuitBreaker.recordSuccess();
 
       expect(circuitBreaker.getState()).toBe('CLOSED');
       expect(circuitBreaker.getConsecutiveFailures()).toBe(0);
     });
 
-    it('should re-open circuit after failure in HALF_OPEN', () => {
+    /**
+     * GIVEN: Circuit is in HALF_OPEN state (testing recovery)
+     * WHEN: A test execution fails
+     * THEN: Circuit should immediately trip back to OPEN (issue not resolved)
+     *
+     * **Business Value**: Quickly halts recovery attempts if the underlying
+     * issue persists, preventing further capital loss. Restarts cooldown
+     * period for more recovery time.
+     */
+    it('should immediately halt recovery if test execution fails', () => {
       mockEventEmitter.emit.mockClear();
       circuitBreaker.recordFailure();
 
@@ -383,16 +587,27 @@ describe('CircuitBreaker', () => {
       });
     });
 
-    it('should allow manual force-close', () => {
-      // Trip the circuit
+    /**
+     * GIVEN: Circuit has tripped and is blocking executions
+     * WHEN: Operator manually force-closes the circuit
+     * THEN: Executions should resume immediately (bypassing cooldown)
+     *
+     * **Business Value**: Enables operators to manually resume operations during
+     * incidents when they've identified and fixed the underlying issue (e.g.,
+     * restarted failing RPC, adjusted gas prices, fixed contract bug).
+     * Prevents unnecessary downtime when issue is confirmed resolved.
+     */
+    it('should allow operators to manually resume operations during incidents', () => {
+      // Given: Trip the circuit
       for (let i = 0; i < 3; i++) {
         circuitBreaker.recordFailure();
       }
       expect(circuitBreaker.getState()).toBe('OPEN');
 
-      // Force close
+      // When: Force close
       circuitBreaker.forceClose();
 
+      // Then: Resume operations
       expect(circuitBreaker.getState()).toBe('CLOSED');
       expect(circuitBreaker.canExecute()).toBe(true);
       expect(circuitBreaker.getConsecutiveFailures()).toBe(0);
@@ -428,7 +643,17 @@ describe('CircuitBreaker', () => {
       );
     });
 
-    it('should allow manual force-open', () => {
+    /**
+     * GIVEN: Circuit is operating normally (CLOSED)
+     * WHEN: Operator manually force-opens the circuit
+     * THEN: All executions should be blocked immediately
+     *
+     * **Business Value**: Enables emergency shutdowns during critical incidents
+     * (e.g., contract vulnerability discovered, exchange API compromised,
+     * regulatory issues). Provides immediate capital protection without
+     * waiting for failures to accumulate.
+     */
+    it('should allow operators to halt executions during emergencies', () => {
       expect(circuitBreaker.getState()).toBe('CLOSED');
 
       circuitBreaker.forceOpen('manual_test');
@@ -469,17 +694,26 @@ describe('CircuitBreaker', () => {
       expect(circuitBreaker.isEnabled()).toBe(false);
     });
 
-    it('should always allow execution when disabled', () => {
-      // Trip the circuit first
+    /**
+     * GIVEN: Circuit breaker is disabled (bypass mode)
+     * WHEN: Checking if execution is allowed (even if circuit has tripped)
+     * THEN: Execution should always be allowed regardless of state
+     *
+     * **Business Value**: Enables debugging and testing of execution logic
+     * without circuit breaker interference. Useful for investigating specific
+     * failures or testing in controlled environments (testnet, staging).
+     */
+    it('should bypass all protection when disabled for testing', () => {
+      // Given: Trip the circuit first
       for (let i = 0; i < 3; i++) {
         circuitBreaker.recordFailure();
       }
       expect(circuitBreaker.canExecute()).toBe(false);
 
-      // Disable
+      // When: Disable
       circuitBreaker.disable();
 
-      // Should now allow execution even though OPEN
+      // Then: Should now allow execution even though OPEN
       expect(circuitBreaker.canExecute()).toBe(true);
     });
 

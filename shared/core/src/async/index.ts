@@ -66,3 +66,17 @@ export {
   tryWithLock
 } from './queue-lock';
 export type { QueueLockStats } from './queue-lock';
+
+// R6: Service Registry (centralized singleton management)
+export {
+  ServiceRegistry,
+  getServiceRegistry,
+  resetServiceRegistry,
+  registerService,
+  getService
+} from './service-registry';
+export type {
+  ServiceRegistration,
+  RegisteredServiceHealth,
+  RegistryHealth
+} from './service-registry';

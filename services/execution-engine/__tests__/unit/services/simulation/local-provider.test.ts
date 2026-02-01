@@ -11,12 +11,12 @@
 // @ts-nocheck - Test file with mock objects that don't need strict typing
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
-import { LocalSimulationProvider, createLocalProvider } from './local-provider';
+import { LocalSimulationProvider, createLocalProvider } from '../../../../src/services/simulation/local-provider';
 import type {
   SimulationProviderConfig,
   SimulationRequest,
   SimulationResult,
-} from './types';
+} from '../../../../src/services/simulation/types';
 
 // =============================================================================
 // Mock Factories

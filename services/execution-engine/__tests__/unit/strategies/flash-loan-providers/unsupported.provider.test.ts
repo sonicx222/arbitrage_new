@@ -10,8 +10,8 @@
  */
 
 // Jest is used globally by the project
-import { UnsupportedFlashLoanProvider } from './unsupported.provider';
-import type { FlashLoanRequest, FlashLoanSwapStep } from './types';
+import { UnsupportedFlashLoanProvider } from '../../../../src/strategies/flash-loan-providers/unsupported.provider';
+import type { FlashLoanRequest, FlashLoanSwapStep } from '../../../../src/strategies/flash-loan-providers/types';
 
 describe('UnsupportedFlashLoanProvider', () => {
   // Test fixtures

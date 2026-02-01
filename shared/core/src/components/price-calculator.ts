@@ -259,16 +259,28 @@ export function calculateSpreadSafe(price1: number, price2: number): number {
 /**
  * Calculate net profit after fees.
  *
+ * P2-2 FIX: Added input validation for NaN and infinite values.
+ *
  * @param grossSpread - Gross spread as decimal (from calculateSpread)
  * @param fee1 - First swap fee as decimal (e.g., 0.003 = 0.3%)
  * @param fee2 - Second swap fee as decimal
- * @returns Net profit as decimal (may be negative)
+ * @returns Net profit as decimal (may be negative), or 0 if inputs invalid
  */
 export function calculateNetProfit(
   grossSpread: number,
   fee1: number,
   fee2: number
 ): number {
+  // P2-2 FIX: Guard against NaN/Infinity propagation
+  if (!Number.isFinite(grossSpread) || !Number.isFinite(fee1) || !Number.isFinite(fee2)) {
+    return 0;
+  }
+
+  // P2-2 FIX: Guard against negative fees (invalid input)
+  if (fee1 < 0 || fee2 < 0) {
+    return 0;
+  }
+
   const totalFees = fee1 + fee2;
   return grossSpread - totalFees;
 }
@@ -276,6 +288,8 @@ export function calculateNetProfit(
 /**
  * Calculate complete spread result between two price sources.
  * This is the main entry point for profit calculations.
+ *
+ * P2-2 FIX: Added comprehensive input validation.
  *
  * @param source1 - First price source
  * @param source2 - Second price source
@@ -288,11 +302,31 @@ export function calculateProfitBetweenSources(
   const price1 = source1.price;
   const price2 = source2.price;
 
+  // P2-2 FIX: Validate inputs early to prevent NaN propagation
+  const validPrice1 = isValidPrice(price1);
+  const validPrice2 = isValidPrice(price2);
+
+  // If either price is invalid, return a "no opportunity" result
+  if (!validPrice1 || !validPrice2) {
+    return {
+      grossSpread: 0,
+      totalFees: 0,
+      netProfit: 0,
+      buyPrice: 0,
+      sellPrice: 0,
+      isProfitable: false,
+      buySource: source1.source,
+      sellSource: source2.source,
+    };
+  }
+
   // Calculate spread using canonical formula
   const grossSpread = calculateSpreadSafe(price1, price2);
 
-  // Calculate total fees
-  const totalFees = source1.fee + source2.fee;
+  // P2-2 FIX: Validate fees (use 0 for invalid/negative fees)
+  const fee1 = isValidFee(source1.fee) ? source1.fee : 0;
+  const fee2 = isValidFee(source2.fee) ? source2.fee : 0;
+  const totalFees = fee1 + fee2;
 
   // Net profit
   const netProfit = grossSpread - totalFees;

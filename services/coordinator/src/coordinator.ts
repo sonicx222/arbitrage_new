@@ -5,12 +5,21 @@
  * Uses Redis Streams for event consumption (ADR-002) and implements
  * leader election for failover (ADR-007).
  *
- * REFACTORED: Routes and middleware extracted to api/ folder.
+ * REFACTORED:
+ * - Routes and middleware extracted to api/ folder
+ * - R2: Leadership → leadership/ folder (LeadershipElectionService)
+ * - R2: Streaming → streaming/ folder (StreamConsumerManager, StreamRateLimiter)
+ * - R2: Health monitoring → health/ folder (HealthMonitor)
+ * - R2: Opportunities → opportunities/ folder (OpportunityRouter)
  *
  * @see ARCHITECTURE_V2.md Section 4.5 (Layer 5: Coordination)
  * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-007: Failover Strategy
  * @see api/ folder for extracted routes and middleware
+ * @see streaming/ folder for stream consumer management
+ * @see health/ folder for health monitoring
+ * @see opportunities/ folder for opportunity routing
+ * @see leadership/ folder for leader election
  */
 import http from 'http';
 import express from 'express';
@@ -26,7 +35,9 @@ import {
   ServiceStateManager,
   createServiceState,
   StreamConsumer,
-  getStreamHealthMonitor
+  getStreamHealthMonitor,
+  // R7 Consolidation: Use shared SimpleCircuitBreaker instead of inline implementation
+  SimpleCircuitBreaker
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { isAuthEnabled } from '@shared/security';
@@ -57,6 +68,11 @@ import {
   hasRequiredString,
   findKSmallest
 } from './utils';
+
+// R2: Import extracted subsystem modules
+import { StreamConsumerManager, StreamRateLimiter } from './streaming';
+import { HealthMonitor, DegradationLevel } from './health';
+import { OpportunityRouter } from './opportunities';
 
 // =============================================================================
 // Service Name Patterns (FIX 3.2: Configurable instead of hardcoded)
@@ -93,15 +109,10 @@ interface LeaderElectionConfig {
 
 /**
  * FIX: Graceful degradation modes per ADR-007.
- * Allows coordinator to communicate system capability level.
+ * R2: Re-exported from health/ module for backward compatibility.
+ * @see health/health-monitor.ts for implementation
  */
-export enum DegradationLevel {
-  FULL_OPERATION = 0,      // All services healthy
-  REDUCED_CHAINS = 1,      // Some chain detectors down
-  DETECTION_ONLY = 2,      // Execution disabled
-  READ_ONLY = 3,           // Only dashboard/monitoring
-  COMPLETE_OUTAGE = 4      // All services down
-}
+export { DegradationLevel } from './health';
 
 // =============================================================================
 // Dependency Injection Interface
@@ -230,13 +241,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // FIX P2: Circuit breaker for execution forwarding
   // Prevents hammering the execution stream when it's down
-  private executionCircuitBreaker = {
-    failures: 0,
-    isOpen: false,
-    lastFailure: 0,
-    threshold: 5,          // Open after 5 consecutive failures
-    resetTimeoutMs: 60000  // Try again after 1 minute
-  };
+  // R7 Consolidation: Now uses shared SimpleCircuitBreaker from @arbitrage/core
+  private executionCircuitBreaker = new SimpleCircuitBreaker(
+    5,     // threshold: Open after 5 consecutive failures
+    60000  // resetTimeoutMs: Try again after 1 minute
+  );
 
   // Startup grace period: Don't report critical alerts during initial startup
   // This prevents false alerts when services haven't reported health yet
@@ -274,6 +283,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // REFACTOR: Store injected dependencies for use in start() and other methods
   // This enables proper testing without Jest mock hoisting issues
   private readonly deps: Required<CoordinatorDependencies>;
+
+  // R2: Extracted subsystem modules
+  // These modules encapsulate specific responsibilities for better testability and maintainability
+  private streamConsumerManager: StreamConsumerManager | null = null;
+  private healthMonitor: HealthMonitor | null = null;
+  private opportunityRouter: OpportunityRouter | null = null;
 
   constructor(config?: Partial<CoordinatorConfig>, deps?: CoordinatorDependencies) {
     // REFACTOR: Initialize dependencies with defaults or injected values
@@ -341,6 +356,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // FIX: Initialize alert notifier for sending alerts to external channels
     this.alertNotifier = new AlertNotifier(this.logger);
+
+    // R2: Initialize extracted subsystem modules
+    // Note: streamConsumerManager and opportunityRouter are initialized in start()
+    // after streamsClient is available
+    this.healthMonitor = new HealthMonitor(
+      this.logger,
+      (alert) => this.sendAlert(alert),
+      {
+        startupGracePeriodMs: CoordinatorService.STARTUP_GRACE_PERIOD_MS,
+        alertCooldownMs: this.config.alertCooldownMs,
+        servicePatterns: {
+          executionEngine: SERVICE_NAME_PATTERNS.EXECUTION_ENGINE,
+          detectorPattern: SERVICE_NAME_PATTERNS.DETECTOR_PATTERN,
+          crossChainPattern: SERVICE_NAME_PATTERNS.CROSS_CHAIN_PATTERN,
+        },
+      }
+    );
 
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
@@ -411,6 +443,47 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       // Initialize Redis Streams client
       this.streamsClient = await this.deps.getRedisStreamsClient();
+
+      // R2: Initialize stream consumer manager after streams client is available
+      this.streamConsumerManager = new StreamConsumerManager(
+        this.streamsClient,
+        this.logger,
+        {
+          maxStreamErrors: this.MAX_STREAM_ERRORS,
+          dlqStream: CoordinatorService.DLQ_STREAM,
+          instanceId: this.config.leaderElection.instanceId,
+        },
+        (alert) => this.sendAlert({
+          type: alert.type,
+          message: alert.message,
+          severity: alert.severity,
+          data: alert.data,
+          timestamp: alert.timestamp,
+        })
+      );
+
+      // R2: Initialize opportunity router after streams client is available
+      this.opportunityRouter = new OpportunityRouter(
+        this.logger,
+        this.executionCircuitBreaker,
+        this.streamsClient,
+        {
+          maxOpportunities: this.MAX_OPPORTUNITIES,
+          opportunityTtlMs: this.OPPORTUNITY_TTL_MS,
+          instanceId: this.config.leaderElection.instanceId,
+          executionRequestsStream: RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
+        },
+        (alert) => this.sendAlert({
+          type: alert.type,
+          message: alert.message,
+          severity: alert.severity,
+          data: alert.data,
+          timestamp: alert.timestamp,
+        })
+      );
+
+      // R2: Start health monitor (records start time for grace period)
+      this.healthMonitor?.start();
 
       // Create consumer groups for all streams
       await this.createConsumerGroups();
@@ -824,67 +897,24 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // FIX Race 5.3: Use atomic flag-and-send pattern to prevent race between check and set
   private sendingStreamErrorAlert = false;
 
-  // FIX P1: Rate limiting for stream message processing
-  // Token bucket rate limiter per stream to prevent DoS via message flooding
-  private streamRateLimiters: Map<string, { tokens: number; lastRefill: number }> = new Map();
-  private readonly RATE_LIMIT_MAX_TOKENS = 1000;     // Max messages per refill period
-  private readonly RATE_LIMIT_REFILL_MS = 1000;      // Refill period (1 second)
-  private readonly RATE_LIMIT_TOKENS_PER_MSG = 1;    // Cost per message
-
-  /**
-   * FIX P1: Check and consume rate limit tokens for a stream.
-   * Returns true if message should be processed, false if rate limited.
-   * Uses token bucket algorithm for smooth rate limiting.
-   *
-   * FIX: Corrected token refill calculation - now adds tokens proportionally
-   * based on elapsed time rather than multiplying by full max tokens.
-   * Old buggy formula: tokens + (refillCount * MAX_TOKENS) could exceed max in one refill
-   * New correct formula: tokens + (elapsed / REFILL_MS * MAX_TOKENS) with proper capping
-   */
-  private checkRateLimit(streamName: string): boolean {
-    const now = Date.now();
-    let limiter = this.streamRateLimiters.get(streamName);
-
-    if (!limiter) {
-      // Initialize rate limiter for this stream
-      limiter = { tokens: this.RATE_LIMIT_MAX_TOKENS, lastRefill: now };
-      this.streamRateLimiters.set(streamName, limiter);
-    }
-
-    // Refill tokens based on elapsed time (FIX: proportional refill, not multiplicative)
-    const elapsed = now - limiter.lastRefill;
-    if (elapsed >= this.RATE_LIMIT_REFILL_MS) {
-      // Calculate how many tokens to add based on elapsed time
-      // Rate: RATE_LIMIT_MAX_TOKENS per RATE_LIMIT_REFILL_MS
-      const tokensToAdd = Math.floor(
-        (elapsed / this.RATE_LIMIT_REFILL_MS) * this.RATE_LIMIT_MAX_TOKENS
-      );
-      limiter.tokens = Math.min(
-        this.RATE_LIMIT_MAX_TOKENS,
-        limiter.tokens + tokensToAdd
-      );
-      limiter.lastRefill = now;
-    }
-
-    // Check if we have enough tokens
-    if (limiter.tokens >= this.RATE_LIMIT_TOKENS_PER_MSG) {
-      limiter.tokens -= this.RATE_LIMIT_TOKENS_PER_MSG;
-      return true;
-    }
-
-    // Rate limited
-    return false;
-  }
+  // FIX P1 + R12: Rate limiting for stream message processing
+  // Uses shared StreamRateLimiter class (R12 consolidation - removed duplicate inline implementation)
+  private readonly streamRateLimiter = new StreamRateLimiter({
+    maxTokens: 1000,        // Max messages per refill period
+    refillMs: 1000,         // Refill period (1 second)
+    tokensPerMessage: 1,    // Cost per message
+  });
 
   /**
    * FIX P1: Wrap a message handler with rate limiting.
+   * Uses shared StreamRateLimiter class (R12 consolidation).
    */
   private withRateLimit(
     streamName: string,
     handler: (msg: StreamMessage) => Promise<void>
   ): (msg: StreamMessage) => Promise<void> {
     return async (msg: StreamMessage) => {
-      if (!this.checkRateLimit(streamName)) {
+      if (!this.streamRateLimiter.checkRateLimit(streamName)) {
         this.logger.warn('Rate limit exceeded, dropping message', {
           stream: streamName,
           messageId: msg.id
@@ -1247,10 +1277,25 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private readonly OPPORTUNITY_CLEANUP_INTERVAL_MS: number;
 
   // P2 FIX: Use StreamMessage type instead of any
+  // R2: Delegates to OpportunityRouter for processing
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
     try {
       const data = message.data as Record<string, unknown>;
-      // FIX: Use type guard utility for required id field with better error logging
+
+      // R2: Delegate to opportunity router
+      if (this.opportunityRouter) {
+        const processed = await this.opportunityRouter.processOpportunity(data, this.isLeader);
+        if (processed) {
+          // Update local metrics from router
+          this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
+          this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+          this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
+        }
+        this.resetStreamErrors();
+        return;
+      }
+
+      // Fallback for tests without opportunity router
       if (!hasRequiredString(data, 'id')) {
         this.logger.debug('Skipping opportunity message - missing or invalid id', {
           messageId: message.id
@@ -1258,13 +1303,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return;
       }
 
-      // FIX: Use type guard utilities for cleaner type-safe extraction
       const opportunityId = getString(data, 'id');
       const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
 
-      // FIX P2: Duplicate opportunity detection
-      // If we've seen this opportunity recently (within 5s), skip it to prevent
-      // duplicate forwarding when multiple detectors report the same opportunity
       const existing = this.opportunities.get(opportunityId);
       if (existing && Math.abs((existing.timestamp || 0) - opportunityTimestamp) < 5000) {
         this.logger.debug('Duplicate opportunity detected, skipping', {
@@ -1276,9 +1317,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return;
       }
 
-      // FIX P1: Input validation for profit percentage
-      // Validate profit is within reasonable range (-100% to 10000%)
-      // Unrealistic values likely indicate malformed data or manipulation
       let profitPercentage = getOptionalNumber(data, 'profitPercentage');
       if (profitPercentage !== undefined) {
         if (profitPercentage < -100 || profitPercentage > 10000) {
@@ -1296,7 +1334,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
         id: opportunityId,
         confidence: getNumber(data, 'confidence', 0),
         timestamp: opportunityTimestamp,
-        // Optional fields using type guards
         chain: getOptionalString(data, 'chain'),
         buyDex: getOptionalString(data, 'buyDex'),
         sellDex: getOptionalString(data, 'sellDex'),
@@ -1305,8 +1342,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
         status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
       };
 
-      // Track opportunity (fast path - cleanup happens on separate interval)
-      // REFACTOR: Removed inline cleanup to prevent race conditions with concurrent consumers
       this.opportunities.set(opportunity.id, opportunity);
       this.systemMetrics.totalOpportunities++;
       this.systemMetrics.pendingOpportunities = this.opportunities.size;
@@ -1319,13 +1354,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
         sellDex: opportunity.sellDex
       });
 
-      // Only leader should forward to execution engine
-      // FIX: Also forward opportunities without explicit status (default to pending)
       if (this.isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
         await this.forwardToExecutionEngine(opportunity);
       }
 
-      // FIX: Reset stream errors on successful processing
       this.resetStreamErrors();
 
     } catch (error) {
@@ -1335,65 +1367,49 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   /**
    * REFACTOR: Extracted opportunity cleanup to prevent race conditions.
-   *
-   * This runs on a separate interval (every 10s) instead of on every message.
-   * Benefits:
-   * - Eliminates race condition where concurrent consumers could over-prune
-   * - Faster message handling (no cleanup overhead per message)
-   * - Predictable cleanup timing
-   * - Follows Node.js best practice of batched background operations
+   * R2: Delegates to OpportunityRouter for cleanup.
    */
   private cleanupExpiredOpportunities(): void {
+    // R2: Delegate to opportunity router
+    if (this.opportunityRouter) {
+      this.opportunityRouter.cleanupExpiredOpportunities();
+      this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+      return;
+    }
+
+    // Fallback for tests without opportunity router
     const now = Date.now();
     const toDelete: string[] = [];
     const initialSize = this.opportunities.size;
 
-    // Phase 1: Identify expired opportunities
     for (const [id, opp] of this.opportunities) {
-      // Delete if explicitly expired
       if (opp.expiresAt && opp.expiresAt < now) {
         toDelete.push(id);
         continue;
       }
-      // Delete if older than TTL (for opportunities without expiresAt)
       if (opp.timestamp && (now - opp.timestamp) > this.OPPORTUNITY_TTL_MS) {
         toDelete.push(id);
       }
     }
 
-    // Phase 2: Delete expired entries
     for (const id of toDelete) {
       this.opportunities.delete(id);
     }
 
-    // Phase 3: Enforce size limit by removing oldest entries
-    // FIX 4.5 & 10.5: Use findKSmallest for O(n log k) with bounded memory
-    // For 1000 opportunities removing 100 oldest:
-    // - Selection sort: O(1000 * 100) = 100,000 operations
-    // - findKSmallest: O(1000 * log(100)) = ~7,000 operations (14x faster)
-    // FIX P0: Previous MinHeap approach allocated memory for ALL items.
-    // findKSmallest maintains only k items in memory at any time.
     if (this.opportunities.size > this.MAX_OPPORTUNITIES) {
       const removeCount = this.opportunities.size - this.MAX_OPPORTUNITIES;
-
-      // Find the k oldest opportunities efficiently
-      // Only keeps removeCount items in memory instead of all opportunities
       const oldestK = findKSmallest(
         this.opportunities.entries(),
         removeCount,
         ([, a], [, b]) => (a.timestamp || 0) - (b.timestamp || 0)
       );
-
-      // Delete the oldest entries
       for (const [id] of oldestK) {
         this.opportunities.delete(id);
       }
     }
 
-    // Update metrics
     this.systemMetrics.pendingOpportunities = this.opportunities.size;
 
-    // Log if cleanup occurred
     const removed = initialSize - this.opportunities.size;
     if (removed > 0) {
       this.logger.debug('Opportunity cleanup completed', {
@@ -1673,57 +1689,47 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * FIX P2: Check if execution circuit breaker is open.
    * If open, check if reset timeout has passed (half-open state).
+   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.isCurrentlyOpen()
    */
   private isExecutionCircuitOpen(): boolean {
-    const cb = this.executionCircuitBreaker;
-    if (!cb.isOpen) return false;
-
-    const now = Date.now();
-    // Check if we should try again (half-open state)
-    if (now - cb.lastFailure >= cb.resetTimeoutMs) {
-      return false; // Allow one attempt
-    }
-
-    return true;
+    return this.executionCircuitBreaker.isCurrentlyOpen();
   }
 
   /**
    * FIX P2: Record execution forwarding failure.
+   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.recordFailure()
    */
   private recordExecutionFailure(): void {
-    const cb = this.executionCircuitBreaker;
-    const now = Date.now();
-    cb.failures++;
-    cb.lastFailure = now;
+    // recordFailure() returns true if this failure just opened the circuit
+    const justOpened = this.executionCircuitBreaker.recordFailure();
+    const status = this.executionCircuitBreaker.getStatus();
 
-    if (cb.failures >= cb.threshold && !cb.isOpen) {
-      cb.isOpen = true;
+    if (justOpened) {
       this.logger.warn('Execution circuit breaker opened', {
-        failures: cb.failures,
-        resetTimeoutMs: cb.resetTimeoutMs
+        failures: status.failures,
+        resetTimeoutMs: status.resetTimeoutMs
       });
 
       // Send alert about circuit breaker opening
       this.sendAlert({
         type: 'EXECUTION_CIRCUIT_OPEN',
-        message: `Execution forwarding circuit breaker opened after ${cb.failures} failures`,
+        message: `Execution forwarding circuit breaker opened after ${status.failures} failures`,
         severity: 'high',
-        data: { failures: cb.failures },
-        timestamp: now
+        data: { failures: status.failures },
+        timestamp: Date.now()
       });
     }
   }
 
   /**
    * FIX P2: Record execution forwarding success.
+   * R7 Consolidation: Now delegates to SimpleCircuitBreaker.recordSuccess()
    */
   private recordExecutionSuccess(): void {
-    const cb = this.executionCircuitBreaker;
-    const wasOpen = cb.isOpen;
-    cb.failures = 0;
-    cb.isOpen = false;
+    // recordSuccess() returns true if the circuit was open and just closed
+    const justRecovered = this.executionCircuitBreaker.recordSuccess();
 
-    if (wasOpen) {
+    if (justRecovered) {
       this.logger.info('Execution circuit breaker closed - recovered');
     }
   }
@@ -1748,7 +1754,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (this.isExecutionCircuitOpen()) {
       this.logger.debug('Execution circuit open, skipping opportunity forwarding', {
         id: opportunity.id,
-        failures: this.executionCircuitBreaker.failures
+        failures: this.executionCircuitBreaker.getFailures()
       });
       return;
     }
@@ -1796,11 +1802,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.error('Failed to forward opportunity to execution engine', {
         id: opportunity.id,
         error: (error as Error).message,
-        circuitFailures: this.executionCircuitBreaker.failures
+        circuitFailures: this.executionCircuitBreaker.getFailures()
       });
 
-      // Send alert for execution forwarding failures (only if circuit not already alerted)
-      if (!this.executionCircuitBreaker.isOpen) {
+      // Send alert for execution forwarding failures (only if circuit not already open)
+      // Use getStatus().isOpen to check raw open state (not affected by half-open logic)
+      if (!this.executionCircuitBreaker.getStatus().isOpen) {
         this.sendAlert({
           type: 'EXECUTION_FORWARD_FAILED',
           message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
@@ -1938,36 +1945,35 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private updateSystemMetrics(): void {
-    // FIX: Single-pass calculation instead of iterating 3 times
-    // This improves performance when there are many services
-    const now = Date.now();
-    let activeServices = 0;
-    let totalMemory = 0;
-    let totalLatency = 0;
+    // R2: Delegate to health monitor for single-pass metrics calculation
+    if (this.healthMonitor) {
+      this.healthMonitor.updateMetrics(this.serviceHealth, this.systemMetrics);
+    } else {
+      // Fallback for tests without health monitor
+      const now = Date.now();
+      let activeServices = 0;
+      let totalMemory = 0;
+      let totalLatency = 0;
 
-    for (const health of this.serviceHealth.values()) {
-      // Count healthy services
-      if (health.status === 'healthy') {
-        activeServices++;
+      for (const health of this.serviceHealth.values()) {
+        if (health.status === 'healthy') {
+          activeServices++;
+        }
+        totalMemory += health.memoryUsage || 0;
+        const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
+        totalLatency += latency;
       }
-      // Sum memory usage
-      totalMemory += health.memoryUsage || 0;
-      // Calculate latency - use explicit if available, else from heartbeat
-      const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
-      totalLatency += latency;
+
+      const totalServices = Math.max(this.serviceHealth.size, 1);
+      this.systemMetrics.activeServices = activeServices;
+      this.systemMetrics.systemHealth = (activeServices / totalServices) * 100;
+      this.systemMetrics.averageLatency = totalLatency / totalServices;
+      this.systemMetrics.averageMemory = totalMemory / totalServices;
+      this.systemMetrics.lastUpdate = now;
     }
 
-    const totalServices = Math.max(this.serviceHealth.size, 1);
-    const systemHealth = (activeServices / totalServices) * 100;
-    const avgMemory = totalMemory / totalServices;
-    const avgLatency = totalLatency / totalServices;
-
-    this.systemMetrics.activeServices = activeServices;
-    this.systemMetrics.systemHealth = systemHealth;
-    this.systemMetrics.averageLatency = avgLatency;
-    this.systemMetrics.averageMemory = avgMemory;
-    this.systemMetrics.lastUpdate = now;
-    this.systemMetrics.pendingOpportunities = this.opportunities.size;
+    // Update pending opportunities count (from either opportunity router or local map)
+    this.systemMetrics.pendingOpportunities = this.opportunityRouter?.getPendingCount() ?? this.opportunities.size;
 
     // FIX: Evaluate degradation level after updating metrics (ADR-007)
     this.evaluateDegradationLevel();
@@ -1975,38 +1981,38 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   /**
    * FIX: Evaluate system degradation level per ADR-007.
-   * Updates degradationLevel based on service health status.
-   *
-   * OPTIMIZATION: Single-pass evaluation instead of calling multiple methods
-   * that each iterate over serviceHealth. This reduces from O(3n) to O(n).
+   * R2: Delegates to HealthMonitor for evaluation.
    */
   private evaluateDegradationLevel(): void {
-    const previousLevel = this.degradationLevel;
-
-    // Single-pass analysis of all services
-    const analysis = this.analyzeServiceHealth();
-
-    // Determine degradation level based on analysis
-    if (!analysis.hasAnyServices || this.systemMetrics.systemHealth === 0) {
-      this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
-    } else if (!analysis.executorHealthy && !analysis.hasHealthyDetectors) {
-      this.degradationLevel = DegradationLevel.READ_ONLY;
-    } else if (!analysis.executorHealthy) {
-      this.degradationLevel = DegradationLevel.DETECTION_ONLY;
-    } else if (!analysis.allDetectorsHealthy) {
-      this.degradationLevel = DegradationLevel.REDUCED_CHAINS;
+    // R2: Delegate to health monitor
+    if (this.healthMonitor) {
+      this.healthMonitor.evaluateDegradationLevel(this.serviceHealth, this.systemMetrics.systemHealth);
+      this.degradationLevel = this.healthMonitor.getDegradationLevel();
     } else {
-      this.degradationLevel = DegradationLevel.FULL_OPERATION;
-    }
+      // Fallback for tests without health monitor
+      const previousLevel = this.degradationLevel;
+      const analysis = this.analyzeServiceHealth();
 
-    // Log degradation level changes
-    if (previousLevel !== this.degradationLevel) {
-      this.logger.warn('Degradation level changed', {
-        previous: DegradationLevel[previousLevel],
-        current: DegradationLevel[this.degradationLevel],
-        systemHealth: this.systemMetrics.systemHealth,
-        analysis // Include analysis for debugging
-      });
+      if (!analysis.hasAnyServices || this.systemMetrics.systemHealth === 0) {
+        this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
+      } else if (!analysis.executorHealthy && !analysis.hasHealthyDetectors) {
+        this.degradationLevel = DegradationLevel.READ_ONLY;
+      } else if (!analysis.executorHealthy) {
+        this.degradationLevel = DegradationLevel.DETECTION_ONLY;
+      } else if (!analysis.allDetectorsHealthy) {
+        this.degradationLevel = DegradationLevel.REDUCED_CHAINS;
+      } else {
+        this.degradationLevel = DegradationLevel.FULL_OPERATION;
+      }
+
+      if (previousLevel !== this.degradationLevel) {
+        this.logger.warn('Degradation level changed', {
+          previous: DegradationLevel[previousLevel],
+          current: DegradationLevel[this.degradationLevel],
+          systemHealth: this.systemMetrics.systemHealth,
+          analysis
+        });
+      }
     }
   }
 
@@ -2075,62 +2081,57 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   /**
    * FIX: Get current degradation level (ADR-007).
+   * R2: Delegates to HealthMonitor if available.
    */
   getDegradationLevel(): DegradationLevel {
-    return this.degradationLevel;
+    return this.healthMonitor?.getDegradationLevel() ?? this.degradationLevel;
   }
 
   /**
    * Check for alerts and trigger notifications.
-   * Respects startup grace period to avoid false alerts during initialization.
+   * R2: Delegates to HealthMonitor for alert checking.
    */
   private checkForAlerts(): void {
-    // P2 FIX: Use Alert type instead of any
-    const alerts: Alert[] = [];
-    const now = Date.now();
+    // R2: Delegate to health monitor
+    if (this.healthMonitor) {
+      this.healthMonitor.checkForAlerts(this.serviceHealth, this.systemMetrics.systemHealth);
+    } else {
+      // Fallback for tests without health monitor
+      const alerts: Alert[] = [];
+      const now = Date.now();
+      const inGracePeriod = (now - this.startTime) < CoordinatorService.STARTUP_GRACE_PERIOD_MS;
 
-    // Check if we're still in the startup grace period
-    const inGracePeriod = (now - this.startTime) < CoordinatorService.STARTUP_GRACE_PERIOD_MS;
-
-    // Check service health
-    // FIX P1: During grace period, don't alert about individual service health
-    // Services are still starting up and may not have reported healthy yet
-    if (!inGracePeriod) {
-      for (const [serviceName, health] of this.serviceHealth) {
-        // Skip 'starting' and 'stopping' status - these are transient states
-        if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
-          alerts.push({
-            type: 'SERVICE_UNHEALTHY',
-            service: serviceName,
-            message: `${serviceName} is ${health.status}`,
-            severity: 'high',
-            timestamp: now
-          });
+      if (!inGracePeriod) {
+        for (const [serviceName, health] of this.serviceHealth) {
+          if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
+            alerts.push({
+              type: 'SERVICE_UNHEALTHY',
+              service: serviceName,
+              message: `${serviceName} is ${health.status}`,
+              severity: 'high',
+              timestamp: now
+            });
+          }
         }
       }
-    }
 
-    // Check system metrics
-    // FIX P1: During grace period, require minimum services before alerting
-    // This prevents false alerts when only 1-2 services have reported
-    // After grace period: alert on any low health
-    const MIN_SERVICES_FOR_GRACE_PERIOD_ALERT = 3;
-    const shouldAlertLowHealth = inGracePeriod
-      ? this.serviceHealth.size >= MIN_SERVICES_FOR_GRACE_PERIOD_ALERT && this.systemMetrics.systemHealth < 80
-      : this.systemMetrics.systemHealth < 80;
+      const MIN_SERVICES_FOR_GRACE_PERIOD_ALERT = 3;
+      const shouldAlertLowHealth = inGracePeriod
+        ? this.serviceHealth.size >= MIN_SERVICES_FOR_GRACE_PERIOD_ALERT && this.systemMetrics.systemHealth < 80
+        : this.systemMetrics.systemHealth < 80;
 
-    if (shouldAlertLowHealth) {
-      alerts.push({
-        type: 'SYSTEM_HEALTH_LOW',
-        message: `System health is ${this.systemMetrics.systemHealth.toFixed(1)}%`,
-        severity: 'critical',
-        timestamp: now
-      });
-    }
+      if (shouldAlertLowHealth) {
+        alerts.push({
+          type: 'SYSTEM_HEALTH_LOW',
+          message: `System health is ${this.systemMetrics.systemHealth.toFixed(1)}%`,
+          severity: 'critical',
+          timestamp: now
+        });
+      }
 
-    // Send alerts (with cooldown)
-    for (const alert of alerts) {
-      this.sendAlert(alert);
+      for (const alert of alerts) {
+        this.sendAlert(alert);
+      }
     }
   }
 
@@ -2138,22 +2139,37 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * P1-NEW-1 FIX: Send alert with cooldown and periodic cleanup
    * P2 FIX: Use Alert type for proper type safety
    * FIX: Now sends to external channels via AlertNotifier
+   * R2: Delegates cooldown tracking to healthMonitor if available
    */
   private sendAlert(alert: Alert): void {
     const alertKey = `${alert.type}_${alert.service || 'system'}`;
     const now = Date.now();
-    const lastAlert = this.alertCooldowns.get(alertKey) || 0;
+
+    // R2: Use healthMonitor's cooldowns if available for consistency
+    const cooldowns = this.healthMonitor?.getAlertCooldowns() ?? this.alertCooldowns;
+    const lastAlert = cooldowns.get(alertKey) || 0;
     // FIX: Use configurable cooldown instead of hardcoded 5 minutes
     const cooldownMs = this.config.alertCooldownMs!;
 
     // Cooldown for same alert type (configurable, default 5 minutes)
     if (now - lastAlert > cooldownMs) {
       this.logger.warn('Alert triggered', alert);
-      this.alertCooldowns.set(alertKey, now);
+
+      // R2 + R12: Update cooldowns in the appropriate storage
+      // R12 FIX: Use proper public API instead of unsafe private field access
+      if (this.healthMonitor) {
+        this.healthMonitor.setAlertCooldown(alertKey, now);
+      } else {
+        this.alertCooldowns.set(alertKey, now);
+      }
 
       // P1-NEW-1 FIX: Periodic cleanup of stale cooldowns (every 100 alerts or 1000+ entries)
-      if (this.alertCooldowns.size > 1000) {
-        this.cleanupAlertCooldowns(now);
+      if (cooldowns.size > 1000) {
+        if (this.healthMonitor) {
+          this.healthMonitor.cleanupAlertCooldowns(now);
+        } else {
+          this.cleanupAlertCooldowns(now);
+        }
       }
 
       // FIX: Send to external channels (Discord/Slack) via AlertNotifier
@@ -2244,15 +2260,18 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   getOpportunities(): Map<string, ArbitrageOpportunity> {
-    return new Map(this.opportunities);
+    // R2: Delegate to opportunity router if available
+    return this.opportunityRouter?.getOpportunities() ?? new Map(this.opportunities);
   }
 
   getAlertCooldowns(): Map<string, number> {
-    return new Map(this.alertCooldowns);
+    // R2: Delegate to health monitor if available
+    return this.healthMonitor?.getAlertCooldowns() ?? new Map(this.alertCooldowns);
   }
 
   deleteAlertCooldown(key: string): boolean {
-    return this.alertCooldowns.delete(key);
+    // R2: Delegate to health monitor if available
+    return this.healthMonitor?.deleteAlertCooldown(key) ?? this.alertCooldowns.delete(key);
   }
 
   getLogger(): RouteLogger {

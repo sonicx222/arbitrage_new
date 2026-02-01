@@ -271,7 +271,9 @@ class TestDetector extends BaseDetector {
   }
 
   public hasHealthMonitoringInterval(): boolean {
-    return this.healthMonitoringInterval !== null;
+    // R5: Check both legacy interval and new health monitor service
+    return this.healthMonitoringInterval !== null ||
+           (this.healthMonitorService !== null && this.healthMonitorService.isActive());
   }
 
   public setMockRedis(mockRedis: any): void {

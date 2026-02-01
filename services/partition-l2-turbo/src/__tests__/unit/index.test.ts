@@ -216,6 +216,7 @@ describe('P2 L2-Turbo Partition Service', () => {
   describe('Module Exports', () => {
     it('should export detector instance', async () => {
       // Import after mocks are set up
+      jest.resetModules();
       const { detector } = await import('../../index');
       expect(detector).toBeDefined();
       expect(typeof detector.start).toBe('function');
@@ -223,6 +224,7 @@ describe('P2 L2-Turbo Partition Service', () => {
     });
 
     it('should export config object', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config).toBeDefined();
       expect(config.partitionId).toBe('l2-turbo');
@@ -232,6 +234,7 @@ describe('P2 L2-Turbo Partition Service', () => {
     });
 
     it('should export partition constants', async () => {
+      jest.resetModules();
       const { P2_PARTITION_ID, P2_CHAINS, P2_REGION } = await import('../../index');
       expect(P2_PARTITION_ID).toBe('l2-turbo');
       expect(P2_CHAINS).toContain('arbitrum');
@@ -239,6 +242,7 @@ describe('P2 L2-Turbo Partition Service', () => {
     });
 
     it('should export cleanupProcessHandlers function', async () => {
+      jest.resetModules();
       const { cleanupProcessHandlers } = await import('../../index');
       expect(cleanupProcessHandlers).toBeDefined();
       expect(typeof cleanupProcessHandlers).toBe('function');
@@ -247,11 +251,13 @@ describe('P2 L2-Turbo Partition Service', () => {
 
   describe('Configuration', () => {
     it('should use correct partition ID', async () => {
+      jest.resetModules();
       const { P2_PARTITION_ID } = await import('../../index');
       expect(P2_PARTITION_ID).toBe('l2-turbo');
     });
 
     it('should configure 3 chains for l2-turbo partition', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.chains).toHaveLength(3);
       expect(config.chains).toEqual(
@@ -260,11 +266,13 @@ describe('P2 L2-Turbo Partition Service', () => {
     });
 
     it('should use default port 3002', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.healthCheckPort).toBe(3002);
     });
 
     it('should use asia-southeast1 region', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.regionId).toBe('asia-southeast1');
     });
@@ -282,12 +290,14 @@ describe('P2 L2-Turbo Partition Service', () => {
     });
 
     it('should have setup detector event handlers', async () => {
+      jest.resetModules();
       const { detector } = await import('../../index');
       expect(typeof detector.on).toBe('function');
       expect(typeof detector.emit).toBe('function');
     });
 
     it('should have setup process handlers and store cleanup function', async () => {
+      jest.resetModules();
       const { cleanupProcessHandlers } = await import('../../index');
       expect(typeof cleanupProcessHandlers).toBe('function');
     });

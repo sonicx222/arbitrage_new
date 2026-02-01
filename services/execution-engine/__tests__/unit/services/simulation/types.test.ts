@@ -17,7 +17,7 @@ import {
   updateRollingAverage,
   WETH_ADDRESSES,
   CHAIN_IDS,
-} from './types';
+} from '../../../../src/services/simulation/types';
 
 // =============================================================================
 // WETH Address Utilities (Fix 6.3)

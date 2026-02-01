@@ -88,6 +88,38 @@ function killProcess(pid) {
 }
 
 /**
+ * Check if a process exists (cross-platform).
+ * FIX P2-1: On Windows, process.kill(pid, 0) is unreliable per Node.js docs.
+ * Use tasklist instead for reliable Windows process existence check.
+ *
+ * @param {number} pid - Process ID to check
+ * @returns {Promise<boolean>} - True if process exists
+ */
+function processExists(pid) {
+  return new Promise((resolve) => {
+    if (isWindows()) {
+      // Windows: use tasklist to check if PID exists
+      exec(`tasklist /FI "PID eq ${pid}" /NH`, (error, stdout) => {
+        if (error) {
+          resolve(false);
+          return;
+        }
+        // Check if PID appears in output (tasklist returns the process row if exists)
+        resolve(stdout.includes(String(pid)));
+      });
+    } else {
+      // Unix: signal 0 is reliable (doesn't actually send signal, just checks existence)
+      try {
+        process.kill(pid, 0);
+        resolve(true);
+      } catch {
+        resolve(false);
+      }
+    }
+  });
+}
+
+/**
  * Find processes using a specific port (cross-platform).
  * @param {number} port - Port number
  * @returns {Promise<number[]>} - Array of PIDs using the port
@@ -405,11 +437,11 @@ async function acquirePidLock() {
         try {
           const lockPid = parseInt(fs.readFileSync(PID_LOCK_FILE, 'utf8'), 10);
           if (lockPid && !isNaN(lockPid)) {
-            try {
-              // Check if process exists (signal 0 doesn't kill, just checks)
-              process.kill(lockPid, 0);
+            // FIX P2-1: Use processExists() for Windows compatibility
+            const lockHolderExists = await processExists(lockPid);
+            if (lockHolderExists) {
               // Process exists, wait and retry
-            } catch {
+            } else {
               // Process doesn't exist, lock is stale - remove it
               fs.unlinkSync(PID_LOCK_FILE);
               continue; // Try again immediately
@@ -477,7 +509,12 @@ function savePids(pids) {
 async function updatePid(serviceName, pid) {
   const lockAcquired = await acquirePidLock();
   if (!lockAcquired) {
-    console.warn(`Warning: Could not acquire PID lock for ${serviceName}, proceeding without lock`);
+    // FIX P1-1: Throw error instead of proceeding without lock to prevent race conditions
+    // See: bug-hunt analysis - race condition in concurrent service startup PID writes
+    throw new Error(
+      `Could not acquire PID lock for ${serviceName} after ${LOCK_TIMEOUT_MS}ms. ` +
+      `Another process may be holding the lock. Try stopping services first: npm run dev:stop`
+    );
   }
 
   try {
@@ -486,9 +523,8 @@ async function updatePid(serviceName, pid) {
     savePids(pids);
     return true;
   } finally {
-    if (lockAcquired) {
-      releasePidLock();
-    }
+    // Lock is always acquired if we reach here, so always release
+    releasePidLock();
   }
 }
 
@@ -500,7 +536,11 @@ async function updatePid(serviceName, pid) {
 async function removePid(serviceName) {
   const lockAcquired = await acquirePidLock();
   if (!lockAcquired) {
-    console.warn(`Warning: Could not acquire PID lock for removing ${serviceName}`);
+    // FIX P1-1: Throw error instead of proceeding without lock to prevent race conditions
+    throw new Error(
+      `Could not acquire PID lock for removing ${serviceName} after ${LOCK_TIMEOUT_MS}ms. ` +
+      `Another process may be holding the lock.`
+    );
   }
 
   try {
@@ -513,9 +553,8 @@ async function removePid(serviceName) {
     }
     return true;
   } finally {
-    if (lockAcquired) {
-      releasePidLock();
-    }
+    // Lock is always acquired if we reach here, so always release
+    releasePidLock();
   }
 }
 
@@ -554,6 +593,7 @@ module.exports = {
   // Cross-platform
   isWindows,
   killProcess,
+  processExists,
   findProcessesByPort,
   findGhostNodeProcesses,
   killTsNodeProcesses,

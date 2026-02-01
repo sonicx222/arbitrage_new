@@ -325,8 +325,9 @@ export function validateAndFilterChains(
   }
 
   // Chain IDs are the keys of CHAINS (mainnet) and TESTNET_CHAINS
-  const mainnetChainIds = Object.keys(CHAINS);
-  const testnetChainIds = Object.keys(TESTNET_CHAINS);
+  // Guard against undefined (can happen in test environments due to module loading order)
+  const mainnetChainIds = CHAINS && typeof CHAINS === 'object' ? Object.keys(CHAINS) : [];
+  const testnetChainIds = TESTNET_CHAINS && typeof TESTNET_CHAINS === 'object' ? Object.keys(TESTNET_CHAINS) : [];
   const allValidChainIds = [...mainnetChainIds, ...testnetChainIds];
 
   const requestedChains = chainsEnv.split(',').map(c => c.trim().toLowerCase());
@@ -858,4 +859,276 @@ export function setupProcessHandlers(
     process.off('uncaughtException', uncaughtHandler);
     process.off('unhandledRejection', rejectionHandler);
   };
+}
+
+// =============================================================================
+// R9: Partition Service Runner Factory
+// =============================================================================
+
+/**
+ * Service lifecycle state for partition services.
+ * Used to prevent duplicate startup/shutdown and track state.
+ */
+export type ServiceLifecycleState = 'idle' | 'starting' | 'started' | 'failed' | 'stopping';
+
+/**
+ * Options for creating a partition service runner.
+ */
+export interface PartitionServiceRunnerOptions {
+  /** Service configuration */
+  config: PartitionServiceConfig;
+
+  /** Unified detector config (passed to UnifiedChainDetector constructor) */
+  detectorConfig: {
+    partitionId: string;
+    chains: string[];
+    instanceId: string;
+    regionId: string;
+    enableCrossRegionHealth: boolean;
+    healthCheckPort: number;
+  };
+
+  /** Factory function to create the detector instance */
+  createDetector: (config: PartitionServiceRunnerOptions['detectorConfig']) => PartitionDetectorInterface;
+
+  /** Logger instance */
+  logger: ReturnType<typeof createLogger>;
+
+  /** Optional callback on successful startup */
+  onStarted?: (detector: PartitionDetectorInterface, startupDurationMs: number) => void;
+
+  /** Optional callback on startup failure */
+  onStartupError?: (error: Error) => void;
+}
+
+/**
+ * Result from createPartitionServiceRunner.
+ */
+export interface PartitionServiceRunner {
+  /** The detector instance */
+  detector: PartitionDetectorInterface;
+
+  /** Start the service (call once) */
+  start: () => Promise<void>;
+
+  /** Get current service state */
+  getState: () => ServiceLifecycleState;
+
+  /** Cleanup function for process handlers */
+  cleanup: ProcessHandlerCleanup;
+
+  /** Health server reference (populated after start) */
+  healthServer: { current: Server | null };
+}
+
+/**
+ * R9: Creates a partition service runner that encapsulates common startup logic.
+ *
+ * This factory reduces boilerplate in partition service entry points by:
+ * - Managing service lifecycle state (idle → starting → started/failed)
+ * - Handling startup guards (preventing duplicate starts)
+ * - Setting up event handlers and process handlers
+ * - Creating health server
+ * - Providing consistent error handling and logging
+ *
+ * @example
+ * ```typescript
+ * const runner = createPartitionServiceRunner({
+ *   config: serviceConfig,
+ *   detectorConfig: config,
+ *   createDetector: (cfg) => new UnifiedChainDetector(cfg),
+ *   logger,
+ * });
+ *
+ * // In main()
+ * await runner.start();
+ *
+ * // Exports
+ * export { runner.detector as detector, runner.cleanup as cleanupProcessHandlers };
+ * ```
+ *
+ * @param options - Runner configuration
+ * @returns Partition service runner with start() method and detector instance
+ */
+export function createPartitionServiceRunner(
+  options: PartitionServiceRunnerOptions
+): PartitionServiceRunner {
+  const { config, detectorConfig, createDetector, logger, onStarted, onStartupError } = options;
+
+  // Create detector instance
+  const detector = createDetector(detectorConfig);
+
+  // Store server reference for graceful shutdown
+  const healthServerRef: { current: Server | null } = { current: null };
+
+  // Setup event handlers
+  setupDetectorEventHandlers(detector, logger, config.partitionId);
+
+  // Setup process handlers
+  const cleanup = setupProcessHandlers(healthServerRef, detector, logger, config.serviceName);
+
+  // Lifecycle state management
+  let state: ServiceLifecycleState = 'idle';
+
+  /**
+   * Start the partition service.
+   *
+   * Guarded against duplicate invocations.
+   */
+  async function start(): Promise<void> {
+    // Guard against multiple start() invocations
+    if (state !== 'idle') {
+      logger.warn('Service already started or starting, ignoring duplicate start()', {
+        currentState: state,
+        partitionId: config.partitionId,
+      });
+      return;
+    }
+    state = 'starting';
+
+    const startupStartTime = Date.now();
+
+    logger.info(`Starting ${config.serviceName}`, {
+      partitionId: config.partitionId,
+      chains: detectorConfig.chains,
+      region: config.region,
+      provider: config.provider,
+      nodeVersion: process.version,
+      pid: process.pid,
+    });
+
+    try {
+      // Start health check server first
+      healthServerRef.current = createPartitionHealthServer({
+        port: detectorConfig.healthCheckPort,
+        config,
+        detector,
+        logger,
+      });
+
+      // Start detector
+      await detector.start();
+
+      // Mark as fully started
+      state = 'started';
+
+      const startupDurationMs = Date.now() - startupStartTime;
+      const memoryUsage = process.memoryUsage();
+
+      logger.info(`${config.serviceName} started successfully`, {
+        partitionId: detector.getPartitionId(),
+        chains: detector.getChains(),
+        healthyChains: detector.getHealthyChains(),
+        startupDurationMs,
+        memoryUsageMB: Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100,
+        rssMemoryMB: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100,
+      });
+
+      // Call optional success callback
+      if (onStarted) {
+        onStarted(detector, startupDurationMs);
+      }
+
+    } catch (error) {
+      state = 'failed';
+
+      const err = error instanceof Error ? error : new Error(String(error));
+      const errorContext: Record<string, unknown> = {
+        partitionId: config.partitionId,
+        port: detectorConfig.healthCheckPort,
+        error: err.message,
+      };
+
+      // Add specific hints based on error type
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === 'EADDRINUSE') {
+        errorContext.errorCode = 'EADDRINUSE';
+        errorContext.hint = `Port ${detectorConfig.healthCheckPort} is already in use.`;
+      } else if (nodeError.code === 'EACCES') {
+        errorContext.errorCode = 'EACCES';
+        errorContext.hint = `Insufficient permissions for port ${detectorConfig.healthCheckPort}.`;
+      } else if (nodeError.code === 'ECONNREFUSED') {
+        errorContext.errorCode = 'ECONNREFUSED';
+        errorContext.hint = 'Redis connection refused. Verify REDIS_URL.';
+      } else if (nodeError.code === 'ETIMEDOUT') {
+        errorContext.errorCode = 'ETIMEDOUT';
+        errorContext.hint = 'Connection timed out.';
+      }
+
+      logger.error(`Failed to start ${config.serviceName}`, errorContext);
+
+      // Cleanup health server if it was created
+      if (healthServerRef.current) {
+        await closeServerWithTimeout(healthServerRef.current, 1000, logger);
+      }
+      healthServerRef.current = null;
+
+      // Clean up process handlers
+      cleanup();
+
+      // Call optional error callback
+      if (onStartupError) {
+        onStartupError(err);
+      }
+
+      // Exit process
+      process.exit(1);
+    }
+  }
+
+  return {
+    detector,
+    start,
+    getState: () => state,
+    cleanup,
+    healthServer: healthServerRef,
+  };
+}
+
+/**
+ * R9: Run a partition service with standard startup logic.
+ *
+ * This is the simplest way to start a partition service. It:
+ * - Creates the service runner
+ * - Guards against Jest auto-start
+ * - Calls start() with proper error handling
+ *
+ * @example
+ * ```typescript
+ * // In partition index.ts
+ * const { detector, cleanup } = runPartitionService({
+ *   config: serviceConfig,
+ *   detectorConfig: config,
+ *   createDetector: (cfg) => new UnifiedChainDetector(cfg),
+ *   logger,
+ * });
+ *
+ * export { detector, cleanup as cleanupProcessHandlers };
+ * ```
+ *
+ * @param options - Runner configuration
+ * @returns Runner instance (for accessing detector and cleanup)
+ */
+export function runPartitionService(
+  options: PartitionServiceRunnerOptions
+): PartitionServiceRunner {
+  const runner = createPartitionServiceRunner(options);
+
+  // Run only when not in Jest (prevents auto-start during test imports)
+  if (!process.env.JEST_WORKER_ID) {
+    runner.start().catch((error) => {
+      try {
+        if (options.logger) {
+          options.logger.error(`Fatal error in ${options.config.serviceName}`, { error });
+        } else {
+          console.error(`Fatal error in ${options.config.serviceName}:`, error);
+        }
+      } catch (logError) {
+        process.stderr.write(`FATAL: ${error}\nLOG ERROR: ${logError}\n`);
+      }
+      process.exit(1);
+    });
+  }
+
+  return runner;
 }

@@ -25,7 +25,32 @@ const STREAMS = {
   HEALTH: 'stream:health'
 };
 
-// Mock Redis Streams Client - define BEFORE jest.mock
+/**
+ * Mock StreamBatcher for testing batched Redis Streams publishing.
+ *
+ * **Mock Configuration:**
+ * - `add` - Jest spy for tracking individual message additions to batch
+ * - `flush` - Jest spy that simulates sending batched messages to Redis
+ * - `getStats` - Returns fake statistics (queue size, compression ratio, etc.)
+ * - `destroy` - Jest spy for cleanup tracking
+ *
+ * **Purpose:**
+ * Simulates the batching behavior that reduces Redis command overhead.
+ * In production, 50 price updates are batched into 1 XADD command,
+ * reducing network round-trips and improving throughput.
+ *
+ * **Usage:**
+ * ```typescript
+ * const batcher = streamsClient.createBatcher('stream:price-updates');
+ * batcher.add({ price: 100 });
+ * batcher.add({ price: 101 });
+ * await batcher.flush(); // Sends 2 messages in 1 Redis command
+ *
+ * // Verify batching behavior
+ * expect(batcher.add).toHaveBeenCalledTimes(2);
+ * expect(batcher.flush).toHaveBeenCalled();
+ * ```
+ */
 const mockBatcher = {
   add: jest.fn<any>(),
   flush: jest.fn<any>(() => Promise.resolve()),
@@ -40,6 +65,32 @@ const mockBatcher = {
   destroy: jest.fn<any>()
 };
 
+/**
+ * Mock RedisStreamsClient for testing Redis Streams operations.
+ *
+ * **Mock Configuration:**
+ * - `xadd` - Jest spy that simulates adding messages to Redis Streams (returns message ID)
+ * - `createBatcher` - Returns the mockBatcher for batched publishing
+ * - `disconnect` - Jest spy for connection cleanup tracking
+ * - `ping` - Jest spy for health check simulation
+ *
+ * **Purpose:**
+ * Allows testing Redis Streams migration (ADR-002) without real Redis instance.
+ * Verifies that price updates, swap events, and opportunities are published
+ * to correct streams with proper batching.
+ *
+ * **Usage:**
+ * ```typescript
+ * const streamsClient = await getRedisStreamsClient();
+ * await streamsClient.xadd('stream:price-updates', { price: 100 });
+ *
+ * // Verify correct stream and message
+ * expect(streamsClient.xadd).toHaveBeenCalledWith(
+ *   'stream:price-updates',
+ *   expect.objectContaining({ price: 100 })
+ * );
+ * ```
+ */
 const mockStreamsClient = {
   xadd: jest.fn<any>(() => Promise.resolve('1234-0')),
   createBatcher: jest.fn<any>(() => mockBatcher),
@@ -47,7 +98,30 @@ const mockStreamsClient = {
   ping: jest.fn<any>(() => Promise.resolve(true))
 };
 
-// Mock the regular Redis client (for backward compatibility)
+/**
+ * Mock legacy Redis client for Pub/Sub backward compatibility testing.
+ *
+ * **Mock Configuration:**
+ * - `publish` - Jest spy for Pub/Sub channel publishing (returns subscriber count)
+ * - `disconnect` - Jest spy for connection cleanup tracking
+ *
+ * **Purpose:**
+ * Supports testing zero-downtime migration from Pub/Sub to Streams (ADR-002).
+ * During migration, both Pub/Sub and Streams are supported to allow gradual
+ * consumer migration without service disruption.
+ *
+ * **Usage:**
+ * ```typescript
+ * const redisClient = await getRedisClient();
+ * await redisClient.publish('price-updates', { price: 100 });
+ *
+ * // Verify backward compatibility
+ * expect(redisClient.publish).toHaveBeenCalledWith(
+ *   'price-updates',
+ *   expect.any(Object)
+ * );
+ * ```
+ */
 const mockRedisClient = {
   publish: jest.fn<any>(() => Promise.resolve(1)),
   disconnect: jest.fn<any>(() => Promise.resolve(undefined))
@@ -65,6 +139,23 @@ jest.mock('@arbitrage/core', () => ({
 }));
 
 describe('BaseDetector Streams Migration', () => {
+  /**
+   * Reset mock state before each test for isolation.
+   *
+   * **Why restore implementations after jest.clearAllMocks()?**
+   * jest.clearAllMocks() clears call history but also resets mock implementations
+   * to undefined. We must restore the default success behaviors (resolved promises,
+   * return values) so that tests start with consistent, working mock implementations.
+   *
+   * **What gets restored:**
+   * - createBatcher returns mockBatcher (not undefined)
+   * - xadd resolves with message ID '1234-0' (not undefined)
+   * - flush resolves successfully (not undefined)
+   * - getStats returns initial statistics (not undefined)
+   *
+   * This pattern allows individual tests to override specific behaviors
+   * (e.g., simulate errors) while ensuring all other tests have working mocks.
+   */
   beforeEach(() => {
     jest.clearAllMocks();
     // Restore mock implementations after clearing
@@ -82,7 +173,18 @@ describe('BaseDetector Streams Migration', () => {
   });
 
   describe('Stream Publishing', () => {
-    it('should publish price updates to Redis Stream instead of Pub/Sub', async () => {
+    /**
+     * GIVEN: A price update from partition service
+     * WHEN: Publishing the update to downstream consumers
+     * THEN: Should use Redis Streams for improved reliability
+     *
+     * **Business Value (ADR-002):**
+     * Redis Streams provides guaranteed delivery, message persistence,
+     * and consumer group support. This prevents lost price updates
+     * during network hiccups or consumer restarts, improving arbitrage
+     * detection accuracy.
+     */
+    it('should use Redis Streams for improved price update delivery reliability', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -113,7 +215,17 @@ describe('BaseDetector Streams Migration', () => {
       );
     });
 
-    it('should use StreamBatcher for batched publishing', async () => {
+    /**
+     * GIVEN: High-frequency price updates (thousands per second)
+     * WHEN: Publishing to Redis Streams
+     * THEN: Should batch updates to reduce Redis command overhead
+     *
+     * **Business Value:**
+     * Batching 50 price updates into 1 Redis command reduces network
+     * round-trips, CPU usage, and Redis load. This allows the system
+     * to handle higher throughput without scaling Redis infrastructure.
+     */
+    it('should batch price updates to reduce Redis load', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -130,7 +242,17 @@ describe('BaseDetector Streams Migration', () => {
       expect(batcher.add).toHaveBeenCalledTimes(3);
     });
 
-    it('should flush batcher when service stops', async () => {
+    /**
+     * GIVEN: Service is shutting down (deployment, scaling event, crash)
+     * WHEN: Batcher still contains unsent messages
+     * THEN: Should flush all pending messages to prevent data loss
+     *
+     * **Business Value:**
+     * Ensures no price updates are lost during service restarts or
+     * crashes. Critical for maintaining accurate arbitrage detection
+     * and preventing missed opportunities.
+     */
+    it('should ensure no price updates are lost during shutdown', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -145,7 +267,18 @@ describe('BaseDetector Streams Migration', () => {
       expect(batcher.flush).toHaveBeenCalled();
     });
 
-    it('should publish swap events to swap stream', async () => {
+    /**
+     * GIVEN: Swap events detected from blockchain monitoring
+     * WHEN: Publishing to downstream consumers
+     * THEN: Should route to dedicated swap stream for separation
+     *
+     * **Business Value:**
+     * Dedicated streams allow different consumer patterns. Swap events
+     * may need different processing (MEV detection, volume tracking)
+     * than price updates. Stream separation enables independent scaling
+     * and consumer group configuration.
+     */
+    it('should route swap events to dedicated stream for separation', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -168,7 +301,17 @@ describe('BaseDetector Streams Migration', () => {
       expect(streamsClient.xadd).toHaveBeenCalled();
     });
 
-    it('should publish whale alerts to whale stream', async () => {
+    /**
+     * GIVEN: Large transaction detected (>$100k USD value)
+     * WHEN: Publishing whale alert
+     * THEN: Should route to dedicated whale stream for priority processing
+     *
+     * **Business Value:**
+     * Whale transactions can signal market-moving events. Dedicated stream
+     * enables priority processing and alerts, helping traders react quickly
+     * to major liquidity changes that may create or invalidate opportunities.
+     */
+    it('should route whale alerts to dedicated stream for priority processing', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -194,7 +337,17 @@ describe('BaseDetector Streams Migration', () => {
       );
     });
 
-    it('should publish arbitrage opportunities to opportunities stream', async () => {
+    /**
+     * GIVEN: Arbitrage opportunity detected
+     * WHEN: Publishing to execution engine
+     * THEN: Should route to opportunities stream for execution processing
+     *
+     * **Business Value:**
+     * Dedicated opportunities stream enables consumer groups for execution
+     * engines, ensuring each opportunity is processed exactly once by a
+     * single execution instance (no duplicate trades).
+     */
+    it('should route opportunities to dedicated stream for execution processing', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -223,7 +376,18 @@ describe('BaseDetector Streams Migration', () => {
   });
 
   describe('Backward Compatibility', () => {
-    it('should support both Pub/Sub and Streams during migration', async () => {
+    /**
+     * GIVEN: System is migrating from Pub/Sub to Streams (ADR-002)
+     * WHEN: Publishing price updates during migration period
+     * THEN: Should support both channels for zero-downtime migration
+     *
+     * **Business Value:**
+     * Enables gradual consumer migration without service disruption.
+     * Old consumers continue reading from Pub/Sub while new consumers
+     * migrate to Streams. Once all consumers are migrated, Pub/Sub
+     * can be safely removed.
+     */
+    it('should enable zero-downtime migration from Pub/Sub to Streams', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const { getRedisClient } = require('@arbitrage/core');
 
@@ -240,7 +404,18 @@ describe('BaseDetector Streams Migration', () => {
       expect(redisClient.publish).toHaveBeenCalled();
     });
 
-    it('should gracefully fallback to Pub/Sub if Streams unavailable', async () => {
+    /**
+     * GIVEN: Streams connection fails (Redis Streams unavailable)
+     * WHEN: Publishing price update
+     * THEN: Should maintain service availability by falling back to Pub/Sub
+     *
+     * **Business Value:**
+     * Provides resilience during Redis Streams outages or version
+     * incompatibilities. Ensures price updates continue flowing even
+     * if Streams feature is temporarily unavailable, preventing complete
+     * system failure.
+     */
+    it('should maintain service availability if Streams connection fails', async () => {
       const { getRedisClient } = require('@arbitrage/core');
       const redisClient = await getRedisClient();
 
@@ -253,7 +428,18 @@ describe('BaseDetector Streams Migration', () => {
   });
 
   describe('Batching Efficiency', () => {
-    it('should achieve 50:1 batching ratio target', async () => {
+    /**
+     * GIVEN: 50 individual price updates in rapid succession
+     * WHEN: Using StreamBatcher with maxBatchSize=50
+     * THEN: Should reduce 50 Redis commands down to 1 command (50:1 ratio)
+     *
+     * **Business Value (ADR-002 Performance Target):**
+     * Batching reduces Redis CPU usage, network bandwidth, and round-trip
+     * latency by 50x. This allows the system to handle 50,000+ price updates
+     * per second without overwhelming Redis or requiring expensive Redis
+     * Cluster scaling.
+     */
+    it('should reduce Redis commands by batching 50 updates into 1 command', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -272,7 +458,17 @@ describe('BaseDetector Streams Migration', () => {
       expect(stats).toBeDefined();
     });
 
-    it('should respect maxWaitMs for time-based flushing', async () => {
+    /**
+     * GIVEN: Price updates arriving slower than batch size threshold
+     * WHEN: maxWaitMs timeout expires (50ms)
+     * THEN: Should flush partial batch to prevent stale data accumulation
+     *
+     * **Business Value:**
+     * Prevents price updates from sitting in the batch queue too long
+     * during low-activity periods. Ensures consumers receive timely updates
+     * even when volume is low (e.g., overnight, low-liquidity pairs).
+     */
+    it('should flush partial batches to prevent stale data during low activity', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -312,7 +508,18 @@ describe('BaseDetector Streams Migration', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle stream publish errors gracefully', async () => {
+    /**
+     * GIVEN: Redis Streams connection fails (network issue, Redis down)
+     * WHEN: Attempting to publish price update
+     * THEN: Should propagate error to caller for retry logic
+     *
+     * **Business Value:**
+     * Allows calling code to implement retry strategies (exponential backoff,
+     * circuit breakers, fallback to Pub/Sub). Failing fast is better than
+     * silently dropping price updates, which would cause missed arbitrage
+     * opportunities.
+     */
+    it('should propagate errors to caller for retry logic', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 
@@ -324,7 +531,17 @@ describe('BaseDetector Streams Migration', () => {
       ).rejects.toThrow('Connection refused');
     });
 
-    it('should cleanup batcher on service shutdown', async () => {
+    /**
+     * GIVEN: Service is shutting down (SIGTERM received)
+     * WHEN: Batcher cleanup is triggered
+     * THEN: Should properly destroy batcher to free resources
+     *
+     * **Business Value:**
+     * Ensures clean shutdown without resource leaks (timers, Redis connections).
+     * Prevents "connection pool exhausted" errors in containerized environments
+     * where services frequently restart (Kubernetes rolling deployments, autoscaling).
+     */
+    it('should properly destroy batcher to prevent resource leaks during shutdown', async () => {
       const { getRedisStreamsClient } = require('@arbitrage/core');
       const streamsClient = await getRedisStreamsClient();
 

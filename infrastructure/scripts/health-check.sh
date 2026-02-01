@@ -45,6 +45,15 @@ PARALLEL_MODE=false
 LOCK_FILE="/tmp/arbitrage-health-check.lock"
 LOCK_FD=200
 
+# Check if a process exists (cross-platform fallback if not in utils)
+# Args: $1 = pid
+# Returns: 0 if exists, 1 if not
+process_exists_local() {
+    local pid="$1"
+    # Use ps -p which works on Linux, macOS, BSD
+    ps -p "$pid" > /dev/null 2>&1
+}
+
 # Acquire lock to prevent concurrent execution race conditions
 # Uses improved locking with stale lock detection
 acquire_lock() {
@@ -67,12 +76,15 @@ acquire_lock() {
         local lock_pid
         lock_pid=$(cat "$LOCK_FILE" 2>/dev/null)
 
-        if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
+        # FIX P2-1: Use ps command instead of /proc for cross-platform support
+        # Previously: [ -d "/proc/$lock_pid" ] only works on Linux
+        # Now: ps -p works on Linux, macOS, BSD
+        if [ -n "$lock_pid" ] && process_exists_local "$lock_pid"; then
             # Process is still running
             echo "Another health check is already running (PID: $lock_pid)" >&2
             exit 1
         else
-            # Stale lock - try to remove and reacquire
+            # Stale lock (process dead) - try to remove and reacquire
             rm -f "$LOCK_FILE" 2>/dev/null
             exec 200>"$LOCK_FILE"
             if ! flock -n 200; then

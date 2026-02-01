@@ -29,8 +29,8 @@ import {
   isVaultModelDex,
   getFactoriesByType,
   validateFactoryRegistry,
-} from './dex-factories';
-import { DEXES } from './dexes';
+} from '../../src/dex-factories';
+import { DEXES } from '../../src/dexes';
 
 describe('DEX Factory Registry', () => {
   // =============================================================================

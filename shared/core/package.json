@@ -4,6 +4,20 @@
   "description": "Core utilities for the arbitrage detection system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal/index.d.ts",
+      "default": "./dist/internal/index.js"
+    },
+    "./deprecated": {
+      "types": "./dist/deprecated/index.d.ts",
+      "default": "./dist/deprecated/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "jest",

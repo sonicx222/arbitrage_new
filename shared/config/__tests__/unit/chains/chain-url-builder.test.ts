@@ -10,7 +10,7 @@ import {
   buildSolanaUrls,
   createAlchemyConfig,
   ChainUrlConfig,
-} from './chain-url-builder';
+} from '../../../src/chains/chain-url-builder';
 
 describe('ChainUrlBuilder', () => {
   // Store original env vars to restore after tests
@@ -119,8 +119,8 @@ describe('ChainUrlBuilder', () => {
       const result = buildChainUrlsWithApiKeys(baseConfig, [
         {
           apiKeyEnvVar: 'ALCHEMY_OPTIMISM_KEY',
-          rpcUrlTemplate: (key) => `https://opt-mainnet.g.alchemy.com/v2/${key}`,
-          wsUrlTemplate: (key) => `wss://opt-mainnet.g.alchemy.com/v2/${key}`,
+          rpcUrlTemplate: (key: string) => `https://opt-mainnet.g.alchemy.com/v2/${key}`,
+          wsUrlTemplate: (key: string) => `wss://opt-mainnet.g.alchemy.com/v2/${key}`,
         },
       ]);
 
@@ -143,13 +143,13 @@ describe('ChainUrlBuilder', () => {
       const result = buildChainUrlsWithApiKeys(baseConfig, [
         {
           apiKeyEnvVar: 'PRIMARY_API_KEY', // not set
-          rpcUrlTemplate: (key) => `https://primary/${key}`,
-          wsUrlTemplate: (key) => `wss://primary/${key}`,
+          rpcUrlTemplate: (key: string) => `https://primary/${key}`,
+          wsUrlTemplate: (key: string) => `wss://primary/${key}`,
         },
         {
           apiKeyEnvVar: 'SECONDARY_API_KEY', // set
-          rpcUrlTemplate: (key) => `https://secondary/${key}`,
-          wsUrlTemplate: (key) => `wss://secondary/${key}`,
+          rpcUrlTemplate: (key: string) => `https://secondary/${key}`,
+          wsUrlTemplate: (key: string) => `wss://secondary/${key}`,
         },
       ]);
 

@@ -19,6 +19,9 @@ const {
   checkRedis,
   checkHealth,
   updatePid,
+  removePid,
+  killProcess,
+  processExists,
   ROOT_DIR
 } = require('./lib/utils');
 
@@ -144,12 +147,15 @@ async function startService(service) {
         }
 
         // Check if process is still running
-        try {
-          process.kill(child.pid, 0);
-        } catch {
-          // Process has died
+        // FIX P2-1: Use processExists() for Windows compatibility
+        const isRunning = await processExists(child.pid);
+        if (!isRunning) {
+          // FIX P1-2: Process has died - clean up PID entry to prevent ghost processes
           logService(service.name, 'Process terminated unexpectedly', 'red');
-          resolve(child.pid);
+          await removePid(service.name).catch(() => {
+            // Ignore cleanup errors (PID may not have been saved yet)
+          });
+          reject(new Error(`${service.name} process died during startup`));
           return;
         }
 
@@ -157,8 +163,13 @@ async function startService(service) {
         attempts++;
       }
 
-      logService(service.name, 'Health check timeout - service may still be starting', 'yellow');
-      resolve(child.pid);
+      // FIX P1-2: Health check timeout - kill the process and clean up to prevent ghost processes
+      logService(service.name, 'Health check timeout - killing process', 'red');
+      await killProcess(child.pid);
+      await removePid(service.name).catch(() => {
+        // Ignore cleanup errors (PID may not have been saved yet)
+      });
+      reject(new Error(`${service.name} health check timeout after ${maxAttempts} seconds`));
     }, service.delay);
   });
 }
@@ -189,6 +200,7 @@ async function main() {
   // Start services
   log('\nStarting services...\n', 'cyan');
 
+  let failedServices = [];
   for (const service of SERVICES) {
     try {
       await startService(service);
@@ -196,7 +208,20 @@ async function main() {
       await new Promise(r => setTimeout(r, 1000));
     } catch (error) {
       log(`Failed to start ${service.name}: ${error.message}`, 'red');
+      // FIX P1-2: Track failed services for summary
+      failedServices.push({ name: service.name, error: error.message });
     }
+  }
+
+  // FIX P1-2: Show failed services summary
+  if (failedServices.length > 0) {
+    log('\n⚠️  Some services failed to start:', 'yellow');
+    failedServices.forEach(({ name, error }) => {
+      log(`  • ${name}: ${error}`, 'yellow');
+    });
+    log('\nTo cleanup and retry:', 'cyan');
+    log('  npm run dev:cleanup', 'dim');
+    log('  npm run dev:start', 'dim');
   }
 
   // Print summary

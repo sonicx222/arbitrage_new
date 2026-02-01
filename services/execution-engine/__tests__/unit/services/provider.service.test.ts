@@ -10,8 +10,8 @@
  */
 
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import { ProviderServiceImpl, ProviderServiceConfig } from './provider.service';
-import type { Logger, ExecutionStats } from '../types';
+import { ProviderServiceImpl, ProviderServiceConfig } from '../../../src/services/provider.service';
+import type { Logger, ExecutionStats } from '../../../src/types';
 
 // =============================================================================
 // Mock Factories
@@ -60,6 +60,7 @@ const createMockStats = (): ExecutionStats => ({
   riskDrawdownBlocks: 0,
   riskCautionCount: 0,
   riskHaltCount: 0,
+  staleLockRecoveries: 0,
 });
 
 const createMockConfig = (overrides: Partial<ProviderServiceConfig> = {}): ProviderServiceConfig => ({

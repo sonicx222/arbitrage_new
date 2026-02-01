@@ -11,8 +11,8 @@ import {
   createRiskOrchestrator,
   type RiskOrchestratorDeps,
   type RiskAssessmentInput,
-} from './risk-management-orchestrator';
-import { createInitialStats, type ExecutionStats, type Logger } from '../types';
+} from '../../../src/risk/risk-management-orchestrator';
+import { createInitialStats, type ExecutionStats, type Logger } from '../../../src/types';
 
 // Mock dependencies
 const createMockLogger = (): Logger => ({

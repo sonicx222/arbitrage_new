@@ -4,6 +4,11 @@
   "description": "Test utilities for arbitrage system",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./builders": "./src/builders/index.ts",
+    "./helpers": "./src/helpers/index.ts"
+  },
   "scripts": {
     "build": "tsc",
     "test": "jest",

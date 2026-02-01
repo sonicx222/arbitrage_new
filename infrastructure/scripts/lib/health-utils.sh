@@ -209,6 +209,25 @@ check_service_url() {
 }
 
 # =============================================================================
+# Process Utilities
+# =============================================================================
+
+# Check if a process exists (cross-platform: Linux, macOS, BSD)
+# Args: $1 = pid
+# Returns: 0 if process exists, 1 if not
+# Note: Uses `ps` command which is POSIX-compliant, unlike /proc which is Linux-only
+process_exists() {
+    local pid="$1"
+
+    # Use ps -p to check process existence (works on all Unix-like systems)
+    if ps -p "$pid" > /dev/null 2>&1; then
+        return 0  # Process exists
+    else
+        return 1  # Process doesn't exist
+    fi
+}
+
+# =============================================================================
 # Locking Utilities
 # =============================================================================
 
@@ -231,11 +250,14 @@ acquire_lock_safe() {
         local lock_pid
         lock_pid=$(cat "$lock_file" 2>/dev/null)
 
-        if [ -n "$lock_pid" ] && [ -d "/proc/$lock_pid" ]; then
+        # FIX P2-1: Use process_exists() instead of /proc check for cross-platform support
+        # Previously: [ -d "/proc/$lock_pid" ] only works on Linux
+        # Now: ps -p works on Linux, macOS, BSD
+        if [ -n "$lock_pid" ] && process_exists "$lock_pid"; then
             # Process is still running
             return 1
         else
-            # Stale lock, try to remove and reacquire
+            # Stale lock (process dead or PID invalid), try to remove and reacquire
             rm -f "$lock_file" 2>/dev/null
             eval "exec $lock_fd>\"$lock_file\""
             if ! flock -n "$lock_fd"; then

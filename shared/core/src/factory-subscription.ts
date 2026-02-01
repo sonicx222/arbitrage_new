@@ -16,71 +16,57 @@
  * - GMX (Avalanche): Classified as balancer_v2 but uses Vault/GLP model
  * - Platypus (Avalanche): Classified as curve but uses "coverage ratio" model
  * These use standard event patterns but may need custom handling for pair initialization.
+ *
+ * R10 REFACTORING (2026-02-01):
+ * Event parsers have been extracted to factory-subscription/parsers/ for better modularity.
+ * All exports remain backward compatible through re-exports below.
  */
 
-import { ethers } from 'ethers';
 import {
-  getFactoriesForChain,
   getFactoriesWithEventSupport,
-  getFactoryByAddress,
   FactoryType,
   FactoryConfig,
-  getAllFactoryAddresses,
 } from '../../config/src/dex-factories';
 import { ServiceLogger } from './logging';
 import { AsyncMutex } from './async/async-mutex';
 
 // =============================================================================
-// Constants for Hex Parsing
+// Re-exports from extracted parser modules (backward compatibility)
 // =============================================================================
 
-/** Offset for '0x' prefix in hex strings */
-const HEX_PREFIX_LENGTH = 2;
-/** Size of a 32-byte word in hex characters (64) */
-const WORD_SIZE_HEX = 64;
-/** Offset to extract address from 32-byte padded value (12 bytes padding = 24 hex chars) */
-const ADDRESS_PADDING_OFFSET = 24;
-/** Full offset including '0x' prefix for first address in data */
-const FIRST_ADDRESS_START = HEX_PREFIX_LENGTH + ADDRESS_PADDING_OFFSET; // 26
-/** Full offset including '0x' prefix for second value in data */
-const SECOND_VALUE_START = HEX_PREFIX_LENGTH + WORD_SIZE_HEX + ADDRESS_PADDING_OFFSET; // 90
+// Re-export types
+export { PairCreatedEvent, RawEventLog } from './factory-subscription/parsers/types';
 
-// =============================================================================
-// Hex Parsing Utilities
-// =============================================================================
+// Re-export all parsers for backward compatibility
+export {
+  parseV2PairCreatedEvent,
+  parseV3PoolCreatedEvent,
+  parseSolidlyPairCreatedEvent,
+  parseAlgebraPoolCreatedEvent,
+  parseTraderJoePairCreatedEvent,
+  parseCurvePlainPoolDeployedEvent,
+  parseCurveMetaPoolDeployedEvent,
+  parseCurvePoolCreatedEvent,
+  parseBalancerPoolRegisteredEvent,
+  parseBalancerTokensRegisteredEvent,
+  CURVE_PLAIN_POOL_SIGNATURE,
+  CURVE_META_POOL_SIGNATURE,
+  BALANCER_TOKENS_REGISTERED_SIGNATURE,
+} from './factory-subscription/parsers';
 
-/**
- * Extract an address from a 32-byte padded hex topic.
- * Topics are always 32 bytes (64 hex chars) with address in last 20 bytes.
- *
- * @param paddedHex - 32-byte hex string (with or without 0x prefix)
- * @returns Lowercase address with 0x prefix
- */
-function extractAddressFromTopic(paddedHex: string): string {
-  // Handle both 0x-prefixed and non-prefixed topics
-  const offset = paddedHex.startsWith('0x') ? HEX_PREFIX_LENGTH + ADDRESS_PADDING_OFFSET : ADDRESS_PADDING_OFFSET;
-  return ('0x' + paddedHex.slice(offset)).toLowerCase();
-}
-
-/**
- * Parse a signed int24 from a hex string using two's complement.
- * int24 range: -8388608 to 8388607
- *
- * @param hexValue - Hex string representing the int24
- * @returns Signed integer value
- */
-function parseSignedInt24(hexValue: string): number {
-  const value = parseInt(hexValue, 16);
-  // int24 is 24 bits, sign bit is at position 23 (counting from 0)
-  const INT24_MAX = 0x7FFFFF; // 8388607
-  const INT24_SIGN_BIT = 0x800000; // 8388608
-
-  if (value > INT24_MAX) {
-    // Negative number - convert from two's complement
-    return value - (INT24_SIGN_BIT * 2); // Subtract 2^24
-  }
-  return value;
-}
+// Import parsers for internal use
+import {
+  PairCreatedEvent,
+  parseV2PairCreatedEvent,
+  parseV3PoolCreatedEvent,
+  parseSolidlyPairCreatedEvent,
+  parseAlgebraPoolCreatedEvent,
+  parseTraderJoePairCreatedEvent,
+  parseCurvePoolCreatedEvent,
+  parseBalancerPoolRegisteredEvent,
+  parseBalancerTokensRegisteredEvent,
+  BALANCER_TOKENS_REGISTERED_SIGNATURE,
+} from './factory-subscription/parsers';
 
 // =============================================================================
 // Types
@@ -96,51 +82,6 @@ export interface FactorySubscriptionConfig {
   enabled: boolean;
   /** Optional: Custom factory addresses to monitor (overrides registry) */
   customFactories?: string[];
-}
-
-/**
- * Parsed PairCreated event data.
- * Extended to support all factory types including Curve and Balancer V2.
- */
-export interface PairCreatedEvent {
-  /** Token 0 address (first non-zero coin for Curve) */
-  token0: string;
-  /** Token 1 address (second non-zero coin for Curve) */
-  token1: string;
-  /** Created pair/pool address */
-  pairAddress: string;
-  /** Factory address that emitted the event */
-  factoryAddress: string;
-  /** Factory type for ABI selection */
-  factoryType: FactoryType;
-  /** DEX name from factory config */
-  dexName: string;
-  /** Block number where pair was created */
-  blockNumber: number;
-  /** Transaction hash */
-  transactionHash: string;
-  /** Optional: Fee tier (V3-style) in basis points */
-  fee?: number;
-  /** Optional: Stable pair flag (Solidly-style) */
-  isStable?: boolean;
-  /** Optional: Tick spacing (V3-style) */
-  tickSpacing?: number;
-  /** Optional: Bin step (Trader Joe) */
-  binStep?: number;
-  /** Optional: Pool ID for Balancer V2 (bytes32 as hex string) */
-  poolId?: string;
-  /** Optional: Balancer V2 pool specialization (0=General, 1=MinimalSwap, 2=TwoToken) */
-  specialization?: number;
-  /** Optional: All coins in the pool (Curve multi-asset pools) */
-  coins?: string[];
-  /** Optional: Amplification coefficient (Curve) */
-  amplificationCoefficient?: number;
-  /** Optional: Base pool address (Curve MetaPool) */
-  basePool?: string;
-  /** Optional: Whether this is a MetaPool (Curve) */
-  isMetaPool?: boolean;
-  /** Optional: Flag indicating tokens need async lookup (Balancer V2) */
-  requiresTokenLookup?: boolean;
 }
 
 /**
@@ -263,563 +204,6 @@ export function getFactoryEventSignature(factoryType: FactoryType): string {
     throw new Error(`Unsupported factory type: ${factoryType}`);
   }
   return signature;
-}
-
-// =============================================================================
-// Event Parsing Functions
-// =============================================================================
-
-/**
- * Parse a V2-style PairCreated event log.
- *
- * Event: PairCreated(address indexed token0, address indexed token1, address pair, uint)
- * Data layout: [pair address (32 bytes)] [pair index (32 bytes)]
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseV2PairCreatedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 3 topics (signature + 2 indexed) and at least 1 word of data
-    // Data: 0x prefix (2) + pair address word (64) = 66 minimum
-    if (!log.topics || log.topics.length < 3 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX) {
-      return null;
-    }
-
-    // Token addresses are in indexed topics (padded to 32 bytes)
-    const token0 = extractAddressFromTopic(log.topics[1]);
-    const token1 = extractAddressFromTopic(log.topics[2]);
-
-    // Pair address is first 32-byte word in data (address is last 20 bytes)
-    const pairAddress = ('0x' + log.data.slice(FIRST_ADDRESS_START, FIRST_ADDRESS_START + 40)).toLowerCase();
-
-    return {
-      token0,
-      token1,
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'uniswap_v2',
-      dexName: '', // Filled in by service
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a V3-style PoolCreated event log.
- *
- * Event: PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)
- * Data layout: [tickSpacing int24 (32 bytes)] [pool address (32 bytes)]
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseV3PoolCreatedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 4 topics (signature + 3 indexed) and 2 words of data
-    // Data: 0x prefix (2) + tickSpacing word (64) + pool address word (64) = 130 minimum
-    if (!log.topics || log.topics.length < 4 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 2) {
-      return null;
-    }
-
-    // Token addresses and fee are in indexed topics
-    const token0 = extractAddressFromTopic(log.topics[1]);
-    const token1 = extractAddressFromTopic(log.topics[2]);
-    const fee = parseInt(log.topics[3], 16);
-
-    // tickSpacing (int24) is first word in data - needs signed int handling
-    // The int24 is right-aligned in the 32-byte word, so we take the last 6 hex chars
-    const tickSpacingHex = log.data.slice(HEX_PREFIX_LENGTH + WORD_SIZE_HEX - 6, HEX_PREFIX_LENGTH + WORD_SIZE_HEX);
-    const tickSpacing = parseSignedInt24(tickSpacingHex);
-
-    // Pool address is second 32-byte word in data (address is last 20 bytes)
-    const pairAddress = ('0x' + log.data.slice(SECOND_VALUE_START, SECOND_VALUE_START + 40)).toLowerCase();
-
-    return {
-      token0,
-      token1,
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'uniswap_v3',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      fee,
-      tickSpacing,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a Solidly-style PairCreated event log.
- *
- * Event: PairCreated(address indexed token0, address indexed token1, bool stable, address pair, uint)
- * Data layout: [stable bool (32 bytes)] [pair address (32 bytes)] [pair index (32 bytes)]
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseSolidlyPairCreatedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 3 topics (signature + 2 indexed) and 3 words of data
-    // Data: 0x prefix (2) + stable bool (64) + pair address (64) + index (64) = 194 minimum
-    if (!log.topics || log.topics.length < 3 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 3) {
-      return null;
-    }
-
-    // Token addresses are in indexed topics
-    const token0 = extractAddressFromTopic(log.topics[1]);
-    const token1 = extractAddressFromTopic(log.topics[2]);
-
-    // stable (bool) is first word in data - non-zero means true
-    const stableWord = log.data.slice(HEX_PREFIX_LENGTH, HEX_PREFIX_LENGTH + WORD_SIZE_HEX);
-    const isStable = parseInt(stableWord, 16) !== 0;
-
-    // Pair address is second 32-byte word in data (address is last 20 bytes)
-    const pairAddress = ('0x' + log.data.slice(SECOND_VALUE_START, SECOND_VALUE_START + 40)).toLowerCase();
-
-    return {
-      token0,
-      token1,
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'solidly',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      isStable,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse an Algebra-style Pool event log.
- *
- * Event: Pool(address indexed token0, address indexed token1, address pool)
- * Data layout: [pool address (32 bytes)]
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseAlgebraPoolCreatedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 3 topics (signature + 2 indexed) and 1 word of data
-    // Data: 0x prefix (2) + pool address word (64) = 66 minimum
-    if (!log.topics || log.topics.length < 3 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX) {
-      return null;
-    }
-
-    // Token addresses are in indexed topics
-    const token0 = extractAddressFromTopic(log.topics[1]);
-    const token1 = extractAddressFromTopic(log.topics[2]);
-
-    // Pool address is first 32-byte word in data (address is last 20 bytes)
-    const pairAddress = ('0x' + log.data.slice(FIRST_ADDRESS_START, FIRST_ADDRESS_START + 40)).toLowerCase();
-
-    return {
-      token0,
-      token1,
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'algebra',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a Trader Joe LBPairCreated event log.
- *
- * Event: LBPairCreated(address indexed tokenX, address indexed tokenY, uint256 indexed binStep, address LBPair, uint256 pid)
- * Data layout: [LBPair address (32 bytes)] [pid (32 bytes)]
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseTraderJoePairCreatedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 4 topics (signature + 3 indexed) and 2 words of data
-    // Data: 0x prefix (2) + LBPair address word (64) + pid word (64) = 130 minimum
-    if (!log.topics || log.topics.length < 4 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 2) {
-      return null;
-    }
-
-    // Token addresses and binStep are in indexed topics
-    const token0 = extractAddressFromTopic(log.topics[1]);
-    const token1 = extractAddressFromTopic(log.topics[2]);
-    const binStep = parseInt(log.topics[3], 16);
-
-    // LBPair address is first 32-byte word in data (address is last 20 bytes)
-    const pairAddress = ('0x' + log.data.slice(FIRST_ADDRESS_START, FIRST_ADDRESS_START + 40)).toLowerCase();
-
-    return {
-      token0,
-      token1,
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'trader_joe',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      binStep,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Zero address constant for comparison.
- */
-const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-
-/**
- * Extract an address from a 32-byte padded hex data word at a specific offset.
- *
- * @param data - The hex data string (with 0x prefix)
- * @param wordIndex - The word index (0-based, each word is 32 bytes)
- * @returns Lowercase address with 0x prefix
- */
-function extractAddressFromDataWord(data: string, wordIndex: number): string {
-  const startOffset = HEX_PREFIX_LENGTH + (wordIndex * WORD_SIZE_HEX) + ADDRESS_PADDING_OFFSET;
-  return ('0x' + data.slice(startOffset, startOffset + 40)).toLowerCase();
-}
-
-/**
- * Extract a uint256 value from data at a specific word index as bigint.
- * Use this when you need full precision for large values (pool IDs, reserves, etc.).
- *
- * P1-4 FIX: Added bigint version for full precision support.
- *
- * @param data - The hex data string (with 0x prefix)
- * @param wordIndex - The word index (0-based, each word is 32 bytes)
- * @returns The uint256 as a bigint (full precision)
- */
-function extractBigIntFromDataWord(data: string, wordIndex: number): bigint {
-  const startOffset = HEX_PREFIX_LENGTH + (wordIndex * WORD_SIZE_HEX);
-  const hexValue = data.slice(startOffset, startOffset + WORD_SIZE_HEX);
-  return BigInt('0x' + hexValue);
-}
-
-/**
- * Extract a uint256 value from data at a specific word index as number.
- *
- * P1-4 FIX: Now returns -1 as sentinel value when overflow occurs, allowing callers
- * to detect and handle the overflow case. Use extractBigIntFromDataWord() when
- * full precision is required.
- *
- * @param data - The hex data string (with 0x prefix)
- * @param wordIndex - The word index (0-based, each word is 32 bytes)
- * @returns The uint256 as a number, or -1 if the value exceeds Number.MAX_SAFE_INTEGER
- */
-function extractUint256FromDataWord(data: string, wordIndex: number): number {
-  const bigValue = extractBigIntFromDataWord(data, wordIndex);
-  if (bigValue > BigInt(Number.MAX_SAFE_INTEGER)) {
-    // P1-4 FIX: Return -1 sentinel instead of silently truncating to MAX_SAFE_INTEGER
-    // This allows callers to detect overflow and use bigint version if needed
-    return -1;
-  }
-  return Number(bigValue);
-}
-
-/**
- * Parse a Curve PlainPoolDeployed event log.
- *
- * Event: PlainPoolDeployed(address[4] coins, uint256 A, uint256 fee, address deployer, address pool)
- * Data layout:
- *   - coins[0-3]: 4 x 32-byte words (addresses padded to 32 bytes)
- *   - A: 32-byte word (amplification coefficient)
- *   - fee: 32-byte word
- *   - deployer: 32-byte word (address)
- *   - pool: 32-byte word (address)
- * Total: 8 words = 256 bytes of data
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseCurvePlainPoolDeployedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 1 topic (signature only, no indexed params) and 8 words of data
-    // Data: 0x prefix (2) + 8 * 64 = 514 minimum
-    const minDataLength = HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 8;
-    if (!log.topics || log.topics.length < 1 || !log.data || log.data.length < minDataLength) {
-      return null;
-    }
-
-    // Extract all 4 coins
-    const coins: string[] = [];
-    for (let i = 0; i < 4; i++) {
-      const coinAddress = extractAddressFromDataWord(log.data, i);
-      if (coinAddress !== ZERO_ADDRESS) {
-        coins.push(coinAddress);
-      }
-    }
-
-    // Need at least 2 coins for a valid pool
-    if (coins.length < 2) {
-      return null;
-    }
-
-    // Extract amplification coefficient (A)
-    const amplificationCoefficient = extractUint256FromDataWord(log.data, 4);
-
-    // Extract fee (word 5)
-    const fee = extractUint256FromDataWord(log.data, 5);
-
-    // Pool address is word 7 (deployer is word 6)
-    const pairAddress = extractAddressFromDataWord(log.data, 7);
-
-    return {
-      token0: coins[0],
-      token1: coins[1],
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'curve',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      coins,
-      amplificationCoefficient,
-      fee,
-      isMetaPool: false,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a Curve MetaPoolDeployed event log.
- *
- * Event: MetaPoolDeployed(address coin, address base_pool, uint256 A, uint256 fee, address deployer, address pool)
- * Data layout:
- *   - coin: 32-byte word (the new token)
- *   - base_pool: 32-byte word (the underlying pool, e.g., 3pool)
- *   - A: 32-byte word (amplification coefficient)
- *   - fee: 32-byte word
- *   - deployer: 32-byte word (address)
- *   - pool: 32-byte word (address)
- * Total: 6 words = 192 bytes of data
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseCurveMetaPoolDeployedEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 1 topic (signature only, no indexed params) and 6 words of data
-    // Data: 0x prefix (2) + 6 * 64 = 386 minimum
-    const minDataLength = HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 6;
-    if (!log.topics || log.topics.length < 1 || !log.data || log.data.length < minDataLength) {
-      return null;
-    }
-
-    // Extract coin (the new token)
-    const coin = extractAddressFromDataWord(log.data, 0);
-    if (coin === ZERO_ADDRESS) {
-      return null;
-    }
-
-    // Extract base_pool address
-    const basePool = extractAddressFromDataWord(log.data, 1);
-    if (basePool === ZERO_ADDRESS) {
-      return null;
-    }
-
-    // Extract amplification coefficient (A)
-    const amplificationCoefficient = extractUint256FromDataWord(log.data, 2);
-
-    // Extract fee (word 3)
-    const fee = extractUint256FromDataWord(log.data, 3);
-
-    // Pool address is word 5 (deployer is word 4)
-    const pairAddress = extractAddressFromDataWord(log.data, 5);
-
-    // For MetaPools, token0 is the new coin, token1 is the base pool address
-    // The base pool typically represents the underlying tokens (e.g., 3pool = DAI/USDC/USDT)
-    return {
-      token0: coin,
-      token1: basePool, // Base pool acts as a "virtual" token
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'curve',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      coins: [coin], // Only the new coin is directly available
-      amplificationCoefficient,
-      fee,
-      basePool,
-      isMetaPool: true,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a Curve pool event, detecting whether it's a PlainPool or MetaPool.
- * Routes to the appropriate parser based on data length.
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseCurvePoolCreatedEvent(log: any): PairCreatedEvent | null {
-  if (!log || !log.topics || log.topics.length < 1 || !log.data) {
-    return null;
-  }
-
-  const signature = log.topics[0].toLowerCase();
-
-  // Check if this is a MetaPoolDeployed event
-  if (signature === AdditionalEventSignatures.curve_metapool.toLowerCase()) {
-    return parseCurveMetaPoolDeployedEvent(log);
-  }
-
-  // Check if this is a PlainPoolDeployed event
-  if (signature === FactoryEventSignatures.curve.toLowerCase()) {
-    return parseCurvePlainPoolDeployedEvent(log);
-  }
-
-  // Unknown signature - try to detect by data length as fallback
-  const dataLength = log.data.length;
-  const plainPoolMinLength = HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 8; // 514
-  const metaPoolMinLength = HEX_PREFIX_LENGTH + WORD_SIZE_HEX * 6;  // 386
-
-  if (dataLength >= plainPoolMinLength) {
-    return parseCurvePlainPoolDeployedEvent(log);
-  } else if (dataLength >= metaPoolMinLength) {
-    return parseCurveMetaPoolDeployedEvent(log);
-  }
-
-  return null;
-}
-
-/**
- * Parse a Balancer V2 PoolRegistered event log.
- *
- * Event: PoolRegistered(bytes32 indexed poolId, address indexed poolAddress, uint8 specialization)
- * Topics:
- *   - topics[0]: Event signature
- *   - topics[1]: poolId (bytes32, contains pool address in first 20 bytes)
- *   - topics[2]: poolAddress (address)
- * Data:
- *   - specialization: uint8 (0=General, 1=MinimalSwap, 2=TwoToken)
- *
- * IMPORTANT: This event does NOT contain token addresses. Tokens must be fetched
- * separately via Vault.getPoolTokens(poolId) or by listening for TokensRegistered event.
- * The requiresTokenLookup flag will be set to true.
- *
- * @param log - The raw log data
- * @returns Parsed event data or null if invalid
- */
-export function parseBalancerPoolRegisteredEvent(log: any): PairCreatedEvent | null {
-  try {
-    // Validate: need 3 topics (signature + 2 indexed) and at least 1 word of data
-    // Data: 0x prefix (2) + specialization word (64) = 66 minimum
-    if (!log.topics || log.topics.length < 3 || !log.data || log.data.length < HEX_PREFIX_LENGTH + WORD_SIZE_HEX) {
-      return null;
-    }
-
-    // poolId is in topics[1] - full bytes32
-    const poolId = log.topics[1].toLowerCase();
-
-    // poolAddress is in topics[2] (address padded to 32 bytes)
-    const pairAddress = extractAddressFromTopic(log.topics[2]);
-
-    // specialization is first word in data (uint8, right-aligned in 32-byte word)
-    const specialization = parseInt(log.data.slice(log.data.length - 2), 16);
-
-    // For Balancer V2, we don't have token addresses from PoolRegistered event
-    // Set placeholder addresses that indicate lookup is required
-    // The poolId contains the pool address in its first 20 bytes
-    return {
-      token0: ZERO_ADDRESS, // Tokens need to be fetched via Vault.getPoolTokens()
-      token1: ZERO_ADDRESS, // Tokens need to be fetched via Vault.getPoolTokens()
-      pairAddress,
-      factoryAddress: log.address.toLowerCase(),
-      factoryType: 'balancer_v2',
-      dexName: '',
-      blockNumber: log.blockNumber,
-      transactionHash: log.transactionHash,
-      poolId,
-      specialization,
-      requiresTokenLookup: true,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-/**
- * Parse a Balancer V2 TokensRegistered event log.
- * This event contains the token addresses for a pool.
- *
- * Event: TokensRegistered(bytes32 indexed poolId, address[] tokens, address[] assetManagers)
- * Topics:
- *   - topics[0]: Event signature
- *   - topics[1]: poolId (bytes32)
- * Data:
- *   - Dynamic array of tokens (offset + length + addresses)
- *   - Dynamic array of assetManagers (offset + length + addresses)
- *
- * @param log - The raw log data
- * @returns Partial event data with tokens or null if invalid
- */
-export function parseBalancerTokensRegisteredEvent(log: any): { poolId: string; tokens: string[] } | null {
-  try {
-    // Validate: need 2 topics (signature + poolId indexed)
-    if (!log.topics || log.topics.length < 2 || !log.data) {
-      return null;
-    }
-
-    // poolId is in topics[1]
-    const poolId = log.topics[1].toLowerCase();
-
-    // Data contains two dynamic arrays: tokens[] and assetManagers[]
-    // Each dynamic array has: offset (32 bytes), then at that offset: length (32 bytes) + elements
-    // For simplicity, we'll parse the tokens array
-
-    // First word is offset to tokens array (should be 64 = 0x40, pointing to after both offsets)
-    const tokensOffset = extractUint256FromDataWord(log.data, 0);
-
-    // Calculate actual position in data (offset is in bytes, we're working with hex chars)
-    // tokensOffset points to where the tokens array length is stored
-    const tokensLengthPos = HEX_PREFIX_LENGTH + (tokensOffset / 32) * WORD_SIZE_HEX;
-    const tokensLengthHex = log.data.slice(tokensLengthPos, tokensLengthPos + WORD_SIZE_HEX);
-    const tokensLength = parseInt(tokensLengthHex, 16);
-
-    if (tokensLength === 0 || tokensLength > 50) {
-      // Invalid or unreasonable token count
-      return null;
-    }
-
-    // Extract token addresses
-    const tokens: string[] = [];
-    const tokensDataStart = tokensLengthPos + WORD_SIZE_HEX;
-
-    for (let i = 0; i < tokensLength; i++) {
-      const tokenWordStart = tokensDataStart + i * WORD_SIZE_HEX + ADDRESS_PADDING_OFFSET;
-      const tokenAddress = ('0x' + log.data.slice(tokenWordStart, tokenWordStart + 40)).toLowerCase();
-      if (tokenAddress !== ZERO_ADDRESS) {
-        tokens.push(tokenAddress);
-      }
-    }
-
-    return { poolId, tokens };
-  } catch (error) {
-    return null;
-  }
 }
 
 // =============================================================================
@@ -1103,7 +487,7 @@ export class FactorySubscriptionService {
       // P1-1 FIX: Check for Balancer TokensRegistered event first
       // TokensRegistered is emitted by Vault (same address as factory for Balancer)
       const eventTopic = log.topics?.[0]?.toLowerCase();
-      if (eventTopic === AdditionalEventSignatures.balancer_tokens_registered.toLowerCase()) {
+      if (eventTopic === BALANCER_TOKENS_REGISTERED_SIGNATURE.toLowerCase()) {
         this.handleBalancerTokensRegistered(log);
         return;
       }

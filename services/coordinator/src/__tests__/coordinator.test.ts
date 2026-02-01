@@ -125,7 +125,17 @@ jest.mock('@arbitrage/core', () => ({
     setConsumerGroup: jest.fn(),
     start: jest.fn(),
     stop: jest.fn()
-  }))
+  })),
+  // R2: Add SimpleCircuitBreaker mock for coordinator tests
+  SimpleCircuitBreaker: jest.fn().mockImplementation(() => ({
+    isCurrentlyOpen: jest.fn(() => false),
+    recordFailure: jest.fn(() => false),
+    recordSuccess: jest.fn(() => false),
+    getFailures: jest.fn(() => 0),
+    getStatus: jest.fn(() => ({ isOpen: false, failures: 0, resetTimeoutMs: 60000 }))
+  })),
+  // R2: Add findKSmallest mock
+  findKSmallest: jest.fn(<T>(iter: Iterable<T>, k: number) => Array.from(iter).slice(0, k))
 }));
 
 // Import config

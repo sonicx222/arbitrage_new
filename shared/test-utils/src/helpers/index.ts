@@ -5,6 +5,7 @@
  * - Timer management (fake/real timers)
  * - Async utilities
  * - Test isolation helpers
+ * - Test state management (beforeAll/beforeEach patterns)
  *
  * @see P2-TEST from refactoring-roadmap.md
  */
@@ -28,3 +29,12 @@ export {
   // Types
   FakeTimerConfig,
 } from './timer-helpers';
+
+export {
+  // Test state management
+  Resettable,
+  verifyResettable,
+  createResetHook,
+  resetStateHelper,
+  ResettableClass,
+} from './test-state-management';

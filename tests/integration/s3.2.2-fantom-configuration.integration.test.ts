@@ -744,13 +744,12 @@ describe('S3.2.2.8: PairDiscoveryService Fantom Integration', () => {
   let resetPairDiscoveryService: typeof import('../../shared/core/src').resetPairDiscoveryService;
   let service: InstanceType<typeof PairDiscoveryService>;
 
+  // P2-1: Initialize service once in beforeAll for performance
   beforeAll(async () => {
     const module = await import('../../shared/core/src');
     PairDiscoveryService = module.PairDiscoveryService;
     resetPairDiscoveryService = module.resetPairDiscoveryService;
-  });
 
-  beforeEach(() => {
     resetPairDiscoveryService();
     service = new PairDiscoveryService({
       maxConcurrentQueries: 5,
@@ -764,7 +763,12 @@ describe('S3.2.2.8: PairDiscoveryService Fantom Integration', () => {
     });
   });
 
-  afterEach(() => {
+  // P2-1: Reset state before each test for isolation
+  beforeEach(() => {
+    service.resetState(); // Fast: just clears stats/circuit breakers
+  });
+
+  afterAll(() => {
     service.cleanup();
   });
 

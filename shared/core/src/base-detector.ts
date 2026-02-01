@@ -23,6 +23,8 @@ import {
   ServiceStateManager,
   ServiceState,
   createServiceState,
+  // P1-1 FIX: Lifecycle mutex to prevent start/stop race conditions
+  AsyncMutex,
   // S2.2.5: Pair Discovery and Caching
   PairDiscoveryService,
   getPairDiscoveryService,
@@ -36,11 +38,23 @@ import {
   createFactorySubscriptionService,
   PairCreatedEvent,
   FactoryEventSignatures,
+  // R7 Consolidation: Use shared retry utility
+  retryWithLogging,
 } from './index';
 // Phase 1 Refactor: Use extracted DetectorConnectionManager (MIGRATION_PLAN.md)
+// Phase 1.5 Refactor: Use extracted PairInitializationService (MIGRATION_PLAN.md)
+// R5 Refactor: Use extracted HealthMonitor and FactoryIntegration
 import {
   initializeDetectorConnections,
   disconnectDetectorConnections,
+  initializePairs as initializePairsService,
+  resolvePairAddress,
+  // R5: Health monitoring
+  DetectorHealthMonitor,
+  createDetectorHealthMonitor,
+  // R5: Factory integration
+  FactoryIntegrationService,
+  createFactoryIntegrationService,
 } from './detector';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, FALLBACK_TOKEN_PRICES, getEnabledDexes, dexFeeToPercentage, getAllFactoryAddresses, getFactoryByAddress, validateFactoryRegistry } from '../../config/src';
 import {
@@ -157,6 +171,8 @@ export abstract class BaseDetector {
   protected factorySubscriptionService: FactorySubscriptionService | null = null;
   // Pre-computed set of factory addresses for O(1) lookup in event routing
   protected factoryAddresses: Set<string> = new Set();
+  // R5: Extracted factory integration service (delegation target)
+  protected factoryIntegrationService: FactoryIntegrationService | null = null;
 
   protected dexes: Dex[];
   // O(1) DEX lookup by name (performance optimization for registerPairFromFactory)
@@ -184,9 +200,15 @@ export abstract class BaseDetector {
   // Service state management (prevents lifecycle race conditions)
   protected stateManager: ServiceStateManager;
   protected healthMonitoringInterval: NodeJS.Timeout | null = null;
+  // R5: Extracted health monitor service (delegation target)
+  protected healthMonitorService: DetectorHealthMonitor | null = null;
 
   // Race condition protection (additional guard alongside state machine)
   protected isStopping = false;
+
+  // P1-1 FIX: Lifecycle mutex to prevent TOCTOU race conditions in start/stop
+  // This ensures that start() and stop() cannot interleave unsafely
+  private lifecycleMutex = new AsyncMutex();
 
   // Redis Streams is REQUIRED per ADR-002 - fail fast if unavailable
   // Removed useStreams flag - Streams is always required
@@ -279,19 +301,21 @@ export abstract class BaseDetector {
         // Use default batcher configs from DetectorConnectionManager
       },
       {
-        // Wrap handlers with publishWithRetry for resilience (P0-6 fix)
+        // R7 Consolidation: Use shared retryWithLogging utility for resilience (P0-6 fix)
         onWhaleAlert: (alert: unknown) => {
-          this.publishWithRetry(
+          retryWithLogging(
             () => this.publishWhaleAlert(alert as WhaleAlert),
             'whale alert',
-            3 // max retries
+            this.logger,
+            { maxRetries: 3 }
           );
         },
         onVolumeAggregate: (aggregate: unknown) => {
-          this.publishWithRetry(
+          retryWithLogging(
             () => this.publishVolumeAggregate(aggregate as VolumeAggregate),
             'volume aggregate',
-            3 // max retries
+            this.logger,
+            { maxRetries: 3 }
           );
         },
       }
@@ -349,204 +373,68 @@ export abstract class BaseDetector {
    * Task 2.1.2: Initialize factory subscription service for dynamic pair discovery.
    * Subscribes to PairCreated events from factory contracts to detect new pairs
    * as they are deployed, enabling 40-50x RPC subscription reduction.
+   *
+   * R5 Refactor: Delegates to extracted FactoryIntegrationService.
    */
   protected async initializeFactorySubscription(): Promise<void> {
-    try {
-      // P0-FIX: Validate factory registry at startup to catch configuration errors early
-      const validationErrors = validateFactoryRegistry();
-      if (validationErrors.length > 0) {
-        this.logger.warn('Factory registry validation warnings', {
-          chain: this.chain,
-          errors: validationErrors,
-          count: validationErrors.length,
-        });
-        // Continue despite warnings - these may be expected for certain DEXes
-      }
-
-      // Build factory address set for O(1) event routing lookup
-      const factoryAddrs = getAllFactoryAddresses(this.chain);
-      this.factoryAddresses = new Set(factoryAddrs.map(addr => addr.toLowerCase()));
-
-      if (this.factoryAddresses.size === 0) {
-        this.logger.info('No factories configured for chain, skipping factory subscription', {
-          chain: this.chain
-        });
-        return;
-      }
-
-      // Create factory subscription service
-      // P0-FIX: Added unsubscribe method to WebSocket adapter for bidirectional subscription management
-      // P1-2 FIX: Added null checks inside closures to handle wsManager becoming null during shutdown
-      this.factorySubscriptionService = createFactorySubscriptionService(
-        {
-          chain: this.chain,
-          enabled: true,
-        },
-        {
-          logger: this.logger,
-          wsManager: this.wsManager ? {
-            subscribe: (params) => {
-              // P1-2 FIX: Check wsManager is still valid (could be nullified during shutdown)
-              if (!this.wsManager) {
-                this.logger.debug('WebSocket manager unavailable for subscribe');
-                return 0; // Return dummy subscription ID
-              }
-              return this.wsManager.subscribe(params);
-            },
-            unsubscribe: (subscriptionId: string) => {
-              // P1-2 FIX: Check wsManager is still valid before unsubscribing
-              if (!this.wsManager) {
-                this.logger.debug('WebSocket manager unavailable for unsubscribe');
-                return;
-              }
-              // Convert string ID to number for WebSocketManager
-              const numId = parseInt(subscriptionId, 10);
-              if (!isNaN(numId)) {
-                this.wsManager.unsubscribe(numId);
-              }
-            },
-            isConnected: () => {
-              // P1-2 FIX: Safe check - return false if wsManager is null
-              return this.wsManager?.isWebSocketConnected() ?? false;
-            },
-          } : undefined,
-        }
-      );
-
-      // Register callback for new pair discovery
-      this.factorySubscriptionService.onPairCreated((event: PairCreatedEvent) => {
-        this.registerPairFromFactory(event);
-      });
-
-      // Subscribe to factory events
-      await this.factorySubscriptionService.subscribeToFactories();
-
-      this.logger.info('Factory subscription service initialized', {
+    // R5: Use extracted FactoryIntegrationService
+    this.factoryIntegrationService = createFactoryIntegrationService(
+      {
         chain: this.chain,
-        factories: this.factoryAddresses.size,
-        stats: this.factorySubscriptionService.getStats(),
-      });
-    } catch (error) {
-      this.logger.error('Failed to initialize factory subscription service', { error });
-      // Non-fatal: existing pairs will still work, just no dynamic discovery
-      this.logger.warn('Dynamic pair discovery disabled');
-    }
+        enabled: true,
+      },
+      {
+        logger: this.logger,
+        wsManager: this.wsManager,
+        dexesByName: this.dexesByName,
+        pairsByAddress: this.pairsByAddress,
+        addPairToIndices: (pairKey: string, pair: Pair) => {
+          this.pairs.set(pairKey, pair);
+          this.pairsByAddress.set(pair.address.toLowerCase(), pair);
+          this.addPairToTokenIndex(pair);
+          this.monitoredPairs.add(pair.address.toLowerCase());
+        },
+        isRunning: () => this.isRunning,
+        isStopping: () => this.isStopping,
+      }
+    );
+
+    const result = await this.factoryIntegrationService.initialize();
+
+    // Copy results to instance properties for backward compatibility
+    this.factorySubscriptionService = result.service;
+    this.factoryAddresses = result.factoryAddresses;
   }
 
   /**
    * Task 2.1.2: Register a new pair from a PairCreated factory event.
-   * Called when a factory emits a PairCreated event to register the new pair
-   * for monitoring.
    *
-   * P0-2 FIX: Added shutdown guard to prevent race condition where late-arriving
-   * factory events modify shared state during cleanup.
+   * R5 Refactor: Now handled by FactoryIntegrationService.
+   * This method is kept for backward compatibility with subclasses.
+   *
+   * @deprecated Use FactoryIntegrationService instead
    */
   protected registerPairFromFactory(event: PairCreatedEvent): void {
-    // P0-2 FIX: Guard against registration during shutdown
-    // This prevents race conditions where factory events arrive during stop()
-    if (this.isStopping || !this.isRunning) {
-      this.logger.debug('Ignoring factory event during shutdown', {
-        pair: event.pairAddress,
-        dex: event.dexName,
-      });
-      return;
-    }
-
-    try {
-      const pairAddressLower = event.pairAddress.toLowerCase();
-
-      // Skip if pair already registered
-      if (this.pairsByAddress.has(pairAddressLower)) {
-        this.logger.debug('Pair already registered, skipping', {
-          pair: event.pairAddress,
-          dex: event.dexName,
-        });
-        return;
-      }
-
-      // Look up DEX configuration to get fee (O(1) lookup via dexesByName map)
-      const dexConfig = this.dexesByName.get(event.dexName.toLowerCase());
-      const fee = dexConfig ? dexFeeToPercentage(dexConfig.fee ?? 30) : 0.003;
-
-      // Create pair object
-      const pair: Pair = {
-        name: `${event.token0.slice(0, 6)}.../${event.token1.slice(0, 6)}...`,
-        address: event.pairAddress,
-        token0: event.token0,
-        token1: event.token1,
-        dex: event.dexName,
-        fee,
-      };
-
-      // Register in all indices
-      const pairKey = `${event.dexName}_${pair.name}`;
-      this.pairs.set(pairKey, pair);
-      this.pairsByAddress.set(pairAddressLower, pair);
-      this.addPairToTokenIndex(pair);
-      this.monitoredPairs.add(pairAddressLower);
-
-      // Subscribe to Sync/Swap events for new pair
-      this.subscribeToNewPair(pair);
-
-      this.logger.info('Registered new pair from factory', {
-        pair: event.pairAddress,
-        dex: event.dexName,
-        token0: event.token0.slice(0, 10) + '...',
-        token1: event.token1.slice(0, 10) + '...',
-        blockNumber: event.blockNumber,
-      });
-    } catch (error) {
-      this.logger.error('Failed to register pair from factory', {
-        error,
-        pairAddress: event.pairAddress,
-        dex: event.dexName,
-      });
-    }
+    // R5: This is now handled internally by FactoryIntegrationService
+    // Kept for backward compatibility in case subclasses override
+    this.logger.debug('registerPairFromFactory called directly - now handled by FactoryIntegrationService', {
+      pair: event.pairAddress,
+    });
   }
 
   /**
    * Task 2.1.2: Subscribe to Sync/Swap events for a newly discovered pair.
-   * Called when a new pair is registered from a factory event.
+   *
+   * R5 Refactor: Now handled by FactoryIntegrationService.
+   * This method is kept for backward compatibility with subclasses.
+   *
+   * @deprecated Use FactoryIntegrationService instead
    */
   protected subscribeToNewPair(pair: Pair): void {
-    if (!this.wsManager) {
-      this.logger.warn('WebSocket manager not available for new pair subscription');
-      return;
-    }
-
-    const pairAddress = pair.address.toLowerCase();
-
-    // Subscribe to Sync events (reserve changes)
-    if (EVENT_CONFIG.syncEvents.enabled) {
-      this.wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: [
-          'logs',
-          {
-            topics: [EVENT_SIGNATURES.SYNC],
-            address: [pairAddress],
-          },
-        ],
-      });
-    }
-
-    // Subscribe to Swap events (trading activity)
-    if (EVENT_CONFIG.swapEvents.enabled) {
-      this.wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: [
-          'logs',
-          {
-            topics: [EVENT_SIGNATURES.SWAP_V2],
-            address: [pairAddress],
-          },
-        ],
-      });
-    }
-
-    this.logger.debug('Subscribed to events for new pair', {
+    // R5: This is now handled internally by FactoryIntegrationService
+    // Kept for backward compatibility in case subclasses override
+    this.logger.debug('subscribeToNewPair called directly - now handled by FactoryIntegrationService', {
       pair: pair.address,
-      dex: pair.dex,
     });
   }
 
@@ -559,27 +447,33 @@ export abstract class BaseDetector {
    * Start the detector service.
    * Uses ServiceStateManager to prevent race conditions.
    * Override onStart() for chain-specific initialization.
+   *
+   * P1-1 FIX: Uses lifecycle mutex to prevent TOCTOU race conditions.
+   * This ensures atomic check-and-start operations.
    */
   async start(): Promise<void> {
-    // Wait for any pending stop operation to complete
-    if (this.stopPromise) {
-      this.logger.debug('Waiting for pending stop operation to complete');
-      await this.stopPromise;
-    }
-
-    // Guard against starting while stopping
-    if (this.isStopping) {
-      this.logger.warn('Cannot start: service is currently stopping');
-      return;
-    }
-
-    // Guard against double start
-    if (this.isRunning) {
-      this.logger.warn('Service is already running');
-      return;
-    }
-
+    // P1-1 FIX: Use mutex to atomically check state and perform start
+    // This prevents race where two callers both pass the guards and double-start
+    const release = await this.lifecycleMutex.acquire();
     try {
+      // Wait for any pending stop operation to complete
+      if (this.stopPromise) {
+        this.logger.debug('Waiting for pending stop operation to complete');
+        await this.stopPromise;
+      }
+
+      // Guard against starting while stopping
+      if (this.isStopping) {
+        this.logger.warn('Cannot start: service is currently stopping');
+        return;
+      }
+
+      // Guard against double start
+      if (this.isRunning) {
+        this.logger.warn('Service is already running');
+        return;
+      }
+
       this.logger.info(`Starting ${this.chain} detector service`);
 
       // Initialize Redis client
@@ -616,6 +510,8 @@ export abstract class BaseDetector {
     } catch (error) {
       this.logger.error(`Failed to start ${this.chain} detector service`, { error });
       throw error;
+    } finally {
+      release();
     }
   }
 
@@ -623,27 +519,45 @@ export abstract class BaseDetector {
    * Stop the detector service.
    * Uses ServiceStateManager to prevent race conditions.
    * Override onStop() for chain-specific cleanup.
+   *
+   * P1-1 FIX: Uses lifecycle mutex to prevent TOCTOU race conditions.
+   * The mutex protects the guard checks and state transitions, but is released
+   * before awaiting cleanup so that start() isn't blocked unnecessarily.
    */
   async stop(): Promise<void> {
-    // If stop is already in progress, wait for it (regardless of other state)
+    // P1-1 FIX: Atomic check if stop is in progress (outside mutex for efficiency)
+    // If already stopping, just wait for that operation to complete
     if (this.stopPromise) {
       return this.stopPromise;
     }
 
-    // Guard against double stop when already stopped
-    if (!this.isRunning && !this.isStopping) {
-      this.logger.debug('Service is already stopped');
-      return;
+    // P1-1 FIX: Use mutex to atomically check state and initiate stop
+    const release = await this.lifecycleMutex.acquire();
+    try {
+      // Re-check stopPromise after acquiring mutex (another caller may have set it)
+      if (this.stopPromise) {
+        release();
+        return this.stopPromise;
+      }
+
+      // Guard against double stop when already stopped
+      if (!this.isRunning && !this.isStopping) {
+        this.logger.debug('Service is already stopped');
+        return;
+      }
+
+      // Mark as stopping BEFORE creating the promise to prevent races
+      this.isStopping = true;
+      this.isRunning = false;
+      this.logger.info(`Stopping ${this.chain} detector service`);
+
+      // Create and store the promise BEFORE releasing mutex
+      this.stopPromise = this.performCleanup();
+    } finally {
+      release();
     }
 
-    // Mark as stopping BEFORE creating the promise to prevent races
-    this.isStopping = true;
-    this.isRunning = false;
-    this.logger.info(`Stopping ${this.chain} detector service`);
-
-    // Create and store the promise BEFORE awaiting
-    this.stopPromise = this.performCleanup();
-
+    // Await cleanup outside of mutex (other operations can proceed)
     try {
       await this.stopPromise;
     } finally {
@@ -658,7 +572,12 @@ export abstract class BaseDetector {
    * Note: State cleanup (isStopping, stopPromise) is handled in stop()
    */
   private async performCleanup(): Promise<void> {
-    // Stop health monitoring first to prevent racing
+    // R5: Stop health monitoring first to prevent racing
+    if (this.healthMonitorService) {
+      this.healthMonitorService.stop();
+      this.healthMonitorService = null;
+    }
+    // Legacy fallback (for backward compatibility)
     if (this.healthMonitoringInterval) {
       clearInterval(this.healthMonitoringInterval);
       this.healthMonitoringInterval = null;
@@ -686,7 +605,12 @@ export abstract class BaseDetector {
     // Clean up Redis Streams batchers (ADR-002, S1.1.4)
     await this.cleanupStreamBatchers();
 
-    // Task 2.1.2: Clean up factory subscription service
+    // R5: Clean up factory integration service
+    if (this.factoryIntegrationService) {
+      this.factoryIntegrationService.stop();
+      this.factoryIntegrationService = null;
+    }
+    // Legacy cleanup (for backward compatibility)
     if (this.factorySubscriptionService) {
       try {
         this.factorySubscriptionService.stop();
@@ -764,7 +688,10 @@ export abstract class BaseDetector {
   async getHealth(): Promise<any> {
     const batcherStats = this.eventBatcher ? this.eventBatcher.getStats() : null;
     const wsStats = this.wsManager ? this.wsManager.getConnectionStats() : null;
-    const factoryStats = this.factorySubscriptionService?.getStats() || null;
+    // R5: Use factory integration service with legacy fallback
+    const factoryStats = this.factoryIntegrationService?.getStats()
+      || this.factorySubscriptionService?.getStats()
+      || null;
 
     return {
       service: `${this.chain}-detector`,
@@ -779,53 +706,36 @@ export abstract class BaseDetector {
       chain: this.chain,
       dexCount: this.dexes.length,
       tokenCount: this.tokens.length,
-      // Task 2.1.2: Factory subscription health
+      // R5: Factory subscription health
       factorySubscription: factoryStats
     };
   }
 
   /**
-   * Start health monitoring interval
-   * P1-FIX: Self-clears interval when stopping to prevent memory leak
+   * Start health monitoring interval.
+   *
+   * R5 Refactor: Delegates to extracted DetectorHealthMonitor.
+   * P1-FIX: Self-clears interval when stopping to prevent memory leak.
    */
   protected startHealthMonitoring(): void {
-    const interval = this.config.healthCheckInterval || 30000;
-    this.healthMonitoringInterval = setInterval(async () => {
-      // P1-FIX: Self-clear when stopping to prevent wasted cycles and memory leak
-      if (this.isStopping || !this.isRunning) {
-        if (this.healthMonitoringInterval) {
-          clearInterval(this.healthMonitoringInterval);
-          this.healthMonitoringInterval = null;
-        }
-        return;
+    // R5: Use extracted DetectorHealthMonitor
+    this.healthMonitorService = createDetectorHealthMonitor(
+      {
+        serviceName: `${this.chain}-detector`,
+        chain: this.chain,
+        healthCheckInterval: this.config.healthCheckInterval || 30000,
+      },
+      {
+        logger: this.logger,
+        perfLogger: this.perfLogger,
+        redis: this.redis,
+        getHealth: () => this.getHealth(),
+        isRunning: () => this.isRunning,
+        isStopping: () => this.isStopping,
       }
+    );
 
-      try {
-        const health = await this.getHealth();
-
-        // Re-check shutdown state after async operation
-        if (this.isStopping || !this.isRunning) {
-          return;
-        }
-
-        // Capture redis reference to prevent null access during shutdown
-        const redis = this.redis;
-        if (redis) {
-          await redis.updateServiceHealth(`${this.chain}-detector`, health);
-        }
-
-        // Final check before logging
-        if (!this.isStopping) {
-          this.perfLogger.logHealthCheck(`${this.chain}-detector`, health);
-        }
-
-      } catch (error) {
-        // Only log error if not stopping (errors during shutdown are expected)
-        if (!this.isStopping) {
-          this.logger.error('Health monitoring failed', { error });
-        }
-      }
-    }, interval);
+    this.healthMonitorService.start();
   }
 
   // ===========================================================================
@@ -1213,160 +1123,56 @@ export abstract class BaseDetector {
 
   // ===========================================================================
   // Pair Initialization (Common functionality)
+  // Phase 1.5 Refactor: Delegates to extracted PairInitializationService
   // ===========================================================================
 
   protected async initializePairs(): Promise<void> {
-    this.logger.info(`Initializing ${this.chain} trading pairs`);
+    // Phase 1.5: Delegate pair discovery to extracted service
+    const result = await initializePairsService({
+      chain: this.chain,
+      logger: this.logger,
+      dexes: this.dexes,
+      tokens: this.tokens,
+      pairDiscoveryService: this.pairDiscoveryService,
+      pairCacheService: this.pairCacheService,
+    });
 
-    const pairsProcessed = new Set<string>();
-
-    // Note: this.dexes is already filtered by getEnabledDexes() in constructor
-    for (const dex of this.dexes) {
-      for (let i = 0; i < this.tokens.length; i++) {
-        for (let j = i + 1; j < this.tokens.length; j++) {
-          const token0 = this.tokens[i];
-          const token1 = this.tokens[j];
-
-          // Skip if pair already processed
-          const pairKey = `${token0.symbol}_${token1.symbol}`;
-          if (pairsProcessed.has(pairKey)) continue;
-
-          try {
-            const pairAddress = await this.getPairAddress(dex, token0, token1);
-            if (pairAddress && pairAddress !== ethers.ZeroAddress) {
-              // Convert fee from basis points to percentage for pair storage
-              // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-              // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0 (if any DEX has 0% fee)
-              const feePercentage = dexFeeToPercentage(dex.fee ?? 30);
-              const pair: Pair = {
-                name: `${token0.symbol}/${token1.symbol}`,
-                address: pairAddress,
-                token0: token0.address,
-                token1: token1.address,
-                dex: dex.name,
-                fee: feePercentage
-              };
-
-              const fullPairKey = `${dex.name}_${pair.name}`;
-              this.pairs.set(fullPairKey, pair);
-              // O(1) lookup by address (used in processLogEvent, calculatePriceImpact)
-              this.pairsByAddress.set(pairAddress.toLowerCase(), pair);
-              // T1.1: Add to token pair index for O(1) arbitrage detection
-              this.addPairToTokenIndex(pair);
-              this.monitoredPairs.add(pairAddress.toLowerCase());
-              pairsProcessed.add(pairKey);
-
-              this.logger.debug(`Added pair: ${pair.name} on ${dex.name}`, {
-                address: pairAddress,
-                pairKey: fullPairKey
-              });
-            }
-          } catch (error) {
-            this.logger.warn(`Failed to get pair address for ${token0.symbol}/${token1.symbol} on ${dex.name}`, {
-              error: (error as Error).message
-            });
-          }
-        }
-      }
+    // Register discovered pairs in instance maps
+    for (const { pairKey, pair } of result.pairs) {
+      this.pairs.set(pairKey, pair);
+      // O(1) lookup by address (used in processLogEvent, calculatePriceImpact)
+      this.pairsByAddress.set(pair.address.toLowerCase(), pair);
+      // T1.1: Add to token pair index for O(1) arbitrage detection
+      this.addPairToTokenIndex(pair);
+      this.monitoredPairs.add(pair.address.toLowerCase());
     }
 
-    this.logger.info(`Initialized ${this.pairs.size} trading pairs for ${this.chain}`);
+    this.logger.info(`Registered ${this.pairs.size} trading pairs for ${this.chain}`, {
+      discovered: result.pairsDiscovered,
+      failed: result.pairsFailed,
+      durationMs: result.durationMs,
+    });
   }
 
   /**
    * S2.2.5: Get pair address using cache-first strategy.
+   * Phase 1.5 Refactor: Delegates to extracted resolvePairAddress function.
+   *
    * 1. Check Redis cache for existing pair address
    * 2. On miss, query factory contract via PairDiscoveryService
    * 3. Cache the result for future lookups
-   * 4. Fall back to CREATE2 computation if factory query fails
+   * 4. Return null if pair doesn't exist
    */
   protected async getPairAddress(dex: Dex, token0: Token, token1: Token): Promise<string | null> {
-    try {
-      // Step 1: Check cache first (fast path)
-      if (this.pairCacheService) {
-        const cacheResult = await this.pairCacheService.get(
-          this.chain,
-          dex.name,
-          token0.address,
-          token1.address
-        );
-
-        if (cacheResult.status === 'hit') {
-          // Cache hit - return cached address
-          if (this.pairDiscoveryService) {
-            this.pairDiscoveryService.incrementCacheHits();
-          }
-          return cacheResult.data.address;
-        }
-
-        if (cacheResult.status === 'null') {
-          // Pair was previously checked and doesn't exist
-          return null;
-        }
-        // Cache miss - proceed to discovery
-      }
-
-      // Step 2: Try factory query via PairDiscoveryService
-      if (this.pairDiscoveryService) {
-        const discoveredPair = await this.pairDiscoveryService.discoverPair(
-          this.chain,
-          dex,
-          token0,
-          token1
-        );
-
-        if (discoveredPair) {
-          // Step 3: Cache the discovered pair
-          if (this.pairCacheService) {
-            await this.pairCacheService.set(
-              this.chain,
-              dex.name,
-              token0.address,
-              token1.address,
-              {
-                address: discoveredPair.address,
-                token0: discoveredPair.token0,
-                token1: discoveredPair.token1,
-                dex: dex.name,
-                chain: this.chain,
-                factoryAddress: dex.factoryAddress,
-                discoveredAt: discoveredPair.discoveredAt,
-                lastVerified: Date.now(),
-                discoveryMethod: discoveredPair.discoveryMethod
-              }
-            );
-          }
-          return discoveredPair.address;
-        }
-
-        // Pair doesn't exist - cache the null result to avoid repeated queries
-        if (this.pairCacheService) {
-          await this.pairCacheService.setNull(
-            this.chain,
-            dex.name,
-            token0.address,
-            token1.address
-          );
-        }
-        return null;
-      }
-
-      // Step 4: Fallback - services not available, return null
-      // Note: This shouldn't happen in production since services are initialized in start()
-      this.logger.warn('Pair services not initialized, returning null', {
-        dex: dex.name,
-        token0: token0.symbol,
-        token1: token1.symbol
-      });
-      return null;
-    } catch (error) {
-      this.logger.error(`Error getting pair address for ${dex.name}`, {
-        error: (error as Error).message,
-        token0: token0.symbol,
-        token1: token1.symbol
-      });
-      return null;
-    }
+    return resolvePairAddress(
+      this.chain,
+      dex,
+      token0,
+      token1,
+      this.pairDiscoveryService,
+      this.pairCacheService,
+      this.logger
+    );
   }
 
   // NOTE: publishPriceUpdate, publishSwapEvent, and publishArbitrageOpportunity
@@ -1514,12 +1320,17 @@ export abstract class BaseDetector {
       if (message.method === 'eth_subscription') {
         const { result } = message;
 
-        // Task 2.1.2: Route factory events to factory subscription service
+        // R5: Route factory events to factory integration service
         // Check if this is a factory event based on log address
         const logAddress = result?.address?.toLowerCase();
+        if (logAddress && this.factoryIntegrationService?.isFactoryAddress(logAddress)) {
+          this.factoryIntegrationService.handleFactoryEvent(result);
+          return; // Factory events are handled by the integration service
+        }
+        // Legacy fallback (for backward compatibility)
         if (logAddress && this.factoryAddresses.has(logAddress) && this.factorySubscriptionService) {
           this.factorySubscriptionService.handleFactoryEvent(result);
-          return; // Factory events are handled by the subscription service
+          return;
         }
 
         // P2-FIX: Add null check for eventBatcher
@@ -1899,8 +1710,12 @@ export abstract class BaseDetector {
       config: this.config,
       // Include stream/batcher stats (ADR-002)
       streaming: this.getBatcherStats(),
-      // Task 2.1.2: Factory subscription stats
-      factorySubscription: this.factorySubscriptionService?.getStats() || null
+      // R5: Factory integration stats (with legacy fallback)
+      factorySubscription: this.factoryIntegrationService?.getStats()
+        || this.factorySubscriptionService?.getStats()
+        || null,
+      // R5: Health monitor active status
+      healthMonitorActive: this.healthMonitorService?.isActive() ?? false,
     };
   }
 
@@ -1909,39 +1724,18 @@ export abstract class BaseDetector {
   /**
    * Publish with retry and exponential backoff (P0-6 fix).
    * Prevents silent failures for critical alerts like whale transactions.
+   *
+   * @deprecated Use `retryWithLogging()` from `@arbitrage/core` instead.
+   * R7 Consolidation: This method now delegates to the shared utility.
+   * Kept for backward compatibility with subclasses.
    */
   protected async publishWithRetry(
     publishFn: () => Promise<void>,
     operationName: string,
     maxRetries: number = 3
   ): Promise<void> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await publishFn();
-        return; // Success
-      } catch (error) {
-        lastError = error as Error;
-
-        if (attempt < maxRetries) {
-          // Exponential backoff: 100ms, 200ms, 400ms...
-          const backoffMs = 100 * Math.pow(2, attempt - 1);
-          this.logger.warn(`${operationName} publish failed, retrying in ${backoffMs}ms`, {
-            attempt,
-            maxRetries,
-            error: this.formatError(error)
-          });
-          await this.sleep(backoffMs);
-        }
-      }
-    }
-
-    // All retries exhausted - log error with full context
-    this.logger.error(`${operationName} publish failed after ${maxRetries} attempts`, {
-      error: lastError,
-      operationName
-    });
+    // R7 Consolidation: Delegate to shared utility
+    await retryWithLogging(publishFn, operationName, this.logger, { maxRetries });
   }
 
   protected sleep(ms: number): Promise<void> {

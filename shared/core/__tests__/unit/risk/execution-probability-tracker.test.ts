@@ -11,12 +11,12 @@ import {
   ExecutionProbabilityTracker,
   getExecutionProbabilityTracker,
   resetExecutionProbabilityTracker,
-} from './execution-probability-tracker';
+} from '../../../src/risk/execution-probability-tracker';
 import type {
   ExecutionOutcome,
   ExecutionProbabilityConfig,
   ProbabilityQueryParams,
-} from './types';
+} from '../../../src/risk/types';
 
 // =============================================================================
 // Mock Data

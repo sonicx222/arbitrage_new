@@ -14,8 +14,8 @@
 import { jest, describe, it, expect, beforeAll, beforeEach, afterEach, afterAll } from '@jest/globals';
 import type { Mock } from 'jest-mock';
 import { createServer, Server } from 'http';
-import type { CircuitBreakerStatus } from '../services/circuit-breaker';
-import type { CircuitBreakerEngineInterface } from './circuit-breaker-api';
+import type { CircuitBreakerStatus } from '../../../src/services/circuit-breaker';
+import type { CircuitBreakerEngineInterface } from '../../../src/api/circuit-breaker-api';
 
 // =============================================================================
 // Types
@@ -130,7 +130,7 @@ describe('Circuit Breaker API Endpoints', () => {
   let apiKey: string;
 
   // Import the handler after mocking
-  let createCircuitBreakerApiHandler: typeof import('./circuit-breaker-api').createCircuitBreakerApiHandler;
+  let createCircuitBreakerApiHandler: typeof import('../../../src/api/circuit-breaker-api').createCircuitBreakerApiHandler;
 
   beforeAll(() => {
     // Set up test API key
@@ -143,7 +143,7 @@ describe('Circuit Breaker API Endpoints', () => {
     mockEngine = createMockEngine();
 
     // Import the module
-    const module = await import('./circuit-breaker-api');
+    const module = await import('../../../src/api/circuit-breaker-api');
     createCircuitBreakerApiHandler = module.createCircuitBreakerApiHandler;
 
     // Create test server
@@ -399,7 +399,7 @@ describe('Circuit Breaker API Endpoints', () => {
       try {
         // Create a new server without API key configured
         const unconfiguredMockEngine = createMockEngine();
-        const module = await import('./circuit-breaker-api');
+        const module = await import('../../../src/api/circuit-breaker-api');
         const handler = module.createCircuitBreakerApiHandler(unconfiguredMockEngine as any);
         const unconfiguredServer = createServer(handler);
         await new Promise<void>((resolve) => unconfiguredServer.listen(0, resolve));

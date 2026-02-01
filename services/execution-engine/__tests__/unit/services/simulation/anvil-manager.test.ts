@@ -13,8 +13,8 @@
 import { describe, test, expect, beforeAll, afterAll, afterEach } from '@jest/globals';
 import { ethers } from 'ethers';
 import { execSync } from 'child_process';
-import type { AnvilForkConfig } from './anvil-manager';
-import { AnvilForkManager } from './anvil-manager';
+import type { AnvilForkConfig } from '../../../../src/services/simulation/anvil-manager';
+import { AnvilForkManager } from '../../../../src/services/simulation/anvil-manager';
 
 // =============================================================================
 // Test Configuration

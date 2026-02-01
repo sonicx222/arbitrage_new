@@ -11,17 +11,17 @@ import {
   EVCalculator,
   getEVCalculator,
   resetEVCalculator,
-} from './ev-calculator';
+} from '../../../src/risk/ev-calculator';
 import {
   ExecutionProbabilityTracker,
   resetExecutionProbabilityTracker,
-} from './execution-probability-tracker';
+} from '../../../src/risk/execution-probability-tracker';
 import type {
   EVConfig,
   EVInput,
   ExecutionOutcome,
   ExecutionProbabilityConfig,
-} from './types';
+} from '../../../src/risk/types';
 
 // =============================================================================
 // Test Helpers

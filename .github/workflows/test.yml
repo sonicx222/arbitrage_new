@@ -1,0 +1,273 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # ===========================================================================
+  # Unit Tests - Shard across 3 jobs for maximum parallelism
+  # ===========================================================================
+  unit-tests:
+    name: Unit Tests (Shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # Run all shards even if one fails
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Unit Tests (Shard ${{ matrix.shard }}/3)
+        run: npm test -- --selectProjects unit --shard=${{ matrix.shard }}/3 --ci --coverage
+        env:
+          CI: true
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          flags: unit-shard-${{ matrix.shard }}
+          fail_ci_if_error: false  # Don't fail if codecov upload fails
+
+      - name: Upload Slow Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: slow-tests-unit-shard-${{ matrix.shard }}
+          path: slow-tests.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # Integration Tests - Shard across 2 jobs with Redis service
+  # ===========================================================================
+  integration-tests:
+    name: Integration Tests (Shard ${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Redis connection
+        run: |
+          redis-cli -h localhost -p 6379 ping
+
+      - name: Run Integration Tests (Shard ${{ matrix.shard }}/2)
+        run: npm test -- --selectProjects integration --shard=${{ matrix.shard }}/2 --ci --coverage
+        env:
+          CI: true
+          REDIS_URL: redis://localhost:6379
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          flags: integration-shard-${{ matrix.shard }}
+          fail_ci_if_error: false
+
+      - name: Upload Slow Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: slow-tests-integration-shard-${{ matrix.shard }}
+          path: slow-tests.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # E2E Tests - No sharding (few tests, must be serial)
+  # ===========================================================================
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run E2E Tests
+        run: npm test -- --selectProjects e2e --ci --coverage
+        env:
+          CI: true
+          REDIS_URL: redis://localhost:6379
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          flags: e2e
+          fail_ci_if_error: false
+
+  # ===========================================================================
+  # Performance Tests - No sharding (must be serial for accurate measurements)
+  # ===========================================================================
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Performance Tests
+        run: npm test -- --selectProjects performance --ci
+        env:
+          CI: true
+
+      - name: Upload Performance Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: |
+            slow-tests.json
+            performance-*.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+  # ===========================================================================
+  # Smoke Tests - Quick validation checks
+  # ===========================================================================
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Smoke Tests
+        run: npm test -- --selectProjects smoke --ci
+        env:
+          CI: true
+          REDIS_URL: redis://localhost:6379
+
+  # ===========================================================================
+  # Code Quality - Lint and Type Check
+  # ===========================================================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript compiler
+        run: npm run typecheck
+
+      - name: Run linter (if configured)
+        run: npm run lint || echo "Linting skipped (not configured)"
+        continue-on-error: true
+
+  # ===========================================================================
+  # Test Summary - Aggregate results and report
+  # ===========================================================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests, performance-tests, smoke-tests, code-quality]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "Unit Tests: ${{ needs.unit-tests.result }}"
+          echo "Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "E2E Tests: ${{ needs.e2e-tests.result }}"
+          echo "Performance Tests: ${{ needs.performance-tests.result }}"
+          echo "Smoke Tests: ${{ needs.smoke-tests.result }}"
+          echo "Code Quality: ${{ needs.code-quality.result }}"
+
+      - name: Fail if any required job failed
+        if: |
+          needs.unit-tests.result == 'failure' ||
+          needs.integration-tests.result == 'failure' ||
+          needs.code-quality.result == 'failure'
+        run: exit 1

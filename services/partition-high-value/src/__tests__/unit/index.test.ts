@@ -68,12 +68,12 @@ jest.mock('@arbitrage/core', () => ({
   }),
   closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
   // BUG-FIX: Add missing mock functions for environment config parsing
-  // Read from process.env to support environment variable tests
+  // Return proper defaults when process.env variables aren't set
   parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
-    partitionChains: process.env.PARTITION_CHAINS,
-    healthCheckPort: process.env.HEALTH_CHECK_PORT,
-    instanceId: process.env.INSTANCE_ID,
-    regionId: process.env.REGION_ID,
+    partitionChains: process.env.PARTITION_CHAINS || undefined,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT || undefined,
+    instanceId: process.env.INSTANCE_ID || undefined,
+    regionId: process.env.REGION_ID || undefined,
     enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
   })),
   validatePartitionEnvironmentConfig: jest.fn(),
@@ -224,6 +224,7 @@ describe('P3 High-Value Partition Service', () => {
   describe('Module Exports', () => {
     it('should export detector instance', async () => {
       // Import after mocks are set up
+      jest.resetModules();
       const { detector } = await import('../../index');
       expect(detector).toBeDefined();
       expect(typeof detector.start).toBe('function');
@@ -231,6 +232,7 @@ describe('P3 High-Value Partition Service', () => {
     });
 
     it('should export config object', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config).toBeDefined();
       expect(config.partitionId).toBe('high-value');
@@ -240,6 +242,7 @@ describe('P3 High-Value Partition Service', () => {
     });
 
     it('should export partition constants', async () => {
+      jest.resetModules();
       const { P3_PARTITION_ID, P3_CHAINS, P3_REGION } = await import('../../index');
       expect(P3_PARTITION_ID).toBe('high-value');
       expect(P3_CHAINS).toContain('ethereum');
@@ -249,6 +252,7 @@ describe('P3 High-Value Partition Service', () => {
     });
 
     it('should export cleanupProcessHandlers function', async () => {
+      jest.resetModules();
       const { cleanupProcessHandlers } = await import('../../index');
       expect(cleanupProcessHandlers).toBeDefined();
       expect(typeof cleanupProcessHandlers).toBe('function');
@@ -257,11 +261,13 @@ describe('P3 High-Value Partition Service', () => {
 
   describe('Configuration', () => {
     it('should use correct partition ID (high-value)', async () => {
+      jest.resetModules();
       const { P3_PARTITION_ID } = await import('../../index');
       expect(P3_PARTITION_ID).toBe('high-value');
     });
 
     it('should configure 3 chains for high-value partition', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.chains).toHaveLength(3);
       expect(config.chains).toEqual(
@@ -270,16 +276,19 @@ describe('P3 High-Value Partition Service', () => {
     });
 
     it('should use default port 3003 (different from P1:3001 and P2:3002)', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.healthCheckPort).toBe(3003);
     });
 
     it('should use us-east1 region (Oracle Cloud US-East)', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       expect(config.regionId).toBe('us-east1');
     });
 
     it('should have correct chains for high-value Ethereum mainnet trading', async () => {
+      jest.resetModules();
       const { config } = await import('../../index');
       // Ethereum is the high-value mainnet
       expect(config.chains).toContain('ethereum');

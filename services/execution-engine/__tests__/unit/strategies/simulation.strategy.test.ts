@@ -12,9 +12,9 @@
  * - Fix 4.3: Stats tracking (simulationsSkipped, successfulExecutions, failedExecutions)
  */
 
-import { SimulationStrategy } from './simulation.strategy';
-import type { StrategyContext, Logger, ResolvedSimulationConfig } from '../types';
-import { ExecutionErrorCode } from '../types';
+import { SimulationStrategy } from '../../../src/strategies/simulation.strategy';
+import type { StrategyContext, Logger, ResolvedSimulationConfig } from '../../../src/types';
+import { ExecutionErrorCode } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================

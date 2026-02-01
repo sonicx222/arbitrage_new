@@ -9,8 +9,8 @@
  * - Queue configuration
  */
 
-import { QueueServiceImpl, QueueServiceConfig } from './queue.service';
-import type { Logger } from '../types';
+import { QueueServiceImpl, QueueServiceConfig } from '../../../src/services/queue.service';
+import type { Logger } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 // =============================================================================

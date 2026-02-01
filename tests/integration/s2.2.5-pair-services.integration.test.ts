@@ -81,6 +81,7 @@ import {
   type CachedPairData
 } from '@arbitrage/core';
 import { Dex, Token } from '../../shared/types';
+import { createResetHook } from '@arbitrage/test-utils';
 
 // =============================================================================
 // Test Fixtures
@@ -140,8 +141,8 @@ const testCachedPairData: CachedPairData = {
 describe('S2.2.5 PairDiscoveryService', () => {
   let service: PairDiscoveryService;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
+  // P2-1: Use beforeAll for expensive object creation (created once vs per-test)
+  beforeAll(() => {
     resetPairDiscoveryService();
     service = new PairDiscoveryService({
       maxConcurrentQueries: 5,
@@ -153,6 +154,12 @@ describe('S2.2.5 PairDiscoveryService', () => {
       circuitBreakerResetMs: 100,
       queryTimeoutMs: 100
     });
+  });
+
+  // P2-1: Reset state before each test for isolation
+  beforeEach(() => {
+    jest.clearAllMocks();
+    service.resetState(); // Fast: just clears data, doesn't recreate objects
   });
 
   describe('Configuration', () => {
@@ -331,15 +338,9 @@ describe('S2.2.5 PairDiscoveryService', () => {
 describe('S2.2.5 PairCacheService', () => {
   let service: PairCacheService;
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
+  // P2-1: Use beforeAll for expensive object creation and initialization
+  beforeAll(async () => {
     resetPairCacheService();
-
-    // Reset mock Redis
-    mockRedisClient.get.mockReset();
-    mockRedisClient.set.mockReset();
-    mockRedisClient.del.mockReset();
-    mockRedisClient.keys.mockReset();
 
     // REFACTOR: Use dependency injection to inject mock Redis client
     // This avoids Jest mock hoisting issues with @arbitrage/core/redis
@@ -357,7 +358,20 @@ describe('S2.2.5 PairCacheService', () => {
       }
     );
 
-    await service.initialize();
+    await service.initialize(); // Initialize once
+  });
+
+  // P2-1: Reset state and mocks before each test for isolation
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    // Reset mock Redis
+    mockRedisClient.get.mockReset();
+    mockRedisClient.set.mockReset();
+    mockRedisClient.del.mockReset();
+    mockRedisClient.keys.mockReset();
+
+    service.resetState(); // Fast: just clears statistics
   });
 
   describe('Initialization', () => {
@@ -728,13 +742,10 @@ describe('S2.2.5 Service Integration', () => {
   let discoveryService: PairDiscoveryService;
   let cacheService: PairCacheService;
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
+  // P2-1: Use beforeAll for expensive object creation and initialization
+  beforeAll(async () => {
     resetPairDiscoveryService();
     resetPairCacheService();
-
-    mockRedisClient.get.mockReset();
-    mockRedisClient.set.mockReset();
 
     discoveryService = new PairDiscoveryService({
       retryAttempts: 2,
@@ -745,6 +756,18 @@ describe('S2.2.5 Service Integration', () => {
     // Use DI to inject mock Redis
     cacheService = new PairCacheService({}, createMockCacheDeps());
     await cacheService.initialize();
+  });
+
+  // P2-1: Reset state and mocks before each test for isolation
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    mockRedisClient.get.mockReset();
+    mockRedisClient.set.mockReset();
+
+    // Reset both services' state
+    discoveryService.resetState();
+    cacheService.resetState();
   });
 
   describe('Cache-Aware Discovery Flow', () => {

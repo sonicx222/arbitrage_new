@@ -83,8 +83,10 @@ function main(): void {
 
   console.log(`Found ${errors.length} custom errors:\n`);
 
-  // Generate selectors
+  // Generate selectors with collision detection
   const selectors: Array<{ selector: string; name: string; signature: string }> = [];
+  // FIX P2-2: Track selectors to detect hash collisions (extremely rare but critical for security contracts)
+  const selectorMap = new Map<string, { name: string; signature: string }>();
 
   for (const error of errors) {
     if (!error.name) continue;
@@ -93,6 +95,19 @@ function main(): void {
     const paramTypes = (error.inputs || []).map(i => i.type).join(',');
     const signature = `${error.name}(${paramTypes})`;
 
+    // FIX P2-2: Check for selector collision
+    if (selectorMap.has(selector)) {
+      const existing = selectorMap.get(selector)!;
+      console.error(`\n❌ ERROR: Selector collision detected!`);
+      console.error(`   Selector: ${selector}`);
+      console.error(`   Error 1:  ${existing.signature}`);
+      console.error(`   Error 2:  ${signature}`);
+      console.error(`\n   This is extremely rare (1 in 4 billion) but must be fixed in the contract.`);
+      console.error(`   Rename one of the errors or change parameter types to resolve the collision.`);
+      process.exit(1);
+    }
+
+    selectorMap.set(selector, { name: error.name, signature });
     selectors.push({ selector, name: error.name, signature });
     console.log(`  ${selector} => ${error.name}`);
   }

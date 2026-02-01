@@ -12,6 +12,7 @@
 const {
   log,
   killProcess,
+  processExists,
   findProcessesByPort,
   findGhostNodeProcesses,
   getRedisMemoryConfig,
@@ -35,9 +36,9 @@ async function cleanup() {
   const redisConfig = getRedisMemoryConfig();
   if (redisConfig) {
     log(`Found stale Redis config for PID ${redisConfig.pid}`, 'dim');
-    try {
-      // Check if process exists
-      process.kill(redisConfig.pid, 0);
+    // FIX P2-1: Use processExists() instead of process.kill(pid, 0) for Windows compatibility
+    const exists = await processExists(redisConfig.pid);
+    if (exists) {
       log(`Killing Redis process ${redisConfig.pid}...`, 'dim');
       const killed = await killProcess(redisConfig.pid);
       if (killed) {
@@ -45,7 +46,7 @@ async function cleanup() {
       } else {
         log('Could not kill Redis process (may already be stopped).', 'yellow');
       }
-    } catch {
+    } else {
       log('Redis process not running.', 'dim');
     }
     deleteRedisMemoryConfig();

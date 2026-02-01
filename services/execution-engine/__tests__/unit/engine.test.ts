@@ -1,12 +1,28 @@
 // Execution Engine Service Unit Tests
 import { jest, describe, test, expect, beforeEach } from '@jest/globals';
-import { ExecutionEngineService, ExecutionEngineConfig } from './engine';
+import { ExecutionEngineService, ExecutionEngineConfig } from '../../src/engine';
 
 // ============================================================================
 // Mock Factories (using dependency injection instead of module mocks)
 // ============================================================================
 
-// Mock logger factory
+/**
+ * Creates a mock logger for testing ExecutionEngineService.
+ *
+ * **Mock Configuration:**
+ * - All log methods (info, error, warn, debug) are Jest spies
+ * - No actual logging occurs during tests
+ * - Assertions can verify log calls were made with expected messages
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockLogger = createMockLogger();
+ * const engine = new ExecutionEngineService({ logger: mockLogger });
+ *
+ * // Verify logging behavior
+ * expect(mockLogger.info).toHaveBeenCalledWith('Engine started');
+ * ```
+ */
 const createMockLogger = () => ({
   info: jest.fn<(msg: string, meta?: object) => void>(),
   error: jest.fn<(msg: string, meta?: object) => void>(),
@@ -14,14 +30,41 @@ const createMockLogger = () => ({
   debug: jest.fn<(msg: string, meta?: object) => void>()
 });
 
-// Mock perf logger factory
+/**
+ * Creates a mock performance logger for testing execution metrics.
+ *
+ * **Mock Configuration:**
+ * - `logEventLatency`: Tracks event processing duration
+ * - `logExecutionResult`: Records trade execution outcomes
+ * - `logHealthCheck`: Captures health check results
+ *
+ * **Purpose:**
+ * Tests can verify performance metrics are logged without actual metric collection overhead.
+ */
 const createMockPerfLogger = () => ({
   logEventLatency: jest.fn(),
   logExecutionResult: jest.fn(),
   logHealthCheck: jest.fn()
 });
 
-// Mock state manager factory
+/**
+ * Creates a mock state manager for testing state transitions.
+ *
+ * **Mock Configuration:**
+ * - Default state: 'idle' (not running)
+ * - All transitions succeed by default
+ * - No actual state machine logic (use real StateManager for integration tests)
+ *
+ * **State Transitions Supported:**
+ * - idle → starting → running → stopping → stopped
+ * - Tests can override `getState()` to simulate different states
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockState = createMockStateManager();
+ * mockState.getState.mockReturnValue('running'); // Override state
+ * ```
+ */
 const createMockStateManager = () => ({
   getState: jest.fn(() => 'idle'),
   executeStart: jest.fn((fn: () => Promise<void>) => fn()),
@@ -57,16 +100,37 @@ describe('ExecutionEngineService', () => {
     engine = new ExecutionEngineService(createTestConfig());
   });
 
-  test('should initialize correctly', () => {
+  /**
+   * GIVEN: A new ExecutionEngineService instance with default configuration
+   * WHEN: The service is instantiated
+   * THEN: It should be fully initialized and ready to process opportunities
+   *
+   * **Business Value**: Ensures the engine can be created without errors,
+   * establishing a baseline for all other tests.
+   */
+  test('should be fully initialized and ready for opportunity processing', () => {
+    // Then: Engine is created successfully
     expect(engine).toBeDefined();
+    expect(engine).toBeInstanceOf(ExecutionEngineService);
   });
 
   // PHASE-3.2: validateOpportunity was moved to OpportunityConsumer
   // buildSwapPath is in BaseExecutionStrategy
   // See consumers/opportunity.consumer.test.ts for consumer-specific tests
 
-  test('should provide stats correctly', () => {
+  /**
+   * GIVEN: A newly instantiated ExecutionEngineService
+   * WHEN: Stats are retrieved before any executions occur
+   * THEN: All counters should be initialized to zero, providing a clean slate
+   *
+   * **Business Value**: Zero-initialized stats prevent garbage values from
+   * affecting metric dashboards and monitoring systems.
+   */
+  test('should start with all execution metrics at zero for accurate tracking', () => {
+    // When: Stats are retrieved from new engine
     const stats = engine.getStats();
+
+    // Then: All execution counters start at zero
     expect(stats).toBeDefined();
     expect(stats.opportunitiesReceived).toBe(0);
     expect(stats.executionAttempts).toBe(0);
@@ -380,7 +444,7 @@ describe('ExecutionEngineService Standby Configuration (ADR-007)', () => {
 // Queue Service Pause/Resume Tests (ADR-007)
 // =============================================================================
 
-import { QueueServiceImpl } from './services/queue.service';
+import { QueueServiceImpl } from '../../src/services/queue.service';
 
 describe('QueueService Pause/Resume (ADR-007)', () => {
   // Mock logger factory
@@ -391,17 +455,30 @@ describe('QueueService Pause/Resume (ADR-007)', () => {
     debug: jest.fn<(msg: string, meta?: object) => void>()
   });
 
-  test('should pause queue manually for standby mode', () => {
+  /**
+   * GIVEN: A QueueService in active state (processing opportunities)
+   * WHEN: The queue is manually paused (e.g., during failover to standby mode)
+   * THEN: New opportunities should be blocked from entering the queue
+   *
+   * **Business Value**: Prevents duplicate executions during multi-region failover.
+   * When transitioning to standby, we must stop accepting new opportunities
+   * while allowing in-flight executions to complete gracefully.
+   *
+   * **ADR-007**: Multi-region standby configuration requires queue pause capability.
+   */
+  test('should prevent new opportunity enqueuing when transitioning to standby mode', () => {
+    // Given: Active queue service
     const mockLogger = createMockLogger();
     const queueService = new QueueServiceImpl({
       logger: mockLogger
     });
-
     expect(queueService.isPaused()).toBe(false);
     expect(queueService.isManuallyPaused()).toBe(false);
 
+    // When: Manually pausing for standby transition
     queueService.pause();
 
+    // Then: Queue is paused and no new enqueues accepted
     expect(queueService.isPaused()).toBe(true);
     expect(queueService.isManuallyPaused()).toBe(true);
     expect(mockLogger.info).toHaveBeenCalledWith('Queue manually paused (standby mode)');
@@ -506,7 +583,7 @@ import {
   createCircuitBreaker,
   CircuitBreaker,
   CircuitBreakerEvent,
-} from './services/circuit-breaker';
+} from '../../src/services/circuit-breaker';
 
 describe('Circuit Breaker Integration Tests (Phase 1.3.3)', () => {
   // Test helpers

@@ -27,13 +27,31 @@ import {
   UnifiedChainDetector,
   UnifiedDetectorConfig,
   UnifiedDetectorStats
-} from './unified-detector';
+} from '../../src/unified-detector';
 
 // ============================================================================
 // Mock Factories (using dependency injection instead of module mocks)
 // ============================================================================
 
-// Mock logger factory
+/**
+ * Creates a mock logger for testing UnifiedChainDetector.
+ *
+ * **Mock Configuration:**
+ * - All log methods (info, error, warn, debug) are Jest spies
+ * - No actual logging occurs during tests
+ * - Allows verification of lifecycle events and error conditions
+ *
+ * **Usage:**
+ * ```typescript
+ * const mockLogger = createMockLogger();
+ * const detector = new UnifiedChainDetector({ logger: mockLogger });
+ *
+ * await detector.start();
+ * expect(mockLogger.info).toHaveBeenCalledWith(
+ *   expect.stringContaining('started')
+ * );
+ * ```
+ */
 const createMockLogger = () => ({
   info: jest.fn<(msg: string, meta?: object) => void>(),
   error: jest.fn<(msg: string, meta?: object) => void>(),
@@ -41,21 +59,54 @@ const createMockLogger = () => ({
   debug: jest.fn<(msg: string, meta?: object) => void>()
 });
 
-// Mock perf logger factory
+/**
+ * Creates a mock performance logger for testing performance metrics.
+ *
+ * **Mock Configuration:**
+ * - `logHealthCheck` - Jest spy for health check event tracking
+ * - `logArbitrageOpportunity` - Jest spy for opportunity detection metrics
+ * - `logEventLatency` - Jest spy for event processing latency
+ *
+ * **Purpose:**
+ * Allows verification that performance metrics are being recorded
+ * without actually sending data to monitoring systems.
+ */
 const createMockPerfLogger = () => ({
   logHealthCheck: jest.fn(),
   logArbitrageOpportunity: jest.fn(),
   logEventLatency: jest.fn()
 });
 
-// Mock Redis client factory
+/**
+ * Creates a mock Redis client for testing state management.
+ *
+ * **Mock Configuration:**
+ * - `disconnect` - Resolves successfully for cleanup testing
+ * - `set` - Resolves with 'OK' for state storage
+ * - `get` - Resolves with null (no state) by default
+ *
+ * **Purpose:**
+ * Simulates Redis operations without real Redis instance, allowing
+ * tests to verify detector state persistence and failover coordination.
+ */
 const createMockRedisClient = () => ({
   disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
   get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null)
 });
 
-// Mock Redis Streams client factory
+/**
+ * Creates a mock Redis Streams client for testing event publishing.
+ *
+ * **Mock Configuration:**
+ * - `disconnect` - Resolves successfully for cleanup testing
+ * - `xadd` - Resolves with message ID '1-0' for stream publishing
+ * - `STREAMS` - Constants for stream names (health, price-updates, opportunities)
+ *
+ * **Purpose:**
+ * Allows testing of event publishing to Redis Streams without real Redis.
+ * Verifies that opportunities and health events are published to correct streams.
+ */
 const createMockStreamsClient = () => ({
   disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   xadd: jest.fn<() => Promise<string>>().mockResolvedValue('1-0'),

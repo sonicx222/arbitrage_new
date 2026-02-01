@@ -1,0 +1,645 @@
+/**
+ * Gas Price Optimizer Service
+ *
+ * Centralized gas price management with spike detection and baseline tracking.
+ * Extracted from base.strategy.ts as part of R4 refactoring.
+ *
+ * Features:
+ * - Chain-specific gas price validation and fallbacks
+ * - Gas price spike detection using median baseline
+ * - Pre-submission gas price refresh with abort thresholds
+ * - Configurable via environment variables
+ *
+ * @see base.strategy.ts (consumer)
+ * @see REFACTORING_ROADMAP.md R4
+ */
+
+import { ethers } from 'ethers';
+import { ARBITRAGE_CONFIG } from '@arbitrage/config';
+import { createPinoLogger, type ILogger } from '@arbitrage/core';
+import type { Logger } from '../types';
+
+// =============================================================================
+// Module Logger
+// =============================================================================
+
+let _moduleLogger: ILogger | null = null;
+function getModuleLogger(): ILogger {
+  if (!_moduleLogger) {
+    _moduleLogger = createPinoLogger('gas-price-optimizer');
+  }
+  return _moduleLogger;
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/**
+ * Pre-computed BigInt multipliers for hot-path optimization.
+ * Avoids repeated Math.floor + BigInt conversion on every call.
+ *
+ * GAS_SPIKE_MULTIPLIER_BIGINT: Used for initial spike detection (e.g., 1.5x = 150)
+ * WEI_PER_GWEI: 10^9, pre-computed for wei-to-gwei conversions
+ */
+export const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100));
+export const WEI_PER_GWEI = BigInt(1e9);
+
+/**
+ * Fix 3.1: Minimum gas prices by chain type (mainnet vs L2).
+ * These sanity checks prevent misconfigured gas prices that could cause:
+ * 1. Transaction failures (gas too low)
+ * 2. Unprofitable trades (testnet gas price on mainnet)
+ *
+ * L1 mainnet: Minimum 1 gwei (Ethereum mainnet rarely goes below this)
+ * L2 chains: Can be much lower (often <0.01 gwei)
+ */
+export const MIN_GAS_PRICE_GWEI: Record<string, number> = {
+  ethereum: 1,       // Mainnet minimum
+  polygon: 1,        // Mainnet minimum
+  bsc: 1,            // Mainnet minimum
+  avalanche: 1,      // Mainnet minimum
+  fantom: 1,         // Mainnet minimum
+  // L2s can have very low gas
+  arbitrum: 0.001,
+  optimism: 0.0001,
+  base: 0.0001,
+  zksync: 0.01,
+  linea: 0.01,
+};
+
+/**
+ * Fix 3.1: Maximum reasonable gas prices by chain (sanity upper bound).
+ * Prevents obviously misconfigured values (e.g., 10000 gwei).
+ */
+export const MAX_GAS_PRICE_GWEI: Record<string, number> = {
+  ethereum: 500,     // Very high but possible during extreme congestion
+  polygon: 1000,     // Polygon can spike
+  bsc: 100,
+  avalanche: 200,
+  fantom: 500,
+  arbitrum: 10,
+  optimism: 1,
+  base: 1,
+  zksync: 10,
+  linea: 10,
+};
+
+/**
+ * Fix 3.1: Validate gas price is within reasonable bounds for chain.
+ * Fix 3.2: Also validates that the price is not NaN (from invalid env var).
+ * Logs warning if configured value is suspicious but clamps to safe range.
+ */
+export function validateGasPrice(chain: string, configuredPrice: number): number {
+  const min = MIN_GAS_PRICE_GWEI[chain] ?? 0.0001;
+  const max = MAX_GAS_PRICE_GWEI[chain] ?? 1000;
+
+  // Fix 3.2: Check for NaN from invalid environment variable
+  if (Number.isNaN(configuredPrice)) {
+    getModuleLogger().error('Invalid gas price (NaN)', {
+      chain,
+      envVar: `GAS_PRICE_${chain.toUpperCase()}_GWEI`,
+      fallback: min,
+    });
+    return min;
+  }
+
+  if (configuredPrice < min) {
+    getModuleLogger().warn('Gas price below minimum', {
+      chain,
+      configured: configuredPrice,
+      min,
+      using: min,
+    });
+    return min;
+  }
+
+  if (configuredPrice > max) {
+    getModuleLogger().warn('Gas price above maximum', {
+      chain,
+      configured: configuredPrice,
+      max,
+      using: max,
+    });
+    return max;
+  }
+
+  return configuredPrice;
+}
+
+/**
+ * Default fallback gas prices by chain (in gwei).
+ * Used when provider fails to return gas price or no provider available.
+ *
+ * Finding 3.2 Fix: Gas prices are now configurable via environment variables.
+ * Environment variable format: GAS_PRICE_<CHAIN>_GWEI (e.g., GAS_PRICE_ETHEREUM_GWEI=50)
+ */
+export const DEFAULT_GAS_PRICES_GWEI: Record<string, number> = {
+  ethereum: validateGasPrice('ethereum', parseFloat(process.env.GAS_PRICE_ETHEREUM_GWEI || '50')),
+  arbitrum: validateGasPrice('arbitrum', parseFloat(process.env.GAS_PRICE_ARBITRUM_GWEI || '0.1')),
+  optimism: validateGasPrice('optimism', parseFloat(process.env.GAS_PRICE_OPTIMISM_GWEI || '0.001')),
+  base: validateGasPrice('base', parseFloat(process.env.GAS_PRICE_BASE_GWEI || '0.001')),
+  polygon: validateGasPrice('polygon', parseFloat(process.env.GAS_PRICE_POLYGON_GWEI || '35')),
+  bsc: validateGasPrice('bsc', parseFloat(process.env.GAS_PRICE_BSC_GWEI || '3')),
+  avalanche: validateGasPrice('avalanche', parseFloat(process.env.GAS_PRICE_AVALANCHE_GWEI || '25')),
+  fantom: validateGasPrice('fantom', parseFloat(process.env.GAS_PRICE_FANTOM_GWEI || '35')),
+  zksync: validateGasPrice('zksync', parseFloat(process.env.GAS_PRICE_ZKSYNC_GWEI || '0.25')),
+  linea: validateGasPrice('linea', parseFloat(process.env.GAS_PRICE_LINEA_GWEI || '0.5')),
+};
+
+/**
+ * Pre-computed fallback gas prices in wei for hot-path optimization.
+ * Avoids repeated ethers.parseUnits() calls on every getOptimalGasPrice() call.
+ * Computed once at module load time.
+ */
+export const FALLBACK_GAS_PRICES_WEI: Record<string, bigint> = Object.fromEntries(
+  Object.entries(DEFAULT_GAS_PRICES_GWEI).map(([chain, gwei]) => [
+    chain,
+    ethers.parseUnits(gwei.toString(), 'gwei'),
+  ])
+);
+
+/** Default fallback price when chain is unknown (50 gwei) */
+const DEFAULT_FALLBACK_GAS_PRICE_WEI = ethers.parseUnits('50', 'gwei');
+
+/**
+ * Get fallback gas price for a chain (O(1) lookup, no computation).
+ * @param chain - Chain name
+ * @returns Gas price in wei
+ */
+export function getFallbackGasPrice(chain: string): bigint {
+  return FALLBACK_GAS_PRICES_WEI[chain] ?? DEFAULT_FALLBACK_GAS_PRICE_WEI;
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/**
+ * Fix 3.1: Startup validation result for gas price configuration.
+ * Tracks which chains are using fallback/minimum values.
+ */
+export interface GasConfigValidationResult {
+  valid: boolean;
+  warnings: string[];
+  chainConfigs: Record<string, {
+    configuredGwei: number;
+    isMinimum: boolean;
+    isMaximum: boolean;
+    source: 'env' | 'default';
+  }>;
+}
+
+/**
+ * Gas baseline entry for tracking historical gas prices.
+ */
+export interface GasBaselineEntry {
+  price: bigint;
+  timestamp: number;
+}
+
+/**
+ * Configuration for the GasPriceOptimizer.
+ */
+export interface GasPriceOptimizerConfig {
+  /** Maximum number of gas price samples to keep in history */
+  maxGasHistory?: number;
+  /** Maximum number of cached median values */
+  maxMedianCacheSize?: number;
+  /** Default median cache TTL for L1 chains (ms) */
+  defaultMedianCacheTtlMs?: number;
+  /** Median cache TTL for fast L2 chains (ms) */
+  fastChainMedianCacheTtlMs?: number;
+  /** Interval between median cache cleanup runs (ms) */
+  medianCacheCleanupIntervalMs?: number;
+}
+
+// =============================================================================
+// Validation Functions
+// =============================================================================
+
+/**
+ * Fix 3.1: Validate gas price configuration at startup.
+ *
+ * Call this from engine initialization to log a summary of gas price configuration
+ * and warn if any values fell back to minimum (which may indicate misconfiguration).
+ *
+ * @param logger - Logger instance for output
+ * @returns Validation result with warnings
+ */
+export function validateGasPriceConfiguration(logger: Logger): GasConfigValidationResult {
+  const warnings: string[] = [];
+  const chainConfigs: GasConfigValidationResult['chainConfigs'] = {};
+
+  for (const [chain, configuredPrice] of Object.entries(DEFAULT_GAS_PRICES_GWEI)) {
+    const min = MIN_GAS_PRICE_GWEI[chain] ?? 0.0001;
+    const max = MAX_GAS_PRICE_GWEI[chain] ?? 1000;
+    const envVar = `GAS_PRICE_${chain.toUpperCase()}_GWEI`;
+    const envValue = process.env[envVar];
+    const source: 'env' | 'default' = envValue !== undefined ? 'env' : 'default';
+
+    const isMinimum = configuredPrice === min;
+    const isMaximum = configuredPrice === max;
+
+    chainConfigs[chain] = {
+      configuredGwei: configuredPrice,
+      isMinimum,
+      isMaximum,
+      source,
+    };
+
+    // Warn if using minimum (may indicate NaN fallback or too-low config)
+    if (isMinimum && source === 'env') {
+      warnings.push(
+        `[WARN] ${chain}: Using minimum gas price (${min} gwei). ` +
+        `Check ${envVar} environment variable for validity.`
+      );
+    }
+
+    // Warn if using maximum (may indicate typo or extreme congestion config)
+    if (isMaximum && source === 'env') {
+      warnings.push(
+        `[WARN] ${chain}: Using maximum gas price (${max} gwei). ` +
+        `Check ${envVar} environment variable - value may be too high.`
+      );
+    }
+  }
+
+  // Log summary
+  const envConfigured = Object.values(chainConfigs).filter(c => c.source === 'env').length;
+  logger.info('Gas price configuration validated', {
+    totalChains: Object.keys(chainConfigs).length,
+    envConfigured,
+    warnings: warnings.length,
+  });
+
+  if (warnings.length > 0) {
+    logger.warn('Gas configuration warnings', { warnings });
+  }
+
+  return {
+    valid: warnings.length === 0,
+    warnings,
+    chainConfigs,
+  };
+}
+
+// =============================================================================
+// GasPriceOptimizer Class
+// =============================================================================
+
+/**
+ * GasPriceOptimizer - Manages gas price tracking, baseline calculation, and spike detection.
+ *
+ * This class encapsulates all gas price management logic previously in BaseExecutionStrategy.
+ * It maintains per-chain gas price baselines and provides spike detection to prevent
+ * unprofitable transaction execution.
+ *
+ * Usage:
+ * ```typescript
+ * const optimizer = new GasPriceOptimizer(logger);
+ * const gasPrice = await optimizer.getOptimalGasPrice(chain, provider, gasBaselines, lastGasPrices);
+ * const refreshed = await optimizer.refreshGasPriceForSubmission(chain, provider, initialPrice);
+ * ```
+ */
+export class GasPriceOptimizer {
+  private readonly logger: Logger;
+
+  // Cached median for performance optimization
+  private medianCache: Map<string, { median: bigint; validUntil: number }> = new Map();
+
+  // Configuration
+  private readonly MAX_GAS_HISTORY: number;
+  private readonly MAX_MEDIAN_CACHE_SIZE: number;
+  private readonly DEFAULT_MEDIAN_CACHE_TTL_MS: number;
+  private readonly FAST_CHAIN_MEDIAN_CACHE_TTL_MS: number;
+  private readonly MEDIAN_CACHE_CLEANUP_INTERVAL_MS: number;
+  private readonly FAST_CHAINS = new Set(['arbitrum', 'optimism', 'base', 'zksync', 'linea']);
+
+  private lastMedianCacheCleanup = 0;
+
+  constructor(logger: Logger, config?: GasPriceOptimizerConfig) {
+    this.logger = logger;
+    this.MAX_GAS_HISTORY = config?.maxGasHistory ?? 100;
+    this.MAX_MEDIAN_CACHE_SIZE = config?.maxMedianCacheSize ?? 50;
+    this.DEFAULT_MEDIAN_CACHE_TTL_MS = config?.defaultMedianCacheTtlMs ?? 5000;
+    this.FAST_CHAIN_MEDIAN_CACHE_TTL_MS = config?.fastChainMedianCacheTtlMs ?? 2000;
+    this.MEDIAN_CACHE_CLEANUP_INTERVAL_MS = config?.medianCacheCleanupIntervalMs ?? 60000;
+  }
+
+  /**
+   * Get optimal gas price with spike protection.
+   * Tracks baseline gas prices and rejects if current price exceeds threshold.
+   *
+   * @param chain - Chain identifier
+   * @param provider - JSON-RPC provider (optional)
+   * @param gasBaselines - Map of chain to gas baseline history
+   * @param lastGasPrices - Optional map for O(1) last price access
+   * @returns Optimal gas price in wei
+   * @throws Error if gas spike detected
+   */
+  async getOptimalGasPrice(
+    chain: string,
+    provider: ethers.JsonRpcProvider | undefined,
+    gasBaselines: Map<string, GasBaselineEntry[]>,
+    lastGasPrices?: Map<string, bigint>
+  ): Promise<bigint> {
+    const fallbackPrice = getFallbackGasPrice(chain);
+
+    if (!provider) {
+      return fallbackPrice;
+    }
+
+    try {
+      const feeData = await provider.getFeeData();
+      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || fallbackPrice;
+
+      // Update baseline and check for spike
+      this.updateGasBaseline(chain, currentPrice, gasBaselines, lastGasPrices);
+
+      if (ARBITRAGE_CONFIG.gasPriceSpikeEnabled) {
+        const baselinePrice = this.getGasBaseline(chain, gasBaselines);
+        if (baselinePrice > 0n) {
+          const maxAllowedPrice = baselinePrice * GAS_SPIKE_MULTIPLIER_BIGINT / 100n;
+
+          if (currentPrice > maxAllowedPrice) {
+            const currentGwei = Number(currentPrice / WEI_PER_GWEI);
+            const baselineGwei = Number(baselinePrice / WEI_PER_GWEI);
+            const maxGwei = Number(maxAllowedPrice / WEI_PER_GWEI);
+
+            this.logger.warn('Gas price spike detected, aborting transaction', {
+              chain,
+              currentGwei,
+              baselineGwei,
+              maxGwei,
+              multiplier: ARBITRAGE_CONFIG.gasPriceSpikeMultiplier
+            });
+
+            throw new Error(`Gas price spike: ${currentGwei} gwei exceeds ${maxGwei} gwei (${ARBITRAGE_CONFIG.gasPriceSpikeMultiplier}x baseline)`);
+          }
+        }
+      }
+
+      return currentPrice;
+    } catch (error) {
+      // Re-throw gas spike errors
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('Gas price spike')) {
+        throw error;
+      }
+      this.logger.warn('Failed to get optimal gas price, using chain-specific fallback', {
+        chain,
+        fallbackGwei: Number(fallbackPrice / WEI_PER_GWEI),
+        error
+      });
+      return fallbackPrice;
+    }
+  }
+
+  /**
+   * Refresh gas price immediately before transaction submission.
+   *
+   * In competitive MEV environments, gas prices can change significantly between
+   * the initial getOptimalGasPrice() call and actual transaction submission.
+   *
+   * Abort Thresholds:
+   * - >20%: Warning logged but execution continues
+   * - >50%: Execution aborted to prevent unprofitable trades
+   *
+   * @param chain - Chain identifier
+   * @param provider - JSON-RPC provider (optional)
+   * @param previousGasPrice - The gas price from earlier getOptimalGasPrice() call
+   * @returns Fresh gas price, or previousGasPrice if refresh fails
+   * @throws Error if price increased >50%
+   */
+  async refreshGasPriceForSubmission(
+    chain: string,
+    provider: ethers.JsonRpcProvider | undefined,
+    previousGasPrice: bigint
+  ): Promise<bigint> {
+    if (!provider) {
+      return previousGasPrice;
+    }
+
+    try {
+      const feeData = await provider.getFeeData();
+      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice;
+
+      if (!currentPrice) {
+        return previousGasPrice;
+      }
+
+      // Check for significant price increase since initial fetch
+      const priceIncrease = currentPrice > previousGasPrice
+        ? Number((currentPrice - previousGasPrice) * 100n / previousGasPrice)
+        : 0;
+
+      // Abort on >50% increase to prevent unprofitable trades
+      if (priceIncrease > 50) {
+        const previousGwei = Number(previousGasPrice / WEI_PER_GWEI);
+        const currentGwei = Number(currentPrice / WEI_PER_GWEI);
+
+        this.logger.error('[ERR_GAS_SPIKE] Aborting: gas price increased >50% since preparation', {
+          chain,
+          previousGwei,
+          currentGwei,
+          increasePercent: priceIncrease,
+        });
+
+        throw new Error(
+          `[ERR_GAS_SPIKE] Gas price spike during submission: ` +
+          `${previousGwei.toFixed(2)} -> ${currentGwei.toFixed(2)} gwei (+${priceIncrease}%)`
+        );
+      }
+
+      if (priceIncrease > 20) {
+        this.logger.warn('[WARN_GAS_INCREASE] Significant gas price increase since initial fetch', {
+          chain,
+          previousGwei: Number(previousGasPrice / WEI_PER_GWEI),
+          currentGwei: Number(currentPrice / WEI_PER_GWEI),
+          increasePercent: priceIncrease,
+        });
+      }
+
+      return currentPrice;
+    } catch (error) {
+      // Re-throw gas spike errors (they're intentional aborts)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('[ERR_GAS_SPIKE]')) {
+        throw error;
+      }
+      // On other failures, use the previous price - don't block transaction
+      return previousGasPrice;
+    }
+  }
+
+  /**
+   * Update gas price baseline for spike detection.
+   * Optimized for hot-path: uses in-place array compaction to avoid
+   * temporary array allocations (filter/slice create new arrays).
+   *
+   * @param chain - Chain identifier
+   * @param price - Current gas price in wei
+   * @param gasBaselines - Map of chain to gas baseline history
+   * @param lastGasPrices - Optional map for O(1) last price access
+   */
+  updateGasBaseline(
+    chain: string,
+    price: bigint,
+    gasBaselines: Map<string, GasBaselineEntry[]>,
+    lastGasPrices?: Map<string, bigint>
+  ): void {
+    const now = Date.now();
+    const windowMs = ARBITRAGE_CONFIG.gasPriceBaselineWindowMs;
+
+    if (!gasBaselines.has(chain)) {
+      gasBaselines.set(chain, []);
+    }
+
+    const history = gasBaselines.get(chain)!;
+
+    // Add current price
+    history.push({ price, timestamp: now });
+
+    // Update pre-computed last gas price for O(1) hot path access
+    if (lastGasPrices) {
+      lastGasPrices.set(chain, price);
+    }
+
+    // Invalidate median cache
+    this.medianCache.delete(chain);
+
+    // Remove old entries and cap size using in-place compaction
+    const cutoff = now - windowMs;
+    if (history.length > this.MAX_GAS_HISTORY || history[0]?.timestamp < cutoff) {
+      // In-place compaction: single pass, no temporary arrays
+      let writeIdx = 0;
+      for (let readIdx = 0; readIdx < history.length; readIdx++) {
+        if (history[readIdx].timestamp >= cutoff) {
+          if (writeIdx !== readIdx) {
+            history[writeIdx] = history[readIdx];
+          }
+          writeIdx++;
+        }
+      }
+
+      // If still over limit, keep only most recent entries
+      if (writeIdx > this.MAX_GAS_HISTORY) {
+        const offset = writeIdx - this.MAX_GAS_HISTORY;
+        for (let i = 0; i < this.MAX_GAS_HISTORY; i++) {
+          history[i] = history[i + offset];
+        }
+        writeIdx = this.MAX_GAS_HISTORY;
+      }
+
+      // Truncate to valid entries
+      history.length = writeIdx;
+    }
+  }
+
+  /**
+   * Calculate baseline gas price from recent history.
+   * Uses median to avoid outlier influence.
+   * Caches result with chain-specific TTL.
+   *
+   * @param chain - Chain identifier
+   * @param gasBaselines - Map of chain to gas baseline history
+   * @returns Median gas price in wei, or 0n if no history
+   */
+  getGasBaseline(chain: string, gasBaselines: Map<string, GasBaselineEntry[]>): bigint {
+    const history = gasBaselines.get(chain);
+    if (!history || history.length === 0) {
+      return 0n;
+    }
+
+    // With fewer than 3 samples, use graduated safety multipliers
+    if (history.length < 3) {
+      const sum = history.reduce((acc, h) => acc + h.price, 0n);
+      const avg = sum / BigInt(history.length);
+
+      // Graduated multiplier: more conservative with fewer samples
+      const multiplier = history.length === 1 ? 5n : 4n; // 5/2 = 2.5x, 4/2 = 2.0x
+      return avg * multiplier / 2n;
+    }
+
+    // Check cache first
+    const now = Date.now();
+    const cached = this.medianCache.get(chain);
+    if (cached && now < cached.validUntil) {
+      return cached.median;
+    }
+
+    // Periodic cleanup of expired cache entries
+    this.cleanupMedianCacheIfNeeded(now);
+
+    // Compute median
+    const sorted = [...history].sort((a, b) => {
+      if (a.price < b.price) return -1;
+      if (a.price > b.price) return 1;
+      return 0;
+    });
+
+    const midIndex = Math.floor(sorted.length / 2);
+    const median = sorted[midIndex].price;
+
+    // Cache with chain-specific TTL
+    const cacheTTL = this.getMedianCacheTTL(chain);
+    this.medianCache.set(chain, {
+      median,
+      validUntil: now + cacheTTL
+    });
+
+    return median;
+  }
+
+  /**
+   * Get chain-specific median cache TTL.
+   * Fast chains use shorter TTL to ensure fresher gas price data.
+   */
+  private getMedianCacheTTL(chain: string): number {
+    return this.FAST_CHAINS.has(chain)
+      ? this.FAST_CHAIN_MEDIAN_CACHE_TTL_MS
+      : this.DEFAULT_MEDIAN_CACHE_TTL_MS;
+  }
+
+  /**
+   * Clean up expired median cache entries periodically.
+   * Called during getGasBaseline to avoid memory leaks.
+   */
+  private cleanupMedianCacheIfNeeded(now: number): void {
+    if (now - this.lastMedianCacheCleanup < this.MEDIAN_CACHE_CLEANUP_INTERVAL_MS) {
+      return;
+    }
+    this.lastMedianCacheCleanup = now;
+
+    // Collect keys to delete first
+    const expiredKeys: string[] = [];
+    for (const [key, value] of this.medianCache) {
+      if (now >= value.validUntil) {
+        expiredKeys.push(key);
+      }
+    }
+    for (const key of expiredKeys) {
+      this.medianCache.delete(key);
+    }
+
+    // Hard cap: if still over limit, evict oldest entries
+    if (this.medianCache.size > this.MAX_MEDIAN_CACHE_SIZE) {
+      const entries = Array.from(this.medianCache.entries())
+        .sort((a, b) => a[1].validUntil - b[1].validUntil);
+
+      const toRemove = entries.slice(0, entries.length - this.MAX_MEDIAN_CACHE_SIZE);
+      for (const [key] of toRemove) {
+        this.medianCache.delete(key);
+      }
+    }
+  }
+
+  /**
+   * Reset the median cache (for testing).
+   */
+  resetMedianCache(): void {
+    this.medianCache.clear();
+    this.lastMedianCacheCleanup = 0;
+  }
+}

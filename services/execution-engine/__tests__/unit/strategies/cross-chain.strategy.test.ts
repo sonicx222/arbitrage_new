@@ -12,15 +12,15 @@
  */
 
 import { ethers } from 'ethers';
-import { CrossChainStrategy } from './cross-chain.strategy';
-import type { StrategyContext, ExecutionResult, Logger } from '../types';
+import { CrossChainStrategy } from '../../../src/strategies/cross-chain.strategy';
+import type { StrategyContext, ExecutionResult, Logger } from '../../../src/types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   ISimulationService,
   SimulationResult,
   SimulationMetrics,
   SimulationProviderType,
-} from '../services/simulation/types';
+} from '../../../src/services/simulation/types';
 
 // =============================================================================
 // Mock Implementations
