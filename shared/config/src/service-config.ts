@@ -72,17 +72,84 @@ export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
 // =============================================================================
 // SERVICE CONFIGURATIONS
 // =============================================================================
+
+/**
+ * Check if running in production environment.
+ * Production is detected by NODE_ENV=production or common production indicators.
+ */
+const isProduction = process.env.NODE_ENV === 'production' ||
+  process.env.FLY_APP_NAME !== undefined ||  // Fly.io
+  process.env.RAILWAY_ENVIRONMENT !== undefined ||  // Railway
+  process.env.RENDER_SERVICE_NAME !== undefined ||  // Render
+  process.env.KOYEB_SERVICE_NAME !== undefined;  // Koyeb
+
+/**
+ * Warn if using localhost defaults in production.
+ * Only emits warning once per process.
+ */
+let productionConfigWarningEmitted = false;
+function warnOnProductionDefault(configName: string, defaultValue: string): void {
+  if (isProduction && !productionConfigWarningEmitted) {
+    productionConfigWarningEmitted = true;
+    console.warn(
+      `[CONFIG WARNING] Using default ${configName} (${defaultValue}) in production!\n` +
+      `Set ${configName.toUpperCase().replace(/\./g, '_')} environment variable for production deployment.`
+    );
+  }
+}
+
+// Validate Redis URL - warn if using localhost in production
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+if (redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1')) {
+  warnOnProductionDefault('REDIS_URL', redisUrl);
+}
+
 export const SERVICE_CONFIGS = {
   redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
-    password: process.env.REDIS_PASSWORD
+    url: redisUrl,
+    password: process.env.REDIS_PASSWORD,
+    /** Flag indicating if using production Redis (not localhost) */
+    isProductionRedis: !redisUrl.includes('localhost') && !redisUrl.includes('127.0.0.1'),
   },
   monitoring: {
     enabled: process.env.MONITORING_ENABLED === 'true',
     interval: parseInt(process.env.MONITORING_INTERVAL || '30000'),
-    endpoints: (process.env.MONITORING_ENDPOINTS || '').split(',')
-  }
+    endpoints: (process.env.MONITORING_ENDPOINTS || '').split(',').filter(Boolean),
+  },
+  /** Indicates if configuration is suitable for production use */
+  isProductionConfig: isProduction && !redisUrl.includes('localhost'),
 };
+
+/**
+ * Validate that all required production configurations are set.
+ * Call this at application startup in production to fail-fast.
+ *
+ * @throws Error if required production configuration is missing
+ */
+export function validateProductionConfig(): void {
+  if (!isProduction) {
+    return; // Skip validation in development
+  }
+
+  const missingConfigs: string[] = [];
+
+  if (!process.env.REDIS_URL || process.env.REDIS_URL.includes('localhost')) {
+    missingConfigs.push('REDIS_URL (production Redis instance required)');
+  }
+
+  if (!process.env.WALLET_PRIVATE_KEY && !process.env.WALLET_MNEMONIC) {
+    missingConfigs.push('WALLET_PRIVATE_KEY or WALLET_MNEMONIC (wallet credentials required for execution)');
+  }
+
+  if (missingConfigs.length > 0) {
+    throw new Error(
+      `Production configuration validation failed!\n\n` +
+      `Missing required configurations:\n` +
+      missingConfigs.map(c => `  - ${c}`).join('\n') +
+      `\n\nEither set the required environment variables or set NODE_ENV=development.`
+    );
+  }
+}
 
 // =============================================================================
 // FLASH LOAN PROVIDER CONFIGURATION (P1-4 fix)

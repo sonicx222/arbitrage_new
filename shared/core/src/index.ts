@@ -1189,3 +1189,58 @@ export type {
   DetectorConnectionResources,
   EventFilterHandlers,
 } from './detector';
+
+// =============================================================================
+// COMMON VALIDATORS (Lightweight validation utilities)
+// =============================================================================
+export {
+  // Type guards
+  isDefined,
+  isNonEmptyString,
+  isPositiveNumber,
+  isNonNegativeNumber,
+  isFiniteNumber,
+  isInteger,
+  isPositiveInteger,
+  isNonEmptyArray,
+  isPlainObject,
+  hasKey,
+  // Validation functions (throw on failure)
+  validateNonEmptyString,
+  validatePositiveNumber,
+  validateNonNegativeNumber,
+  validatePositiveInteger,
+  validateInRange,
+  // Safe parsing functions
+  parseNumberSafe,
+  parseIntegerSafe,
+  parseBooleanSafe,
+  // Address validators (lightweight)
+  looksLikeEthereumAddress,
+  looksLikeSolanaAddress,
+  // Assertion helpers
+  assert,
+  assertDefined,
+} from './utils/common-validators';
+
+// =============================================================================
+// PERFORMANCE UTILITIES
+// =============================================================================
+export {
+  // WeakMap-based object cache
+  createObjectCache,
+  // Memoization
+  memoize,
+  memoizeAsync,
+  // Batch processing
+  processBatches,
+  processWithRateLimit,
+  // Fast lookup structures
+  createFastLookupSet,
+  createFastLookupMap,
+  // Object pooling
+  createObjectPool,
+  // Lazy initialization
+  lazy,
+  lazyAsync,
+} from './utils/performance-utils';

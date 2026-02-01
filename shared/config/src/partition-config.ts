@@ -1,7 +1,8 @@
 /**
  * Partition Configuration (DEPRECATED)
  *
- * @deprecated This file is deprecated. Import from './partitions' instead.
+ * @deprecated This file is deprecated since v1.0.0. Import from './partitions' instead.
+ * This file will be removed in v2.0.0.
  *
  * This file now re-exports from partitions.ts for backward compatibility.
  * All new code should import directly from partitions.ts.
@@ -15,5 +16,16 @@
  * @see ADR-008: Phase metrics and targets
  */
 
-// Re-export from partitions.ts for backward compatibility
-export { PARTITION_CONFIG, PHASE_METRICS } from './partitions';
+import { PARTITION_CONFIG as _PARTITION_CONFIG, PHASE_METRICS as _PHASE_METRICS } from './partitions';
+
+/**
+ * @deprecated Since v1.0.0. Use getChainsForPartition() from './partitions' instead.
+ * Will be removed in v2.0.0.
+ */
+export const PARTITION_CONFIG = _PARTITION_CONFIG;
+
+/**
+ * @deprecated Since v1.0.0. Import PHASE_METRICS from './partitions' instead.
+ * Will be removed in v2.0.0.
+ */
+export const PHASE_METRICS = _PHASE_METRICS;

@@ -495,3 +495,69 @@ export {
   type ProviderConfig,
   type ProviderBudget,
 } from './provider-config';
+
+// =============================================================================
+// BLOCK TIME UTILITIES (Consolidated from price-calculator.ts)
+// Single source of truth for chain block times
+// =============================================================================
+
+/**
+ * Pre-computed block times in milliseconds for O(1) lookup.
+ * Derived from CHAINS config blockTime (in seconds) * 1000.
+ *
+ * Used by:
+ * - price-calculator.ts for data freshness/staleness scoring
+ * - websocket-manager.ts for connection health
+ * - base-detector.ts for event timing
+ */
+export const BLOCK_TIMES_MS: Readonly<Record<string, number>> = Object.freeze(
+  Object.entries(CHAINS).reduce((acc, [chain, config]) => {
+    acc[chain] = Math.round(config.blockTime * 1000);
+    return acc;
+  }, {} as Record<string, number>)
+);
+
+// Cache for normalized chain names to avoid toLowerCase() in hot path
+const normalizedChainCache = new Map<string, string>();
+
+/**
+ * Get block time for a chain in milliseconds.
+ * Defaults to Ethereum block time (12000ms) for unknown chains.
+ *
+ * Performance optimized:
+ * - Uses pre-computed BLOCK_TIMES_MS for O(1) lookup
+ * - Caches normalized chain names to avoid string allocation in hot path
+ *
+ * @param chain - Chain name (case-insensitive)
+ * @returns Block time in milliseconds
+ */
+export function getBlockTimeMs(chain: string): number {
+  // Fast path: direct lookup for already lowercase chains
+  const direct = BLOCK_TIMES_MS[chain];
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  // Check cache before creating new lowercase string
+  let normalized = normalizedChainCache.get(chain);
+  if (!normalized) {
+    normalized = chain.toLowerCase();
+    // Limit cache size to prevent memory leak from malicious input
+    if (normalizedChainCache.size < 100) {
+      normalizedChainCache.set(chain, normalized);
+    }
+  }
+
+  return BLOCK_TIMES_MS[normalized] ?? 12000; // Default to Ethereum block time
+}
+
+/**
+ * Get block time for a chain in seconds.
+ * Convenience wrapper around getBlockTimeMs.
+ *
+ * @param chain - Chain name (case-insensitive)
+ * @returns Block time in seconds
+ */
+export function getBlockTimeSec(chain: string): number {
+  return getBlockTimeMs(chain) / 1000;
+}

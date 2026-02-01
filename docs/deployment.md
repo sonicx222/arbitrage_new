@@ -26,7 +26,6 @@ The system achieves institutional-grade performance by strategically placing mic
 ### System Requirements
 - Node.js 18+
 - Docker & Docker Compose
-- `wasm-pack` (for building the WebAssembly engine)
 
 ### Required Cloud Accounts
 - [Fly.io](https://fly.io/) (Detectors)

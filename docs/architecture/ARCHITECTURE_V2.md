@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.3
-> **Last Updated:** 2026-01-25
+> **Document Version:** 2.4
+> **Last Updated:** 2026-01-31
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -25,7 +25,7 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **11 blockchains** (10 EVM + Solana) with **62 DEXs** and **165 tokens**
+- Monitor **11 blockchains** (10 EVM + Solana) with **54 DEXs** and **143 tokens**
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
@@ -59,8 +59,8 @@ Build a **professional and reliable profitable arbitrage application** with:
 | Metric | Target | Current | Gap |
 |--------|--------|---------|-----|
 | Chains Supported | 11 (10 EVM + Solana) | 5 | +6 |
-| DEXs Monitored | 62 (55 EVM + 7 Solana) | 10 | +52 |
-| Tokens Tracked | 165 | 23 | +142 |
+| DEXs Monitored | 54 (47 EVM + 7 Solana) | 10 | +44 |
+| Tokens Tracked | 143 | 23 | +120 |
 | Detection Latency (EVM same-chain) | <50ms | ~150ms | -100ms |
 | Detection Latency (Solana) | <100ms | N/A | New |
 | Detection Latency (cross-chain) | <10s | ~30s | -20s |
@@ -455,7 +455,7 @@ Within each partition, scale by:
 | Current | 5 | 10 | 23 | 50 | ~100 | ~3,000 |
 | Phase 1 | 7 | 25 | 60 | 150 | ~300 | ~5,000 |
 | Phase 2 | 9 | 45 | 110 | 350 | ~500 | ~7,000 |
-| Phase 3 | 11 (10 EVM + Solana) | 62 | 165 | 600 | ~1000 | ~9,500 |
+| Phase 3 | 11 (10 EVM + Solana) | 54 | 143 | 500 | ~1000 | ~9,500 |
 
 All phases remain within Upstash 10K/day limit due to batching.
 
@@ -565,7 +565,7 @@ All phases remain within Upstash 10K/day limit due to batching.
 - Low fees (<$0.001) enable micro-arbitrage
 - Unique ecosystem (memecoins, LSTs) not available on EVM
 
-### 9.2 DEX Distribution (62 DEXs: 55 EVM + 7 Solana)
+### 9.2 DEX Distribution (54 DEXs: 47 EVM + 7 Solana)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -613,7 +613,7 @@ All phases remain within Upstash 10K/day limit due to batching.
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.3 Token Strategy (165 Tokens, 600 Pairs)
+### 9.3 Token Strategy (143 Tokens, ~500 Pairs)
 
 | Token Category | Count | Per Chain (EVM) | Solana | Example Tokens |
 |----------------|-------|-----------------|--------|----------------|
@@ -632,7 +632,7 @@ All phases remain within Upstash 10K/day limit due to batching.
 | **Current** | 5 | 10 | 23 | ~50 | Now |
 | **Phase 1** | 7 | 25 | 60 | ~150 | Week 1-2 |
 | **Phase 2** | 9 + Solana | 52 | 125 | ~450 | Week 3-4 |
-| **Phase 3** | 11 | 62 | 165 | ~600 | Week 5-6 |
+| **Phase 3** | 11 | 54 | 143 | ~500 | Week 5-6 |
 
 ---
 
@@ -811,6 +811,7 @@ The following Architecture Decision Records document key decisions:
 | 2.1 | 2025-01-12 | Architecture Update | Added Solana as P4 partition, 11 chains, 62 DEXs, 165 tokens |
 | 2.2 | 2026-01-24 | Phase 1-3 Update | Added simulation, MEV protection, circuit breaker, factory subscriptions, flash loans |
 | 2.3 | 2026-01-25 | Optimization Evaluation | Added feature status table, WASM clarification, 13/15 optimizations confirmed complete |
+| 2.4 | 2026-01-31 | Config Alignment | Corrected DEX count (62→54), token count (165→143) to match actual config |
 
 ---
 

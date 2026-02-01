@@ -86,56 +86,36 @@ const PRICE_PRECISION = 10n ** 18n;
 const PRICE_PRECISION_NUMBER = 1e18;
 
 // =============================================================================
-// Chain Constants
+// Chain Constants (Re-exported from @arbitrage/config)
+// Single source of truth: shared/config/src/chains/index.ts
 // =============================================================================
+
+// Import from config module - the canonical source of truth
+import {
+  BLOCK_TIMES_MS as CONFIG_BLOCK_TIMES_MS,
+  getBlockTimeMs as configGetBlockTimeMs,
+} from '../../../config/src';
 
 /**
  * Block times in milliseconds for different chains.
  * Used for calculating data freshness/staleness in confidence scoring.
+ *
+ * @deprecated Since v1.1.0. Import BLOCK_TIMES_MS from '@arbitrage/config' instead.
+ * This re-export is kept for backward compatibility.
  */
-export const BLOCK_TIMES_MS: Record<string, number> = {
-  ethereum: 12000,
-  polygon: 2000,
-  bsc: 3000,
-  arbitrum: 250,
-  optimism: 2000,
-  base: 2000,
-  avalanche: 2000,
-  solana: 400,
-};
-
-// P0-FIX 10.4: Cache for normalized chain names to avoid toLowerCase() in hot path
-const normalizedChainCache: Map<string, string> = new Map();
+export const BLOCK_TIMES_MS = CONFIG_BLOCK_TIMES_MS;
 
 /**
  * Get block time for a chain in milliseconds.
  * Defaults to Ethereum block time (12s) for unknown chains.
  *
- * P0-FIX 10.4: Uses caching to avoid toLowerCase() string allocation in hot path.
- * Callers should normalize chain names at system boundaries, not per-call.
+ * @deprecated Since v1.1.0. Import getBlockTimeMs from '@arbitrage/config' instead.
+ * This re-export is kept for backward compatibility.
  *
  * @param chain - Chain name (case-insensitive)
  * @returns Block time in milliseconds
  */
-export function getBlockTimeMs(chain: string): number {
-  // Fast path: direct lookup for already lowercase chains
-  let lookupKey = BLOCK_TIMES_MS[chain];
-  if (lookupKey !== undefined) {
-    return lookupKey;
-  }
-
-  // P0-FIX 10.4: Check cache before creating new lowercase string
-  let normalized = normalizedChainCache.get(chain);
-  if (!normalized) {
-    normalized = chain.toLowerCase();
-    // Limit cache size to prevent memory leak from malicious input
-    if (normalizedChainCache.size < 100) {
-      normalizedChainCache.set(chain, normalized);
-    }
-  }
-
-  return BLOCK_TIMES_MS[normalized] ?? 12000;
-}
+export const getBlockTimeMs = configGetBlockTimeMs;
 
 // =============================================================================
 // Core Price Calculations
