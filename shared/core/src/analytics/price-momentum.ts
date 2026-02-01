@@ -15,6 +15,7 @@
  */
 
 import { createLogger } from '../logger';
+import { createConfigurableSingleton } from '../async/async-singleton';
 
 const logger = createLogger('price-momentum');
 
@@ -544,19 +545,18 @@ export class PriceMomentumTracker {
 }
 
 // =============================================================================
-// Singleton Factory
+// Singleton Factory (P1-FIX: Using createConfigurableSingleton)
 // =============================================================================
 
 /**
- * Singleton Pattern Note:
- * This uses a configurable singleton pattern rather than `createSingleton` from async-singleton.ts
- * because it requires configuration parameters on first initialization. The standard createSingleton
- * pattern uses a fixed factory function which doesn't support runtime configuration.
- *
- * Thread safety: JavaScript is single-threaded for synchronous code, so this pattern
- * is safe. The check-and-set is atomic in the JS event loop.
+ * P1-FIX: Migrated to createConfigurableSingleton for standardized singleton pattern.
+ * This utility handles configurable singletons - configuration is only applied on first call.
  */
-let trackerInstance: PriceMomentumTracker | null = null;
+const priceMomentumSingleton = createConfigurableSingleton<PriceMomentumTracker, Partial<MomentumConfig>>(
+  (config) => new PriceMomentumTracker(config),
+  (instance) => instance.resetAll(),
+  'price-momentum-tracker'
+);
 
 /**
  * Get the singleton PriceMomentumTracker instance.
@@ -565,20 +565,10 @@ let trackerInstance: PriceMomentumTracker | null = null;
  * @param config - Optional configuration (only used on first initialization)
  * @returns The singleton PriceMomentumTracker instance
  */
-export function getPriceMomentumTracker(config?: Partial<MomentumConfig>): PriceMomentumTracker {
-  if (!trackerInstance) {
-    trackerInstance = new PriceMomentumTracker(config);
-  }
-  return trackerInstance;
-}
+export const getPriceMomentumTracker = priceMomentumSingleton.get;
 
 /**
  * Reset the singleton instance.
  * Use for testing or when reconfiguration is needed.
  */
-export function resetPriceMomentumTracker(): void {
-  if (trackerInstance) {
-    trackerInstance.resetAll();
-  }
-  trackerInstance = null;
-}
+export const resetPriceMomentumTracker = priceMomentumSingleton.reset;

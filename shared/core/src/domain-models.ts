@@ -291,10 +291,14 @@ export interface IExecutorFactory {
 
 // Error Classes
 /**
- * @deprecated Use ArbitrageError from './resilience/error-handling' instead.
+ * @deprecated Use ArbitrageError from '@arbitrage/types' instead.
  * This legacy class is kept for backward compatibility with existing code.
- * Migration: Replace `new DomainArbitrageError(code, msg)` with
- * `new ArbitrageError(msg, ErrorCode.XXX)` from error-handling.
+ *
+ * Migration options:
+ * - Simple errors: `import { ArbitrageError } from '@arbitrage/types'`
+ *   Usage: `new ArbitrageError(msg, 'ERROR_CODE', 'service-name', retryable)`
+ * - Rich errors: `import { BaseArbitrageError, ErrorCode } from '@arbitrage/core'`
+ *   Usage: `new BaseArbitrageError(msg, ErrorCode.XXX, { context })`
  *
  * Removal planned for v2.0.0
  */
@@ -311,8 +315,8 @@ export class DomainArbitrageError extends Error {
 }
 
 /**
- * @deprecated Alias for DomainArbitrageError. Use ArbitrageError from
- * './resilience/error-handling' for new code.
+ * @deprecated Alias for DomainArbitrageError.
+ * For new code, use ArbitrageError from '@arbitrage/types' (canonical).
  */
 export { DomainArbitrageError as ArbitrageError };
 

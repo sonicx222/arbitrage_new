@@ -17,19 +17,10 @@
 // Timeout Utilities
 // =============================================================================
 
-/**
- * Timeout error thrown when an operation exceeds the allowed time.
- */
-export class TimeoutError extends Error {
-  constructor(
-    message: string,
-    public readonly timeoutMs: number,
-    public readonly operation?: string
-  ) {
-    super(message);
-    this.name = 'TimeoutError';
-  }
-}
+// P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
+// Re-export for backward compatibility with existing imports from this module
+import { TimeoutError } from '../../../types';
+export { TimeoutError };
 
 /**
  * Execute a promise with a timeout.
@@ -50,10 +41,9 @@ export async function withTimeout<T>(
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      const msg = operationName
-        ? `Operation '${operationName}' timed out after ${timeoutMs}ms`
-        : `Operation timed out after ${timeoutMs}ms`;
-      reject(new TimeoutError(msg, timeoutMs, operationName));
+      // P0-FIX: Use canonical TimeoutError constructor (operation, timeoutMs, service?)
+      // Canonical class auto-generates message: "Timeout: {operation} exceeded {timeoutMs}ms"
+      reject(new TimeoutError(operationName || 'operation', timeoutMs));
     }, timeoutMs);
   });
 

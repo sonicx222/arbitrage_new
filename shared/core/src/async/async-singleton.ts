@@ -143,6 +143,69 @@ export function createSingleton<T>(
 }
 
 /**
+ * P1-FIX: Creates a configurable singleton factory.
+ * Use this for singletons that need configuration on first initialization.
+ *
+ * Unlike createSingleton which uses a fixed factory, this pattern accepts
+ * optional configuration on the first get() call. Subsequent calls ignore
+ * the config parameter and return the existing instance.
+ *
+ * @param factory - Function that creates the instance, receives optional config
+ * @param cleanup - Optional function to cleanup the instance on reset
+ * @param name - Optional name for logging purposes
+ *
+ * @example
+ * const { get: getTracker, reset: resetTracker } = createConfigurableSingleton(
+ *   (config) => new PriceTracker(config),
+ *   (instance) => instance.reset(),
+ *   'price-tracker'
+ * );
+ *
+ * // First call creates with config
+ * const tracker = getTracker({ windowSize: 100 });
+ * // Subsequent calls return same instance (config ignored)
+ * const same = getTracker({ windowSize: 200 }); // same === tracker
+ */
+export function createConfigurableSingleton<T, C = undefined>(
+  factory: (config?: C) => T,
+  cleanup?: (instance: T) => void,
+  name?: string
+): {
+  get: (config?: C) => T;
+  reset: () => void;
+  isInitialized: () => boolean;
+} {
+  let instance: T | null = null;
+  const singletonName = name || 'unnamed-configurable-singleton';
+
+  return {
+    get(config?: C): T {
+      if (!instance) {
+        instance = factory(config);
+        logger.debug(`Configurable singleton initialized: ${singletonName}`);
+      }
+      return instance;
+    },
+
+    reset(): void {
+      if (instance && cleanup) {
+        try {
+          cleanup(instance);
+          logger.debug(`Configurable singleton cleaned up: ${singletonName}`);
+        } catch (error) {
+          logger.error(`Configurable singleton cleanup failed: ${singletonName}`, { error });
+        }
+      }
+      instance = null;
+    },
+
+    isInitialized(): boolean {
+      return instance !== null;
+    }
+  };
+}
+
+/**
  * Decorator for creating singleton methods in classes.
  * The first call initializes, subsequent calls return the cached instance.
  */

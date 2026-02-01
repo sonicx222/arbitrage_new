@@ -21,6 +21,8 @@ import {
 // Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
 import { CHAINS } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+// P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
+import { TimeoutError } from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
 
 // =============================================================================
@@ -978,15 +980,9 @@ export const PROVIDER_RECONNECTION_TIMEOUT_MS = parseEnvTimeout(
 // Timeout Utility
 // =============================================================================
 
-/**
- * Error thrown when an operation times out.
- */
-export class TimeoutError extends Error {
-  constructor(operationName: string, timeoutMs: number) {
-    super(`Operation "${operationName}" timed out after ${timeoutMs}ms`);
-    this.name = 'TimeoutError';
-  }
-}
+// P0-FIX: TimeoutError now imported from @arbitrage/types (canonical source)
+// Re-export for backward compatibility with code importing from this module
+export { TimeoutError };
 
 /**
  * Wrap a promise with a timeout.

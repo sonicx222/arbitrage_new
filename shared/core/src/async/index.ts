@@ -14,6 +14,7 @@
 export {
   createAsyncSingleton,
   createSingleton,
+  createConfigurableSingleton,  // P1-FIX: For singletons needing config on first init
   singleton
 } from './async-singleton';
 

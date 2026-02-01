@@ -8,7 +8,8 @@ export {
 export type { RedisClientDeps, RedisConstructor } from './redis';
 
 // P1-3-FIX: Standardized singleton pattern utilities
-export { createAsyncSingleton, createSingleton, singleton } from './async/async-singleton';
+// P1-FIX: Added createConfigurableSingleton for singletons needing config on first init
+export { createAsyncSingleton, createSingleton, createConfigurableSingleton, singleton } from './async/async-singleton';
 
 // P2-2 FIX: Reusable AsyncMutex utility
 export {
@@ -464,20 +465,26 @@ export type {
 } from './analytics/pair-activity-tracker';
 
 // Domain models and core interfaces
-// FIX 6.1: Error Class Name Disambiguation
+// FIX 6.1: Error Class Name Disambiguation (P0-FIX: Updated for consolidation)
 // ╔════════════════════════════════════════════════════════════════════════════╗
 // ║ ERROR CLASS NAMING GUIDE                                                   ║
 // ╠════════════════════════════════════════════════════════════════════════════╣
-// ║ PREFERRED (use these):                                                      ║
+// ║ CANONICAL (use for new code):                                              ║
+// ║   - ArbitrageError: Simple error with string code (from @arbitrage/types)  ║
+// ║     Import: import { ArbitrageError } from '@arbitrage/types'              ║
+// ║     Usage: new ArbitrageError(msg, code, service, retryable)               ║
+// ║   - TimeoutError: Timeout errors (from @arbitrage/types)                   ║
+// ║     Import: import { TimeoutError } from '@arbitrage/types'                ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ RICH ERRORS (for detailed error handling):                                 ║
 // ║   - BaseArbitrageError: Rich error with ErrorCode enum, severity, context  ║
 // ║     Import: import { BaseArbitrageError, ErrorCode } from '@arbitrage/core'║
 // ║   - ConnectionError, ValidationError, LifecycleError, ExecutionError       ║
 // ║     (Specialized error classes from resilience/error-handling)             ║
 // ╠════════════════════════════════════════════════════════════════════════════╣
 // ║ DEPRECATED (legacy, will be removed in v2.0):                              ║
-// ║   - ArbitrageError (from domain-models.ts): Simple error with string code  ║
-// ║   - DomainArbitrageError: Same as above, explicit name                     ║
-// ║     Migration: new BaseArbitrageError(msg, ErrorCode.XXX, { context })     ║
+// ║   - DomainArbitrageError (from domain-models.ts): Old pattern              ║
+// ║     Migration: new ArbitrageError(msg, code, service) from @arbitrage/types║
 // ╚════════════════════════════════════════════════════════════════════════════╝
 export * from './domain-models';
 

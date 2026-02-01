@@ -5,6 +5,9 @@
  * across modular components.
  */
 
+// P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
+import { TimeoutError } from '@arbitrage/types';
+
 // =============================================================================
 // Logger Interface
 // =============================================================================
@@ -209,15 +212,9 @@ export function isUnstableChain(
 // Async Utilities (FIX 9.1: Timeout-Race Pattern)
 // =============================================================================
 
-/**
- * Timeout error for withTimeout utility.
- */
-export class TimeoutError extends Error {
-  constructor(message: string, public readonly timeoutMs: number) {
-    super(message);
-    this.name = 'TimeoutError';
-  }
-}
+// P0-FIX: TimeoutError now imported from @arbitrage/types (canonical source)
+// Re-export for backward compatibility with code importing from this module
+export { TimeoutError };
 
 /**
  * Execute a promise with a timeout.
@@ -252,7 +249,9 @@ export async function withTimeout<T>(
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new TimeoutError(`${operationName} timed out after ${timeoutMs}ms`, timeoutMs));
+      // P0-FIX: Use canonical TimeoutError constructor (operation, timeoutMs, service?)
+      // Canonical class auto-generates message: "Timeout: {operation} exceeded {timeoutMs}ms"
+      reject(new TimeoutError(operationName, timeoutMs));
     }, timeoutMs);
   });
 
