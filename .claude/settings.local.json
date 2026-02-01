@@ -11,7 +11,9 @@
       "WebFetch(domain:docs.alchemy.com)",
       "WebFetch(domain:docs.infura.io)",
       "WebFetch(domain:www.quicknode.com)",
-      "WebFetch(domain:publicnode.com)"
+      "WebFetch(domain:publicnode.com)",
+      "Bash(git mv:*)",
+      "Bash(ls:*)"
     ]
   }
 }

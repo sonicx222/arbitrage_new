@@ -6,7 +6,6 @@
 import { ethers } from 'ethers';
 import {
   RedisClient,
-  getRedisClient,
   createLogger,
   getPerformanceLogger,
   PerformanceLogger,
@@ -18,7 +17,6 @@ import {
   WebSocketMessage,
   RedisStreamsClient,
   StreamBatcher,
-  getRedisStreamsClient,
   SwapEventFilter,
   WhaleAlert,
   VolumeAggregate,
@@ -39,6 +37,11 @@ import {
   PairCreatedEvent,
   FactoryEventSignatures,
 } from './index';
+// Phase 1 Refactor: Use extracted DetectorConnectionManager (MIGRATION_PLAN.md)
+import {
+  initializeDetectorConnections,
+  disconnectDetectorConnections,
+} from './detector';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, FALLBACK_TOKEN_PRICES, getEnabledDexes, dexFeeToPercentage, getAllFactoryAddresses, getFactoryByAddress, validateFactoryRegistry } from '../../config/src';
 import {
   calculatePriceFromReserves,
@@ -262,81 +265,45 @@ export abstract class BaseDetector {
     });
   }
 
+  /**
+   * Phase 1 Refactor: Delegates to extracted DetectorConnectionManager.
+   * @see MIGRATION_PLAN.md section 1.4
+   * @see ./detector/detector-connection-manager.ts
+   */
   protected async initializeRedis(): Promise<void> {
-    try {
-      // Initialize Redis client for basic operations
-      this.redis = await getRedisClient() as RedisClient;
-      this.logger.debug('Redis client initialized');
+    // Use extracted DetectorConnectionManager (Phase 1 refactor)
+    const resources = await initializeDetectorConnections(
+      {
+        chain: this.chain,
+        logger: this.logger,
+        // Use default batcher configs from DetectorConnectionManager
+      },
+      {
+        // Wrap handlers with publishWithRetry for resilience (P0-6 fix)
+        onWhaleAlert: (alert: unknown) => {
+          this.publishWithRetry(
+            () => this.publishWhaleAlert(alert as WhaleAlert),
+            'whale alert',
+            3 // max retries
+          );
+        },
+        onVolumeAggregate: (aggregate: unknown) => {
+          this.publishWithRetry(
+            () => this.publishVolumeAggregate(aggregate as VolumeAggregate),
+            'volume aggregate',
+            3 // max retries
+          );
+        },
+      }
+    );
 
-      // Initialize Redis Streams client (REQUIRED per ADR-002 - no fallback)
-      this.streamsClient = await getRedisStreamsClient();
-      this.logger.debug('Redis Streams client initialized');
-
-      // Create batchers for efficient command usage (50:1 target ratio)
-      this.priceUpdateBatcher = this.streamsClient.createBatcher(
-        RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        {
-          maxBatchSize: 50,
-          maxWaitMs: 100 // Flush every 100ms for latency-sensitive price data
-        }
-      );
-
-      this.swapEventBatcher = this.streamsClient.createBatcher(
-        RedisStreamsClient.STREAMS.SWAP_EVENTS,
-        {
-          maxBatchSize: 100,
-          maxWaitMs: 500 // Less time-sensitive
-        }
-      );
-
-      this.whaleAlertBatcher = this.streamsClient.createBatcher(
-        RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        {
-          maxBatchSize: 10,
-          maxWaitMs: 50 // Whale alerts are time-sensitive
-        }
-      );
-
-      this.logger.info('Redis Streams batchers initialized', {
-        priceUpdates: { maxBatch: 50, maxWaitMs: 100 },
-        swapEvents: { maxBatch: 100, maxWaitMs: 500 },
-        whaleAlerts: { maxBatch: 10, maxWaitMs: 50 }
-      });
-
-      // Initialize Smart Swap Event Filter (S1.2)
-      this.swapEventFilter = new SwapEventFilter({
-        minUsdValue: 10,       // Filter dust transactions < $10
-        whaleThreshold: 50000, // Alert for transactions >= $50K
-        dedupWindowMs: 5000,   // 5 second dedup window
-        aggregationWindowMs: 5000 // 5 second volume aggregation
-      });
-
-      // Set up whale alert handler to publish to stream with retry (P0-6 fix)
-      this.swapEventFilter.onWhaleAlert((alert: WhaleAlert) => {
-        this.publishWithRetry(
-          () => this.publishWhaleAlert(alert),
-          'whale alert',
-          3 // max retries
-        );
-      });
-
-      // Set up volume aggregate handler to publish to stream with retry
-      this.swapEventFilter.onVolumeAggregate((aggregate: VolumeAggregate) => {
-        this.publishWithRetry(
-          () => this.publishVolumeAggregate(aggregate),
-          'volume aggregate',
-          3 // max retries
-        );
-      });
-
-      this.logger.info('Smart Swap Event Filter initialized', {
-        minUsdValue: 10,
-        whaleThreshold: 50000
-      });
-    } catch (error) {
-      this.logger.error('Failed to initialize Redis/Streams', { error });
-      throw new Error('Redis Streams initialization failed - Streams required per ADR-002');
-    }
+    // Assign connection resources to instance properties
+    this.redis = resources.redis;
+    this.streamsClient = resources.streamsClient;
+    this.priceUpdateBatcher = resources.priceUpdateBatcher;
+    this.swapEventBatcher = resources.swapEventBatcher;
+    this.whaleAlertBatcher = resources.whaleAlertBatcher;
+    this.swapEventFilter = resources.swapEventFilter;
   }
 
   /**
