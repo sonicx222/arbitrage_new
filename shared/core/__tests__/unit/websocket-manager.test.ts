@@ -861,3 +861,207 @@ describe('WebSocketManager Fallback URL Integration', () => {
     });
   });
 });
+
+/**
+ * Phase 2: Worker Thread JSON Parsing Tests
+ * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 2
+ */
+describe('WebSocketManager Worker Thread JSON Parsing', () => {
+  let manager: WebSocketManager;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (manager) {
+      manager.disconnect();
+    }
+  });
+
+  describe('Configuration', () => {
+    it('should default to worker parsing disabled', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.enabled).toBe(false);
+    });
+
+    it('should enable worker parsing when configured', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.enabled).toBe(true);
+    });
+
+    it('should use default threshold of 1KB', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.thresholdBytes).toBe(1024);
+    });
+
+    it('should accept custom threshold', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+        workerParsingThresholdBytes: 2048,
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.thresholdBytes).toBe(2048);
+    });
+  });
+
+  describe('Runtime Control', () => {
+    it('should allow enabling worker parsing at runtime', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(false);
+
+      manager.setWorkerParsing(true);
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+    });
+
+    it('should allow disabling worker parsing at runtime', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+
+      manager.setWorkerParsing(false);
+      expect(manager.getWorkerParsingStats().enabled).toBe(false);
+    });
+
+    it('should allow changing threshold at runtime', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(1024);
+
+      manager.setWorkerParsingThreshold(4096);
+      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(4096);
+    });
+
+    it('should handle negative threshold by using 0', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      manager.setWorkerParsingThreshold(-100);
+      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(0);
+    });
+  });
+
+  describe('Statistics', () => {
+    it('should track main thread parses', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        // Worker parsing disabled - all parses go to main thread
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.mainThreadParses).toBe(0);
+      expect(stats.workerThreadParses).toBe(0);
+    });
+
+    it('should calculate worker usage percentage', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      // With no parses, percentage should be 0
+      expect(stats.workerUsagePercent).toBe(0);
+    });
+
+    it('should reset statistics', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+
+      // Reset stats
+      manager.resetWorkerParsingStats();
+      const stats = manager.getWorkerParsingStats();
+
+      expect(stats.mainThreadParses).toBe(0);
+      expect(stats.workerThreadParses).toBe(0);
+      expect(stats.parseErrors).toBe(0);
+      expect(stats.poolStartupFallbacks).toBe(0);
+    });
+
+    it('should report pool ready status', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      // Pool starts not ready (lazy initialization)
+      expect(stats.poolReady).toBe(false);
+    });
+  });
+
+  describe('Statistics Format', () => {
+    it('should return complete statistics object', () => {
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+        workerParsingThresholdBytes: 512,
+      };
+
+      manager = new WebSocketManager(config);
+      const stats = manager.getWorkerParsingStats();
+
+      // Verify all expected properties exist
+      expect(stats).toHaveProperty('enabled');
+      expect(stats).toHaveProperty('poolReady');
+      expect(stats).toHaveProperty('thresholdBytes');
+      expect(stats).toHaveProperty('mainThreadParses');
+      expect(stats).toHaveProperty('workerThreadParses');
+      expect(stats).toHaveProperty('parseErrors');
+      expect(stats).toHaveProperty('poolStartupFallbacks');
+      expect(stats).toHaveProperty('workerUsagePercent');
+
+      // Verify values
+      expect(stats.enabled).toBe(true);
+      expect(stats.thresholdBytes).toBe(512);
+      expect(typeof stats.workerUsagePercent).toBe('number');
+    });
+  });
+});

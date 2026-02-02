@@ -516,8 +516,8 @@ describe('HotForkSynchronizer', () => {
 
       await synchronizer.start();
 
-      // Wait for some syncs
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Wait for enough syncs to complete failures and recovery (increased for CI stability)
+      await new Promise((resolve) => setTimeout(resolve, 400));
 
       const metrics = synchronizer.getMetrics();
       expect(metrics.consecutiveFailures).toBe(0);

@@ -32,6 +32,7 @@ import {
   type NonceManager,
   type MevProviderFactory,
   type BridgeRouterFactory,
+  type BatchProvider,
 } from '@arbitrage/core';
 // Fix 3.1: Import CHAINS from config to derive SUPPORTED_CHAINS dynamically
 import { CHAINS } from '@arbitrage/config';
@@ -973,6 +974,12 @@ export interface StrategyContext {
    * post-swap pool states before execution.
    */
   pendingStateSimulator?: import('./services/simulation/pending-state-simulator').PendingStateSimulator;
+  /**
+   * Phase 3: RPC batch providers for optimized request batching.
+   * Reduces HTTP overhead by combining multiple RPC calls into single requests.
+   * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+   */
+  batchProviders?: Map<string, BatchProvider>;
 }
 
 /**
@@ -1040,6 +1047,14 @@ export interface ProviderService {
   getWallet(chain: string): ethers.Wallet | undefined;
   /** Get all wallets */
   getWallets(): Map<string, ethers.Wallet>;
+  /** Clear all state and shutdown (Phase 3: async for batch provider cleanup) */
+  clear(): Promise<void>;
+  /** Phase 3: Get batch provider for chain */
+  getBatchProvider(chain: string): BatchProvider | undefined;
+  /** Phase 3: Get all batch providers */
+  getBatchProviders(): Map<string, BatchProvider>;
+  /** Phase 3: Check if batching is enabled */
+  isBatchingEnabled(): boolean;
 }
 
 // =============================================================================

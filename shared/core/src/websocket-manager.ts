@@ -11,6 +11,7 @@
 import WebSocket from 'ws';
 import { createLogger } from './logger';
 import { getProviderHealthScorer, ProviderHealthScorer, METHOD_CU_COSTS } from './monitoring/provider-health-scorer';
+import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 
 export interface WebSocketConfig {
   url: string;
@@ -40,6 +41,33 @@ export interface WebSocketConfig {
    * - Slow chains (ethereum, zksync, linea): 15000ms
    */
   stalenessThresholdMs?: number;
+
+  // ==========================================================================
+  // Phase 2: Worker Thread JSON Parsing Configuration
+  // @see RPC_DATA_OPTIMIZATION_RESEARCH.md
+  // ==========================================================================
+
+  /**
+   * Enable worker thread JSON parsing to offload JSON.parse from main thread.
+   * Best for high-throughput scenarios (>500 events/sec) or large payloads.
+   *
+   * Trade-offs:
+   * - Adds ~0.5-2ms message-passing overhead per parse
+   * - Prevents main thread blocking during large JSON parsing
+   * - Most effective for payloads >1KB
+   *
+   * @default false (disabled - use main thread parsing)
+   */
+  useWorkerParsing?: boolean;
+
+  /**
+   * Minimum payload size in bytes to use worker thread parsing.
+   * Payloads smaller than this threshold are parsed on main thread
+   * since overhead would exceed benefits.
+   *
+   * @default 1024 (1KB) - only worker-parse messages >1KB
+   */
+  workerParsingThresholdBytes?: number;
 }
 
 /**
@@ -177,6 +205,33 @@ export class WebSocketManager {
   /** Whether to use budget-aware provider selection (6-Provider Shield) */
   private useBudgetAwareSelection = true;
 
+  // ==========================================================================
+  // Phase 2: Worker Thread JSON Parsing
+  // ==========================================================================
+
+  /** Whether to use worker thread for JSON parsing (disabled by default) */
+  private useWorkerParsing = false;
+
+  /** Minimum payload size to use worker parsing (default: 1KB) */
+  private workerParsingThresholdBytes = 1024;
+
+  /** Worker pool reference (lazy-initialized when worker parsing enabled) */
+  private workerPool: EventProcessingWorkerPool | null = null;
+
+  /** Track worker parsing statistics */
+  private workerParsingStats = {
+    mainThreadParses: 0,
+    workerThreadParses: 0,
+    parseErrors: 0,
+    poolStartupFallbacks: 0
+  };
+
+  /** Whether worker pool has been started */
+  private workerPoolStarted = false;
+
+  /** Whether pool startup is in progress */
+  private workerPoolStarting = false;
+
   constructor(config: WebSocketConfig) {
     this.config = {
       reconnectInterval: 1000,  // Base delay for exponential backoff
@@ -211,6 +266,19 @@ export class WebSocketManager {
       this.allUrls.push(...config.fallbackUrls);
     }
     this.currentUrlIndex = 0;
+
+    // Phase 2: Initialize worker thread JSON parsing if enabled
+    this.useWorkerParsing = config.useWorkerParsing ?? false;
+    this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 1024;
+
+    if (this.useWorkerParsing) {
+      // Lazy init - worker pool will be started when first needed
+      this.workerPool = getWorkerPool();
+      this.logger.info('Worker thread JSON parsing enabled', {
+        chainId: this.chainId,
+        thresholdBytes: this.workerParsingThresholdBytes
+      });
+    }
   }
 
   /**
@@ -368,6 +436,86 @@ export class WebSocketManager {
    */
   setBudgetAwareSelection(enabled: boolean): void {
     this.useBudgetAwareSelection = enabled;
+  }
+
+  // ==========================================================================
+  // Phase 2: Worker Thread JSON Parsing Control Methods
+  // ==========================================================================
+
+  /**
+   * Enable or disable worker thread JSON parsing at runtime.
+   * When enabled, large payloads (>threshold) are parsed in worker threads.
+   *
+   * @param enabled - Whether to use worker threads for large JSON parsing
+   */
+  setWorkerParsing(enabled: boolean): void {
+    if (enabled && !this.workerPool) {
+      this.workerPool = getWorkerPool();
+    }
+    this.useWorkerParsing = enabled;
+    this.logger.info('Worker parsing setting changed', {
+      chainId: this.chainId,
+      enabled,
+      thresholdBytes: this.workerParsingThresholdBytes
+    });
+  }
+
+  /**
+   * Set the minimum payload size threshold for worker parsing.
+   * Payloads smaller than this are parsed on main thread.
+   *
+   * @param bytes - Minimum size in bytes (default: 1024)
+   */
+  setWorkerParsingThreshold(bytes: number): void {
+    this.workerParsingThresholdBytes = Math.max(0, bytes);
+    this.logger.debug('Worker parsing threshold changed', {
+      chainId: this.chainId,
+      thresholdBytes: this.workerParsingThresholdBytes
+    });
+  }
+
+  /**
+   * Get worker parsing statistics for monitoring.
+   * Useful for tuning the threshold and understanding usage patterns.
+   *
+   * @returns Statistics about main thread vs worker thread parsing
+   */
+  getWorkerParsingStats(): {
+    enabled: boolean;
+    poolReady: boolean;
+    thresholdBytes: number;
+    mainThreadParses: number;
+    workerThreadParses: number;
+    parseErrors: number;
+    poolStartupFallbacks: number;
+    workerUsagePercent: number;
+  } {
+    const total = this.workerParsingStats.mainThreadParses +
+                  this.workerParsingStats.workerThreadParses;
+    const workerUsagePercent = total > 0
+      ? (this.workerParsingStats.workerThreadParses / total) * 100
+      : 0;
+
+    return {
+      enabled: this.useWorkerParsing,
+      poolReady: this.workerPoolStarted,
+      thresholdBytes: this.workerParsingThresholdBytes,
+      ...this.workerParsingStats,
+      workerUsagePercent
+    };
+  }
+
+  /**
+   * Reset worker parsing statistics.
+   * Useful for benchmarking or after configuration changes.
+   */
+  resetWorkerParsingStats(): void {
+    this.workerParsingStats = {
+      mainThreadParses: 0,
+      workerThreadParses: 0,
+      parseErrors: 0,
+      poolStartupFallbacks: 0
+    };
   }
 
   /**
@@ -585,6 +733,20 @@ export class WebSocketManager {
     this.isConnecting = false;
     // P2-FIX: Reset reconnection state
     this.isReconnecting = false;
+
+    // BUG-4 FIX: Reset worker pool state on disconnect
+    // This prevents stale state if the same instance is reconnected.
+    // Note: We DON'T stop the worker pool here because it may be shared.
+    // We only reset the connection-specific flags.
+    this.workerPoolStarted = false;
+    this.workerPoolStarting = false;
+    // Reset worker parsing stats to avoid carrying over stale data
+    this.workerParsingStats = {
+      mainThreadParses: 0,
+      workerThreadParses: 0,
+      parseErrors: 0,
+      poolStartupFallbacks: 0
+    };
   }
 
   subscribe(subscription: Omit<WebSocketSubscription, 'id'>): number {
@@ -709,62 +871,167 @@ export class WebSocketManager {
   }
 
   private handleMessage(data: Buffer): void {
-    try {
-      const message: WebSocketMessage = JSON.parse(data.toString());
+    const dataString = data.toString();
+    const dataSize = data.length;
 
-      // S3.3: Update quality metrics
-      this.qualityMetrics.lastMessageTime = Date.now();
-      this.qualityMetrics.messagesReceived++;
+    // Phase 2: Worker Thread JSON Parsing
+    // Use worker pool for large payloads to avoid blocking main thread
+    // Small payloads use main thread (overhead not worth it)
+    const shouldUseWorker = this.useWorkerParsing &&
+                            this.workerPool &&
+                            dataSize >= this.workerParsingThresholdBytes;
 
-      // NOTE: Budget tracking is NOT done for inbound messages.
-      // Budget is only tracked for outbound requests (subscriptions, RPC calls).
-      // Inbound messages (subscription data) don't consume CU quota.
-
-      // S3.3: Handle pending subscription confirmations
-      if (message.id !== undefined && this.pendingConfirmations?.has(message.id)) {
-        const confirmation = this.pendingConfirmations.get(message.id);
-        if (confirmation) {
-          if (message.error) {
-            confirmation.reject(new Error(message.error.message || 'Subscription error'));
-          } else {
-            confirmation.resolve();
-          }
-        }
-      }
-
-      // S3.3: Check for rate limit errors in JSON-RPC responses
-      if (message.error && this.isRateLimitError(message.error)) {
-        this.handleRateLimit(this.getCurrentUrl());
-        this.qualityMetrics.errorsEncountered++;
-        // Still notify handlers so they can handle the error
-      }
-
-      // S3.3: Track block numbers from newHeads subscriptions
-      if (message.params?.result?.number) {
-        const blockNumber = parseInt(message.params.result.number, 16);
-        if (!isNaN(blockNumber)) {
-          // Check for data gaps before updating last known block
-          this.checkForDataGap(blockNumber);
-          this.qualityMetrics.lastBlockNumber = blockNumber;
-          // Report to health scorer for freshness tracking
-          this.healthScorer.recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
-        }
-      }
-
-      // Notify all message handlers
-      this.messageHandlers.forEach(handler => {
-        try {
-          handler(message);
-        } catch (error) {
-          this.logger.error('Error in WebSocket message handler', { error });
-          this.qualityMetrics.errorsEncountered++;
-        }
-      });
-
-    } catch (error) {
-      this.logger.error('Failed to parse WebSocket message', { error, data: data.toString() });
-      this.qualityMetrics.errorsEncountered++;
+    if (shouldUseWorker) {
+      // Async path: Parse in worker thread (non-blocking for large payloads)
+      this.workerParsingStats.workerThreadParses++;
+      this.parseMessageInWorker(dataString);
+    } else {
+      // Sync path: Parse on main thread (fast for small payloads)
+      this.workerParsingStats.mainThreadParses++;
+      this.parseMessageSync(dataString);
     }
+  }
+
+  /**
+   * Phase 2: Parse message synchronously on main thread.
+   * Used for small payloads where worker overhead exceeds benefits.
+   */
+  private parseMessageSync(dataString: string): void {
+    try {
+      const message: WebSocketMessage = JSON.parse(dataString);
+      this.processMessage(message);
+    } catch (error) {
+      this.logger.error('Failed to parse WebSocket message', { error, data: dataString.slice(0, 200) });
+      this.qualityMetrics.errorsEncountered++;
+      this.workerParsingStats.parseErrors++;
+    }
+  }
+
+  /**
+   * Phase 2: Parse message asynchronously in worker thread.
+   * Used for large payloads to avoid blocking main event loop.
+   * Fire-and-forget: errors are logged but don't propagate.
+   *
+   * If worker pool isn't ready, falls back to synchronous parsing (fail-safe).
+   */
+  private parseMessageInWorker(dataString: string): void {
+    // Ensure worker pool is started (lazy initialization)
+    if (!this.workerPoolStarted && !this.workerPoolStarting) {
+      this.startWorkerPoolAsync();
+    }
+
+    // If pool isn't ready yet, fall back to sync parsing (fail-safe)
+    // This prevents message loss during pool startup
+    if (!this.workerPoolStarted) {
+      this.workerParsingStats.poolStartupFallbacks++;
+      this.parseMessageSync(dataString);
+      return;
+    }
+
+    // Fire-and-forget async parsing - errors are caught and logged
+    this.workerPool!.parseJson<WebSocketMessage>(dataString)
+      .then(message => {
+        this.processMessage(message);
+      })
+      .catch(error => {
+        this.logger.error('Worker thread JSON parse failed', {
+          error: error instanceof Error ? error.message : String(error),
+          dataPreview: dataString.slice(0, 200)
+        });
+        this.qualityMetrics.errorsEncountered++;
+        this.workerParsingStats.parseErrors++;
+      });
+  }
+
+  /**
+   * Phase 2: Start worker pool asynchronously (non-blocking).
+   * Called lazily when worker parsing is first needed.
+   *
+   * RACE-1 FIX: Set workerPoolStarting flag synchronously at the START of this method
+   * to prevent multiple concurrent calls from reaching the async start() call.
+   * The previous code had a window where multiple messages could trigger multiple calls
+   * before the flag was set.
+   */
+  private startWorkerPoolAsync(): void {
+    // RACE-1 FIX: Early exit if already starting or started (atomic check)
+    if (this.workerPoolStarting || this.workerPoolStarted) return;
+
+    // RACE-1 FIX: Set flag IMMEDIATELY (synchronously) before any async operations
+    // This closes the race window where multiple calls could pass the check above
+    this.workerPoolStarting = true;
+    this.logger.debug('Starting worker pool for JSON parsing', { chainId: this.chainId });
+
+    // Non-blocking pool startup
+    this.workerPool!.start()
+      .then(() => {
+        this.workerPoolStarted = true;
+        this.workerPoolStarting = false;
+        this.logger.info('Worker pool ready for JSON parsing', { chainId: this.chainId });
+      })
+      .catch(error => {
+        this.workerPoolStarting = false;
+        this.logger.error('Failed to start worker pool, disabling worker parsing', {
+          chainId: this.chainId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        // Disable worker parsing on failure
+        this.useWorkerParsing = false;
+      });
+  }
+
+  /**
+   * Process a parsed WebSocket message.
+   * Shared logic for both sync and async parsing paths.
+   */
+  private processMessage(message: WebSocketMessage): void {
+    // S3.3: Update quality metrics
+    this.qualityMetrics.lastMessageTime = Date.now();
+    this.qualityMetrics.messagesReceived++;
+
+    // NOTE: Budget tracking is NOT done for inbound messages.
+    // Budget is only tracked for outbound requests (subscriptions, RPC calls).
+    // Inbound messages (subscription data) don't consume CU quota.
+
+    // S3.3: Handle pending subscription confirmations
+    if (message.id !== undefined && this.pendingConfirmations?.has(message.id)) {
+      const confirmation = this.pendingConfirmations.get(message.id);
+      if (confirmation) {
+        if (message.error) {
+          confirmation.reject(new Error(message.error.message || 'Subscription error'));
+        } else {
+          confirmation.resolve();
+        }
+      }
+    }
+
+    // S3.3: Check for rate limit errors in JSON-RPC responses
+    if (message.error && this.isRateLimitError(message.error)) {
+      this.handleRateLimit(this.getCurrentUrl());
+      this.qualityMetrics.errorsEncountered++;
+      // Still notify handlers so they can handle the error
+    }
+
+    // S3.3: Track block numbers from newHeads subscriptions
+    if (message.params?.result?.number) {
+      const blockNumber = parseInt(message.params.result.number, 16);
+      if (!isNaN(blockNumber)) {
+        // Check for data gaps before updating last known block
+        this.checkForDataGap(blockNumber);
+        this.qualityMetrics.lastBlockNumber = blockNumber;
+        // Report to health scorer for freshness tracking
+        this.healthScorer.recordBlock(this.getCurrentUrl(), this.chainId, blockNumber);
+      }
+    }
+
+    // Notify all message handlers
+    this.messageHandlers.forEach(handler => {
+      try {
+        handler(message);
+      } catch (error) {
+        this.logger.error('Error in WebSocket message handler', { error });
+        this.qualityMetrics.errorsEncountered++;
+      }
+    });
   }
 
   private sendSubscription(subscription: WebSocketSubscription): void {

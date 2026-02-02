@@ -17,8 +17,8 @@
 
 import { ethers } from 'ethers';
 import { CHAINS } from '@arbitrage/config';
-import { getErrorMessage, NonceManager } from '@arbitrage/core';
-import type { ServiceStateManager } from '@arbitrage/core';
+import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider } from '@arbitrage/core';
+import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
 import {
   PROVIDER_CONNECTIVITY_TIMEOUT_MS,
@@ -31,6 +31,16 @@ export interface ProviderServiceConfig {
   stateManager: ServiceStateManager;
   nonceManager: NonceManager | null;
   stats: ExecutionStats;
+  /**
+   * Phase 3: Enable RPC request batching for optimized performance.
+   * When enabled, BatchProvider instances are created for each chain.
+   * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+   */
+  enableBatching?: boolean;
+  /**
+   * Phase 3: Configuration for batch providers.
+   */
+  batchConfig?: BatchProviderConfig;
 }
 
 export class ProviderServiceImpl implements IProviderService {
@@ -43,6 +53,15 @@ export class ProviderServiceImpl implements IProviderService {
   private wallets: Map<string, ethers.Wallet> = new Map();
   private providerHealth: Map<string, ProviderHealth> = new Map();
   private healthCheckInterval: NodeJS.Timeout | null = null;
+
+  /**
+   * Phase 3: BatchProvider instances for RPC request batching.
+   * One BatchProvider per chain, wrapping the underlying JsonRpcProvider.
+   * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+   */
+  private batchProviders: Map<string, BatchProvider> = new Map();
+  private readonly enableBatching: boolean;
+  private readonly batchConfig: BatchProviderConfig;
 
   // Callback for provider reconnection (allows engine to clear stale state)
   private onProviderReconnectCallback: ((chainName: string) => void) | null = null;
@@ -64,6 +83,14 @@ export class ProviderServiceImpl implements IProviderService {
     this.stateManager = config.stateManager;
     this.nonceManager = config.nonceManager;
     this.stats = config.stats;
+    // Phase 3: Initialize batching configuration
+    this.enableBatching = config.enableBatching ?? false;
+    this.batchConfig = config.batchConfig ?? {
+      maxBatchSize: 10,
+      batchTimeoutMs: 10,
+      enabled: true,
+      maxQueueSize: 100,
+    };
   }
 
   /**
@@ -82,6 +109,12 @@ export class ProviderServiceImpl implements IProviderService {
       try {
         const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
         this.providers.set(chainName, provider);
+
+        // Phase 3: Create BatchProvider if batching is enabled
+        if (this.enableBatching) {
+          const batchProvider = createBatchProvider(provider, this.batchConfig);
+          this.batchProviders.set(chainName, batchProvider);
+        }
 
         // Initialize health tracking for this provider
         // Note: Use direct set here since this is initial state (no previous health to compare)
@@ -102,7 +135,9 @@ export class ProviderServiceImpl implements IProviderService {
       }
     }
     this.logger.info('Initialized blockchain providers', {
-      count: this.providers.size
+      count: this.providers.size,
+      batchingEnabled: this.enableBatching,
+      batchProviderCount: this.batchProviders.size
     });
   }
 
@@ -294,6 +329,19 @@ export class ProviderServiceImpl implements IProviderService {
 
       // Replace old provider
       this.providers.set(chainName, newProvider);
+
+      // Phase 3: Recreate BatchProvider if batching is enabled
+      if (this.enableBatching) {
+        // Shutdown old batch provider if exists
+        const oldBatchProvider = this.batchProviders.get(chainName);
+        if (oldBatchProvider) {
+          await oldBatchProvider.shutdown();
+        }
+        // Create new batch provider with new provider
+        const newBatchProvider = createBatchProvider(newProvider, this.batchConfig);
+        this.batchProviders.set(chainName, newBatchProvider);
+      }
+
       // Fix 10.2: Use helper to update cache
       this.updateProviderHealth(chainName, {
         healthy: true,
@@ -386,6 +434,31 @@ export class ProviderServiceImpl implements IProviderService {
     return this.providers;
   }
 
+  /**
+   * Phase 3: Get BatchProvider for a specific chain.
+   * Returns undefined if batching is disabled or chain not found.
+   * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+   */
+  getBatchProvider(chain: string): BatchProvider | undefined {
+    return this.batchProviders.get(chain);
+  }
+
+  /**
+   * Phase 3: Get all BatchProvider instances.
+   * Returns empty map if batching is disabled.
+   * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+   */
+  getBatchProviders(): Map<string, BatchProvider> {
+    return this.batchProviders;
+  }
+
+  /**
+   * Phase 3: Check if batching is enabled.
+   */
+  isBatchingEnabled(): boolean {
+    return this.enableBatching;
+  }
+
   getHealthMap(): Map<string, ProviderHealth> {
     return new Map(this.providerHealth);
   }
@@ -441,8 +514,20 @@ export class ProviderServiceImpl implements IProviderService {
   /**
    * Clear all state (for shutdown).
    */
-  clear(): void {
+  async clear(): Promise<void> {
     this.stopHealthChecks();
+
+    // Phase 3: Shutdown all batch providers before clearing
+    if (this.enableBatching) {
+      const shutdownPromises = Array.from(this.batchProviders.values()).map(
+        (bp) => bp.shutdown().catch((err) => {
+          this.logger.warn('Error shutting down batch provider', { error: getErrorMessage(err) });
+        })
+      );
+      await Promise.all(shutdownPromises);
+      this.batchProviders.clear();
+    }
+
     this.providers.clear();
     this.wallets.clear();
     this.providerHealth.clear();

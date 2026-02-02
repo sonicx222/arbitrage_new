@@ -112,8 +112,8 @@ describe('ProviderServiceImpl - Health Monitoring', () => {
     service = new ProviderServiceImpl(mockConfig);
   });
 
-  afterEach(() => {
-    service.clear();
+  afterEach(async () => {
+    await service.clear();
     jest.useRealTimers();
   });
 
@@ -127,11 +127,11 @@ describe('ProviderServiceImpl - Health Monitoring', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
-  test('should stop health checks on clear', () => {
+  test('should stop health checks on clear', async () => {
     service.startHealthChecks();
     expect(jest.getTimerCount()).toBe(1);
 
-    service.clear();
+    await service.clear();
     expect(jest.getTimerCount()).toBe(0);
     expect(service.getProviders().size).toBe(0);
   });
@@ -171,8 +171,8 @@ describe('ProviderServiceImpl - Reconnection Logic', () => {
     service = new ProviderServiceImpl(mockConfig);
   });
 
-  afterEach(() => {
-    service.clear();
+  afterEach(async () => {
+    await service.clear();
   });
 
   test('should attempt reconnection after 3 consecutive failures', async () => {
@@ -356,11 +356,11 @@ describe('ProviderServiceImpl - Health Map', () => {
   /**
    * Fix 10.2: Test that clear() resets the cached healthy count.
    */
-  test('should reset cached healthy count on clear (Fix 10.2)', () => {
+  test('should reset cached healthy count on clear (Fix 10.2)', async () => {
     (service as any).updateProviderHealth('chain1', { healthy: true, lastCheck: 0, consecutiveFailures: 0 });
     expect(service.getHealthyCount()).toBe(1);
 
-    service.clear();
+    await service.clear();
 
     expect(service.getHealthyCount()).toBe(0);
   });
@@ -381,8 +381,8 @@ describe('ProviderServiceImpl - Health Check Guard (Fix 5.2)', () => {
     service = new ProviderServiceImpl(mockConfig);
   });
 
-  afterEach(() => {
-    service.clear();
+  afterEach(async () => {
+    await service.clear();
     jest.useRealTimers();
   });
 
@@ -452,5 +452,126 @@ describe('ProviderServiceImpl - Health Check Guard (Fix 5.2)', () => {
     // Guard should be reset after completion
     expect((service as any).isCheckingHealth).toBe(false);
     expect(fastHealthCheck).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================================
+// Test Suite: BatchProvider Integration (Phase 3)
+// =============================================================================
+
+describe('ProviderServiceImpl - BatchProvider Integration (Phase 3)', () => {
+  let service: ProviderServiceImpl;
+  let mockConfig: ProviderServiceConfig;
+
+  describe('Batching Disabled (default)', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockConfig = createMockConfig();
+      service = new ProviderServiceImpl(mockConfig);
+    });
+
+    afterEach(async () => {
+      await service.clear();
+    });
+
+    test('should not create batch providers when batching is disabled', () => {
+      expect(service.isBatchingEnabled()).toBe(false);
+      expect(service.getBatchProviders().size).toBe(0);
+      expect(service.getBatchProvider('ethereum')).toBeUndefined();
+    });
+  });
+
+  describe('Batching Enabled', () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockConfig = createMockConfig({
+        enableBatching: true,
+        batchConfig: {
+          maxBatchSize: 15,
+          batchTimeoutMs: 20,
+          enabled: true,
+          maxQueueSize: 200,
+        },
+      });
+      service = new ProviderServiceImpl(mockConfig);
+    });
+
+    afterEach(async () => {
+      await service.clear();
+    });
+
+    test('should report batching as enabled', () => {
+      expect(service.isBatchingEnabled()).toBe(true);
+    });
+
+    test('should return empty batch providers map before initialization', () => {
+      // Before initialize() is called, no batch providers exist
+      expect(service.getBatchProviders().size).toBe(0);
+    });
+
+    test('should clear batch providers on clear()', async () => {
+      // Manually add a mock batch provider for testing
+      const mockBatchProvider = {
+        shutdown: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      };
+      (service as any).batchProviders.set('testchain', mockBatchProvider);
+
+      await service.clear();
+
+      expect(mockBatchProvider.shutdown).toHaveBeenCalled();
+      expect(service.getBatchProviders().size).toBe(0);
+    });
+
+    test('should handle batch provider shutdown errors gracefully', async () => {
+      // Add a mock batch provider that fails shutdown
+      const mockBatchProvider = {
+        shutdown: jest.fn<() => Promise<void>>().mockRejectedValue(new Error('Shutdown failed')),
+      };
+      (service as any).batchProviders.set('testchain', mockBatchProvider);
+
+      // Should not throw
+      await expect(service.clear()).resolves.not.toThrow();
+
+      // Should log the warning
+      expect(mockConfig.logger.warn).toHaveBeenCalledWith(
+        'Error shutting down batch provider',
+        expect.objectContaining({ error: 'Shutdown failed' })
+      );
+    });
+  });
+
+  describe('Batch Provider Configuration', () => {
+    test('should use default batch config when not provided', () => {
+      const serviceWithDefaults = new ProviderServiceImpl({
+        ...createMockConfig(),
+        enableBatching: true,
+        // No batchConfig provided
+      });
+
+      // Access internal config to verify defaults
+      expect((serviceWithDefaults as any).batchConfig).toEqual({
+        maxBatchSize: 10,
+        batchTimeoutMs: 10,
+        enabled: true,
+        maxQueueSize: 100,
+      });
+    });
+
+    test('should use provided batch config', () => {
+      const customConfig = {
+        maxBatchSize: 25,
+        batchTimeoutMs: 50,
+        enabled: true,
+        maxQueueSize: 500,
+      };
+
+      const serviceWithCustom = new ProviderServiceImpl({
+        ...createMockConfig(),
+        enableBatching: true,
+        batchConfig: customConfig,
+      });
+
+      expect((serviceWithCustom as any).batchConfig).toEqual(customConfig);
+    });
   });
 });

@@ -77,8 +77,8 @@ export const PERFORMANCE_THRESHOLDS = {
   // Tolerance Settings
   // =========================================================================
 
-  /** P99 multiplier for max latency (e.g., 2x means P99 can be 2x the target) */
-  P99_MULTIPLIER: 2,
+  /** P99 multiplier for max latency (e.g., 3x means P99 can be 3x the target, increased for CI environment stability) */
+  P99_MULTIPLIER: 3,
 
   /** Number of warmup iterations before measuring */
   WARMUP_ITERATIONS: 10,

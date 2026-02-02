@@ -111,3 +111,16 @@ export type {
   PairCorrelation,
   CorrelationStats
 } from './correlation-analyzer';
+
+// Reserve Cache (ADR-022 - Event-Driven Reserve Caching)
+export {
+  ReserveCache,
+  createReserveCache,
+  getReserveCache,
+  resetReserveCache
+} from './reserve-cache';
+export type {
+  ReserveCacheConfig,
+  CachedReserve,
+  ReserveCacheStats
+} from './reserve-cache';

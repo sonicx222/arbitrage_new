@@ -356,11 +356,20 @@ export class ExecutionEngineService {
       });
 
       // Initialize provider service
+      // Phase 3: RPC batching controlled via environment variable
+      const enableBatching = process.env.RPC_BATCHING_ENABLED === 'true';
       this.providerService = new ProviderServiceImpl({
         logger: this.logger,
         stateManager: this.stateManager,
         nonceManager: this.nonceManager,
-        stats: this.stats
+        stats: this.stats,
+        enableBatching,
+        batchConfig: enableBatching ? {
+          maxBatchSize: parseInt(process.env.RPC_BATCH_MAX_SIZE || '10', 10),
+          batchTimeoutMs: parseInt(process.env.RPC_BATCH_TIMEOUT_MS || '10', 10),
+          maxQueueSize: parseInt(process.env.RPC_BATCH_MAX_QUEUE || '100', 10),
+          enabled: true,
+        } : undefined,
       });
 
       // Clear stale gas baseline when provider reconnects
@@ -568,9 +577,9 @@ export class ExecutionEngineService {
         this.nonceManager = null;
       }
 
-      // Stop provider service
+      // Stop provider service (Phase 3: now async for batch provider shutdown)
       if (this.providerService) {
-        this.providerService.clear();
+        await this.providerService.clear();
         this.providerService = null;
       }
 
@@ -1478,6 +1487,8 @@ export class ExecutionEngineService {
       simulationService: this.txSimulationService ?? undefined,
       // Phase 2: Pending state simulator for mempool-aware execution
       pendingStateSimulator: this.pendingStateSimulator ?? undefined,
+      // Phase 3: Batch providers for RPC request optimization
+      batchProviders: this.providerService?.getBatchProviders(),
     };
   }
 

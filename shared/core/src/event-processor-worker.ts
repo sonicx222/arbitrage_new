@@ -152,6 +152,91 @@ async function processStatisticalAnalysis(data: any): Promise<any> {
 }
 
 /**
+ * Process JSON parsing task.
+ * Offloads JSON.parse from main event loop for high-throughput WebSocket processing.
+ *
+ * Benefits:
+ * - Prevents main thread blocking during JSON parsing
+ * - Enables 2-4x event throughput increase
+ * - Amortizes parsing overhead across worker threads
+ *
+ * Trade-offs:
+ * - Message passing overhead (~0.5-1ms per message)
+ * - Best for larger JSON payloads or high-frequency streams
+ * - May not benefit small messages (<1KB)
+ *
+ * @see ADR-012: Worker Thread Path Finding (extended for JSON parsing)
+ * @see RPC_DATA_OPTIMIZATION_RESEARCH.md Phase 2
+ */
+function processJsonParsing(data: { jsonString: string }): {
+  parsed: unknown;
+  byteLength: number;
+  parseTimeUs: number;
+} {
+  const { jsonString } = data;
+
+  if (typeof jsonString !== 'string') {
+    throw new Error('jsonString must be a string');
+  }
+
+  const startTime = process.hrtime.bigint();
+  const parsed = JSON.parse(jsonString);
+  const endTime = process.hrtime.bigint();
+
+  // Calculate parse time in microseconds
+  const parseTimeUs = Number(endTime - startTime) / 1000;
+
+  return {
+    parsed,
+    byteLength: Buffer.byteLength(jsonString, 'utf8'),
+    parseTimeUs
+  };
+}
+
+/**
+ * Process batch JSON parsing task.
+ * Parses multiple JSON strings in a single worker message to amortize overhead.
+ *
+ * Use this for batching multiple WebSocket messages for efficient parsing.
+ */
+function processBatchJsonParsing(data: { jsonStrings: string[] }): {
+  results: Array<{ parsed: unknown; byteLength: number; parseTimeUs: number } | { error: string }>;
+  totalParseTimeUs: number;
+  successCount: number;
+  errorCount: number;
+} {
+  const { jsonStrings } = data;
+
+  if (!Array.isArray(jsonStrings)) {
+    throw new Error('jsonStrings must be an array');
+  }
+
+  const results: Array<{ parsed: unknown; byteLength: number; parseTimeUs: number } | { error: string }> = [];
+  let totalParseTimeUs = 0;
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (const jsonString of jsonStrings) {
+    try {
+      const result = processJsonParsing({ jsonString });
+      results.push(result);
+      totalParseTimeUs += result.parseTimeUs;
+      successCount++;
+    } catch (error) {
+      results.push({ error: error instanceof Error ? error.message : String(error) });
+      errorCount++;
+    }
+  }
+
+  return {
+    results,
+    totalParseTimeUs,
+    successCount,
+    errorCount
+  };
+}
+
+/**
  * Process multi-leg path finding task.
  * Offloads CPU-intensive DFS from main event loop.
  */
@@ -216,6 +301,16 @@ parentPort?.on('message', async (message: TaskMessage) => {
 
       case 'multi_leg_path_finding':
         result = await processMultiLegPathFinding(taskData);
+        break;
+
+      case 'json_parsing':
+        // Synchronous - no await needed
+        result = processJsonParsing(taskData);
+        break;
+
+      case 'batch_json_parsing':
+        // Synchronous - no await needed
+        result = processBatchJsonParsing(taskData);
         break;
 
       default:

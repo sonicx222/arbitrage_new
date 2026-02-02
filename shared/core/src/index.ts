@@ -895,6 +895,34 @@ export type {
   GasPriceCacheConfig
 } from './caching/gas-price-cache';
 
+// ADR-022: Reserve Cache (Event-Driven Reserve Caching)
+export {
+  ReserveCache,
+  createReserveCache,
+  getReserveCache,
+  resetReserveCache
+} from './caching/reserve-cache';
+export type {
+  ReserveCacheConfig,
+  CachedReserve,
+  ReserveCacheStats
+} from './caching/reserve-cache';
+
+// Phase 3: RPC Request Batching
+// @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+export {
+  BatchProvider,
+  createBatchProvider,
+  BATCHABLE_METHODS,
+  NON_BATCHABLE_METHODS
+} from './rpc';
+export type {
+  BatchProviderConfig,
+  BatchProviderStats,
+  JsonRpcRequest,
+  JsonRpcResponse
+} from './rpc';
+
 // Phase 2: MEV Protection (ADR-013)
 export {
   MevProviderFactory,

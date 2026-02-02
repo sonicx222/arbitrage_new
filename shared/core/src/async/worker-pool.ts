@@ -24,6 +24,59 @@ export interface TaskResult {
   processingTime: number;
 }
 
+// =============================================================================
+// JSON Parsing Types (Phase 2: Worker Thread JSON Parsing)
+// =============================================================================
+
+/**
+ * Result from JSON parsing task in worker thread.
+ * @see RPC_DATA_OPTIMIZATION_RESEARCH.md Phase 2
+ */
+export interface JsonParseResult {
+  /** The parsed JSON value */
+  parsed: unknown;
+  /** Size of the input string in bytes */
+  byteLength: number;
+  /** Time taken to parse in microseconds */
+  parseTimeUs: number;
+}
+
+/**
+ * Result from batch JSON parsing task.
+ */
+export interface BatchJsonParseResult {
+  /** Individual results (either parsed or error) */
+  results: Array<JsonParseResult | { error: string }>;
+  /** Total parse time in microseconds */
+  totalParseTimeUs: number;
+  /** Number of successfully parsed strings */
+  successCount: number;
+  /** Number of parse errors */
+  errorCount: number;
+}
+
+/**
+ * JSON parsing statistics for monitoring.
+ */
+export interface JsonParsingStats {
+  /** Total single parse requests */
+  totalSingleParses: number;
+  /** Total batch parse requests */
+  totalBatchParses: number;
+  /** Total strings parsed (includes batch) */
+  totalStringsParsed: number;
+  /** Total parse errors */
+  totalErrors: number;
+  /** Average parse time in microseconds */
+  avgParseTimeUs: number;
+  /** P99 parse time in microseconds (approximation from rolling window) */
+  p99ParseTimeUs: number;
+  /** Average message passing overhead in ms */
+  avgOverheadMs: number;
+  /** Total bytes parsed */
+  totalBytesParsed: number;
+}
+
 export interface WorkerStats {
   workerId: number;
   activeTasks: number;
@@ -33,32 +86,118 @@ export interface WorkerStats {
   uptime: number;
 }
 
+/**
+ * PERF-1 FIX: Binary Max-Heap based PriorityQueue
+ *
+ * Previous implementation used Array.sort() on every enqueue: O(n log n)
+ * New implementation uses binary heap: O(log n) enqueue, O(log n) dequeue
+ *
+ * Performance improvement for hot-path task scheduling:
+ * - Old: 1000 enqueues × O(n log n) = ~10,000,000 operations
+ * - New: 1000 enqueues × O(log n) = ~10,000 operations (1000x improvement)
+ *
+ * Higher priority values are dequeued first (max-heap behavior).
+ */
 export class PriorityQueue<T> {
-  private items: Array<{item: T, priority: number}> = [];
+  private heap: Array<{ item: T; priority: number }> = [];
 
+  /**
+   * Add item with given priority. O(log n)
+   * @param item - The item to enqueue
+   * @param priority - Higher values = higher priority (dequeued first)
+   */
   enqueue(item: T, priority: number): void {
-    this.items.push({ item, priority });
-    this.items.sort((a, b) => b.priority - a.priority); // Higher priority first
+    this.heap.push({ item, priority });
+    this.bubbleUp(this.heap.length - 1);
   }
 
+  /**
+   * Remove and return highest-priority item. O(log n)
+   * @returns The item with highest priority, or undefined if empty
+   */
   dequeue(): T | undefined {
-    return this.items.shift()?.item;
+    if (this.heap.length === 0) return undefined;
+    if (this.heap.length === 1) return this.heap.pop()!.item;
+
+    const max = this.heap[0];
+    this.heap[0] = this.heap.pop()!;
+    this.bubbleDown(0);
+    return max.item;
   }
 
+  /**
+   * Peek at highest-priority item without removing. O(1)
+   */
   peek(): T | undefined {
-    return this.items[0]?.item;
+    return this.heap[0]?.item;
   }
 
+  /**
+   * Number of items in the queue. O(1)
+   */
   size(): number {
-    return this.items.length;
+    return this.heap.length;
   }
 
+  /**
+   * Check if queue is empty. O(1)
+   */
   isEmpty(): boolean {
-    return this.items.length === 0;
+    return this.heap.length === 0;
   }
 
+  /**
+   * Remove all items. O(1)
+   */
   clear(): void {
-    this.items = [];
+    this.heap = [];
+  }
+
+  /**
+   * Bubble up element at index to maintain max-heap property.
+   * Higher priority floats to top.
+   */
+  private bubbleUp(index: number): void {
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      // Max-heap: parent should have HIGHER priority than child
+      if (this.heap[parentIndex].priority >= this.heap[index].priority) break;
+      this.swap(index, parentIndex);
+      index = parentIndex;
+    }
+  }
+
+  /**
+   * Bubble down element at index to maintain max-heap property.
+   */
+  private bubbleDown(index: number): void {
+    const length = this.heap.length;
+    while (true) {
+      const leftChild = 2 * index + 1;
+      const rightChild = 2 * index + 2;
+      let largest = index;
+
+      // Max-heap: find child with HIGHER priority
+      if (leftChild < length && this.heap[leftChild].priority > this.heap[largest].priority) {
+        largest = leftChild;
+      }
+      if (rightChild < length && this.heap[rightChild].priority > this.heap[largest].priority) {
+        largest = rightChild;
+      }
+      if (largest === index) break;
+
+      this.swap(index, largest);
+      index = largest;
+    }
+  }
+
+  /**
+   * Swap two elements in the heap array.
+   */
+  private swap(i: number, j: number): void {
+    const temp = this.heap[i];
+    this.heap[i] = this.heap[j];
+    this.heap[j] = temp;
   }
 }
 
@@ -72,6 +211,24 @@ export class EventProcessingWorkerPool extends EventEmitter {
   private poolSize: number;
   private maxQueueSize: number;
   private taskTimeout: number;
+
+  // JSON parsing statistics (Phase 2)
+  private jsonParsingStats: JsonParsingStats = {
+    totalSingleParses: 0,
+    totalBatchParses: 0,
+    totalStringsParsed: 0,
+    totalErrors: 0,
+    avgParseTimeUs: 0,
+    p99ParseTimeUs: 0,
+    avgOverheadMs: 0,
+    totalBytesParsed: 0
+  };
+  // Rolling window for P99 calculation (last 100 parse times)
+  private parseTimeWindow: number[] = [];
+  private overheadWindow: number[] = [];
+  private readonly STATS_WINDOW_SIZE = 100;
+  // Task ID counter for JSON parsing (atomic increment)
+  private jsonTaskIdCounter = 0;
 
   constructor(
     poolSize = 4,
@@ -490,6 +647,248 @@ export class EventProcessingWorkerPool extends EventEmitter {
       averageProcessingTime
     };
   }
+
+  // ===========================================================================
+  // JSON Parsing Methods (Phase 2: Worker Thread JSON Parsing)
+  // ===========================================================================
+
+  /**
+   * Parse a JSON string in a worker thread.
+   * Offloads JSON.parse from the main event loop for high-throughput scenarios.
+   *
+   * Trade-offs:
+   * - Adds ~0.5-2ms overhead for message passing
+   * - Best for large JSON payloads (>1KB) or high-frequency streams
+   * - For small messages, consider using parseJsonSync() instead
+   *
+   * @param jsonString - The JSON string to parse
+   * @param priority - Task priority (higher = processed sooner, default: 5)
+   * @returns Promise resolving to the parsed JSON value
+   * @throws Error if parsing fails or worker pool is not running
+   *
+   * @example
+   * ```typescript
+   * const workerPool = getWorkerPool();
+   * await workerPool.start();
+   *
+   * const data = await workerPool.parseJson('{"key": "value"}');
+   * console.log(data); // { key: 'value' }
+   * ```
+   */
+  async parseJson<T = unknown>(jsonString: string, priority = 5): Promise<T> {
+    const startTime = Date.now();
+    const taskId = `json_${++this.jsonTaskIdCounter}_${Date.now()}`;
+
+    const result = await this.submitTask({
+      id: taskId,
+      type: 'json_parsing',
+      data: { jsonString },
+      priority
+    });
+
+    // Validate task succeeded and result has expected shape
+    if (!result.success) {
+      throw new Error(`JSON parsing task failed: ${result.error ?? 'Unknown error'}`);
+    }
+
+    const jsonResult = result.result as JsonParseResult | undefined;
+    if (!jsonResult || typeof jsonResult.parsed === 'undefined') {
+      throw new Error('JSON parsing returned invalid result structure');
+    }
+
+    // Update statistics
+    const overheadMs = Date.now() - startTime;
+    this.updateJsonParsingStats(jsonResult, overheadMs);
+
+    return jsonResult.parsed as T;
+  }
+
+  /**
+   * Parse multiple JSON strings in a single worker task.
+   * Amortizes message-passing overhead across multiple parses.
+   *
+   * Use this when you have multiple messages to parse at once (e.g., WebSocket batch).
+   *
+   * @param jsonStrings - Array of JSON strings to parse
+   * @param priority - Task priority (default: 5)
+   * @returns Promise resolving to array of parsed values (or errors)
+   *
+   * @example
+   * ```typescript
+   * const results = await workerPool.parseJsonBatch([
+   *   '{"a": 1}',
+   *   '{"b": 2}',
+   *   'invalid json'
+   * ]);
+   * // [{ parsed: {a:1}, ... }, { parsed: {b:2}, ... }, { error: 'Unexpected token' }]
+   * ```
+   */
+  async parseJsonBatch(
+    jsonStrings: string[],
+    priority = 5
+  ): Promise<Array<{ parsed: unknown } | { error: string }>> {
+    if (jsonStrings.length === 0) {
+      return [];
+    }
+
+    const startTime = Date.now();
+    const taskId = `batch_json_${++this.jsonTaskIdCounter}_${Date.now()}`;
+
+    const result = await this.submitTask({
+      id: taskId,
+      type: 'batch_json_parsing',
+      data: { jsonStrings },
+      priority
+    });
+
+    // Validate task succeeded and result has expected shape
+    if (!result.success) {
+      throw new Error(`Batch JSON parsing task failed: ${result.error ?? 'Unknown error'}`);
+    }
+
+    const batchResult = result.result as BatchJsonParseResult | undefined;
+    if (!batchResult || !Array.isArray(batchResult.results)) {
+      throw new Error('Batch JSON parsing returned invalid result structure');
+    }
+
+    // Update statistics
+    const overheadMs = Date.now() - startTime;
+    this.updateBatchJsonParsingStats(batchResult, overheadMs);
+
+    // Map to simplified return format
+    return batchResult.results.map(r => {
+      if ('error' in r) {
+        return { error: r.error };
+      }
+      return { parsed: r.parsed };
+    });
+  }
+
+  /**
+   * Get JSON parsing statistics for monitoring.
+   *
+   * PERF-3 FIX: P99 is now calculated lazily (on-demand) instead of on every parse.
+   * This avoids O(n log n) sort on every parse operation in the hot path.
+   *
+   * @returns Current JSON parsing statistics snapshot
+   */
+  getJsonParsingStats(): JsonParsingStats {
+    // PERF-3 FIX: Calculate P99 lazily only when stats are requested
+    // This moves the expensive sort from hot-path to monitoring code path
+    const stats = { ...this.jsonParsingStats };
+
+    if (this.parseTimeWindow.length > 0) {
+      // Calculate P99 on-demand (not on every parse)
+      const sorted = [...this.parseTimeWindow].sort((a, b) => a - b);
+      const p99Index = Math.floor(sorted.length * 0.99);
+      stats.p99ParseTimeUs = sorted[p99Index] ?? sorted[sorted.length - 1];
+    }
+
+    return stats;
+  }
+
+  /**
+   * Reset JSON parsing statistics.
+   * Useful for testing or after configuration changes.
+   */
+  resetJsonParsingStats(): void {
+    this.jsonParsingStats = {
+      totalSingleParses: 0,
+      totalBatchParses: 0,
+      totalStringsParsed: 0,
+      totalErrors: 0,
+      avgParseTimeUs: 0,
+      p99ParseTimeUs: 0,
+      avgOverheadMs: 0,
+      totalBytesParsed: 0
+    };
+    this.parseTimeWindow = [];
+    this.overheadWindow = [];
+  }
+
+  /**
+   * Update statistics after a single JSON parse.
+   */
+  private updateJsonParsingStats(result: JsonParseResult, overheadMs: number): void {
+    this.jsonParsingStats.totalSingleParses++;
+    this.jsonParsingStats.totalStringsParsed++;
+    this.jsonParsingStats.totalBytesParsed += result.byteLength;
+
+    // Update rolling windows
+    this.parseTimeWindow.push(result.parseTimeUs);
+    this.overheadWindow.push(overheadMs);
+
+    // Trim windows to max size
+    if (this.parseTimeWindow.length > this.STATS_WINDOW_SIZE) {
+      this.parseTimeWindow.shift();
+    }
+    if (this.overheadWindow.length > this.STATS_WINDOW_SIZE) {
+      this.overheadWindow.shift();
+    }
+
+    // Recalculate averages and P99
+    this.recalculateJsonStats();
+  }
+
+  /**
+   * Update statistics after a batch JSON parse.
+   */
+  private updateBatchJsonParsingStats(result: BatchJsonParseResult, overheadMs: number): void {
+    this.jsonParsingStats.totalBatchParses++;
+    this.jsonParsingStats.totalStringsParsed += result.successCount + result.errorCount;
+    this.jsonParsingStats.totalErrors += result.errorCount;
+
+    // Calculate average parse time per string in the batch
+    const avgParseTimePerString = result.successCount > 0
+      ? result.totalParseTimeUs / result.successCount
+      : 0;
+
+    // Update rolling windows with batch averages
+    if (result.successCount > 0) {
+      this.parseTimeWindow.push(avgParseTimePerString);
+    }
+    this.overheadWindow.push(overheadMs);
+
+    // Sum up bytes from successful parses
+    for (const r of result.results) {
+      if ('byteLength' in r) {
+        this.jsonParsingStats.totalBytesParsed += r.byteLength;
+      }
+    }
+
+    // Trim windows
+    if (this.parseTimeWindow.length > this.STATS_WINDOW_SIZE) {
+      this.parseTimeWindow.shift();
+    }
+    if (this.overheadWindow.length > this.STATS_WINDOW_SIZE) {
+      this.overheadWindow.shift();
+    }
+
+    this.recalculateJsonStats();
+  }
+
+  /**
+   * Recalculate average statistics from rolling windows.
+   *
+   * PERF-3 FIX: P99 calculation removed from this hot-path method.
+   * P99 is now calculated lazily in getJsonParsingStats().
+   *
+   * Previous: O(n log n) sort on every parse
+   * New: O(n) reduce on every parse, O(n log n) sort only on stats request
+   */
+  private recalculateJsonStats(): void {
+    // Calculate averages only (O(n) - acceptable for rolling window)
+    if (this.parseTimeWindow.length > 0) {
+      this.jsonParsingStats.avgParseTimeUs =
+        this.parseTimeWindow.reduce((a, b) => a + b, 0) / this.parseTimeWindow.length;
+      // PERF-3 FIX: P99 calculation moved to getJsonParsingStats() (lazy)
+    }
+
+    if (this.overheadWindow.length > 0) {
+      this.jsonParsingStats.avgOverheadMs =
+        this.overheadWindow.reduce((a, b) => a + b, 0) / this.overheadWindow.length;
+    }
+  }
 }
 
 // =============================================================================
@@ -502,9 +901,41 @@ export class EventProcessingWorkerPool extends EventEmitter {
 // Singleton instance
 let workerPool: EventProcessingWorkerPool | null = null;
 
-export function getWorkerPool(): EventProcessingWorkerPool {
+/**
+ * Get the singleton worker pool instance.
+ * Creates a new instance if one doesn't exist.
+ *
+ * @param poolSize - Optional pool size (only used when creating new instance)
+ * @param maxQueueSize - Optional max queue size (only used when creating new instance)
+ * @param taskTimeout - Optional task timeout in ms (only used when creating new instance)
+ * @returns The singleton EventProcessingWorkerPool instance
+ */
+export function getWorkerPool(
+  poolSize?: number,
+  maxQueueSize?: number,
+  taskTimeout?: number
+): EventProcessingWorkerPool {
   if (!workerPool) {
-    workerPool = new EventProcessingWorkerPool();
+    workerPool = new EventProcessingWorkerPool(poolSize, maxQueueSize, taskTimeout);
   }
   return workerPool;
+}
+
+/**
+ * BUG-1 FIX: Reset the singleton worker pool instance.
+ *
+ * Stops the current pool (if running) and clears the singleton reference.
+ * Used for testing and when pool needs to be reconfigured.
+ *
+ * Pattern matches other singletons in this codebase:
+ * - resetReserveCache() in reserve-cache.ts
+ * - resetGasPriceCache() in gas-price-cache.ts
+ *
+ * @returns Promise that resolves when the pool is fully stopped
+ */
+export async function resetWorkerPool(): Promise<void> {
+  if (workerPool) {
+    await workerPool.stop();
+    workerPool = null;
+  }
 }

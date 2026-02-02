@@ -52,11 +52,16 @@ export type {
 export {
   EventProcessingWorkerPool,
   getWorkerPool,
+  resetWorkerPool,  // BUG-1 FIX: Added singleton reset function
   PriorityQueue
 } from './worker-pool';
 export type {
   Task,
-  TaskResult
+  TaskResult,
+  // Phase 2: JSON Parsing Types
+  JsonParseResult,
+  BatchJsonParseResult,
+  JsonParsingStats
 } from './worker-pool';
 
 // FIX 9.1: Queue Lock (shared pattern)
