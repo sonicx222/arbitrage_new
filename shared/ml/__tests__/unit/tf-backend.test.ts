@@ -2,28 +2,41 @@
  * TensorFlow Backend Tests
  *
  * FIX 8.1: Add missing test coverage for tf-backend.ts
+ * FIX P0-2: Fixed mock hoisting issue - mocks must be defined inside factory
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
-// Mock @tensorflow/tfjs
+// P0-2 FIX: Define mock inside factory to avoid hoisting issues
+// Jest.mock is hoisted, so external references aren't available
+const mockSetBackend = jest.fn<() => Promise<boolean>>();
+const mockReady = jest.fn<() => Promise<void>>();
+const mockGetBackend = jest.fn<() => string>();
+const mockMemory = jest.fn<() => { numTensors: number; numDataBuffers: number; numBytes: number }>();
+const mockDisposeVariables = jest.fn();
+const mockTidy = jest.fn<(fn: () => unknown) => unknown>();
+const mockEngine = jest.fn<() => { state: { registeredVariables: Record<string, unknown> } }>();
+
+// Store mock reference for test access
 const mockTf = {
-  setBackend: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-  ready: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  getBackend: jest.fn<() => string>().mockReturnValue('cpu'),
-  memory: jest.fn(() => ({
-    numTensors: 0,
-    numDataBuffers: 0,
-    numBytes: 0
-  })),
-  disposeVariables: jest.fn(),
-  tidy: jest.fn((fn: () => unknown) => fn()),
-  engine: jest.fn(() => ({
-    state: { registeredVariables: {} }
-  }))
+  setBackend: mockSetBackend,
+  ready: mockReady,
+  getBackend: mockGetBackend,
+  memory: mockMemory,
+  disposeVariables: mockDisposeVariables,
+  tidy: mockTidy,
+  engine: mockEngine
 };
 
-jest.mock('@tensorflow/tfjs', () => mockTf);
+jest.mock('@tensorflow/tfjs', () => ({
+  setBackend: mockSetBackend,
+  ready: mockReady,
+  getBackend: mockGetBackend,
+  memory: mockMemory,
+  disposeVariables: mockDisposeVariables,
+  tidy: mockTidy,
+  engine: mockEngine
+}));
 
 // Mock @arbitrage/core logger
 jest.mock('@arbitrage/core', () => ({
@@ -54,6 +67,21 @@ describe('tf-backend', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetTensorFlowBackend();
+
+    // P0-2 FIX: Set up default mock implementations
+    mockSetBackend.mockResolvedValue(true);
+    mockReady.mockResolvedValue(undefined);
+    mockGetBackend.mockReturnValue('cpu');
+    mockMemory.mockReturnValue({
+      numTensors: 0,
+      numDataBuffers: 0,
+      numBytes: 0
+    });
+    mockTidy.mockImplementation((fn: () => unknown) => fn());
+    mockEngine.mockReturnValue({
+      state: { registeredVariables: {} }
+    });
+
     // Reset environment
     delete process.env.TF_FORCE_BACKEND;
     delete process.env.TF_ENABLE_NATIVE;

@@ -1291,6 +1291,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
           this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
         }
+        // P1-7 FIX: Always sync dropped opportunities (not just when processed)
+        this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
         this.resetStreamErrors();
         return;
       }
@@ -1744,17 +1746,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
    */
   private async forwardToExecutionEngine(opportunity: ArbitrageOpportunity): Promise<void> {
     if (!this.streamsClient) {
+      // P1-7 FIX: Track dropped opportunity
+      this.systemMetrics.opportunitiesDropped++;
       this.logger.warn('Cannot forward opportunity - streams client not initialized', {
-        id: opportunity.id
+        id: opportunity.id,
+        totalDropped: this.systemMetrics.opportunitiesDropped
       });
       return;
     }
 
     // FIX P2: Check circuit breaker before attempting to forward
     if (this.isExecutionCircuitOpen()) {
+      // P1-7 FIX: Track dropped opportunity due to circuit breaker
+      this.systemMetrics.opportunitiesDropped++;
       this.logger.debug('Execution circuit open, skipping opportunity forwarding', {
         id: opportunity.id,
-        failures: this.executionCircuitBreaker.getFailures()
+        failures: this.executionCircuitBreaker.getFailures(),
+        totalDropped: this.systemMetrics.opportunitiesDropped
       });
       return;
     }
@@ -1799,10 +1807,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // FIX P2: Record failure for circuit breaker
       this.recordExecutionFailure();
 
+      // P1-7 FIX: Track dropped opportunity on error
+      this.systemMetrics.opportunitiesDropped++;
+
       this.logger.error('Failed to forward opportunity to execution engine', {
         id: opportunity.id,
         error: (error as Error).message,
-        circuitFailures: this.executionCircuitBreaker.getFailures()
+        circuitFailures: this.executionCircuitBreaker.getFailures(),
+        totalDropped: this.systemMetrics.opportunitiesDropped
       });
 
       // Send alert for execution forwarding failures (only if circuit not already open)
@@ -1812,7 +1824,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           type: 'EXECUTION_FORWARD_FAILED',
           message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
           severity: 'high',
-          data: { opportunityId: opportunity.id, chain: opportunity.chain },
+          data: { opportunityId: opportunity.id, chain: opportunity.chain, totalDropped: this.systemMetrics.opportunitiesDropped },
           timestamp: Date.now()
         });
       }
@@ -1842,7 +1854,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       volumeAggregatesProcessed: 0,
       activePairsTracked: 0,
       // Price feed metrics (S3.3.5)
-      priceUpdatesReceived: 0
+      priceUpdatesReceived: 0,
+      // P1-7 FIX: Track dropped opportunities
+      opportunitiesDropped: 0
     };
   }
 

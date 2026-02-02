@@ -194,6 +194,67 @@ it('should detect arbitrage when price difference exceeds threshold', () => {
 });
 ```
 
+### Assertion Messages
+
+Add explanatory messages to non-obvious assertions:
+
+```typescript
+// ❌ BAD - No context
+expect(breaker.isOpen()).toBe(true);
+
+// ✅ GOOD - Clear reason
+expect(breaker.isOpen()).toBe(true,
+  'Circuit should block executions after threshold to prevent cascade');
+```
+
+**When to add messages**:
+- Business logic assertions
+- State transition assertions
+- Threshold/boundary checks
+- Security-critical assertions
+
+**When NOT to add messages** (already obvious):
+- `expect(result).toBeDefined()`
+- `expect(array).toHaveLength(3)`
+- `expect(response.status).toBe(200)`
+
+### Mock Factory Documentation
+
+Document mock factories to help developers understand what's mocked and how to use them:
+
+```typescript
+/**
+ * Creates a mock [component] for testing [feature].
+ *
+ * **Mock Configuration:**
+ * - [List what's mocked and default behaviors]
+ * - [Explain what's NOT mocked (if relevant)]
+ *
+ * **Purpose:**
+ * [Why this mock exists / what scenarios it supports]
+ *
+ * **Usage:**
+ * ```typescript
+ * const mock = createMock();
+ * expect(mock.method).toHaveBeenCalled();
+ * ```
+ *
+ * **Customization:**
+ * ```typescript
+ * mock.method.mockReturnValue(customValue);
+ * ```
+ */
+const createMockComponent = () => ({
+  method: jest.fn(),
+  // ...
+});
+```
+
+**Benefits**:
+- Future developers know what each mock provides
+- Usage examples show common patterns
+- Customization section explains flexibility
+
 ### Test Isolation
 
 - Each test should be independent

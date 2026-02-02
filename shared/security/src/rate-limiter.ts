@@ -130,14 +130,14 @@ export class RateLimiter {
       return info;
     } catch (error) {
       logger.error('Rate limiter error', { error, identifier });
-      // FIX B10.6: Fail CLOSED on Redis error - block requests when rate limiting is unavailable
-      // For DeFi/trading systems, allowing unlimited requests during outage is a security risk
-      // that could enable DoS attacks or resource exhaustion
+      // P1-4 FIX: Fail OPEN on Redis error - allow requests when rate limiting is unavailable
+      // Trade-off: Temporary abuse window vs complete service denial
+      // Circuit breaker pattern should be used for sustained Redis failures
       return {
-        remaining: 0,
+        remaining: config.maxRequests,
         resetTime: now + config.windowMs,
         total: config.maxRequests,
-        exceeded: true  // Block request when rate limiting unavailable
+        exceeded: false  // Allow request when rate limiting unavailable
       };
     }
   }
@@ -183,14 +183,10 @@ export class RateLimiter {
         req.rateLimit = limitInfo;
         next();
       } catch (error) {
-        logger.error('Rate limiter middleware error', { error });
-        // FIX B10.6: Fail CLOSED - reject request when rate limiting is unavailable
-        // Prevents abuse during Redis outages in DeFi/trading systems
-        return res.status(503).json({
-          error: 'Service temporarily unavailable',
-          message: 'Rate limiting service unavailable. Please try again later.',
-          retryAfter: 60
-        });
+        logger.error('Rate limiter error', { error });
+        // P1-4 FIX: Fail OPEN - allow request when rate limiting is unavailable
+        // Trade-off: Temporary abuse window vs complete service denial
+        next();
       }
     };
   }

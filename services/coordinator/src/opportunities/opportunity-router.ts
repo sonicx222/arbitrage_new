@@ -70,6 +70,13 @@ export interface OpportunityRouterConfig {
   minProfitPercentage?: number;
   /** Maximum profit percentage (default: 10000) */
   maxProfitPercentage?: number;
+  // P1-7 FIX: Retry and DLQ configuration
+  /** Maximum retry attempts for forwarding failures (default: 3) */
+  maxRetries?: number;
+  /** Base delay in ms for exponential backoff (default: 10) */
+  retryBaseDelayMs?: number;
+  /** Dead letter queue stream name (default: 'stream:forwarding-dlq') */
+  dlqStream?: string;
 }
 
 /**
@@ -83,6 +90,10 @@ const DEFAULT_CONFIG: Required<OpportunityRouterConfig> = {
   executionRequestsStream: 'stream:execution-requests',
   minProfitPercentage: -100,
   maxProfitPercentage: 10000,
+  // P1-7 FIX: Retry and DLQ defaults
+  maxRetries: 3,
+  retryBaseDelayMs: 10,
+  dlqStream: 'stream:forwarding-dlq',
 };
 
 /**
@@ -102,6 +113,8 @@ export class OpportunityRouter {
   // Metrics counters (exposed for coordinator to track)
   private _totalOpportunities = 0;
   private _totalExecutions = 0;
+  // P1-7 FIX: Track dropped opportunities for monitoring
+  private _opportunitiesDropped = 0;
 
   constructor(
     logger: OpportunityRouterLogger,
@@ -143,6 +156,13 @@ export class OpportunityRouter {
    */
   getTotalExecutions(): number {
     return this._totalExecutions;
+  }
+
+  /**
+   * P1-7 FIX: Get total opportunities dropped due to forwarding failures
+   */
+  getOpportunitiesDropped(): number {
+    return this._opportunitiesDropped;
   }
 
   /**
@@ -225,6 +245,9 @@ export class OpportunityRouter {
   /**
    * Forward an opportunity to the execution engine via Redis Streams.
    *
+   * P1-7 FIX: Now includes retry logic with exponential backoff and DLQ support.
+   * Retries up to maxRetries times before moving to dead letter queue.
+   *
    * Only the leader coordinator should call this method to prevent
    * duplicate execution attempts.
    */
@@ -242,80 +265,164 @@ export class OpportunityRouter {
         id: opportunity.id,
         failures: this.circuitBreaker.getFailures(),
       });
+      // P1-7 FIX: Track as dropped when circuit is open
+      this._opportunitiesDropped++;
+      return;
+    }
+
+    const messageData = {
+      id: opportunity.id,
+      type: opportunity.type || 'simple',
+      chain: opportunity.chain || 'unknown',
+      buyDex: opportunity.buyDex || '',
+      sellDex: opportunity.sellDex || '',
+      profitPercentage: opportunity.profitPercentage?.toString() || '0',
+      confidence: opportunity.confidence?.toString() || '0',
+      timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
+      expiresAt: opportunity.expiresAt?.toString() || '',
+      tokenIn: opportunity.tokenIn || '',
+      tokenOut: opportunity.tokenOut || '',
+      amountIn: opportunity.amountIn || '',
+      forwardedBy: this.config.instanceId,
+      forwardedAt: Date.now().toString(),
+    };
+
+    // P1-7 FIX: Retry loop with exponential backoff
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+      try {
+        await this.streamsClient.xadd(this.config.executionRequestsStream, messageData);
+
+        // Success - record and return
+        const justRecovered = this.circuitBreaker.recordSuccess();
+        if (justRecovered) {
+          this.logger.info('Execution circuit breaker closed - recovered');
+        }
+
+        this.logger.info('Forwarded opportunity to execution engine', {
+          id: opportunity.id,
+          chain: opportunity.chain,
+          profitPercentage: opportunity.profitPercentage,
+          attempt: attempt + 1,
+        });
+
+        this._totalExecutions++;
+        return; // Success, exit the method
+
+      } catch (error) {
+        lastError = error as Error;
+
+        // Record failure for circuit breaker
+        const justOpened = this.circuitBreaker.recordFailure();
+
+        if (justOpened) {
+          const status = this.circuitBreaker.getStatus();
+          this.logger.warn('Execution circuit breaker opened', {
+            failures: status.failures,
+            resetTimeoutMs: status.resetTimeoutMs,
+          });
+
+          this.onAlert?.({
+            type: 'EXECUTION_CIRCUIT_OPEN',
+            message: `Execution forwarding circuit breaker opened after ${status.failures} failures`,
+            severity: 'high',
+            data: { failures: status.failures },
+            timestamp: Date.now(),
+          });
+          // Don't retry if circuit breaker just opened
+          break;
+        }
+
+        // Don't retry if circuit breaker is already open
+        if (this.circuitBreaker.isCurrentlyOpen()) {
+          break;
+        }
+
+        // Log retry attempt
+        if (attempt < this.config.maxRetries - 1) {
+          const delay = this.config.retryBaseDelayMs * Math.pow(2, attempt);
+          this.logger.debug('Retrying opportunity forwarding', {
+            id: opportunity.id,
+            attempt: attempt + 1,
+            maxRetries: this.config.maxRetries,
+            nextDelayMs: delay,
+            error: lastError.message,
+          });
+          // Exponential backoff: 10ms, 20ms, 40ms...
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // P1-7 FIX: All retries exhausted - permanent failure
+    this._opportunitiesDropped++;
+    const status = this.circuitBreaker.getStatus();
+
+    this.logger.error('Failed to forward opportunity after all retries', {
+      id: opportunity.id,
+      error: lastError?.message,
+      attempts: this.config.maxRetries,
+      circuitFailures: status.failures,
+      totalDropped: this._opportunitiesDropped,
+    });
+
+    // Move to DLQ for later analysis/manual intervention
+    await this.moveToDeadLetterQueue(opportunity, lastError);
+
+    // Send alert for permanent forwarding failures (only if circuit not already open)
+    if (!status.isOpen) {
+      this.onAlert?.({
+        type: 'EXECUTION_FORWARD_FAILED',
+        message: `Failed to forward opportunity ${opportunity.id} after ${this.config.maxRetries} retries: ${lastError?.message}`,
+        severity: 'high',
+        data: {
+          opportunityId: opportunity.id,
+          chain: opportunity.chain,
+          attempts: this.config.maxRetries,
+          totalDropped: this._opportunitiesDropped,
+        },
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  /**
+   * P1-7 FIX: Move failed opportunity to dead letter queue for later analysis.
+   *
+   * DLQ entries include original opportunity data plus error context,
+   * allowing for debugging and potential manual replay if needed.
+   */
+  private async moveToDeadLetterQueue(
+    opportunity: ArbitrageOpportunity,
+    error: Error | null
+  ): Promise<void> {
+    if (!this.streamsClient) {
       return;
     }
 
     try {
-      // Publish to execution-requests stream
-      await this.streamsClient.xadd(this.config.executionRequestsStream, {
-        id: opportunity.id,
-        type: opportunity.type || 'simple',
-        chain: opportunity.chain || 'unknown',
-        buyDex: opportunity.buyDex || '',
-        sellDex: opportunity.sellDex || '',
-        profitPercentage: opportunity.profitPercentage?.toString() || '0',
-        confidence: opportunity.confidence?.toString() || '0',
-        timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
-        expiresAt: opportunity.expiresAt?.toString() || '',
-        // Include token info if available
-        tokenIn: opportunity.tokenIn || '',
-        tokenOut: opportunity.tokenOut || '',
-        amountIn: opportunity.amountIn || '',
-        // Source metadata
-        forwardedBy: this.config.instanceId,
-        forwardedAt: Date.now().toString(),
+      await this.streamsClient.xadd(this.config.dlqStream, {
+        opportunityId: opportunity.id,
+        originalData: JSON.stringify(opportunity),
+        error: error?.message || 'Unknown error',
+        errorStack: error?.stack?.substring(0, 500),
+        failedAt: Date.now().toString(),
+        service: 'opportunity-router',
+        instanceId: this.config.instanceId,
+        targetStream: this.config.executionRequestsStream,
       });
 
-      // Record success to close circuit breaker if it was half-open
-      const justRecovered = this.circuitBreaker.recordSuccess();
-      if (justRecovered) {
-        this.logger.info('Execution circuit breaker closed - recovered');
-      }
-
-      this.logger.info('Forwarded opportunity to execution engine', {
-        id: opportunity.id,
-        chain: opportunity.chain,
-        profitPercentage: opportunity.profitPercentage,
+      this.logger.debug('Opportunity moved to DLQ', {
+        opportunityId: opportunity.id,
+        dlqStream: this.config.dlqStream,
       });
-
-      this._totalExecutions++;
-
-    } catch (error) {
-      // Record failure for circuit breaker
-      const justOpened = this.circuitBreaker.recordFailure();
-      const status = this.circuitBreaker.getStatus();
-
-      if (justOpened) {
-        this.logger.warn('Execution circuit breaker opened', {
-          failures: status.failures,
-          resetTimeoutMs: status.resetTimeoutMs,
-        });
-
-        this.onAlert?.({
-          type: 'EXECUTION_CIRCUIT_OPEN',
-          message: `Execution forwarding circuit breaker opened after ${status.failures} failures`,
-          severity: 'high',
-          data: { failures: status.failures },
-          timestamp: Date.now(),
-        });
-      }
-
-      this.logger.error('Failed to forward opportunity to execution engine', {
-        id: opportunity.id,
-        error: (error as Error).message,
-        circuitFailures: status.failures,
+    } catch (dlqError) {
+      // If DLQ write fails, log but don't throw - the opportunity is already lost
+      this.logger.error('Failed to move opportunity to DLQ', {
+        opportunityId: opportunity.id,
+        dlqError: (dlqError as Error).message,
+        originalError: error?.message,
       });
-
-      // Send alert for execution forwarding failures (only if circuit not already open)
-      if (!status.isOpen) {
-        this.onAlert?.({
-          type: 'EXECUTION_FORWARD_FAILED',
-          message: `Failed to forward opportunity ${opportunity.id}: ${(error as Error).message}`,
-          severity: 'high',
-          data: { opportunityId: opportunity.id, chain: opportunity.chain },
-          timestamp: Date.now(),
-        });
-      }
     }
   }
 
@@ -389,5 +496,6 @@ export class OpportunityRouter {
     this.opportunities.clear();
     this._totalOpportunities = 0;
     this._totalExecutions = 0;
+    this._opportunitiesDropped = 0;
   }
 }

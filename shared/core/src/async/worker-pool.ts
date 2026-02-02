@@ -411,10 +411,15 @@ export class EventProcessingWorkerPool extends EventEmitter {
   private cleanupWorker(workerId: number): void {
     const worker = this.workers[workerId];
     if (worker) {
-      // Remove all event listeners to prevent memory leaks
-      worker.removeAllListeners('message');
-      worker.removeAllListeners('error');
-      worker.removeAllListeners('exit');
+      // P1-6 FIX: Wrap removeAllListeners in try/catch to handle worker errors gracefully
+      // Without this, a worker in inconsistent state could throw and leak listeners
+      try {
+        worker.removeAllListeners('message');
+        worker.removeAllListeners('error');
+        worker.removeAllListeners('exit');
+      } catch (error) {
+        logger.warn(`Failed to remove listeners from worker ${workerId}:`, error);
+      }
     }
 
     // Mark worker as dead

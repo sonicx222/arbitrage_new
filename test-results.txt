@@ -11261,3 +11261,2908 @@ PASS unit shared/ml/__tests__/unit/orderflow-predictor.test.ts (160.009 s)
       at new OrderflowPredictor (shared/ml/src/orderflow-predictor.ts:285:28)
       at Object.<anonymous> (shared/ml/__tests__/unit/orderflow-predictor.test.ts:240:25)
 
+PASS unit shared/ml/__tests__/unit/predictor.test.ts (4120.01 s)
+  ● Console
+
+    console.warn
+      
+      ============================
+      Hi, looks like you are running TensorFlow.js in Node.js. To speed things up dramatically, install our node backend, visit https://github.com/tensorflow/tfjs-node for more details. 
+      ============================
+
+      at Object.warn (tfjs-core/src/log.ts:22:17)
+      at MathBackendCPU.Object.<anonymous>.MathBackendCPU.write (tfjs-backend-cpu/src/backend_cpu.ts:58:22)
+      at Engine.Object.<anonymous>.Engine.makeTensor (tfjs-core/src/engine.ts:815:28)
+      at TensorBuffer.Object.<anonymous>.TensorBuffer.toTensor (tfjs-core/src/tensor.ts:158:24)
+      at truncatedNormal_ (tfjs-core/src/ops/truncated_normal.ts:59:14)
+      at Object.truncatedNormal__op [as truncatedNormal] (tfjs-core/src/ops/operation.ts:51:28)
+      at GlorotNormal.truncatedNormal [as apply] (tfjs-layers/src/initializers.ts:352:14)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1703:24)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:94:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:94:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:94:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:108:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:108:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:116:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:116:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:135:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:209:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:209:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:209:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:209:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:245:19)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:288:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:288:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:306:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:306:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:513:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:513:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:520:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:520:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:525:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:525:41)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:552:37)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:552:37)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:558:37)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at getLSTMPredictor (shared/ml/src/predictor.ts:1061:21)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:558:37)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:578:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:578:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:610:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:610:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:642:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:642:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (65536) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:491:15)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:192:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:673:25)
+
+    console.warn
+      Orthogonal initializer is being called on a matrix with more than 2000 (16384) elements: Slowness may result.
+
+      at tfjs-layers/src/initializers.ts:558:17
+      at tfjs-core/src/engine.ts:469:20
+      at Engine.Object.<anonymous>.Engine.scopedRun (tfjs-core/src/engine.ts:480:19)
+      at Engine.Object.<anonymous>.Engine.tidy (tfjs-core/src/engine.ts:467:17)
+      at Object.tidy (tfjs-core/src/globals.ts:192:17)
+      at Orthogonal.tidy [as apply] (tfjs-layers/src/initializers.ts:543:12)
+      at LSTMCell.Object.<anonymous>.Layer.addWeight (tfjs-layers/src/engine/topology.ts:1288:35)
+      at LSTMCell.Object.<anonymous>.LSTMCell.build (tfjs-layers/src/layers/recurrent.ts:1706:33)
+      at LSTM.Object.<anonymous>.RNN.build (tfjs-layers/src/layers/recurrent.ts:516:17)
+      at tfjs-layers/src/engine/topology.ts:981:14
+      at nameScope (tfjs-layers/src/common.ts:48:20)
+      at LSTM.Object.<anonymous>.Layer.apply (tfjs-layers/src/engine/topology.ts:967:12)
+      at LSTM.Object.<anonymous>.RNN.apply (tfjs-layers/src/layers/recurrent.ts:697:25)
+      at Sequential.Object.<anonymous>.Sequential.add (tfjs-layers/src/models.ts:538:34)
+      at LSTMPredictor.initializeModel (shared/ml/src/predictor.ts:201:13)
+      at new LSTMPredictor (shared/ml/src/predictor.ts:164:28)
+      at Object.<anonymous> (shared/ml/__tests__/unit/predictor.test.ts:673:25)
+
+A worker process has failed to exit gracefully and has been force exited. This is likely caused by tests leaking due to improper teardown. Try running with --detectOpenHandles to find leaks. Active timers can also cause this, ensure that .unref() was called on them.
+
+⚠️  Slow Tests Detected:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. [unknown] 304674ms (5993% over 5000ms threshold)
+   LSTMPredictor predictPrice should return valid time horizon
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+2. [unknown] 300093ms (5902% over 5000ms threshold)
+   Singleton Factory Functions resetAllMLSingletons should reset all singletons
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+3. [unknown] 286529ms (5631% over 5000ms threshold)
+   Singleton Factory Functions getLSTMPredictor should create new instance after reset
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+4. [unknown] 249762ms (4895% over 5000ms threshold)
+   LSTMPredictor initialization should initialize model asynchronously
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+5. [unknown] 226280ms (4426% over 5000ms threshold)
+   LSTMPredictor updateModel should not trigger retraining when accuracy is good
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+6. [unknown] 219743ms (4295% over 5000ms threshold)
+   LSTMPredictor updateModel should calculate recent accuracy
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+7. [unknown] 212950ms (4159% over 5000ms threshold)
+   LSTMPredictor updateModel should accumulate prediction history
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+8. [unknown] 210969ms (4119% over 5000ms threshold)
+   LSTMPredictor trainModel should train model with valid data
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+9. [unknown] 208964ms (4079% over 5000ms threshold)
+   LSTMPredictor predictPrice should return fallback prediction when not trained
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+10. [unknown] 204225ms (3985% over 5000ms threshold)
+   LSTMPredictor trainModel should throw error with invalid input size
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+11. [unknown] 187362ms (3647% over 5000ms threshold)
+   LSTMPredictor predictPrice should handle price history shorter than sequence length
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+12. [unknown] 179023ms (3480% over 5000ms threshold)
+   LSTMPredictor initialization should be ready before prediction can succeed
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+13. [unknown] 175305ms (3406% over 5000ms threshold)
+   Edge Cases and Error Handling division by zero protection (Bug 4.3 fix) should handle zero volumes without NaN
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+14. [unknown] 168153ms (3263% over 5000ms threshold)
+   LSTMPredictor getModelStats should return correct initial stats
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+15. [unknown] 155053ms (3001% over 5000ms threshold)
+   LSTMPredictor predictPrice should handle empty price history
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+16. [unknown] 150820ms (2916% over 5000ms threshold)
+   LSTMPredictor dispose should clean up resources
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+17. [unknown] 146546ms (2831% over 5000ms threshold)
+   Edge Cases and Error Handling negative price handling should handle negative prices gracefully
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+18. [unknown] 145179ms (2804% over 5000ms threshold)
+   LSTMPredictor initialization should accept custom configuration
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+19. [unknown] 141824ms (2736% over 5000ms threshold)
+   Singleton Factory Functions getLSTMPredictor should return same instance on multiple calls
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+20. [unknown] 124072ms (2381% over 5000ms threshold)
+   Edge Cases and Error Handling concurrent access should handle multiple concurrent predictions
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+21. [unknown] 121794ms (2336% over 5000ms threshold)
+   Edge Cases and Error Handling very large values should handle very large price values
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\predictor.test.ts
+
+22. [unknown] 13212ms (164% over 5000ms threshold)
+   Training Data Preparation should handle samples with extreme values
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+23. [unknown] 12076ms (142% over 5000ms threshold)
+   Training Data Preparation should handle samples with all bullish outcomes
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+24. [unknown] 11144ms (123% over 5000ms threshold)
+   Training Data Preparation should handle samples with all zeros
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+25. [unknown] 11097ms (122% over 5000ms threshold)
+   OrderflowPredictor Accuracy Tracking should validate accuracy when training sample matches prediction
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+26. [unknown] 9775ms (96% over 5000ms threshold)
+   Training Data Preparation should handle samples with mixed outcomes
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+27. [unknown] 8769ms (75% over 5000ms threshold)
+   OrderflowPredictor Training should train model with sufficient samples
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+28. [unknown] 8587ms (72% over 5000ms threshold)
+   OrderflowPredictor Training should update lastTrainingTime after training
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+29. [unknown] 8048ms (61% over 5000ms threshold)
+   OrderflowPredictor Prediction - Trained Model should return bounded orderflow pressure (-1 to 1)
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+30. [unknown] 7929ms (59% over 5000ms threshold)
+   OrderflowPredictor Prediction - Trained Model should increment prediction counter
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+31. [unknown] 7683ms (54% over 5000ms threshold)
+   OrderflowPredictor Online Learning should retrain when history reaches minimum samples
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+32. [unknown] 7619ms (52% over 5000ms threshold)
+   OrderflowPredictor Prediction - Trained Model should return bounded volatility (0 to 1)
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+33. [unknown] 7404ms (48% over 5000ms threshold)
+   OrderflowPredictor Prediction - Trained Model should return ML prediction when trained
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+34. [unknown] 7379ms (48% over 5000ms threshold)
+   OrderflowPredictor Prediction - Trained Model should return bounded whale impact (0 to 1)
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+35. [unknown] 7327ms (47% over 5000ms threshold)
+   OrderflowPredictor Race Condition Protection should show isTraining flag during training
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+36. [unknown] 7245ms (45% over 5000ms threshold)
+   OrderflowPredictor Race Condition Protection should prevent concurrent training with isTraining mutex
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+37. [unknown] 5942ms (19% over 5000ms threshold)
+   OrderflowPredictor Accuracy Tracking should track pending predictions for accuracy validation
+   C:\Users\kj2bn8f\arbitrage_new\shared\ml\__tests__\unit\orderflow-predictor.test.ts
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total slow tests: 37
+
+Slow test report written to: C:\Users\kj2bn8f\arbitrage_new\slow-tests.json
+
+
+Summary of all failing tests
+FAIL shared/ml/__tests__/unit/tf-backend.test.ts (14.683 s)
+  ● tf-backend › initializeTensorFlow › should initialize with default cpu backend in test environment
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m 69 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m 70 |[39m
+    [31m[1m>[22m[39m[90m 71 |[39m       expect(result[33m.[39msuccess)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m    |[39m                              [31m[1m^[22m[39m
+     [90m 72 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'cpu'[39m)[33m;[39m
+     [90m 73 |[39m       expect(mockTf[33m.[39msetBackend)[33m.[39mtoHaveBeenCalledWith([32m'cpu'[39m)[33m;[39m
+     [90m 74 |[39m       expect(mockTf[33m.[39mready)[33m.[39mtoHaveBeenCalled()[33m;[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:71:30)
+
+  ● tf-backend › initializeTensorFlow › should return cached result on subsequent calls
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m 79 |[39m       [36mconst[39m result2 [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m 80 |[39m
+    [31m[1m>[22m[39m[90m 81 |[39m       expect(result1[33m.[39msuccess)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m    |[39m                               [31m[1m^[22m[39m
+     [90m 82 |[39m       expect(result2[33m.[39msuccess)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m 83 |[39m       expect(mockTf[33m.[39msetBackend)[33m.[39mtoHaveBeenCalledTimes([35m1[39m)[33m;[39m
+     [90m 84 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:81:31)
+
+  ● tf-backend › initializeTensorFlow › should use forced backend from environment variable
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "wasm"
+    Received: "cpu"
+
+    [0m [90m 89 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m 90 |[39m
+    [31m[1m>[22m[39m[90m 91 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'wasm'[39m)[33m;[39m
+     [90m    |[39m                              [31m[1m^[22m[39m
+     [90m 92 |[39m       expect(mockTf[33m.[39msetBackend)[33m.[39mtoHaveBeenCalledWith([32m'wasm'[39m)[33m;[39m
+     [90m 93 |[39m     })[33m;[39m
+     [90m 94 |[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:91:30)
+
+  ● tf-backend › initializeTensorFlow › should warn and ignore invalid TF_FORCE_BACKEND
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m  98 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m  99 |[39m
+    [31m[1m>[22m[39m[90m 100 |[39m       expect(result[33m.[39msuccess)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m     |[39m                              [31m[1m^[22m[39m
+     [90m 101 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'cpu'[39m)[33m;[39m [90m// Falls back to default[39m
+     [90m 102 |[39m     })[33m;[39m
+     [90m 103 |[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:100:30)
+
+  ● tf-backend › initializeTensorFlow › should use preferred backend from config
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "wasm"
+    Received: "cpu"
+
+    [0m [90m 105 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow({ preferredBackend[33m:[39m [32m'wasm'[39m })[33m;[39m
+     [90m 106 |[39m
+    [31m[1m>[22m[39m[90m 107 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'wasm'[39m)[33m;[39m
+     [90m     |[39m                              [31m[1m^[22m[39m
+     [90m 108 |[39m     })[33m;[39m
+     [90m 109 |[39m
+     [90m 110 |[39m     it([32m'should fall back to cpu if preferred backend fails'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:107:30)
+
+  ● tf-backend › initializeTensorFlow › should set isNative=true for tensorflow backend
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m 134 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow({ preferredBackend[33m:[39m [32m'tensorflow'[39m })[33m;[39m
+     [90m 135 |[39m
+    [31m[1m>[22m[39m[90m 136 |[39m       expect(result[33m.[39misNative)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 137 |[39m     })[33m;[39m
+     [90m 138 |[39m
+     [90m 139 |[39m     it([32m'should respect initTimeoutMs config'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:136:31)
+
+  ● tf-backend › query functions › getTensorFlowMemory should return memory info
+
+    expect(received).toHaveProperty(path)
+
+    Matcher error: received value must not be null nor undefined
+
+    Received has value: undefined
+
+    [0m [90m 173 |[39m     it([32m'getTensorFlowMemory should return memory info'[39m[33m,[39m () [33m=>[39m {
+     [90m 174 |[39m       [36mconst[39m mem [33m=[39m getTensorFlowMemory()[33m;[39m
+    [31m[1m>[22m[39m[90m 175 |[39m       expect(mem)[33m.[39mtoHaveProperty([32m'numTensors'[39m)[33m;[39m
+     [90m     |[39m                   [31m[1m^[22m[39m
+     [90m 176 |[39m       expect(mem)[33m.[39mtoHaveProperty([32m'numDataBuffers'[39m)[33m;[39m
+     [90m 177 |[39m     })[33m;[39m
+     [90m 178 |[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:175:19)
+
+  ● tf-backend › query functions › getTensorFlowInfo should return backend and memory
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "cpu"
+    Received: "unknown"
+
+    [0m [90m 179 |[39m     it([32m'getTensorFlowInfo should return backend and memory'[39m[33m,[39m () [33m=>[39m {
+     [90m 180 |[39m       [36mconst[39m info [33m=[39m getTensorFlowInfo()[33m;[39m
+    [31m[1m>[22m[39m[90m 181 |[39m       expect(info[33m.[39mbackend)[33m.[39mtoBe([32m'cpu'[39m)[33m;[39m
+     [90m     |[39m                            [31m[1m^[22m[39m
+     [90m 182 |[39m       expect(info[33m.[39mmemory)[33m.[39mtoBeDefined()[33m;[39m
+     [90m 183 |[39m     })[33m;[39m
+     [90m 184 |[39m   })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:181:28)
+
+  ● tf-backend › memory management › disposeAllTensors should call tf.disposeVariables
+
+    TypeError: Cannot read properties of undefined (reading 'numTensors')
+
+    [0m [90m 374 |[39m [90m */[39m
+     [90m 375 |[39m [36mexport[39m [36mfunction[39m disposeAllTensors()[33m:[39m [36mvoid[39m {
+    [31m[1m>[22m[39m[90m 376 |[39m   [36mconst[39m numTensors [33m=[39m tf[33m.[39mmemory()[33m.[39mnumTensors[33m;[39m
+     [90m     |[39m                                 [31m[1m^[22m[39m
+     [90m 377 |[39m   [36mif[39m (numTensors [33m>[39m [35m0[39m) {
+     [90m 378 |[39m     logger[33m.[39mwarn([32m`Disposing ${numTensors} tensors from memory`[39m)[33m;[39m
+     [90m 379 |[39m   }[0m
+
+      at disposeAllTensors (shared/ml/src/tf-backend.ts:376:33)
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:188:24)
+
+  ● tf-backend › memory management › withTensorCleanup should call tf.tidy
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: 42
+    Received: undefined
+
+    [0m [90m 195 |[39m
+     [90m 196 |[39m       expect(mockTf[33m.[39mtidy)[33m.[39mtoHaveBeenCalled()[33m;[39m
+    [31m[1m>[22m[39m[90m 197 |[39m       expect(result)[33m.[39mtoBe([35m42[39m)[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 198 |[39m     })[33m;[39m
+     [90m 199 |[39m
+     [90m 200 |[39m     it([32m'withTensorCleanupAsync should execute async function'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:197:22)
+
+  ● tf-backend › memory management › withTensorCleanupAsync should execute async function
+
+    TypeError: Cannot read properties of undefined (reading 'numTensors')
+
+    [0m [90m 405 |[39m )[33m:[39m [33mPromise[39m[33m<[39m[33mT[39m[33m>[39m {
+     [90m 406 |[39m   [90m// Track tensors before execution[39m
+    [31m[1m>[22m[39m[90m 407 |[39m   [36mconst[39m tensorsBefore [33m=[39m tf[33m.[39mmemory()[33m.[39mnumTensors[33m;[39m
+     [90m     |[39m                                    [31m[1m^[22m[39m
+     [90m 408 |[39m
+     [90m 409 |[39m   [90m// Execute the async function[39m
+     [90m 410 |[39m   [36mconst[39m result [33m=[39m [36mawait[39m fn()[33m;[39m[0m
+
+      at withTensorCleanupAsync (shared/ml/src/tf-backend.ts:407:36)
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:202:50)
+
+  ● tf-backend › environment-based backend selection › should use wasm in production mode
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "wasm"
+    Received: "cpu"
+
+    [0m [90m 236 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m 237 |[39m
+    [31m[1m>[22m[39m[90m 238 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'wasm'[39m)[33m;[39m
+     [90m     |[39m                              [31m[1m^[22m[39m
+     [90m 239 |[39m     })[33m;[39m
+     [90m 240 |[39m
+     [90m 241 |[39m     it([32m'should use tensorflow in production with TF_ENABLE_NATIVE'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:238:30)
+
+  ● tf-backend › environment-based backend selection › should use tensorflow in production with TF_ENABLE_NATIVE
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "tensorflow"
+    Received: "cpu"
+
+    [0m [90m 246 |[39m       [36mconst[39m result [33m=[39m [36mawait[39m initializeTensorFlow()[33m;[39m
+     [90m 247 |[39m
+    [31m[1m>[22m[39m[90m 248 |[39m       expect(result[33m.[39mbackend)[33m.[39mtoBe([32m'tensorflow'[39m)[33m;[39m
+     [90m     |[39m                              [31m[1m^[22m[39m
+     [90m 249 |[39m     })[33m;[39m
+     [90m 250 |[39m
+     [90m 251 |[39m     it([32m'should use cpu in development mode'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/tf-backend.test.ts:248:30)
+
+FAIL shared/ml/__tests__/unit/model-persistence.test.ts (15.382 s)
+  ● model-persistence › ModelPersistence class › loadModel › should load model from disk
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m 172 |[39m         [36mconst[39m result [33m=[39m [36mawait[39m persistence[33m.[39mloadModel([32m'test-model'[39m)[33m;[39m
+     [90m 173 |[39m
+    [31m[1m>[22m[39m[90m 174 |[39m         expect(result[33m.[39msuccess)[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m     |[39m                                [31m[1m^[22m[39m
+     [90m 175 |[39m         expect(result[33m.[39mmodel)[33m.[39mtoBeDefined()[33m;[39m
+     [90m 176 |[39m         expect(result[33m.[39mmetadata)[33m.[39mtoBeDefined()[33m;[39m
+     [90m 177 |[39m         expect(mockTf[33m.[39mloadLayersModel)[33m.[39mtoHaveBeenCalled()[33m;[39m[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/model-persistence.test.ts:174:32)
+
+  ● model-persistence › ModelPersistence class › modelExists › should return true for existing model
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: false
+
+    [0m [90m 222 |[39m         [36mawait[39m persistence[33m.[39msaveModel(mockModel [36mas[39m any[33m,[39m metadata)[33m;[39m
+     [90m 223 |[39m
+    [31m[1m>[22m[39m[90m 224 |[39m         expect(persistence[33m.[39mmodelExists([32m'test-model'[39m))[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m     |[39m                                                       [31m[1m^[22m[39m
+     [90m 225 |[39m       })[33m;[39m
+     [90m 226 |[39m
+     [90m 227 |[39m       it([32m'should return false for non-existent model'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/ml/__tests__/unit/model-persistence.test.ts:224:55)
+
+FAIL services/execution-engine/__tests__/unit/services/simulation/simulation-metrics-collector.test.ts
+  ● Test suite failed to run
+
+    [96mservices/execution-engine/__tests__/unit/services/simulation/simulation-metrics-collector.test.ts[0m:[93m56[0m:[93m87[0m - [91merror[0m[90m TS2322: [0mType '{ opportunitiesReceived: number; executionAttempts: number; opportunitiesRejected: number; successfulExecutions: number; failedExecutions: number; queueRejects: number; lockConflicts: number; ... 15 more ...; riskHaltCount: number; }' is not assignable to type 'ExecutionStats'.
+      Types of property 'staleLockRecoveries' are incompatible.
+        Type 'number | undefined' is not assignable to type 'number'.
+          Type 'undefined' is not assignable to type 'number'.
+
+    [7m 56[0m const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStats => ({
+    [7m   [0m [91m                                                                                      ~[0m
+    [7m 57[0m   opportunitiesReceived: 100,
+    [7m   [0m [91m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [7m...[0m 
+    [7m 80[0m   ...overrides,
+    [7m   [0m [91m~~~~~~~~~~~~~~~[0m
+    [7m 81[0m });
+    [7m   [0m [91m~[0m
+
+FAIL shared/config/__tests__/unit/config-modules.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m48[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './index' or its corresponding type declarations.
+
+    [7m48[0m } from './index';
+    [7m  [0m [91m       ~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m290[0m:[93m9[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m290[0m         b => b.sourceChain === 'solana' || b.targetChain === 'solana'
+    [7m   [0m [91m        ~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m293[0m:[93m34[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m293[0m       expect(solanaBridges.every(b => b.bridge === 'wormhole')).toBe(true);
+    [7m   [0m [91m                                 ~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m324[0m:[93m47[0m - [91merror[0m[90m TS7006: [0mParameter 'b' implicitly has an 'any' type.
+
+    [7m324[0m         const lowestFee = Math.min(...all.map(b => b.feePercentage));
+    [7m   [0m [91m                                              ~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m506[0m:[93m16[0m - [91merror[0m[90m TS18046: [0m'config' is of type 'unknown'.
+
+    [7m506[0m         expect(config.batchSize).toBeGreaterThan(0);
+    [7m   [0m [91m               ~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m507[0m:[93m16[0m - [91merror[0m[90m TS18046: [0m'config' is of type 'unknown'.
+
+    [7m507[0m         expect(config.batchSize).toBeLessThanOrEqual(1000); // Reasonable upper limit
+    [7m   [0m [91m               ~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m572[0m:[93m51[0m - [91merror[0m[90m TS2307: [0mCannot find module '../../types' or its corresponding type declarations.
+
+    [7m572[0m     let getAllChains: () => Record<string, import('../../types').Chain>;
+    [7m   [0m [91m                                                  ~~~~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m575[0m:[93m35[0m - [91merror[0m[90m TS2307: [0mCannot find module './chains' or its corresponding type declarations.
+
+    [7m575[0m       const module = await import('./chains');
+    [7m   [0m [91m                                  ~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m616[0m:[93m35[0m - [91merror[0m[90m TS2307: [0mCannot find module './event-config' or its corresponding type declarations.
+
+    [7m616[0m   let EVENT_CONFIG: typeof import('./event-config').EVENT_CONFIG;
+    [7m   [0m [91m                                  ~~~~~~~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m617[0m:[93m39[0m - [91merror[0m[90m TS2307: [0mCannot find module './event-config' or its corresponding type declarations.
+
+    [7m617[0m   let EVENT_SIGNATURES: typeof import('./event-config').EVENT_SIGNATURES;
+    [7m   [0m [91m                                      ~~~~~~~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-modules.test.ts[0m:[93m620[0m:[93m33[0m - [91merror[0m[90m TS2307: [0mCannot find module './event-config' or its corresponding type declarations.
+
+    [7m620[0m     const module = await import('./event-config');
+    [7m   [0m [91m                                ~~~~~~~~~~~~~~~~[0m
+
+FAIL shared/security/__tests__/unit/rate-limiter.test.ts (18.21 s)
+  ● RateLimiter › checkLimit › should handle Redis errors gracefully
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: false
+    Received: true
+
+    [0m [90m 130 |[39m
+     [90m 131 |[39m       [90m// Should fail open (allow request) on Redis error[39m
+    [31m[1m>[22m[39m[90m 132 |[39m       expect(result[33m.[39mexceeded)[33m.[39mtoBe([36mfalse[39m)[33m;[39m
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 133 |[39m       expect(result[33m.[39mtotal)[33m.[39mtoBe([35m10[39m)[33m;[39m
+     [90m 134 |[39m       expect(recordingLogger[33m.[39mhasLogMatching([32m'error'[39m[33m,[39m [32m'Rate limiter error'[39m))[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m 135 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/security/__tests__/unit/rate-limiter.test.ts:132:31)
+
+  ● RateLimiter › middleware › should handle middleware errors gracefully
+
+    expect(jest.fn()).toHaveBeenCalled()
+
+    Expected number of calls: >= 1
+    Received number of calls:    0
+
+    [0m [90m 258 |[39m
+     [90m 259 |[39m       [90m// Should fail open[39m
+    [31m[1m>[22m[39m[90m 260 |[39m       expect(mockNext)[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m     |[39m                        [31m[1m^[22m[39m
+     [90m 261 |[39m       expect(recordingLogger[33m.[39mhasLogMatching([32m'error'[39m[33m,[39m [32m'Rate limiter error'[39m))[33m.[39mtoBe([36mtrue[39m)[33m;[39m
+     [90m 262 |[39m     })[33m;[39m
+     [90m 263 |[39m   })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/security/__tests__/unit/rate-limiter.test.ts:260:24)
+
+FAIL services/execution-engine/__tests__/unit/strategies/simulation.strategy.test.ts
+  ● Test suite failed to run
+
+    [96mservices/execution-engine/__tests__/unit/strategies/simulation.strategy.test.ts[0m:[93m54[0m:[93m3[0m - [91merror[0m[90m TS2741: [0mProperty 'staleLockRecoveries' is missing in type '{ opportunitiesReceived: number; executionAttempts: number; opportunitiesRejected: number; successfulExecutions: number; failedExecutions: number; lockConflicts: number; executionTimeouts: number; ... 14 more ...; riskHaltCount: number; }' but required in type 'ExecutionStats'.
+
+    [7m54[0m   stats: {
+    [7m  [0m [91m  ~~~~~[0m
+
+      [96mservices/execution-engine/src/types.ts[0m:[93m433[0m:[93m3[0m
+        [7m433[0m   staleLockRecoveries: number;
+        [7m   [0m [96m  ~~~~~~~~~~~~~~~~~~~[0m
+        'staleLockRecoveries' is declared here.
+      [96mservices/execution-engine/src/types.ts[0m:[93m967[0m:[93m3[0m
+        [7m967[0m   stats: ExecutionStats;
+        [7m   [0m [96m  ~~~~~[0m
+        The expected type comes from property 'stats' which is declared here on type 'StrategyContext'
+
+FAIL services/execution-engine/__tests__/unit/strategies/strategy-factory.test.ts
+  ● Test suite failed to run
+
+    [96mservices/execution-engine/__tests__/unit/strategies/strategy-factory.test.ts[0m:[93m66[0m:[93m3[0m - [91merror[0m[90m TS2741: [0mProperty 'staleLockRecoveries' is missing in type '{ opportunitiesReceived: number; executionAttempts: number; opportunitiesRejected: number; successfulExecutions: number; failedExecutions: number; queueRejects: number; lockConflicts: number; ... 14 more ...; riskHaltCount: number; }' but required in type 'ExecutionStats'.
+
+    [7m66[0m   stats: {
+    [7m  [0m [91m  ~~~~~[0m
+
+      [96mservices/execution-engine/src/types.ts[0m:[93m433[0m:[93m3[0m
+        [7m433[0m   staleLockRecoveries: number;
+        [7m   [0m [96m  ~~~~~~~~~~~~~~~~~~~[0m
+        'staleLockRecoveries' is declared here.
+      [96mservices/execution-engine/src/types.ts[0m:[93m967[0m:[93m3[0m
+        [7m967[0m   stats: ExecutionStats;
+        [7m   [0m [96m  ~~~~~[0m
+        The expected type comes from property 'stats' which is declared here on type 'StrategyContext'
+
+FAIL tests/integration/s3.1.7-detector-migration.integration.test.ts (19.517 s)
+  ● S3.1.7.10: Migration Documentation › should reference partition architecture in implementation plan
+
+    ENOENT: no such file or directory, open 'C:\Users\kj2bn8f\arbitrage_new\docs\IMPLEMENTATION_PLAN.md'
+
+    [0m [90m 666 |[39m
+     [90m 667 |[39m     [36mconst[39m planPath [33m=[39m path[33m.[39mjoin(process[33m.[39mcwd()[33m,[39m [32m'docs/IMPLEMENTATION_PLAN.md'[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 668 |[39m     [36mconst[39m content [33m=[39m fs[33m.[39mreadFileSync(planPath[33m,[39m [32m'utf-8'[39m)[33m;[39m
+     [90m     |[39m                        [31m[1m^[22m[39m
+     [90m 669 |[39m
+     [90m 670 |[39m     expect(content)[33m.[39mtoContain([32m'Partitioned'[39m)[33m;[39m
+     [90m 671 |[39m     expect(content)[33m.[39mtoContain([32m'S3.1.7'[39m)[33m;[39m[0m
+
+      at Object.<anonymous> (tests/integration/s3.1.7-detector-migration.integration.test.ts:668:24)
+
+FAIL tests/integration/s3.1.6-partition-solana.integration.test.ts (20.349 s)
+  ● S3.1.6.18: Cross-Partition Consistency › P4 uses same patterns as P1-P3 › should have consistent comment patterns with P3
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected substring: "P12-P14 refactor"
+    Received string:    "/**·
+     * P3 High-Value Partition Service Entry Point·
+     *·
+     * Deploys the unified detector for the High-Value partition:·
+     * - Chains: Ethereum, zkSync, Linea·
+     * - Region: Oracle Cloud US-East (us-east1)·
+     * - Resource Profile: Heavy (3 high-value chains)·
+     *·
+     * This service is a deployment wrapper for the unified-detector,·
+     * configured specifically for the P3 partition.·
+     *·
+     * High-Value partition characteristics:·
+     * - Longer health checks (30s) for Ethereum's ~12s blocks·
+     * - Standard failover timeout (60s) for mainnet stability·
+     * - Heavy resource profile for Ethereum mainnet processing·
+     * - US-East deployment for proximity to major Ethereum infrastructure·
+     *·
+     * Environment Variables:·
+     * - PARTITION_ID: Set to 'high-value' by default·
+     * - PARTITION_CHAINS: Override chains to monitor (comma-separated, default: ethereum,zksync,linea)·
+     * - REDIS_URL: Redis connection URL (required)·
+     * - LOG_LEVEL: Logging level (default: info)·
+     * - HEALTH_CHECK_PORT: HTTP health check port (default: 3003)·
+     * - INSTANCE_ID: Unique instance identifier (auto-generated if not set)·
+     * - REGION_ID: Deployment region (default: us-east1)·
+     * - ENABLE_CROSS_REGION_HEALTH: Enable cross-region health reporting (default: true)·
+     *·
+     * @see ADR-003: Partitioned Chain Detectors·
+     */···
+    import { Server } from 'http';·
+    import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';·
+    import {·
+      createLogger,·
+      parsePort,·
+      validateAndFilterChains,·
+      createPartitionHealthServer,·
+      setupDetectorEventHandlers,·
+      setupProcessHandlers,·
+      exitWithConfigError,·
+      closeServerWithTimeout,·
+      parsePartitionEnvironmentConfig,·
+      validatePartitionEnvironmentConfig,·
+      generateInstanceId,·
+      PartitionServiceConfig,·
+      PartitionEnvironmentConfig,·
+      PARTITION_PORTS,·
+      PARTITION_SERVICE_NAMES·
+    } from '@arbitrage/core';·
+    import { getPartition, PARTITION_IDS } from '@arbitrage/config';···
+    // =============================================================================·
+    // P3 Partition Constants·
+    // =============================================================================···
+    const P3_PARTITION_ID = PARTITION_IDS.HIGH_VALUE;·
+    // Use centralized port constant (P1: 3001, P2: 3002, P3: 3003, P4: 3004)·
+    const P3_DEFAULT_PORT = PARTITION_PORTS[P3_PARTITION_ID] ?? 3003;···
+    // =============================================================================·
+    // Configuration·
+    // =============================================================================···
+    const logger = createLogger('partition-high-value:main');···
+    // =============================================================================·
+    // Partition Configuration Retrieval·
+    // =============================================================================···
+    // Single partition config retrieval·
+    const partitionConfig = getPartition(P3_PARTITION_ID);·
+    if (!partitionConfig) {·
+      exitWithConfigError('P3 partition configuration not found', { partitionId: P3_PARTITION_ID }, logger);·
+    }···
+    // BUG-FIX: Add defensive null-safety checks for test compatibility·
+    // During test imports, mocks may not be fully initialized, so we use optional chaining·
+    // and provide safe defaults to prevent \"Cannot read properties of undefined\" errors·
+    const P3_CHAINS: readonly string[] = partitionConfig?.chains ?? [];·
+    const P3_REGION = partitionConfig?.region ?? 'us-east1';···
+    // BUG-FIX: Validate partition config has chains·
+    if (!P3_CHAINS || P3_CHAINS.length === 0) {·
+      exitWithConfigError('P3 partition has no chains configured', {·
+        partitionId: P3_PARTITION_ID,·
+        chains: P3_CHAINS·
+      }, logger);·
+    }···
+    // =============================================================================·
+    // Environment Configuration (Using shared typed utilities)·
+    // =============================================================================···
+    // Parse environment into typed configuration using shared utility·
+    const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P3_CHAINS);···
+    // Validate environment configuration (exits on critical errors, warns on non-critical)·
+    validatePartitionEnvironmentConfig(envConfig, P3_PARTITION_ID, P3_CHAINS, logger);···
+    // =============================================================================·
+    // Service Configuration·
+    // =============================================================================···
+    // Service configuration for shared utilities·
+    const serviceConfig: PartitionServiceConfig = {·
+      partitionId: P3_PARTITION_ID,·
+      serviceName: PARTITION_SERVICE_NAMES[P3_PARTITION_ID] ?? 'partition-high-value',·
+      defaultChains: P3_CHAINS,·
+      defaultPort: P3_DEFAULT_PORT,·
+      region: P3_REGION,·
+      provider: partitionConfig?.provider ?? 'oracle'·
+    };···
+    // Store server reference for graceful shutdown·
+    const healthServerRef: { current: Server | null } = { current: null };···
+    // Unified detector configuration (uses typed envConfig)·
+    // BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)·
+    // to properly handle falsy but valid values like empty strings or 0·
+    // BUG-FIX: Add optional chaining for envConfig properties for test compatibility·
+    const config: UnifiedDetectorConfig = {·
+      partitionId: P3_PARTITION_ID,·
+      chains: validateAndFilterChains(envConfig?.partitionChains, P3_CHAINS, logger),·
+      instanceId: generateInstanceId(P3_PARTITION_ID, envConfig?.instanceId),·
+      regionId: envConfig?.regionId ?? P3_REGION,·
+      enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,·
+      healthCheckPort: parsePort(envConfig?.healthCheckPort, P3_DEFAULT_PORT, logger)·
+    };···
+    // =============================================================================·
+    // Service Instance·
+    // =============================================================================···
+    const detector = new UnifiedChainDetector(config);···
+    // =============================================================================·
+    // Event Handlers (Using shared utilities)·
+    // =============================================================================···
+    setupDetectorEventHandlers(detector, logger, P3_PARTITION_ID);···
+    // =============================================================================·
+    // Process Handlers (Using shared utilities with shutdown guard)·
+    // =============================================================================···
+    // Store cleanup function to prevent MaxListenersExceeded warnings·
+    // in test scenarios and allow proper handler cleanup·
+    const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);···
+    // =============================================================================·
+    // Main Entry Point·
+    // =============================================================================···
+    // Guard against multiple main() invocations (e.g., from integration tests)·
+    // FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)·
+    // This is cleaner and more explicit about the service lifecycle state·
+    type MainState = 'idle' | 'starting' | 'started' | 'failed';·
+    let mainState: MainState = 'idle';···
+    async function main(): Promise<void> {·
+      // Check-and-set guard prevents duplicate invocations within same event loop tick·
+      if (mainState !== 'idle') {·
+        logger.warn('main() already started or starting, ignoring duplicate invocation', {·
+          currentState: mainState·
+        });·
+        return;·
+      }·
+      mainState = 'starting';···
+      logger.info('Starting P3 High-Value Partition Service', {·
+        partitionId: P3_PARTITION_ID,·
+        chains: config.chains,·
+        region: P3_REGION,·
+        provider: serviceConfig.provider,·
+        nodeVersion: process.version,·
+        pid: process.pid·
+      });···
+      try {·
+        // Start health check server first (using shared utilities)·
+        // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly·
+        healthServerRef.current = createPartitionHealthServer({·
+          port: config.healthCheckPort ?? P3_DEFAULT_PORT,·
+          config: serviceConfig,·
+          detector,·
+          logger·
+        });···
+        // Start detector·
+        await detector.start();···
+        // BUG-FIX: Mark as fully started only after successful completion·
+        mainState = 'started';···
+        logger.info('P3 High-Value Partition Service started successfully', {·
+          partitionId: detector.getPartitionId(),·
+          chains: detector.getChains(),·
+          healthyChains: detector.getHealthyChains()·
+        });···
+      } catch (error) {·
+        // BUG-FIX: Mark as failed instead of resetting to idle·
+        mainState = 'failed';···
+        logger.error('Failed to start P3 High-Value Partition Service', { error });···
+        // BUG-FIX: Explicit null check before closing server·
+        // Server may be null if createPartitionHealthServer threw before assignment·
+        if (healthServerRef.current) {·
+          await closeServerWithTimeout(healthServerRef.current, 1000, logger);·
+        }···
+        // BUG-FIX: Clear server reference after closing to prevent stale reference issues·
+        healthServerRef.current = null;···
+        // Clean up process handlers before exit to prevent listener leaks·
+        cleanupProcessHandlers();···
+        process.exit(1);·
+      }·
+    }···
+    // Run - only when this is the main entry point (not when imported by tests)·
+    // Check for Jest worker to prevent auto-start during test imports·
+    if (!process.env.JEST_WORKER_ID) {·
+      main().catch((error) => {·
+        // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails·
+        try {·
+          if (logger) {·
+            logger.error('Fatal error in P3 High-Value partition main', { error });·
+          } else {·
+            console.error('Fatal error in P3 High-Value partition main (logger unavailable):', error);·
+          }·
+        } catch (logError) {·
+          // Last resort - write to stderr directly·
+          process.stderr.write(`FATAL: ${error}\\nLOG ERROR: ${logError}\\n`);·
+        }·
+        process.exit(1);·
+      });·
+    }···
+    // =============================================================================·
+    // Exports·
+    // =============================================================================···
+    export {·
+      detector,·
+      config,·
+      P3_PARTITION_ID,·
+      P3_CHAINS,·
+      P3_REGION,·
+      cleanupProcessHandlers,·
+      // Export for testing·
+      envConfig·
+    };···
+    // Re-export type from shared utilities for convenience·
+    export type { PartitionEnvironmentConfig };·
+    "
+
+    [0m [90m 1665 |[39m
+     [90m 1666 |[39m       [90m// Both should use P12-P14 refactor pattern[39m
+    [31m[1m>[22m[39m[90m 1667 |[39m       expect(p3Content)[33m.[39mtoContain([32m'P12-P14 refactor'[39m)[33m;[39m
+     [90m      |[39m                         [31m[1m^[22m[39m
+     [90m 1668 |[39m       expect(p4Content)[33m.[39mtoContain([32m'P12-P14 refactor'[39m)[33m;[39m
+     [90m 1669 |[39m
+     [90m 1670 |[39m       [90m// Both should use P12-P16 refactor pattern[39m[0m
+
+      at Object.<anonymous> (tests/integration/s3.1.6-partition-solana.integration.test.ts:1667:25)
+
+  ● S3.1.6.18: Cross-Partition Consistency › All partitions share same utility patterns › should use validateAndFilterChains in all partitions
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected substring: "validateAndFilterChains(process.env.PARTITION_CHAINS"
+    Received string:    "/**·
+     * P1 Asia-Fast Partition Service Entry Point·
+     *·
+     * Deploys the unified detector for the Asia-Fast partition:·
+     * - Chains: BSC, Polygon, Avalanche, Fantom·
+     * - Region: Oracle Cloud Singapore (asia-southeast1)·
+     * - Resource Profile: Heavy (4 chains)·
+     *·
+     * This service is a deployment wrapper for the unified-detector,·
+     * configured specifically for the P1 partition.·
+     *·
+     * Architecture Note:·
+     * This service creates its own HTTP health server via createPartitionHealthServer().·
+     * The UnifiedChainDetector class provides health data but NOT an HTTP server.·
+     * This separation of concerns allows:·
+     * - Partition-specific health endpoint configuration·
+     * - Consistent health response format across all partition services·
+     * - The detector class to remain transport-agnostic·
+     *·
+     * Environment Variables:·
+     * - PARTITION_ID: Set to 'asia-fast' by default·
+     * - REDIS_URL: Redis connection URL (required)·
+     * - LOG_LEVEL: Logging level (default: info)·
+     * - HEALTH_CHECK_PORT: HTTP health check port (default: 3001)·
+     * - INSTANCE_ID: Unique instance identifier (auto-generated if not set)·
+     * - REGION_ID: Region identifier (default: asia-southeast1)·
+     * - ENABLE_CROSS_REGION_HEALTH: Enable cross-region health reporting (default: true)·
+     * - PARTITION_CHAINS: Override default chains (comma-separated)·
+     *·
+     * @see ADR-003: Partitioned Chain Detectors·
+     */···
+    import { Server } from 'http';·
+    import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';·
+    import {·
+      createLogger,·
+      parsePort,·
+      validateAndFilterChains,·
+      createPartitionHealthServer,·
+      setupDetectorEventHandlers,·
+      setupProcessHandlers,·
+      exitWithConfigError,·
+      closeServerWithTimeout,·
+      parsePartitionEnvironmentConfig,·
+      validatePartitionEnvironmentConfig,·
+      generateInstanceId,·
+      PartitionServiceConfig,·
+      PartitionEnvironmentConfig,·
+      PARTITION_PORTS,·
+      PARTITION_SERVICE_NAMES,·
+      Logger·
+    } from '@arbitrage/core';·
+    import { getPartition, PARTITION_IDS } from '@arbitrage/config';···
+    // =============================================================================·
+    // P1 Partition Constants·
+    // =============================================================================···
+    const P1_PARTITION_ID = PARTITION_IDS.ASIA_FAST;·
+    // Use centralized port constant (P1: 3001, P2: 3002, P3: 3003, P4: 3004)·
+    const P1_DEFAULT_PORT = PARTITION_PORTS[P1_PARTITION_ID] ?? 3001;···
+    // =============================================================================·
+    // Configuration·
+    // =============================================================================···
+    const logger = createLogger('partition-asia-fast:main');···
+    // =============================================================================·
+    // Partition Configuration Retrieval·
+    // =============================================================================···
+    // Single partition config retrieval·
+    const partitionConfig = getPartition(P1_PARTITION_ID);·
+    if (!partitionConfig) {·
+      exitWithConfigError('P1 partition configuration not found', { partitionId: P1_PARTITION_ID }, logger);·
+    }···
+    // BUG-FIX: Add defensive null-safety checks for test compatibility·
+    // During test imports, mocks may not be fully initialized, so we use optional chaining·
+    // and provide safe defaults to prevent \"Cannot read properties of undefined\" errors·
+    const P1_CHAINS: readonly string[] = partitionConfig?.chains ?? [];·
+    const P1_REGION = partitionConfig?.region ?? 'asia-southeast1';···
+    // BUG-FIX: Validate partition config has chains·
+    if (!P1_CHAINS || P1_CHAINS.length === 0) {·
+      exitWithConfigError('P1 partition has no chains configured', {·
+        partitionId: P1_PARTITION_ID,·
+        chains: P1_CHAINS·
+      }, logger);·
+    }···
+    // =============================================================================·
+    // Environment Configuration (Using shared typed utilities)·
+    // =============================================================================···
+    // Parse environment into typed configuration using shared utility·
+    const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P1_CHAINS);···
+    // Validate environment configuration (exits on critical errors, warns on non-critical)·
+    validatePartitionEnvironmentConfig(envConfig, P1_PARTITION_ID, P1_CHAINS, logger);···
+    // =============================================================================·
+    // Service Configuration·
+    // =============================================================================···
+    // Service configuration for shared utilities·
+    const serviceConfig: PartitionServiceConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      serviceName: PARTITION_SERVICE_NAMES[P1_PARTITION_ID] ?? 'partition-asia-fast',·
+      defaultChains: P1_CHAINS,·
+      defaultPort: P1_DEFAULT_PORT,·
+      region: P1_REGION,·
+      provider: partitionConfig?.provider ?? 'oracle'·
+    };···
+    // Store server reference for graceful shutdown·
+    const healthServerRef: { current: Server | null } = { current: null };···
+    // Unified detector configuration (uses typed envConfig)·
+    // BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)·
+    // to properly handle falsy but valid values like empty strings or 0·
+    // BUG-FIX: Add optional chaining for envConfig properties for test compatibility·
+    const config: UnifiedDetectorConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      chains: validateAndFilterChains(envConfig?.partitionChains, P1_CHAINS, logger),·
+      instanceId: generateInstanceId(P1_PARTITION_ID, envConfig?.instanceId),·
+      regionId: envConfig?.regionId ?? P1_REGION,·
+      enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,·
+      healthCheckPort: parsePort(envConfig?.healthCheckPort, P1_DEFAULT_PORT, logger)·
+    };···
+    // =============================================================================·
+    // Service Instance·
+    // =============================================================================···
+    const detector = new UnifiedChainDetector(config);···
+    // =============================================================================·
+    // Event Handlers (Using shared utilities)·
+    // =============================================================================···
+    setupDetectorEventHandlers(detector, logger, P1_PARTITION_ID);···
+    // =============================================================================·
+    // Process Handlers (Using shared utilities with shutdown guard)·
+    // =============================================================================···
+    // Store cleanup function to prevent MaxListenersExceeded warnings·
+    // in test scenarios and allow proper handler cleanup·
+    const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);···
+    // =============================================================================·
+    // Main Entry Point·
+    // =============================================================================···
+    // Guard against multiple main() invocations (e.g., from integration tests)·
+    // FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)·
+    // This is cleaner and more explicit about the service lifecycle state·
+    type MainState = 'idle' | 'starting' | 'started' | 'failed';·
+    let mainState: MainState = 'idle';···
+    async function main(): Promise<void> {·
+      // Check-and-set guard prevents duplicate invocations within same event loop tick·
+      if (mainState !== 'idle') {·
+        logger.warn('main() already started or starting, ignoring duplicate invocation', {·
+          currentState: mainState·
+        });·
+        return;·
+      }·
+      mainState = 'starting';···
+      logger.info('Starting P1 Asia-Fast Partition Service', {·
+        partitionId: P1_PARTITION_ID,·
+        chains: config.chains,·
+        region: P1_REGION,·
+        provider: serviceConfig.provider,·
+        nodeVersion: process.version,·
+        pid: process.pid·
+      });···
+      try {·
+        // Start health check server first (using shared utilities)·
+        // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly·
+        healthServerRef.current = createPartitionHealthServer({·
+          port: config.healthCheckPort ?? P1_DEFAULT_PORT,·
+          config: serviceConfig,·
+          detector,·
+          logger·
+        });···
+        // Start detector·
+        await detector.start();···
+        // BUG-FIX: Mark as fully started only after successful completion·
+        mainState = 'started';···
+        logger.info('P1 Asia-Fast Partition Service started successfully', {·
+          partitionId: detector.getPartitionId(),·
+          chains: detector.getChains(),·
+          healthyChains: detector.getHealthyChains()·
+        });···
+      } catch (error) {·
+        // BUG-FIX: Mark as failed instead of resetting to idle·
+        mainState = 'failed';···
+        logger.error('Failed to start P1 Asia-Fast Partition Service', { error });···
+        // BUG-FIX: Explicit null check before closing server·
+        // Server may be null if createPartitionHealthServer threw before assignment·
+        if (healthServerRef.current) {·
+          await closeServerWithTimeout(healthServerRef.current, 1000, logger);·
+        }···
+        // BUG-FIX: Clear server reference after closing to prevent stale reference issues·
+        healthServerRef.current = null;···
+        // Clean up process handlers before exit to prevent listener leaks·
+        cleanupProcessHandlers();···
+        process.exit(1);·
+      }·
+    }···
+    // Run - only when this is the main entry point (not when imported by tests)·
+    // Check for Jest worker to prevent auto-start during test imports·
+    if (!process.env.JEST_WORKER_ID) {·
+      main().catch((error) => {·
+        // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails·
+        try {·
+          if (logger) {·
+            logger.error('Fatal error in P1 Asia-Fast partition main', { error });·
+          } else {·
+            console.error('Fatal error in P1 Asia-Fast partition main (logger unavailable):', error);·
+          }·
+        } catch (logError) {·
+          // Last resort - write to stderr directly·
+          process.stderr.write(`FATAL: ${error}\\nLOG ERROR: ${logError}\\n`);·
+        }·
+        process.exit(1);·
+      });·
+    }···
+    // =============================================================================·
+    // Exports·
+    // =============================================================================···
+    export {·
+      detector,·
+      config,·
+      P1_PARTITION_ID,·
+      P1_CHAINS,·
+      P1_REGION,·
+      cleanupProcessHandlers,·
+      // Export for testing·
+      envConfig·
+    };···
+    // Re-export type from shared utilities for convenience·
+    export type { PartitionEnvironmentConfig };·
+    "
+
+    [0m [90m 1843 |[39m         [36mconst[39m content [33m=[39m fs[33m.[39mreadFileSync(filePath[33m,[39m [32m'utf-8'[39m)[33m;[39m
+     [90m 1844 |[39m
+    [31m[1m>[22m[39m[90m 1845 |[39m         expect(content)[33m.[39mtoContain([32m'validateAndFilterChains(process.env.PARTITION_CHAINS'[39m)[33m;[39m
+     [90m      |[39m                         [31m[1m^[22m[39m
+     [90m 1846 |[39m       }
+     [90m 1847 |[39m     })[33m;[39m
+     [90m 1848 |[39m[0m
+
+      at Object.<anonymous> (tests/integration/s3.1.6-partition-solana.integration.test.ts:1845:25)
+
+  ● S3.1.6.18: Cross-Partition Consistency › All partitions share same utility patterns › should use parsePort in all partitions
+
+    expect(received).toContain(expected) // indexOf
+
+    Expected substring: "parsePort(process.env.HEALTH_CHECK_PORT"
+    Received string:    "/**·
+     * P1 Asia-Fast Partition Service Entry Point·
+     *·
+     * Deploys the unified detector for the Asia-Fast partition:·
+     * - Chains: BSC, Polygon, Avalanche, Fantom·
+     * - Region: Oracle Cloud Singapore (asia-southeast1)·
+     * - Resource Profile: Heavy (4 chains)·
+     *·
+     * This service is a deployment wrapper for the unified-detector,·
+     * configured specifically for the P1 partition.·
+     *·
+     * Architecture Note:·
+     * This service creates its own HTTP health server via createPartitionHealthServer().·
+     * The UnifiedChainDetector class provides health data but NOT an HTTP server.·
+     * This separation of concerns allows:·
+     * - Partition-specific health endpoint configuration·
+     * - Consistent health response format across all partition services·
+     * - The detector class to remain transport-agnostic·
+     *·
+     * Environment Variables:·
+     * - PARTITION_ID: Set to 'asia-fast' by default·
+     * - REDIS_URL: Redis connection URL (required)·
+     * - LOG_LEVEL: Logging level (default: info)·
+     * - HEALTH_CHECK_PORT: HTTP health check port (default: 3001)·
+     * - INSTANCE_ID: Unique instance identifier (auto-generated if not set)·
+     * - REGION_ID: Region identifier (default: asia-southeast1)·
+     * - ENABLE_CROSS_REGION_HEALTH: Enable cross-region health reporting (default: true)·
+     * - PARTITION_CHAINS: Override default chains (comma-separated)·
+     *·
+     * @see ADR-003: Partitioned Chain Detectors·
+     */···
+    import { Server } from 'http';·
+    import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';·
+    import {·
+      createLogger,·
+      parsePort,·
+      validateAndFilterChains,·
+      createPartitionHealthServer,·
+      setupDetectorEventHandlers,·
+      setupProcessHandlers,·
+      exitWithConfigError,·
+      closeServerWithTimeout,·
+      parsePartitionEnvironmentConfig,·
+      validatePartitionEnvironmentConfig,·
+      generateInstanceId,·
+      PartitionServiceConfig,·
+      PartitionEnvironmentConfig,·
+      PARTITION_PORTS,·
+      PARTITION_SERVICE_NAMES,·
+      Logger·
+    } from '@arbitrage/core';·
+    import { getPartition, PARTITION_IDS } from '@arbitrage/config';···
+    // =============================================================================·
+    // P1 Partition Constants·
+    // =============================================================================···
+    const P1_PARTITION_ID = PARTITION_IDS.ASIA_FAST;·
+    // Use centralized port constant (P1: 3001, P2: 3002, P3: 3003, P4: 3004)·
+    const P1_DEFAULT_PORT = PARTITION_PORTS[P1_PARTITION_ID] ?? 3001;···
+    // =============================================================================·
+    // Configuration·
+    // =============================================================================···
+    const logger = createLogger('partition-asia-fast:main');···
+    // =============================================================================·
+    // Partition Configuration Retrieval·
+    // =============================================================================···
+    // Single partition config retrieval·
+    const partitionConfig = getPartition(P1_PARTITION_ID);·
+    if (!partitionConfig) {·
+      exitWithConfigError('P1 partition configuration not found', { partitionId: P1_PARTITION_ID }, logger);·
+    }···
+    // BUG-FIX: Add defensive null-safety checks for test compatibility·
+    // During test imports, mocks may not be fully initialized, so we use optional chaining·
+    // and provide safe defaults to prevent \"Cannot read properties of undefined\" errors·
+    const P1_CHAINS: readonly string[] = partitionConfig?.chains ?? [];·
+    const P1_REGION = partitionConfig?.region ?? 'asia-southeast1';···
+    // BUG-FIX: Validate partition config has chains·
+    if (!P1_CHAINS || P1_CHAINS.length === 0) {·
+      exitWithConfigError('P1 partition has no chains configured', {·
+        partitionId: P1_PARTITION_ID,·
+        chains: P1_CHAINS·
+      }, logger);·
+    }···
+    // =============================================================================·
+    // Environment Configuration (Using shared typed utilities)·
+    // =============================================================================···
+    // Parse environment into typed configuration using shared utility·
+    const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P1_CHAINS);···
+    // Validate environment configuration (exits on critical errors, warns on non-critical)·
+    validatePartitionEnvironmentConfig(envConfig, P1_PARTITION_ID, P1_CHAINS, logger);···
+    // =============================================================================·
+    // Service Configuration·
+    // =============================================================================···
+    // Service configuration for shared utilities·
+    const serviceConfig: PartitionServiceConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      serviceName: PARTITION_SERVICE_NAMES[P1_PARTITION_ID] ?? 'partition-asia-fast',·
+      defaultChains: P1_CHAINS,·
+      defaultPort: P1_DEFAULT_PORT,·
+      region: P1_REGION,·
+      provider: partitionConfig?.provider ?? 'oracle'·
+    };···
+    // Store server reference for graceful shutdown·
+    const healthServerRef: { current: Server | null } = { current: null };···
+    // Unified detector configuration (uses typed envConfig)·
+    // BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)·
+    // to properly handle falsy but valid values like empty strings or 0·
+    // BUG-FIX: Add optional chaining for envConfig properties for test compatibility·
+    const config: UnifiedDetectorConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      chains: validateAndFilterChains(envConfig?.partitionChains, P1_CHAINS, logger),·
+      instanceId: generateInstanceId(P1_PARTITION_ID, envConfig?.instanceId),·
+      regionId: envConfig?.regionId ?? P1_REGION,·
+      enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,·
+      healthCheckPort: parsePort(envConfig?.healthCheckPort, P1_DEFAULT_PORT, logger)·
+    };···
+    // =============================================================================·
+    // Service Instance·
+    // =============================================================================···
+    const detector = new UnifiedChainDetector(config);···
+    // =============================================================================·
+    // Event Handlers (Using shared utilities)·
+    // =============================================================================···
+    setupDetectorEventHandlers(detector, logger, P1_PARTITION_ID);···
+    // =============================================================================·
+    // Process Handlers (Using shared utilities with shutdown guard)·
+    // =============================================================================···
+    // Store cleanup function to prevent MaxListenersExceeded warnings·
+    // in test scenarios and allow proper handler cleanup·
+    const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);···
+    // =============================================================================·
+    // Main Entry Point·
+    // =============================================================================···
+    // Guard against multiple main() invocations (e.g., from integration tests)·
+    // FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)·
+    // This is cleaner and more explicit about the service lifecycle state·
+    type MainState = 'idle' | 'starting' | 'started' | 'failed';·
+    let mainState: MainState = 'idle';···
+    async function main(): Promise<void> {·
+      // Check-and-set guard prevents duplicate invocations within same event loop tick·
+      if (mainState !== 'idle') {·
+        logger.warn('main() already started or starting, ignoring duplicate invocation', {·
+          currentState: mainState·
+        });·
+        return;·
+      }·
+      mainState = 'starting';···
+      logger.info('Starting P1 Asia-Fast Partition Service', {·
+        partitionId: P1_PARTITION_ID,·
+        chains: config.chains,·
+        region: P1_REGION,·
+        provider: serviceConfig.provider,·
+        nodeVersion: process.version,·
+        pid: process.pid·
+      });···
+      try {·
+        // Start health check server first (using shared utilities)·
+        // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly·
+        healthServerRef.current = createPartitionHealthServer({·
+          port: config.healthCheckPort ?? P1_DEFAULT_PORT,·
+          config: serviceConfig,·
+          detector,·
+          logger·
+        });···
+        // Start detector·
+        await detector.start();···
+        // BUG-FIX: Mark as fully started only after successful completion·
+        mainState = 'started';···
+        logger.info('P1 Asia-Fast Partition Service started successfully', {·
+          partitionId: detector.getPartitionId(),·
+          chains: detector.getChains(),·
+          healthyChains: detector.getHealthyChains()·
+        });···
+      } catch (error) {·
+        // BUG-FIX: Mark as failed instead of resetting to idle·
+        mainState = 'failed';···
+        logger.error('Failed to start P1 Asia-Fast Partition Service', { error });···
+        // BUG-FIX: Explicit null check before closing server·
+        // Server may be null if createPartitionHealthServer threw before assignment·
+        if (healthServerRef.current) {·
+          await closeServerWithTimeout(healthServerRef.current, 1000, logger);·
+        }···
+        // BUG-FIX: Clear server reference after closing to prevent stale reference issues·
+        healthServerRef.current = null;···
+        // Clean up process handlers before exit to prevent listener leaks·
+        cleanupProcessHandlers();···
+        process.exit(1);·
+      }·
+    }···
+    // Run - only when this is the main entry point (not when imported by tests)·
+    // Check for Jest worker to prevent auto-start during test imports·
+    if (!process.env.JEST_WORKER_ID) {·
+      main().catch((error) => {·
+        // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails·
+        try {·
+          if (logger) {·
+            logger.error('Fatal error in P1 Asia-Fast partition main', { error });·
+          } else {·
+            console.error('Fatal error in P1 Asia-Fast partition main (logger unavailable):', error);·
+          }·
+        } catch (logError) {·
+          // Last resort - write to stderr directly·
+          process.stderr.write(`FATAL: ${error}\\nLOG ERROR: ${logError}\\n`);·
+        }·
+        process.exit(1);·
+      });·
+    }···
+    // =============================================================================·
+    // Exports·
+    // =============================================================================···
+    export {·
+      detector,·
+      config,·
+      P1_PARTITION_ID,·
+      P1_CHAINS,·
+      P1_REGION,·
+      cleanupProcessHandlers,·
+      // Export for testing·
+      envConfig·
+    };···
+    // Re-export type from shared utilities for convenience·
+    export type { PartitionEnvironmentConfig };·
+    "
+
+    [0m [90m 1862 |[39m         [36mconst[39m content [33m=[39m fs[33m.[39mreadFileSync(filePath[33m,[39m [32m'utf-8'[39m)[33m;[39m
+     [90m 1863 |[39m
+    [31m[1m>[22m[39m[90m 1864 |[39m         expect(content)[33m.[39mtoContain([32m'parsePort(process.env.HEALTH_CHECK_PORT'[39m)[33m;[39m
+     [90m      |[39m                         [31m[1m^[22m[39m
+     [90m 1865 |[39m       }
+     [90m 1866 |[39m     })[33m;[39m
+     [90m 1867 |[39m   })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/integration/s3.1.6-partition-solana.integration.test.ts:1864:25)
+
+FAIL shared/config/__tests__/unit/partitions.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m34[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './partitions' or its corresponding type declarations.
+
+    [7m34[0m } from './partitions';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m43[0m:[93m34[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m43[0m       const ids = PARTITIONS.map(p => p.partitionId);
+    [7m  [0m [91m                                 ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m49[0m:[93m40[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m49[0m       const asiaFast = PARTITIONS.find(p => p.partitionId === 'asia-fast');
+    [7m  [0m [91m                                       ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m56[0m:[93m38[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m56[0m       const l2Fast = PARTITIONS.find(p => p.partitionId === 'l2-turbo');
+    [7m  [0m [91m                                     ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m64[0m:[93m41[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m64[0m       const highValue = PARTITIONS.find(p => p.partitionId === 'high-value');
+    [7m  [0m [91m                                        ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m105[0m:[93m47[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m105[0m       const expanded = FUTURE_PARTITIONS.find(p => p.partitionId === 'asia-fast-expanded');
+    [7m   [0m [91m                                              ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m250[0m:[93m29[0m - [91merror[0m[90m TS7006: [0mParameter 'p' implicitly has an 'any' type.
+
+    [7m250[0m     const ids = enabled.map(p => p.partitionId);
+    [7m   [0m [91m                            ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m325[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m325[0m     expect(instances.map(i => i.chainId)).toContain('bsc');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m326[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m326[0m     expect(instances.map(i => i.chainId)).toContain('polygon');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m327[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m327[0m     expect(instances.map(i => i.chainId)).toContain('avalanche');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m328[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m328[0m     expect(instances.map(i => i.chainId)).toContain('fantom');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m334[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m334[0m     expect(instances.map(i => i.chainId)).toContain('arbitrum');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m335[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m335[0m     expect(instances.map(i => i.chainId)).toContain('optimism');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m336[0m:[93m26[0m - [91merror[0m[90m TS7006: [0mParameter 'i' implicitly has an 'any' type.
+
+    [7m336[0m     expect(instances.map(i => i.chainId)).toContain('base');
+    [7m   [0m [91m                         ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m413[0m:[93m31[0m - [91merror[0m[90m TS7006: [0mParameter 'e' implicitly has an 'any' type.
+
+    [7m413[0m     expect(result.errors.some(e => e.includes('not found'))).toBe(true);
+    [7m   [0m [91m                              ~[0m
+    [96mshared/config/__tests__/unit/partitions.test.ts[0m:[93m432[0m:[93m33[0m - [91merror[0m[90m TS7006: [0mParameter 'w' implicitly has an 'any' type.
+
+    [7m432[0m     expect(result.warnings.some(w => w.includes('insufficient'))).toBe(true);
+    [7m   [0m [91m                                ~[0m
+
+FAIL shared/config/__tests__/unit/config-manager.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/config-manager.test.ts[0m:[93m352[0m:[93m12[0m - [91merror[0m[90m TS2304: [0mCannot find name 'result'.
+
+    [7m352[0m     expect(result.warnings.filter((w: string) => w.includes('OPTIONAL_VAR'))).toHaveLength(0);
+    [7m   [0m [91m           ~~~~~~[0m
+    [96mshared/config/__tests__/unit/config-manager.test.ts[0m:[93m426[0m:[93m1[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
+
+    [7m426[0m });
+    [7m   [0m [91m~[0m
+    [96mshared/config/__tests__/unit/config-manager.test.ts[0m:[93m426[0m:[93m2[0m - [91merror[0m[90m TS1128: [0mDeclaration or statement expected.
+
+    [7m426[0m });
+    [7m   [0m [91m ~[0m
+
+FAIL services/coordinator/__tests__/unit/leadership/leadership-election-service.test.ts
+  ● Test suite failed to run
+
+    [96mservices/coordinator/__tests__/unit/leadership/leadership-election-service.test.ts[0m:[93m13[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './leadership-election-service' or its corresponding type declarations.
+
+    [7m13[0m } from './leadership-election-service';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+    [96mservices/coordinator/__tests__/unit/leadership/leadership-election-service.test.ts[0m:[93m71[0m:[93m17[0m - [91merror[0m[90m TS7006: [0mParameter 'alert' implicitly has an 'any' type.
+
+    [7m71[0m       onAlert: (alert) => alerts.push(alert),
+    [7m  [0m [91m                ~~~~~[0m
+    [96mservices/coordinator/__tests__/unit/leadership/leadership-election-service.test.ts[0m:[93m72[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'isLeader' implicitly has an 'any' type.
+
+    [7m72[0m       onLeadershipChange: (isLeader) => leadershipChanges.push(isLeader),
+    [7m  [0m [91m                           ~~~~~~~~[0m
+
+FAIL shared/config/__tests__/unit/cross-chain.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/cross-chain.test.ts[0m:[93m19[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './cross-chain' or its corresponding type declarations.
+
+    [7m19[0m } from './cross-chain';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~[0m
+
+FAIL shared/test-utils/__tests__/unit/helpers/timer-helpers.test.ts
+  ● Test suite failed to run
+
+    [96mshared/test-utils/__tests__/unit/helpers/timer-helpers.test.ts[0m:[93m16[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './timer-helpers' or its corresponding type declarations.
+
+    [7m16[0m } from './timer-helpers';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~~~[0m
+
+FAIL shared/config/__tests__/unit/websocket-resilience.test.ts
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Arbitrum should have 3 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/arbitrum", "wss://arbitrum-one-rpc.publicnode.com", "wss://arbitrum-mainnet.public.blastapi.io", "wss://arb1.arbitrum.io/feed"]
+
+    [0m [90m 146 |[39m   describe([32m'Chain-Specific Configuration'[39m[33m,[39m () [33m=>[39m {
+     [90m 147 |[39m     it([32m'Arbitrum should have 3 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 148 |[39m       expect([33mCHAINS[39m[33m.[39marbitrum[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m3[39m)[33m;[39m
+     [90m     |[39m                                              [31m[1m^[22m[39m
+     [90m 149 |[39m     })[33m;[39m
+     [90m 150 |[39m
+     [90m 151 |[39m     it([32m'Optimism should have 3 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:148:46)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Optimism should have 3 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/optimism", "wss://optimism-rpc.publicnode.com", "wss://optimism-mainnet.public.blastapi.io", "wss://mainnet.optimism.io"]
+
+    [0m [90m 150 |[39m
+     [90m 151 |[39m     it([32m'Optimism should have 3 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 152 |[39m       expect([33mCHAINS[39m[33m.[39moptimism[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m3[39m)[33m;[39m
+     [90m     |[39m                                              [31m[1m^[22m[39m
+     [90m 153 |[39m     })[33m;[39m
+     [90m 154 |[39m
+     [90m 155 |[39m     it([32m'BSC should have 3 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:152:46)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › BSC should have 3 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 3
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/bsc", "wss://bsc-rpc.publicnode.com", "wss://bsc-mainnet.public.blastapi.io", "wss://bsc-ws-node.nariox.org:443"]
+
+    [0m [90m 154 |[39m
+     [90m 155 |[39m     it([32m'BSC should have 3 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 156 |[39m       expect([33mCHAINS[39m[33m.[39mbsc[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m3[39m)[33m;[39m
+     [90m     |[39m                                         [31m[1m^[22m[39m
+     [90m 157 |[39m     })[33m;[39m
+     [90m 158 |[39m
+     [90m 159 |[39m     it([32m'Ethereum should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:156:41)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Ethereum should have 2 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/eth", "wss://ethereum-rpc.publicnode.com", "wss://eth-mainnet.public.blastapi.io", "wss://eth.llamarpc.com"]
+
+    [0m [90m 158 |[39m
+     [90m 159 |[39m     it([32m'Ethereum should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 160 |[39m       expect([33mCHAINS[39m[33m.[39methereum[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m2[39m)[33m;[39m
+     [90m     |[39m                                              [31m[1m^[22m[39m
+     [90m 161 |[39m     })[33m;[39m
+     [90m 162 |[39m
+     [90m 163 |[39m     it([32m'Base should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:160:46)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Base should have 2 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/base", "wss://base-rpc.publicnode.com", "wss://base-mainnet.public.blastapi.io", "wss://mainnet.base.org"]
+
+    [0m [90m 162 |[39m
+     [90m 163 |[39m     it([32m'Base should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 164 |[39m       expect([33mCHAINS[39m[33m.[39mbase[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m2[39m)[33m;[39m
+     [90m     |[39m                                          [31m[1m^[22m[39m
+     [90m 165 |[39m     })[33m;[39m
+     [90m 166 |[39m
+     [90m 167 |[39m     it([32m'Polygon should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:164:42)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Polygon should have 2 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/polygon", "wss://polygon-bor-rpc.publicnode.com", "wss://polygon-mainnet.public.blastapi.io", "wss://polygon-rpc.com"]
+
+    [0m [90m 166 |[39m
+     [90m 167 |[39m     it([32m'Polygon should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 168 |[39m       expect([33mCHAINS[39m[33m.[39mpolygon[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m2[39m)[33m;[39m
+     [90m     |[39m                                             [31m[1m^[22m[39m
+     [90m 169 |[39m     })[33m;[39m
+     [90m 170 |[39m
+     [90m 171 |[39m     it([32m'Avalanche should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:168:45)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › Avalanche should have 2 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/avalanche", "wss://avalanche-c-chain-rpc.publicnode.com", "wss://avax-mainnet.public.blastapi.io", "wss://api.avax.network/ext/bc/C/ws"]
+
+    [0m [90m 170 |[39m
+     [90m 171 |[39m     it([32m'Avalanche should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 172 |[39m       expect([33mCHAINS[39m[33m.[39mavalanche[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m2[39m)[33m;[39m
+     [90m     |[39m                                               [31m[1m^[22m[39m
+     [90m 173 |[39m     })[33m;[39m
+     [90m 174 |[39m
+     [90m 175 |[39m     it([32m'Fantom should have at least 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:172:47)
+
+  ● WebSocket Resilience Configuration (S3.3) › Chain-Specific Configuration › zkSync should have 2 WebSocket fallbacks
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 2
+    Received length: 4
+    Received array:  ["wss://rpc.ankr.com/zksync_era", "wss://zksync-era-rpc.publicnode.com", "wss://zksync-mainnet.public.blastapi.io", "wss://mainnet.era.zksync.io/ws"]
+
+    [0m [90m 178 |[39m
+     [90m 179 |[39m     it([32m'zkSync should have 2 WebSocket fallbacks'[39m[33m,[39m () [33m=>[39m {
+    [31m[1m>[22m[39m[90m 180 |[39m       expect([33mCHAINS[39m[33m.[39mzksync[33m.[39mwsFallbackUrls)[33m.[39mtoHaveLength([35m2[39m)[33m;[39m
+     [90m     |[39m                                            [31m[1m^[22m[39m
+     [90m 181 |[39m     })[33m;[39m
+     [90m 182 |[39m
+     [90m 183 |[39m     it([32m'Linea should have at least 1 WebSocket fallback'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/config/__tests__/unit/websocket-resilience.test.ts:180:44)
+
+FAIL shared/config/__tests__/unit/dex-expansion.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/dex-expansion.test.ts[0m:[93m16[0m:[93m21[0m - [91merror[0m[90m TS2307: [0mCannot find module '../../types' or its corresponding type declarations.
+
+    [7m16[0m import { Dex } from '../../types';
+    [7m  [0m [91m                    ~~~~~~~~~~~~~[0m
+
+FAIL shared/core/__tests__/unit/tier2-optimizations.test.ts
+  ● T2.7: Price Momentum Detection › Performance › should calculate signals quickly
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 200
+    Received:   222.51320000000123
+
+    [0m [90m 1143 |[39m
+     [90m 1144 |[39m       [90m// Should complete in under 200ms (increased from 50ms for CI environment stability)[39m
+    [31m[1m>[22m[39m[90m 1145 |[39m       expect(elapsed)[33m.[39mtoBeLessThan([35m200[39m)[33m;[39m
+     [90m      |[39m                       [31m[1m^[22m[39m
+     [90m 1146 |[39m     })[33m;[39m
+     [90m 1147 |[39m   })[33m;[39m
+     [90m 1148 |[39m })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/core/__tests__/unit/tier2-optimizations.test.ts:1145:23)
+
+
+Test Suites: 17 failed, 2 skipped, 171 passed, 188 of 190 total
+Tests:       30 failed, 51 skipped, 92 todo, 7392 passed, 7565 total
+Snapshots:   0 total
+Time:        4148.367 s
+Ran all test suites in 4 projects.
+
+[Jest Global Teardown] Stopping Redis test server...
+[Jest Global Teardown] Redis test server stopped
+
+ig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P1_CHAINS);···
+    // Validate environment configuration (exits on critical errors, warns on non-critical)·
+    validatePartitionEnvironmentConfig(envConfig, P1_PARTITION_ID, P1_CHAINS, logger);···
+    // =============================================================================·
+    // Service Configuration·
+    // =============================================================================···
+    // Service configuration for shared utilities·
+    const serviceConfig: PartitionServiceConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      serviceName: PARTITION_SERVICE_NAMES[P1_PARTITION_ID] ?? 'partition-asia-fast',·
+      defaultChains: P1_CHAINS,·
+      defaultPort: P1_DEFAULT_PORT,·
+      region: P1_REGION,·
+      provider: partitionConfig?.provider ?? 'oracle'·
+    };···
+    // Store server reference for graceful shutdown·
+    const healthServerRef: { current: Server | null } = { current: null };···
+    // Unified detector configuration (uses typed envConfig)·
+    // BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)·
+    // to properly handle falsy but valid values like empty strings or 0·
+    // BUG-FIX: Add optional chaining for envConfig properties for test compatibility·
+    const config: UnifiedDetectorConfig = {·
+      partitionId: P1_PARTITION_ID,·
+      chains: validateAndFilterChains(envConfig?.partitionChains, P1_CHAINS, logger),·
+      instanceId: generateInstanceId(P1_PARTITION_ID, envConfig?.instanceId),·
+      regionId: envConfig?.regionId ?? P1_REGION,·
+      enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,·
+      healthCheckPort: parsePort(envConfig?.healthCheckPort, P1_DEFAULT_PORT, logger)·
+    };···
+    // =============================================================================·
+    // Service Instance·
+    // =============================================================================···
+    const detector = new UnifiedChainDetector(config);···
+    // =============================================================================·
+    // Event Handlers (Using shared utilities)·
+    // =============================================================================···
+    setupDetectorEventHandlers(detector, logger, P1_PARTITION_ID);···
+    // =============================================================================·
+    // Process Handlers (Using shared utilities with shutdown guard)·
+    // =============================================================================···
+    // Store cleanup function to prevent MaxListenersExceeded warnings·
+    // in test scenarios and allow proper handler cleanup·
+    const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);···
+    // =============================================================================·
+    // Main Entry Point·
+    // =============================================================================···
+    // Guard against multiple main() invocations (e.g., from integration tests)·
+    // FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)·
+    // This is cleaner and more explicit about the service lifecycle state·
+    type MainState = 'idle' | 'starting' | 'started' | 'failed';·
+    let mainState: MainState = 'idle';···
+    async function main(): Promise<void> {·
+      // Check-and-set guard prevents duplicate invocations within same event loop tick·
+      if (mainState !== 'idle') {·
+        logger.warn('main() already started or starting, ignoring duplicate invocation', {·
+          currentState: mainState·
+        });·
+        return;·
+      }·
+      mainState = 'starting';···
+      logger.info('Starting P1 Asia-Fast Partition Service', {·
+        partitionId: P1_PARTITION_ID,·
+        chains: config.chains,·
+        region: P1_REGION,·
+        provider: serviceConfig.provider,·
+        nodeVersion: process.version,·
+        pid: process.pid·
+      });···
+      try {·
+        // Start health check server first (using shared utilities)·
+        // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly·
+        healthServerRef.current = createPartitionHealthServer({·
+          port: config.healthCheckPort ?? P1_DEFAULT_PORT,·
+          config: serviceConfig,·
+          detector,·
+          logger·
+        });···
+        // Start detector·
+        await detector.start();···
+        // BUG-FIX: Mark as fully started only after successful completion·
+        mainState = 'started';···
+        logger.info('P1 Asia-Fast Partition Service started successfully', {·
+          partitionId: detector.getPartitionId(),·
+          chains: detector.getChains(),·
+          healthyChains: detector.getHealthyChains()·
+        });···
+      } catch (error) {·
+        // BUG-FIX: Mark as failed instead of resetting to idle·
+        mainState = 'failed';···
+        logger.error('Failed to start P1 Asia-Fast Partition Service', { error });···
+        // BUG-FIX: Explicit null check before closing server·
+        // Server may be null if createPartitionHealthServer threw before assignment·
+        if (healthServerRef.current) {·
+          await closeServerWithTimeout(healthServerRef.current, 1000, logger);·
+        }···
+        // BUG-FIX: Clear server reference after closing to prevent stale reference issues·
+        healthServerRef.current = null;···
+        // Clean up process handlers before exit to prevent listener leaks·
+        cleanupProcessHandlers();···
+        process.exit(1);·
+      }·
+    }···
+    // Run - only when this is the main entry point (not when imported by tests)·
+    // Check for Jest worker to prevent auto-start during test imports·
+    if (!process.env.JEST_WORKER_ID) {·
+      main().catch((error) => {·
+        // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails·
+        try {·
+          if (logger) {·
+            logger.error('Fatal error in P1 Asia-Fast partition main', { error });·
+          } else {·
+            console.error('Fatal error in P1 Asia-Fast partition main (logger unavailable):', error);·
+          }·
+        } catch (logError) {·
+          // Last resort - write to stderr directly·
+          process.stderr.write(`FATAL: ${error}\\nLOG ERROR: ${logError}\\n`);·
+        }·
+        process.exit(1);·
+      });·
+    }···
+    // =============================================================================·
+    // Exports·
+    // =============================================================================···
+    export {·
+      detector,·
+      config,·
+      P1_PARTITION_ID,·
+      P1_CHAINS,·
+      P1_REGION,·
+      cleanupProcessHandlers,·
+      // Export for testing·
+      envConfig·
+    };···
+    // Re-export type from shared utilities for convenience·
+    export type { PartitionEnvironmentConfig };·
+    "
+
+    [0m [90m 1862 |[39m         [36mconst[39m content [33m=[39m fs[33m.[39mreadFileSync(filePath[33m,[39m [32m'utf-8'[39m)[33m;[39m
+     [90m 1863 |[39m
+    [31m[1m>[22m[39m[90m 1864 |[39m         expect(content)[33m.[39mtoContain([32m'parsePort(process.env.HEALTH_CHECK_PORT'[39m)[33m;[39m
+     [90m      |[39m                         [31m[1m^[22m[39m
+     [90m 1865 |[39m       }
+     [90m 1866 |[39m     })[33m;[39m
+     [90m 1867 |[39m   })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/integration/s3.1.6-partition-solana.integration.test.ts:1864:25)
+
+FAIL tests/performance/hot-path-detection.perf.ts (57.857 s)
+  ● Hot Path Performance - Detection (<50ms) › Arbitrage Detection › should handle batch detection for 100 pairs in <50ms
+
+    Batch detection: P99 127.19ms exceeds threshold 100ms (2x target)
+
+    [0m [90m 180 |[39m
+     [90m 181 |[39m   [36mif[39m (result[33m.[39mp99Ms [33m>[39m p99Threshold) {
+    [31m[1m>[22m[39m[90m 182 |[39m     [36mthrow[39m [36mnew[39m [33mError[39m(
+     [90m     |[39m           [31m[1m^[22m[39m
+     [90m 183 |[39m       [32m`${label}: P99 ${result.p99Ms.toFixed(2)}ms exceeds threshold ${p99Threshold}ms (${PERFORMANCE_THRESHOLDS.P99_MULTIPLIER}x target)`[39m
+     [90m 184 |[39m     )[33m;[39m
+     [90m 185 |[39m   }[0m
+
+      at assertPerformance (tests/performance/thresholds.ts:182:11)
+      at Object.<anonymous> (tests/performance/hot-path-detection.perf.ts:223:24)
+
+FAIL services/mempool-detector/src/__tests__/integration/success-criteria.integration.test.ts (10.3 s)
+  ● Success Criteria: Feed Latency (<10ms) › should decode real transactions within 10ms latency budget
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 10
+    Received:   42.784599999999045
+
+    [0m [90m 435 |[39m     console[33m.[39mlog([32m'==========================================\n'[39m)[33m;[39m
+     [90m 436 |[39m
+    [31m[1m>[22m[39m[90m 437 |[39m     expect(maxLatency)[33m.[39mtoBeLessThan([33mSUCCESS_CRITERIA[39m[33m.[39m[33mMAX_FEED_LATENCY_MS[39m)[33m;[39m
+     [90m     |[39m                        [31m[1m^[22m[39m
+     [90m 438 |[39m   })[33m;[39m
+     [90m 439 |[39m
+     [90m 440 |[39m   it([32m'should handle high-throughput decoding of real transactions within latency budget'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (services/mempool-detector/src/__tests__/integration/success-criteria.integration.test.ts:437:24)
+
+FAIL shared/core/__tests__/unit/tier2-optimizations.test.ts (6.569 s)
+  ● T2.7: Price Momentum Detection › Performance › should handle high-frequency updates efficiently
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 100
+    Received:   303.6564000000071
+
+    [0m [90m 1123 |[39m
+     [90m 1124 |[39m       [90m// Should complete in under 100ms[39m
+    [31m[1m>[22m[39m[90m 1125 |[39m       expect(elapsed)[33m.[39mtoBeLessThan([35m100[39m)[33m;[39m
+     [90m      |[39m                       [31m[1m^[22m[39m
+     [90m 1126 |[39m     })[33m;[39m
+     [90m 1127 |[39m
+     [90m 1128 |[39m     it([32m'should calculate signals quickly'[39m[33m,[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (shared/core/__tests__/unit/tier2-optimizations.test.ts:1125:23)
+
+  ● T2.7: Price Momentum Detection › Performance › should calculate signals quickly
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 200
+    Received:   446.67369999999937
+
+    [0m [90m 1143 |[39m
+     [90m 1144 |[39m       [90m// Should complete in under 200ms (increased from 50ms for CI environment stability)[39m
+    [31m[1m>[22m[39m[90m 1145 |[39m       expect(elapsed)[33m.[39mtoBeLessThan([35m200[39m)[33m;[39m
+     [90m      |[39m                       [31m[1m^[22m[39m
+     [90m 1146 |[39m     })[33m;[39m
+     [90m 1147 |[39m   })[33m;[39m
+     [90m 1148 |[39m })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/core/__tests__/unit/tier2-optimizations.test.ts:1145:23)
+
+FAIL shared/core/__tests__/unit/regression.test.ts
+  ● Promise.allSettled Cleanup Regression Tests › should run cleanup in parallel
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 100
+    Received:   129
+
+    [0m [90m 591 |[39m
+     [90m 592 |[39m     [90m// If running in parallel, total time should be ~50ms, not ~150ms[39m
+    [31m[1m>[22m[39m[90m 593 |[39m     expect(totalTime)[33m.[39mtoBeLessThan([35m100[39m)[33m;[39m
+     [90m     |[39m                       [31m[1m^[22m[39m
+     [90m 594 |[39m
+     [90m 595 |[39m     [90m// All should have started at roughly the same time[39m
+     [90m 596 |[39m     [36mconst[39m startSpread [33m=[39m [33mMath[39m[33m.[39mmax([33m...[39mstartTimes) [33m-[39m [33mMath[39m[33m.[39mmin([33m...[39mstartTimes)[33m;[39m[0m
+
+      at Object.<anonymous> (shared/core/__tests__/unit/regression.test.ts:593:23)
+
+FAIL shared/core/__tests__/unit/tier1-optimizations.test.ts
+  ● T1.1: Token Pair Indexing › Index Performance › should enable O(1) pair lookup
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 50
+    Received:   179.64050000000861
+
+    [0m [90m 521 |[39m
+     [90m 522 |[39m       [90m// 10k Map lookups should complete in < 10ms[39m
+    [31m[1m>[22m[39m[90m 523 |[39m       expect(lookupTime)[33m.[39mtoBeLessThan([35m50[39m)[33m;[39m
+     [90m     |[39m                          [31m[1m^[22m[39m
+     [90m 524 |[39m     })[33m;[39m
+     [90m 525 |[39m   })[33m;[39m
+     [90m 526 |[39m })[33m;[39m[0m
+
+      at Object.<anonymous> (shared/core/__tests__/unit/tier1-optimizations.test.ts:523:26)
+
+FAIL shared/config/__tests__/unit/chains/chain-url-builder.test.ts
+  ● Test suite failed to run
+
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m13[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module './chain-url-builder' or its corresponding type declarations.
+
+    [7m13[0m } from './chain-url-builder';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~~~~~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m122[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m122[0m           rpcUrlTemplate: (key) => `https://opt-mainnet.g.alchemy.com/v2/${key}`,
+    [7m   [0m [91m                           ~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m123[0m:[93m27[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m123[0m           wsUrlTemplate: (key) => `wss://opt-mainnet.g.alchemy.com/v2/${key}`,
+    [7m   [0m [91m                          ~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m146[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m146[0m           rpcUrlTemplate: (key) => `https://primary/${key}`,
+    [7m   [0m [91m                           ~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m147[0m:[93m27[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m147[0m           wsUrlTemplate: (key) => `wss://primary/${key}`,
+    [7m   [0m [91m                          ~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m151[0m:[93m28[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m151[0m           rpcUrlTemplate: (key) => `https://secondary/${key}`,
+    [7m   [0m [91m                           ~~~[0m
+    [96mshared/config/__tests__/unit/chains/chain-url-builder.test.ts[0m:[93m152[0m:[93m27[0m - [91merror[0m[90m TS7006: [0mParameter 'key' implicitly has an 'any' type.
+
+    [7m152[0m           wsUrlTemplate: (key) => `wss://secondary/${key}`,
+    [7m   [0m [91m                          ~~~[0m
+
+FAIL services/execution-engine/__tests__/unit/strategies/flash-loan-providers/provider-factory.test.ts
+  ● Test suite failed to run
+
+    TypeError: abi is not iterable
+
+    [0m [90m 36 |[39m [90m * @see service-config.ts for full ABI documentation[39m
+     [90m 37 |[39m [90m */[39m
+    [31m[1m>[22m[39m[90m 38 |[39m [36mconst[39m [33mFLASH_LOAN_INTERFACE[39m [33m=[39m [36mnew[39m ethers[33m.[39m[33mInterface[39m([33mFLASH_LOAN_ARBITRAGE_ABI[39m)[33m;[39m
+     [90m    |[39m                              [31m[1m^[22m[39m
+     [90m 39 |[39m
+     [90m 40 |[39m [90m/**[39m
+     [90m 41 |[39m [90m * Aave V3 Flash Loan Provider[39m[0m
+
+      at new Interface (node_modules/ethers/src.ts/abi/interface.ts:342:25)
+      at Object.<anonymous> (services/execution-engine/src/strategies/flash-loan-providers/aave-v3.provider.ts:38:30)
+      at Object.<anonymous> (services/execution-engine/src/strategies/flash-loan-providers/provider-factory.ts:22:1)
+      at Object.<anonymous> (services/execution-engine/__tests__/unit/strategies/flash-loan-providers/provider-factory.test.ts:13:1)
+
+FAIL services/execution-engine/__tests__/unit/strategies/cross-chain.strategy.test.ts
+  ● Test suite failed to run
+
+    [96mservices/execution-engine/__tests__/unit/strategies/cross-chain.strategy.test.ts[0m:[93m23[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module '../services/simulation/types' or its corresponding type declarations.
+
+    [7m23[0m } from '../services/simulation/types';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+FAIL services/execution-engine/__tests__/unit/strategies/intra-chain.strategy.test.ts
+  ● Test suite failed to run
+
+    [96mservices/execution-engine/__tests__/unit/strategies/intra-chain.strategy.test.ts[0m:[93m22[0m:[93m8[0m - [91merror[0m[90m TS2307: [0mCannot find module '../services/simulation/types' or its corresponding type declarations.
+
+    [7m22[0m } from '../services/simulation/types';
+    [7m  [0m [91m       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+Test Suites: 25 failed, 2 skipped, 163 passed, 188 of 190 total
+Tests:       35 failed, 51 skipped, 92 todo, 7302 passed, 7480 total
+Snapshots:   0 total
+Time:        4599.692 s
+Ran all test suites in 4 projects.
+
+[Jest Global Teardown] Stopping Redis test server...
+[Jest Global Teardown] Redis test server stopped
+

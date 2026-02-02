@@ -116,16 +116,21 @@ function validateAndGetEnvBackend(): TFBackend | null {
  * Determine the optimal backend based on environment.
  *
  * FIX 1.3, 2.3, 3.1: Updated selection logic with accurate comments.
+ * FIX P0-2: Accept optional flag indicating if preferredBackend was explicitly specified
+ *
+ * @param config - Full backend configuration
+ * @param explicitBackend - True if preferredBackend was explicitly provided by caller
  */
-function selectBackend(config: Required<BackendConfig>): TFBackend {
+function selectBackend(config: Required<BackendConfig>, explicitBackend: boolean): TFBackend {
   // FIX 3.2: Check for forced backend via environment variable with validation
   const forcedBackend = validateAndGetEnvBackend();
   if (forcedBackend) {
     return forcedBackend;
   }
 
-  // Use preferred backend from config if specified
-  if (config.preferredBackend) {
+  // FIX P0-2: Only use config.preferredBackend if explicitly specified by caller
+  // This allows environment-based auto-selection when caller doesn't specify a backend
+  if (explicitBackend && config.preferredBackend) {
     return config.preferredBackend;
   }
 
@@ -190,8 +195,12 @@ export async function initializeTensorFlow(
     };
   }
 
+  // FIX P0-2: Track whether preferredBackend was explicitly specified by caller
+  // This enables environment-based auto-selection when not specified
+  const explicitBackend = config.preferredBackend !== undefined;
+
   // Start initialization
-  initializationPromise = doInitialize({ ...DEFAULT_CONFIG, ...config });
+  initializationPromise = doInitialize({ ...DEFAULT_CONFIG, ...config }, explicitBackend);
   return initializationPromise;
 }
 
@@ -233,8 +242,11 @@ async function initBackendWithTimeout(
   );
 }
 
-async function doInitialize(config: Required<BackendConfig>): Promise<BackendInitResult> {
-  const selectedBackend = selectBackend(config);
+async function doInitialize(
+  config: Required<BackendConfig>,
+  explicitBackend: boolean
+): Promise<BackendInitResult> {
+  const selectedBackend = selectBackend(config, explicitBackend);
 
   try {
     if (config.logInfo) {

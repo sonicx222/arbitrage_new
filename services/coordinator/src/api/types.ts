@@ -61,6 +61,8 @@ export interface SystemMetrics {
   activePairsTracked: number;
   // Price feed metrics (S3.3.5 - Solana Price Feed Integration)
   priceUpdatesReceived: number;
+  // P1-7 FIX: Track dropped opportunities for monitoring
+  opportunitiesDropped: number;
 }
 
 // =============================================================================
