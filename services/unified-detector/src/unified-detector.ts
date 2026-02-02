@@ -54,8 +54,9 @@ import {
 } from './chain-instance-manager';
 import { HealthReporter, createHealthReporter } from './health-reporter';
 import { MetricsCollector, createMetricsCollector } from './metrics-collector';
-// REFACTOR: Import shared Logger type to eliminate duplication
-import type { Logger } from './types';
+// REFACTOR: Import shared types to eliminate duplication
+// ChainStats moved to types.ts to fix circular dependency
+import type { Logger, ChainStats } from './types';
 
 // =============================================================================
 // Types
@@ -128,17 +129,11 @@ export interface UnifiedDetectorStats {
   chainStats: Map<string, ChainStats>;
 }
 
-export interface ChainStats {
-  chainId: string;
-  status: 'connected' | 'connecting' | 'disconnected' | 'error';
-  eventsProcessed: number;
-  opportunitiesFound: number;
-  lastBlockNumber: number;
-  avgBlockLatencyMs: number;
-  pairsMonitored: number;
-  /** FIX 10.4: Expose hot pair count for monitoring volatility-based prioritization */
-  hotPairsCount?: number;
-}
+// ChainStats moved to types.ts to fix circular dependency:
+// - chain-instance.ts imported ChainStats from unified-detector.ts
+// - unified-detector.ts imported ChainDetectorInstance from chain-instance.ts
+// Re-export for backward compatibility with existing consumers
+export type { ChainStats } from './types';
 
 // =============================================================================
 // Unified Chain Detector

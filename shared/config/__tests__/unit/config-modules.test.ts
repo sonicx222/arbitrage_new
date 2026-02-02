@@ -45,7 +45,7 @@ import {
   CHAINS,
   MAINNET_CHAIN_IDS,
   TESTNET_CHAINS
-} from './index';
+} from '../../src';
 
 // =============================================================================
 // CROSS-CHAIN MODULE TESTS
@@ -287,10 +287,10 @@ describe('Service Config Module', () => {
 
     it('should have Solana bridge routes (Wormhole)', () => {
       const solanaBridges = BRIDGE_COSTS.filter(
-        b => b.sourceChain === 'solana' || b.targetChain === 'solana'
+        (b: { sourceChain: string; targetChain: string }) => b.sourceChain === 'solana' || b.targetChain === 'solana'
       );
       expect(solanaBridges.length).toBeGreaterThan(0);
-      expect(solanaBridges.every(b => b.bridge === 'wormhole')).toBe(true);
+      expect(solanaBridges.every((b: { bridge: string }) => b.bridge === 'wormhole')).toBe(true);
     });
   });
 
@@ -321,7 +321,7 @@ describe('Service Config Module', () => {
       const all = getAllBridgeOptions('ethereum', 'arbitrum');
 
       if (all.length > 1) {
-        const lowestFee = Math.min(...all.map(b => b.feePercentage));
+        const lowestFee = Math.min(...all.map((b: { feePercentage: number }) => b.feePercentage));
         expect(best!.feePercentage).toBe(lowestFee);
       }
     });
@@ -502,7 +502,7 @@ describe('Detector Config Module', () => {
     });
 
     it('should have valid batch sizes', () => {
-      for (const [, config] of Object.entries(DETECTOR_CONFIG)) {
+      for (const [, config] of Object.entries(DETECTOR_CONFIG) as [string, { batchSize: number }][]) {
         expect(config.batchSize).toBeGreaterThan(0);
         expect(config.batchSize).toBeLessThanOrEqual(1000); // Reasonable upper limit
       }
@@ -569,10 +569,10 @@ describe('Chains Module', () => {
 
   describe('getAllChains', () => {
     // Import getAllChains for this test
-    let getAllChains: () => Record<string, import('../../types').Chain>;
+    let getAllChains: () => Record<string, import('../../../types').Chain>;
 
     beforeAll(async () => {
-      const module = await import('./chains');
+      const module = await import('../../src/chains');
       getAllChains = module.getAllChains;
     });
 
@@ -613,11 +613,11 @@ describe('Chains Module', () => {
 // =============================================================================
 describe('Event Config Module', () => {
   // Import event config
-  let EVENT_CONFIG: typeof import('./event-config').EVENT_CONFIG;
-  let EVENT_SIGNATURES: typeof import('./event-config').EVENT_SIGNATURES;
+  let EVENT_CONFIG: typeof import('../../src/event-config').EVENT_CONFIG;
+  let EVENT_SIGNATURES: typeof import('../../src/event-config').EVENT_SIGNATURES;
 
   beforeAll(async () => {
-    const module = await import('./event-config');
+    const module = await import('../../src/event-config');
     EVENT_CONFIG = module.EVENT_CONFIG;
     EVENT_SIGNATURES = module.EVENT_SIGNATURES;
   });

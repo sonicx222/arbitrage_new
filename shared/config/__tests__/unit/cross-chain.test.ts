@@ -16,7 +16,7 @@ import {
   getChainSpecificTokenSymbol,
   DEFAULT_QUOTE_TOKENS,
   getDefaultQuoteToken
-} from './cross-chain';
+} from '../../src/cross-chain';
 
 describe('Cross-Chain Token Normalization', () => {
   describe('CROSS_CHAIN_TOKEN_ALIASES', () => {

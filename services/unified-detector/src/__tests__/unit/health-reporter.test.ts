@@ -10,7 +10,7 @@ import {
   createHealthReporter,
   HealthReporterConfig,
 } from '../../health-reporter';
-import { ChainStats } from '../../unified-detector';
+import type { ChainStats } from '../../types';
 import { PartitionHealth, ChainHealth } from '@arbitrage/config';
 import { RecordingLogger } from '@arbitrage/core';
 

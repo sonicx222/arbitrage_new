@@ -61,6 +61,7 @@ const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStat
   failedExecutions: 10,
   queueRejects: 5,
   lockConflicts: 2,
+  staleLockRecoveries: 0,
   executionTimeouts: 3,
   validationErrors: 1,
   providerReconnections: 2,

@@ -106,10 +106,17 @@ import {
   CircuitBreakerEvent,
   CircuitBreakerStatus,
 } from './services/circuit-breaker';
+// P0 Refactoring: Health monitoring extracted from engine.ts
+import {
+  HealthMonitoringManager,
+  createHealthMonitoringManager,
+} from './services/health-monitoring-manager';
 // Phase 2 components
 import { AnvilForkManager, createAnvilForkManager } from './services/simulation/anvil-manager';
 import { PendingStateSimulator, createPendingStateSimulator } from './services/simulation/pending-state-simulator';
 import { HotForkSynchronizer, createHotForkSynchronizer } from './services/simulation/hot-fork-synchronizer';
+// R2: Extracted risk management orchestrator
+import { RiskManagementOrchestrator, createRiskOrchestrator } from './risk';
 
 // Re-export types for consumers
 export type {
@@ -173,6 +180,8 @@ export class ExecutionEngineService {
   private positionSizer: KellyPositionSizer | null = null;
   private probabilityTracker: ExecutionProbabilityTracker | null = null;
   private riskManagementEnabled = false;
+  // R2: Extracted orchestrator encapsulates risk assessment logic
+  private riskOrchestrator: RiskManagementOrchestrator | null = null;
 
   // Phase 2: Pending state simulation components
   private anvilForkManager: AnvilForkManager | null = null;
@@ -211,10 +220,12 @@ export class ExecutionEngineService {
   // Tracks repeated lock conflicts to detect crashed lock holders
   private lockConflictTracker = new LockConflictTracker();
 
-  // Intervals
+  // P0 Refactoring: Health monitoring extracted to dedicated manager
+  // Handles non-hot-path interval operations (health checks, gas cleanup, pending cleanup)
+  private healthMonitoringManager: HealthMonitoringManager | null = null;
+
+  // Intervals (only executionProcessingInterval remains in engine - hot path related)
   private executionProcessingInterval: NodeJS.Timeout | null = null;
-  private healthMonitoringInterval: NodeJS.Timeout | null = null;
-  private stalePendingCleanupInterval: NodeJS.Timeout | null = null;
 
   constructor(config: ExecutionEngineConfig = {}) {
     // Initialize simulation config
@@ -431,6 +442,19 @@ export class ExecutionEngineService {
       this.probabilityTracker = riskResult.probabilityTracker;
       this.riskManagementEnabled = riskResult.enabled;
 
+      // R2: Create risk orchestrator to encapsulate assessment logic
+      // This replaces ~110 LOC of inline risk checks in executeOpportunity()
+      if (this.riskManagementEnabled) {
+        this.riskOrchestrator = createRiskOrchestrator({
+          drawdownBreaker: this.drawdownBreaker,
+          evCalculator: this.evCalculator,
+          positionSizer: this.positionSizer,
+          probabilityTracker: this.probabilityTracker,
+          logger: this.logger,
+          stats: this.stats,
+        });
+      }
+
       // CRITICAL FIX: Throw on risk management failure in production
       // Previously this only logged a warning, allowing trades to execute without
       // proper risk controls (drawdown limits, position sizing). This is dangerous
@@ -469,11 +493,29 @@ export class ExecutionEngineService {
       // Start execution processing
       this.startExecutionProcessing();
 
-      // Start health monitoring
-      this.startHealthMonitoring();
-
       // Start simulation metrics collector (Phase 1.1.3)
+      // Note: Must start before health monitoring to provide metrics
       this.startSimulationMetricsCollection();
+
+      // P0 Refactoring: Create and start health monitoring manager
+      // All dependencies passed via constructor (one-time cost)
+      // Maps passed by reference (no copy) per constraint #2
+      this.healthMonitoringManager = createHealthMonitoringManager({
+        logger: this.logger,
+        perfLogger: this.perfLogger,
+        stateManager: this.stateManager,
+        stats: this.stats,
+        gasBaselines: this.gasBaselines, // By reference
+        lockConflictTracker: this.lockConflictTracker,
+        consumerConfig: this.consumerConfig,
+        // Getters for nullable services
+        getStreamsClient: () => this.streamsClient,
+        getRedis: () => this.redis,
+        getQueueService: () => this.queueService,
+        getOpportunityConsumer: () => this.opportunityConsumer,
+        getSimulationMetricsSnapshot: () => this.simulationMetricsCollector?.getSnapshot() ?? null,
+      });
+      this.healthMonitoringManager.start();
 
       this.logger.info('Execution Engine Service started successfully');
     });
@@ -490,8 +532,14 @@ export class ExecutionEngineService {
     const result = await this.stateManager.executeStop(async () => {
       this.logger.info('Stopping Execution Engine Service');
 
-      // Clear intervals
+      // Clear execution processing interval (hot-path related)
       this.clearIntervals();
+
+      // P0 Refactoring: Stop health monitoring manager
+      if (this.healthMonitoringManager) {
+        this.healthMonitoringManager.stop();
+        this.healthMonitoringManager = null;
+      }
 
       // Stop simulation metrics collector (Phase 1.1.3)
       if (this.simulationMetricsCollector) {
@@ -592,6 +640,7 @@ export class ExecutionEngineService {
       this.positionSizer = null;
       this.probabilityTracker = null;
       this.riskManagementEnabled = false;
+      this.riskOrchestrator = null;
 
       // FIX 1.1: Reset initialization module state to allow re-initialization
       resetInitializationState();
@@ -606,18 +655,16 @@ export class ExecutionEngineService {
     }
   }
 
+  /**
+   * Clear execution processing interval.
+   *
+   * P0 Refactoring: Health monitoring intervals now managed by HealthMonitoringManager.
+   * Only executionProcessingInterval remains here (hot-path related).
+   */
   private clearIntervals(): void {
     if (this.executionProcessingInterval) {
       clearInterval(this.executionProcessingInterval);
       this.executionProcessingInterval = null;
-    }
-    if (this.healthMonitoringInterval) {
-      clearInterval(this.healthMonitoringInterval);
-      this.healthMonitoringInterval = null;
-    }
-    if (this.stalePendingCleanupInterval) {
-      clearInterval(this.stalePendingCleanupInterval);
-      this.stalePendingCleanupInterval = null;
     }
   }
 
@@ -1254,115 +1301,71 @@ export class ExecutionEngineService {
 
       // =======================================================================
       // Phase 3: Capital Risk Management Checks (Task 3.4.5)
+      // R2: Refactored to use RiskManagementOrchestrator
       // =======================================================================
 
-      if (this.riskManagementEnabled && !this.isSimulationMode) {
-        // Step 1: Check drawdown circuit breaker
-        if (this.drawdownBreaker) {
-          drawdownCheck = this.drawdownBreaker.isTradingAllowed();
+      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
+        const riskDecision = this.riskOrchestrator.assess({
+          chain,
+          dex,
+          pathLength: opportunity.path?.length ?? 2,
+          expectedProfit: opportunity.expectedProfit,
+          // Convert string Wei to number for orchestrator (ArbitrageOpportunity.gasEstimate is string)
+          gasEstimate: opportunity.gasEstimate ? Number(opportunity.gasEstimate) : undefined,
+        });
 
-          if (!drawdownCheck.allowed) {
-            this.stats.riskDrawdownBlocks++;
+        // Store results for later use (outcome recording)
+        drawdownCheck = riskDecision.drawdownCheck ?? null;
+        evCalc = riskDecision.evCalculation ?? null;
+        positionSize = riskDecision.positionSize ?? null;
+
+        if (!riskDecision.allowed) {
+          // Map rejection code to execution error code
+          const errorCode = riskDecision.rejectionCode === 'DRAWDOWN_HALT'
+            ? ExecutionErrorCode.DRAWDOWN_HALT
+            : riskDecision.rejectionCode === 'LOW_EV'
+              ? ExecutionErrorCode.LOW_EV
+              : ExecutionErrorCode.POSITION_SIZE;
+
+          // Log with opportunity context
+          if (riskDecision.rejectionCode === 'DRAWDOWN_HALT') {
             this.logger.warn('Trade blocked by drawdown circuit breaker', {
               id: opportunity.id,
-              state: drawdownCheck.state,
-              reason: drawdownCheck.reason,
+              state: drawdownCheck?.state,
+              reason: riskDecision.rejectionReason,
             });
-
-            const skippedResult = createSkippedResult(
-              opportunity.id,
-              `${ExecutionErrorCode.DRAWDOWN_HALT}: ${drawdownCheck.reason}`,
-              chain,
-              dex
-            );
-            await this.publishExecutionResult(skippedResult);
-            return;
+          } else {
+            this.logger.debug(`Trade rejected: ${riskDecision.rejectionReason}`, {
+              id: opportunity.id,
+              code: riskDecision.rejectionCode,
+            });
           }
 
-          // Track trades executed with reduced position sizing
-          // Note: HALT state returns early above, so we only reach here for allowed states
-          if (drawdownCheck.state === 'CAUTION') {
-            this.stats.riskCautionCount++;
-            this.logger.debug('Trading with reduced position size (CAUTION)', {
-              id: opportunity.id,
-              sizeMultiplier: drawdownCheck.sizeMultiplier,
-            });
-          } else if (drawdownCheck.state === 'RECOVERY') {
-            this.logger.debug('Trading with reduced position size (RECOVERY)', {
-              id: opportunity.id,
-              sizeMultiplier: drawdownCheck.sizeMultiplier,
-            });
-          }
-        }
-
-        // Step 2: Calculate Expected Value
-        if (this.evCalculator && RISK_CONFIG.ev.enabled) {
-          evCalc = this.evCalculator.calculate({
+          const skippedResult = createSkippedResult(
+            opportunity.id,
+            `${errorCode}: ${riskDecision.rejectionReason}`,
             chain,
-            dex,
-            pathLength: opportunity.path?.length ?? 2,
-            estimatedProfit: opportunity.expectedProfit ? BigInt(Math.floor(opportunity.expectedProfit * 1e18)) : undefined,
-            estimatedGas: opportunity.gasEstimate ? BigInt(opportunity.gasEstimate) : undefined,
-          });
-
-          if (!evCalc.shouldExecute) {
-            this.stats.riskEVRejections++;
-            this.logger.debug('Trade rejected due to low expected value', {
-              id: opportunity.id,
-              expectedValue: evCalc.expectedValue.toString(),
-              winProbability: evCalc.winProbability,
-              reason: evCalc.reason,
-            });
-
-            const skippedResult = createSkippedResult(
-              opportunity.id,
-              `${ExecutionErrorCode.LOW_EV}: ${evCalc.reason}`,
-              chain,
-              dex
-            );
-            await this.publishExecutionResult(skippedResult);
-            return;
-          }
+            dex
+          );
+          await this.publishExecutionResult(skippedResult);
+          return;
         }
 
-        // Step 3: Size position using Kelly Criterion
-        if (this.positionSizer && RISK_CONFIG.positionSizing.enabled && evCalc) {
-          positionSize = this.positionSizer.calculateSize({
-            winProbability: evCalc.winProbability,
-            expectedProfit: evCalc.rawProfitEstimate,
-            expectedLoss: evCalc.rawGasCost,
-          });
-
-          // Apply drawdown state multiplier to position size
-          // FIX 10.2: Use direct property mutation instead of object spread for performance
-          if (drawdownCheck && positionSize.recommendedSize > 0n) {
-            const multiplier = BigInt(Math.floor(drawdownCheck.sizeMultiplier * 10000));
-            positionSize.recommendedSize = (positionSize.recommendedSize * multiplier) / 10000n;
-          }
-
-          if (!positionSize.shouldTrade || positionSize.recommendedSize === 0n) {
-            this.stats.riskPositionSizeRejections++;
-            this.logger.debug('Trade rejected due to position sizing', {
-              id: opportunity.id,
-              reason: positionSize.reason,
-              kellyFraction: positionSize.kellyFraction,
-            });
-
-            const skippedResult = createSkippedResult(
-              opportunity.id,
-              `${ExecutionErrorCode.POSITION_SIZE}: ${positionSize.reason}`,
-              chain,
-              dex
-            );
-            await this.publishExecutionResult(skippedResult);
-            return;
-          }
-
+        // Log position sizing info for allowed trades
+        if (positionSize && riskDecision.recommendedSize) {
           this.logger.debug('Position sized for trade', {
             id: opportunity.id,
-            recommendedSize: positionSize.recommendedSize.toString(),
+            recommendedSize: riskDecision.recommendedSize.toString(),
             fractionOfCapital: positionSize.fractionOfCapital,
             sizeMultiplier: drawdownCheck?.sizeMultiplier ?? 1.0,
+          });
+        }
+
+        // Log reduced position states
+        if (drawdownCheck?.state === 'CAUTION' || drawdownCheck?.state === 'RECOVERY') {
+          this.logger.debug(`Trading with reduced position size (${drawdownCheck.state})`, {
+            id: opportunity.id,
+            sizeMultiplier: drawdownCheck.sizeMultiplier,
           });
         }
       }
@@ -1387,42 +1390,22 @@ export class ExecutionEngineService {
 
       // =======================================================================
       // Record Outcome for Risk Management (Task 3.4.5)
+      // R2: Refactored to use RiskManagementOrchestrator
       // =======================================================================
 
-      if (this.riskManagementEnabled && !this.isSimulationMode) {
-        // Record outcome to probability tracker for learning
-        if (this.probabilityTracker) {
-          // FIX 10.1: Use pre-computed last gas price for O(1) hot path access
-          // Instead of array access: gasBaseline[gasBaseline.length - 1].price
-          const currentGasPrice = this.lastGasPrices.get(chain) ?? 0n;
+      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
+        // FIX 10.1: Use pre-computed last gas price for O(1) hot path access
+        const currentGasPrice = this.lastGasPrices.get(chain) ?? 0n;
 
-          this.probabilityTracker.recordOutcome({
-            chain,
-            dex,
-            pathLength: opportunity.path?.length ?? 2,
-            hourOfDay: new Date().getUTCHours(),
-            gasPrice: currentGasPrice,
-            success: result.success,
-            profit: result.actualProfit ? BigInt(Math.floor(result.actualProfit * 1e18)) : undefined,
-            gasCost: result.gasCost ? BigInt(result.gasCost) : 0n,
-            timestamp: Date.now(),
-          });
-        }
-
-        // Update drawdown breaker with trade result
-        if (this.drawdownBreaker) {
-          const pnl = result.success && result.actualProfit
-            ? BigInt(Math.floor(result.actualProfit * 1e18))
-            : result.gasCost
-              ? -BigInt(result.gasCost)
-              : 0n;
-
-          this.drawdownBreaker.recordTradeResult({
-            success: result.success,
-            pnl,
-            timestamp: Date.now(),
-          });
-        }
+        this.riskOrchestrator.recordOutcome({
+          chain,
+          dex,
+          pathLength: opportunity.path?.length ?? 2,
+          success: result.success,
+          actualProfit: result.actualProfit,
+          gasCost: result.gasCost,
+          gasPrice: currentGasPrice,
+        });
       }
 
       if (result.success) {
@@ -1447,11 +1430,15 @@ export class ExecutionEngineService {
       this.circuitBreaker?.recordFailure();
 
       // Record failure to risk management
-      if (this.riskManagementEnabled && !this.isSimulationMode && this.drawdownBreaker) {
-        this.drawdownBreaker.recordTradeResult({
+      // R2: Use orchestrator when available for consistency
+      if (this.riskManagementEnabled && !this.isSimulationMode && this.riskOrchestrator) {
+        this.riskOrchestrator.recordOutcome({
+          chain,
+          dex,
+          pathLength: opportunity.path?.length ?? 2,
           success: false,
-          pnl: 0n, // Unknown loss on error
-          timestamp: Date.now(),
+          actualProfit: undefined,
+          gasCost: undefined,
         });
       }
 
@@ -1510,112 +1497,9 @@ export class ExecutionEngineService {
 
   // ===========================================================================
   // Health Monitoring
+  // P0 Refactoring: Health monitoring logic extracted to HealthMonitoringManager
+  // See: services/health-monitoring-manager.ts
   // ===========================================================================
-
-  private startHealthMonitoring(): void {
-    this.healthMonitoringInterval = setInterval(async () => {
-      try {
-        // Fix 4.2: Cleanup old gas baseline entries to prevent memory leak
-        this.cleanupGasBaselines();
-
-        // P1 FIX: Cleanup stale lock conflict tracking entries
-        this.lockConflictTracker.cleanup();
-
-        const health: ServiceHealth = {
-          name: 'execution-engine',
-          status: this.stateManager.isRunning() ? 'healthy' : 'unhealthy',
-          uptime: process.uptime(),
-          memoryUsage: process.memoryUsage().heapUsed,
-          cpuUsage: 0,
-          lastHeartbeat: Date.now(),
-          error: undefined
-        };
-
-        // Get simulation metrics snapshot (Phase 1.1.3)
-        const simulationMetrics = this.simulationMetricsCollector?.getSnapshot();
-
-        if (this.streamsClient) {
-          await this.streamsClient.xadd(
-            RedisStreamsClient.STREAMS.HEALTH,
-            {
-              ...health,
-              queueSize: this.queueService?.size() ?? 0,
-              queuePaused: this.queueService?.isPaused() ?? false,
-              activeExecutions: this.opportunityConsumer?.getActiveCount() ?? 0,
-              pendingMessages: this.opportunityConsumer?.getPendingCount() ?? 0,
-              stats: this.stats,
-              // Include simulation metrics (Phase 1.1.3)
-              simulationMetrics: simulationMetrics ?? null,
-            }
-          );
-        }
-
-        if (this.redis) {
-          await this.redis.updateServiceHealth('execution-engine', health);
-        }
-
-        this.perfLogger.logHealthCheck('execution-engine', health);
-      } catch (error) {
-        this.logger.error('Execution engine health monitoring failed', { error });
-      }
-    }, 30000);
-
-    // Start stale pending message cleanup interval
-    // FIX: Integrates cleanupStalePendingMessages() into health monitoring
-    const cleanupIntervalMs = this.consumerConfig?.stalePendingCleanupIntervalMs
-      ?? DEFAULT_CONSUMER_CONFIG.stalePendingCleanupIntervalMs;
-
-    if (cleanupIntervalMs > 0) {
-      this.stalePendingCleanupInterval = setInterval(async () => {
-        if (!this.stateManager.isRunning()) return;
-        if (!this.opportunityConsumer) return;
-
-        try {
-          const cleanedCount = await this.opportunityConsumer.cleanupStalePendingMessages();
-          if (cleanedCount > 0) {
-            this.logger.info('Cleaned up stale pending messages', {
-              cleanedCount,
-              intervalMs: cleanupIntervalMs,
-            });
-          }
-        } catch (error) {
-          this.logger.error('Failed to cleanup stale pending messages', {
-            error: getErrorMessage(error),
-          });
-        }
-      }, cleanupIntervalMs);
-
-      this.logger.debug('Stale pending message cleanup interval started', {
-        intervalMs: cleanupIntervalMs,
-      });
-    }
-  }
-
-  /**
-   * Cleanup old gas baseline entries to prevent memory leak.
-   * Fix 4.2: Removes entries older than 5 minutes and limits to 100 entries per chain.
-   */
-  private cleanupGasBaselines(): void {
-    const MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
-    const MAX_ENTRIES_PER_CHAIN = 100;
-    const now = Date.now();
-
-    for (const [chain, history] of this.gasBaselines) {
-      if (history.length === 0) continue;
-
-      // Filter out entries older than MAX_AGE_MS
-      const validEntries = history.filter(entry => (now - entry.timestamp) < MAX_AGE_MS);
-
-      // Also limit to MAX_ENTRIES_PER_CHAIN (keep most recent)
-      const trimmedEntries = validEntries.length > MAX_ENTRIES_PER_CHAIN
-        ? validEntries.slice(-MAX_ENTRIES_PER_CHAIN)
-        : validEntries;
-
-      // Update in place to preserve references (strategies may hold reference to array)
-      history.length = 0;
-      history.push(...trimmedEntries);
-    }
-  }
 
   /**
    * Start simulation metrics collection (Phase 1.1.3)

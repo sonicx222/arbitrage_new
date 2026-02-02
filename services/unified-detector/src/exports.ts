@@ -13,7 +13,9 @@
 
 export { UnifiedChainDetector } from './unified-detector';
 export { ChainDetectorInstance } from './chain-instance';
-export type { UnifiedDetectorConfig, UnifiedDetectorStats, ChainStats } from './unified-detector';
+export type { UnifiedDetectorConfig, UnifiedDetectorStats } from './unified-detector';
+// ChainStats moved to types.ts to fix circular dependency (still re-exported from unified-detector.ts for compat)
+export type { ChainStats } from './types';
 
 // =============================================================================
 // Modular Components (ARCH-REFACTOR)

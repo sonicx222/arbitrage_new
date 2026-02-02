@@ -28,9 +28,11 @@ import {
 import {
   MEMPOOL_CONFIG,
   getEnabledMempoolChains,
+  CHAIN_NAME_TO_ID,
 } from '@arbitrage/config';
 import { BloXrouteFeed, createBloXrouteFeed } from './bloxroute-feed';
-import { SwapDecoderRegistry, createSwapDecoderRegistry, CHAIN_NAME_TO_ID } from './swap-decoder';
+// Use DecoderRegistry directly for better hot-path performance (no wrapper overhead)
+import { DecoderRegistry, createDecoderRegistry } from './decoders';
 import {
   DEFAULT_PENDING_OPPORTUNITIES_STREAM,
   DEFAULT_MEMPOOL_DETECTOR_PORT,
@@ -164,8 +166,8 @@ export class MempoolDetectorService extends EventEmitter {
   // FIX 4.1: Batcher now publishes PendingOpportunity wrapper (not raw PendingSwapIntent)
   private streamBatcher: StreamBatcher<PendingOpportunity> | null = null;
 
-  // FIX 2.1: Swap decoder
-  private swapDecoder: SwapDecoderRegistry | null = null;
+  // FIX 2.1: Swap decoder (using DecoderRegistry directly for hot-path performance)
+  private swapDecoder: DecoderRegistry | null = null;
 
   // FIX 1.3/7.1: Transaction buffer with backpressure
   private txBuffer: CircularBuffer<{ tx: RawPendingTransaction; chainId: string }>;
@@ -269,8 +271,8 @@ export class MempoolDetectorService extends EventEmitter {
     });
 
     try {
-      // FIX 2.1: Initialize swap decoder
-      this.swapDecoder = createSwapDecoderRegistry(this.logger);
+      // FIX 2.1: Initialize swap decoder (using DecoderRegistry directly for hot-path performance)
+      this.swapDecoder = createDecoderRegistry(this.logger);
 
       // FIX 1.2: Initialize Redis streams client
       await this.initializeRedisStreams();
@@ -762,7 +764,7 @@ export function createMempoolDetectorService(
 
 export * from './types';
 export * from './bloxroute-feed';
-export * from './swap-decoder';
+// R5: Removed deprecated './swap-decoder' re-export - use './decoders' directly
 export * from './decoders';
 
 // =============================================================================

@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from '@jest/globals';
 import { DEXES, CHAINS, CORE_TOKENS, PHASE_METRICS } from '../../src/index';
-import { Dex } from '../../types';
+import { Dex } from '../../../types';
 
 // Helper to validate Ethereum address format
 const isValidAddress = (address: string): boolean => {

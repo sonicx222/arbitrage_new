@@ -23,6 +23,45 @@ export interface Logger {
   debug: (message: string, meta?: object) => void;
 }
 
+// =============================================================================
+// Chain Stats Interface
+// =============================================================================
+
+/**
+ * Statistics for a single chain instance.
+ *
+ * FIX: Moved from unified-detector.ts to break circular dependency:
+ * - chain-instance.ts imported ChainStats from unified-detector.ts
+ * - unified-detector.ts imported ChainDetectorInstance from chain-instance.ts
+ *
+ * Now both can import ChainStats from types.ts without circular dependency.
+ */
+export interface ChainStats {
+  /** Chain identifier (e.g., 'ethereum', 'bsc') */
+  chainId: string;
+
+  /** Current connection status */
+  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+
+  /** Total events processed since startup */
+  eventsProcessed: number;
+
+  /** Total arbitrage opportunities found */
+  opportunitiesFound: number;
+
+  /** Last processed block number */
+  lastBlockNumber: number;
+
+  /** Average block latency in milliseconds */
+  avgBlockLatencyMs: number;
+
+  /** Number of pairs being monitored */
+  pairsMonitored: number;
+
+  /** Number of hot pairs (high activity) for volatility-based prioritization */
+  hotPairsCount?: number;
+}
+
 /**
  * FIX Inconsistency 6.3: Helper function to cast RecordingLogger to Logger.
  * Use this in tests for consistent type casting across all test files.

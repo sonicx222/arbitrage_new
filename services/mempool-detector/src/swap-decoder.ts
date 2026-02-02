@@ -1,10 +1,23 @@
 /**
  * Swap Transaction Decoder (Backward Compatible Wrapper)
  *
+ * @deprecated This module is deprecated. Use DecoderRegistry from './decoders' directly.
+ *
  * This module provides backward compatibility with the original SwapDecoderRegistry
  * interface while using the new modular decoder system under the hood.
  *
- * For new code, prefer importing from './decoders' directly.
+ * Migration guide:
+ * ```typescript
+ * // Before (deprecated):
+ * import { SwapDecoderRegistry, createSwapDecoderRegistry } from './swap-decoder';
+ * const registry = createSwapDecoderRegistry(logger);
+ *
+ * // After (recommended):
+ * import { DecoderRegistry, createDecoderRegistry } from './decoders';
+ * const registry = createDecoderRegistry(logger);
+ * ```
+ *
+ * The DecoderRegistry has the same API and is more direct (no wrapper overhead).
  *
  * FIX 7.3: Updated imports to use centralized config for chain ID utilities.
  *
@@ -56,13 +69,20 @@ export { CHAIN_NAME_TO_ID, CHAIN_ID_TO_NAME };
 /**
  * Swap Decoder Registry
  *
+ * @deprecated Use DecoderRegistry from './decoders' instead.
+ * This wrapper adds unnecessary function call overhead in the hot path.
+ *
  * Manages multiple swap decoders and routes transactions to appropriate decoders.
  * This is a backward-compatible wrapper around the new DecoderRegistry.
  *
  * @example
  * ```typescript
+ * // Deprecated:
  * const registry = createSwapDecoderRegistry(logger);
- * const intent = registry.decode(tx, 'ethereum');
+ *
+ * // Use instead:
+ * import { createDecoderRegistry } from './decoders';
+ * const registry = createDecoderRegistry(logger);
  * ```
  */
 export class SwapDecoderRegistry {
@@ -140,6 +160,9 @@ export class SwapDecoderRegistry {
 
 /**
  * Create a new SwapDecoderRegistry instance.
+ *
+ * @deprecated Use createDecoderRegistry from './decoders' instead.
+ * This wrapper adds unnecessary function call overhead in the hot path.
  *
  * @param logger - Logger instance
  * @returns Configured SwapDecoderRegistry

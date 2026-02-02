@@ -8,7 +8,7 @@
  * REFACTORED:
  * - Routes and middleware extracted to api/ folder
  * - R2: Leadership → leadership/ folder (LeadershipElectionService)
- * - R2: Streaming → streaming/ folder (StreamConsumerManager, StreamRateLimiter)
+ * - R2: Streaming → streaming/ folder (StreamConsumerManager)
  * - R2: Health monitoring → health/ folder (HealthMonitor)
  * - R2: Opportunities → opportunities/ folder (OpportunityRouter)
  *
@@ -55,7 +55,7 @@ import {
 } from './api';
 
 // Import alert notification system
-import { AlertNotifier } from './alerts';
+import { AlertNotifier, AlertCooldownManager } from './alerts';
 
 // Import type guard utilities and collections
 import {
@@ -70,7 +70,7 @@ import {
 } from './utils';
 
 // R2: Import extracted subsystem modules
-import { StreamConsumerManager, StreamRateLimiter } from './streaming';
+import { StreamConsumerManager } from './streaming';
 import { HealthMonitor, DegradationLevel } from './health';
 import { OpportunityRouter } from './opportunities';
 
@@ -234,7 +234,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private systemMetrics: SystemMetrics;
   // FIX: Track degradation level per ADR-007
   private degradationLevel: DegradationLevel = DegradationLevel.FULL_OPERATION;
-  private alertCooldowns: Map<string, number> = new Map();
+  // R2: Alert cooldown manager (encapsulates dual-storage pattern with HealthMonitor)
+  private alertCooldownManager: AlertCooldownManager | null = null;
   private opportunities: Map<string, ArbitrageOpportunity> = new Map();
   // FIX: Alert notifier for sending alerts to Discord/Slack
   private alertNotifier: AlertNotifier | null = null;
@@ -374,6 +375,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     );
 
+    // R2: Initialize alert cooldown manager with HealthMonitor as delegate
+    // This centralizes cooldown logic and eliminates duplicate code
+    this.alertCooldownManager = new AlertCooldownManager(
+      this.logger,
+      this.healthMonitor,
+      { cooldownMs: this.config.alertCooldownMs }
+    );
+
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
     this.consumerGroups = [
@@ -449,7 +458,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         this.streamsClient,
         this.logger,
         {
-          maxStreamErrors: this.MAX_STREAM_ERRORS,
+          maxStreamErrors: 10, // Threshold before alerting
           dlqStream: CoordinatorService.DLQ_STREAM,
           instanceId: this.config.leaderElection.instanceId,
         },
@@ -489,8 +498,14 @@ export class CoordinatorService implements CoordinatorStateProvider {
       await this.createConsumerGroups();
 
       // P0-FIX 1.3: Recover pending messages from previous coordinator instance
-      // This handles messages that were being processed when the previous instance crashed
-      await this.recoverPendingMessages();
+      // R2 REFACTOR: Use StreamConsumerManager for pending message recovery
+      await this.streamConsumerManager.recoverPendingMessages(
+        this.consumerGroups.map(g => ({
+          streamName: g.streamName,
+          groupName: g.groupName,
+          consumerName: g.consumerName,
+        }))
+      );
 
       // Configure StreamHealthMonitor to use our consumer group
       // This fixes the XPENDING errors when monitoring stream health
@@ -610,12 +625,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       // Clear collections
       this.serviceHealth.clear();
-      this.alertCooldowns.clear();
+      this.alertCooldownManager?.clear();
       this.opportunities.clear();
       // FIX: Clear activePairs to prevent stale data on restart
       this.activePairs.clear();
-      // P2-1 FIX: Reset stream error counter
-      this.streamConsumerErrors = 0;
+      // R2 REFACTOR: Reset stream consumer manager state
+      this.streamConsumerManager?.reset();
 
       this.logger.info('Coordinator Service stopped successfully');
     });
@@ -890,192 +905,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
   }
 
-  // P2-1 fix: Track stream consumer errors for health monitoring
-  private streamConsumerErrors = 0;
-  private readonly MAX_STREAM_ERRORS = 10;
-  private alertSentForCurrentErrorBurst = false; // P1-NEW-2: Prevent duplicate alerts
-  // FIX Race 5.3: Use atomic flag-and-send pattern to prevent race between check and set
-  private sendingStreamErrorAlert = false;
-
-  // FIX P1 + R12: Rate limiting for stream message processing
-  // Uses shared StreamRateLimiter class (R12 consolidation - removed duplicate inline implementation)
-  private readonly streamRateLimiter = new StreamRateLimiter({
-    maxTokens: 1000,        // Max messages per refill period
-    refillMs: 1000,         // Refill period (1 second)
-    tokensPerMessage: 1,    // Cost per message
-  });
-
-  /**
-   * FIX P1: Wrap a message handler with rate limiting.
-   * Uses shared StreamRateLimiter class (R12 consolidation).
-   */
-  private withRateLimit(
-    streamName: string,
-    handler: (msg: StreamMessage) => Promise<void>
-  ): (msg: StreamMessage) => Promise<void> {
-    return async (msg: StreamMessage) => {
-      if (!this.streamRateLimiter.checkRateLimit(streamName)) {
-        this.logger.warn('Rate limit exceeded, dropping message', {
-          stream: streamName,
-          messageId: msg.id
-        });
-        return;
-      }
-      return handler(msg);
-    };
-  }
-
-  /**
-   * P0-FIX 1.2: Wrap a message handler with deferred acknowledgment and DLQ support.
-   *
-   * This replaces autoAck: true with manual ACK after successful processing.
-   * Failed messages are moved to DLQ before ACK to prevent data loss.
-   *
-   * Flow:
-   * 1. Call handler with message
-   * 2. On success: ACK the message
-   * 3. On failure: Move to DLQ, then ACK (prevents infinite retries)
-   */
-  private withDeferredAck(
-    groupConfig: ConsumerGroupConfig,
-    handler: (msg: StreamMessage) => Promise<void>
-  ): (msg: StreamMessage) => Promise<void> {
-    return async (msg: StreamMessage) => {
-      try {
-        await handler(msg);
-        // Success: ACK the message
-        await this.ackMessage(groupConfig, msg.id);
-      } catch (error) {
-        // Failure: Move to DLQ, then ACK to prevent infinite retries
-        this.logger.error('Message handler failed, moving to DLQ', {
-          stream: groupConfig.streamName,
-          messageId: msg.id,
-          error: (error as Error).message
-        });
-        await this.moveToDeadLetterQueue(msg, error as Error, groupConfig.streamName);
-        await this.ackMessage(groupConfig, msg.id);
-      }
-    };
-  }
-
-  /**
-   * P0-FIX 1.2: Acknowledge a message after processing.
-   */
-  private async ackMessage(groupConfig: ConsumerGroupConfig, messageId: string): Promise<void> {
-    if (!this.streamsClient) return;
-
-    try {
-      await this.streamsClient.xack(groupConfig.streamName, groupConfig.groupName, messageId);
-    } catch (error) {
-      this.logger.error('Failed to ACK message', {
-        stream: groupConfig.streamName,
-        messageId,
-        error: (error as Error).message
-      });
-    }
-  }
-
-  /**
-   * P0-FIX 1.2: Move a failed message to the Dead Letter Queue.
-   *
-   * DLQ entries include:
-   * - Original message data
-   * - Error details
-   * - Source stream for replay
-   * - Timestamp for TTL-based cleanup
-   */
-  private async moveToDeadLetterQueue(
-    message: StreamMessage,
-    error: Error,
-    sourceStream: string
-  ): Promise<void> {
-    if (!this.streamsClient) return;
-
-    try {
-      await this.streamsClient.xadd(CoordinatorService.DLQ_STREAM, {
-        originalMessageId: message.id,
-        originalStream: sourceStream,
-        originalData: JSON.stringify(message.data),
-        error: error.message,
-        errorStack: error.stack?.substring(0, 500), // Truncate stack trace
-        timestamp: Date.now(),
-        service: 'coordinator',
-        instanceId: this.config.leaderElection.instanceId
-      });
-
-      this.logger.debug('Message moved to DLQ', {
-        originalMessageId: message.id,
-        sourceStream
-      });
-    } catch (dlqError) {
-      // If DLQ write fails, log but don't throw - we still want to ACK the original message
-      // to prevent infinite retry loops
-      this.logger.error('Failed to move message to DLQ', {
-        originalMessageId: message.id,
-        sourceStream,
-        dlqError: (dlqError as Error).message
-      });
-    }
-  }
-
-  /**
-   * P0-FIX 1.3: Check for and log pending messages from previous coordinator instance.
-   *
-   * When coordinator crashes mid-processing, messages remain in XPENDING.
-   * This method logs their presence - they will be automatically redelivered
-   * by Redis Streams to this consumer when it starts reading.
-   *
-   * Note: Redis Streams automatically handles redelivery of pending messages
-   * to consumers in the same group. When we call xreadgroup with '>',
-   * pending messages assigned to this consumer are automatically included.
-   *
-   * Called during startup after consumer groups are created.
-   */
-  private async recoverPendingMessages(): Promise<void> {
-    if (!this.streamsClient) return;
-
-    for (const groupConfig of this.consumerGroups) {
-      try {
-        // Get pending messages summary
-        const pendingInfo = await this.streamsClient.xpending(
-          groupConfig.streamName,
-          groupConfig.groupName
-        );
-
-        if (!pendingInfo || pendingInfo.total === 0) {
-          continue;
-        }
-
-        // Log pending messages for observability
-        // These will be automatically redelivered by Redis when the consumer starts
-        this.logger.warn('Found pending messages from previous instance', {
-          stream: groupConfig.streamName,
-          pendingCount: pendingInfo.total,
-          smallestId: pendingInfo.smallestId,
-          largestId: pendingInfo.largestId,
-          consumers: pendingInfo.consumers
-        });
-
-        // Find pending messages for THIS consumer (if any)
-        const ourPending = pendingInfo.consumers.find(
-          c => c.name === groupConfig.consumerName
-        );
-        if (ourPending && ourPending.pending > 0) {
-          this.logger.info('This consumer has pending messages to process', {
-            stream: groupConfig.streamName,
-            pendingForUs: ourPending.pending
-          });
-        }
-      } catch (error) {
-        this.logger.error('Failed to check pending messages', {
-          stream: groupConfig.streamName,
-          error: (error as Error).message
-        });
-        // Continue with other streams even if one fails
-      }
-    }
-  }
-
   /**
    * Start stream consumers using blocking reads pattern.
    * Replaces setInterval polling for better latency and reduced Redis command usage.
@@ -1090,59 +919,47 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Previously, errors in consumer.start() were silently lost.
    */
   private async startStreamConsumers(): Promise<void> {
-    if (!this.streamsClient) return;
+    if (!this.streamsClient || !this.streamConsumerManager) return;
 
-    // Handler map for each stream
-    // FIX P1: All handlers are wrapped with rate limiting to prevent DoS attacks
-    const handlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
-      [RedisStreamsClient.STREAMS.HEALTH]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.HEALTH,
-        (msg) => this.handleHealthMessage(msg)
-      ),
-      [RedisStreamsClient.STREAMS.OPPORTUNITIES]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        (msg) => this.handleOpportunityMessage(msg)
-      ),
-      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.WHALE_ALERTS,
-        (msg) => this.handleWhaleAlertMessage(msg)
-      ),
-      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.SWAP_EVENTS,
-        (msg) => this.handleSwapEventMessage(msg)
-      ),
-      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.VOLUME_AGGREGATES,
-        (msg) => this.handleVolumeAggregateMessage(msg)
-      ),
-      // S3.3.5 FIX: Add price updates handler
-      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: this.withRateLimit(
-        RedisStreamsClient.STREAMS.PRICE_UPDATES,
-        (msg) => this.handlePriceUpdateMessage(msg)
-      )
+    // Raw handler map for each stream (will be wrapped by streamConsumerManager)
+    const rawHandlers: Record<string, (msg: StreamMessage) => Promise<void>> = {
+      [RedisStreamsClient.STREAMS.HEALTH]: (msg) => this.handleHealthMessage(msg),
+      [RedisStreamsClient.STREAMS.OPPORTUNITIES]: (msg) => this.handleOpportunityMessage(msg),
+      [RedisStreamsClient.STREAMS.WHALE_ALERTS]: (msg) => this.handleWhaleAlertMessage(msg),
+      [RedisStreamsClient.STREAMS.SWAP_EVENTS]: (msg) => this.handleSwapEventMessage(msg),
+      [RedisStreamsClient.STREAMS.VOLUME_AGGREGATES]: (msg) => this.handleVolumeAggregateMessage(msg),
+      [RedisStreamsClient.STREAMS.PRICE_UPDATES]: (msg) => this.handlePriceUpdateMessage(msg),
     };
 
     // REFACTOR: Use injected StreamConsumer class for testability
     // Create a StreamConsumer for each consumer group
     const StreamConsumerClass = this.deps.StreamConsumer;
     for (const groupConfig of this.consumerGroups) {
-      const rateLimitedHandler = handlers[groupConfig.streamName];
-      if (!rateLimitedHandler) continue;
+      const rawHandler = rawHandlers[groupConfig.streamName];
+      if (!rawHandler) continue;
 
-      // P0-FIX 1.2: Wrap handler with deferred ACK and DLQ support
-      // This replaces autoAck: true, ensuring failed messages go to DLQ
-      const deferredAckHandler = this.withDeferredAck(groupConfig, rateLimitedHandler);
+      // R2 REFACTOR: Use StreamConsumerManager.wrapHandler for combined rate limiting + deferred ACK
+      // This replaces duplicate withRateLimit/withDeferredAck methods
+      const wrappedHandler = this.streamConsumerManager.wrapHandler(
+        {
+          streamName: groupConfig.streamName,
+          groupName: groupConfig.groupName,
+          consumerName: groupConfig.consumerName,
+        },
+        rawHandler
+      );
 
       const consumer = new StreamConsumerClass(this.streamsClient, {
         config: groupConfig,
-        handler: deferredAckHandler,
+        handler: wrappedHandler,
         batchSize: 10,
         blockMs: 1000, // Block for 1s - immediate delivery when messages arrive
-        autoAck: false, // P0-FIX 1.2: Deferred ACK - we handle ACK in withDeferredAck
+        autoAck: false, // Deferred ACK - handled by streamConsumerManager.wrapHandler
         logger: {
           error: (msg, ctx) => {
             this.logger.error(msg, ctx);
-            this.trackStreamError(groupConfig.streamName);
+            // R2 REFACTOR: Use StreamConsumerManager for error tracking
+            this.streamConsumerManager!.trackError(groupConfig.streamName);
           },
           debug: (msg, ctx) => this.logger.debug(msg, ctx)
         }
@@ -1167,51 +984,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }
   }
-
-  /**
-   * Track stream consumer errors and send alerts if threshold exceeded.
-   * Preserves P2-1 and P1-NEW-2 error tracking behavior.
-   * FIX Race 5.3: Uses atomic flag pattern to prevent duplicate alerts from concurrent calls.
-   */
-  private trackStreamError(streamName: string): void {
-    this.streamConsumerErrors++;
-
-    // FIX Race 5.3: Check and set alert flag atomically using sendingStreamErrorAlert
-    // This prevents multiple concurrent consumers from all passing the check before any sets the flag
-    if (this.streamConsumerErrors >= this.MAX_STREAM_ERRORS &&
-        !this.alertSentForCurrentErrorBurst &&
-        !this.sendingStreamErrorAlert) {
-      // Set sending flag FIRST (synchronously) before any async work
-      this.sendingStreamErrorAlert = true;
-
-      this.sendAlert({
-        type: 'STREAM_CONSUMER_FAILURE',
-        message: `Stream consumer experienced ${this.streamConsumerErrors} errors on ${streamName}`,
-        severity: 'critical',
-        // S3.3.5 FIX: Include streamName in data for programmatic access
-        data: { streamName, errorCount: this.streamConsumerErrors },
-        timestamp: Date.now()
-      });
-
-      // Set permanent flag after sending (prevents retries)
-      this.alertSentForCurrentErrorBurst = true;
-      this.sendingStreamErrorAlert = false;
-    }
-  }
-
-  /**
-   * Reset stream error tracking (called on successful processing).
-   */
-  private resetStreamErrors(): void {
-    if (this.streamConsumerErrors > 0) {
-      this.logger.debug('Stream consumer recovered', {
-        previousErrors: this.streamConsumerErrors
-      });
-      this.streamConsumerErrors = 0;
-      this.alertSentForCurrentErrorBurst = false;
-    }
-  }
-
   // ===========================================================================
   // Stream Message Handlers
   // ===========================================================================
@@ -1263,7 +1035,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
 
       // FIX: Reset stream errors on successful processing
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle health message', { error, message });
@@ -1293,7 +1065,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         }
         // P1-7 FIX: Always sync dropped opportunities (not just when processed)
         this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-        this.resetStreamErrors();
+        this.streamConsumerManager?.resetErrors();
         return;
       }
 
@@ -1315,7 +1087,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           existingTimestamp: existing.timestamp,
           newTimestamp: opportunityTimestamp
         });
-        this.resetStreamErrors();
+        this.streamConsumerManager?.resetErrors();
         return;
       }
 
@@ -1327,7 +1099,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
             profitPercentage,
             reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
           });
-          this.resetStreamErrors();
+          this.streamConsumerManager?.resetErrors();
           return;
         }
       }
@@ -1360,7 +1132,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         await this.forwardToExecutionEngine(opportunity);
       }
 
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle opportunity message', { error, message });
@@ -1480,7 +1252,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
 
       // FIX: Reset stream errors on successful processing
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle whale alert message', { error, message });
@@ -1541,7 +1313,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // FIX: Reset stream errors on successful processing
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle swap event message', { error, message });
@@ -1590,7 +1362,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       // Skip detailed logging for empty windows (no swaps in this 5s period)
       if (swapCount === 0) {
-        this.resetStreamErrors();
+        this.streamConsumerManager?.resetErrors();
         return;
       }
 
@@ -1607,7 +1379,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // FIX: Reset stream errors on successful processing
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle volume aggregate message', { error, message });
@@ -1653,7 +1425,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.systemMetrics.activePairsTracked = this.activePairs.size;
 
       // FIX: Reset stream errors on successful processing
-      this.resetStreamErrors();
+      this.streamConsumerManager?.resetErrors();
 
     } catch (error) {
       this.logger.error('Failed to handle price update message', { error, message });
@@ -1918,7 +1690,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
       try {
         // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
-        this.cleanupAlertCooldowns(Date.now());
+        this.alertCooldownManager?.cleanup(Date.now());
 
         // Cleanup stale active pairs to prevent unbounded memory growth
         this.cleanupActivePairs();
@@ -1960,31 +1732,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   private updateSystemMetrics(): void {
     // R2: Delegate to health monitor for single-pass metrics calculation
-    if (this.healthMonitor) {
-      this.healthMonitor.updateMetrics(this.serviceHealth, this.systemMetrics);
-    } else {
-      // Fallback for tests without health monitor
-      const now = Date.now();
-      let activeServices = 0;
-      let totalMemory = 0;
-      let totalLatency = 0;
-
-      for (const health of this.serviceHealth.values()) {
-        if (health.status === 'healthy') {
-          activeServices++;
-        }
-        totalMemory += health.memoryUsage || 0;
-        const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
-        totalLatency += latency;
-      }
-
-      const totalServices = Math.max(this.serviceHealth.size, 1);
-      this.systemMetrics.activeServices = activeServices;
-      this.systemMetrics.systemHealth = (activeServices / totalServices) * 100;
-      this.systemMetrics.averageLatency = totalLatency / totalServices;
-      this.systemMetrics.averageMemory = totalMemory / totalServices;
-      this.systemMetrics.lastUpdate = now;
-    }
+    // Note: healthMonitor is always initialized in constructor
+    this.healthMonitor!.updateMetrics(this.serviceHealth, this.systemMetrics);
 
     // Update pending opportunities count (from either opportunity router or local map)
     this.systemMetrics.pendingOpportunities = this.opportunityRouter?.getPendingCount() ?? this.opportunities.size;
@@ -1998,95 +1747,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * R2: Delegates to HealthMonitor for evaluation.
    */
   private evaluateDegradationLevel(): void {
-    // R2: Delegate to health monitor
-    if (this.healthMonitor) {
-      this.healthMonitor.evaluateDegradationLevel(this.serviceHealth, this.systemMetrics.systemHealth);
-      this.degradationLevel = this.healthMonitor.getDegradationLevel();
-    } else {
-      // Fallback for tests without health monitor
-      const previousLevel = this.degradationLevel;
-      const analysis = this.analyzeServiceHealth();
-
-      if (!analysis.hasAnyServices || this.systemMetrics.systemHealth === 0) {
-        this.degradationLevel = DegradationLevel.COMPLETE_OUTAGE;
-      } else if (!analysis.executorHealthy && !analysis.hasHealthyDetectors) {
-        this.degradationLevel = DegradationLevel.READ_ONLY;
-      } else if (!analysis.executorHealthy) {
-        this.degradationLevel = DegradationLevel.DETECTION_ONLY;
-      } else if (!analysis.allDetectorsHealthy) {
-        this.degradationLevel = DegradationLevel.REDUCED_CHAINS;
-      } else {
-        this.degradationLevel = DegradationLevel.FULL_OPERATION;
-      }
-
-      if (previousLevel !== this.degradationLevel) {
-        this.logger.warn('Degradation level changed', {
-          previous: DegradationLevel[previousLevel],
-          current: DegradationLevel[this.degradationLevel],
-          systemHealth: this.systemMetrics.systemHealth,
-          analysis
-        });
-      }
-    }
-  }
-
-  /**
-   * OPTIMIZATION: Single-pass analysis of service health.
-   * Replaces multiple iterations with one pass over serviceHealth map.
-   *
-   * @returns Analysis result with all degradation-relevant flags
-   */
-  private analyzeServiceHealth(): {
-    hasAnyServices: boolean;
-    executorHealthy: boolean;
-    hasHealthyDetectors: boolean;
-    allDetectorsHealthy: boolean;
-    detectorCount: number;
-    healthyDetectorCount: number;
-  } {
-    const result = {
-      hasAnyServices: this.serviceHealth.size > 0,
-      executorHealthy: false,
-      hasHealthyDetectors: false,
-      allDetectorsHealthy: true, // Assume true, set false if unhealthy detector found
-      detectorCount: 0,
-      healthyDetectorCount: 0
-    };
-
-    // Single pass over all services
-    // FIX 3.2: Use configurable service name patterns instead of hardcoded strings
-    for (const [name, health] of this.serviceHealth) {
-      const isHealthy = health.status === 'healthy';
-
-      // Check execution engine using configurable pattern
-      if (name === SERVICE_NAME_PATTERNS.EXECUTION_ENGINE) {
-        result.executorHealthy = isHealthy;
-        continue;
-      }
-
-      // Check detectors using configurable pattern (contains pattern string)
-      if (name.includes(SERVICE_NAME_PATTERNS.DETECTOR_PATTERN)) {
-        result.detectorCount++;
-        if (isHealthy) {
-          result.healthyDetectorCount++;
-          result.hasHealthyDetectors = true;
-        } else {
-          result.allDetectorsHealthy = false;
-        }
-      }
-    }
-
-    // No detectors means allDetectorsHealthy should be false
-    if (result.detectorCount === 0) {
-      result.allDetectorsHealthy = false;
-    }
-
-    return result;
+    // R2: Delegate to health monitor (always initialized in constructor)
+    this.healthMonitor!.evaluateDegradationLevel(this.serviceHealth, this.systemMetrics.systemHealth);
+    this.degradationLevel = this.healthMonitor!.getDegradationLevel();
   }
 
   /**
    * Check if a specific service is healthy.
-   * Note: For bulk checks, use analyzeServiceHealth() instead.
    */
   private isServiceHealthy(serviceName: string): boolean {
     const health = this.serviceHealth.get(serviceName);
@@ -2106,47 +1773,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * R2: Delegates to HealthMonitor for alert checking.
    */
   private checkForAlerts(): void {
-    // R2: Delegate to health monitor
-    if (this.healthMonitor) {
-      this.healthMonitor.checkForAlerts(this.serviceHealth, this.systemMetrics.systemHealth);
-    } else {
-      // Fallback for tests without health monitor
-      const alerts: Alert[] = [];
-      const now = Date.now();
-      const inGracePeriod = (now - this.startTime) < CoordinatorService.STARTUP_GRACE_PERIOD_MS;
-
-      if (!inGracePeriod) {
-        for (const [serviceName, health] of this.serviceHealth) {
-          if (health.status !== 'healthy' && health.status !== 'starting' && health.status !== 'stopping') {
-            alerts.push({
-              type: 'SERVICE_UNHEALTHY',
-              service: serviceName,
-              message: `${serviceName} is ${health.status}`,
-              severity: 'high',
-              timestamp: now
-            });
-          }
-        }
-      }
-
-      const MIN_SERVICES_FOR_GRACE_PERIOD_ALERT = 3;
-      const shouldAlertLowHealth = inGracePeriod
-        ? this.serviceHealth.size >= MIN_SERVICES_FOR_GRACE_PERIOD_ALERT && this.systemMetrics.systemHealth < 80
-        : this.systemMetrics.systemHealth < 80;
-
-      if (shouldAlertLowHealth) {
-        alerts.push({
-          type: 'SYSTEM_HEALTH_LOW',
-          message: `System health is ${this.systemMetrics.systemHealth.toFixed(1)}%`,
-          severity: 'critical',
-          timestamp: now
-        });
-      }
-
-      for (const alert of alerts) {
-        this.sendAlert(alert);
-      }
-    }
+    // R2: Delegate to health monitor (always initialized in constructor)
+    this.healthMonitor!.checkForAlerts(this.serviceHealth, this.systemMetrics.systemHealth);
   }
 
   /**
@@ -2155,68 +1783,27 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * FIX: Now sends to external channels via AlertNotifier
    * R2: Delegates cooldown tracking to healthMonitor if available
    */
-  private sendAlert(alert: Alert): void {
-    const alertKey = `${alert.type}_${alert.service || 'system'}`;
-    const now = Date.now();
-
-    // R2: Use healthMonitor's cooldowns if available for consistency
-    const cooldowns = this.healthMonitor?.getAlertCooldowns() ?? this.alertCooldowns;
-    const lastAlert = cooldowns.get(alertKey) || 0;
-    // FIX: Use configurable cooldown instead of hardcoded 5 minutes
-    const cooldownMs = this.config.alertCooldownMs!;
-
-    // Cooldown for same alert type (configurable, default 5 minutes)
-    if (now - lastAlert > cooldownMs) {
-      this.logger.warn('Alert triggered', alert);
-
-      // R2 + R12: Update cooldowns in the appropriate storage
-      // R12 FIX: Use proper public API instead of unsafe private field access
-      if (this.healthMonitor) {
-        this.healthMonitor.setAlertCooldown(alertKey, now);
-      } else {
-        this.alertCooldowns.set(alertKey, now);
-      }
-
-      // P1-NEW-1 FIX: Periodic cleanup of stale cooldowns (every 100 alerts or 1000+ entries)
-      if (cooldowns.size > 1000) {
-        if (this.healthMonitor) {
-          this.healthMonitor.cleanupAlertCooldowns(now);
-        } else {
-          this.cleanupAlertCooldowns(now);
-        }
-      }
-
-      // FIX: Send to external channels (Discord/Slack) via AlertNotifier
-      if (this.alertNotifier) {
-        // Fire and forget - don't await to avoid blocking
-        this.alertNotifier.notify(alert).catch(error => {
-          this.logger.error('Failed to send alert notification', { error: (error as Error).message });
-        });
-      }
-    }
-  }
-
   /**
-   * P1-NEW-1 FIX: Clean up stale alert cooldown entries
+   * Send an alert with cooldown management.
+   * Uses AlertCooldownManager to prevent alert spam.
    */
-  private cleanupAlertCooldowns(now: number): void {
-    const maxAge = 3600000; // 1 hour - remove cooldowns older than this
-    const toDelete: string[] = [];
+  private sendAlert(alert: Alert): void {
+    const alertKey = AlertCooldownManager.createKey(alert.type, alert.service);
 
-    for (const [key, timestamp] of this.alertCooldowns) {
-      if (now - timestamp > maxAge) {
-        toDelete.push(key);
-      }
+    // Use AlertCooldownManager for cooldown check and recording
+    // The manager handles delegation to HealthMonitor and automatic cleanup
+    if (!this.alertCooldownManager?.shouldSendAndRecord(alertKey)) {
+      return; // Alert is on cooldown, skip
     }
 
-    for (const key of toDelete) {
-      this.alertCooldowns.delete(key);
-    }
+    // Log and send alert
+    this.logger.warn('Alert triggered', alert);
 
-    if (toDelete.length > 0) {
-      this.logger.debug('Cleaned up stale alert cooldowns', {
-        removed: toDelete.length,
-        remaining: this.alertCooldowns.size
+    // Send to external channels (Discord/Slack) via AlertNotifier
+    if (this.alertNotifier) {
+      // Fire and forget - don't await to avoid blocking
+      this.alertNotifier.notify(alert).catch(error => {
+        this.logger.error('Failed to send alert notification', { error: (error as Error).message });
       });
     }
   }
@@ -2279,13 +1866,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   getAlertCooldowns(): Map<string, number> {
-    // R2: Delegate to health monitor if available
-    return this.healthMonitor?.getAlertCooldowns() ?? new Map(this.alertCooldowns);
+    // R2: Delegate to AlertCooldownManager (which delegates to HealthMonitor)
+    return this.alertCooldownManager?.getCooldowns() ?? new Map();
   }
 
   deleteAlertCooldown(key: string): boolean {
-    // R2: Delegate to health monitor if available
-    return this.healthMonitor?.deleteAlertCooldown(key) ?? this.alertCooldowns.delete(key);
+    // R2: Delegate to health monitor for deletion (manager doesn't expose delete)
+    return this.healthMonitor?.deleteAlertCooldown(key) ?? false;
   }
 
   getLogger(): RouteLogger {

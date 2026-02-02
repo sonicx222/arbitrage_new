@@ -31,7 +31,7 @@ import {
   isEvmChain,
   isEvmChainSafe,
   getNonEvmChains
-} from './partitions';
+} from '../../src/partitions';
 
 describe('PartitionConfig', () => {
   describe('PARTITIONS constant', () => {

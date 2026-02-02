@@ -46,12 +46,14 @@ import {
   ServiceState,
   createServiceState,
   getPriceOracle,
-  PriceOracle
+  PriceOracle,
+  // P1-5 FIX: Reusable concurrency guard for detection and health loops
+  OperationGuard,
 } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
   calculateBridgeCostUsd,
-  // S3.2.4-FIX: Import token normalization for cross-chain matching
+  // Used for individual token normalization in extractTokenFromPair, whale analysis, etc.
   normalizeTokenForCrossChain,
   // REFACTOR: Use centralized default quote tokens from config
   getDefaultQuoteToken,
@@ -82,8 +84,6 @@ import {
   DetectorConfig,
   WhaleAnalysisConfig,
   MLPredictionConfig,
-  // FIX 4.2: Import normalizeToInternalFormat for consistent token pair lookups
-  normalizeToInternalFormat,
   // FIX 7.1: Import toDisplayTokenPair for pending opportunity formatting
   toDisplayTokenPair,
 } from './types';
@@ -96,12 +96,9 @@ import {
   WhaleActivitySummary,
   TrackedWhaleTransaction,
 } from '@arbitrage/core';
-// ML Predictor for TensorFlow.js integration
+// ML Predictor types - P0-3 FIX: getLSTMPredictor and LSTMPredictor now owned by MLPredictionManager
 import {
-  getLSTMPredictor,
-  LSTMPredictor,
   PredictionResult,
-  // ADR-014: PriceHistory now only used by MLPredictionManager, not needed here
 } from '@arbitrage/ml';
 
 // =============================================================================
@@ -168,40 +165,6 @@ const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
 };
 
 // =============================================================================
-// S3.2.4-FIX: Token Pair Normalization Helper
-// =============================================================================
-
-/**
- * Normalize a token pair string for cross-chain matching.
- * Handles different token symbol conventions across chains:
- * - WETH.e (Avalanche) → WETH
- * - ETH (BSC) → WETH
- * - fUSDT (Fantom) → USDT
- * - BTCB (BSC) → WBTC
- *
- * P1-FIX 2.5: Now handles DEX prefixes correctly by only normalizing the last 2 parts.
- * Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
- *
- * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
- * @returns Normalized token pair string (always "TOKEN0_TOKEN1" format)
- */
-function normalizeTokenPair(tokenPair: string): string {
-  const parts = tokenPair.split('_');
-  if (parts.length < 2) return tokenPair;
-
-  // P1-FIX 2.5: Handle DEX prefix by taking only the last 2 parts (token0 and token1)
-  // Format can be "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1" or "DEX_EXTRA_TOKEN0_TOKEN1"
-  const token0 = parts[parts.length - 2];
-  const token1 = parts[parts.length - 1];
-
-  // Normalize only the token symbols, not any prefix
-  const normalizedToken0 = normalizeTokenForCrossChain(token0);
-  const normalizedToken1 = normalizeTokenForCrossChain(token1);
-
-  return `${normalizedToken0}_${normalizedToken1}`;
-}
-
-// =============================================================================
 // Cross-Chain Detector Service
 // =============================================================================
 
@@ -223,9 +186,8 @@ export class CrossChainDetectorService {
 
   private bridgePredictor: BridgeLatencyPredictor;
 
-  // Phase 3: ML Predictor (TensorFlow.js LSTM) and Whale Activity Tracker
-  // NOTE: mlPredictor is now managed by MLPredictionManager, but kept for direct access if needed
-  private mlPredictor: LSTMPredictor | null = null;
+  // Phase 3: ML Predictor state and Whale Activity Tracker
+  // P0-3 FIX: LSTMPredictor instance now owned exclusively by MLPredictionManager
   private mlPredictorInitialized = false;
   private whaleTracker: WhaleActivityTracker | null = null;
   // DEAD-CODE-REMOVED: momentumTracker was never used in detection logic
@@ -243,12 +205,12 @@ export class CrossChainDetectorService {
   private opportunityDetectionInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
 
-  // FIX B2: Concurrency guard for health monitoring
-  private isMonitoringHealth = false;
-
-  // FIX 5.1: Concurrency guard for detection cycles
-  // Prevents overlapping detection cycles when detectCrossChainOpportunities() takes longer than interval
-  private isDetecting = false;
+  // P1-5 FIX: Reusable concurrency guards for async operations
+  // Replaces manual boolean flags (isMonitoringHealth, isDetecting) with OperationGuard
+  private readonly healthGuard = new OperationGuard('health-monitoring');
+  private readonly detectionGuard = new OperationGuard('detection');
+  // SECURITY-FIX: Rate limiting for whale-triggered detection to prevent DoS
+  private readonly whaleGuard = new OperationGuard('whale-detection', { cooldownMs: 1000 });
 
   // FIX #5: Circuit breaker for detection loop errors
   private consecutiveDetectionErrors = 0;
@@ -264,11 +226,6 @@ export class CrossChainDetectorService {
 
   // Task 1.3.3: Counter for pending opportunities received from mempool
   private pendingOpportunitiesReceived = 0;
-
-  // SECURITY-FIX: Rate limiting for whale-triggered detection to prevent DoS
-  // A malicious actor could spam whale transactions to trigger excessive detection cycles
-  private lastWhaleDetectionTime = 0;
-  private static readonly WHALE_DETECTION_COOLDOWN_MS = 1000; // 1 second minimum between whale detections
 
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
@@ -507,8 +464,9 @@ export class CrossChainDetectorService {
       this.streamConsumer = null;
       this.bridgeCostEstimator = null;
 
-      // Reset concurrency guard for clean restart
-      this.isMonitoringHealth = false;
+      // P1-5 FIX: Reset concurrency guards for clean restart
+      this.healthGuard.forceRelease();
+      this.detectionGuard.forceRelease();
 
       this.logger.info('Cross-Chain Detector Service stopped');
     });
@@ -963,37 +921,22 @@ export class CrossChainDetectorService {
   // ===========================================================================
 
   private async initializeMLPredictor(): Promise<void> {
-    // ADR-014: Use MLPredictionManager.initialize() for centralized ML initialization
+    // P0-3 FIX: Unified ML initialization path via MLPredictionManager
+    // MLPredictionManager owns the LSTMPredictor instance; detector just tracks state
     if (this.mlPredictionManager) {
       const success = await this.mlPredictionManager.initialize();
       this.mlPredictorInitialized = success;
 
       if (success) {
-        // Also keep direct reference for legacy code that may need it
-        try {
-          this.mlPredictor = getLSTMPredictor();
-        } catch {
-          // Non-critical - MLPredictionManager handles predictions
-        }
         this.logger.info('ML predictor initialized via MLPredictionManager (TensorFlow.js LSTM)');
       } else {
-        this.mlPredictor = null;
         // Graceful degradation - service continues without ML
         this.logger.warn('ML predictor initialization failed, continuing without ML predictions');
       }
     } else {
-      // Fallback to direct initialization if MLPredictionManager not available
-      try {
-        this.mlPredictor = getLSTMPredictor();
-        this.mlPredictorInitialized = true;
-        this.logger.info('ML predictor initialized directly (TensorFlow.js LSTM)');
-      } catch (error) {
-        this.logger.warn('ML predictor initialization failed, continuing without ML predictions', {
-          error: (error as Error).message
-        });
-        this.mlPredictor = null;
-        this.mlPredictorInitialized = false;
-      }
+      // Safety fallback - should not happen since mlPredictionManager is created in initializeComponents
+      this.logger.warn('MLPredictionManager not available, ML predictions disabled');
+      this.mlPredictorInitialized = false;
     }
   }
 
@@ -1020,10 +963,10 @@ export class CrossChainDetectorService {
     this.opportunityDetectionInterval = setInterval(async () => {
       if (!this.stateManager.isRunning()) return;
 
-      // FIX 5.1: Concurrency guard - skip if previous detection cycle is still running
-      // This prevents duplicate opportunities and resource contention
-      // NOTE: Per-skip debug logging removed - expected under load
-      if (this.isDetecting) {
+      // P1-5 FIX: Use OperationGuard for concurrency control
+      // Skip if previous detection cycle is still running (prevents duplicate opportunities)
+      const releaseGuard = this.detectionGuard.tryAcquire();
+      if (!releaseGuard) {
         return;
       }
 
@@ -1032,7 +975,8 @@ export class CrossChainDetectorService {
       if (this.consecutiveDetectionErrors >= CrossChainDetectorService.DETECTION_ERROR_THRESHOLD) {
         // Check if we should reset the circuit breaker
         if (now - this.lastCircuitBreakerTrip < CrossChainDetectorService.CIRCUIT_BREAKER_RESET_MS) {
-          return; // Still in cooldown period
+          releaseGuard(); // Release immediately if we're in cooldown
+          return;
         }
         // Reset circuit breaker after cooldown
         this.logger.info('Circuit breaker reset after cooldown', {
@@ -1041,9 +985,6 @@ export class CrossChainDetectorService {
         });
         this.consecutiveDetectionErrors = 0;
       }
-
-      // FIX 5.1: Set guard before async operation
-      this.isDetecting = true;
 
       try {
         await this.detectCrossChainOpportunities();
@@ -1066,8 +1007,8 @@ export class CrossChainDetectorService {
           });
         }
       } finally {
-        // FIX 5.1: Always release guard, even on error
-        this.isDetecting = false;
+        // P1-5 FIX: Always release guard, even on error
+        releaseGuard();
       }
     }, intervalMs);
   }
@@ -1661,27 +1602,28 @@ export class CrossChainDetectorService {
       if (whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd ||
           Math.abs(summary.netFlowUsd) > this.whaleConfig.significantFlowThresholdUsd) {
 
-        // SECURITY-FIX: Rate limit whale-triggered detection to prevent DoS
-        // Malicious actors could spam whale transactions to cause excessive CPU usage
-        const now = Date.now();
-        if (now - this.lastWhaleDetectionTime < CrossChainDetectorService.WHALE_DETECTION_COOLDOWN_MS) {
+        // P1-5 FIX: Use OperationGuard for rate limiting (prevents DoS via whale spam)
+        const releaseWhaleGuard = this.whaleGuard.tryAcquire();
+        if (!releaseWhaleGuard) {
           this.logger.debug('Whale detection rate limited, skipping', {
-            timeSinceLastMs: now - this.lastWhaleDetectionTime,
-            cooldownMs: CrossChainDetectorService.WHALE_DETECTION_COOLDOWN_MS,
+            remainingCooldownMs: this.whaleGuard.getRemainingCooldownMs(),
           });
           return;
         }
-        this.lastWhaleDetectionTime = now;
 
-        this.logger.info('Super whale detected, triggering immediate opportunity scan', {
-          token: whaleTx.token,
-          chain: whaleTx.chain,
-          usdValue: whaleTx.usdValue,
-          isSuperWhale: whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd
-        });
+        try {
+          this.logger.info('Super whale detected, triggering immediate opportunity scan', {
+            token: whaleTx.token,
+            chain: whaleTx.chain,
+            usdValue: whaleTx.usdValue,
+            isSuperWhale: whaleTx.usdValue >= this.whaleConfig.superWhaleThresholdUsd
+          });
 
-        // Trigger immediate cross-chain detection for this token
-        await this.detectWhaleInducedOpportunities(whaleTx, summary);
+          // Trigger immediate cross-chain detection for this token
+          await this.detectWhaleInducedOpportunities(whaleTx, summary);
+        } finally {
+          releaseWhaleGuard();
+        }
       }
     } catch (error) {
       this.logger.error('Failed to analyze whale impact', {
@@ -1782,10 +1724,14 @@ export class CrossChainDetectorService {
     // CONFIG-C1: Use configurable health check interval
     const intervalMs = this.config.healthCheckIntervalMs!;
     this.healthMonitoringInterval = setInterval(async () => {
-      // FIX B2: Skip if already monitoring (prevents concurrent health updates)
-      if (this.isMonitoringHealth || !this.stateManager.isRunning()) return;
+      if (!this.stateManager.isRunning()) return;
 
-      this.isMonitoringHealth = true;
+      // P1-5 FIX: Use OperationGuard for concurrency control
+      const releaseGuard = this.healthGuard.tryAcquire();
+      if (!releaseGuard) {
+        return; // Previous health check still running
+      }
+
       try {
         // P3-2 FIX: Use unified ServiceHealth with 'name' field
         // FIX 6.3: Standardized to 'lastHeartbeat' per ServiceHealth interface.
@@ -1801,7 +1747,7 @@ export class CrossChainDetectorService {
           // ADR-014: Use module getters for health metrics
           chainsMonitored: this.priceDataManager?.getChains().length ?? 0,
           opportunitiesCache: this.opportunityPublisher?.getCacheSize() ?? 0,
-          mlPredictorActive: !!this.mlPredictor
+          mlPredictorActive: this.mlPredictorInitialized
         };
 
         // FIX 2.2: Publish health to stream with MAXLEN limit
@@ -1822,7 +1768,7 @@ export class CrossChainDetectorService {
       } catch (error) {
         this.logger.error('Cross-chain health monitoring failed', { error });
       } finally {
-        this.isMonitoringHealth = false;
+        releaseGuard();
       }
     }, intervalMs);
   }

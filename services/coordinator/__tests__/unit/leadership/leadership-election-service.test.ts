@@ -10,7 +10,7 @@ import {
   LeadershipElectionOptions,
   LeadershipRedisClient,
   LeadershipAlert,
-} from './leadership-election-service';
+} from '../../../src/leadership/leadership-election-service';
 
 // Mock logger
 const createMockLogger = () => ({
@@ -68,8 +68,8 @@ describe('LeadershipElectionService', () => {
       config,
       redis: mockRedis,
       logger: mockLogger,
-      onAlert: (alert) => alerts.push(alert),
-      onLeadershipChange: (isLeader) => leadershipChanges.push(isLeader),
+      onAlert: (alert: LeadershipAlert) => alerts.push(alert),
+      onLeadershipChange: (isLeader: boolean) => leadershipChanges.push(isLeader),
       jitterRangeMs: 0, // Disable jitter for predictable tests
       ...overrides,
     });

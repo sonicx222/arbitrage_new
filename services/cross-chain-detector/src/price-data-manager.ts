@@ -20,8 +20,8 @@
 
 import { PriceUpdate } from '@arbitrage/types';
 // TYPE-CONSOLIDATION: Import shared types instead of duplicating
-import { Logger, PriceData, IndexedSnapshot, PricePoint } from './types';
-import { normalizeTokenForCrossChain } from '@arbitrage/config';
+// P0-2 FIX: Use consolidated normalizeTokenPair from types.ts
+import { Logger, PriceData, IndexedSnapshot, PricePoint, normalizeTokenPair } from './types';
 
 // =============================================================================
 // Types
@@ -315,42 +315,21 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
           let normalizedPair = normalizedPairCache.get(pairKey);
 
           if (normalizedPair === undefined) {
-            // Not in cache - extract and normalize token pair from pairKey (format: DEX_TOKEN0_TOKEN1)
-            const parts = pairKey.split('_');
-            if (parts.length >= 2) {
-              const token0 = parts[parts.length - 2];
-              const token1 = parts[parts.length - 1];
+            // P0-2 FIX: Use consolidated normalizeTokenPair from types.ts
+            // This handles DEX prefixes, token validation, and cross-chain normalization
+            try {
+              normalizedPair = normalizeTokenPair(pairKey);
+              normalizedPairCache.set(pairKey, normalizedPair);
 
-              // FIX 4.4: Validate token symbols are non-empty strings
-              if (!token0 || !token1 || token0.length === 0 || token1.length === 0) {
+              if (normalizedPair === null) {
                 logger.warn('Invalid token pair format in pairKey', { pairKey, chain, dex });
-                normalizedPairCache.set(pairKey, null); // Cache the invalid result
-                continue; // Skip this price point
-              }
-
-              // FIX 4.2: Wrap normalization in try-catch to handle any errors
-              try {
-                const normalizedToken0 = normalizeTokenForCrossChain(token0);
-                const normalizedToken1 = normalizeTokenForCrossChain(token1);
-
-                // FIX: Ensure normalized tokens are valid
-                if (!normalizedToken0 || !normalizedToken1) {
-                  logger.warn('Token normalization returned empty', { token0, token1, pairKey });
-                  normalizedPairCache.set(pairKey, null);
-                  continue;
-                }
-
-                normalizedPair = `${normalizedToken0}_${normalizedToken1}`;
-                normalizedPairCache.set(pairKey, normalizedPair);
-              } catch (normError) {
-                logger.warn('Token normalization threw error', {
-                  token0, token1, pairKey,
-                  error: (normError as Error).message
-                });
-                normalizedPairCache.set(pairKey, null);
                 continue;
               }
-            } else {
+            } catch (normError) {
+              logger.warn('Token normalization threw error', {
+                pairKey,
+                error: (normError as Error).message
+              });
               normalizedPairCache.set(pairKey, null);
               continue;
             }

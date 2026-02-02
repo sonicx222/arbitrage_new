@@ -72,6 +72,15 @@ export {
   clearAllNamedMutexes
 } from './async/async-mutex';
 export type { MutexStats } from './async/async-mutex';
+
+// P1-5 FIX: Operation Guard (skip-if-busy pattern with rate limiting)
+export {
+  OperationGuard,
+  tryWithGuard,
+  tryWithGuardSync
+} from './async/operation-guard';
+export type { OperationGuardStats, OperationGuardConfig } from './async/operation-guard';
+
 export {
   RedisStreamsClient,
   StreamBatcher,

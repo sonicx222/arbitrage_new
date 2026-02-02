@@ -121,13 +121,38 @@ const loadServiceWithMocks = async () => {
       },
       // FIX: Add KNOWN_ROUTERS mock for swap decoder
       KNOWN_ROUTERS: {
-        1: {
+        ethereum: {
           '0x7a250d5630b4cf539739df2c5dacb4c659f2488d': { name: 'Uniswap V2', type: 'uniswapV2' },
           '0xe592427a0aece92de3edee1f18e0157c05861564': { name: 'Uniswap V3', type: 'uniswapV3' },
         },
-        56: {
+        bsc: {
           '0x10ed43c718714eb63d5aa57b78b54704e256024e': { name: 'PancakeSwap', type: 'pancakeswap' },
         },
+      },
+      // FIX: Add chain ID mappings required by DecoderRegistry
+      CHAIN_NAME_TO_ID: {
+        ethereum: 1,
+        bsc: 56,
+        polygon: 137,
+        arbitrum: 42161,
+        optimism: 10,
+        base: 8453,
+      },
+      CHAIN_ID_TO_NAME: {
+        1: 'ethereum',
+        56: 'bsc',
+        137: 'polygon',
+        42161: 'arbitrum',
+        10: 'optimism',
+        8453: 'base',
+      },
+      NATIVE_TOKENS: {
+        ethereum: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+        bsc: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+        polygon: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+        arbitrum: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+        optimism: '0x4200000000000000000000000000000000000006',
+        base: '0x4200000000000000000000000000000000000006',
       },
       getEnabledMempoolChains: jest.fn().mockReturnValue(['ethereum', 'bsc']),
       isMempoolEnabledForChain: jest.fn().mockReturnValue(true),
@@ -196,19 +221,18 @@ const loadServiceWithMocks = async () => {
       };
     });
 
-    // FIX: Mock swap-decoder module
-    jest.doMock('../swap-decoder', () => {
-      const mockSwapDecoderRegistry = {
+    // FIX: Mock decoders module (now using DecoderRegistry directly for hot-path performance)
+    jest.doMock('../decoders', () => {
+      const mockDecoderRegistry = {
         decode: jest.fn().mockReturnValue(null), // By default, return null (no swap)
-        getStats: jest.fn().mockReturnValue({ decoderCount: 4, routerCount: 3 }),
+        getDecoderForSelector: jest.fn().mockReturnValue(undefined),
+        getStats: jest.fn().mockReturnValue({ decoderCount: 4, routerCount: 3, selectorCount: 20, chainCount: 2 }),
       };
 
       return {
-        SwapDecoderRegistry: jest.fn().mockImplementation(() => mockSwapDecoderRegistry),
-        createSwapDecoderRegistry: jest.fn().mockReturnValue(mockSwapDecoderRegistry),
-        CHAIN_NAME_TO_ID: { ethereum: 1, bsc: 56, polygon: 137 },
-        CHAIN_ID_TO_NAME: { 1: 'ethereum', 56: 'bsc', 137: 'polygon' },
-        SWAP_SELECTORS: {},
+        DecoderRegistry: jest.fn().mockImplementation(() => mockDecoderRegistry),
+        createDecoderRegistry: jest.fn().mockReturnValue(mockDecoderRegistry),
+        SWAP_FUNCTION_SELECTORS: {},
       };
     });
 

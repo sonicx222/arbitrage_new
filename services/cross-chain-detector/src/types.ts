@@ -15,6 +15,8 @@
  */
 
 import { PriceUpdate, ILogger } from '@arbitrage/types';
+// P0-2 FIX: Import token normalization for consolidated normalizeTokenPair function
+import { normalizeTokenForCrossChain } from '@arbitrage/config';
 
 // =============================================================================
 // Token Pair Format Constants and Utilities
@@ -94,6 +96,55 @@ export function normalizeToInternalFormat(tokenPair: string): string {
     return `${parts[parts.length - 2]}${TOKEN_PAIR_INTERNAL_SEPARATOR}${parts[parts.length - 1]}`;
   }
   return tokenPair;
+}
+
+/**
+ * Normalize a token pair for cross-chain matching.
+ *
+ * P0-2 FIX: Consolidated from detector.ts and price-data-manager.ts to eliminate duplication.
+ *
+ * Handles different token symbol conventions across chains:
+ * - WETH.e (Avalanche) → WETH
+ * - ETH (BSC) → WETH
+ * - fUSDT (Fantom) → USDT
+ * - BTCB (BSC) → WBTC
+ *
+ * P1-FIX 2.5: Handles DEX prefixes correctly by only normalizing the last 2 parts.
+ * Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+ *
+ * @param tokenPair - Token pair string in format "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+ * @returns Normalized token pair string (always "TOKEN0_TOKEN1" format), or null if invalid
+ */
+export function normalizeTokenPair(tokenPair: string): string | null {
+  if (!tokenPair || typeof tokenPair !== 'string') {
+    return null;
+  }
+
+  const parts = tokenPair.split(TOKEN_PAIR_INTERNAL_SEPARATOR);
+  if (parts.length < 2) {
+    return null;
+  }
+
+  // P1-FIX 2.5: Handle DEX prefix by taking only the last 2 parts (token0 and token1)
+  // Format can be "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1" or "DEX_EXTRA_TOKEN0_TOKEN1"
+  const token0 = parts[parts.length - 2];
+  const token1 = parts[parts.length - 1];
+
+  // FIX 4.4: Validate token symbols are non-empty strings
+  if (!token0 || !token1 || token0.length === 0 || token1.length === 0) {
+    return null;
+  }
+
+  // Normalize only the token symbols, not any prefix
+  const normalizedToken0 = normalizeTokenForCrossChain(token0);
+  const normalizedToken1 = normalizeTokenForCrossChain(token1);
+
+  // FIX: Ensure normalized tokens are valid
+  if (!normalizedToken0 || !normalizedToken1) {
+    return null;
+  }
+
+  return `${normalizedToken0}${TOKEN_PAIR_INTERNAL_SEPARATOR}${normalizedToken1}`;
 }
 
 // =============================================================================

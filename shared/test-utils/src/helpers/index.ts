@@ -38,3 +38,15 @@ export {
   resetStateHelper,
   ResettableClass,
 } from './test-state-management';
+
+export {
+  // Chaos testing
+  createChaosController,
+  withChaos,
+  createChaosRedisClient,
+  createChaosRpcProvider,
+  NetworkPartitionSimulator,
+  withChaosTest,
+  waitForCondition as waitForChaosCondition,
+  type ChaosConfig,
+} from './chaos-testing';

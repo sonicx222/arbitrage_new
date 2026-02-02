@@ -124,3 +124,16 @@ export {
   type ConflictInfo,
   type LockConflictTrackerConfig,
 } from './lock-conflict-tracker';
+
+// =============================================================================
+// P0 Refactoring: Health Monitoring Manager (extracted from engine.ts)
+// =============================================================================
+
+// Health monitoring manager for interval-based operations
+export {
+  HealthMonitoringManager,
+  createHealthMonitoringManager,
+  // Types
+  type HealthMonitoringDependencies,
+  type GasBaselineEntry as HealthGasBaselineEntry,
+} from './health-monitoring-manager';

@@ -26,7 +26,7 @@ describe('ConfigManager', () => {
     jest.resetModules();
 
     // Import fresh instance
-    const configModule = require('./config-manager');
+    const configModule = require('../../src/config-manager');
     ConfigManager = configModule.ConfigManager;
     configManager = configModule.configManager;
     resetConfigManager = configModule.resetConfigManager;
@@ -78,6 +78,8 @@ describe('ConfigManager', () => {
 
     it('should fail for missing REDIS_URL', () => {
       delete process.env.REDIS_URL;
+      delete process.env.REDIS_PORT; // Ensure fallback is also not available
+      resetConfigManager(); // Reset singleton after env change
 
       const result = ConfigManager.getInstance().validate();
 
@@ -224,6 +226,7 @@ describe('ConfigManager', () => {
   describe('validateOrThrow', () => {
     beforeEach(() => {
       process.env.REDIS_URL = 'redis://localhost:6379';
+      resetConfigManager(); // Reset singleton for fresh instance with new env
     });
 
     it('should not throw for valid configuration', () => {
@@ -234,6 +237,8 @@ describe('ConfigManager', () => {
 
     it('should throw for invalid configuration', () => {
       delete process.env.REDIS_URL;
+      delete process.env.REDIS_PORT; // Ensure fallback is also not available
+      resetConfigManager(); // Reset singleton after env change
 
       expect(() => {
         ConfigManager.getInstance().validateOrThrow();
@@ -245,6 +250,8 @@ describe('ConfigManager', () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
 
       delete process.env.REDIS_URL;
+      delete process.env.REDIS_PORT; // Ensure fallback is also not available
+      resetConfigManager(); // Reset singleton after env change
 
       expect(() => {
         ConfigManager.getInstance().validateOrThrow();
@@ -349,20 +356,35 @@ describe('ConfigManager', () => {
       expect(result.valid).toBe(true);
       expect(result.warnings.filter((w: string) => w.includes('OPTIONAL_VAR'))).toHaveLength(0);
     });
-    expect(result.warnings.filter((w: string) => w.includes('OPTIONAL_VAR'))).toHaveLength(0);
   });
 });
 
 describe('STRICT_CONFIG_VALIDATION', () => {
   beforeEach(() => {
+    // Reset environment to known state
+    process.env = { ...originalEnv };
+    jest.resetModules();
+
+    // Import fresh instance
+    const configModule = require('../../src/config-manager');
+    ConfigManager = configModule.ConfigManager;
+    configManager = configModule.configManager;
+    resetConfigManager = configModule.resetConfigManager;
+    resetConfigManager();
+
     process.env.REDIS_URL = 'redis://localhost:6379';
   });
 
   it('should demote errors to warnings when STRICT_CONFIG_VALIDATION is false', () => {
     process.env.STRICT_CONFIG_VALIDATION = 'false';
     delete process.env.REDIS_URL;
+    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Re-import to get fresh module with new env
+    jest.resetModules();
+    const mod = require('../../src/config-manager');
+    mod.resetConfigManager();
 
-    const result = ConfigManager.getInstance().validate();
+    const result = mod.ConfigManager.getInstance().validate();
 
     expect(result.valid).toBe(true); // Should be valid despite missing required var
     expect(result.errors).toHaveLength(0);
@@ -372,8 +394,13 @@ describe('STRICT_CONFIG_VALIDATION', () => {
   it('should enforce errors when STRICT_CONFIG_VALIDATION is true', () => {
     process.env.STRICT_CONFIG_VALIDATION = 'true';
     delete process.env.REDIS_URL;
+    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Re-import to get fresh module with new env
+    jest.resetModules();
+    const mod = require('../../src/config-manager');
+    mod.resetConfigManager();
 
-    const result = ConfigManager.getInstance().validate();
+    const result = mod.ConfigManager.getInstance().validate();
 
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
@@ -382,8 +409,13 @@ describe('STRICT_CONFIG_VALIDATION', () => {
   it('should default to strict validation (errors are errors)', () => {
     delete process.env.STRICT_CONFIG_VALIDATION;
     delete process.env.REDIS_URL;
+    delete process.env.REDIS_PORT; // Ensure fallback is also not available
+    // Re-import to get fresh module with new env
+    jest.resetModules();
+    const mod = require('../../src/config-manager');
+    mod.resetConfigManager();
 
-    const result = ConfigManager.getInstance().validate();
+    const result = mod.ConfigManager.getInstance().validate();
 
     expect(result.valid).toBe(false);
   });
@@ -391,6 +423,13 @@ describe('STRICT_CONFIG_VALIDATION', () => {
 
 describe('getEnv helper', () => {
   beforeEach(() => {
+    process.env = { ...originalEnv };
+    jest.resetModules();
+    const configModule = require('../../src/config-manager');
+    ConfigManager = configModule.ConfigManager;
+    configManager = configModule.configManager;
+    resetConfigManager = configModule.resetConfigManager;
+    resetConfigManager();
     process.env.REDIS_URL = 'redis://localhost:6379';
   });
 
@@ -417,10 +456,20 @@ describe('getEnv helper', () => {
 });
 
 describe('exported singleton', () => {
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    jest.resetModules();
+    const configModule = require('../../src/config-manager');
+    ConfigManager = configModule.ConfigManager;
+    configManager = configModule.configManager;
+    resetConfigManager = configModule.resetConfigManager;
+    resetConfigManager();
+    process.env.REDIS_URL = 'redis://localhost:6379';
+  });
+
   it('should export a pre-configured singleton', () => {
     expect(configManager).toBeDefined();
     expect(typeof configManager.validate).toBe('function');
     expect(typeof configManager.validateOrThrow).toBe('function');
   });
-});
 });

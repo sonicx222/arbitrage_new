@@ -87,6 +87,9 @@ export * from './redis-test-helper';
 // Timer Helpers (P2-TEST: Standardize timer management)
 export * from './helpers';
 
+// Contract Testing (P3-4: Contract Testing)
+export * from './contracts';
+
 // =============================================================================
 // Legacy Exports (kept for backward compatibility)
 // =============================================================================

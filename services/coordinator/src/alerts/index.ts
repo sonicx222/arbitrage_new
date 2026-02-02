@@ -1,7 +1,7 @@
 /**
  * Alerts Module
  *
- * Re-exports alert notification components.
+ * Re-exports alert notification and cooldown management components.
  */
 
 export {
@@ -12,3 +12,10 @@ export {
   type AlertSeverity,
   type NotificationChannel
 } from './notifier';
+
+export {
+  AlertCooldownManager,
+  type CooldownDelegate,
+  type CooldownManagerLogger,
+  type AlertCooldownManagerConfig
+} from './cooldown-manager';

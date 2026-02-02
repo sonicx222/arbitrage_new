@@ -14,7 +14,7 @@ import {
   StartResult,
 } from '../../chain-instance-manager';
 import { ChainDetectorInstance } from '../../chain-instance';
-import { ChainStats } from '../../unified-detector';
+import type { ChainStats } from '../../types';
 import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================

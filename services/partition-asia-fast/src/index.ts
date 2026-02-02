@@ -170,6 +170,9 @@ async function main(): Promise<void> {
   }
   mainState = 'starting';
 
+  // R3: Track startup time for metrics (standardized from P2)
+  const startupStartTime = Date.now();
+
   logger.info('Starting P1 Asia-Fast Partition Service', {
     partitionId: P1_PARTITION_ID,
     chains: config.chains,
@@ -195,17 +198,49 @@ async function main(): Promise<void> {
     // BUG-FIX: Mark as fully started only after successful completion
     mainState = 'started';
 
+    // R3: Calculate startup metrics (standardized from P2)
+    const startupDurationMs = Date.now() - startupStartTime;
+    const memoryUsage = process.memoryUsage();
+
     logger.info('P1 Asia-Fast Partition Service started successfully', {
       partitionId: detector.getPartitionId(),
       chains: detector.getChains(),
-      healthyChains: detector.getHealthyChains()
+      healthyChains: detector.getHealthyChains(),
+      startupDurationMs,
+      memoryUsageMB: Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100,
+      rssMemoryMB: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100
     });
 
   } catch (error) {
     // BUG-FIX: Mark as failed instead of resetting to idle
     mainState = 'failed';
 
-    logger.error('Failed to start P1 Asia-Fast Partition Service', { error });
+    // R3: Enhanced error context (standardized from P2)
+    const errorContext: Record<string, unknown> = {
+      partitionId: P1_PARTITION_ID,
+      port: config.healthCheckPort ?? P1_DEFAULT_PORT,
+      error: error instanceof Error ? error.message : String(error)
+    };
+
+    // Add specific hints based on error type
+    if (error instanceof Error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === 'EADDRINUSE') {
+        errorContext.errorCode = 'EADDRINUSE';
+        errorContext.hint = `Port ${config.healthCheckPort ?? P1_DEFAULT_PORT} is already in use. Check for other running instances.`;
+      } else if (nodeError.code === 'EACCES') {
+        errorContext.errorCode = 'EACCES';
+        errorContext.hint = `Insufficient permissions to bind to port ${config.healthCheckPort ?? P1_DEFAULT_PORT}. Try a port > 1024.`;
+      } else if (nodeError.code === 'ECONNREFUSED') {
+        errorContext.errorCode = 'ECONNREFUSED';
+        errorContext.hint = 'Redis connection refused. Verify REDIS_URL and that Redis is running.';
+      } else if (nodeError.code === 'ETIMEDOUT') {
+        errorContext.errorCode = 'ETIMEDOUT';
+        errorContext.hint = 'Connection timed out. Check network connectivity and Redis availability.';
+      }
+    }
+
+    logger.error('Failed to start P1 Asia-Fast Partition Service', errorContext);
 
     // BUG-FIX: Explicit null check before closing server
     // Server may be null if createPartitionHealthServer threw before assignment

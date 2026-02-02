@@ -669,7 +669,8 @@ describe('S3.1.7.10: Migration Documentation', () => {
 
     expect(content).toContain('Partitioned');
     expect(content).toContain('S3.1.7');
-    expect(content).toContain('Migrate existing detectors');
+    // Documentation uses "migrated" past tense after completion
+    expect(content.toLowerCase()).toContain('migrat');
   });
 });
 

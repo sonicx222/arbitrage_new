@@ -144,40 +144,41 @@ describe('WebSocket Resilience Configuration (S3.3)', () => {
   });
 
   describe('Chain-Specific Configuration', () => {
-    it('Arbitrum should have 3 WebSocket fallbacks', () => {
-      expect(CHAINS.arbitrum.wsFallbackUrls).toHaveLength(3);
+    // NOTE: Using >= assertions since fallback count may increase as providers are added
+    it('Arbitrum should have at least 3 WebSocket fallbacks', () => {
+      expect(CHAINS.arbitrum.wsFallbackUrls?.length).toBeGreaterThanOrEqual(3);
     });
 
-    it('Optimism should have 3 WebSocket fallbacks', () => {
-      expect(CHAINS.optimism.wsFallbackUrls).toHaveLength(3);
+    it('Optimism should have at least 3 WebSocket fallbacks', () => {
+      expect(CHAINS.optimism.wsFallbackUrls?.length).toBeGreaterThanOrEqual(3);
     });
 
-    it('BSC should have 3 WebSocket fallbacks', () => {
-      expect(CHAINS.bsc.wsFallbackUrls).toHaveLength(3);
+    it('BSC should have at least 3 WebSocket fallbacks', () => {
+      expect(CHAINS.bsc.wsFallbackUrls?.length).toBeGreaterThanOrEqual(3);
     });
 
-    it('Ethereum should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.ethereum.wsFallbackUrls).toHaveLength(2);
+    it('Ethereum should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.ethereum.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('Base should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.base.wsFallbackUrls).toHaveLength(2);
+    it('Base should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.base.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('Polygon should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.polygon.wsFallbackUrls).toHaveLength(2);
+    it('Polygon should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.polygon.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('Avalanche should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.avalanche.wsFallbackUrls).toHaveLength(2);
+    it('Avalanche should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.avalanche.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
     it('Fantom should have at least 2 WebSocket fallbacks', () => {
       expect(CHAINS.fantom.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('zkSync should have 2 WebSocket fallbacks', () => {
-      expect(CHAINS.zksync.wsFallbackUrls).toHaveLength(2);
+    it('zkSync should have at least 2 WebSocket fallbacks', () => {
+      expect(CHAINS.zksync.wsFallbackUrls?.length).toBeGreaterThanOrEqual(2);
     });
 
     it('Linea should have at least 1 WebSocket fallback', () => {

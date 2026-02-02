@@ -8,7 +8,8 @@ import {
   MetricsCollector,
   createMetricsCollector,
 } from '../../metrics-collector';
-import { UnifiedDetectorStats, ChainStats } from '../../unified-detector';
+import type { UnifiedDetectorStats } from '../../unified-detector';
+import type { ChainStats } from '../../types';
 import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================

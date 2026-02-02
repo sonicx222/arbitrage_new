@@ -13,7 +13,7 @@ import {
   TimerPresets,
   waitForCondition,
   areFakeTimersActive,
-} from './timer-helpers';
+} from '../../../src/helpers/timer-helpers';
 
 describe('TimerHelpers', () => {
   // Always restore real timers after each test

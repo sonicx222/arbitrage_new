@@ -25,7 +25,16 @@
       "Bash(do echo \"=== Testing $file \\(3 runs\\) ===\")",
       "Bash(do npm test -- --selectProjects integration --testPathPattern=\"$file\")",
       "Bash(rimraf:*)",
-      "Bash(npx rimraf:*)"
+      "Bash(npx rimraf:*)",
+      "Bash(npm ls:*)",
+      "Bash(pnpm add:*)",
+      "Bash(npx pnpm:*)",
+      "Bash(yarn add:*)",
+      "Bash(gh run list:*)",
+      "Bash(gh run view:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api:*)",
+      "Bash(more:*)"
     ]
   }
 }

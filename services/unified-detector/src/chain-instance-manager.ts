@@ -28,7 +28,7 @@ import {
 import { CHAINS } from '@arbitrage/config';
 
 import { ChainDetectorInstance } from './chain-instance';
-import { ChainStats } from './unified-detector';
+import type { ChainStats } from './types';
 import { Logger } from './types';
 import { CHAIN_STOP_TIMEOUT_MS } from './constants';
 

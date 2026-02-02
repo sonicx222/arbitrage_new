@@ -67,6 +67,14 @@ export {
 } from './queue-lock';
 export type { QueueLockStats } from './queue-lock';
 
+// P1-5 FIX: Operation Guard (skip-if-busy pattern with rate limiting)
+export {
+  OperationGuard,
+  tryWithGuard,
+  tryWithGuardSync
+} from './operation-guard';
+export type { OperationGuardStats, OperationGuardConfig } from './operation-guard';
+
 // R6: Service Registry (centralized singleton management)
 export {
   ServiceRegistry,

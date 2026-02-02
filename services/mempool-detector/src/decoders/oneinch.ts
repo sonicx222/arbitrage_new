@@ -15,6 +15,7 @@
 
 import { Interface, AbiCoder } from 'ethers';
 import type { Logger } from '@arbitrage/core';
+import { NATIVE_TOKENS, CHAIN_ID_TO_NAME } from '@arbitrage/config';
 import { BaseDecoder, hexToBigInt, isValidInput } from './base-decoder';
 import type { RawPendingTransaction, PendingSwapIntent, SwapRouterType, SelectorInfo } from './base-decoder';
 
@@ -63,15 +64,47 @@ const oneInchInterface = new Interface(ONEINCH_ABI);
 // Native ETH placeholder used by 1inch
 const ETH_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
-// WETH addresses by chain for ETH resolution
-const WETH_BY_CHAIN: Record<number, string> = {
-  1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Ethereum
-  56: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // BSC (WBNB)
-  137: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon (WMATIC)
-  42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum
-  10: '0x4200000000000000000000000000000000000006', // Optimism
-  8453: '0x4200000000000000000000000000000000000006', // Base
-};
+/**
+ * Pre-computed wrapped native token addresses by chain ID.
+ * Built at module initialization from centralized NATIVE_TOKENS config.
+ * This ensures O(1) lookup in the hot path with zero runtime overhead.
+ *
+ * Falls back to hardcoded values if config is not available (e.g., during tests
+ * with mock setups or circular import scenarios).
+ *
+ * @see NATIVE_TOKENS from @arbitrage/config - single source of truth
+ */
+const NATIVE_TOKENS_BY_CHAIN_ID: Record<number, string> = (() => {
+  // Fallback values - used if config is not available during initialization
+  const fallback: Record<number, string> = {
+    1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Ethereum WETH
+    56: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // BSC WBNB
+    137: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon WMATIC
+    42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
+    10: '0x4200000000000000000000000000000000000006', // Optimism WETH
+    8453: '0x4200000000000000000000000000000000000006', // Base WETH
+    43114: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', // Avalanche WAVAX
+    250: '0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83', // Fantom WFTM
+  };
+
+  // Try to build from centralized config if available
+  if (NATIVE_TOKENS && CHAIN_ID_TO_NAME) {
+    const fromConfig: Record<number, string> = {};
+    for (const chainIdStr of Object.keys(CHAIN_ID_TO_NAME)) {
+      const numericId = Number(chainIdStr);
+      const chainName = CHAIN_ID_TO_NAME[numericId];
+      if (!chainName) continue;
+      const nativeToken = NATIVE_TOKENS[chainName];
+      if (nativeToken) {
+        fromConfig[numericId] = nativeToken;
+      }
+    }
+    // Return config values if we got any, otherwise use fallback
+    return Object.keys(fromConfig).length > 0 ? fromConfig : fallback;
+  }
+
+  return fallback;
+})()
 
 // =============================================================================
 // DECODER IMPLEMENTATION
@@ -264,11 +297,12 @@ export class OneInchDecoder extends BaseDecoder {
   }
 
   /**
-   * Resolve ETH placeholder to WETH address.
+   * Resolve ETH placeholder to wrapped native token address.
+   * Uses pre-computed NATIVE_TOKENS_BY_CHAIN_ID for O(1) hot-path lookup.
    */
   private resolveToken(token: string, chainId: number): string {
     if (token.toLowerCase() === ETH_ADDRESS.toLowerCase()) {
-      return WETH_BY_CHAIN[chainId] || token;
+      return NATIVE_TOKENS_BY_CHAIN_ID[chainId] || token;
     }
     return token;
   }
@@ -294,7 +328,7 @@ export class OneInchDecoder extends BaseDecoder {
   private extractOutputTokenFromPools(pools: bigint[], chainId: number): string {
     if (!pools || pools.length === 0) {
       this.logger.debug('1inch: empty pools array for token extraction');
-      return WETH_BY_CHAIN[chainId] || '0x' + '0'.repeat(40);
+      return NATIVE_TOKENS_BY_CHAIN_ID[chainId] || '0x' + '0'.repeat(40);
     }
 
     // Extract the last pool address (lower 160 bits)
@@ -342,8 +376,8 @@ export class OneInchDecoder extends BaseDecoder {
     if (!pools || pools.length === 0) {
       this.logger.debug('1inch: empty V3 pools array');
       return {
-        tokenIn: WETH_BY_CHAIN[chainId] || '0x' + '0'.repeat(40),
-        tokenOut: WETH_BY_CHAIN[chainId] || '0x' + '0'.repeat(40),
+        tokenIn: NATIVE_TOKENS_BY_CHAIN_ID[chainId] || '0x' + '0'.repeat(40),
+        tokenOut: NATIVE_TOKENS_BY_CHAIN_ID[chainId] || '0x' + '0'.repeat(40),
       };
     }
 
