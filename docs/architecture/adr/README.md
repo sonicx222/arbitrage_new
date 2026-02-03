@@ -30,6 +30,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-018](./ADR-018-circuit-breaker.md) | Execution Circuit Breaker | Accepted | 2026-01-23 | 95% |
 | [ADR-019](./ADR-019-factory-subscriptions.md) | Factory-Level Event Subscriptions | Accepted | 2026-01-23 | 92% |
 | [ADR-020](./ADR-020-flash-loan.md) | Flash Loan Integration | Accepted | 2026-01-24 | 85% |
+| [ADR-022](./ADR-022-hot-path-memory-optimization.md) | Hot-Path Memory Optimization | Accepted | 2026-02-04 | 95% |
 
 ## Decision Summary
 
@@ -132,6 +133,13 @@ An Architecture Decision Record captures an important architectural decision mad
     - Zero-capital arbitrage
     - Custom FlashLoanArbitrage.sol contract
 
+### Performance Optimization (Phase 4)
+
+16. **Hot-Path Memory Optimization** (ADR-022)
+    - Ring buffer for event latencies (zero allocation)
+    - LRU cache for normalized token pairs
+    - 99% reduction in hot-path memory churn
+
 ## How to Use These ADRs
 
 ### For Implementation
@@ -198,3 +206,5 @@ XX% - Explanation of confidence factors
 | 2026-01-23 | ADR-018 | Added Execution Circuit Breaker decision |
 | 2026-01-23 | ADR-019 | Added Factory-Level Event Subscriptions decision |
 | 2026-01-24 | ADR-020 | Added Flash Loan Integration decision |
+| 2026-02-04 | ADR-005 | Updated L3 cache description (clarified no MongoDB) |
+| 2026-02-04 | ADR-022 | Added Hot-Path Memory Optimization decision |

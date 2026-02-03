@@ -1,7 +1,7 @@
 # ADR-005: Hierarchical Caching Strategy (L1/L2/L3)
 
 ## Status
-**Accepted** | 2025-01-10
+**Accepted** | 2025-01-10 | **Updated** 2026-02-04 (L3 cache clarification)
 
 ## Context
 
@@ -39,10 +39,12 @@ Optimize the hierarchical cache specifically for arbitrage price data:
 - Cross-partition price sharing
 - TTL: 60 seconds (prices stale after)
 
-### L3: MongoDB (10-50ms)
-- Opportunity history for ML training
-- Price snapshots for backtesting
-- Not used in hot path
+### L3: RPC Fallback (100-500ms)
+- Direct blockchain state queries via RPC providers
+- Used only when L1/L2 cache misses AND fresh data required
+- Not used in hot path (too slow)
+- **Note**: Original design planned MongoDB for persistent storage,
+  but current implementation uses Redis-only architecture for simplicity
 
 ### Implementation
 
@@ -122,7 +124,7 @@ class PriceMatrix {
 |-------|-------|-------|----------|
 | L1 | ~0.1μs | Single instance | Hot path price lookups |
 | L2 | ~2ms | Cross-partition | Price sharing, history |
-| L3 | ~20ms | Persistent | Analytics, ML training |
+| L3 | ~200ms | RPC Fallback | Fresh on-chain data when cache stale |
 
 ### Cache Hit Rate Targets
 
@@ -138,7 +140,11 @@ class PriceMatrix {
 |-------|------------|----------|
 | L1 | 16KB per 1000 pairs | 10,000 pairs max |
 | L2 | 256MB Redis limit | ~100K cached values |
-| L3 | 512MB MongoDB limit | ~1M records |
+| L3 | N/A (RPC calls) | On-demand queries |
+
+**Note**: The system operates without persistent storage (no MongoDB/PostgreSQL).
+All state is either in-memory (L1) or Redis (L2). Historical data for analytics
+would require adding a persistence layer in the future.
 
 ### Performance Comparison
 
@@ -210,6 +216,8 @@ class PredictiveWarmer {
 ## References
 
 - [Current implementation](../../../shared/core/src/hierarchical-cache.ts)
+- [Price Matrix implementation](../../../shared/core/src/caching/price-matrix.ts)
+- [ADR-022: Hot-Path Memory Optimization](./ADR-022-hot-path-memory-optimization.md) - Related optimizations
 - [SharedArrayBuffer MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer)
 - [Atomics MDN](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics)
 

@@ -1,7 +1,7 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.4
-> **Last Updated:** 2026-01-31
+> **Document Version:** 2.5
+> **Last Updated:** 2026-02-04
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
 
@@ -119,9 +119,9 @@ Build a **professional and reliable profitable arbitrage application** with:
 │  │                            DATA PLANE (Global)                                 │   │
 │  │                                                                                │   │
 │  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                │   │
-│  │  │ Upstash Redis   │  │ MongoDB Atlas   │  │ L1 Cache        │                │   │
-│  │  │ Streams         │  │ Opportunity Log │  │ SharedArrayBuf  │                │   │
-│  │  │ (Event Backbone)│  │ (Analytics)     │  │ (Per-Instance)  │                │   │
+│  │  │ Upstash Redis   │  │ Redis Cache     │  │ L1 Cache        │                │   │
+│  │  │ Streams         │  │ (L2 Price Data) │  │ SharedArrayBuf  │                │   │
+│  │  │ (Event Backbone)│  │ (Cross-Partition│  │ (Per-Instance)  │                │   │
 │  │  └─────────────────┘  └─────────────────┘  └─────────────────┘                │   │
 │  │                                                                                │   │
 │  └───────────────────────────────────────────────────────────────────────────────┘   │
@@ -479,9 +479,12 @@ All phases remain within Upstash 10K/day limit due to batching.
 | Render | Executor Backup | US-East | 512MB | $0 |
 | Koyeb | Coordinator | US-East | 256MB | $0 |
 | GCP | Standby Coordinator | US-Central | 1GB | $0 |
-| Upstash | Redis Streams | Global | 10K/day | $0 |
-| MongoDB Atlas | Opportunity Log | Global | 512MB | $0 |
+| Upstash | Redis Streams + Cache | Global | 10K/day | $0 |
 | Vercel | Dashboard | Edge | 100GB-hrs | $0 |
+
+> **Note**: Original design included MongoDB Atlas for opportunity logging.
+> Current implementation uses Redis-only architecture for simplicity.
+> MongoDB may be added in future for analytics/ML training data persistence.
 
 **Total: $0/month**
 
@@ -505,6 +508,30 @@ All phases remain within Upstash 10K/day limit due to batching.
 | Event Buffer | Ring buffer (fixed size) | 80% |
 | Cache | LRU eviction, TTL expiry | 40% |
 | Logs | Sampling, rotation | 70% |
+| Token Pair Normalization | LRU cache (10K entries) | 99% allocation reduction |
+| Event Latencies | Float64Array ring buffer | Zero hot-path allocation |
+
+### 7.4 Hot-Path Optimization (ADR-022)
+
+The following optimizations ensure the detection hot-path maintains <50ms latency:
+
+**Ring Buffer for Event Latencies**
+- Pre-allocated Float64Array (1000 samples)
+- O(1) write with zero memory allocation
+- Eliminates ~8MB/sec memory churn under high load
+
+**Normalization Cache for Token Pairs**
+- LRU-style cache with 10K entry capacity
+- >99% cache hit rate for active pairs
+- Simple "clear-half" eviction strategy
+- Eliminates ~400K string allocations/sec
+
+**Nullish Coalescing for Numeric Values**
+- Use `??` instead of `||` for values where 0 is valid
+- Prevents incorrect fallback for zero-profit opportunities
+- Applied consistently across execution strategies
+
+See [ADR-022](./adr/ADR-022-hot-path-memory-optimization.md) for detailed rationale.
 
 ---
 
@@ -793,12 +820,15 @@ The following Architecture Decision Records document key decisions:
 - [ADR-014: Modular Detector Components](./adr/ADR-014-modular-detector-components.md)
 - [ADR-015: Pino Logger Migration](./adr/ADR-015-pino-logger-migration.md)
 
-### Phase 1-3 Enhancements (ADR-016 to ADR-020) ✅ NEW
+### Phase 1-3 Enhancements (ADR-016 to ADR-020)
 - [ADR-016: Transaction Simulation Integration](./adr/ADR-016-transaction-simulation.md)
 - [ADR-017: MEV Protection Enhancement](./adr/ADR-017-mev-protection.md)
 - [ADR-018: Execution Circuit Breaker](./adr/ADR-018-circuit-breaker.md)
 - [ADR-019: Factory-Level Event Subscriptions](./adr/ADR-019-factory-subscriptions.md)
 - [ADR-020: Flash Loan Integration](./adr/ADR-020-flash-loan.md)
+
+### Phase 4 Performance Optimization (ADR-022+) ✅ NEW
+- [ADR-022: Hot-Path Memory Optimization](./adr/ADR-022-hot-path-memory-optimization.md)
 
 ---
 
@@ -812,6 +842,7 @@ The following Architecture Decision Records document key decisions:
 | 2.2 | 2026-01-24 | Phase 1-3 Update | Added simulation, MEV protection, circuit breaker, factory subscriptions, flash loans |
 | 2.3 | 2026-01-25 | Optimization Evaluation | Added feature status table, WASM clarification, 13/15 optimizations confirmed complete |
 | 2.4 | 2026-01-31 | Config Alignment | Corrected DEX count (62→54), token count (165→143) to match actual config |
+| 2.5 | 2026-02-04 | Bug Hunt Fixes | Added ADR-022 (hot-path memory optimization), corrected data plane diagram (no MongoDB), documented ring buffer and normalization cache patterns |
 
 ---
 
