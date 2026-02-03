@@ -1211,10 +1211,22 @@ export class WebSocketManager {
       return null;
     }
 
-    // TODO: Query current block via eth_blockNumber RPC call
+    /**
+     * TODO: Implement proactive staleness detection via eth_blockNumber RPC call.
+     *
+     * Implementation requires:
+     * 1. Add pendingRequests Map<number, { resolve, reject, timeout }> for request tracking
+     * 2. Add response handler in onMessage to match JSON-RPC responses by id
+     * 3. Implement sendRequest(method, params): Promise<result> with timeout
+     * 4. Call eth_blockNumber and compare with lastKnownBlock
+     *
+     * Priority: P3 (Enhancement) - Current passive approach via checkForDataGap()
+     * works correctly, this would add proactive detection without waiting for next block.
+     *
+     * @see https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_blocknumber
+     */
     // For now, rely on checkForDataGap() which triggers on incoming block messages
     // This passive approach detects gaps when the next block arrives
-
     return null;
   }
 

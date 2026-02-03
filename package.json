@@ -80,6 +80,8 @@
   ],
   "private": true,
   "devDependencies": {
+    "@swc/core": "^1.4.0",
+    "@swc/jest": "^0.2.36",
     "@pact-foundation/pact": "^13.1.4",
     "@stryker-mutator/core": "^8.2.6",
     "@stryker-mutator/jest-runner": "^8.2.6",

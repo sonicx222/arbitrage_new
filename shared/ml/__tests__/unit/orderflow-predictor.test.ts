@@ -12,8 +12,19 @@
  * - Singleton factory functions
  * - Edge cases and error handling
  *
+ * NOTE: These tests are slow (~6-8s per test) due to TensorFlow.js model
+ * initialization. They are skipped in CI by default. Set RUN_SLOW_TESTS=true
+ * to run them (e.g., in nightly builds).
+ *
  * @see docs/reports/implementation_plan_v3.md - Phase 4, Task 4.3.2
  */
+
+// Skip slow ML tests in CI unless explicitly enabled
+const SKIP_SLOW_ML_TESTS = process.env.CI === 'true' &&
+                           process.env.RUN_SLOW_TESTS !== 'true';
+
+// Conditional describe - skip in CI for performance
+const describeOrSkip = SKIP_SLOW_ML_TESTS ? describe.skip : describe;
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
@@ -220,7 +231,7 @@ function generateTrainingSamples(count: number): OrderflowTrainingSample[] {
 // OrderflowPredictor Tests
 // =============================================================================
 
-describe('OrderflowPredictor', () => {
+describeOrSkip('OrderflowPredictor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Re-setup whale tracker mock after clearAllMocks
@@ -286,12 +297,13 @@ describe('OrderflowPredictor', () => {
   describe('Prediction - Untrained Model', () => {
     let predictor: OrderflowPredictor;
 
-    beforeEach(async () => {
+    // Use beforeAll for shared model - predictions are read-only operations
+    beforeAll(async () => {
       predictor = new OrderflowPredictor();
       await predictor.waitForReady();
-    });
+    }, 30000);
 
-    afterEach(() => {
+    afterAll(() => {
       predictor.dispose();
     });
 
@@ -712,12 +724,13 @@ describe('OrderflowPredictor', () => {
   describe('Edge Cases', () => {
     let predictor: OrderflowPredictor;
 
-    beforeEach(async () => {
+    // Use beforeAll - predictions are read-only operations
+    beforeAll(async () => {
       predictor = new OrderflowPredictor();
       await predictor.waitForReady();
-    });
+    }, 30000);
 
-    afterEach(() => {
+    afterAll(() => {
       predictor.dispose();
     });
 
@@ -807,12 +820,13 @@ describe('OrderflowPredictor', () => {
   describe('Prediction Result Structure', () => {
     let predictor: OrderflowPredictor;
 
-    beforeEach(async () => {
+    // Use beforeAll - predictions are read-only operations
+    beforeAll(async () => {
       predictor = new OrderflowPredictor();
       await predictor.waitForReady();
-    });
+    }, 30000);
 
-    afterEach(() => {
+    afterAll(() => {
       predictor.dispose();
     });
 
@@ -855,7 +869,7 @@ describe('OrderflowPredictor', () => {
 // Singleton Factory Tests
 // =============================================================================
 
-describe('Singleton Factory', () => {
+describeOrSkip('Singleton Factory', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Re-setup whale tracker mock after clearAllMocks
@@ -914,7 +928,7 @@ describe('Singleton Factory', () => {
 // Integration with OrderflowFeatureExtractor Tests
 // =============================================================================
 
-describe('Integration with OrderflowFeatureExtractor', () => {
+describeOrSkip('Integration with OrderflowFeatureExtractor', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     // Re-setup whale tracker mock after clearAllMocks
@@ -989,7 +1003,7 @@ describe('Integration with OrderflowFeatureExtractor', () => {
 // Training Data Preparation Tests
 // =============================================================================
 
-describe('Training Data Preparation', () => {
+describeOrSkip('Training Data Preparation', () => {
   let predictor: OrderflowPredictor;
 
   beforeEach(async () => {

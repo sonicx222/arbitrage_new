@@ -34,7 +34,10 @@
       "Bash(gh run view:*)",
       "WebFetch(domain:github.com)",
       "Bash(gh api:*)",
-      "Bash(more:*)"
+      "Bash(more:*)",
+      "Bash(for file in \"setupTests.ts\" \"index.ts\" \"types.ts\")",
+      "Bash(do echo \"\")",
+      "Bash(echo:*)"
     ]
   }
 }

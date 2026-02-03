@@ -6,16 +6,9 @@
  * - Region: Oracle Cloud Singapore (asia-southeast1)
  * - Resource Profile: Heavy (4 chains)
  *
- * This service is a deployment wrapper for the unified-detector,
- * configured specifically for the P1 partition.
- *
  * Architecture Note:
- * This service creates its own HTTP health server via createPartitionHealthServer().
- * The UnifiedChainDetector class provides health data but NOT an HTTP server.
- * This separation of concerns allows:
- * - Partition-specific health endpoint configuration
- * - Consistent health response format across all partition services
- * - The detector class to remain transport-agnostic
+ * Uses the shared partition service runner factory for consistent startup,
+ * shutdown, and health server behavior across all partition services.
  *
  * Environment Variables:
  * - PARTITION_ID: Set to 'asia-fast' by default
@@ -28,27 +21,24 @@
  * - PARTITION_CHAINS: Override default chains (comma-separated)
  *
  * @see ADR-003: Partitioned Chain Detectors
+ * @see ADR-024: Partition Service Factory Pattern
  */
 
-import { Server } from 'http';
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
 import {
   createLogger,
   parsePort,
   validateAndFilterChains,
-  createPartitionHealthServer,
-  setupDetectorEventHandlers,
-  setupProcessHandlers,
   exitWithConfigError,
-  closeServerWithTimeout,
   parsePartitionEnvironmentConfig,
   validatePartitionEnvironmentConfig,
   generateInstanceId,
   PartitionServiceConfig,
   PartitionEnvironmentConfig,
+  runPartitionService,
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES,
-  Logger
+  PartitionDetectorInterface
 } from '@arbitrage/core';
 import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 
@@ -57,7 +47,6 @@ import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 // =============================================================================
 
 const P1_PARTITION_ID = PARTITION_IDS.ASIA_FAST;
-// Use centralized port constant (P1: 3001, P2: 3002, P3: 3003, P4: 3004)
 const P1_DEFAULT_PORT = PARTITION_PORTS[P1_PARTITION_ID] ?? 3001;
 
 // =============================================================================
@@ -66,23 +55,16 @@ const P1_DEFAULT_PORT = PARTITION_PORTS[P1_PARTITION_ID] ?? 3001;
 
 const logger = createLogger('partition-asia-fast:main');
 
-// =============================================================================
-// Partition Configuration Retrieval
-// =============================================================================
-
-// Single partition config retrieval
+// Partition configuration retrieval
 const partitionConfig = getPartition(P1_PARTITION_ID);
 if (!partitionConfig) {
   exitWithConfigError('P1 partition configuration not found', { partitionId: P1_PARTITION_ID }, logger);
 }
 
-// BUG-FIX: Add defensive null-safety checks for test compatibility
-// During test imports, mocks may not be fully initialized, so we use optional chaining
-// and provide safe defaults to prevent "Cannot read properties of undefined" errors
+// Defensive null-safety for test compatibility
 const P1_CHAINS: readonly string[] = partitionConfig?.chains ?? [];
 const P1_REGION = partitionConfig?.region ?? 'asia-southeast1';
 
-// BUG-FIX: Validate partition config has chains
 if (!P1_CHAINS || P1_CHAINS.length === 0) {
   exitWithConfigError('P1 partition has no chains configured', {
     partitionId: P1_PARTITION_ID,
@@ -91,20 +73,16 @@ if (!P1_CHAINS || P1_CHAINS.length === 0) {
 }
 
 // =============================================================================
-// Environment Configuration (Using shared typed utilities)
+// Environment Configuration
 // =============================================================================
 
-// Parse environment into typed configuration using shared utility
 const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P1_CHAINS);
-
-// Validate environment configuration (exits on critical errors, warns on non-critical)
 validatePartitionEnvironmentConfig(envConfig, P1_PARTITION_ID, P1_CHAINS, logger);
 
 // =============================================================================
 // Service Configuration
 // =============================================================================
 
-// Service configuration for shared utilities
 const serviceConfig: PartitionServiceConfig = {
   partitionId: P1_PARTITION_ID,
   serviceName: PARTITION_SERVICE_NAMES[P1_PARTITION_ID] ?? 'partition-asia-fast',
@@ -114,14 +92,8 @@ const serviceConfig: PartitionServiceConfig = {
   provider: partitionConfig?.provider ?? 'oracle'
 };
 
-// Store server reference for graceful shutdown
-const healthServerRef: { current: Server | null } = { current: null };
-
-// Unified detector configuration (uses typed envConfig)
-// BUG-FIX: Use nullish coalescing (??) consistently instead of logical OR (||)
-// to properly handle falsy but valid values like empty strings or 0
-// BUG-FIX: Add optional chaining for envConfig properties for test compatibility
-const config: UnifiedDetectorConfig = {
+// Build detector config with explicit types for the factory
+const detectorConfig = {
   partitionId: P1_PARTITION_ID,
   chains: validateAndFilterChains(envConfig?.partitionChains, P1_CHAINS, logger),
   instanceId: generateInstanceId(P1_PARTITION_ID, envConfig?.instanceId),
@@ -130,156 +102,43 @@ const config: UnifiedDetectorConfig = {
   healthCheckPort: parsePort(envConfig?.healthCheckPort, P1_DEFAULT_PORT, logger)
 };
 
-// =============================================================================
-// Service Instance
-// =============================================================================
-
-const detector = new UnifiedChainDetector(config);
+// Re-export config with UnifiedDetectorConfig type for backward compatibility
+const config: UnifiedDetectorConfig = detectorConfig;
 
 // =============================================================================
-// Event Handlers (Using shared utilities)
+// Service Runner (Using shared factory for consistent behavior)
 // =============================================================================
 
-setupDetectorEventHandlers(detector, logger, P1_PARTITION_ID);
+/**
+ * TYPE-CAST-EXPLANATION:
+ * The `as unknown as` cast is required because UnifiedChainDetector doesn't
+ * explicitly implement PartitionDetectorInterface, though it has all required
+ * methods. The interfaces have slightly different return type signatures:
+ *
+ * - PartitionDetectorInterface.getStats() returns { chainStats: Map<string, unknown> }
+ * - UnifiedChainDetector.getStats() returns { chainStats: Map<string, ChainStats> }
+ *
+ * The types ARE compatible at runtime (more specific → less specific is OK),
+ * but TypeScript can't verify this without explicit implementation.
+ *
+ * TODO: Refactor UnifiedChainDetector to explicitly implement PartitionDetectorInterface
+ * by aligning the return types or using interface generics.
+ * @see ADR-024: Partition Service Factory Pattern
+ */
+const runner = runPartitionService({
+  config: serviceConfig,
+  detectorConfig,
+  createDetector: (cfg) => new UnifiedChainDetector(cfg) as unknown as PartitionDetectorInterface,
+  logger
+});
 
 // =============================================================================
-// Process Handlers (Using shared utilities with shutdown guard)
+// Exports (Maintaining backward compatibility)
 // =============================================================================
 
-// Store cleanup function to prevent MaxListenersExceeded warnings
-// in test scenarios and allow proper handler cleanup
-const cleanupProcessHandlers = setupProcessHandlers(healthServerRef, detector, logger, serviceConfig.serviceName);
-
-// =============================================================================
-// Main Entry Point
-// =============================================================================
-
-// Guard against multiple main() invocations (e.g., from integration tests)
-// FIX: Standardized to use single state enum (matching P2 l2-turbo pattern)
-// This is cleaner and more explicit about the service lifecycle state
-type MainState = 'idle' | 'starting' | 'started' | 'failed';
-let mainState: MainState = 'idle';
-
-async function main(): Promise<void> {
-  // Check-and-set guard prevents duplicate invocations within same event loop tick
-  if (mainState !== 'idle') {
-    logger.warn('main() already started or starting, ignoring duplicate invocation', {
-      currentState: mainState
-    });
-    return;
-  }
-  mainState = 'starting';
-
-  // R3: Track startup time for metrics (standardized from P2)
-  const startupStartTime = Date.now();
-
-  logger.info('Starting P1 Asia-Fast Partition Service', {
-    partitionId: P1_PARTITION_ID,
-    chains: config.chains,
-    region: P1_REGION,
-    provider: serviceConfig.provider,
-    nodeVersion: process.version,
-    pid: process.pid
-  });
-
-  try {
-    // Start health check server first (using shared utilities)
-    // BUG-FIX: Use nullish coalescing for port to handle port 0 correctly
-    healthServerRef.current = createPartitionHealthServer({
-      port: config.healthCheckPort ?? P1_DEFAULT_PORT,
-      config: serviceConfig,
-      detector,
-      logger
-    });
-
-    // Start detector
-    await detector.start();
-
-    // BUG-FIX: Mark as fully started only after successful completion
-    mainState = 'started';
-
-    // R3: Calculate startup metrics (standardized from P2)
-    const startupDurationMs = Date.now() - startupStartTime;
-    const memoryUsage = process.memoryUsage();
-
-    logger.info('P1 Asia-Fast Partition Service started successfully', {
-      partitionId: detector.getPartitionId(),
-      chains: detector.getChains(),
-      healthyChains: detector.getHealthyChains(),
-      startupDurationMs,
-      memoryUsageMB: Math.round(memoryUsage.heapUsed / 1024 / 1024 * 100) / 100,
-      rssMemoryMB: Math.round(memoryUsage.rss / 1024 / 1024 * 100) / 100
-    });
-
-  } catch (error) {
-    // BUG-FIX: Mark as failed instead of resetting to idle
-    mainState = 'failed';
-
-    // R3: Enhanced error context (standardized from P2)
-    const errorContext: Record<string, unknown> = {
-      partitionId: P1_PARTITION_ID,
-      port: config.healthCheckPort ?? P1_DEFAULT_PORT,
-      error: error instanceof Error ? error.message : String(error)
-    };
-
-    // Add specific hints based on error type
-    if (error instanceof Error) {
-      const nodeError = error as NodeJS.ErrnoException;
-      if (nodeError.code === 'EADDRINUSE') {
-        errorContext.errorCode = 'EADDRINUSE';
-        errorContext.hint = `Port ${config.healthCheckPort ?? P1_DEFAULT_PORT} is already in use. Check for other running instances.`;
-      } else if (nodeError.code === 'EACCES') {
-        errorContext.errorCode = 'EACCES';
-        errorContext.hint = `Insufficient permissions to bind to port ${config.healthCheckPort ?? P1_DEFAULT_PORT}. Try a port > 1024.`;
-      } else if (nodeError.code === 'ECONNREFUSED') {
-        errorContext.errorCode = 'ECONNREFUSED';
-        errorContext.hint = 'Redis connection refused. Verify REDIS_URL and that Redis is running.';
-      } else if (nodeError.code === 'ETIMEDOUT') {
-        errorContext.errorCode = 'ETIMEDOUT';
-        errorContext.hint = 'Connection timed out. Check network connectivity and Redis availability.';
-      }
-    }
-
-    logger.error('Failed to start P1 Asia-Fast Partition Service', errorContext);
-
-    // BUG-FIX: Explicit null check before closing server
-    // Server may be null if createPartitionHealthServer threw before assignment
-    if (healthServerRef.current) {
-      await closeServerWithTimeout(healthServerRef.current, 1000, logger);
-    }
-
-    // BUG-FIX: Clear server reference after closing to prevent stale reference issues
-    healthServerRef.current = null;
-
-    // Clean up process handlers before exit to prevent listener leaks
-    cleanupProcessHandlers();
-
-    process.exit(1);
-  }
-}
-
-// Run - only when this is the main entry point (not when imported by tests)
-// Check for Jest worker to prevent auto-start during test imports
-if (!process.env.JEST_WORKER_ID) {
-  main().catch((error) => {
-    // BUG-FIX: Wrap logging in try-catch to prevent silent failures if logger fails
-    try {
-      if (logger) {
-        logger.error('Fatal error in P1 Asia-Fast partition main', { error });
-      } else {
-        console.error('Fatal error in P1 Asia-Fast partition main (logger unavailable):', error);
-      }
-    } catch (logError) {
-      // Last resort - write to stderr directly
-      process.stderr.write(`FATAL: ${error}\nLOG ERROR: ${logError}\n`);
-    }
-    process.exit(1);
-  });
-}
-
-// =============================================================================
-// Exports
-// =============================================================================
+// Cast back to UnifiedChainDetector for consumers that need the full type
+const detector = runner.detector as unknown as UnifiedChainDetector;
+const cleanupProcessHandlers = runner.cleanup;
 
 export {
   detector,
@@ -288,9 +147,7 @@ export {
   P1_CHAINS,
   P1_REGION,
   cleanupProcessHandlers,
-  // Export for testing
   envConfig
 };
 
-// Re-export type from shared utilities for convenience
 export type { PartitionEnvironmentConfig };

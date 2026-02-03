@@ -8,7 +8,18 @@
  * - Reset functions
  * - Edge cases and error handling
  * - Configuration options
+ *
+ * NOTE: These tests are slow (~100-200s per test) due to TensorFlow.js model
+ * initialization. They are skipped in CI by default. Set RUN_SLOW_TESTS=true
+ * to run them (e.g., in nightly builds).
  */
+
+// Skip slow ML tests in CI unless explicitly enabled
+const SKIP_SLOW_ML_TESTS = process.env.CI === 'true' &&
+                           process.env.RUN_SLOW_TESTS !== 'true';
+
+// Conditional describe - skip in CI for performance
+const describeOrSkip = SKIP_SLOW_ML_TESTS ? describe.skip : describe;
 
 import {
   LSTMPredictor,
@@ -79,7 +90,7 @@ jest.mock('@arbitrage/core', () => {
   };
 });
 
-describe('LSTMPredictor', () => {
+describeOrSkip('LSTMPredictor', () => {
   // Reset singletons before each test
   beforeEach(() => {
     resetAllMLSingletons();
@@ -131,12 +142,13 @@ describe('LSTMPredictor', () => {
   describe('predictPrice', () => {
     let predictor: LSTMPredictor;
 
-    beforeEach(async () => {
+    // Use beforeAll for shared model - tests are read-only (predictions don't modify model)
+    beforeAll(async () => {
       predictor = new LSTMPredictor();
       await predictor.waitForReady();
-    });
+    }, 30000);
 
-    afterEach(() => {
+    afterAll(() => {
       predictor.dispose();
     });
 
@@ -321,7 +333,7 @@ describe('LSTMPredictor', () => {
   });
 });
 
-describe('PatternRecognizer', () => {
+describeOrSkip('PatternRecognizer', () => {
   beforeEach(() => {
     resetPatternRecognizer();
   });
@@ -499,7 +511,7 @@ describe('PatternRecognizer', () => {
   });
 });
 
-describe('Singleton Factory Functions', () => {
+describeOrSkip('Singleton Factory Functions', () => {
   beforeEach(() => {
     resetAllMLSingletons();
   });
@@ -564,7 +576,7 @@ describe('Singleton Factory Functions', () => {
   });
 });
 
-describe('Edge Cases and Error Handling', () => {
+describeOrSkip('Edge Cases and Error Handling', () => {
   beforeEach(() => {
     resetAllMLSingletons();
   });

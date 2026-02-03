@@ -145,6 +145,27 @@ jest.mock('@arbitrage/core', () => ({
     'solana-native': 'partition-solana',
   },
   PartitionServiceConfig: {},
+  // R9: Partition Service Runner Factory
+  runPartitionService: jest.fn().mockImplementation((options: {
+    createDetector: (cfg: unknown) => unknown;
+    detectorConfig: unknown;
+  }) => ({
+    detector: options.createDetector(options.detectorConfig),
+    start: jest.fn().mockResolvedValue(undefined),
+    getState: jest.fn().mockReturnValue('idle'),
+    cleanup: jest.fn(),
+    healthServer: { current: null },
+  })),
+  createPartitionServiceRunner: jest.fn().mockImplementation((options: {
+    createDetector: (cfg: unknown) => unknown;
+    detectorConfig: unknown;
+  }) => ({
+    detector: options.createDetector(options.detectorConfig),
+    start: jest.fn().mockResolvedValue(undefined),
+    getState: jest.fn().mockReturnValue('idle'),
+    cleanup: jest.fn(),
+    healthServer: { current: null },
+  })),
 }));
 
 jest.mock('@arbitrage/config', () => ({
@@ -366,30 +387,26 @@ describe('P1 Asia-Fast Partition Service Integration', () => {
     });
   });
 
-  describe('Event Handler Setup', () => {
-    it('should call setupDetectorEventHandlers with correct parameters', async () => {
+  describe('Service Runner Factory', () => {
+    it('should call runPartitionService with correct service configuration', async () => {
       jest.resetModules();
-      const { setupDetectorEventHandlers } = await import('@arbitrage/core');
-      const { detector, cleanupProcessHandlers } = await import('../../index');
+      const { runPartitionService } = await import('@arbitrage/core');
+      const { cleanupProcessHandlers } = await import('../../index');
       cleanupFn = cleanupProcessHandlers;
 
-      expect(setupDetectorEventHandlers).toHaveBeenCalledWith(
-        detector,
-        expect.anything(), // logger
-        'asia-fast'
+      expect(runPartitionService).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            partitionId: 'asia-fast',
+            serviceName: 'partition-asia-fast',
+          }),
+          detectorConfig: expect.objectContaining({
+            partitionId: 'asia-fast',
+          }),
+          createDetector: expect.any(Function),
+          logger: expect.anything(),
+        })
       );
-    });
-  });
-
-  describe('Process Handler Setup', () => {
-    it('should call setupProcessHandlers with correct parameters', async () => {
-      jest.resetModules();
-      const { setupProcessHandlers } = await import('@arbitrage/core');
-      await import('../../index');
-
-      expect(setupProcessHandlers).toHaveBeenCalled();
-      const callArgs = (setupProcessHandlers as jest.Mock).mock.calls[0];
-      expect(callArgs[3]).toBe('partition-asia-fast'); // serviceName
     });
 
     it('should export cleanup function that can be called multiple times', async () => {

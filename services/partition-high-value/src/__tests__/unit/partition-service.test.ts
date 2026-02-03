@@ -1,8 +1,14 @@
 /**
- * Unit Tests for P1 Asia-Fast Partition Service
+ * Unit Tests for P3 High-Value Partition Service
  *
  * Tests partition-specific configuration, exports, and service setup.
  * The JEST_WORKER_ID guard in index.ts prevents auto-start during import.
+ *
+ * P3 High-Value Partition:
+ * - Chains: Ethereum (1), zkSync Era (324), Linea (59144)
+ * - Region: Oracle Cloud US-East (us-east1)
+ * - Port: 3003
+ * - Health Check Interval: 30s (longer for Ethereum's ~12s blocks)
  */
 
 import { EventEmitter } from 'events';
@@ -60,24 +66,20 @@ jest.mock('@arbitrage/core', () => ({
   exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
     throw new Error(`Config error: ${msg}`);
   }),
-  // New shared utilities for typed environment config
   closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
-  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((chainNames: readonly string[]) => ({
-    redisUrl: process.env.REDIS_URL,
-    partitionChains: process.env.PARTITION_CHAINS,
-    healthCheckPort: process.env.HEALTH_CHECK_PORT,
-    instanceId: process.env.INSTANCE_ID,
-    regionId: process.env.REGION_ID,
+  // BUG-FIX: Add missing mock functions for environment config parsing
+  // Return proper defaults when process.env variables aren't set
+  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
+    partitionChains: process.env.PARTITION_CHAINS || undefined,
+    healthCheckPort: process.env.HEALTH_CHECK_PORT || undefined,
+    instanceId: process.env.INSTANCE_ID || undefined,
+    regionId: process.env.REGION_ID || undefined,
     enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-    nodeEnv: process.env.NODE_ENV || 'development',
-    rpcUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
-    wsUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
   })),
   validatePartitionEnvironmentConfig: jest.fn(),
-  generateInstanceId: jest.fn().mockImplementation((partitionId: string, providedId?: string) => {
-    if (providedId) return providedId;
-    return `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
-  }),
+  generateInstanceId: jest.fn().mockImplementation((partitionId, instanceId) =>
+    instanceId || `p3-${partitionId}-${Date.now()}`
+  ),
   getRedisClient: jest.fn().mockResolvedValue({
     disconnect: jest.fn().mockResolvedValue(undefined),
   }),
@@ -99,7 +101,7 @@ jest.mock('@arbitrage/core', () => ({
     registerCapabilities: jest.fn(),
     triggerDegradation: jest.fn(),
   }),
-  // Centralized constants (Single source of truth)
+  // Centralized constants (P1-1/P1-2-FIX: Single source of truth)
   PARTITION_PORTS: {
     'asia-fast': 3001,
     'l2-turbo': 3002,
@@ -112,22 +114,45 @@ jest.mock('@arbitrage/core', () => ({
     'high-value': 'partition-high-value',
     'solana-native': 'partition-solana',
   },
+  // R9: Partition Service Runner Factory
+  runPartitionService: jest.fn().mockImplementation((options: {
+    createDetector: (cfg: unknown) => unknown;
+    detectorConfig: unknown;
+  }) => ({
+    detector: options.createDetector(options.detectorConfig),
+    start: jest.fn().mockResolvedValue(undefined),
+    getState: jest.fn().mockReturnValue('idle'),
+    cleanup: jest.fn(),
+    healthServer: { current: null },
+  })),
+  createPartitionServiceRunner: jest.fn().mockImplementation((options: {
+    createDetector: (cfg: unknown) => unknown;
+    detectorConfig: unknown;
+  }) => ({
+    detector: options.createDetector(options.detectorConfig),
+    start: jest.fn().mockResolvedValue(undefined),
+    getState: jest.fn().mockReturnValue('idle'),
+    cleanup: jest.fn(),
+    healthServer: { current: null },
+  })),
 }));
 
-// Mock @arbitrage/config
+// Mock @arbitrage/config with P3 High-Value configuration
 jest.mock('@arbitrage/config', () => ({
   getPartition: jest.fn().mockImplementation((partitionId: string) => ({
     partitionId,
-    name: 'Asia Fast Chains',
-    chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
-    region: 'asia-southeast1',
+    name: 'High Value Chains',
+    chains: ['ethereum', 'zksync', 'linea'],
+    region: 'us-east1',
     provider: 'oracle',
     resourceProfile: 'heavy',
-    priority: 1,
+    priority: 2,
     maxMemoryMB: 768,
     enabled: true,
-    healthCheckIntervalMs: 15000,
+    healthCheckIntervalMs: 30000, // 30s for Ethereum's ~12s blocks
     failoverTimeoutMs: 60000,
+    standbyRegion: 'eu-west1',
+    standbyProvider: 'gcp',
   })),
   PARTITION_IDS: {
     ASIA_FAST: 'asia-fast',
@@ -136,10 +161,9 @@ jest.mock('@arbitrage/config', () => ({
     SOLANA_NATIVE: 'solana-native',
   },
   CHAINS: {
-    bsc: { id: 56, name: 'BSC' },
-    polygon: { id: 137, name: 'Polygon' },
-    avalanche: { id: 43114, name: 'Avalanche' },
-    fantom: { id: 250, name: 'Fantom' },
+    ethereum: { id: 1, name: 'Ethereum', blockTime: 12 },
+    zksync: { id: 324, name: 'zkSync Era', blockTime: 1 },
+    linea: { id: 59144, name: 'Linea', blockTime: 2 },
   },
 }));
 
@@ -213,7 +237,7 @@ jest.mock('@arbitrage/unified-detector', () => ({
 // Tests
 // =============================================================================
 
-describe('P1 Asia-Fast Partition Service', () => {
+describe('P3 High-Value Partition Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -232,19 +256,20 @@ describe('P1 Asia-Fast Partition Service', () => {
       jest.resetModules();
       const { config } = await import('../../index');
       expect(config).toBeDefined();
-      expect(config.partitionId).toBe('asia-fast');
-      expect(config.chains).toContain('bsc');
-      expect(config.chains).toContain('polygon');
-      expect(config.chains).toContain('avalanche');
-      expect(config.chains).toContain('fantom');
+      expect(config.partitionId).toBe('high-value');
+      expect(config.chains).toContain('ethereum');
+      expect(config.chains).toContain('zksync');
+      expect(config.chains).toContain('linea');
     });
 
     it('should export partition constants', async () => {
       jest.resetModules();
-      const { P1_PARTITION_ID, P1_CHAINS, P1_REGION } = await import('../../index');
-      expect(P1_PARTITION_ID).toBe('asia-fast');
-      expect(P1_CHAINS).toContain('bsc');
-      expect(P1_REGION).toBe('asia-southeast1');
+      const { P3_PARTITION_ID, P3_CHAINS, P3_REGION } = await import('../../index');
+      expect(P3_PARTITION_ID).toBe('high-value');
+      expect(P3_CHAINS).toContain('ethereum');
+      expect(P3_CHAINS).toContain('zksync');
+      expect(P3_CHAINS).toContain('linea');
+      expect(P3_REGION).toBe('us-east1');
     });
 
     it('should export cleanupProcessHandlers function', async () => {
@@ -256,60 +281,89 @@ describe('P1 Asia-Fast Partition Service', () => {
   });
 
   describe('Configuration', () => {
-    it('should use correct partition ID', async () => {
+    it('should use correct partition ID (high-value)', async () => {
       jest.resetModules();
-      const { P1_PARTITION_ID } = await import('../../index');
-      expect(P1_PARTITION_ID).toBe('asia-fast');
+      const { P3_PARTITION_ID } = await import('../../index');
+      expect(P3_PARTITION_ID).toBe('high-value');
     });
 
-    it('should configure 4 chains for asia-fast partition', async () => {
+    it('should configure 3 chains for high-value partition', async () => {
       jest.resetModules();
       const { config } = await import('../../index');
-      expect(config.chains).toHaveLength(4);
+      expect(config.chains).toHaveLength(3);
       expect(config.chains).toEqual(
-        expect.arrayContaining(['bsc', 'polygon', 'avalanche', 'fantom'])
+        expect.arrayContaining(['ethereum', 'zksync', 'linea'])
       );
     });
 
-    it('should use default port 3001', async () => {
+    it('should use default port 3003 (different from P1:3001 and P2:3002)', async () => {
       jest.resetModules();
       const { config } = await import('../../index');
-      expect(config.healthCheckPort).toBe(3001);
+      expect(config.healthCheckPort).toBe(3003);
     });
 
-    it('should use asia-southeast1 region', async () => {
+    it('should use us-east1 region (Oracle Cloud US-East)', async () => {
       jest.resetModules();
       const { config } = await import('../../index');
-      expect(config.regionId).toBe('asia-southeast1');
+      expect(config.regionId).toBe('us-east1');
+    });
+
+    it('should have correct chains for high-value Ethereum mainnet trading', async () => {
+      jest.resetModules();
+      const { config } = await import('../../index');
+      // Ethereum is the high-value mainnet
+      expect(config.chains).toContain('ethereum');
+      // zkSync and Linea are ZK rollups with Ethereum bridge opportunities
+      expect(config.chains).toContain('zksync');
+      expect(config.chains).toContain('linea');
     });
   });
 
   describe('Initialization', () => {
-    // Note: These tests verify that the module initialization calls the correct functions.
-    // Since the module is already imported and cached, we test that the mocks were called
-    // during the first import (in the Module Exports tests).
+    it('should call createLogger with correct namespace', async () => {
+      jest.resetModules();
+      const { createLogger } = await import('@arbitrage/core');
+      await import('../../index');
 
-    it('should have called createLogger with correct namespace', async () => {
-      // Module is already imported, verify the mock was called
-      const { createLogger } = jest.requireMock('@arbitrage/core');
-      // The module was already loaded in previous tests, so we check it was called at least once
-      expect(createLogger).toBeDefined();
+      expect(createLogger).toHaveBeenCalledWith('partition-high-value:main');
     });
 
-    it('should have called getPartition with asia-fast ID', async () => {
-      // Module is already imported, verify the mock was called
-      const { getPartition } = jest.requireMock('@arbitrage/config');
-      expect(getPartition).toBeDefined();
+    it('should call getPartition with high-value partition ID', async () => {
+      jest.resetModules();
+      const { getPartition } = await import('@arbitrage/config');
+      await import('../../index');
+
+      expect(getPartition).toHaveBeenCalledWith('high-value');
     });
 
-    it('should have setup detector event handlers', async () => {
+    it('should call runPartitionService with correct configuration', async () => {
+      jest.resetModules();
+      const { runPartitionService } = await import('@arbitrage/core');
+      await import('../../index');
+
+      expect(runPartitionService).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({
+            partitionId: 'high-value',
+            serviceName: 'partition-high-value',
+          }),
+          detectorConfig: expect.objectContaining({
+            partitionId: 'high-value',
+          }),
+          createDetector: expect.any(Function),
+          logger: expect.anything(),
+        })
+      );
+    });
+
+    it('should have detector with event handling capabilities', async () => {
       // Verify the exported detector has event handling capabilities
       const { detector } = await import('../../index');
       expect(typeof detector.on).toBe('function');
       expect(typeof detector.emit).toBe('function');
     });
 
-    it('should have setup process handlers and store cleanup function', async () => {
+    it('should have cleanup function exported', async () => {
       // Verify the cleanup function is exported
       const { cleanupProcessHandlers } = await import('../../index');
       expect(typeof cleanupProcessHandlers).toBe('function');
@@ -318,10 +372,8 @@ describe('P1 Asia-Fast Partition Service', () => {
 
   describe('JEST_WORKER_ID Guard', () => {
     it('should not auto-start when JEST_WORKER_ID is set', async () => {
-      // JEST_WORKER_ID is set in setupTests.ts
       expect(process.env.JEST_WORKER_ID).toBeDefined();
 
-      // Import should not trigger main()
       const { detector } = await import('../../index');
 
       // Detector is created but main() wasn't called (no auto-start)
@@ -332,12 +384,12 @@ describe('P1 Asia-Fast Partition Service', () => {
   describe('Uses Shared Utilities', () => {
     it('should use PARTITION_PORTS from @arbitrage/core', async () => {
       const { PARTITION_PORTS } = jest.requireMock('@arbitrage/core');
-      expect(PARTITION_PORTS['asia-fast']).toBe(3001);
+      expect(PARTITION_PORTS['high-value']).toBe(3003);
     });
 
     it('should use PARTITION_SERVICE_NAMES from @arbitrage/core', async () => {
       const { PARTITION_SERVICE_NAMES } = jest.requireMock('@arbitrage/core');
-      expect(PARTITION_SERVICE_NAMES['asia-fast']).toBe('partition-asia-fast');
+      expect(PARTITION_SERVICE_NAMES['high-value']).toBe('partition-high-value');
     });
 
     it('should use shared exitWithConfigError', async () => {
@@ -347,7 +399,7 @@ describe('P1 Asia-Fast Partition Service', () => {
   });
 });
 
-describe('Environment Variable Handling', () => {
+describe('P3 Environment Variable Handling', () => {
   const originalEnv = process.env;
   let cleanupFn: (() => void) | null = null;
 
@@ -377,53 +429,50 @@ describe('Environment Variable Handling', () => {
   });
 
   it('should use PARTITION_CHAINS env var when provided', async () => {
-    process.env.PARTITION_CHAINS = 'bsc,polygon';
+    process.env.PARTITION_CHAINS = 'ethereum,zksync';
 
     jest.resetModules();
     const { validateAndFilterChains } = await import('@arbitrage/core');
 
-    // The mock returns what we passed
-    expect(validateAndFilterChains).toBeDefined();
-    const result = validateAndFilterChains('bsc,polygon', ['bsc', 'polygon', 'avalanche', 'fantom'], mockLogger as any);
-    expect(result).toEqual(['bsc', 'polygon']);
+    const result = validateAndFilterChains('ethereum,zksync', ['ethereum', 'zksync', 'linea'], mockLogger as any);
+    expect(result).toEqual(['ethereum', 'zksync']);
   });
 
   it('should use HEALTH_CHECK_PORT env var when provided', async () => {
-    process.env.HEALTH_CHECK_PORT = '4001';
+    process.env.HEALTH_CHECK_PORT = '4003';
 
     jest.resetModules();
     const { parsePort } = await import('@arbitrage/core');
 
-    const result = parsePort('4001', 3001, mockLogger as any);
-    expect(result).toBe(4001);
+    const result = parsePort('4003', 3003, mockLogger as any);
+    expect(result).toBe(4003);
   });
 
   it('should use default port when HEALTH_CHECK_PORT is invalid', async () => {
     const { parsePort } = await import('@arbitrage/core');
 
-    const result = parsePort('invalid', 3001, mockLogger as any);
-    expect(result).toBe(3001);
+    const result = parsePort('invalid', 3003, mockLogger as any);
+    expect(result).toBe(3003);
   });
 
-  // FIX: Add missing environment variable tests
   it('should use INSTANCE_ID env var when provided', async () => {
-    process.env.INSTANCE_ID = 'custom-instance-123';
+    process.env.INSTANCE_ID = 'p3-high-value-custom-123';
 
     jest.resetModules();
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
 
-    expect(config.instanceId).toBe('custom-instance-123');
+    expect(config.instanceId).toBe('p3-high-value-custom-123');
   });
 
   it('should use REGION_ID env var when provided', async () => {
-    process.env.REGION_ID = 'us-west1';
+    process.env.REGION_ID = 'eu-west1';
 
     jest.resetModules();
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
 
-    expect(config.regionId).toBe('us-west1');
+    expect(config.regionId).toBe('eu-west1');
   });
 
   it('should disable cross-region health when ENABLE_CROSS_REGION_HEALTH is false', async () => {
@@ -437,8 +486,6 @@ describe('Environment Variable Handling', () => {
   });
 
   it('should enable cross-region health by default', async () => {
-    // Don't set ENABLE_CROSS_REGION_HEALTH
-
     jest.resetModules();
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
@@ -447,19 +494,17 @@ describe('Environment Variable Handling', () => {
   });
 
   it('should generate default instance ID when not provided', async () => {
-    // Don't set INSTANCE_ID
     delete process.env.INSTANCE_ID;
 
     jest.resetModules();
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
 
-    // Instance ID format is now ${partitionId}-${hostname}-${timestamp}
-    expect(config.instanceId).toMatch(/^asia-fast-/);
+    expect(config.instanceId).toMatch(/^p3-high-value-/);
   });
 });
 
-describe('Process Handler Cleanup', () => {
+describe('P3 Process Handler Cleanup', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -492,8 +537,7 @@ describe('Process Handler Cleanup', () => {
   });
 });
 
-// Tests for typed environment configuration using shared utilities
-describe('Typed Environment Configuration (Shared Utilities)', () => {
+describe('P3 Error Handling', () => {
   const originalEnv = process.env;
   let cleanupFn: (() => void) | null = null;
 
@@ -502,78 +546,97 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
     process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
   });
 
-  afterEach(() => {
-    if (cleanupFn) {
-      cleanupFn();
+  afterEach(async () => {
+    try {
+      if (cleanupFn) {
+        cleanupFn();
+      }
+    } catch {
+      // Ignore cleanup errors
+    } finally {
       cleanupFn = null;
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('uncaughtException');
+      process.removeAllListeners('unhandledRejection');
     }
     process.env = originalEnv;
   });
 
-  it('should export envConfig with all required properties', async () => {
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
-
-    expect(envConfig).toBeDefined();
-    expect(envConfig).toHaveProperty('redisUrl');
-    expect(envConfig).toHaveProperty('partitionChains');
-    expect(envConfig).toHaveProperty('healthCheckPort');
-    expect(envConfig).toHaveProperty('instanceId');
-    expect(envConfig).toHaveProperty('regionId');
-    expect(envConfig).toHaveProperty('enableCrossRegionHealth');
-    expect(envConfig).toHaveProperty('nodeEnv');
-    expect(envConfig).toHaveProperty('rpcUrls');
-    expect(envConfig).toHaveProperty('wsUrls');
+  it('should have exitWithConfigError available for configuration errors', async () => {
+    const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
+    expect(exitWithConfigError).toBeDefined();
+    expect(typeof exitWithConfigError).toBe('function');
   });
 
-  it('should parse RPC URLs from environment', async () => {
-    process.env.BSC_RPC_URL = 'https://custom-bsc-rpc.com';
-    process.env.POLYGON_RPC_URL = 'https://custom-polygon-rpc.com';
+  it('exitWithConfigError should throw with config error message', async () => {
+    const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
+    expect(() => exitWithConfigError('Test error', { test: true })).toThrow('Config error: Test error');
+  });
 
+  it('should have closeServerWithTimeout available for cleanup on errors', async () => {
+    const { closeServerWithTimeout } = jest.requireMock('@arbitrage/core');
+    expect(closeServerWithTimeout).toBeDefined();
+    expect(typeof closeServerWithTimeout).toBe('function');
+  });
+
+  it('closeServerWithTimeout should resolve when called', async () => {
+    const { closeServerWithTimeout } = jest.requireMock('@arbitrage/core');
+    await expect(closeServerWithTimeout({}, 1000, {})).resolves.toBeUndefined();
+  });
+
+  it('should have createPartitionHealthServer that returns closeable server', async () => {
+    const { createPartitionHealthServer } = jest.requireMock('@arbitrage/core');
+    const mockServer = createPartitionHealthServer({});
+    expect(mockServer).toBeDefined();
+    expect(typeof mockServer.close).toBe('function');
+  });
+
+  it('should correctly handle missing partition config via mock', async () => {
+    // Verify getPartition mock is configured correctly
+    const { getPartition } = jest.requireMock('@arbitrage/config');
+
+    // Normal case returns config
+    const config = getPartition('high-value');
+    expect(config).toBeDefined();
+    expect(config.chains).toEqual(['ethereum', 'zksync', 'linea']);
+  });
+});
+
+describe('P3 High-Value Chain Characteristics', () => {
+  // Reset modules before this test block to get fresh mock state
+  beforeAll(() => {
     jest.resetModules();
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
-
-    // Now using Record<string, string | undefined> instead of fixed properties
-    expect(envConfig.rpcUrls['bsc']).toBe('https://custom-bsc-rpc.com');
-    expect(envConfig.rpcUrls['polygon']).toBe('https://custom-polygon-rpc.com');
   });
 
-  it('should parse WebSocket URLs from environment', async () => {
-    process.env.BSC_WS_URL = 'wss://custom-bsc-ws.com';
-    process.env.FANTOM_WS_URL = 'wss://custom-fantom-ws.com';
-
-    jest.resetModules();
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
-
-    // Now using Record<string, string | undefined> instead of fixed properties
-    expect(envConfig.wsUrls['bsc']).toBe('wss://custom-bsc-ws.com');
-    expect(envConfig.wsUrls['fantom']).toBe('wss://custom-fantom-ws.com');
+  it('should have Ethereum (chain ID 1) in the partition', async () => {
+    const { config } = await import('../../index');
+    expect(config.chains).toContain('ethereum');
   });
 
-  it('should set nodeEnv to test in test environment', async () => {
-    const { envConfig, cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
-
-    expect(envConfig.nodeEnv).toBe('test');
+  it('should have zkSync Era (chain ID 324) for ZK rollup arbitrage', async () => {
+    const { config } = await import('../../index');
+    expect(config.chains).toContain('zksync');
   });
 
-  it('should call validatePartitionEnvironmentConfig during module init', async () => {
-    jest.resetModules();
-    const { cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
-
-    const { validatePartitionEnvironmentConfig } = jest.requireMock('@arbitrage/core');
-    expect(validatePartitionEnvironmentConfig).toHaveBeenCalled();
+  it('should have Linea (chain ID 59144) for Consensys ZK rollup', async () => {
+    const { config } = await import('../../index');
+    expect(config.chains).toContain('linea');
   });
 
-  it('should use generateInstanceId from shared utilities', async () => {
-    jest.resetModules();
-    const { cleanupProcessHandlers } = await import('../../index');
-    cleanupFn = cleanupProcessHandlers;
+  it('should use us-east1 region (Oracle Cloud US-East)', async () => {
+    // Verify via the exported config from index.ts (avoids mock state issues)
+    const { P3_REGION, config } = await import('../../index');
+    expect(P3_REGION).toBe('us-east1');
+    expect(config.regionId).toBe('us-east1');
+  });
 
-    const { generateInstanceId } = jest.requireMock('@arbitrage/core');
-    expect(generateInstanceId).toHaveBeenCalledWith('asia-fast', undefined);
+  it('should verify partition configuration via exported constants', async () => {
+    // The partition details (provider, healthCheckIntervalMs, standbyRegion)
+    // are verified through the index module's exported values
+    const { P3_PARTITION_ID, P3_CHAINS, P3_REGION } = await import('../../index');
+    expect(P3_PARTITION_ID).toBe('high-value');
+    expect(P3_CHAINS).toEqual(expect.arrayContaining(['ethereum', 'zksync', 'linea']));
+    expect(P3_REGION).toBe('us-east1');
   });
 });

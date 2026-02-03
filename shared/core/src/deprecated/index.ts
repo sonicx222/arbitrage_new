@@ -18,40 +18,28 @@
  */
 
 // =============================================================================
-// DEPRECATED ARBITRAGE CALCULATOR EXPORTS
-// These have been replaced by components/arbitrage-detector and components/price-calculator
+// REMOVED: Deprecated Arbitrage Calculator Exports
 // =============================================================================
-
-/**
- * @deprecated Since v1.0.0. Use detectArbitrage from components/arbitrage-detector instead.
- * Will be removed in v2.0.0.
- */
-export { calculateIntraChainArbitrage } from '../arbitrage-calculator';
-
-/**
- * @deprecated Since v1.0.0. Use isValidPairSnapshot from components/arbitrage-detector instead.
- * Will be removed in v2.0.0.
- */
-export { validatePairSnapshot } from '../arbitrage-calculator';
-
-/**
- * @deprecated Since v1.0.0. Use PairRepository.createSnapshot() from components/pair-repository instead.
- * Will be removed in v2.0.0.
- */
-export { createPairSnapshot } from '../arbitrage-calculator';
-
-/**
- * @deprecated Since v1.0.0. These types will be removed in v2.0.0.
- * Migration guide:
- * - PairSnapshot → ComponentPairSnapshot from components/pair-repository
- * - ChainPriceData → components/arbitrage-detector
- * - CrossChainOpportunityResult → components/arbitrage-detector
- */
-export type {
-  PairSnapshot as ArbitragePairSnapshot,
-  PriceComparisonResult,
-  ArbitrageCalcConfig,
-} from '../arbitrage-calculator';
+// The following exports have been REMOVED as part of v2.0.0 cleanup:
+//
+// - calculateIntraChainArbitrage
+//   → MIGRATION: Use SimpleArbitrageDetector.detectArbitrage() from unified-detector
+//
+// - validatePairSnapshot
+//   → MIGRATION: Use SnapshotManager validation or define local validation
+//
+// - createPairSnapshot
+//   → MIGRATION: Use SnapshotManager.createPairSnapshot() from unified-detector
+//
+// - PairSnapshot type (ArbitragePairSnapshot)
+//   → MIGRATION: Import PairSnapshot from simple-arbitrage-detector
+//
+// - PriceComparisonResult type
+//   → MIGRATION: Use SpreadResult from components/price-calculator
+//
+// - ArbitrageCalcConfig type
+//   → MIGRATION: Use detection config directly in services
+// =============================================================================
 
 // =============================================================================
 // DEPRECATED DOMAIN MODELS

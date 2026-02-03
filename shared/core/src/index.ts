@@ -32,11 +32,16 @@
  * @version 1.0.0
  */
 
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 1: CORE INFRASTRUCTURE                         #
+// #                                                                           #
+// #############################################################################
+
 // =============================================================================
-// PUBLIC API: Core Services
+// 1.1 Redis Core
 // =============================================================================
 
-// Core utilities exports
 export {
   RedisClient,
   RedisOperationError,
@@ -45,6 +50,70 @@ export {
   resetRedisInstance
 } from './redis';
 export type { RedisClientDeps, RedisConstructor } from './redis';
+
+export {
+  RedisStreamsClient,
+  StreamBatcher,
+  StreamConsumer,
+  getRedisStreamsClient,
+  resetRedisStreamsInstance
+} from './redis-streams';
+export type {
+  StreamMessage,
+  ConsumerGroupConfig,
+  XReadOptions,
+  XReadGroupOptions,
+  XTrimOptions,
+  XAddOptions,
+  StreamInfo,
+  PendingInfo,
+  BatcherConfig,
+  BatcherStats,
+  StreamConsumerConfig,
+  StreamConsumerStats,
+  RedisStreamsConstructor,
+  RedisStreamsClientDeps
+} from './redis-streams';
+
+// =============================================================================
+// 1.2 Logging Infrastructure (ADR-015: Pino Logger Migration)
+// =============================================================================
+
+// Legacy logger (for backward compatibility)
+export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
+
+// Pino-based production logging
+export {
+  createPinoLogger,
+  getLogger,
+  getPinoPerformanceLogger,
+  PinoPerformanceLogger,
+  resetLoggerCache,
+  resetPerformanceLoggerCache,
+} from './logging';
+
+// Testing utilities (no jest.mock needed)
+export {
+  RecordingLogger,
+  RecordingPerformanceLogger,
+  NullLogger,
+  createMockLoggerFactory,
+} from './logging';
+
+// Logging types
+export type {
+  ILogger,
+  IPerformanceLogger,
+  LoggerConfig,
+  LogLevel,
+  LogMeta,
+  LogEntry,
+  ServiceLogger,  // P0-FIX: Consolidated logger interface for DI
+} from './logging';
+
+// =============================================================================
+// 1.3 Async Primitives
+// =============================================================================
 
 // P1-3-FIX: Standardized singleton pattern utilities
 // P1-FIX: Added createConfigurableSingleton for singletons needing config on first init
@@ -81,26 +150,34 @@ export {
 } from './async/operation-guard';
 export type { OperationGuardStats, OperationGuardConfig } from './async/operation-guard';
 
+// REF-4/ARCH-3: Shared async utilities
 export {
-  RedisStreamsClient,
-  StreamBatcher,
-  StreamConsumer,
-  getRedisStreamsClient,
-  resetRedisStreamsInstance
-} from './redis-streams';
-
-// Distributed Lock Manager (ADR-007)
-export {
-  DistributedLockManager,
-  getDistributedLockManager,
-  resetDistributedLockManager
-} from './distributed-lock';
+  TimeoutError,
+  withTimeout,
+  withTimeoutDefault,
+  withTimeoutSafe,
+  withRetry as withRetryAsync,
+  sleep,
+  createDeferred,
+  mapConcurrent,
+  mapSequential,
+  debounceAsync,
+  throttleAsync,
+  gracefulShutdown,
+  waitWithTimeouts
+} from './async/async-utils';
 export type {
-  LockConfig,
-  AcquireOptions,
-  LockHandle,
-  LockStats
-} from './distributed-lock';
+  RetryConfig,
+  Deferred
+} from './async/async-utils';
+
+// Worker Pool
+export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './async/worker-pool';
+export type { Task, TaskResult } from './async/worker-pool';
+
+// =============================================================================
+// 1.4 Service State & Lifecycle
+// =============================================================================
 
 // Service State Machine (lifecycle management)
 export {
@@ -118,102 +195,39 @@ export type {
   ServiceStateManagerDeps
 } from './service-state';
 
-// Price Oracle (replaces hardcoded prices)
+// Distributed Lock Manager (ADR-007)
 export {
-  PriceOracle,
-  getPriceOracle,
-  resetPriceOracle,
-  getDefaultPrice,
-  hasDefaultPrice
-} from './analytics/price-oracle';
+  DistributedLockManager,
+  getDistributedLockManager,
+  resetDistributedLockManager
+} from './distributed-lock';
 export type {
-  TokenPrice,
-  PriceOracleConfig,
-  PriceBatchRequest
-} from './analytics/price-oracle';
+  LockConfig,
+  AcquireOptions,
+  LockHandle,
+  LockStats
+} from './distributed-lock';
+
+// Interval Manager (centralized interval management)
+export {
+  IntervalManager,
+  createIntervalManager
+} from './interval-manager';
 export type {
-  StreamMessage,
-  ConsumerGroupConfig,
-  XReadOptions,
-  XReadGroupOptions,
-  XTrimOptions,
-  XAddOptions,
-  StreamInfo,
-  PendingInfo,
-  BatcherConfig,
-  BatcherStats,
-  StreamConsumerConfig,
-  StreamConsumerStats,
-  RedisStreamsConstructor,
-  RedisStreamsClientDeps
-} from './redis-streams';
-export { createLogger, PerformanceLogger, getPerformanceLogger, Logger } from './logger';
+  IntervalInfo,
+  IntervalManagerStats
+} from './interval-manager';
+
+// #############################################################################
+// #                                                                           #
+// #                       SECTION 2: RESILIENCE                               #
+// #                                                                           #
+// #############################################################################
 
 // =============================================================================
-// Logging Infrastructure (ADR-015: Pino Logger Migration)
-// High-performance logging with DI pattern for testability
+// 2.1 Circuit Breakers
 // =============================================================================
 
-// Pino-based production logging
-export {
-  createPinoLogger,
-  getLogger,
-  getPinoPerformanceLogger,
-  PinoPerformanceLogger,
-  resetLoggerCache,
-  resetPerformanceLoggerCache,
-} from './logging';
-
-// Testing utilities (no jest.mock needed)
-export {
-  RecordingLogger,
-  RecordingPerformanceLogger,
-  NullLogger,
-  createMockLoggerFactory,
-} from './logging';
-
-// Types
-export type {
-  ILogger,
-  IPerformanceLogger,
-  LoggerConfig,
-  LogLevel,
-  LogMeta,
-  LogEntry,
-  ServiceLogger,  // P0-FIX: Consolidated logger interface for DI
-} from './logging';
-
-// REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
-export { EventProcessingWorkerPool, getWorkerPool, PriorityQueue } from './async/worker-pool';
-export type { Task, TaskResult } from './async/worker-pool';
-export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './event-batcher';
-export {
-  WebSocketManager,
-  WebSocketConfig,
-  WebSocketSubscription,
-  WebSocketMessage,
-  WebSocketEventHandler,
-  ConnectionStateHandler,
-  ErrorEventHandler,
-  GenericEventHandler
-} from './websocket-manager';
-
-// S3.3: Provider Health Scoring for intelligent fallback selection
-export {
-  ProviderHealthScorer,
-  getProviderHealthScorer,
-  resetProviderHealthScorer
-} from './monitoring/provider-health-scorer';
-export type {
-  ProviderHealthMetrics,
-  ProviderHealthScorerConfig
-} from './monitoring/provider-health-scorer';
-
-export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
-export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching/hierarchical-cache';
-export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
-export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
-// REMOVED: ABTestingFramework (unused module cleaned up)
 export {
   CircuitBreaker,
   CircuitBreakerError,
@@ -225,6 +239,21 @@ export {
   getCircuitBreakerRegistry,
   withCircuitBreaker
 } from './resilience/circuit-breaker';
+
+// Simple Circuit Breaker (lightweight failure tracking)
+export {
+  SimpleCircuitBreaker,
+  createSimpleCircuitBreaker
+} from './circuit-breaker';
+export type {
+  SimpleCircuitBreakerOptions,
+  SimpleCircuitBreakerStatus
+} from './circuit-breaker';
+
+// =============================================================================
+// 2.2 Retry & Recovery
+// =============================================================================
+
 export {
   RetryMechanism,
   RetryPresets,
@@ -239,9 +268,158 @@ export {
   retryWithLogging
 } from './resilience/retry-mechanism';
 export type { RetryLogger, RetryWithLoggingConfig } from './resilience/retry-mechanism';
+
 export { GracefulDegradationManager, getGracefulDegradationManager, triggerDegradation, isFeatureEnabled, getCapabilityFallback } from './resilience/graceful-degradation';
 
-// Cross-Region Health (ADR-007)
+export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './resilience/dead-letter-queue';
+
+export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
+
+export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './resilience/expert-self-healing-manager';
+
+export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
+
+// =============================================================================
+// 2.3 Error Handling (REF-3/ARCH-2)
+// =============================================================================
+
+// FIX 6.1: Error Class Name Disambiguation (P0-FIX: Updated for consolidation)
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║ ERROR CLASS NAMING GUIDE                                                   ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ CANONICAL (use for new code):                                              ║
+// ║   - ArbitrageError: Simple error with string code (from @arbitrage/types)  ║
+// ║     Import: import { ArbitrageError } from '@arbitrage/types'              ║
+// ║     Usage: new ArbitrageError(msg, code, service, retryable)               ║
+// ║   - TimeoutError: Timeout errors (from @arbitrage/types)                   ║
+// ║     Import: import { TimeoutError } from '@arbitrage/types'                ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ RICH ERRORS (for detailed error handling):                                 ║
+// ║   - BaseArbitrageError: Rich error with ErrorCode enum, severity, context  ║
+// ║     Import: import { BaseArbitrageError, ErrorCode } from '@arbitrage/core'║
+// ║   - ConnectionError, ValidationError, LifecycleError, ExecutionError       ║
+// ║     (Specialized error classes from resilience/error-handling)             ║
+// ╠════════════════════════════════════════════════════════════════════════════╣
+// ║ DEPRECATED (legacy, will be removed in v2.0):                              ║
+// ║   - DomainArbitrageError (from domain-models.ts): Old pattern              ║
+// ║     Migration: new ArbitrageError(msg, code, service) from @arbitrage/types║
+// ╚════════════════════════════════════════════════════════════════════════════╝
+
+export {
+  ArbitrageError as BaseArbitrageError,
+  ConnectionError,
+  ValidationError as SharedValidationError,
+  LifecycleError,
+  ExecutionError,
+  ErrorCode,
+  ErrorSeverity,
+  success,
+  failure,
+  tryCatch,
+  tryCatchSync,
+  isRetryableError as isRetryableErrorCheck,
+  isCriticalError,
+  getErrorSeverity,
+  getErrorMessage,  // FIX: Export safe error message extractor
+  formatErrorForLog,
+  formatErrorForResponse,
+  ErrorAggregator
+} from './resilience/error-handling';
+export type { Result } from './resilience/error-handling';
+
+// #############################################################################
+// #                                                                           #
+// #                         SECTION 3: CACHING                                #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 3.1 Price & Data Caching
+// =============================================================================
+
+export {
+  PriceMatrix,
+  PriceIndexMapper,
+  PriceMatrixFullError, // P0-FIX 4.3: Explicit error when capacity is full
+  getPriceMatrix,
+  resetPriceMatrix
+} from './caching/price-matrix';
+export type {
+  PriceMatrixConfig,
+  PriceEntry,
+  MemoryUsage,
+  PriceMatrixStats,
+  BatchUpdate
+} from './caching/price-matrix';
+
+export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
+export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching/hierarchical-cache';
+
+export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
+
+export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
+
+// =============================================================================
+// 3.2 Pair Caching (S2.2.5)
+// =============================================================================
+
+export {
+  PairCacheService,
+  getPairCacheService,
+  resetPairCacheService
+} from './caching/pair-cache';
+export type {
+  PairCacheConfig,
+  CachedPairData,
+  PairCacheStats,
+  CacheLookupResult,
+  PairCacheServiceDeps
+} from './caching/pair-cache';
+
+// =============================================================================
+// 3.3 Gas & Reserve Caching
+// =============================================================================
+
+// Phase 2: Gas Price Cache (ADR-012, ADR-013)
+export {
+  GasPriceCache,
+  getGasPriceCache,
+  resetGasPriceCache,
+  GAS_UNITS,
+  DEFAULT_TRADE_AMOUNT_USD,
+  FALLBACK_GAS_COSTS_ETH,
+  FALLBACK_GAS_SCALING_PER_STEP
+} from './caching/gas-price-cache';
+export type {
+  GasPriceData,
+  NativeTokenPrice,
+  GasCostEstimate,
+  GasPriceCacheConfig
+} from './caching/gas-price-cache';
+
+// ADR-022: Reserve Cache (Event-Driven Reserve Caching)
+export {
+  ReserveCache,
+  createReserveCache,
+  getReserveCache,
+  resetReserveCache
+} from './caching/reserve-cache';
+export type {
+  ReserveCacheConfig,
+  CachedReserve,
+  ReserveCacheStats
+} from './caching/reserve-cache';
+
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 4: MONITORING & HEALTH                         #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 4.1 Cross-Region Health (ADR-007)
+// =============================================================================
+
 export {
   CrossRegionHealthManager,
   getCrossRegionHealthManager,
@@ -256,45 +434,13 @@ export type {
   CrossRegionHealthConfig,
   GlobalHealthStatus
 } from './monitoring/cross-region-health';
-export { DeadLetterQueue, getDeadLetterQueue, enqueueFailedOperation } from './resilience/dead-letter-queue';
-export { SelfHealingManager, getSelfHealingManager, registerServiceForSelfHealing } from './resilience/self-healing-manager';
-export { ExpertSelfHealingManager, getExpertSelfHealingManager, FailureSeverity, RecoveryStrategy } from './resilience/expert-self-healing-manager';
-export { ErrorRecoveryOrchestrator, getErrorRecoveryOrchestrator, recoverFromError, withErrorRecovery } from './resilience/error-recovery';
 
-// Simple Circuit Breaker (lightweight failure tracking)
-export {
-  SimpleCircuitBreaker,
-  createSimpleCircuitBreaker
-} from './circuit-breaker';
-export type {
-  SimpleCircuitBreakerOptions,
-  SimpleCircuitBreakerStatus
-} from './circuit-breaker';
-
-// Interval Manager (centralized interval management)
-export {
-  IntervalManager,
-  createIntervalManager
-} from './interval-manager';
-export type {
-  IntervalInfo,
-  IntervalManagerStats
-} from './interval-manager';
-
-// Publishing Service (centralized message publishing)
-export {
-  PublishingService,
-  createPublishingService,
-  STANDARD_BATCHER_CONFIGS
-} from './publishing';
-export type {
-  PublishableMessageType,
-  PublishingBatcherConfig,
-  PublishingServiceDeps,
-  PublishingBatchers
-} from './publishing';
+// =============================================================================
+// 4.2 Stream & System Health
+// =============================================================================
 
 export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './monitoring/enhanced-health-monitor';
+
 export {
   StreamHealthMonitor,
   getStreamHealthMonitor,
@@ -313,6 +459,76 @@ export type {
   StreamAlert,
   StreamHealthMonitorConfig
 } from './monitoring/stream-health-monitor';
+
+// =============================================================================
+// 4.3 Provider Health (S3.3)
+// =============================================================================
+
+export {
+  ProviderHealthScorer,
+  getProviderHealthScorer,
+  resetProviderHealthScorer
+} from './monitoring/provider-health-scorer';
+export type {
+  ProviderHealthMetrics,
+  ProviderHealthScorerConfig
+} from './monitoring/provider-health-scorer';
+
+// =============================================================================
+// 4.4 Performance Monitoring (Task 2.3)
+// =============================================================================
+
+export {
+  HotPathMonitor,
+  measureHotPath,
+  measureHotPathAsync,
+  hotPathMonitor,
+  resetHotPathMonitor,
+} from './performance-monitor';
+export type {
+  LatencyMetric,
+  LatencyStats,
+} from './performance-monitor';
+
+// #############################################################################
+// #                                                                           #
+// #                         SECTION 5: ANALYTICS                              #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 5.1 Price Analytics
+// =============================================================================
+
+// Price Oracle (replaces hardcoded prices)
+export {
+  PriceOracle,
+  getPriceOracle,
+  resetPriceOracle,
+  getDefaultPrice,
+  hasDefaultPrice
+} from './analytics/price-oracle';
+export type {
+  TokenPrice,
+  PriceOracleConfig,
+  PriceBatchRequest
+} from './analytics/price-oracle';
+
+// T2.7: Price Momentum Detection
+export {
+  PriceMomentumTracker,
+  MomentumSignal,
+  MomentumConfig,
+  PairStats,
+  getPriceMomentumTracker,
+  resetPriceMomentumTracker
+} from './analytics/price-momentum';
+
+// =============================================================================
+// 5.2 Market Analytics
+// =============================================================================
+
+// Swap Event Filter
 export {
   SwapEventFilter,
   getSwapEventFilter,
@@ -359,139 +575,21 @@ export type {
   LiquidityAnalyzerStats
 } from './analytics/liquidity-depth-analyzer';
 
+// Pair Activity Tracker (Volatility-based prioritization)
 export {
-  PriceMatrix,
-  PriceIndexMapper,
-  PriceMatrixFullError, // P0-FIX 4.3: Explicit error when capacity is full
-  getPriceMatrix,
-  resetPriceMatrix
-} from './caching/price-matrix';
+  PairActivityTracker,
+  getPairActivityTracker,
+  resetPairActivityTracker
+} from './analytics/pair-activity-tracker';
 export type {
-  PriceMatrixConfig,
-  PriceEntry,
-  MemoryUsage,
-  PriceMatrixStats,
-  BatchUpdate
-} from './caching/price-matrix';
+  ActivityTrackerConfig,
+  PairActivityMetrics,
+  ActivityTrackerStats
+} from './analytics/pair-activity-tracker';
 
-// Pair Discovery and Caching (S2.2.5)
-export {
-  PairDiscoveryService,
-  getPairDiscoveryService,
-  resetPairDiscoveryService
-} from './pair-discovery';
-export type {
-  PairDiscoveryConfig,
-  DiscoveredPair,
-  PairDiscoveryStats
-} from './pair-discovery';
-export {
-  PairCacheService,
-  getPairCacheService,
-  resetPairCacheService
-} from './caching/pair-cache';
-export type {
-  PairCacheConfig,
-  CachedPairData,
-  PairCacheStats,
-  CacheLookupResult,
-  PairCacheServiceDeps
-} from './caching/pair-cache';
-
-// Professional Quality Monitor (AD-PQS scoring)
-export {
-  ProfessionalQualityMonitor
-} from './analytics/professional-quality-monitor';
-export type {
-  ProfessionalQualityScore,
-  QualityMetrics,
-  QualityMonitorDeps,
-  QualityMonitorRedis
-} from './analytics/professional-quality-monitor';
-
-// DEX Adapters for non-factory DEXes (Balancer V2, GMX, Platypus)
-export {
-  BalancerV2Adapter,
-  GmxAdapter,
-  PlatypusAdapter,
-  AdapterRegistry,
-  getAdapterRegistry,
-  resetAdapterRegistry,
-  BALANCER_VAULT_ADDRESSES,
-  BALANCER_VAULT_ABI,
-  GMX_ADDRESSES,
-  GMX_VAULT_ABI,
-  GMX_READER_ABI,
-  PLATYPUS_ADDRESSES,
-  PLATYPUS_POOL_ABI,
-  SUBGRAPH_URLS,
-  success as adapterSuccess,
-  failure as adapterFailure
-} from './dex-adapters';
-export type {
-  AdapterConfig,
-  AdapterType,
-  PoolType,
-  DiscoveredPool,
-  PoolReserves,
-  SwapQuote,
-  DexAdapter,
-  AdapterKey,
-  AdapterFactory,
-  AdapterRegistryEntry,
-  AdapterResult
-} from './dex-adapters';
-
-// REMOVED: Other professional-grade modules (unused, cleaned up):
-// - AdvancedStatisticalArbitrage
-// - RiskManagementEngine
-// - EnterpriseTestingFramework
-// - EnterpriseConfigurationManager
-
-// Keeping PerformanceAnalyticsEngine and CrossDexTriangularArbitrage as they may be needed
-export {
-  PerformanceAnalyticsEngine,
-  StrategyPerformance,
-  AssetPerformance,
-  TimePerformance,
-  BenchmarkComparison,
-  AttributionAnalysis
-} from './analytics/performance-analytics';
-export {
-  CrossDexTriangularArbitrage,
-  DexPool,
-  TriangularOpportunity,
-  TriangularStep,
-  ArbitragePath,
-  // T2.6: Quadrilateral arbitrage
-  QuadrilateralOpportunity
-} from './cross-dex-triangular-arbitrage';
-
-// T3.11: Multi-Leg Path Finding (5+ tokens)
-export {
-  MultiLegPathFinder,
-  getMultiLegPathFinder,
-  resetMultiLegPathFinder
-} from './multi-leg-path-finder';
-export type {
-  MultiLegPathConfig,
-  MultiLegOpportunity,
-  PathFinderStats
-} from './multi-leg-path-finder';
-
-export {
-  ValidationMiddleware,
-  ValidationSchemas
-} from './validation';
-// T2.7: Price Momentum Detection
-export {
-  PriceMomentumTracker,
-  MomentumSignal,
-  MomentumConfig,
-  PairStats,
-  getPriceMomentumTracker,
-  resetPriceMomentumTracker
-} from './analytics/price-momentum';
+// =============================================================================
+// 5.3 ML & Scoring
+// =============================================================================
 
 // T2.8: ML Opportunity Scorer
 // T4.3.3: Orderflow Integration with Opportunity Scoring
@@ -517,55 +615,36 @@ export type {
   OrderflowPredictionInput
 } from './analytics/ml-opportunity-scorer';
 
-// Pair Activity Tracker (Volatility-based prioritization)
+// Professional Quality Monitor (AD-PQS scoring)
 export {
-  PairActivityTracker,
-  getPairActivityTracker,
-  resetPairActivityTracker
-} from './analytics/pair-activity-tracker';
+  ProfessionalQualityMonitor
+} from './analytics/professional-quality-monitor';
 export type {
-  ActivityTrackerConfig,
-  PairActivityMetrics,
-  ActivityTrackerStats
-} from './analytics/pair-activity-tracker';
+  ProfessionalQualityScore,
+  QualityMetrics,
+  QualityMonitorDeps,
+  QualityMonitorRedis
+} from './analytics/professional-quality-monitor';
 
-// Domain models and core interfaces
-// FIX 6.1: Error Class Name Disambiguation (P0-FIX: Updated for consolidation)
-// ╔════════════════════════════════════════════════════════════════════════════╗
-// ║ ERROR CLASS NAMING GUIDE                                                   ║
-// ╠════════════════════════════════════════════════════════════════════════════╣
-// ║ CANONICAL (use for new code):                                              ║
-// ║   - ArbitrageError: Simple error with string code (from @arbitrage/types)  ║
-// ║     Import: import { ArbitrageError } from '@arbitrage/types'              ║
-// ║     Usage: new ArbitrageError(msg, code, service, retryable)               ║
-// ║   - TimeoutError: Timeout errors (from @arbitrage/types)                   ║
-// ║     Import: import { TimeoutError } from '@arbitrage/types'                ║
-// ╠════════════════════════════════════════════════════════════════════════════╣
-// ║ RICH ERRORS (for detailed error handling):                                 ║
-// ║   - BaseArbitrageError: Rich error with ErrorCode enum, severity, context  ║
-// ║     Import: import { BaseArbitrageError, ErrorCode } from '@arbitrage/core'║
-// ║   - ConnectionError, ValidationError, LifecycleError, ExecutionError       ║
-// ║     (Specialized error classes from resilience/error-handling)             ║
-// ╠════════════════════════════════════════════════════════════════════════════╣
-// ║ DEPRECATED (legacy, will be removed in v2.0):                              ║
-// ║   - DomainArbitrageError (from domain-models.ts): Old pattern              ║
-// ║     Migration: new ArbitrageError(msg, code, service) from @arbitrage/types║
-// ╚════════════════════════════════════════════════════════════════════════════╝
-export * from './domain-models';
-
-// Repository pattern
+// Performance Analytics
 export {
-  RedisArbitrageRepository,
-  RedisExecutionRepository,
-  createArbitrageRepository,
-  createExecutionRepository
-} from './repositories';
+  PerformanceAnalyticsEngine,
+  StrategyPerformance,
+  AssetPerformance,
+  TimePerformance,
+  BenchmarkComparison,
+  AttributionAnalysis
+} from './analytics/performance-analytics';
 
-// REMOVED: ArbitrageService and EnterpriseConfigManager (unused, cleaned up)
-// DEPRECATED: AdvancedArbitrageOrchestrator removed per ADR-002
-// The orchestrator used Pub/Sub which violates ADR-002 (Redis Streams required)
-// Use the coordinator service pattern with Redis Streams instead
-// See: services/coordinator/src/coordinator.ts
+// #############################################################################
+// #                                                                           #
+// #                   SECTION 6: DETECTION & ARBITRAGE                        #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 6.1 Base Detectors
+// =============================================================================
 
 // Base detector for chain-specific implementations
 export { BaseDetector } from './base-detector';
@@ -592,7 +671,117 @@ export type {
   CrossChainDiscrepancy
 } from './partitioned-detector';
 
-// Solana detector for non-EVM chain support (S3.3.1)
+// =============================================================================
+// 6.2 Arbitrage Detection Components
+// =============================================================================
+
+// ArbitrageDetector - Pure detection logic
+// REFACTOR: Replaces calculateIntraChainArbitrage, calculateCrossChainArbitrage
+export {
+  // Core detection functions
+  detectArbitrage,
+  detectArbitrageForTokenPair,
+  calculateArbitrageProfit,
+  calculateCrossChainArbitrage,
+
+  // Token order utilities
+  isReverseTokenOrder,
+  normalizeTokenOrder,
+  adjustPriceForTokenOrder,
+
+  // Validation utilities
+  isValidPairSnapshot,
+  validateDetectionInput,
+} from './components/arbitrage-detector';
+export type {
+  ArbitrageDetectionInput,
+  ArbitrageDetectionResult,
+  ArbitrageOpportunityData,
+  BatchDetectionOptions,
+  ChainPriceData,
+  CrossChainOpportunityResult,
+} from './components/arbitrage-detector';
+
+// =============================================================================
+// 6.3 Multi-Path Arbitrage
+// =============================================================================
+
+export {
+  CrossDexTriangularArbitrage,
+  DexPool,
+  TriangularOpportunity,
+  TriangularStep,
+  ArbitragePath,
+  // T2.6: Quadrilateral arbitrage
+  QuadrilateralOpportunity
+} from './cross-dex-triangular-arbitrage';
+
+// T3.11: Multi-Leg Path Finding (5+ tokens)
+export {
+  MultiLegPathFinder,
+  getMultiLegPathFinder,
+  resetMultiLegPathFinder
+} from './multi-leg-path-finder';
+export type {
+  MultiLegPathConfig,
+  MultiLegOpportunity,
+  PathFinderStats
+} from './multi-leg-path-finder';
+
+// =============================================================================
+// 6.4 Detector Infrastructure
+// =============================================================================
+
+// Connection management extracted from base-detector for SRP
+export {
+  initializeDetectorConnections,
+  disconnectDetectorConnections,
+  DEFAULT_BATCHER_CONFIG,
+  DEFAULT_SWAP_FILTER_CONFIG,
+  // Phase 1.5: Pair Initialization Service
+  initializePairs,
+  resolvePairAddress,
+  createTokenPairKey,
+  buildFullPairKey,
+  // R5: Health Monitor
+  DetectorHealthMonitor,
+  createDetectorHealthMonitor,
+  // R5: Factory Integration
+  FactoryIntegrationService,
+  createFactoryIntegrationService,
+} from './detector';
+export type {
+  DetectorConnectionConfig,
+  DetectorConnectionResources,
+  EventFilterHandlers,
+  // Phase 1.5: Pair Initialization Service types
+  PairInitializationConfig,
+  PairInitializationResult,
+  DiscoveredPairResult,
+  PairAddressResolver,
+  // R5: Health Monitor types
+  HealthMonitorConfig,
+  DetectorHealthStatus,
+  HealthMonitorDeps,
+  HealthMonitorRedis,
+  HealthMonitorPerfLogger,
+  // R5: Factory Integration types
+  FactoryIntegrationConfig,
+  FactoryIntegrationHandlers,
+  FactoryIntegrationDeps,
+  FactoryIntegrationResult,
+} from './detector';
+
+// #############################################################################
+// #                                                                           #
+// #                         SECTION 7: SOLANA                                 #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 7.1 Solana Detector (S3.3.1)
+// =============================================================================
+
 export { SolanaDetector, SOLANA_DEX_PROGRAMS } from './solana/solana-detector';
 export type {
   SolanaDetectorConfig,
@@ -610,7 +799,10 @@ export type {
   ProgramSubscription
 } from './solana/solana-detector';
 
-// Solana swap parser for instruction parsing (S3.3.4)
+// =============================================================================
+// 7.2 Solana Swap Parser (S3.3.4)
+// =============================================================================
+
 export {
   SolanaSwapParser,
   getSolanaSwapParser,
@@ -630,7 +822,10 @@ export type {
   ParserStats
 } from './solana/solana-swap-parser';
 
-// Solana price feed for real-time DEX price updates (S3.3.5)
+// =============================================================================
+// 7.3 Solana Price Feed (S3.3.5)
+// =============================================================================
+
 export {
   SolanaPriceFeed,
   RAYDIUM_AMM_LAYOUT,
@@ -650,347 +845,17 @@ export type {
   SupportedDex
 } from './solana/solana-price-feed';
 
-// =============================================================================
-// REF-1 to REF-4 / ARCH-1 to ARCH-3: Shared Utilities
-// =============================================================================
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 8: PRICE & CALCULATION                         #
+// #                                                                           #
+// #############################################################################
 
 // =============================================================================
-// REF-1/ARCH-1: DEPRECATED arbitrage-calculator.ts exports
-// REFACTOR: Most functions have been migrated to components/price-calculator
-// and components/arbitrage-detector. Only keeping legacy exports that don't
-// have direct replacements yet.
-//
-// MIGRATION GUIDE:
-// - calculatePriceFromReserves → components/price-calculator (DONE)
-// - calculatePriceFromBigIntReserves → components/price-calculator (DONE)
-// - safeBigIntDivision → components/price-calculator (DONE)
-// - invertPrice → components/price-calculator (DONE)
-// - calculatePriceDifferencePercent → components/price-calculator (DONE)
-// - getDefaultFee → components/price-calculator (DONE)
-// - getMinProfitThreshold → components/price-calculator (DONE)
-// - isSameTokenPair → components/token-utils (DONE)
-// - isReverseOrder → components/token-utils (DONE)
-// - calculateCrossChainArbitrage → components/arbitrage-detector (DONE)
-// - validatePairSnapshot → components/arbitrage-detector as isValidPairSnapshot
-// - createPairSnapshot → components/pair-repository as PairRepository.createSnapshot()
-// - calculateIntraChainArbitrage → components/arbitrage-detector as detectArbitrage
-// =============================================================================
-export {
-  /**
-   * @deprecated Since v1.0.0. Use detectArbitrage from components/arbitrage-detector instead.
-   * Will be removed in v2.0.0.
-   */
-  calculateIntraChainArbitrage,
-  /**
-   * @deprecated Since v1.0.0. Use isValidPairSnapshot from components/arbitrage-detector instead.
-   * Will be removed in v2.0.0.
-   */
-  validatePairSnapshot,
-  /**
-   * @deprecated Since v1.0.0. Use PairRepository.createSnapshot() from components/pair-repository instead.
-   * Will be removed in v2.0.0.
-   */
-  createPairSnapshot
-} from './arbitrage-calculator';
-
-/**
- * @deprecated Since v1.0.0. These types will be removed in v2.0.0.
- * Migration guide:
- * - PairSnapshot → ComponentPairSnapshot from components/pair-repository
- * - ChainPriceData → components/arbitrage-detector
- * - CrossChainOpportunityResult → components/arbitrage-detector
- */
-export type {
-  PairSnapshot as ArbitragePairSnapshot,
-  PriceComparisonResult,
-  ArbitrageCalcConfig,
-} from './arbitrage-calculator';
-
-// REF-2: Shared message validation utilities
-export {
-  validatePriceUpdate,
-  validateWhaleTransaction,
-  validateSwapEvent,
-  validateReserveUpdate,
-  validateCoordinatorCommand,
-  validateServiceHealthStatus,
-  validateMessage,
-  validateBatch,
-  createPriceUpdate,
-  createWhaleTransaction,
-  createCoordinatorCommand
-} from './message-validators';
-export type {
-  PriceUpdate as ValidatedPriceUpdate,
-  WhaleTransaction as ValidatedWhaleTransaction,
-  SwapEvent as ValidatedSwapEvent,
-  ReserveUpdate,
-  CoordinatorCommand,
-  ServiceHealthStatus,
-  ValidationResult
-} from './message-validators';
-
-// REF-3/ARCH-2: Standardized error handling
-export {
-  ArbitrageError as BaseArbitrageError,
-  ConnectionError,
-  ValidationError as SharedValidationError,
-  LifecycleError,
-  ExecutionError,
-  ErrorCode,
-  ErrorSeverity,
-  success,
-  failure,
-  tryCatch,
-  tryCatchSync,
-  isRetryableError as isRetryableErrorCheck,
-  isCriticalError,
-  getErrorSeverity,
-  getErrorMessage,  // FIX: Export safe error message extractor
-  formatErrorForLog,
-  formatErrorForResponse,
-  ErrorAggregator
-} from './resilience/error-handling';
-export type { Result } from './resilience/error-handling';
-
-// REF-4/ARCH-3: Shared async utilities
-export {
-  TimeoutError,
-  withTimeout,
-  withTimeoutDefault,
-  withTimeoutSafe,
-  withRetry as withRetryAsync,
-  sleep,
-  createDeferred,
-  mapConcurrent,
-  mapSequential,
-  debounceAsync,
-  throttleAsync,
-  gracefulShutdown,
-  waitWithTimeouts
-} from './async/async-utils';
-export type {
-  RetryConfig,
-  Deferred
-} from './async/async-utils';
-
-// Re-export types for convenience
-export type {
-  Chain,
-  Dex,
-  Token,
-  Pair,
-  PriceUpdate,
-  ArbitrageOpportunity,
-  SwapEvent,
-  WhaleTransaction,
-  MessageEvent,
-  ServiceHealth,
-  PerformanceMetrics,
-  PredictionResult,
-  MLModelMetrics,
-  ServiceConfig,
-  DetectorConfig,
-  ExecutionConfig,
-  ArbitrageError,
-  NetworkError,
-  ValidationError
-} from '../../types';
-
-// Partition service utilities (P12-P16 refactor)
-export {
-  parsePort,
-  validateAndFilterChains,
-  createPartitionHealthServer,
-  shutdownPartitionService,
-  setupDetectorEventHandlers,
-  setupProcessHandlers,
-  exitWithConfigError,
-  closeServerWithTimeout,
-  SHUTDOWN_TIMEOUT_MS,
-  HEALTH_SERVER_CLOSE_TIMEOUT_MS,
-  // Typed environment config utilities (standardized across P1-P4)
-  parsePartitionEnvironmentConfig,
-  validatePartitionEnvironmentConfig,
-  generateInstanceId,
-  // R9: Partition Service Runner Factory
-  createPartitionServiceRunner,
-  runPartitionService
-} from './partition-service-utils';
-export type {
-  PartitionServiceConfig,
-  HealthServerOptions,
-  PartitionDetectorInterface,
-  ProcessHandlerCleanup,
-  // Typed environment config type
-  PartitionEnvironmentConfig,
-  // R9: Partition Service Runner types
-  ServiceLifecycleState,
-  PartitionServiceRunnerOptions,
-  PartitionServiceRunner
-} from './partition-service-utils';
-
-// Partition Router (S3.1.7 - Detector Migration)
-export {
-  PartitionRouter,
-  createDeprecationWarning,
-  isDeprecatedPattern,
-  getMigrationRecommendation,
-  warnIfDeprecated,
-  // P1-1/P1-2-FIX: Export constants as single source of truth
-  PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES,
-  // P3-FIX: All service ports centralized
-  SERVICE_PORTS
-} from './partition-router';
-export type { PartitionEndpoint } from './partition-router';
-
-// Simulation Mode for Local Testing
-export {
-  PriceSimulator,
-  getSimulator,
-  isSimulationMode,
-  SIMULATION_CONFIG,
-  // Chain-specific simulators for detector integration
-  ChainSimulator,
-  getChainSimulator,
-  stopChainSimulator,
-  stopAllChainSimulators,
-  resetSimulatorInstance
-} from './simulation-mode';
-export type {
-  SimulatedPriceUpdate,
-  SimulationConfig,
-  // Chain simulator types
-  SimulatedSyncEvent,
-  SimulatedOpportunity,
-  ChainSimulatorConfig,
-  SimulatedPairConfig
-} from './simulation-mode';
-
-// P0-2 FIX: Nonce Manager for Transaction Sequencing
-// CRITICAL-4 FIX: Added getNonceManagerAsync for race-safe initialization
-export {
-  NonceManager,
-  getNonceManager,
-  getNonceManagerAsync,
-  resetNonceManager
-} from './nonce-manager';
-export type { NonceManagerConfig } from './nonce-manager';
-
-// Phase 2: Gas Price Cache (ADR-012, ADR-013)
-export {
-  GasPriceCache,
-  getGasPriceCache,
-  resetGasPriceCache,
-  GAS_UNITS,
-  DEFAULT_TRADE_AMOUNT_USD,
-  FALLBACK_GAS_COSTS_ETH,
-  FALLBACK_GAS_SCALING_PER_STEP
-} from './caching/gas-price-cache';
-export type {
-  GasPriceData,
-  NativeTokenPrice,
-  GasCostEstimate,
-  GasPriceCacheConfig
-} from './caching/gas-price-cache';
-
-// ADR-022: Reserve Cache (Event-Driven Reserve Caching)
-export {
-  ReserveCache,
-  createReserveCache,
-  getReserveCache,
-  resetReserveCache
-} from './caching/reserve-cache';
-export type {
-  ReserveCacheConfig,
-  CachedReserve,
-  ReserveCacheStats
-} from './caching/reserve-cache';
-
-// Phase 3: RPC Request Batching
-// @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
-export {
-  BatchProvider,
-  createBatchProvider,
-  BATCHABLE_METHODS,
-  NON_BATCHABLE_METHODS
-} from './rpc';
-export type {
-  BatchProviderConfig,
-  BatchProviderStats,
-  JsonRpcRequest,
-  JsonRpcResponse
-} from './rpc';
-
-// Phase 2: MEV Protection (ADR-013)
-export {
-  MevProviderFactory,
-  FlashbotsProvider,
-  L2SequencerProvider,
-  StandardProvider,
-  createFlashbotsProvider,
-  createL2SequencerProvider,
-  createStandardProvider,
-  createMevProvider,
-  hasMevProtection,
-  getRecommendedPriorityFee,
-  isL2SequencerChain,
-  getL2ChainConfig,
-  CHAIN_MEV_STRATEGIES,
-  MEV_DEFAULTS
-} from './mev-protection';
-export type {
-  IMevProvider,
-  MevStrategy,
-  MevSubmissionResult,
-  MevProviderConfig,
-  FlashbotsBundle,
-  BundleSimulationResult,
-  MevMetrics,
-  MevGlobalConfig,
-  ChainWalletConfig
-} from './mev-protection';
-
-// Phase 3: Cross-Chain Bridge Router (ADR-014)
-export {
-  StargateRouter,
-  createStargateRouter,
-  BridgeRouterFactory,
-  createBridgeRouterFactory,
-  BRIDGE_DEFAULTS,
-  STARGATE_CHAIN_IDS,
-  STARGATE_POOL_IDS,
-  STARGATE_ROUTER_ADDRESSES,
-  BRIDGE_TIMES
-} from './bridge-router';
-export type {
-  BridgeProtocol,
-  BridgeStatus,
-  BridgeChainConfig,
-  BridgeTokenConfig,
-  BridgeQuoteRequest,
-  BridgeQuote,
-  BridgeExecuteRequest,
-  BridgeExecuteResult,
-  BridgeStatusResult,
-  IBridgeRouter,
-  CrossChainExecutionPlan,
-  CrossChainExecutionResult,
-  BridgeRouterFactoryConfig
-} from './bridge-router';
-
-// =============================================================================
-// ARCH-REFACTOR: Component Architecture
-// Foundation components for detection and price calculation refactoring
-// @see .claude/plans/detection-refactoring-plan.md
-// @see .claude/plans/component-architecture-proposal.md
-// =============================================================================
-
-// =============================================================================
-// PriceCalculator - Pure functions for price/profit calculations
+// 8.1 Price Calculator - Pure Functions
 // REFACTOR: These are now the PRIMARY exports (replacing deprecated versions)
 // =============================================================================
+
 export {
   // Core price calculations - PRIMARY EXPORTS (replace deprecated versions)
   calculatePriceFromReserves,
@@ -1037,22 +902,8 @@ export type {
   ProfitCalculationResult,
 } from './components/price-calculator';
 
-// PairRepository - In-memory storage with O(1) lookups
-export {
-  PairRepository,
-  createPairRepository,
-} from './components/pair-repository';
-
-export type {
-  PairSnapshot as ComponentPairSnapshot,
-  ExtendedPair as ComponentExtendedPair,
-  SnapshotOptions,
-  RepositoryStats,
-  PairChangeCallback,
-} from './components/pair-repository';
-
 // =============================================================================
-// Data Structures - High-performance structures for hot-path operations
+// 8.2 Data Structures - High-Performance for Hot-Path
 // =============================================================================
 
 export {
@@ -1070,7 +921,6 @@ export {
   NumericRollingWindow,
   createNumericRollingWindow,
 } from './data-structures';
-
 export type {
   CircularBufferConfig,
   CircularBufferStats,
@@ -1081,39 +931,43 @@ export type {
 } from './data-structures';
 
 // =============================================================================
-// ArbitrageDetector - Pure detection logic
-// REFACTOR: Replaces calculateIntraChainArbitrage, calculateCrossChainArbitrage
+// 8.3 BigInt & Numeric Utilities (FIX 9.3)
 // =============================================================================
+
 export {
-  // Core detection functions
-  detectArbitrage,
-  detectArbitrageForTokenPair,
-  calculateArbitrageProfit,
-  calculateCrossChainArbitrage,
+  // Scale factors
+  DEFAULT_SCALE,
+  HIGH_PRECISION_SCALE,
 
-  // Token order utilities
-  isReverseTokenOrder,
-  normalizeTokenOrder,
-  adjustPriceForTokenOrder,
+  // BigInt <-> Number conversions
+  fractionToBigInt,
+  bigIntToFraction,
+  applyFraction,
+  calculateFraction,
+  bigIntToNumber,
+  numberToBigInt,
 
-  // Validation utilities
-  isValidPairSnapshot,
-  validateDetectionInput,
-} from './components/arbitrage-detector';
+  // BigInt arithmetic
+  bigIntMin,
+  bigIntMax,
+  bigIntClamp,
+  bigIntAbs,
 
-export type {
-  ArbitrageDetectionInput,
-  ArbitrageDetectionResult,
-  ArbitrageOpportunityData,
-  BatchDetectionOptions,
-  ChainPriceData,
-  CrossChainOpportunityResult,
-} from './components/arbitrage-detector';
+  // Formatting
+  formatWeiAsEth,
+} from './utils';
+
+// #############################################################################
+// #                                                                           #
+// #                      SECTION 9: TOKEN & PAIR                              #
+// #                                                                           #
+// #############################################################################
 
 // =============================================================================
-// TokenUtils - Address normalization and token handling
+// 9.1 Token Utilities
 // REFACTOR: Replaces isSameTokenPair, isReverseOrder from arbitrage-calculator
 // =============================================================================
+
 export {
   // Address normalization
   normalizeAddress,
@@ -1152,10 +1006,98 @@ export {
 } from './components/token-utils';
 
 // =============================================================================
-// Factory Subscription Service (Phase 2.1.2)
-// Factory-level event subscriptions for 40-50x RPC reduction
+// 9.2 Pair Repository & Discovery
 // =============================================================================
 
+// PairRepository - In-memory storage with O(1) lookups
+export {
+  PairRepository,
+  createPairRepository,
+} from './components/pair-repository';
+export type {
+  PairSnapshot as ComponentPairSnapshot,
+  ExtendedPair as ComponentExtendedPair,
+  SnapshotOptions,
+  RepositoryStats,
+  PairChangeCallback,
+} from './components/pair-repository';
+
+// Pair Discovery and Caching (S2.2.5)
+export {
+  PairDiscoveryService,
+  getPairDiscoveryService,
+  resetPairDiscoveryService
+} from './pair-discovery';
+export type {
+  PairDiscoveryConfig,
+  DiscoveredPair,
+  PairDiscoveryStats
+} from './pair-discovery';
+
+// #############################################################################
+// #                                                                           #
+// #                       SECTION 10: DEX ADAPTERS                            #
+// #                                                                           #
+// #############################################################################
+
+// DEX Adapters for non-factory DEXes (Balancer V2, GMX, Platypus)
+export {
+  BalancerV2Adapter,
+  GmxAdapter,
+  PlatypusAdapter,
+  AdapterRegistry,
+  getAdapterRegistry,
+  resetAdapterRegistry,
+  BALANCER_VAULT_ADDRESSES,
+  BALANCER_VAULT_ABI,
+  GMX_ADDRESSES,
+  GMX_VAULT_ABI,
+  GMX_READER_ABI,
+  PLATYPUS_ADDRESSES,
+  PLATYPUS_POOL_ABI,
+  SUBGRAPH_URLS,
+  success as adapterSuccess,
+  failure as adapterFailure
+} from './dex-adapters';
+export type {
+  AdapterConfig,
+  AdapterType,
+  PoolType,
+  DiscoveredPool,
+  PoolReserves,
+  SwapQuote,
+  DexAdapter,
+  AdapterKey,
+  AdapterFactory,
+  AdapterRegistryEntry,
+  AdapterResult
+} from './dex-adapters';
+
+// #############################################################################
+// #                                                                           #
+// #                 SECTION 11: BLOCKCHAIN INFRASTRUCTURE                     #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 11.1 WebSocket & Event Handling
+// =============================================================================
+
+export { EventBatcher, BatchedEvent, createEventBatcher, getDefaultEventBatcher, resetDefaultEventBatcher } from './event-batcher';
+
+export {
+  WebSocketManager,
+  WebSocketConfig,
+  WebSocketSubscription,
+  WebSocketMessage,
+  WebSocketEventHandler,
+  ConnectionStateHandler,
+  ErrorEventHandler,
+  GenericEventHandler
+} from './websocket-manager';
+
+// Factory Subscription Service (Phase 2.1.2)
+// Factory-level event subscriptions for 40-50x RPC reduction
 export {
   FactorySubscriptionService,
   createFactorySubscriptionService,
@@ -1168,7 +1110,6 @@ export {
   FactoryEventSignatures,
   AdditionalEventSignatures,
 } from './factory-subscription';
-
 export type {
   FactorySubscriptionConfig,
   FactorySubscriptionStats,
@@ -1180,24 +1121,180 @@ export type {
 } from './factory-subscription';
 
 // =============================================================================
-// PERFORMANCE MONITORING (Task 2.3)
+// 11.2 Transaction Management
 // =============================================================================
+
+// P0-2 FIX: Nonce Manager for Transaction Sequencing
+// CRITICAL-4 FIX: Added getNonceManagerAsync for race-safe initialization
 export {
-  HotPathMonitor,
-  measureHotPath,
-  measureHotPathAsync,
-  hotPathMonitor,
-  resetHotPathMonitor,
-} from './performance-monitor';
+  NonceManager,
+  getNonceManager,
+  getNonceManagerAsync,
+  resetNonceManager
+} from './nonce-manager';
+export type { NonceManagerConfig } from './nonce-manager';
 
+// =============================================================================
+// 11.3 RPC & Provider Infrastructure
+// =============================================================================
+
+// Phase 3: RPC Request Batching
+// @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
+export {
+  BatchProvider,
+  createBatchProvider,
+  BATCHABLE_METHODS,
+  NON_BATCHABLE_METHODS
+} from './rpc';
 export type {
-  LatencyMetric,
-  LatencyStats,
-} from './performance-monitor';
+  BatchProviderConfig,
+  BatchProviderStats,
+  JsonRpcRequest,
+  JsonRpcResponse
+} from './rpc';
 
 // =============================================================================
-// RISK MANAGEMENT (Phase 3: Capital & Risk Controls - Task 3.4)
+// 11.4 MEV Protection (Phase 2: ADR-013)
 // =============================================================================
+
+export {
+  MevProviderFactory,
+  FlashbotsProvider,
+  L2SequencerProvider,
+  StandardProvider,
+  createFlashbotsProvider,
+  createL2SequencerProvider,
+  createStandardProvider,
+  createMevProvider,
+  hasMevProtection,
+  getRecommendedPriorityFee,
+  isL2SequencerChain,
+  getL2ChainConfig,
+  CHAIN_MEV_STRATEGIES,
+  MEV_DEFAULTS
+} from './mev-protection';
+export type {
+  IMevProvider,
+  MevStrategy,
+  MevSubmissionResult,
+  MevProviderConfig,
+  FlashbotsBundle,
+  BundleSimulationResult,
+  MevMetrics,
+  MevGlobalConfig,
+  ChainWalletConfig
+} from './mev-protection';
+
+// =============================================================================
+// 11.5 Cross-Chain Bridge Router (Phase 3: ADR-014)
+// =============================================================================
+
+export {
+  StargateRouter,
+  createStargateRouter,
+  BridgeRouterFactory,
+  createBridgeRouterFactory,
+  BRIDGE_DEFAULTS,
+  STARGATE_CHAIN_IDS,
+  STARGATE_POOL_IDS,
+  STARGATE_ROUTER_ADDRESSES,
+  BRIDGE_TIMES
+} from './bridge-router';
+export type {
+  BridgeProtocol,
+  BridgeStatus,
+  BridgeChainConfig,
+  BridgeTokenConfig,
+  BridgeQuoteRequest,
+  BridgeQuote,
+  BridgeExecuteRequest,
+  BridgeExecuteResult,
+  BridgeStatusResult,
+  IBridgeRouter,
+  CrossChainExecutionPlan,
+  CrossChainExecutionResult,
+  BridgeRouterFactoryConfig
+} from './bridge-router';
+
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 12: PARTITION SERVICES                         #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 12.1 Partition Service Utilities (P12-P16 refactor)
+// =============================================================================
+
+export {
+  parsePort,
+  validateAndFilterChains,
+  createPartitionHealthServer,
+  shutdownPartitionService,
+  setupDetectorEventHandlers,
+  setupProcessHandlers,
+  exitWithConfigError,
+  closeServerWithTimeout,
+  SHUTDOWN_TIMEOUT_MS,
+  HEALTH_SERVER_CLOSE_TIMEOUT_MS,
+  // Typed environment config utilities (standardized across P1-P4)
+  parsePartitionEnvironmentConfig,
+  validatePartitionEnvironmentConfig,
+  generateInstanceId,
+  // R9: Partition Service Runner Factory
+  createPartitionServiceRunner,
+  runPartitionService
+} from './partition-service-utils';
+export type {
+  PartitionServiceConfig,
+  HealthServerOptions,
+  PartitionDetectorInterface,
+  ProcessHandlerCleanup,
+  // Typed environment config type
+  PartitionEnvironmentConfig,
+  // R9: Partition Service Runner types
+  ServiceLifecycleState,
+  PartitionServiceRunnerOptions,
+  PartitionServiceRunner
+} from './partition-service-utils';
+
+// =============================================================================
+// 12.2 Partition Router (S3.1.7 - Detector Migration)
+// =============================================================================
+
+export {
+  PartitionRouter,
+  createDeprecationWarning,
+  isDeprecatedPattern,
+  getMigrationRecommendation,
+  warnIfDeprecated,
+  // P1-1/P1-2-FIX: Export constants as single source of truth
+  PARTITION_PORTS,
+  PARTITION_SERVICE_NAMES,
+  // P3-FIX: All service ports centralized
+  SERVICE_PORTS
+} from './partition-router';
+export type { PartitionEndpoint } from './partition-router';
+
+// Publishing Service (centralized message publishing)
+export {
+  PublishingService,
+  createPublishingService,
+  STANDARD_BATCHER_CONFIGS
+} from './publishing';
+export type {
+  PublishableMessageType,
+  PublishingBatcherConfig,
+  PublishingServiceDeps,
+  PublishingBatchers
+} from './publishing';
+
+// #############################################################################
+// #                                                                           #
+// #                      SECTION 13: RISK MANAGEMENT                          #
+// #                    (Phase 3: Capital & Risk Controls)                     #
+// #                                                                           #
+// #############################################################################
 
 // Task 3.4.1: Execution Probability Tracker
 export {
@@ -1262,81 +1359,16 @@ export type {
   TradeResult,
 } from './risk';
 
-// =============================================================================
-// UTILITIES (FIX 9.3)
-// =============================================================================
-
-export {
-  // Scale factors
-  DEFAULT_SCALE,
-  HIGH_PRECISION_SCALE,
-
-  // BigInt <-> Number conversions
-  fractionToBigInt,
-  bigIntToFraction,
-  applyFraction,
-  calculateFraction,
-  bigIntToNumber,
-  numberToBigInt,
-
-  // BigInt arithmetic
-  bigIntMin,
-  bigIntMax,
-  bigIntClamp,
-  bigIntAbs,
-
-  // Formatting
-  formatWeiAsEth,
-} from './utils';
+// #############################################################################
+// #                                                                           #
+// #                        SECTION 14: UTILITIES                              #
+// #                                                                           #
+// #############################################################################
 
 // =============================================================================
-// DETECTOR MODULE (Phase 1 Refactoring)
-// Connection management extracted from base-detector for SRP
+// 14.1 Common Validators (Lightweight validation utilities)
 // =============================================================================
 
-export {
-  initializeDetectorConnections,
-  disconnectDetectorConnections,
-  DEFAULT_BATCHER_CONFIG,
-  DEFAULT_SWAP_FILTER_CONFIG,
-  // Phase 1.5: Pair Initialization Service
-  initializePairs,
-  resolvePairAddress,
-  createTokenPairKey,
-  buildFullPairKey,
-  // R5: Health Monitor
-  DetectorHealthMonitor,
-  createDetectorHealthMonitor,
-  // R5: Factory Integration
-  FactoryIntegrationService,
-  createFactoryIntegrationService,
-} from './detector';
-
-export type {
-  DetectorConnectionConfig,
-  DetectorConnectionResources,
-  EventFilterHandlers,
-  // Phase 1.5: Pair Initialization Service types
-  PairInitializationConfig,
-  PairInitializationResult,
-  DiscoveredPairResult,
-  PairAddressResolver,
-  // R5: Health Monitor types
-  HealthMonitorConfig,
-  DetectorHealthStatus,
-  HealthMonitorDeps,
-  HealthMonitorRedis,
-  HealthMonitorPerfLogger,
-  // R5: Factory Integration types
-  FactoryIntegrationConfig,
-  FactoryIntegrationHandlers,
-  FactoryIntegrationDeps,
-  FactoryIntegrationResult,
-} from './detector';
-
-// =============================================================================
-// COMMON VALIDATORS (Lightweight validation utilities)
-// =============================================================================
 export {
   // Type guards
   isDefined,
@@ -1368,8 +1400,9 @@ export {
 } from './utils/common-validators';
 
 // =============================================================================
-// PERFORMANCE UTILITIES
+// 14.2 Performance Utilities
 // =============================================================================
+
 export {
   // WeakMap-based object cache
   createObjectCache,
@@ -1390,8 +1423,166 @@ export {
 } from './utils/performance-utils';
 
 // =============================================================================
-// R8: ALTERNATIVE IMPORT PATHS
+// 14.3 Validation Middleware
 // =============================================================================
+
+export {
+  ValidationMiddleware,
+  ValidationSchemas
+} from './validation';
+
+// =============================================================================
+// 14.4 Simulation Mode (Local Testing)
+// =============================================================================
+
+export {
+  PriceSimulator,
+  getSimulator,
+  isSimulationMode,
+  SIMULATION_CONFIG,
+  // Chain-specific simulators for detector integration
+  ChainSimulator,
+  getChainSimulator,
+  stopChainSimulator,
+  stopAllChainSimulators,
+  resetSimulatorInstance
+} from './simulation-mode';
+export type {
+  SimulatedPriceUpdate,
+  SimulationConfig,
+  // Chain simulator types
+  SimulatedSyncEvent,
+  SimulatedOpportunity,
+  ChainSimulatorConfig,
+  SimulatedPairConfig
+} from './simulation-mode';
+
+// #############################################################################
+// #                                                                           #
+// #                    SECTION 15: DOMAIN MODELS & TYPES                      #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 15.1 Domain Models
+// =============================================================================
+
+export * from './domain-models';
+
+// =============================================================================
+// 15.2 Repositories
+// =============================================================================
+
+export {
+  RedisArbitrageRepository,
+  RedisExecutionRepository,
+  createArbitrageRepository,
+  createExecutionRepository
+} from './repositories';
+
+// =============================================================================
+// 15.3 Message Validators (REF-2)
+// =============================================================================
+
+export {
+  validatePriceUpdate,
+  validateWhaleTransaction,
+  validateSwapEvent,
+  validateReserveUpdate,
+  validateCoordinatorCommand,
+  validateServiceHealthStatus,
+  validateMessage,
+  validateBatch,
+  createPriceUpdate,
+  createWhaleTransaction,
+  createCoordinatorCommand
+} from './message-validators';
+export type {
+  PriceUpdate as ValidatedPriceUpdate,
+  WhaleTransaction as ValidatedWhaleTransaction,
+  SwapEvent as ValidatedSwapEvent,
+  ReserveUpdate,
+  CoordinatorCommand,
+  ServiceHealthStatus,
+  ValidationResult
+} from './message-validators';
+
+// =============================================================================
+// 15.4 Re-exported Types (from @arbitrage/types)
+// =============================================================================
+
+export type {
+  Chain,
+  Dex,
+  Token,
+  Pair,
+  PriceUpdate,
+  ArbitrageOpportunity,
+  SwapEvent,
+  WhaleTransaction,
+  MessageEvent,
+  ServiceHealth,
+  PerformanceMetrics,
+  PredictionResult,
+  MLModelMetrics,
+  ServiceConfig,
+  DetectorConfig,
+  ExecutionConfig,
+  ArbitrageError,
+  NetworkError,
+  ValidationError
+} from '../../types';
+
+// #############################################################################
+// #                                                                           #
+// #             SECTION 16: DEPRECATED & INTERNAL API RE-EXPORTS              #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// REF-1/ARCH-1: DEPRECATED arbitrage-calculator.ts exports
+// REFACTOR: Most functions have been migrated to components/price-calculator
+// and components/arbitrage-detector. Only keeping legacy exports that don't
+// have direct replacements yet.
+//
+// MIGRATION GUIDE:
+// - calculatePriceFromReserves → components/price-calculator (DONE)
+// - calculatePriceFromBigIntReserves → components/price-calculator (DONE)
+// - safeBigIntDivision → components/price-calculator (DONE)
+// - invertPrice → components/price-calculator (DONE)
+// - calculatePriceDifferencePercent → components/price-calculator (DONE)
+// - getDefaultFee → components/price-calculator (DONE)
+// - getMinProfitThreshold → components/price-calculator (DONE)
+// - isSameTokenPair → components/token-utils (DONE)
+// - isReverseOrder → components/token-utils (DONE)
+// - calculateCrossChainArbitrage → components/arbitrage-detector (DONE)
+// - validatePairSnapshot → components/arbitrage-detector as isValidPairSnapshot
+// - createPairSnapshot → components/pair-repository as PairRepository.createSnapshot()
+// - calculateIntraChainArbitrage → components/arbitrage-detector as detectArbitrage
+// =============================================================================
+// REMOVED: Deprecated exports from arbitrage-calculator.ts
+// The following have been migrated to components/:
+// - calculateIntraChainArbitrage → Use SimpleArbitrageDetector from unified-detector
+// - validatePairSnapshot → Use local validation in SnapshotManager
+// - createPairSnapshot → Use SnapshotManager.createPairSnapshot()
+// - PairSnapshot type → Use PairSnapshot from simple-arbitrage-detector
+// - PriceComparisonResult type → Use SpreadResult from price-calculator
+// - ArbitrageCalcConfig type → Use detection config in services
+// =============================================================================
+
+// REMOVED: ArbitrageService and EnterpriseConfigManager (unused, cleaned up)
+// DEPRECATED: AdvancedArbitrageOrchestrator removed per ADR-002
+// The orchestrator used Pub/Sub which violates ADR-002 (Redis Streams required)
+// Use the coordinator service pattern with Redis Streams instead
+// See: services/coordinator/src/coordinator.ts
+
+// REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
+// REMOVED: ABTestingFramework (unused module cleaned up)
+// REMOVED: Other professional-grade modules (unused, cleaned up):
+// - AdvancedStatisticalArbitrage
+// - RiskManagementEngine
+// - EnterpriseTestingFramework
+// - EnterpriseConfigurationManager
 
 /**
  * Internal API Re-exports
