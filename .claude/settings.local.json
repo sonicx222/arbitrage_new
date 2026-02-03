@@ -41,7 +41,8 @@
       "Bash(CI=true npm test -- --selectProjects unit --testPathPattern=\"shared/ml/__tests__/unit/\\(predictor|orderflow-predictor\\)\" --passWithNoTests)",
       "Bash(CI=true npm test -- --selectProjects unit --testPathIgnorePatterns=\"shared/ml/__tests__/unit/\\(predictor|orderflow-predictor\\)\" --passWithNoTests)",
       "Bash(CI=true npm test -- --selectProjects unit --passWithNoTests)",
-      "Bash(CI=true npm test -- --selectProjects unit --testPathPattern=\"shared/ml\" --passWithNoTests)"
+      "Bash(CI=true npm test -- --selectProjects unit --testPathPattern=\"shared/ml\" --passWithNoTests)",
+      "Bash(CI=true npm test)"
     ]
   }
 }

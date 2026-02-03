@@ -289,6 +289,15 @@ export class CrossRegionHealthManager extends EventEmitter {
       this.healthCheckInterval = null;
     }
 
+    // P2-2 FIX: Unsubscribe from Redis pub/sub to prevent callback memory leak
+    if (this.redis) {
+      try {
+        await this.redis.unsubscribe(this.FAILOVER_CHANNEL);
+      } catch (error) {
+        this.logger.warn('Failed to unsubscribe from failover channel', { error });
+      }
+    }
+
     // Release leadership if held
     if (this.isLeader) {
       await this.releaseLeadership();

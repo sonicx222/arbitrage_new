@@ -247,12 +247,19 @@ export class PartitionedDetector extends EventEmitter {
    * @returns Normalized token pair string
    */
   protected normalizeTokenPair(pairKey: string): string {
-    const parts = pairKey.split('_');
-    if (parts.length < 2) return pairKey;
+    // P2-3 FIX: Use lastIndexOf instead of split() to avoid array allocation in hot path
+    // Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
+    const lastSep = pairKey.lastIndexOf('_');
+    if (lastSep === -1) return pairKey;
 
-    // Take last 2 parts as tokens (handles both formats)
-    const token0 = parts[parts.length - 2];
-    const token1 = parts[parts.length - 1];
+    const token1 = pairKey.slice(lastSep + 1);
+    const beforeLastSep = pairKey.slice(0, lastSep);
+    const secondLastSep = beforeLastSep.lastIndexOf('_');
+
+    // If no second separator, format is "TOKEN0_TOKEN1"
+    const token0 = secondLastSep === -1
+      ? beforeLastSep
+      : beforeLastSep.slice(secondLastSep + 1);
 
     // Normalize each token in the pair using injected function
     const normalizedToken0 = this.normalizeToken(token0);
@@ -846,9 +853,15 @@ export class PartitionedDetector extends EventEmitter {
     for (const [normalizedPair, chainPriceData] of normalizedPrices) {
       if (chainPriceData.size < 2) continue;
 
-      const priceValues = Array.from(chainPriceData.values()).map(p => p.price.price);
-      const minPrice = Math.min(...priceValues);
-      const maxPrice = Math.max(...priceValues);
+      // P0-1 FIX: Single-pass min/max without array allocation (hot-path optimization)
+      // Previous code created 2 array allocations per pair - bad for GC in tight loop
+      let minPrice = Infinity;
+      let maxPrice = -Infinity;
+      for (const data of chainPriceData.values()) {
+        const price = data.price.price;
+        if (price < minPrice) minPrice = price;
+        if (price > maxPrice) maxPrice = price;
+      }
 
       if (minPrice === 0) continue;
 

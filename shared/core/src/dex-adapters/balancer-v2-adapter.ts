@@ -347,8 +347,11 @@ export class BalancerV2Adapter implements DexAdapter {
 
     if (pool.poolType === 'weighted' && weights) {
       // Weighted pool math: out = balanceOut * (1 - (balanceIn / (balanceIn + amountIn * (1 - fee)))^(wIn/wOut))
-      const weightIn = weights[indexIn] || 0.5;
-      const weightOut = weights[indexOut] || 0.5;
+      // P1-4 FIX: Use ?? to properly handle undefined weights. Balancer weighted pools always have
+      // positive weights (0 would be invalid), so ?? correctly handles only undefined/null cases.
+      // Using || would incorrectly treat 0 as falsy if a bug elsewhere produced a 0 weight.
+      const weightIn = weights[indexIn] ?? 0.5;
+      const weightOut = weights[indexOut] ?? 0.5;
 
       // PRECISION-FIX: Use basis points for fee calculation
       const amountInAfterFee = (amountIn * feeMultiplierBps) / 10000n;

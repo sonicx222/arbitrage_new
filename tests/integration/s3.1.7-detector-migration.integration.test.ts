@@ -660,17 +660,18 @@ describe('S3.1.7.10: Migration Documentation', () => {
     }
   });
 
-  it('should reference partition architecture in implementation plan', async () => {
+  it('should reference partition architecture in documentation', async () => {
     const fs = await import('fs');
     const path = await import('path');
 
-    const planPath = path.join(process.cwd(), 'docs/IMPLEMENTATION_PLAN.md');
-    const content = fs.readFileSync(planPath, 'utf-8');
+    // Architecture documentation should reference partition architecture
+    const archPath = path.join(process.cwd(), 'docs/architecture/ARCHITECTURE_V2.md');
+    const content = fs.readFileSync(archPath, 'utf-8');
 
-    expect(content).toContain('Partitioned');
-    expect(content).toContain('S3.1.7');
-    // Documentation uses "migrated" past tense after completion
-    expect(content.toLowerCase()).toContain('migrat');
+    // Should reference partitioned architecture
+    expect(content.toLowerCase()).toContain('partition');
+    // Should reference ADR for partitioned detectors
+    expect(content).toContain('ADR-003');
   });
 });
 

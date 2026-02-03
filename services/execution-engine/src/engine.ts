@@ -117,6 +117,14 @@ import { PendingStateSimulator, createPendingStateSimulator } from './services/s
 import { HotForkSynchronizer, createHotForkSynchronizer } from './services/simulation/hot-fork-synchronizer';
 // R2: Extracted risk management orchestrator
 import { RiskManagementOrchestrator, createRiskOrchestrator } from './risk';
+// Task 3: A/B Testing Framework
+import {
+  ABTestingFramework,
+  createABTestingFramework,
+  type ABTestingConfig,
+  type VariantAssignment,
+  type ExperimentSummary,
+} from './ab-testing';
 
 // Re-export types for consumers
 export type {
@@ -182,6 +190,10 @@ export class ExecutionEngineService {
   private riskManagementEnabled = false;
   // R2: Extracted orchestrator encapsulates risk assessment logic
   private riskOrchestrator: RiskManagementOrchestrator | null = null;
+
+  // Task 3: A/B Testing Framework
+  private abTestingFramework: ABTestingFramework | null = null;
+  private readonly abTestingConfig: Partial<ABTestingConfig>;
 
   // Phase 2: Pending state simulation components
   private anvilForkManager: AnvilForkManager | null = null;
@@ -300,6 +312,15 @@ export class ExecutionEngineService {
 
     // Store consumer config for passing to OpportunityConsumer
     this.consumerConfig = config.consumerConfig;
+
+    // Task 3: A/B testing config (enabled via environment variable)
+    this.abTestingConfig = {
+      enabled: process.env.AB_TESTING_ENABLED === 'true',
+      defaultTrafficSplit: parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT || '0.1'),
+      defaultMinSampleSize: parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE || '100', 10),
+      significanceThreshold: parseFloat(process.env.AB_TESTING_SIGNIFICANCE || '0.05'),
+      ...config.abTestingConfig,
+    };
 
     // Use injected dependencies or defaults
     this.logger = config.logger ?? createLogger('execution-engine');
@@ -485,6 +506,16 @@ export class ExecutionEngineService {
         }
       }
 
+      // Task 3: Initialize A/B testing framework
+      if (this.abTestingConfig.enabled) {
+        this.abTestingFramework = createABTestingFramework(this.redis, this.abTestingConfig);
+        await this.abTestingFramework.start();
+        this.logger.info('A/B testing framework initialized', {
+          defaultTrafficSplit: this.abTestingConfig.defaultTrafficSplit,
+          minSampleSize: this.abTestingConfig.defaultMinSampleSize,
+        });
+      }
+
       // Initialize opportunity consumer
       this.opportunityConsumer = new OpportunityConsumer({
         logger: this.logger,
@@ -560,6 +591,12 @@ export class ExecutionEngineService {
       if (this.circuitBreaker) {
         this.circuitBreaker.stop();
         this.circuitBreaker = null;
+      }
+
+      // Task 3: Stop A/B testing framework
+      if (this.abTestingFramework) {
+        await this.abTestingFramework.stop();
+        this.abTestingFramework = null;
       }
 
       // Stop Phase 2 pending state components
@@ -1294,6 +1331,9 @@ export class ExecutionEngineService {
     let positionSize: PositionSize | null = null;
     let drawdownCheck: TradingAllowedResult | null = null;
 
+    // Task 3: A/B testing variant assignment
+    let abVariants: Map<string, VariantAssignment> | null = null;
+
     try {
       this.opportunityConsumer?.markActive(opportunity.id);
       this.stats.executionAttempts++;
@@ -1380,6 +1420,26 @@ export class ExecutionEngineService {
       }
 
       // =======================================================================
+      // Task 3: A/B Testing Variant Assignment
+      // =======================================================================
+
+      if (this.abTestingFramework) {
+        // Use opportunity ID as the hash for deterministic variant assignment
+        abVariants = this.abTestingFramework.assignAllVariants(
+          opportunity.id,
+          chain,
+          dex
+        );
+
+        if (abVariants.size > 0) {
+          this.logger.debug('A/B variant assignments', {
+            id: opportunity.id,
+            variants: Object.fromEntries(abVariants),
+          });
+        }
+      }
+
+      // =======================================================================
       // Execute Trade
       // =======================================================================
 
@@ -1417,6 +1477,25 @@ export class ExecutionEngineService {
         });
       }
 
+      // =======================================================================
+      // Task 3: Record A/B Testing Results
+      // =======================================================================
+
+      const latencyMs = performance.now() - startTime;
+
+      if (this.abTestingFramework && abVariants && abVariants.size > 0) {
+        // Record result for each active experiment
+        for (const [experimentId, variant] of abVariants) {
+          await this.abTestingFramework.recordResult(
+            experimentId,
+            variant,
+            result,
+            latencyMs,
+            false // MEV frontrun detection - can be enhanced later
+          );
+        }
+      }
+
       if (result.success) {
         this.stats.successfulExecutions++;
         // Record success with circuit breaker (resets consecutive failures)
@@ -1427,8 +1506,7 @@ export class ExecutionEngineService {
         this.circuitBreaker?.recordFailure();
       }
 
-      const latency = performance.now() - startTime;
-      this.perfLogger.logEventLatency('opportunity_execution', latency, {
+      this.perfLogger.logEventLatency('opportunity_execution', latencyMs, {
         success: result.success,
         profit: result.actualProfit ?? 0
       });
@@ -1756,6 +1834,76 @@ export class ExecutionEngineService {
     this.logger.info('Risk management capital updated', {
       newCapital: newCapital.toString(),
     });
+  }
+
+  // ===========================================================================
+  // A/B Testing Getters (Task 3)
+  // ===========================================================================
+
+  /**
+   * Check if A/B testing is enabled.
+   */
+  isABTestingEnabled(): boolean {
+    return this.abTestingConfig.enabled ?? false;
+  }
+
+  /**
+   * Get experiment summary with metrics and significance analysis.
+   *
+   * @param experimentId - The experiment ID
+   * @returns Experiment summary or null if not found
+   */
+  async getExperimentSummary(experimentId: string): Promise<ExperimentSummary | null> {
+    return this.abTestingFramework?.getExperimentSummary(experimentId) ?? null;
+  }
+
+  /**
+   * List all A/B testing experiments.
+   *
+   * @param status - Optional filter by status
+   * @returns List of experiments
+   */
+  async listExperiments(status?: 'draft' | 'running' | 'paused' | 'completed' | 'cancelled'): Promise<unknown[]> {
+    return this.abTestingFramework?.listExperiments(status) ?? [];
+  }
+
+  /**
+   * Create a new A/B testing experiment.
+   *
+   * @param params - Experiment parameters
+   * @returns Created experiment
+   */
+  async createExperiment(params: {
+    name: string;
+    control: string;
+    variant: string;
+    trafficSplit?: number;
+    minSampleSize?: number;
+    description?: string;
+    chainFilter?: string;
+    dexFilter?: string;
+    startImmediately?: boolean;
+  }): Promise<unknown> {
+    if (!this.abTestingFramework) {
+      throw new Error('A/B testing framework not initialized');
+    }
+    return this.abTestingFramework.createExperiment(params);
+  }
+
+  /**
+   * Update experiment status.
+   *
+   * @param experimentId - The experiment ID
+   * @param status - New status
+   */
+  async updateExperimentStatus(
+    experimentId: string,
+    status: 'draft' | 'running' | 'paused' | 'completed' | 'cancelled'
+  ): Promise<void> {
+    if (!this.abTestingFramework) {
+      throw new Error('A/B testing framework not initialized');
+    }
+    return this.abTestingFramework.updateExperimentStatus(experimentId, status);
   }
 
   // ===========================================================================

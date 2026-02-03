@@ -126,11 +126,15 @@ export class StreamConsumerManager {
    * Wrap a message handler with rate limiting.
    * Drops messages that exceed the rate limit.
    *
+   * IMPORTANT: This method is private because rate-limited messages MUST be ACKed
+   * to prevent PEL (Pending Entries List) leaks. Use wrapHandler() which combines
+   * rate limiting with proper ACKing via withDeferredAck().
+   *
    * @param streamName - Stream name for rate limit tracking
    * @param handler - Original message handler
    * @returns Wrapped handler with rate limiting
    */
-  withRateLimit(
+  private withRateLimit(
     streamName: string,
     handler: (msg: StreamMessage) => Promise<void>
   ): (msg: StreamMessage) => Promise<void> {
@@ -140,6 +144,9 @@ export class StreamConsumerManager {
           stream: streamName,
           messageId: msg.id,
         });
+        // P0-2 NOTE: We return without ACK here, but this method is private.
+        // When used via wrapHandler(), withDeferredAck() wraps this and ACKs
+        // rate-limited messages (since they don't throw, they're treated as success).
         return;
       }
       return handler(msg);

@@ -448,7 +448,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         const onChainProfitUsd = onChainProfitEth * nativeTokenPriceUsd;
 
         // If on-chain profit is significantly lower than expected, log warning
-        const offChainProfit = opportunity.expectedProfit || 0;
+        // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
+        const offChainProfit = opportunity.expectedProfit ?? 0;
         const profitDivergence = offChainProfit > 0
           ? Math.abs(onChainProfitUsd - offChainProfit) / offChainProfit
           : 0;
@@ -475,8 +476,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       }
 
       // Analyze profitability (flash loan vs direct, accounting for fees)
+      // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
       const profitAnalysis = this.analyzeProfitability({
-        expectedProfitUsd: opportunity.expectedProfit || 0,
+        expectedProfitUsd: opportunity.expectedProfit ?? 0,
         flashLoanAmountWei: amountIn,
         estimatedGasUnits: estimatedGas,
         gasPriceWei: gasPrice,
@@ -748,7 +750,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     const slippage = slippageBps !== undefined ? BigInt(slippageBps) : this.slippageBps;
 
     const amountIn = BigInt(opportunity.amountIn!);
-    const expectedProfitUsd = opportunity.expectedProfit || 0;
+    // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
+    const expectedProfitUsd = opportunity.expectedProfit ?? 0;
 
     // Fix 7.1: Get actual token decimals for both tokens
     const tokenInDecimals = getTokenDecimals(chain, opportunity.tokenIn!);
@@ -1073,7 +1076,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Bug 4.1 Fix: Convert USD profit to token units with strict validation
     // expectedProfit is in USD, but contract expects minProfit in token units (flash-loaned asset)
     // Formula: profitInTokens = expectedProfitUsd / tokenPriceUsd
-    const expectedProfitUsd = opportunity.expectedProfit || 0;
+    // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
+    const expectedProfitUsd = opportunity.expectedProfit ?? 0;
 
     // Validate buyPrice strictly - throw if invalid
     const buyPriceValid = opportunity.buyPrice !== undefined &&

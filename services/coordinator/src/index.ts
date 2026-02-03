@@ -185,16 +185,24 @@ async function main() {
       });
     });
 
+    // P2-4 FIX: Wrap async handler in try-catch to prevent unhandled rejection
     crossRegionManager.on('activateStandby', async (event: { failedRegion: string; timestamp: number }) => {
-      logger.warn('Standby activation triggered - becoming active', {
-        failedRegion: event.failedRegion
-      });
-      // Activate the coordinator to become leader
-      const activated = await coordinator.activateStandby();
-      if (activated) {
-        logger.info('Coordinator successfully activated as leader');
-      } else {
-        logger.error('Failed to activate coordinator as leader');
+      try {
+        logger.warn('Standby activation triggered - becoming active', {
+          failedRegion: event.failedRegion
+        });
+        // Activate the coordinator to become leader
+        const activated = await coordinator.activateStandby();
+        if (activated) {
+          logger.info('Coordinator successfully activated as leader');
+        } else {
+          logger.error('Failed to activate coordinator as leader');
+        }
+      } catch (error) {
+        logger.error('Error during standby activation', {
+          error: error instanceof Error ? error.message : String(error),
+          failedRegion: event.failedRegion
+        });
       }
     });
 
@@ -214,6 +222,9 @@ async function main() {
       logger.info(`Received ${signal}, shutting down gracefully`);
 
       try {
+        // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
+        crossRegionManager.removeAllListeners();
+
         // Stop cross-region health manager
         await resetCrossRegionHealthManager();
 

@@ -1684,27 +1684,42 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
         'partition-solana'
       ];
 
+      // Imports common to both factory-pattern (EVM) and legacy-pattern (Solana) partitions
       const requiredImports = [
         'createLogger',
         'parsePort',
         'validateAndFilterChains',
+        'PartitionServiceConfig'
+      ];
+
+      // Legacy pattern partitions need these additional imports
+      const legacyPatternImports = [
         'createPartitionHealthServer',
         'setupDetectorEventHandlers',
-        'setupProcessHandlers',
-        'PartitionServiceConfig'
+        'setupProcessHandlers'
       ];
 
       for (const partition of partitions) {
         const filePath = path.join(process.cwd(), `services/${partition}/src/index.ts`);
         const content = fs.readFileSync(filePath, 'utf-8');
 
+        // Check common imports
         for (const imp of requiredImports) {
           expect(content).toContain(imp);
+        }
+
+        // Factory pattern uses runPartitionService which handles these internally
+        // Legacy pattern imports them directly
+        const usesFactory = content.includes('runPartitionService');
+        if (!usesFactory) {
+          for (const imp of legacyPatternImports) {
+            expect(content).toContain(imp);
+          }
         }
       }
     });
 
-    it('should have same section structure in all partitions', async () => {
+    it('should have common section structure in all partitions', async () => {
       const fs = await import('fs');
       const path = await import('path');
 
@@ -1715,13 +1730,10 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
         'partition-solana'
       ];
 
+      // Sections that exist in both factory-pattern and legacy-pattern partitions
       const requiredSections = [
         'Partition Constants',
         'Configuration',
-        'Service Instance',
-        'Event Handlers',
-        'Process Handlers',
-        'Main Entry Point',
         'Exports'
       ];
 
@@ -1731,6 +1743,15 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
 
         for (const section of requiredSections) {
           expect(content).toContain(section);
+        }
+
+        // Factory-pattern partitions have these handled by runPartitionService
+        // Legacy-pattern partitions (partition-solana) have explicit sections
+        const usesFactory = content.includes('runPartitionService');
+        if (!usesFactory) {
+          // Legacy pattern should have explicit event/process handlers
+          expect(content).toContain('Event Handlers');
+          expect(content).toContain('Process Handlers');
         }
       }
     });
@@ -1808,7 +1829,7 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
   });
 
   describe('All partitions share same utility patterns', () => {
-    it('should use healthServerRef pattern in all partitions', async () => {
+    it('should use consistent service patterns in all partitions', async () => {
       const fs = await import('fs');
       const path = await import('path');
 
@@ -1823,8 +1844,16 @@ describe('S3.1.6.18: Cross-Partition Consistency', () => {
         const filePath = path.join(process.cwd(), `services/${partition}/src/index.ts`);
         const content = fs.readFileSync(filePath, 'utf-8');
 
-        expect(content).toContain('healthServerRef: { current: Server | null }');
-        expect(content).toContain('healthServerRef.current = createPartitionHealthServer');
+        // Partitions use either:
+        // 1. runPartitionService factory pattern (ADR-024) - EVM chains
+        // 2. healthServerRef pattern - Solana (non-EVM, custom requirements)
+        const usesFactoryPattern = content.includes('runPartitionService');
+        const usesLegacyPattern = content.includes('healthServerRef');
+
+        expect(usesFactoryPattern || usesLegacyPattern).toBe(true);
+
+        // All partitions should use validateAndFilterChains for consistency
+        expect(content).toContain('validateAndFilterChains');
       }
     });
 

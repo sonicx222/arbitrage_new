@@ -389,9 +389,10 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     // Initialize triangular/quadrilateral arbitrage detector
+    // P1-1 FIX: Use ?? instead of || to allow 0 as a valid threshold value
     this.triangularDetector = new CrossDexTriangularArbitrage({
-      minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.003,
-      maxSlippage: ARBITRAGE_CONFIG.slippageTolerance || 0.10
+      minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage ?? 0.003,
+      maxSlippage: ARBITRAGE_CONFIG.slippageTolerance ?? 0.10
     });
 
     // R3: Initialize extracted detection modules
@@ -527,8 +528,9 @@ export class ChainDetectorInstance extends EventEmitter {
       await this.initializePairs();
 
       // Initialize multi-leg path finder for 5-7 token arbitrage
+      // P1-1 FIX: Use ?? instead of || to allow 0 as a valid threshold value
       this.multiLegPathFinder = getMultiLegPathFinder({
-        minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage || 0.005,
+        minProfitThreshold: ARBITRAGE_CONFIG.minProfitPercentage ?? 0.005,
         maxPathLength: 7,
         minPathLength: 5,
         timeoutMs: 3000

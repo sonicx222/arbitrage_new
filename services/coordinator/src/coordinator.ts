@@ -385,12 +385,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
+    //
+    // P1-3 DESIGN NOTE: startId: '$' (only new messages) is INTENTIONAL for a trading system:
+    // - Stale opportunities are dangerous to execute (prices may have moved)
+    // - Stale price updates would corrupt our price state
+    // - Processing old messages after restart could cause bad trades
+    // If messages arrive during coordinator downtime, they're intentionally skipped.
+    // Use recoverPendingMessages() for messages that were being processed during crash.
     this.consumerGroups = [
       {
         streamName: RedisStreamsClient.STREAMS.HEALTH,
         groupName: this.config.consumerGroup,
         consumerName: this.config.consumerId,
-        startId: '$' // Only new messages
+        startId: '$' // Only new messages - stale health data not useful
       },
       {
         streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,

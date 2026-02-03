@@ -249,15 +249,23 @@ async function main() {
       crossRegionManager = getCrossRegionHealthManager(crossRegionConfig);
 
       // Wire up failover events
+      // P2-4 FIX: Wrap async handler in try-catch to prevent unhandled rejection
       crossRegionManager.on('activateStandby', async (event: { failedRegion: string; timestamp: number }) => {
-        logger.warn('Standby activation triggered by CrossRegionHealthManager', {
-          failedRegion: event.failedRegion
-        });
-        const activated = await engine.activate();
-        if (activated) {
-          logger.info('Executor successfully activated');
-        } else {
-          logger.error('Failed to activate executor');
+        try {
+          logger.warn('Standby activation triggered by CrossRegionHealthManager', {
+            failedRegion: event.failedRegion
+          });
+          const activated = await engine.activate();
+          if (activated) {
+            logger.info('Executor successfully activated');
+          } else {
+            logger.error('Failed to activate executor');
+          }
+        } catch (error) {
+          logger.error('Error during standby activation', {
+            error: error instanceof Error ? error.message : String(error),
+            failedRegion: event.failedRegion
+          });
         }
       });
 
@@ -300,7 +308,9 @@ async function main() {
 
       try {
         // Stop cross-region health manager if running
+        // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
         if (crossRegionManager) {
+          crossRegionManager.removeAllListeners();
           await resetCrossRegionHealthManager();
         }
 

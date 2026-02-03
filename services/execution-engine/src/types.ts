@@ -49,6 +49,7 @@ import {
   BaseHealth,
 } from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
+import type { ABTestingConfig } from './ab-testing/types';
 
 // =============================================================================
 // Re-exports for backward compatibility (Phase 3)
@@ -690,6 +691,8 @@ export interface ExecutionEngineConfig {
   pendingStateConfig?: PendingStateEngineConfig;
   /** Consumer configuration for opportunity stream processing */
   consumerConfig?: Partial<ConsumerConfig>;
+  /** Task 3: A/B testing framework configuration */
+  abTestingConfig?: Partial<ABTestingConfig>;
 }
 
 /**
