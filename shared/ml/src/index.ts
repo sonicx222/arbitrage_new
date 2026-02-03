@@ -215,3 +215,25 @@ export type {
   // Statistics
   OrderflowModelStats
 } from './orderflow-predictor';
+
+// =============================================================================
+// Ensemble Prediction Combiner (P4 Optimization)
+// =============================================================================
+
+export {
+  // Class
+  EnsemblePredictionCombiner,
+  // Singleton factory
+  getEnsemblePredictionCombiner,
+  // Reset function
+  resetEnsemblePredictionCombiner,
+} from './ensemble-combiner';
+
+export type {
+  // Combined prediction result
+  CombinedPrediction,
+  // Configuration
+  EnsembleCombinerConfig,
+  // Statistics
+  EnsembleCombinerStats,
+} from './ensemble-combiner';

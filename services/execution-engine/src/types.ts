@@ -50,6 +50,8 @@ import {
 } from '@arbitrage/types';
 import type { ISimulationService } from './services/simulation/types';
 import type { ABTestingConfig } from './ab-testing/types';
+// P3 Optimization: Import orderflow signal type for execution integration
+import type { OrderflowSignal } from '@arbitrage/core';
 
 // =============================================================================
 // Re-exports for backward compatibility (Phase 3)
@@ -983,6 +985,13 @@ export interface StrategyContext {
    * @see RPC_DATA_OPTIMIZATION_IMPLEMENTATION_PLAN.md Phase 3
    */
   batchProviders?: Map<string, BatchProvider>;
+  /**
+   * P3 Optimization: Orderflow signal for execution priority adjustment.
+   * Contains direction, confidence, whale impact, and volatility signals.
+   * Used to adjust execution urgency based on market sentiment.
+   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P3
+   */
+  orderflowSignal?: OrderflowSignal;
 }
 
 /**
@@ -1140,3 +1149,69 @@ export const BRIDGE_RECOVERY_KEY_PREFIX = 'bridge:recovery:';
 
 /** Maximum time to wait for a bridge before considering it failed (24 hours) */
 export const BRIDGE_RECOVERY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// =============================================================================
+// P3 Optimization: Orderflow-Adjusted Execution Priority
+// =============================================================================
+
+/**
+ * P3 Optimization: Calculate execution priority with orderflow signal adjustment.
+ *
+ * Adjusts the base expected profit priority using orderflow signals:
+ * - Direction alignment: +20% boost if orderflow confirms trade direction
+ * - Whale impact: -20% if high whale activity detected (front-run risk)
+ * - Confidence scaling: Adjustments scaled by orderflow confidence
+ *
+ * @param baseProfit - Base expected profit (used as base priority)
+ * @param orderflowSignal - Optional orderflow signal for adjustment
+ * @param tradeDirection - Trade direction ('buy' or 'sell')
+ * @returns Adjusted priority value
+ *
+ * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P3
+ */
+export function calculateOrderflowAdjustedPriority(
+  baseProfit: number,
+  orderflowSignal: OrderflowSignal | undefined,
+  tradeDirection: 'buy' | 'sell'
+): number {
+  // Start with base profit as priority
+  let priority = baseProfit;
+
+  // If no orderflow signal, return base priority
+  if (!orderflowSignal) {
+    return priority;
+  }
+
+  // Check direction alignment
+  const isAligned = (
+    (tradeDirection === 'buy' && orderflowSignal.direction === 'bullish') ||
+    (tradeDirection === 'sell' && orderflowSignal.direction === 'bearish')
+  );
+
+  // Apply orderflow adjustments scaled by confidence
+  if (isAligned) {
+    // Boost priority if orderflow aligns with trade direction
+    // Max +20% boost at 100% confidence
+    priority *= (1 + orderflowSignal.confidence * 0.2);
+  } else if (orderflowSignal.direction !== 'neutral') {
+    // Slight penalty if orderflow opposes trade direction
+    // Max -10% penalty at 100% confidence
+    priority *= (1 - orderflowSignal.confidence * 0.1);
+  }
+
+  // Reduce priority if whale activity detected (front-run risk)
+  // High whale impact (>0.7) triggers -20% reduction
+  if (orderflowSignal.whaleImpact > 0.7) {
+    priority *= 0.8;
+  } else if (orderflowSignal.whaleImpact > 0.5) {
+    // Moderate whale impact triggers -10% reduction
+    priority *= 0.9;
+  }
+
+  // High volatility increases uncertainty - slight reduction
+  if (orderflowSignal.expectedVolatility > 0.5) {
+    priority *= (1 - orderflowSignal.expectedVolatility * 0.1);
+  }
+
+  return Math.max(0, priority);
+}

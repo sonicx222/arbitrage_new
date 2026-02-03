@@ -17,6 +17,12 @@
  */
 
 import { ethers } from 'ethers';
+import {
+  TokenBucketRateLimiter,
+  type RateLimiterConfig,
+  getRateLimitConfig,
+  isRateLimitExempt,
+} from './rate-limiter';
 
 // =============================================================================
 // Types
@@ -71,6 +77,24 @@ export interface BatchProviderConfig {
   maxQueueSize?: number;
   /** Enable request deduplication within batch window (default: false) */
   enableDeduplication?: boolean;
+  /**
+   * R3 Optimization: Enable per-chain rate limiting.
+   * Uses token bucket algorithm to prevent 429 errors from RPC providers.
+   * Hot-path methods (eth_sendRawTransaction) are exempt.
+   * @default false (opt-in for backward compatibility)
+   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R3
+   */
+  enableRateLimiting?: boolean;
+  /**
+   * R3 Optimization: Custom rate limit configuration.
+   * If not provided, defaults are used based on detected provider.
+   */
+  rateLimitConfig?: RateLimiterConfig;
+  /**
+   * R3 Optimization: Chain/provider name for rate limit defaults.
+   * Used to auto-detect appropriate rate limits.
+   */
+  chainOrProvider?: string;
 }
 
 /**
@@ -93,6 +117,8 @@ export interface BatchProviderStats {
   totalDeduplicated: number;
   /** Current queue size */
   currentQueueSize: number;
+  /** R3 Optimization: Number of requests throttled by rate limiter */
+  totalRateLimited: number;
 }
 
 // =============================================================================
@@ -123,7 +149,10 @@ export const NON_BATCHABLE_METHODS = new Set([
 ]);
 
 /** Default configuration values */
-const DEFAULT_MAX_BATCH_SIZE = 10;
+// R4 Optimization: Increased from 10 to 20 for 15-20% reduction in HTTP overhead
+// JSON-RPC batch protocol has minimal per-request overhead, larger batches are more efficient
+// @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R4
+const DEFAULT_MAX_BATCH_SIZE = 20;
 const DEFAULT_BATCH_TIMEOUT_MS = 10;
 const DEFAULT_MAX_QUEUE_SIZE = 100;
 
@@ -168,10 +197,14 @@ export class BatchProvider {
     avgBatchSize: 0,
     totalDeduplicated: 0,
     currentQueueSize: 0,
+    totalRateLimited: 0,
   };
 
   // Deduplication map (only when enabled)
   private deduplicationMap: Map<string, PendingRequest[]> | null = null;
+
+  // R3 Optimization: Rate limiter instance (only when enabled)
+  private rateLimiter: TokenBucketRateLimiter | null = null;
 
   constructor(provider: ethers.JsonRpcProvider, config?: BatchProviderConfig) {
     this.provider = provider;
@@ -180,11 +213,24 @@ export class BatchProvider {
       batchTimeoutMs: config?.batchTimeoutMs ?? DEFAULT_BATCH_TIMEOUT_MS,
       enabled: config?.enabled ?? true,
       maxQueueSize: config?.maxQueueSize ?? DEFAULT_MAX_QUEUE_SIZE,
-      enableDeduplication: config?.enableDeduplication ?? false,
+      // R1 Optimization: Enable deduplication by default to reduce 5-10% redundant RPC calls
+      // Deduplication tracks identical requests within a batch window and shares results
+      // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R1
+      enableDeduplication: config?.enableDeduplication ?? true,
+      // R3 Optimization: Rate limiting (opt-in for backward compatibility)
+      enableRateLimiting: config?.enableRateLimiting ?? false,
+      rateLimitConfig: config?.rateLimitConfig ?? { tokensPerSecond: 20, maxBurst: 40 },
+      chainOrProvider: config?.chainOrProvider ?? 'default',
     };
 
     if (this.config.enableDeduplication) {
       this.deduplicationMap = new Map();
+    }
+
+    // R3 Optimization: Initialize rate limiter if enabled
+    if (this.config.enableRateLimiting) {
+      const rateLimitConfig = config?.rateLimitConfig ?? getRateLimitConfig(this.config.chainOrProvider);
+      this.rateLimiter = new TokenBucketRateLimiter(rateLimitConfig);
     }
   }
 
@@ -206,6 +252,15 @@ export class BatchProvider {
     // Check if shutting down
     if (this.isShuttingDown) {
       throw new Error('BatchProvider is shutting down');
+    }
+
+    // R3 Optimization: Check rate limiter before processing (hot-path exempt methods bypass)
+    // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R3
+    if (this.rateLimiter && !isRateLimitExempt(method)) {
+      if (!this.rateLimiter.tryAcquire()) {
+        this.stats.totalRateLimited++;
+        throw new Error(`Rate limited: ${method} - too many requests`);
+      }
     }
 
     // Bypass batching if disabled or method is not batchable
@@ -502,6 +557,7 @@ export class BatchProvider {
       avgBatchSize: 0,
       totalDeduplicated: 0,
       currentQueueSize: this.pendingBatch.length,
+      totalRateLimited: 0,
     };
   }
 

@@ -225,14 +225,30 @@ export class ProviderServiceImpl implements IProviderService {
 
       this.isCheckingHealth = true;
       try {
-        for (const [chainName, provider] of this.providers) {
-          // Check state before each provider check to abort early during shutdown
-          if (!this.stateManager.isRunning()) {
-            this.logger.debug('Aborting provider health checks - service stopping');
-            return;
-          }
-          await this.checkAndReconnectProvider(chainName, provider);
+        // R2 Optimization: Parallel health checks for 3-4x faster health check cycles
+        // Previous sequential approach: 3 providers × 2ms = 6ms minimum
+        // Parallel approach: max(2ms, 2ms, 2ms) = 2ms
+        // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization R2
+
+        // Check if service is stopping before starting any checks
+        if (!this.stateManager.isRunning()) {
+          this.logger.debug('Aborting provider health checks - service stopping');
+          return;
         }
+
+        // Run all health checks in parallel with error isolation
+        const healthCheckPromises = Array.from(this.providers.entries()).map(
+          ([chainName, provider]) =>
+            this.checkAndReconnectProvider(chainName, provider)
+              .catch((err) => {
+                // Error isolation: one provider failure doesn't affect others
+                this.logger.warn(`Health check error for ${chainName}`, {
+                  error: getErrorMessage(err)
+                });
+              })
+        );
+
+        await Promise.all(healthCheckPromises);
       } finally {
         this.isCheckingHealth = false;
       }

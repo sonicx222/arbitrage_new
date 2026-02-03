@@ -20,6 +20,7 @@
 
 import * as tf from '@tensorflow/tfjs';
 import { createLogger, AsyncMutex } from '@arbitrage/core';
+import { getModelPersistence, type ModelMetadata } from './model-persistence';
 
 const logger = createLogger('ml-predictor');
 
@@ -49,6 +50,24 @@ export interface LSTMPredictorConfig {
   errorThreshold?: number;
   /** Time horizon for predictions in ms (default: 300000 = 5 minutes) */
   predictionTimeHorizonMs?: number;
+  /**
+   * P1 Optimization: Enable model persistence to save/load trained models.
+   * Eliminates 100-200s cold start time by loading pre-trained models.
+   * @default true
+   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P1
+   */
+  enablePersistence?: boolean;
+  /**
+   * P1 Optimization: Model ID for persistence storage.
+   * @default 'lstm-predictor'
+   */
+  modelId?: string;
+  /**
+   * P1 Optimization: Maximum model age in ms before forcing retrain.
+   * Models older than this are considered stale and will be retrained.
+   * @default 86400000 (24 hours)
+   */
+  maxModelAgeMs?: number;
 }
 
 /**
@@ -61,7 +80,11 @@ const DEFAULT_LSTM_CONFIG: Required<LSTMPredictorConfig> = {
   retrainCooldownMs: 3600000, // 1 hour
   maxHistorySize: 1000,
   errorThreshold: 0.05, // 5%
-  predictionTimeHorizonMs: 300000 // 5 minutes
+  predictionTimeHorizonMs: 300000, // 5 minutes
+  // P1 Optimization: Model persistence defaults
+  enablePersistence: true,
+  modelId: 'lstm-predictor',
+  maxModelAgeMs: 86400000, // 24 hours
 };
 
 // =============================================================================
@@ -149,6 +172,10 @@ export class LSTMPredictor {
   private readonly modelReady: Promise<void>;
   private modelInitError: Error | null = null;
 
+  // P1 Optimization: Model persistence tracking
+  private modelVersion = 0;
+  private loadedFromPersistence = false;
+
   constructor(config: LSTMPredictorConfig = {}) {
     this.config = { ...DEFAULT_LSTM_CONFIG, ...config };
     const totalFeatures = this.config.sequenceLength * this.config.featureCount;
@@ -186,6 +213,21 @@ export class LSTMPredictor {
 
   private async initializeModel(): Promise<void> {
     try {
+      // P1 Optimization: Try to load persisted model first to skip cold start
+      // @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P1
+      if (this.config.enablePersistence) {
+        const loadedSuccessfully = await this.tryLoadPersistedModel();
+        if (loadedSuccessfully) {
+          logger.info('LSTM model loaded from persistence (skipped cold start)', {
+            modelId: this.config.modelId,
+            version: this.modelVersion,
+          });
+          return;
+        }
+      }
+
+      // Fresh model creation (cold start path)
+      logger.info('Creating fresh LSTM model (no persisted model found or persistence disabled)');
       const model = tf.sequential();
 
       // Input LSTM layer
@@ -242,6 +284,112 @@ export class LSTMPredictor {
       prediction.dispose();
     } finally {
       warmupTensor.dispose();
+    }
+  }
+
+  /**
+   * P1 Optimization: Try to load a persisted model from disk.
+   * Returns true if model was successfully loaded and is not stale.
+   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P1
+   */
+  private async tryLoadPersistedModel(): Promise<boolean> {
+    try {
+      const persistence = getModelPersistence();
+
+      // Check if model exists
+      if (!persistence.modelExists(this.config.modelId)) {
+        logger.debug('No persisted model found', { modelId: this.config.modelId });
+        return false;
+      }
+
+      // Load metadata first to check staleness (faster than full load)
+      const metadata = await persistence.loadMetadata(this.config.modelId);
+      if (!metadata) {
+        logger.debug('No metadata found for persisted model', { modelId: this.config.modelId });
+        return false;
+      }
+
+      // Check model staleness
+      const modelAge = Date.now() - metadata.lastTrainingTime;
+      if (modelAge > this.config.maxModelAgeMs) {
+        logger.info('Persisted model is stale, will create fresh model', {
+          modelId: this.config.modelId,
+          modelAgeHours: Math.round(modelAge / 3600000),
+          maxAgeHours: Math.round(this.config.maxModelAgeMs / 3600000),
+        });
+        return false;
+      }
+
+      // Load the full model
+      const loadResult = await persistence.loadModel(this.config.modelId);
+      if (!loadResult.success || !loadResult.model) {
+        logger.warn('Failed to load persisted model', {
+          modelId: this.config.modelId,
+          error: loadResult.error?.message,
+        });
+        return false;
+      }
+
+      // Assign loaded model
+      this.model = loadResult.model;
+      this.isTrained = metadata.isTrained;
+      this.lastTrainingTime = metadata.lastTrainingTime;
+      this.modelVersion = metadata.version;
+      this.loadedFromPersistence = true;
+
+      // Warm up the loaded model
+      await this.warmupModel();
+
+      return true;
+    } catch (error) {
+      logger.warn('Error loading persisted model, will create fresh model', {
+        modelId: this.config.modelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * P1 Optimization: Save model to persistence after training.
+   * @see docs/reports/RPC_PREDICTION_OPTIMIZATION_RESEARCH.md - Optimization P1
+   */
+  private async saveModelToPersistence(): Promise<void> {
+    if (!this.config.enablePersistence || !this.model) return;
+
+    try {
+      const persistence = getModelPersistence();
+
+      this.modelVersion++;
+      const metadata: ModelMetadata = {
+        modelId: this.config.modelId,
+        modelType: 'lstm',
+        version: this.modelVersion,
+        lastTrainingTime: this.lastTrainingTime,
+        trainingSamplesCount: this.predictionHistory.length,
+        accuracy: this.calculateRecentAccuracy(),
+        isTrained: this.isTrained,
+        savedAt: Date.now(),
+      };
+
+      const saveResult = await persistence.saveModel(this.model, metadata);
+      if (saveResult.success) {
+        logger.info('LSTM model saved to persistence', {
+          modelId: this.config.modelId,
+          version: this.modelVersion,
+          accuracy: metadata.accuracy,
+        });
+      } else {
+        logger.warn('Failed to save LSTM model to persistence', {
+          modelId: this.config.modelId,
+          error: saveResult.error?.message,
+        });
+      }
+    } catch (error) {
+      logger.warn('Error saving model to persistence', {
+        modelId: this.config.modelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -350,6 +498,9 @@ export class LSTMPredictor {
         this.isTrained = true;
         this.lastTrainingTime = Date.now();
         logger.info('LSTM model training completed successfully');
+
+        // P1 Optimization: Save model to persistence after training
+        await this.saveModelToPersistence();
       } finally {
         inputs.dispose();
         outputs.dispose();
@@ -461,6 +612,9 @@ export class LSTMPredictor {
 
         this.lastTrainingTime = Date.now();
         logger.info('Model retrained on recent data');
+
+        // P1 Optimization: Save model to persistence after retraining
+        await this.saveModelToPersistence();
       } finally {
         inputs.dispose();
         outputs.dispose();
@@ -732,6 +886,10 @@ export class LSTMPredictor {
     isRetraining: boolean;
     retrainAttempts: number;
     lastRetrainError: string | null;
+    // P1 Optimization: Model persistence stats
+    persistenceEnabled: boolean;
+    loadedFromPersistence: boolean;
+    modelVersion: number;
   } {
     return {
       isTrained: this.isTrained,
@@ -743,7 +901,11 @@ export class LSTMPredictor {
       isRetraining: this.retrainingMutex.isLocked(),
       // Fix 7.1: Expose retry stats for monitoring
       retrainAttempts: this.retrainAttempts,
-      lastRetrainError: this.lastRetrainError?.message ?? null
+      lastRetrainError: this.lastRetrainError?.message ?? null,
+      // P1 Optimization: Model persistence stats
+      persistenceEnabled: this.config.enablePersistence,
+      loadedFromPersistence: this.loadedFromPersistence,
+      modelVersion: this.modelVersion,
     };
   }
 
