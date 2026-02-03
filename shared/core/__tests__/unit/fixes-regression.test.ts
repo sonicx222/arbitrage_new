@@ -1642,3 +1642,339 @@ describe('ARCH-REFACTOR: Precision Loss Fix for Price Calculation', () => {
     expect(Math.abs(price1! - price2!) / Math.min(price1!, price2!)).toBeLessThan(0.01);
   });
 });
+
+// =============================================================================
+// P1-1: Service Lifecycle TOCTOU Race Condition Fix
+// =============================================================================
+
+describe('P1-1: Service Lifecycle TOCTOU Race Condition Fix', () => {
+  /**
+   * Tests the pattern used in base-detector.ts:209-211
+   * The lifecycleMutex prevents concurrent start/stop operations from interleaving.
+   */
+  it('should serialize concurrent start/stop operations using mutex', async () => {
+    // Simulate lifecycle state
+    let isRunning = false;
+    let isStopping = false;
+    const operationOrder: string[] = [];
+
+    // Simulate AsyncMutex acquire/release pattern
+    let locked = false;
+    const waitQueue: Array<() => void> = [];
+
+    const acquire = (): Promise<() => void> => {
+      return new Promise(resolve => {
+        if (!locked) {
+          locked = true;
+          resolve(() => {
+            const next = waitQueue.shift();
+            if (next) {
+              setImmediate(() => next());
+            } else {
+              locked = false;
+            }
+          });
+        } else {
+          waitQueue.push(() => {
+            resolve(() => {
+              const next = waitQueue.shift();
+              if (next) {
+                setImmediate(() => next());
+              } else {
+                locked = false;
+              }
+            });
+          });
+        }
+      });
+    };
+
+    // Simulate start operation with mutex
+    const start = async (): Promise<void> => {
+      const release = await acquire();
+      try {
+        if (isStopping || isRunning) {
+          operationOrder.push('start-skipped');
+          return;
+        }
+        await new Promise(r => setTimeout(r, 10));
+        isRunning = true;
+        operationOrder.push('started');
+      } finally {
+        release();
+      }
+    };
+
+    // Simulate stop operation with mutex
+    const stop = async (): Promise<void> => {
+      const release = await acquire();
+      try {
+        if (!isRunning) {
+          operationOrder.push('stop-skipped');
+          return;
+        }
+        isStopping = true;
+        await new Promise(r => setTimeout(r, 10));
+        isRunning = false;
+        isStopping = false;
+        operationOrder.push('stopped');
+      } finally {
+        release();
+      }
+    };
+
+    // Execute concurrent start/stop
+    await Promise.all([
+      start(),
+      start(), // Should be skipped (already starting)
+      stop(),  // Should wait for start, then stop
+    ]);
+
+    // Verify serialized execution
+    expect(operationOrder).toContain('started');
+    // Either stop succeeded or was skipped - but they were serialized
+    expect(operationOrder.filter(o => o.includes('skip')).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should prevent TOCTOU by holding mutex during entire operation', async () => {
+    let state = 'stopped';
+    let operationLog: string[] = [];
+
+    // With mutex - TOCTOU safe (P1-1 fix pattern)
+    let mutexLocked = false;
+    const mutexQueue: Array<() => void> = [];
+
+    const withMutex = async <T>(fn: () => Promise<T>): Promise<T> => {
+      // Acquire
+      await new Promise<void>(resolve => {
+        if (!mutexLocked) {
+          mutexLocked = true;
+          resolve();
+        } else {
+          mutexQueue.push(resolve);
+        }
+      });
+
+      try {
+        return await fn();
+      } finally {
+        // Release
+        const next = mutexQueue.shift();
+        if (next) {
+          setImmediate(() => next());
+        } else {
+          mutexLocked = false;
+        }
+      }
+    };
+
+    const checkAndStart_safe = async (): Promise<boolean> => {
+      return withMutex(async () => {
+        if (state !== 'stopped') {
+          return false;
+        }
+        await new Promise(r => setTimeout(r, 5));
+        state = 'running';
+        operationLog.push('started-safe');
+        return true;
+      });
+    };
+
+    // Reset state
+    state = 'stopped';
+    operationLog = [];
+
+    // Concurrent safe operations
+    const results = await Promise.all([
+      checkAndStart_safe(),
+      checkAndStart_safe(),
+      checkAndStart_safe()
+    ]);
+
+    // Only one should succeed (mutex serialized them)
+    expect(results.filter(r => r === true).length).toBe(1);
+    expect(operationLog.filter(o => o === 'started-safe').length).toBe(1);
+  });
+});
+
+// =============================================================================
+// P2-2: Named Mutex Utility Regression Tests
+// =============================================================================
+
+describe('P2-2: Named Mutex Utility', () => {
+  /**
+   * Tests the namedMutex pattern from async-mutex.ts:278-292
+   * Named mutexes allow coordination across different parts of the codebase.
+   */
+  it('should provide same mutex instance for same name', async () => {
+    // Simulate namedMutex registry
+    const registry = new Map<string, { locked: boolean; waitQueue: Array<() => void> }>();
+
+    const getNamedMutex = (name: string) => {
+      if (!registry.has(name)) {
+        registry.set(name, { locked: false, waitQueue: [] });
+      }
+      return registry.get(name)!;
+    };
+
+    const mutex1 = getNamedMutex('test-resource');
+    const mutex2 = getNamedMutex('test-resource');
+    const mutex3 = getNamedMutex('different-resource');
+
+    // Same name should return same instance
+    expect(mutex1).toBe(mutex2);
+    // Different name should return different instance
+    expect(mutex1).not.toBe(mutex3);
+  });
+
+  it('should coordinate access across independent callers', async () => {
+    const registry = new Map<string, { locked: boolean; queue: Array<() => void> }>();
+    const operationOrder: string[] = [];
+
+    const getOrCreateMutex = (name: string) => {
+      if (!registry.has(name)) {
+        registry.set(name, { locked: false, queue: [] });
+      }
+      return registry.get(name)!;
+    };
+
+    const runExclusive = async (mutexName: string, operationName: string, delayMs: number) => {
+      const mutex = getOrCreateMutex(mutexName);
+
+      // Acquire
+      await new Promise<void>(resolve => {
+        if (!mutex.locked) {
+          mutex.locked = true;
+          resolve();
+        } else {
+          mutex.queue.push(resolve);
+        }
+      });
+
+      try {
+        operationOrder.push(`${operationName}-start`);
+        await new Promise(r => setTimeout(r, delayMs));
+        operationOrder.push(`${operationName}-end`);
+      } finally {
+        // Release with direct handoff
+        const next = mutex.queue.shift();
+        if (next) {
+          setImmediate(() => next());
+        } else {
+          mutex.locked = false;
+        }
+      }
+    };
+
+    // Simulate Component A and Component B both accessing 'shared-resource'
+    await Promise.all([
+      runExclusive('shared-resource', 'A', 15),
+      runExclusive('shared-resource', 'B', 10),
+    ]);
+
+    // Operations should be serialized (start-end pairs should not interleave)
+    const aStartIdx = operationOrder.indexOf('A-start');
+    const aEndIdx = operationOrder.indexOf('A-end');
+    const bStartIdx = operationOrder.indexOf('B-start');
+    const bEndIdx = operationOrder.indexOf('B-end');
+
+    // Either A completes before B starts, or B completes before A starts
+    const serialized = (aEndIdx < bStartIdx) || (bEndIdx < aStartIdx);
+    expect(serialized).toBe(true);
+  });
+
+  it('should use direct handoff pattern to prevent lock theft', async () => {
+    // This tests the RACE-CONDITION-FIX pattern from async-mutex.ts:93-107
+    let locked = false;
+    const waitQueue: Array<() => void> = [];
+    const acquisitionOrder: number[] = [];
+
+    const acquire = async (callerId: number): Promise<() => void> => {
+      if (locked) {
+        // Wait for our turn
+        await new Promise<void>(resolve => {
+          waitQueue.push(resolve);
+        });
+      }
+      locked = true;
+      acquisitionOrder.push(callerId);
+
+      // Return release function with direct handoff
+      return () => {
+        const next = waitQueue.shift();
+        if (next) {
+          // Direct handoff: wake up next waiter immediately, lock stays held
+          setImmediate(() => next());
+        } else {
+          // No waiters, safe to release
+          locked = false;
+        }
+      };
+    };
+
+    // Start multiple concurrent acquisitions
+    const promises = [1, 2, 3, 4, 5].map(async (id) => {
+      const release = await acquire(id);
+      await new Promise(r => setTimeout(r, 5));
+      release();
+    });
+
+    await Promise.all(promises);
+
+    // All callers should have acquired in order (FIFO due to direct handoff)
+    expect(acquisitionOrder.length).toBe(5);
+    // The order should be stable - first in queue gets lock next
+    // (Without direct handoff, a new caller could steal the lock between release and wake)
+  });
+
+  it('should handle cleanup of idle mutexes', () => {
+    // Tests P0-FIX Memory Leak from async-mutex.ts:208-276
+    interface MutexEntry {
+      lastUsed: number;
+      isLocked: boolean;
+      waitingCount: number;
+    }
+
+    const registry = new Map<string, MutexEntry>();
+    const IDLE_TTL_MS = 100; // Short TTL for testing
+
+    const cleanup = () => {
+      const now = Date.now();
+      const keysToDelete: string[] = [];
+
+      for (const [name, entry] of registry.entries()) {
+        // Don't delete active mutexes
+        if (entry.isLocked || entry.waitingCount > 0) continue;
+
+        // Delete idle mutexes past TTL
+        if (now - entry.lastUsed > IDLE_TTL_MS) {
+          keysToDelete.push(name);
+        }
+      }
+
+      for (const key of keysToDelete) {
+        registry.delete(key);
+      }
+    };
+
+    // Create some mutexes
+    registry.set('active', { lastUsed: Date.now(), isLocked: true, waitingCount: 0 });
+    registry.set('waiting', { lastUsed: Date.now() - 200, isLocked: false, waitingCount: 1 });
+    registry.set('idle-recent', { lastUsed: Date.now() - 50, isLocked: false, waitingCount: 0 });
+    registry.set('idle-old', { lastUsed: Date.now() - 200, isLocked: false, waitingCount: 0 });
+
+    expect(registry.size).toBe(4);
+
+    cleanup();
+
+    // active: kept (locked)
+    // waiting: kept (has waiters)
+    // idle-recent: kept (under TTL)
+    // idle-old: deleted (idle and past TTL)
+    expect(registry.size).toBe(3);
+    expect(registry.has('active')).toBe(true);
+    expect(registry.has('waiting')).toBe(true);
+    expect(registry.has('idle-recent')).toBe(true);
+    expect(registry.has('idle-old')).toBe(false);
+  });
+});

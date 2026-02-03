@@ -11,43 +11,23 @@
  * Project-level configuration options
  * These options are valid inside project configurations
  *
- * Uses SWC for 10-20x faster TypeScript compilation.
- * Falls back to ts-jest if SWC is not available.
+ * Note: SWC transformer was considered for 10-20x faster compilation but
+ * is incompatible with ts-jest's TypeScript-aware mocking features
+ * (jest.mocked, mockImplementation on typed mocks). Keeping ts-jest.
  */
-let swcAvailable = false;
-try {
-  require.resolve('@swc/jest');
-  swcAvailable = true;
-} catch {
-  // SWC not available, will use ts-jest
-}
-
 const projectConfig = {
-  // Don't use preset when using SWC
-  ...(swcAvailable ? {} : { preset: 'ts-jest' }),
+  preset: 'ts-jest',
   testEnvironment: 'node',
 
-  // Transform configuration - prefer SWC for speed
-  transform: swcAvailable
-    ? {
-        '^.+\\.tsx?$': ['@swc/jest', {
-          jsc: {
-            parser: {
-              syntax: 'typescript',
-              decorators: true
-            },
-            target: 'es2021'
-          }
-        }]
+  // Transform configuration
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', {
+      tsconfig: 'tsconfig.json',
+      diagnostics: {
+        ignoreCodes: [151001]
       }
-    : {
-        '^.+\\.tsx?$': ['ts-jest', {
-          tsconfig: 'tsconfig.json',
-          diagnostics: {
-            ignoreCodes: [151001]
-          }
-        }]
-      },
+    }]
+  },
 
   // Module resolution - maps package aliases to source directories
   moduleNameMapper: {

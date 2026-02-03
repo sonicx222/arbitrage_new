@@ -1,0 +1,34 @@
+{
+  "recommendations": [
+    // TypeScript & JavaScript
+    "ms-vscode.vscode-typescript-next",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+
+    // Testing
+    "orta.vscode-jest",
+    "ryanluker.vscode-coverage-gutters",
+
+    // Git & Collaboration
+    "eamodio.gitlens",
+    "mhutchie.git-graph",
+
+    // Docker & Infrastructure
+    "ms-azuretools.vscode-docker",
+    "ms-vscode-remote.remote-containers",
+
+    // Environment & Config
+    "mikestead.dotenv",
+    "redhat.vscode-yaml",
+
+    // Productivity
+    "christian-kohler.path-intellisense",
+    "streetsidesoftware.code-spell-checker",
+    "gruntfuggly.todo-tree",
+
+    // Code Quality
+    "sonarsource.sonarlint-vscode",
+    "usernamehw.errorlens"
+  ],
+  "unwantedRecommendations": []
+}

@@ -8,12 +8,14 @@ This guide covers setting up and running the arbitrage system locally for develo
 2. [Prerequisites](#prerequisites)
 3. [Architecture Overview](#architecture-overview)
 4. [Step-by-Step Setup](#step-by-step-setup)
-5. [Running Individual Services](#running-individual-services)
-6. [Simulation Modes](#simulation-modes)
-7. [Full Partitioned Architecture](#full-partitioned-architecture)
-8. [Testing](#testing)
-9. [Troubleshooting](#troubleshooting)
-10. [Commands Reference](#commands-reference)
+5. [Running Services](#running-services)
+6. [Hot Reload Development](#hot-reload-development)
+7. [VSCode Integration](#vscode-integration)
+8. [Simulation Modes](#simulation-modes)
+9. [Testing](#testing)
+10. [Building](#building)
+11. [Troubleshooting](#troubleshooting)
+12. [Commands Reference](#commands-reference)
 
 ---
 
@@ -30,19 +32,25 @@ npm run dev:setup
 npm run dev:redis          # Option A: Docker (recommended)
 npm run dev:redis:memory   # Option B: In-memory (no Docker required)
 
-# 4. Check status
-npm run dev:status
+# 4. Start all services with hot reload (RECOMMENDED)
+npm run dev:all
 
-# 5. Start services (in separate terminals)
-npm run dev:coordinator      # Terminal 1: Dashboard at http://localhost:3000
-npm run dev:partition:asia   # Terminal 2: Asia-Fast detector (port 3001)
-npm run dev:execution        # Terminal 3: Execution engine (port 3005)
-npm run dev:cross-chain      # Terminal 4: Cross-chain detector (port 3006)
+# OR start minimal setup (Coordinator + P1 + Execution)
+npm run dev:minimal
 ```
 
 Visit **http://localhost:3000** to see the coordinator dashboard.
 
-> **Note**: The build step (`npm run build`) is optional for development. The dev scripts use ts-node to run TypeScript directly.
+### Alternative: Individual Services
+
+```bash
+# Start services in separate terminals
+npm run dev:coordinator:fast   # Terminal 1: Dashboard (port 3000)
+npm run dev:partition:asia:fast # Terminal 2: Asia-Fast detector (port 3001)
+npm run dev:execution:fast     # Terminal 3: Execution engine (port 3005)
+```
+
+> **New in v1.2**: Use `:fast` suffix for ~50x faster startup with hot reload!
 
 ---
 
@@ -126,14 +134,14 @@ docker --version  # Optional: Should show Docker version
 | Service | Port | Environment Variable | Command |
 |---------|------|---------------------|---------|
 | Redis | 6379 | `REDIS_PORT` | `npm run dev:redis` |
-| Coordinator (Dashboard) | 3000 | `COORDINATOR_PORT` | `npm run dev:coordinator` |
-| P1 Asia-Fast Detector | 3001 | `P1_ASIA_FAST_PORT` | `npm run dev:partition:asia` |
-| P2 L2-Turbo Detector | 3002 | `P2_L2_TURBO_PORT` | `npm run dev:partition:l2` |
-| P3 High-Value Detector | 3003 | `P3_HIGH_VALUE_PORT` | `npm run dev:partition:high` |
+| Coordinator (Dashboard) | 3000 | `COORDINATOR_PORT` | `npm run dev:coordinator:fast` |
+| P1 Asia-Fast Detector | 3001 | `P1_ASIA_FAST_PORT` | `npm run dev:partition:asia:fast` |
+| P2 L2-Turbo Detector | 3002 | `P2_L2_TURBO_PORT` | `npm run dev:partition:l2:fast` |
+| P3 High-Value Detector | 3003 | `P3_HIGH_VALUE_PORT` | `npm run dev:partition:high:fast` |
 | P4 Solana Detector | 3004 | `P4_SOLANA_PORT` | (optional, see below) |
-| Execution Engine | 3005 | `EXECUTION_ENGINE_PORT` | `npm run dev:execution` |
-| Cross-Chain Detector | 3006 | `CROSS_CHAIN_DETECTOR_PORT` | `npm run dev:cross-chain` |
-| Unified Detector | 3007 | `UNIFIED_DETECTOR_PORT` | `npm run dev:detector` (deprecated) |
+| Execution Engine | 3005 | `EXECUTION_ENGINE_PORT` | `npm run dev:execution:fast` |
+| Cross-Chain Detector | 3006 | `CROSS_CHAIN_DETECTOR_PORT` | `npm run dev:cross-chain:fast` |
+| Unified Detector | 3007 | `UNIFIED_DETECTOR_PORT` | `npm run dev:detector:fast` (deprecated) |
 | Redis Commander (debug) | 8081 | - | `npm run dev:redis:ui` |
 
 ---
@@ -195,22 +203,28 @@ The in-memory option uses `redis-memory-server` and is useful when:
 
 ### Step 4: Start Services
 
-Open separate terminal windows for each service:
+**Option A: All Services with Hot Reload (Recommended)**
+```bash
+npm run dev:all
+```
+This starts all 6 core services with color-coded output and hot reload.
 
+**Option B: Minimal Setup**
+```bash
+npm run dev:minimal
+```
+Starts only Coordinator + P1 Asia-Fast + Execution Engine.
+
+**Option C: Individual Services**
 ```bash
 # Terminal 1: Coordinator (Dashboard)
-npm run dev:coordinator
+npm run dev:coordinator:fast
 
-# Terminal 2: Partition Detector (choose one)
-npm run dev:partition:asia    # Asia-Fast: BSC, Polygon, Avalanche, Fantom
-npm run dev:partition:l2      # L2-Turbo: Arbitrum, Optimism, Base
-npm run dev:partition:high    # High-Value: Ethereum, zkSync, Linea
+# Terminal 2: Partition Detector
+npm run dev:partition:asia:fast
 
-# Terminal 3: Cross-Chain Detector
-npm run dev:cross-chain
-
-# Terminal 4 (optional): Execution Engine
-npm run dev:execution
+# Terminal 3: Execution Engine
+npm run dev:execution:fast
 ```
 
 ### Step 5: Verify Everything Works
@@ -232,52 +246,131 @@ Open **http://localhost:3000** in your browser.
 
 ---
 
-## Running Individual Services
+## Running Services
 
-### Coordinator (Dashboard)
+### Standard Mode (ts-node)
 
-```bash
-npm run dev:coordinator
-```
-
-Provides:
-- Web dashboard at http://localhost:3000
-- Health monitoring for all services
-- Real-time statistics
-- Arbitrage opportunity feed
-
-### Partition Detectors
+Uses `ts-node` for TypeScript execution. Slower startup but compatible with all environments.
 
 ```bash
-# Asia-Fast partition (BSC, Polygon, Avalanche, Fantom)
-npm run dev:partition:asia
-
-# L2-Turbo partition (Arbitrum, Optimism, Base)
-npm run dev:partition:l2
-
-# High-Value partition (Ethereum, zkSync, Linea)
-npm run dev:partition:high
+npm run dev:coordinator      # Coordinator
+npm run dev:partition:asia   # P1 Asia-Fast
+npm run dev:partition:l2     # P2 L2-Turbo
+npm run dev:partition:high   # P3 High-Value
+npm run dev:cross-chain      # Cross-Chain Detector
+npm run dev:execution        # Execution Engine
 ```
 
-### Cross-Chain Detector
+### Fast Mode with Hot Reload (tsx) - RECOMMENDED
+
+Uses `tsx` (esbuild-based) for ~50x faster startup with automatic hot reload on file changes.
 
 ```bash
-npm run dev:cross-chain
+npm run dev:coordinator:fast      # Coordinator with hot reload
+npm run dev:partition:asia:fast   # P1 with hot reload
+npm run dev:partition:l2:fast     # P2 with hot reload
+npm run dev:partition:high:fast   # P3 with hot reload
+npm run dev:cross-chain:fast      # Cross-Chain with hot reload
+npm run dev:execution:fast        # Execution with hot reload
 ```
 
-Analyzes price differences across chains for cross-chain arbitrage opportunities.
+### Unified Commands
 
-### Execution Engine
+| Command | Description |
+|---------|-------------|
+| `npm run dev:all` | Start all 6 services with hot reload (color-coded) |
+| `npm run dev:minimal` | Start Coordinator + P1 + Execution only |
 
-```bash
-# Standard mode (requires private keys)
-npm run dev:execution
+---
 
-# Simulation mode (no real transactions)
-npm run dev:execution:simulate
+## Hot Reload Development
+
+The system uses `tsx` for hot reload development, providing:
+- **~50x faster startup** compared to ts-node
+- **Automatic restart** on file changes
+- **Watch mode** built-in
+
+### How to Use
+
+1. Start a service with the `:fast` suffix:
+   ```bash
+   npm run dev:coordinator:fast
+   ```
+
+2. Edit any TypeScript file in the service
+
+3. The service automatically restarts with your changes
+
+### Comparison
+
+| Aspect | ts-node (`dev:coordinator`) | tsx (`dev:coordinator:fast`) |
+|--------|----------------------------|------------------------------|
+| Startup Time | ~5 seconds | <1 second |
+| Hot Reload | No | Yes |
+| Type Checking | At runtime | Via IDE only |
+| Use Case | CI/Production-like | Development |
+
+> **Note**: tsx doesn't type-check during compilation. Use `npm run typecheck:watch` in a separate terminal for continuous type checking.
+
+---
+
+## VSCode Integration
+
+The project includes VSCode workspace configuration for optimal development experience.
+
+### Recommended Extensions
+
+Open the project in VSCode and install recommended extensions when prompted, or run:
+```
+Ctrl+Shift+P → Extensions: Show Recommended Extensions
 ```
 
-> **Warning**: The execution engine requires private keys to execute real trades. Use simulation mode for testing.
+Key extensions:
+- **ESLint** - Code linting
+- **Prettier** - Code formatting
+- **vscode-jest** - Test integration
+- **GitLens** - Git history
+- **Error Lens** - Inline error display
+
+### Debug Configurations
+
+Press **F5** to see available debug configurations:
+
+| Configuration | Description |
+|---------------|-------------|
+| Debug Coordinator | Debug the coordinator service |
+| Debug P1 Asia-Fast | Debug the P1 partition detector |
+| Debug P2 L2-Turbo | Debug the P2 partition detector |
+| Debug P3 High-Value | Debug the P3 partition detector |
+| Debug Execution Engine | Debug the execution engine |
+| Debug Cross-Chain Detector | Debug the cross-chain detector |
+| Debug Current Test File | Debug the currently open test file |
+| Debug Test (by pattern) | Debug tests matching a pattern |
+| Debug All Services | Compound: Start multiple services |
+
+### Tasks
+
+Press `Ctrl+Shift+B` (or `Cmd+Shift+B` on Mac) to see build tasks:
+
+| Task | Description |
+|------|-------------|
+| Build | Full TypeScript build |
+| Build (Watch) | Continuous build on changes |
+| Typecheck | Type check without building |
+| Typecheck (Watch) | Continuous type checking |
+| Test | Run all tests |
+| Test (Changed Files) | Run tests for changed files only |
+| Lint | Run ESLint |
+| Dev: All Services | Start all services with hot reload |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `F5` | Start debugging |
+| `Ctrl+Shift+B` | Run build task |
+| `Ctrl+Shift+P` | Command palette |
+| `Ctrl+`` ` | Open terminal |
 
 ---
 
@@ -290,7 +383,6 @@ The system supports two independent simulation modes for safe development:
 Simulates blockchain data (prices, swap events) without connecting to real blockchains.
 
 ```bash
-# Start with price simulation
 npm run dev:simulate
 ```
 
@@ -312,7 +404,6 @@ SIMULATION_UPDATE_INTERVAL_MS=1000  # Update every second
 Bypasses real blockchain transactions while still consuming real (or simulated) price data.
 
 ```bash
-# Start with execution simulation
 npm run dev:simulate:execution
 ```
 
@@ -321,17 +412,7 @@ Or set in `.env`:
 EXECUTION_SIMULATION_MODE=true
 EXECUTION_SIMULATION_SUCCESS_RATE=0.85      # 85% success rate
 EXECUTION_SIMULATION_LATENCY_MS=500         # 500ms simulated latency
-EXECUTION_SIMULATION_GAS_USED=200000        # Gas per transaction
-EXECUTION_SIMULATION_GAS_COST_MULTIPLIER=0.1 # 10% of profit as gas cost
-EXECUTION_SIMULATION_PROFIT_VARIANCE=0.2    # +/-20% profit variance
-EXECUTION_SIMULATION_LOG=true               # Log simulated executions
 ```
-
-**Use cases:**
-- Testing the full pipeline without risking funds
-- Integration testing
-- Performance benchmarking
-- Demo/presentation purposes
 
 ### 3. Full Simulation Mode
 
@@ -340,79 +421,6 @@ Combine both modes to test the complete system without any blockchain interactio
 ```bash
 npm run dev:simulate:full
 ```
-
-Or set both in `.env`:
-```env
-SIMULATION_MODE=true
-EXECUTION_SIMULATION_MODE=true
-```
-
----
-
-## Full Partitioned Architecture
-
-For testing the complete distributed architecture locally with all partitions.
-
-### Option A: Separate Terminal Windows
-
-Run each service in its own terminal window:
-
-```bash
-# Terminal 1 - Redis (required first)
-npm run dev:redis
-
-# Terminal 2 - Coordinator (Dashboard, Port 3000)
-npm run dev:coordinator
-
-# Terminal 3 - P1 Asia-Fast (Port 3001)
-npm run dev:partition:asia
-
-# Terminal 4 - P2 L2-Turbo (Port 3002)
-npm run dev:partition:l2
-
-# Terminal 5 - P3 High-Value (Port 3003)
-npm run dev:partition:high
-
-# Terminal 6 - Execution Engine (Port 3005)
-npm run dev:execution
-
-# Terminal 7 - Cross-Chain Detector (Port 3006)
-npm run dev:cross-chain
-
-# Optional: Terminal 8 - P4 Solana (Port 3004, requires Solana RPC)
-# cross-env HEALTH_CHECK_PORT=3004 ts-node -r dotenv/config services/partition-solana/src/index.ts
-```
-
-### Option B: Docker Compose
-
-Run all services in Docker containers:
-
-```bash
-# 1. Build the Docker image
-npm run dev:partitions:build
-
-# 2. Start all partitions
-npm run dev:partitions:up
-
-# 3. Check status
-npm run dev:partitions:status
-
-# 4. View logs
-npm run dev:partitions:logs
-
-# 5. Stop all
-npm run dev:partitions:down
-```
-
-### Memory Requirements
-
-The full architecture uses approximately:
-- Redis: ~256MB
-- Each partition: ~200-300MB
-- Cross-chain detector: ~200MB
-- Execution engine: ~200MB
-- Coordinator: ~150MB
-- **Total: ~2-3GB**
 
 ---
 
@@ -427,39 +435,79 @@ npm test
 ### Run Specific Test Types
 
 ```bash
-# Unit tests only
-npm run test:unit
+npm run test:unit          # Unit tests only
+npm run test:integration   # Integration tests
+npm run test:e2e           # End-to-end tests
+npm run test:performance   # Performance tests
+npm run test:smoke         # Smoke tests
+```
 
-# Integration tests
-npm run test:integration
+### Selective Testing (Fast Feedback)
 
-# End-to-end tests
-npm run test:e2e
+```bash
+# Run tests only for files changed since last commit
+npm run test:changed
 
-# Performance tests
-npm run test:performance
-
-# Smoke tests
-npm run test:smoke
+# Run tests related to specific files
+npm run test:related shared/core/src/redis.ts
 
 # Watch mode (re-runs on file changes)
 npm run test:watch
-
-# With coverage report
-npm run test:coverage
-
-# CI mode
-npm run test:ci
 ```
 
-### Test Debugging
+### Test Coverage
 
 ```bash
-# Run tests with debug output
+npm run test:coverage
+```
+
+### Debugging Tests
+
+**Via CLI:**
+```bash
 npm run test:debug
 ```
 
+**Via VSCode:**
+1. Open a test file
+2. Press F5
+3. Select "Debug Current Test File"
+
 > **Note**: Tests automatically start a Redis memory server. No manual Redis setup needed.
+
+---
+
+## Building
+
+### Standard Build
+
+```bash
+npm run build
+```
+
+### Incremental Build (Watch Mode)
+
+For faster rebuilds during development:
+
+```bash
+npm run build:watch
+```
+
+### Type Checking
+
+```bash
+# One-time check
+npm run typecheck
+
+# Continuous checking (recommended during development)
+npm run typecheck:watch
+```
+
+### Clean Build
+
+```bash
+npm run build:clean
+```
 
 ---
 
@@ -530,35 +578,13 @@ npm run build:clean
    ```
 3. Check service logs for errors
 
-### RPC Rate Limiting
+### Hot Reload Not Working
 
-If you see rate limit warnings, this is expected with free public endpoints. The system will:
-- Temporarily exclude rate-limited providers
-- Select alternative providers based on health scores
-- Resume using the provider after a cooldown period
+If hot reload isn't triggering on file changes:
 
-Solutions:
-- Enable simulation mode (`SIMULATION_MODE=true`)
-- Use paid RPC providers with higher rate limits
-
-### Windows-Specific Issues
-
-1. **Use PowerShell** (not Git Bash for some commands)
-2. **Process cleanup**: Services are stopped using `taskkill` automatically
-3. **Manual cleanup** if needed:
-   ```powershell
-   tasklist | findstr "node"
-   taskkill /F /IM node.exe   # Warning: kills all Node processes
-   ```
-
-### M1 Mac Docker Issues
-
-If you see architecture-related errors:
-
-```bash
-docker compose -f docker-compose.local.yml down -v
-docker compose -f docker-compose.local.yml up -d
-```
+1. Ensure you're using `:fast` commands
+2. Check that tsx is installed: `npx tsx --version`
+3. Try restarting the service
 
 ### Clear Everything and Start Fresh
 
@@ -570,11 +596,8 @@ npm run dev:stop
 npm run build:clean
 
 # Remove node_modules and reinstall
-# macOS/Linux:
-rm -rf node_modules && npm install
-
-# Windows PowerShell:
-Remove-Item -Recurse -Force node_modules; npm install
+rm -rf node_modules && npm install  # Unix/macOS
+Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 ```
 
 ---
@@ -597,20 +620,31 @@ Remove-Item -Recurse -Force node_modules; npm install
 | `npm run dev:redis:down` | Stop Redis container |
 | `npm run dev:redis:logs` | View Redis container logs |
 
-### Service Management
+### Service Management (Hot Reload - RECOMMENDED)
 
 | Command | Port | Description |
 |---------|------|-------------|
-| `npm run dev:coordinator` | 3000 | Start Coordinator (Dashboard) |
-| `npm run dev:partition:asia` | 3001 | Start P1 Asia-Fast partition |
-| `npm run dev:partition:l2` | 3002 | Start P2 L2-Turbo partition |
-| `npm run dev:partition:high` | 3003 | Start P3 High-Value partition |
-| (manual) | 3004 | P4 Solana partition (requires Solana RPC setup) |
-| `npm run dev:execution` | 3005 | Start Execution Engine |
-| `npm run dev:execution:simulate` | 3005 | Start Execution Engine (simulation) |
-| `npm run dev:cross-chain` | 3006 | Start Cross-Chain Detector |
-| `npm run dev:detector` | 3007 | Start Unified Detector (deprecated) |
-| `npm run dev:start` | - | Start all services |
+| `npm run dev:all` | All | Start all 6 services with hot reload |
+| `npm run dev:minimal` | 3000,3001,3005 | Start Coordinator + P1 + Execution |
+| `npm run dev:coordinator:fast` | 3000 | Coordinator with hot reload |
+| `npm run dev:partition:asia:fast` | 3001 | P1 Asia-Fast with hot reload |
+| `npm run dev:partition:l2:fast` | 3002 | P2 L2-Turbo with hot reload |
+| `npm run dev:partition:high:fast` | 3003 | P3 High-Value with hot reload |
+| `npm run dev:cross-chain:fast` | 3006 | Cross-Chain with hot reload |
+| `npm run dev:execution:fast` | 3005 | Execution Engine with hot reload |
+| `npm run dev:detector:fast` | 3007 | Unified Detector with hot reload (deprecated) |
+
+### Service Management (Standard)
+
+| Command | Port | Description |
+|---------|------|-------------|
+| `npm run dev:coordinator` | 3000 | Coordinator (ts-node) |
+| `npm run dev:partition:asia` | 3001 | P1 Asia-Fast (ts-node) |
+| `npm run dev:partition:l2` | 3002 | P2 L2-Turbo (ts-node) |
+| `npm run dev:partition:high` | 3003 | P3 High-Value (ts-node) |
+| `npm run dev:cross-chain` | 3006 | Cross-Chain Detector (ts-node) |
+| `npm run dev:execution` | 3005 | Execution Engine (ts-node) |
+| `npm run dev:start` | - | Start all services (legacy) |
 | `npm run dev:stop` | - | Stop all services |
 | `npm run dev:status` | - | Check status of all services |
 | `npm run dev:cleanup` | - | Clean up stale services |
@@ -634,19 +668,37 @@ Remove-Item -Recurse -Force node_modules; npm install
 | `npm run dev:partitions:status` | Show status of all containers |
 | `npm run dev:partitions:restart` | Restart all containers |
 
-### Building & Testing
+### Building
 
 | Command | Description |
 |---------|-------------|
 | `npm run build` | Build TypeScript |
+| `npm run build:watch` | Continuous build (incremental) |
 | `npm run build:clean` | Clean and rebuild |
 | `npm run typecheck` | Type check without building |
+| `npm run typecheck:watch` | Continuous type checking |
+
+### Testing
+
+| Command | Description |
+|---------|-------------|
 | `npm test` | Run all tests |
 | `npm run test:unit` | Run unit tests |
 | `npm run test:integration` | Run integration tests |
 | `npm run test:e2e` | Run end-to-end tests |
+| `npm run test:changed` | Run tests for changed files only |
+| `npm run test:related <file>` | Run tests related to specific files |
 | `npm run test:watch` | Watch mode tests |
 | `npm run test:coverage` | Tests with coverage report |
+| `npm run test:debug` | Run tests with debug output |
+
+### Code Quality
+
+| Command | Description |
+|---------|-------------|
+| `npm run lint` | Run ESLint |
+| `npm run lint:fix` | Fix ESLint errors |
+| `npm run validate` | Run tests + lint |
 
 ---
 
@@ -730,6 +782,18 @@ Set in `.env`:
 ```env
 ETHEREUM_PRIVATE_KEY=0x<generated-test-key>
 ```
+
+---
+
+## Memory Requirements
+
+The full architecture uses approximately:
+- Redis: ~256MB
+- Each partition: ~200-300MB
+- Cross-chain detector: ~200MB
+- Execution engine: ~200MB
+- Coordinator: ~150MB
+- **Total: ~2-3GB**
 
 ---
 

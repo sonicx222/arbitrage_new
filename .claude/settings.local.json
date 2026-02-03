@@ -37,7 +37,11 @@
       "Bash(more:*)",
       "Bash(for file in \"setupTests.ts\" \"index.ts\" \"types.ts\")",
       "Bash(do echo \"\")",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(CI=true npm test -- --selectProjects unit --testPathPattern=\"shared/ml/__tests__/unit/\\(predictor|orderflow-predictor\\)\" --passWithNoTests)",
+      "Bash(CI=true npm test -- --selectProjects unit --testPathIgnorePatterns=\"shared/ml/__tests__/unit/\\(predictor|orderflow-predictor\\)\" --passWithNoTests)",
+      "Bash(CI=true npm test -- --selectProjects unit --passWithNoTests)",
+      "Bash(CI=true npm test -- --selectProjects unit --testPathPattern=\"shared/ml\" --passWithNoTests)"
     ]
   }
 }

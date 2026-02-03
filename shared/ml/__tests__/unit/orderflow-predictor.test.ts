@@ -116,7 +116,10 @@ import {
 // Get the mocked module and set up whale tracker implementation
 import { getWhaleActivityTracker } from '@arbitrage/core';
 const mockedGetWhaleActivityTracker = jest.mocked(getWhaleActivityTracker);
-mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
+// Only setup mock if we're not skipping tests (mock setup fails with SWC when skipped)
+if (!SKIP_SLOW_ML_TESTS && mockedGetWhaleActivityTracker.mockReturnValue) {
+  mockedGetWhaleActivityTracker.mockReturnValue(mockWhaleTracker as any);
+}
 import type {
   OrderflowPrediction,
   OrderflowTrainingSample,
