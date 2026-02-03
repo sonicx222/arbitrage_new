@@ -212,6 +212,12 @@ export interface GasPriceOptimizerConfig {
   fastChainMedianCacheTtlMs?: number;
   /** Interval between median cache cleanup runs (ms) */
   medianCacheCleanupIntervalMs?: number;
+  /**
+   * EMA smoothing factor (alpha). Range: 0-1.
+   * Higher values = more weight on recent prices (more responsive).
+   * Default: 0.3 (30% weight on latest price)
+   */
+  emaSmoothingFactor?: number;
 }
 
 // =============================================================================
@@ -308,6 +314,13 @@ export class GasPriceOptimizer {
   // Cached median for performance optimization
   private medianCache: Map<string, { median: bigint; validUntil: number }> = new Map();
 
+  /**
+   * Phase 2 Optimization: Exponential Moving Average (EMA) for O(1) baseline tracking.
+   * EMA = price * α + prevEMA * (1 - α)
+   * Provides fast baseline estimation without O(n log n) median sort.
+   */
+  private emaBaselines: Map<string, bigint> = new Map();
+
   // Configuration
   private readonly MAX_GAS_HISTORY: number;
   private readonly MAX_MEDIAN_CACHE_SIZE: number;
@@ -315,6 +328,12 @@ export class GasPriceOptimizer {
   private readonly FAST_CHAIN_MEDIAN_CACHE_TTL_MS: number;
   private readonly MEDIAN_CACHE_CLEANUP_INTERVAL_MS: number;
   private readonly FAST_CHAINS = new Set(['arbitrum', 'optimism', 'base', 'zksync', 'linea']);
+
+  /**
+   * EMA smoothing factor (α). Higher = more responsive to price changes.
+   * 0.3 = 30% weight on latest price, 70% on historical average.
+   */
+  private readonly EMA_SMOOTHING_FACTOR: number;
 
   private lastMedianCacheCleanup = 0;
 
@@ -325,6 +344,24 @@ export class GasPriceOptimizer {
     this.DEFAULT_MEDIAN_CACHE_TTL_MS = config?.defaultMedianCacheTtlMs ?? 5000;
     this.FAST_CHAIN_MEDIAN_CACHE_TTL_MS = config?.fastChainMedianCacheTtlMs ?? 2000;
     this.MEDIAN_CACHE_CLEANUP_INTERVAL_MS = config?.medianCacheCleanupIntervalMs ?? 60000;
+
+    // Validate and clamp EMA smoothing factor to valid range [0.01, 0.99]
+    // Invalid values could break EMA calculation math
+    const rawAlpha = config?.emaSmoothingFactor ?? 0.3;
+    const MIN_ALPHA = 0.01;
+    const MAX_ALPHA = 0.99;
+
+    if (Number.isNaN(rawAlpha) || rawAlpha < MIN_ALPHA || rawAlpha > MAX_ALPHA) {
+      const clampedAlpha = Number.isNaN(rawAlpha) ? 0.3 : Math.max(MIN_ALPHA, Math.min(MAX_ALPHA, rawAlpha));
+      this.logger.warn('EMA smoothing factor out of valid range, clamping', {
+        configured: rawAlpha,
+        validRange: `[${MIN_ALPHA}, ${MAX_ALPHA}]`,
+        using: clampedAlpha,
+      });
+      this.EMA_SMOOTHING_FACTOR = clampedAlpha;
+    } else {
+      this.EMA_SMOOTHING_FACTOR = rawAlpha;
+    }
   }
 
   /**
@@ -478,6 +515,8 @@ export class GasPriceOptimizer {
    * Optimized for hot-path: uses in-place array compaction to avoid
    * temporary array allocations (filter/slice create new arrays).
    *
+   * Phase 2 Enhancement: Also updates EMA baseline for O(1) spike detection.
+   *
    * @param chain - Chain identifier
    * @param price - Current gas price in wei
    * @param gasBaselines - Map of chain to gas baseline history
@@ -504,6 +543,24 @@ export class GasPriceOptimizer {
     // Update pre-computed last gas price for O(1) hot path access
     if (lastGasPrices) {
       lastGasPrices.set(chain, price);
+    }
+
+    // Phase 2: Update EMA baseline (O(1) operation)
+    // EMA = price * α + prevEMA * (1 - α)
+    // Using scaled integer math: EMA = (price * α_scaled + prevEMA * (1000 - α_scaled)) / 1000
+    if (price > 0n) {
+      const existingEma = this.emaBaselines.get(chain);
+      if (existingEma === undefined) {
+        // First price: initialize EMA directly
+        this.emaBaselines.set(chain, price);
+      } else {
+        // EMA update using scaled integer arithmetic (avoid floating point)
+        // α = 0.3 → α_scaled = 300, (1-α) = 700
+        const alphaScaled = BigInt(Math.floor(this.EMA_SMOOTHING_FACTOR * 1000));
+        const oneMinusAlphaScaled = 1000n - alphaScaled;
+        const newEma = (price * alphaScaled + existingEma * oneMinusAlphaScaled) / 1000n;
+        this.emaBaselines.set(chain, newEma);
+      }
     }
 
     // Invalidate median cache
@@ -539,14 +596,22 @@ export class GasPriceOptimizer {
 
   /**
    * Calculate baseline gas price from recent history.
-   * Uses median to avoid outlier influence.
-   * Caches result with chain-specific TTL.
+   *
+   * Phase 2 Enhancement: Uses EMA for O(1) fast-path baseline estimation.
+   * Falls back to median calculation with caching for edge cases.
    *
    * @param chain - Chain identifier
    * @param gasBaselines - Map of chain to gas baseline history
-   * @returns Median gas price in wei, or 0n if no history
+   * @returns Baseline gas price in wei, or 0n if no history
    */
   getGasBaseline(chain: string, gasBaselines: Map<string, GasBaselineEntry[]>): bigint {
+    // Phase 2: Fast-path using EMA (O(1) lookup)
+    const emaBaseline = this.emaBaselines.get(chain);
+    if (emaBaseline !== undefined && emaBaseline > 0n) {
+      return emaBaseline;
+    }
+
+    // Fallback to historical median calculation for cold start
     const history = gasBaselines.get(chain);
     if (!history || history.length === 0) {
       return 0n;
@@ -572,7 +637,7 @@ export class GasPriceOptimizer {
     // Periodic cleanup of expired cache entries
     this.cleanupMedianCacheIfNeeded(now);
 
-    // Compute median
+    // Compute median (only for cold start when EMA not yet established)
     const sorted = [...history].sort((a, b) => {
       if (a.price < b.price) return -1;
       if (a.price > b.price) return 1;
@@ -590,6 +655,15 @@ export class GasPriceOptimizer {
     });
 
     return median;
+  }
+
+  /**
+   * Get the current EMA baseline for a chain (for monitoring/testing).
+   * @param chain - Chain identifier
+   * @returns EMA baseline in wei, or undefined if not established
+   */
+  getEmaBaseline(chain: string): bigint | undefined {
+    return this.emaBaselines.get(chain);
   }
 
   /**
@@ -636,10 +710,18 @@ export class GasPriceOptimizer {
   }
 
   /**
-   * Reset the median cache (for testing).
+   * Reset the median cache and EMA baselines (for testing).
    */
   resetMedianCache(): void {
     this.medianCache.clear();
+    this.emaBaselines.clear();
     this.lastMedianCacheCleanup = 0;
+  }
+
+  /**
+   * Reset only EMA baselines (for testing specific scenarios).
+   */
+  resetEmaBaselines(): void {
+    this.emaBaselines.clear();
   }
 }

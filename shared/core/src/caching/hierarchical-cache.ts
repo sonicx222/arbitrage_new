@@ -20,17 +20,50 @@ import type { CorrelationAnalyzer } from './correlation-analyzer';
 // This is more explicit, testable, and follows the dependency injection pattern.
 // =============================================================================
 
+// =============================================================================
+// P1-PHASE1: Deployment Platform Detection for Resource-Constrained Hosts
+// P3-FIX: Cache detection results at module load to avoid redundant env checks
+// =============================================================================
+
+/**
+ * Cached result: Running on Fly.io (most constrained at 256MB).
+ * Evaluated once at module load.
+ */
+const IS_FLY_IO = process.env.FLY_APP_NAME !== undefined;
+
+/**
+ * Cached result: Running on any memory-constrained free-tier platform.
+ * Includes Fly.io, Railway, Render, or explicit CONSTRAINED_MEMORY flag.
+ *
+ * Phase 1 Fix: Fly.io memory optimization (Week 1)
+ * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 6.2
+ */
+const IS_CONSTRAINED_HOST = IS_FLY_IO ||
+  process.env.RAILWAY_ENVIRONMENT !== undefined ||
+  process.env.RENDER_SERVICE_NAME !== undefined ||
+  process.env.CONSTRAINED_MEMORY === 'true';
+
+// Legacy function wrappers for backward compatibility with constructor logging
+const isConstrainedHost = (): boolean => IS_CONSTRAINED_HOST;
+const isFlyIo = (): boolean => IS_FLY_IO;
+
 /**
  * Cache default configuration values.
  * These can be overridden via the CacheConfig parameter in constructor.
  *
  * P2-FIX 3.1: Consolidated from fragile require() pattern to static defaults.
+ * P1-PHASE1: Added adaptive defaults for constrained hosts.
  */
 const CACHE_DEFAULTS = {
   /** Average size of cache entries in bytes for capacity calculation */
   averageEntrySize: 1024,
-  /** Default L1 cache size in MB */
-  defaultL1SizeMb: 64,
+  /**
+   * Default L1 cache size in MB.
+   * P1-PHASE1: Reduced from 64MB to 16MB on Fly.io for ~48MB savings.
+   * 16MB is sufficient for ~16,000 pairs with 1KB average entry size.
+   * P3-FIX: Uses cached constants instead of function calls.
+   */
+  defaultL1SizeMb: IS_FLY_IO ? 16 : IS_CONSTRAINED_HOST ? 32 : 64,
   /** Default L2 (Redis) TTL in seconds */
   defaultL2TtlSeconds: 300,
   /** Time in ms after which unused entries can be demoted */
@@ -39,6 +72,16 @@ const CACHE_DEFAULTS = {
   minAccessCountBeforeDemotion: 3,
   /** Batch size for Redis SCAN operations */
   scanBatchSize: 100,
+  /**
+   * P1-PHASE1: Pattern cache max size.
+   * Reduced from 100 to 25 on constrained hosts for ~24KB savings.
+   */
+  patternCacheMaxSize: IS_CONSTRAINED_HOST ? 25 : 100,
+  /**
+   * P1-PHASE1: L3 (persistent storage) enabled state.
+   * Disabled on Fly.io for ~3MB savings as L2 (Redis) provides sufficient caching.
+   */
+  l3EnabledDefault: !IS_FLY_IO,
 } as const;
 
 const logger = createLogger('hierarchical-cache');
@@ -320,19 +363,23 @@ export class HierarchicalCache {
   // Pattern matching is called frequently during invalidation operations
   // Pre-compiled patterns provide significant performance improvement
   private patternCache: Map<string, RegExp> = new Map();
-  private readonly PATTERN_CACHE_MAX_SIZE = 100; // Limit to prevent memory leak
+  // P1-PHASE1: Use adaptive pattern cache size based on deployment platform
+  private readonly PATTERN_CACHE_MAX_SIZE = CACHE_DEFAULTS.patternCacheMaxSize;
 
   // P2-FIX 10.2: Track whether to collect timing metrics
   private enableTimingMetrics: boolean;
 
   constructor(config: Partial<CacheConfig> = {}) {
     // P2-2-FIX: Use configured constants instead of magic numbers
+    // P1-PHASE1: L3 disabled by default on Fly.io for memory savings
+    const l3Default = config.l3Enabled ?? CACHE_DEFAULTS.l3EnabledDefault;
+
     this.config = {
       l1Enabled: config.l1Enabled !== false,
       l1Size: config.l1Size || CACHE_DEFAULTS.defaultL1SizeMb,
       l2Enabled: config.l2Enabled !== false,
       l2Ttl: config.l2Ttl || CACHE_DEFAULTS.defaultL2TtlSeconds,
-      l3Enabled: config.l3Enabled !== false,
+      l3Enabled: l3Default,
       // T2.10: L3 max size defaults to 10000 (0 = unlimited for backwards compat)
       l3MaxSize: config.l3MaxSize ?? 10000,
       enablePromotion: config.enablePromotion !== false,
@@ -372,12 +419,20 @@ export class HierarchicalCache {
       this.correlationAnalyzer.updateCorrelations();
     }
 
+    // P1-PHASE1: Log memory optimization status for constrained hosts
+    const isConstrained = isConstrainedHost();
     logger.info('Hierarchical cache initialized', {
       l1Enabled: this.config.l1Enabled,
       l2Enabled: this.config.l2Enabled,
       l3Enabled: this.config.l3Enabled,
       l1Size: this.config.l1Size,
-      predictiveWarmingEnabled: !!this.predictiveWarmingConfig
+      predictiveWarmingEnabled: !!this.predictiveWarmingConfig,
+      // P1-PHASE1: Memory optimization indicators
+      ...(isConstrained && {
+        memoryOptimized: true,
+        platform: isFlyIo() ? 'fly.io' : 'constrained',
+        patternCacheSize: CACHE_DEFAULTS.patternCacheMaxSize
+      })
     });
   }
 

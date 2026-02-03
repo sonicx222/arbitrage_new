@@ -870,33 +870,49 @@ export class RedisClient {
     }
   }
 
-  // Performance metrics
+  /**
+   * Performance metrics recording with MULTI/EXEC batching.
+   *
+   * P1-PHASE1: Optimized from 5-6 separate commands to single MULTI/EXEC transaction.
+   * This reduces Redis commands by ~120/day (40% reduction in metrics ops).
+   *
+   * Previous: hset, expire, llen, [rpop], lpush, expire = 5-6 commands
+   * New: MULTI(hset, expire, lpush, ltrim, expire) EXEC = 1 transaction
+   *
+   * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 4.3
+   */
   async recordMetrics(serviceName: string, metrics: PerformanceMetrics): Promise<void> {
     // Use time-bucketed keys instead of millisecond precision to prevent memory leaks
     const timeBucket = Math.floor(Date.now() / (5 * 60 * 1000)); // 5-minute buckets
-    const key = `metrics:${serviceName}:${timeBucket}`;
-
-    // Store metrics in a hash to aggregate within the time bucket
-    const field = Date.now().toString();
-    await this.hset(key, field, metrics);
-
-    // Set TTL on the hash key (24 hours)
-    await this.client.expire(key, 86400);
-
-    // Also maintain a rolling window of recent metrics (limit to prevent unbounded growth)
+    const hashKey = `metrics:${serviceName}:${timeBucket}`;
     const rollingKey = `metrics:${serviceName}:recent`;
+    const field = Date.now().toString();
     const serialized = JSON.stringify(metrics);
 
-    // Check current list length before adding
-    const currentLength = await this.client.llen(rollingKey);
-    if (currentLength >= 100) {
-      // Remove oldest entry before adding new one
-      await this.client.rpop(rollingKey);
-    }
-    await this.client.lpush(rollingKey, serialized);
+    // P1-PHASE1: Batch all operations in single MULTI/EXEC transaction
+    // This reduces from 5-6 round trips to 1 atomic transaction
+    const multi = this.client.multi();
 
-    // Set TTL on rolling key as well
-    await this.client.expire(rollingKey, 86400);
+    // Store metrics in hash (time-bucketed)
+    multi.hset(hashKey, field, serialized);
+    multi.expire(hashKey, 86400); // 24 hours TTL
+
+    // Maintain rolling window of recent metrics
+    multi.lpush(rollingKey, serialized);
+    // P1-PHASE1: Use LTRIM instead of LLEN + conditional RPOP
+    // LTRIM keeps only the first 100 entries (0-99), removing older ones automatically
+    multi.ltrim(rollingKey, 0, 99);
+    multi.expire(rollingKey, 86400); // 24 hours TTL
+
+    // Execute all commands atomically
+    // P1-PHASE1-FIX: Add error handling consistent with P2-FIX-1 pattern
+    try {
+      await multi.exec();
+    } catch (error) {
+      // Metrics are non-critical auxiliary data - log but don't throw
+      // Unlike critical operations, metrics failure shouldn't crash the application
+      this.logger.error('Error recording metrics', { error, serviceName });
+    }
   }
 
   async getRecentMetrics(serviceName: string, count: number = 10): Promise<PerformanceMetrics[]> {

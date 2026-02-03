@@ -207,13 +207,24 @@ export class WebSocketManager {
 
   // ==========================================================================
   // Phase 2: Worker Thread JSON Parsing
+  // P1-PHASE1: Enabled by default for production to reduce main thread blocking
+  // @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 5.2
   // ==========================================================================
 
-  /** Whether to use worker thread for JSON parsing (disabled by default) */
+  /**
+   * Whether to use worker thread for JSON parsing.
+   * P1-PHASE1: Now enabled by default for production environments.
+   * Worker parsing offloads large payload parsing (>2KB) to worker threads,
+   * reducing main thread blocking by 20-30% during high-volume WebSocket traffic.
+   */
   private useWorkerParsing = false;
 
-  /** Minimum payload size to use worker parsing (default: 1KB) */
-  private workerParsingThresholdBytes = 1024;
+  /**
+   * Minimum payload size to use worker parsing.
+   * P1-PHASE1: Changed from 1KB to 2KB per research recommendations.
+   * Below 2KB, main thread parsing overhead is less than worker message-passing overhead.
+   */
+  private workerParsingThresholdBytes = 2048;
 
   /** Worker pool reference (lazy-initialized when worker parsing enabled) */
   private workerPool: EventProcessingWorkerPool | null = null;
@@ -267,16 +278,24 @@ export class WebSocketManager {
     }
     this.currentUrlIndex = 0;
 
-    // Phase 2: Initialize worker thread JSON parsing if enabled
-    this.useWorkerParsing = config.useWorkerParsing ?? false;
-    this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 1024;
+    // Phase 2: Initialize worker thread JSON parsing
+    // P1-PHASE1: Enable by default for production (NODE_ENV=production or detected production environment)
+    // Worker parsing reduces main thread blocking by 20-30% for large payloads
+    const isProduction = process.env.NODE_ENV === 'production' ||
+      process.env.FLY_APP_NAME !== undefined ||
+      process.env.RAILWAY_ENVIRONMENT !== undefined;
+    const workerParsingDefault = isProduction;
+
+    this.useWorkerParsing = config.useWorkerParsing ?? workerParsingDefault;
+    this.workerParsingThresholdBytes = config.workerParsingThresholdBytes ?? 2048;
 
     if (this.useWorkerParsing) {
       // Lazy init - worker pool will be started when first needed
       this.workerPool = getWorkerPool();
       this.logger.info('Worker thread JSON parsing enabled', {
         chainId: this.chainId,
-        thresholdBytes: this.workerParsingThresholdBytes
+        thresholdBytes: this.workerParsingThresholdBytes,
+        autoEnabled: config.useWorkerParsing === undefined && workerParsingDefault
       });
     }
   }

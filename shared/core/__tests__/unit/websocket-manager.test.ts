@@ -912,20 +912,21 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
       manager = new WebSocketManager(config);
       const stats = manager.getWorkerParsingStats();
 
-      expect(stats.thresholdBytes).toBe(1024);
+      // P1-PHASE1: Default threshold changed from 1024 to 2048
+      expect(stats.thresholdBytes).toBe(2048);
     });
 
     it('should accept custom threshold', () => {
       const config: WebSocketConfig = {
         url: 'wss://test.example.com',
         useWorkerParsing: true,
-        workerParsingThresholdBytes: 2048,
+        workerParsingThresholdBytes: 4096, // Custom threshold
       };
 
       manager = new WebSocketManager(config);
       const stats = manager.getWorkerParsingStats();
 
-      expect(stats.thresholdBytes).toBe(2048);
+      expect(stats.thresholdBytes).toBe(4096);
     });
   });
 
@@ -962,7 +963,8 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
       };
 
       manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(1024);
+      // P1-PHASE1: Default threshold changed from 1024 to 2048
+      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(2048);
 
       manager.setWorkerParsingThreshold(4096);
       expect(manager.getWorkerParsingStats().thresholdBytes).toBe(4096);
@@ -1062,6 +1064,89 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
       expect(stats.enabled).toBe(true);
       expect(stats.thresholdBytes).toBe(512);
       expect(typeof stats.workerUsagePercent).toBe('number');
+    });
+  });
+
+  // P3-FIX: Tests for production auto-enable behavior (P1-PHASE1)
+  describe('Production Auto-Enable', () => {
+    const originalEnv = { ...process.env };
+
+    afterEach(() => {
+      // Restore original environment
+      process.env = { ...originalEnv };
+    });
+
+    it('should disable worker parsing in test environment by default', () => {
+      // In test environment (NODE_ENV=test), worker parsing should be disabled by default
+      // This is the current behavior since NODE_ENV=test is not detected as production
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(false);
+    });
+
+    it('should allow explicit enable override regardless of environment', () => {
+      // Even in non-production, explicit true should enable
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: true,
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+    });
+
+    it('should allow explicit disable override regardless of environment', () => {
+      // Explicit false should always disable, even if env says production
+      process.env.NODE_ENV = 'production';
+
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        useWorkerParsing: false,
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(false);
+    });
+
+    it('should detect Fly.io environment', () => {
+      // Note: This test documents the expected behavior but can't fully test
+      // module-load detection due to Jest's module caching.
+      // The detection logic is: FLY_APP_NAME !== undefined
+      process.env.FLY_APP_NAME = 'test-app';
+
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+        // Not specifying useWorkerParsing - should auto-detect
+      };
+
+      manager = new WebSocketManager(config);
+      // Should be enabled because FLY_APP_NAME is set
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+    });
+
+    it('should detect Railway environment', () => {
+      process.env.RAILWAY_ENVIRONMENT = 'production';
+
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+    });
+
+    it('should detect NODE_ENV=production', () => {
+      process.env.NODE_ENV = 'production';
+
+      const config: WebSocketConfig = {
+        url: 'wss://test.example.com',
+      };
+
+      manager = new WebSocketManager(config);
+      expect(manager.getWorkerParsingStats().enabled).toBe(true);
     });
   });
 });

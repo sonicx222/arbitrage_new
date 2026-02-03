@@ -3,8 +3,29 @@ name: Test Suite
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+# Minimum permissions for security (least privilege)
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # ===========================================================================
@@ -13,6 +34,7 @@ jobs:
   unit-tests:
     name: Unit Tests (Shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false  # Run all shards even if one fails
       matrix:
@@ -39,6 +61,7 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           flags: unit-shard-${{ matrix.shard }}
           fail_ci_if_error: false  # Don't fail if codecov upload fails
 
@@ -57,13 +80,14 @@ jobs:
   integration-tests:
     name: Integration Tests (Shard ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2]
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.2-alpine
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -100,6 +124,7 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           flags: integration-shard-${{ matrix.shard }}
           fail_ci_if_error: false
 
@@ -118,9 +143,10 @@ jobs:
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.2-alpine
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s
@@ -153,6 +179,7 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           flags: e2e
           fail_ci_if_error: false
 
@@ -162,6 +189,7 @@ jobs:
   performance-tests:
     name: Performance Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -197,9 +225,15 @@ jobs:
   smoke-tests:
     name: Smoke Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.2-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
         ports:
           - 6379:6379
     steps:
@@ -227,6 +261,7 @@ jobs:
   code-quality:
     name: Code Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -243,9 +278,8 @@ jobs:
       - name: Run TypeScript compiler
         run: npm run typecheck
 
-      - name: Run linter (if configured)
-        run: npm run lint || echo "Linting skipped (not configured)"
-        continue-on-error: true
+      - name: Run linter
+        run: npm run lint
 
   # ===========================================================================
   # Test Summary - Aggregate results and report
@@ -253,6 +287,7 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [unit-tests, integration-tests, e2e-tests, performance-tests, smoke-tests, code-quality]
     if: always()
     steps:
@@ -269,5 +304,6 @@ jobs:
         if: |
           needs.unit-tests.result == 'failure' ||
           needs.integration-tests.result == 'failure' ||
+          needs.e2e-tests.result == 'failure' ||
           needs.code-quality.result == 'failure'
         run: exit 1

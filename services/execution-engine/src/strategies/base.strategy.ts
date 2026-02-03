@@ -104,6 +104,19 @@ import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
 import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
 
 /**
+ * Phase 2 Enhancement: RBF (Replace-By-Fee) retry configuration.
+ * Used for EIP-1559 transaction replacement on transient failures.
+ */
+interface RbfRetryConfig {
+  /** Maximum number of retry attempts (default: 3) */
+  maxRetries: number;
+  /** Gas price bump percentage per retry (default: 10 = 10%) */
+  gasBumpPercent: number;
+  /** Patterns indicating retryable errors */
+  retryableErrorPatterns: RegExp[];
+}
+
+/**
  * Standard Uniswap V2 Router ABI for swapExactTokensForTokens.
  * Compatible with most DEX routers (SushiSwap, PancakeSwap, etc.)
  */
@@ -124,6 +137,46 @@ const ERC20_APPROVE_ABI = [
  * Issue 3.3 Fix: Configurable swap deadline in seconds.
  */
 const SWAP_DEADLINE_SECONDS = parseInt(process.env.SWAP_DEADLINE_SECONDS || '300', 10);
+
+/**
+ * Parse and validate an integer environment variable with bounds checking.
+ * Returns defaultValue if env var is missing, NaN, or out of bounds.
+ */
+function parseValidatedEnvInt(
+  envValue: string | undefined,
+  defaultValue: number,
+  min: number,
+  max: number
+): number {
+  const parsed = parseInt(envValue || String(defaultValue), 10);
+  if (Number.isNaN(parsed) || parsed < min || parsed > max) {
+    return defaultValue;
+  }
+  return parsed;
+}
+
+/**
+ * Phase 2 Enhancement: Default RBF retry configuration.
+ * Enables automatic retry with gas bumping for transient failures.
+ *
+ * Config validation:
+ * - maxRetries: 0-10 (prevents infinite or negative retries)
+ * - gasBumpPercent: 1-100 (must be positive, capped at 100% per retry)
+ */
+const DEFAULT_RBF_CONFIG: RbfRetryConfig = {
+  maxRetries: parseValidatedEnvInt(process.env.RBF_MAX_RETRIES, 3, 0, 10),
+  gasBumpPercent: parseValidatedEnvInt(process.env.RBF_GAS_BUMP_PERCENT, 10, 1, 100),
+  retryableErrorPatterns: [
+    /replacement transaction underpriced/i,
+    /nonce.*too low/i,
+    /transaction underpriced/i,
+    /already known/i,
+    /timeout/i,
+    /ETIMEDOUT/i,
+    /ECONNRESET/i,
+    /network error/i,
+  ],
+};
 
 // Validate the deadline is reasonable (30 seconds to 30 minutes)
 if (Number.isNaN(SWAP_DEADLINE_SECONDS) || SWAP_DEADLINE_SECONDS < 30 || SWAP_DEADLINE_SECONDS > 1800) {
@@ -651,48 +704,116 @@ export abstract class BaseExecutionStrategy {
           usedMevProtection: true,
         };
       } else {
-        // Standard transaction submission
-        if (tx.type === 2) {
-          tx.maxFeePerGas = finalGasPrice;
-        } else {
-          tx.gasPrice = finalGasPrice;
-        }
+        // Standard transaction submission with RBF retry logic
+        // Phase 2 Enhancement: Retry with gas bump on transient failures
+        let currentGasPrice = finalGasPrice;
+        let lastError: string | undefined;
 
-        const txResponse = await this.withTransactionTimeout(
-          () => wallet.sendTransaction(tx),
-          'sendTransaction'
-        );
+        for (let attempt = 0; attempt <= DEFAULT_RBF_CONFIG.maxRetries; attempt++) {
+          try {
+            // Set gas price based on transaction type
+            if (tx.type === 2) {
+              tx.maxFeePerGas = currentGasPrice;
+              // Also bump maxPriorityFeePerGas proportionally if set
+              if (tx.maxPriorityFeePerGas && attempt > 0) {
+                const priorityFee = BigInt(tx.maxPriorityFeePerGas);
+                tx.maxPriorityFeePerGas = priorityFee + (priorityFee * BigInt(DEFAULT_RBF_CONFIG.gasBumpPercent) / 100n);
+              }
+            } else {
+              tx.gasPrice = currentGasPrice;
+            }
 
-        txHash = txResponse.hash;
+            if (attempt > 0) {
+              this.logger.info('RBF retry: resubmitting with bumped gas', {
+                chain,
+                attempt,
+                previousError: lastError,
+                nonce,
+                newGasPriceGwei: Number(currentGasPrice / WEI_PER_GWEI),
+              });
+            }
 
-        receipt = await this.withTransactionTimeout(
-          () => txResponse.wait(),
-          'waitForReceipt'
-        );
+            const txResponse = await this.withTransactionTimeout(
+              () => wallet.sendTransaction(tx),
+              'sendTransaction'
+            );
 
-        if (!receipt) {
-          if (ctx.nonceManager && nonce !== undefined) {
-            ctx.nonceManager.failTransaction(chain, nonce, 'No receipt received');
+            txHash = txResponse.hash;
+
+            receipt = await this.withTransactionTimeout(
+              () => txResponse.wait(),
+              'waitForReceipt'
+            );
+
+            if (!receipt) {
+              // Transaction was submitted but no receipt - this is unusual
+              // Don't retry as the tx might have been mined
+              if (ctx.nonceManager && nonce !== undefined) {
+                ctx.nonceManager.failTransaction(chain, nonce, 'No receipt received');
+              }
+              return {
+                success: false,
+                error: 'Transaction receipt not received',
+                txHash,
+                nonce,
+              };
+            }
+
+            // Success - confirm nonce and return
+            if (ctx.nonceManager && nonce !== undefined) {
+              ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
+            }
+
+            if (attempt > 0) {
+              this.logger.info('RBF retry succeeded', {
+                chain,
+                totalAttempts: attempt + 1,
+                txHash: receipt.hash,
+              });
+            }
+
+            return {
+              success: true,
+              receipt,
+              txHash: receipt.hash,
+              nonce,
+              usedMevProtection: false,
+            };
+          } catch (submitError) {
+            lastError = getErrorMessage(submitError);
+
+            // Check if this error is retryable
+            const isRetryable = DEFAULT_RBF_CONFIG.retryableErrorPatterns.some(
+              pattern => pattern.test(lastError || '')
+            );
+
+            if (!isRetryable || attempt >= DEFAULT_RBF_CONFIG.maxRetries) {
+              // Non-retryable error or max retries reached
+              this.logger.warn('Transaction submission failed (not retryable or max retries reached)', {
+                chain,
+                attempt,
+                maxRetries: DEFAULT_RBF_CONFIG.maxRetries,
+                error: lastError,
+                isRetryable,
+              });
+              throw submitError;
+            }
+
+            // Bump gas price for next attempt (10% increase)
+            const bumpAmount = currentGasPrice * BigInt(DEFAULT_RBF_CONFIG.gasBumpPercent) / 100n;
+            currentGasPrice = currentGasPrice + bumpAmount;
+
+            this.logger.debug('Transaction failed with retryable error, will retry', {
+              chain,
+              attempt,
+              error: lastError,
+              nextGasPriceGwei: Number(currentGasPrice / WEI_PER_GWEI),
+            });
           }
-          return {
-            success: false,
-            error: 'Transaction receipt not received',
-            txHash,
-            nonce,
-          };
         }
 
-        if (ctx.nonceManager && nonce !== undefined) {
-          ctx.nonceManager.confirmTransaction(chain, nonce, receipt.hash);
-        }
-
-        return {
-          success: true,
-          receipt,
-          txHash: receipt.hash,
-          nonce,
-          usedMevProtection: false,
-        };
+        // Should not reach here, but handle gracefully
+        throw new Error(lastError || 'Transaction failed after all retry attempts');
       }
     } catch (error) {
       if (ctx.nonceManager && nonce !== undefined) {
@@ -860,6 +981,57 @@ export abstract class BaseExecutionStrategy {
   }
 
   /**
+   * Phase 2 Enhancement: Check token allowance status without modifying state.
+   * This read-only operation can be parallelized with other pre-checks.
+   *
+   * @returns Object with allowance status and current allowance amount
+   */
+  protected async checkTokenAllowanceStatus(
+    tokenAddress: string,
+    spenderAddress: string,
+    requiredAmount: bigint,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<{ sufficient: boolean; currentAllowance: bigint }> {
+    const wallet = ctx.wallets.get(chain);
+    if (!wallet) {
+      // If no wallet, we can't check - return insufficient to trigger approval flow
+      return { sufficient: false, currentAllowance: 0n };
+    }
+
+    const provider = ctx.providers.get(chain);
+    if (!provider) {
+      return { sufficient: false, currentAllowance: 0n };
+    }
+
+    try {
+      // Use provider for read-only call (not wallet to avoid any signing)
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        ERC20_APPROVE_ABI,
+        provider
+      );
+
+      const ownerAddress = await this.getWalletAddress(wallet);
+      const currentAllowance = await tokenContract.allowance(ownerAddress, spenderAddress);
+
+      return {
+        sufficient: currentAllowance >= requiredAmount,
+        currentAllowance: BigInt(currentAllowance.toString()),
+      };
+    } catch (error) {
+      this.logger.debug('Failed to check token allowance', {
+        token: tokenAddress,
+        spender: spenderAddress,
+        chain,
+        error: getErrorMessage(error),
+      });
+      // On error, assume insufficient to trigger approval flow
+      return { sufficient: false, currentAllowance: 0n };
+    }
+  }
+
+  /**
    * Check and approve token allowance for DEX router if needed.
    */
   protected async ensureTokenAllowance(
@@ -950,6 +1122,55 @@ export abstract class BaseExecutionStrategy {
     operationName: string
   ): Promise<T> {
     return withTimeout(operation, operationName, TRANSACTION_TIMEOUT_MS);
+  }
+
+  // ===========================================================================
+  // Dynamic Gas Limit (Phase 2 Enhancement)
+  // ===========================================================================
+
+  /**
+   * Phase 2 Enhancement: Apply dynamic gas limit from simulation result.
+   * Uses `gasLimit = simulatedGas * 1.15` (15% safety margin) for gas efficiency.
+   *
+   * @param tx - Transaction request to modify
+   * @param simulationResult - Result from performSimulation
+   * @returns Modified transaction with optimized gas limit
+   */
+  protected applyDynamicGasLimit(
+    tx: ethers.TransactionRequest,
+    simulationResult: SimulationResult | null
+  ): ethers.TransactionRequest {
+    // Only apply if simulation succeeded and returned valid gasUsed
+    if (!simulationResult?.success || !simulationResult.gasUsed) {
+      return tx;
+    }
+
+    // Apply 15% safety margin: gasLimit = simulatedGas * 1.15
+    const simulatedGas = BigInt(simulationResult.gasUsed.toString());
+    const safetyMargin = simulatedGas * 15n / 100n;
+    const dynamicGasLimit = simulatedGas + safetyMargin;
+
+    // Ensure minimum gas limit (protect against too-low simulations)
+    // NOTE: 21000 is only the base ETH transfer cost. DEX swaps require significantly more:
+    // - Simple Uniswap V2 swap: ~120k-150k gas
+    // - Multi-hop swaps: ~200k-400k gas
+    // Using 100k as floor to protect against anomalous simulation results
+    const MIN_SWAP_GAS_LIMIT = 100000n;
+    const finalGasLimit = dynamicGasLimit > MIN_SWAP_GAS_LIMIT ? dynamicGasLimit : MIN_SWAP_GAS_LIMIT;
+
+    // Only update if we're actually reducing from default or if no limit was set
+    if (tx.gasLimit === undefined || tx.gasLimit === null || BigInt(tx.gasLimit.toString()) > finalGasLimit) {
+      tx.gasLimit = finalGasLimit;
+
+      this.logger.debug('Applied dynamic gas limit from simulation', {
+        simulatedGas: simulatedGas.toString(),
+        dynamicGasLimit: finalGasLimit.toString(),
+        safetyMarginPercent: 15,
+        provider: simulationResult.provider,
+      });
+    }
+
+    return tx;
   }
 
   // ===========================================================================
