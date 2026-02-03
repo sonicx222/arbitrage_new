@@ -84,6 +84,69 @@ export interface RedisClientDeps {
   RedisImpl?: RedisConstructor;
 }
 
+// =============================================================================
+// Phase 4: Redis Command Usage Tracking
+// Provides visibility into command usage for free-tier optimization
+// =============================================================================
+
+/**
+ * Phase 4: Redis command statistics for usage dashboard.
+ * Helps monitor free-tier limits (10,000 commands/day on Upstash).
+ *
+ * @see ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 4 - Redis Usage Optimization
+ */
+export interface RedisCommandStats {
+  /** Command category -> count mapping */
+  byCategory: Record<string, number>;
+  /** Command type -> count mapping */
+  byCommand: Record<string, number>;
+  /** Total commands since tracking started */
+  totalCommands: number;
+  /** Timestamp when tracking started */
+  trackingStartedAt: number;
+  /** Timestamp of last command */
+  lastCommandAt: number;
+  /** Commands per minute (rolling average) */
+  commandsPerMinute: number;
+  /** Estimated daily usage at current rate */
+  estimatedDailyUsage: number;
+  /** Percentage of daily limit used (based on 10,000/day) */
+  dailyLimitPercent: number;
+}
+
+/**
+ * Command category for grouping statistics.
+ */
+type CommandCategory = 'stream' | 'cache' | 'metrics' | 'ratelimit' | 'lock' | 'pubsub' | 'other';
+
+/**
+ * Map command names to categories for dashboard grouping.
+ */
+const COMMAND_CATEGORIES: Record<string, CommandCategory> = {
+  // Stream operations
+  xadd: 'stream', xread: 'stream', xreadgroup: 'stream', xack: 'stream',
+  xlen: 'stream', xrange: 'stream', xinfo: 'stream', xpending: 'stream',
+  // Cache operations
+  get: 'cache', set: 'cache', setex: 'cache', del: 'cache',
+  mget: 'cache', mset: 'cache', getex: 'cache', expire: 'cache',
+  // Hash operations (often cache/metrics)
+  hget: 'cache', hset: 'cache', hmget: 'cache', hmset: 'cache',
+  hgetall: 'cache', hdel: 'cache', hincrby: 'metrics',
+  // Rate limiting
+  zadd: 'ratelimit', zrangebyscore: 'ratelimit', zremrangebyscore: 'ratelimit',
+  zcard: 'ratelimit', zcount: 'ratelimit', zscore: 'ratelimit',
+  // Locking
+  setnx: 'lock', eval: 'lock',
+  // Pub/Sub
+  publish: 'pubsub', subscribe: 'pubsub', unsubscribe: 'pubsub',
+  // Lists (often metrics)
+  lpush: 'metrics', rpush: 'metrics', lrange: 'metrics', ltrim: 'metrics',
+  // Other
+  ping: 'other', scan: 'other', keys: 'other', multi: 'other', exec: 'other',
+};
+
+const UPSTASH_DAILY_LIMIT = 10000;
+
 export class RedisClient {
   private client: Redis;
   private pubClient: Redis;
@@ -91,6 +154,17 @@ export class RedisClient {
   // P2-FIX: Use proper Logger type
   private logger: Logger;
   private readonly deps: Required<RedisClientDeps>;
+
+  // Phase 4: Command tracking for usage dashboard
+  private commandStats = {
+    byCategory: {} as Record<string, number>,
+    byCommand: {} as Record<string, number>,
+    totalCommands: 0,
+    trackingStartedAt: Date.now(),
+    lastCommandAt: Date.now(),
+    // Rolling window for per-minute calculation (last 60 timestamps)
+    recentCommands: [] as number[],
+  };
 
   constructor(url: string, password?: string, deps?: RedisClientDeps) {
     this.logger = createLogger('redis-client');
@@ -187,6 +261,7 @@ export class RedisClient {
         throw new Error('Message too large');
       }
 
+      this.trackCommand('publish');
       return await this.pubClient.publish(channel, serializedMessage);
     } catch (error) {
       this.logger.error('Error publishing message', { error, channel });
@@ -313,8 +388,10 @@ export class RedisClient {
     try {
       const serializedValue = JSON.stringify(value);
       if (ttl) {
+        this.trackCommand('setex');
         await this.client.setex(key, ttl, serializedValue);
       } else {
+        this.trackCommand('set');
         await this.client.set(key, serializedValue);
       }
     } catch (error) {
@@ -325,6 +402,7 @@ export class RedisClient {
 
   async get<T = any>(key: string): Promise<T | null> {
     try {
+      this.trackCommand('get');
       const value = await this.client.get(key);
       return value ? JSON.parse(value) : null;
     } catch (error) {
@@ -339,6 +417,7 @@ export class RedisClient {
    */
   async setex(key: string, seconds: number, value: string): Promise<string> {
     try {
+      this.trackCommand('setex');
       return await this.client.setex(key, seconds, value);
     } catch (error) {
       this.logger.error('Error in setex', { error, key });
@@ -352,6 +431,7 @@ export class RedisClient {
    */
   async getRaw(key: string): Promise<string | null> {
     try {
+      this.trackCommand('get');
       return await this.client.get(key);
     } catch (error) {
       this.logger.error('Error in getRaw', { error, key });
@@ -365,6 +445,7 @@ export class RedisClient {
   async del(...keys: string[]): Promise<number> {
     try {
       if (keys.length === 0) return 0;
+      this.trackCommand('del');
       return await this.client.del(...keys);
     } catch (error) {
       this.logger.error('Error deleting cache', { error, keys });
@@ -377,6 +458,7 @@ export class RedisClient {
    */
   async expire(key: string, seconds: number): Promise<number> {
     try {
+      this.trackCommand('expire');
       return await this.client.expire(key, seconds);
     } catch (error) {
       this.logger.error('Error setting expire', { error, key });
@@ -393,6 +475,7 @@ export class RedisClient {
    */
   async incr(key: string): Promise<number> {
     try {
+      this.trackCommand('incr');
       return await this.client.incr(key);
     } catch (error) {
       this.logger.error('Error incrementing key', { error, key });
@@ -412,6 +495,7 @@ export class RedisClient {
    */
   async setNx(key: string, value: string, ttlSeconds?: number): Promise<boolean> {
     try {
+      this.trackCommand('setnx');
       let result: string | null;
       if (ttlSeconds) {
         // SET key value NX EX seconds
@@ -436,6 +520,7 @@ export class RedisClient {
    */
   async exists(key: string): Promise<boolean> {
     try {
+      this.trackCommand('exists');
       const result = await this.client.exists(key);
       return result === 1;
     } catch (error) {
@@ -457,6 +542,7 @@ export class RedisClient {
    */
   async eval<T = unknown>(script: string, keys: string[], args: string[]): Promise<T> {
     try {
+      this.trackCommand('eval');
       const result = await this.client.eval(script, keys.length, ...keys, ...args);
       return result as T;
     } catch (error) {
@@ -552,6 +638,7 @@ export class RedisClient {
    */
   async hset(key: string, field: string, value: unknown): Promise<number> {
     try {
+      this.trackCommand('hset');
       const serializedValue = JSON.stringify(value);
       return await this.client.hset(key, field, serializedValue);
     } catch (error) {
@@ -562,6 +649,7 @@ export class RedisClient {
 
   async hget<T = any>(key: string, field: string): Promise<T | null> {
     try {
+      this.trackCommand('hget');
       const value = await this.client.hget(key, field);
       return value ? JSON.parse(value) : null;
     } catch (error) {
@@ -572,6 +660,7 @@ export class RedisClient {
 
   async hgetall<T = any>(key: string): Promise<Record<string, T> | null> {
     try {
+      this.trackCommand('hgetall');
       const result = await this.client.hgetall(key);
       if (!result || Object.keys(result).length === 0) return null;
 
@@ -592,6 +681,7 @@ export class RedisClient {
    */
   async sadd(key: string, ...members: string[]): Promise<number> {
     try {
+      this.trackCommand('sadd');
       return await this.client.sadd(key, ...members);
     } catch (error) {
       this.logger.error('Error sadd', { error, key });
@@ -604,6 +694,7 @@ export class RedisClient {
    */
   async srem(key: string, ...members: string[]): Promise<number> {
     try {
+      this.trackCommand('srem');
       return await this.client.srem(key, ...members);
     } catch (error) {
       this.logger.error('Error srem', { error, key });
@@ -613,6 +704,7 @@ export class RedisClient {
 
   async smembers(key: string): Promise<string[]> {
     try {
+      this.trackCommand('smembers');
       return await this.client.smembers(key);
     } catch (error) {
       this.logger.error('Error smembers', { error });
@@ -626,6 +718,7 @@ export class RedisClient {
    */
   async zadd(key: string, score: number, member: string): Promise<number> {
     try {
+      this.trackCommand('zadd');
       return await this.client.zadd(key, score, member);
     } catch (error) {
       this.logger.error('Error zadd', { error, key });
@@ -635,6 +728,7 @@ export class RedisClient {
 
   async zrange(key: string, start: number, stop: number, withScores: string = ''): Promise<string[]> {
     try {
+      this.trackCommand('zrange');
       if (withScores === 'WITHSCORES') {
         return await this.client.zrange(key, start, stop, 'WITHSCORES');
       }
@@ -650,6 +744,7 @@ export class RedisClient {
    */
   async zrem(key: string, ...members: string[]): Promise<number> {
     try {
+      this.trackCommand('zrem');
       return await this.client.zrem(key, ...members);
     } catch (error) {
       this.logger.error('Error zrem', { error, key });
@@ -659,6 +754,7 @@ export class RedisClient {
 
   async zcard(key: string): Promise<number> {
     try {
+      this.trackCommand('zcard');
       return await this.client.zcard(key);
     } catch (error) {
       this.logger.error('Error zcard', { error });
@@ -668,6 +764,7 @@ export class RedisClient {
 
   async zscore(key: string, member: string): Promise<string | null> {
     try {
+      this.trackCommand('zscore');
       return await this.client.zscore(key, member);
     } catch (error) {
       this.logger.error('Error zscore', { error });
@@ -682,6 +779,7 @@ export class RedisClient {
    */
   async zremrangebyscore(key: string, min: number, max: number): Promise<number> {
     try {
+      this.trackCommand('zremrangebyscore');
       return await this.client.zremrangebyscore(key, min, max);
     } catch (error) {
       this.logger.error('Error zremrangebyscore', { error, key });
@@ -743,6 +841,7 @@ export class RedisClient {
   // Key operations
   async keys(pattern: string): Promise<string[]> {
     try {
+      this.trackCommand('keys');
       return await this.client.keys(pattern);
     } catch (error) {
       this.logger.error('Error keys', { error });
@@ -769,6 +868,7 @@ export class RedisClient {
     count: number
   ): Promise<[string, string[]]> {
     try {
+      this.trackCommand('scan');
       const result = await this.client.scan(cursor, matchArg, pattern, countArg, count);
       // Redis returns [cursor, keys[]] - cursor is string, keys is array
       return [result[0], result[1]];
@@ -780,6 +880,7 @@ export class RedisClient {
 
   async llen(key: string): Promise<number> {
     try {
+      this.trackCommand('llen');
       return await this.client.llen(key);
     } catch (error) {
       this.logger.error('Error llen', { error });
@@ -792,6 +893,7 @@ export class RedisClient {
    */
   async lpush(key: string, ...values: string[]): Promise<number> {
     try {
+      this.trackCommand('lpush');
       return await this.client.lpush(key, ...values);
     } catch (error) {
       this.logger.error('Error lpush', { error, key });
@@ -801,6 +903,7 @@ export class RedisClient {
 
   async rpop(key: string): Promise<string | null> {
     try {
+      this.trackCommand('rpop');
       return await this.client.rpop(key);
     } catch (error) {
       this.logger.error('Error rpop', { error });
@@ -810,6 +913,7 @@ export class RedisClient {
 
   async lrange(key: string, start: number, stop: number): Promise<string[]> {
     try {
+      this.trackCommand('lrange');
       return await this.client.lrange(key, start, stop);
     } catch (error) {
       this.logger.error('Error lrange', { error });
@@ -822,6 +926,7 @@ export class RedisClient {
    */
   async ltrim(key: string, start: number, stop: number): Promise<'OK'> {
     try {
+      this.trackCommand('ltrim');
       return await this.client.ltrim(key, start, stop);
     } catch (error) {
       this.logger.error('Error ltrim', { error, key });
@@ -979,11 +1084,157 @@ export class RedisClient {
   // Health check
   async ping(): Promise<boolean> {
     try {
+      this.trackCommand('ping');
       const result = await this.client.ping();
       return result === 'PONG';
     } catch (error) {
       return false;
     }
+  }
+
+  // ===========================================================================
+  // Phase 4: Redis Command Usage Dashboard
+  // Provides visibility into command usage for free-tier optimization
+  // ===========================================================================
+
+  /**
+   * Phase 4: Track a Redis command execution.
+   * Call this from Redis operations to build usage statistics.
+   *
+   * @param command - Command name (e.g., 'get', 'set', 'xadd')
+   * @param count - Number of commands (for batch operations)
+   */
+  trackCommand(command: string, count: number = 1): void {
+    const now = Date.now();
+    const cmd = command.toLowerCase();
+    const category = COMMAND_CATEGORIES[cmd] || 'other';
+
+    // Update counters
+    this.commandStats.byCommand[cmd] = (this.commandStats.byCommand[cmd] || 0) + count;
+    this.commandStats.byCategory[category] = (this.commandStats.byCategory[category] || 0) + count;
+    this.commandStats.totalCommands += count;
+    this.commandStats.lastCommandAt = now;
+
+    // Add to rolling window (keep last 1000 for per-minute calculation)
+    for (let i = 0; i < count; i++) {
+      this.commandStats.recentCommands.push(now);
+    }
+    if (this.commandStats.recentCommands.length > 1000) {
+      this.commandStats.recentCommands = this.commandStats.recentCommands.slice(-1000);
+    }
+  }
+
+  /**
+   * Phase 4: Get Redis command usage statistics for dashboard.
+   *
+   * Returns comprehensive statistics including:
+   * - Command counts by category and type
+   * - Rolling commands per minute
+   * - Estimated daily usage and limit percentage
+   *
+   * @returns RedisCommandStats object for dashboard rendering
+   */
+  getCommandStats(): RedisCommandStats {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+
+    // Calculate commands per minute from rolling window
+    const recentCount = this.commandStats.recentCommands.filter(
+      ts => ts > oneMinuteAgo
+    ).length;
+
+    // Calculate time-based estimates
+    const elapsedMs = now - this.commandStats.trackingStartedAt;
+    const elapsedMinutes = Math.max(1, elapsedMs / 60000);
+
+    // Commands per minute (rolling average)
+    const commandsPerMinute = recentCount || (this.commandStats.totalCommands / elapsedMinutes);
+
+    // Estimated daily usage at current rate
+    const estimatedDailyUsage = Math.round(commandsPerMinute * 60 * 24);
+
+    // Percentage of Upstash daily limit
+    const dailyLimitPercent = Math.round((estimatedDailyUsage / UPSTASH_DAILY_LIMIT) * 100);
+
+    return {
+      byCategory: { ...this.commandStats.byCategory },
+      byCommand: { ...this.commandStats.byCommand },
+      totalCommands: this.commandStats.totalCommands,
+      trackingStartedAt: this.commandStats.trackingStartedAt,
+      lastCommandAt: this.commandStats.lastCommandAt,
+      commandsPerMinute: Math.round(commandsPerMinute * 10) / 10,
+      estimatedDailyUsage,
+      dailyLimitPercent,
+    };
+  }
+
+  /**
+   * Phase 4: Reset command tracking statistics.
+   * Call at midnight or when deploying to reset daily tracking.
+   */
+  resetCommandStats(): void {
+    this.commandStats = {
+      byCategory: {},
+      byCommand: {},
+      totalCommands: 0,
+      trackingStartedAt: Date.now(),
+      lastCommandAt: Date.now(),
+      recentCommands: [],
+    };
+    this.logger.info('Redis command stats reset');
+  }
+
+  /**
+   * Phase 4: Get formatted usage dashboard string.
+   * Useful for logging or terminal display.
+   */
+  getUsageDashboard(): string {
+    const stats = this.getCommandStats();
+    const uptimeMs = Date.now() - stats.trackingStartedAt;
+    const uptimeHours = Math.round(uptimeMs / 3600000 * 10) / 10;
+
+    const lines = [
+      '═══════════════════════════════════════════════════════════',
+      '               Redis Usage Dashboard (Phase 4)',
+      '═══════════════════════════════════════════════════════════',
+      '',
+      `Tracking since: ${new Date(stats.trackingStartedAt).toISOString()} (${uptimeHours}h)`,
+      '',
+      '📊 USAGE SUMMARY',
+      `   Total Commands:      ${stats.totalCommands.toLocaleString()}`,
+      `   Commands/min:        ${stats.commandsPerMinute}`,
+      `   Est. Daily Usage:    ${stats.estimatedDailyUsage.toLocaleString()} / ${UPSTASH_DAILY_LIMIT.toLocaleString()}`,
+      `   Daily Limit Used:    ${stats.dailyLimitPercent}%`,
+      '',
+      '📂 BY CATEGORY',
+    ];
+
+    // Sort categories by usage
+    const sortedCategories = Object.entries(stats.byCategory)
+      .sort((a, b) => b[1] - a[1]);
+
+    for (const [cat, count] of sortedCategories) {
+      const pct = Math.round((count / stats.totalCommands) * 100);
+      lines.push(`   ${cat.padEnd(12)} ${count.toLocaleString().padStart(8)}  (${pct}%)`);
+    }
+
+    lines.push('');
+    lines.push('📝 TOP COMMANDS');
+
+    // Show top 10 commands
+    const sortedCommands = Object.entries(stats.byCommand)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+
+    for (const [cmd, count] of sortedCommands) {
+      const pct = Math.round((count / stats.totalCommands) * 100);
+      lines.push(`   ${cmd.padEnd(16)} ${count.toLocaleString().padStart(8)}  (${pct}%)`);
+    }
+
+    lines.push('');
+    lines.push('═══════════════════════════════════════════════════════════');
+
+    return lines.join('\n');
   }
 }
 

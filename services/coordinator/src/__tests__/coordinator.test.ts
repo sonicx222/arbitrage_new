@@ -873,7 +873,7 @@ describe('CoordinatorService Standby Activation', () => {
 
     it('should reject activation when already a leader', async () => {
       // Simulates the leader check in activateStandby()
-      let isLeader = true;
+      const isLeader = true;
 
       const activateStandby = async (): Promise<boolean> => {
         if (isLeader) {
@@ -887,7 +887,7 @@ describe('CoordinatorService Standby Activation', () => {
     });
 
     it('should fail gracefully when leader acquisition fails', async () => {
-      let canAcquireLock = false;
+      const canAcquireLock = false;
 
       const tryAcquireLeadership = async (): Promise<boolean> => {
         return canAcquireLock;

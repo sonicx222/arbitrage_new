@@ -98,7 +98,7 @@ describe('ProfessionalQualityMonitor', () => {
 
     it('should handle recording errors gracefully', async () => {
       // Override setex to reject
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (mockRedis.setex as any).mockRejectedValueOnce(new Error('Redis error'));
 
       const result = {
@@ -179,7 +179,7 @@ describe('ProfessionalQualityMonitor', () => {
   describe('Performance Metrics', () => {
     it('should calculate latency percentiles correctly', async () => {
       const latencies = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
 
       const metrics = monitorInstance.calculateLatencyMetrics(latencies);
@@ -193,7 +193,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should handle empty latency arrays', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
       const metrics = monitorInstance.calculateLatencyMetrics([]);
 
@@ -206,7 +206,7 @@ describe('ProfessionalQualityMonitor', () => {
 
   describe('Score Grading System', () => {
     it('should assign A+ grade for perfect scores', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(98, {
         detectionPerformance: 95,
@@ -220,7 +220,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should assign F grade for failing scores', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(45, {
         detectionPerformance: 40,
@@ -234,7 +234,7 @@ describe('ProfessionalQualityMonitor', () => {
     });
 
     it('should assign CRITICAL risk for any component below 50', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
       const { grade, riskLevel } = monitorInstance.determineGradeAndRisk(85, {
         detectionPerformance: 95,
@@ -258,7 +258,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 85,
           operationalConsistency: 80
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -275,7 +275,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 90,
           operationalConsistency: 88
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -300,7 +300,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 90,
           operationalConsistency: 85
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -317,7 +317,7 @@ describe('ProfessionalQualityMonitor', () => {
           systemReliability: 60,
           operationalConsistency: 65
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         metrics: {} as any,
         timestamp: Date.now(),
         assessmentPeriod: { start: 0, end: 0, duration: 0 },
@@ -358,7 +358,7 @@ describe('ProfessionalQualityMonitor', () => {
   describe('Error Handling', () => {
     it('should handle Redis failures gracefully', async () => {
       // Make get reject
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (mockRedis.get as any).mockRejectedValueOnce(new Error('Redis down'));
 
       const score = await monitor.getCurrentQualityScore();
@@ -367,7 +367,7 @@ describe('ProfessionalQualityMonitor', () => {
 
     it('should handle calculation errors gracefully', async () => {
       // Mock metrics gathering to fail
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const monitorInstance = monitor as any;
       monitorInstance.gatherMetricsForPeriod = jest.fn(() => Promise.reject(new Error('Metrics error')));
 

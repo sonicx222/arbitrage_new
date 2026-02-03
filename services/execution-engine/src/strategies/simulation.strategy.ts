@@ -47,7 +47,8 @@ export class SimulationStrategy extends BaseExecutionStrategy {
   ): Promise<ExecutionResult> {
     const chain = opportunity.buyChain || 'ethereum';
     const dex = opportunity.buyDex || 'unknown';
-    const expectedProfit = opportunity.expectedProfit || 0;
+    // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+    const expectedProfit = opportunity.expectedProfit ?? 0;
 
     // Fix 1.1: Validate basic opportunity structure (consistent with real strategies)
     if (!opportunity.id) {

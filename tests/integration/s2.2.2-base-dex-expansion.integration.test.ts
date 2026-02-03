@@ -30,7 +30,7 @@ process.env.REDIS_URL = 'redis://localhost:6379';
 
 // Use require to avoid ts-jest transformation caching issues
 // This ensures we use the compiled dist output with all exports
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const {
   CHAINS,
   DEXES,

@@ -45,11 +45,11 @@ const mockFetch = jest.fn<() => Promise<MockFetchResponse>>();
 
 describe('BatchProvider', () => {
   let mockProvider: ethers.JsonRpcProvider;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let mockProviderSend: jest.Mock<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let mockProviderGetNetwork: jest.Mock<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let mockProviderGetConnection: jest.Mock<any>;
   let batchProvider: BatchProvider;
 

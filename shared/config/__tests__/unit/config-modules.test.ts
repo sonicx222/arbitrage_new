@@ -365,6 +365,81 @@ describe('Service Config Module', () => {
       expect(result).toBeUndefined();
     });
   });
+
+  // ===========================================================================
+  // Phase 3: Dynamic Bridge Selection Tests
+  // ===========================================================================
+  describe('selectOptimalBridge', () => {
+    const { selectOptimalBridge, selectOptimalBridgeFast } = require('../../src/service-config');
+
+    it('should return undefined for invalid routes', () => {
+      const result = selectOptimalBridge('unknown1', 'unknown2');
+      expect(result).toBeUndefined();
+    });
+
+    it('should return optimal bridge for valid routes', () => {
+      const result = selectOptimalBridge('ethereum', 'arbitrum');
+      expect(result).toBeDefined();
+      expect(result!.config).toBeDefined();
+      expect(result!.score).toBeGreaterThan(0);
+      expect(result!.score).toBeLessThanOrEqual(1);
+    });
+
+    it('should include normalized scores in result', () => {
+      const result = selectOptimalBridge('ethereum', 'arbitrum', 10000);
+      expect(result).toBeDefined();
+      expect(result!.normalizedLatency).toBeGreaterThanOrEqual(0);
+      expect(result!.normalizedLatency).toBeLessThanOrEqual(1);
+      expect(result!.normalizedCost).toBeGreaterThanOrEqual(0);
+      expect(result!.normalizedCost).toBeLessThanOrEqual(1);
+      expect(result!.reliabilityScore).toBeGreaterThanOrEqual(0);
+      expect(result!.reliabilityScore).toBeLessThanOrEqual(1);
+    });
+
+    it('should respect urgency parameter for scoring', () => {
+      // High urgency should favor faster bridges
+      const highUrgency = selectOptimalBridge('ethereum', 'arbitrum', 10000, 'high');
+      const lowUrgency = selectOptimalBridge('ethereum', 'arbitrum', 10000, 'low');
+
+      // Both should return valid results
+      expect(highUrgency).toBeDefined();
+      expect(lowUrgency).toBeDefined();
+
+      // Both should have valid scores (may select same bridge)
+      expect(highUrgency!.score).toBeGreaterThan(0);
+      expect(lowUrgency!.score).toBeGreaterThan(0);
+    });
+
+    it('should be case-insensitive', () => {
+      const lower = selectOptimalBridge('ethereum', 'arbitrum');
+      const upper = selectOptimalBridge('ETHEREUM', 'ARBITRUM');
+      expect(lower!.config.bridge).toBe(upper!.config.bridge);
+    });
+
+    it('selectOptimalBridgeFast should match selectOptimalBridge for lowercase inputs', () => {
+      const slow = selectOptimalBridge('ethereum', 'arbitrum', 10000, 'medium');
+      const fast = selectOptimalBridgeFast('ethereum', 'arbitrum', 10000, 'medium');
+      expect(fast!.config.bridge).toBe(slow!.config.bridge);
+      expect(fast!.score).toBeCloseTo(slow!.score, 5);
+    });
+
+    it('should include Hyperlane as a bridge option when available', () => {
+      // Phase 3 added Hyperlane routes
+      const options = getAllBridgeOptions('ethereum', 'arbitrum');
+      const hasHyperlane = options.some(opt => opt.bridge === 'hyperlane');
+      expect(hasHyperlane).toBe(true);
+    });
+
+    // Regression test for P3-001: normalizedLatency was negative for slow bridges
+    it('should return normalized scores in [0,1] range even for slow native bridges', () => {
+      // Routes with native bridges have very long latencies (7 days = 604800s)
+      // normalizedLatency should still be in [0,1] range, not negative
+      const result = selectOptimalBridge('base', 'ethereum', 1000, 'low');
+      expect(result).toBeDefined();
+      expect(result!.normalizedLatency).toBeGreaterThanOrEqual(0);
+      expect(result!.normalizedLatency).toBeLessThanOrEqual(1);
+    });
+  });
 });
 
 // =============================================================================

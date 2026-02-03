@@ -46,7 +46,7 @@ process.env.REDIS_URL = 'redis://localhost:6379';
 
 // P1-3 FIX: Use require to avoid ts-jest transformation caching issues
 // This ensures we use the compiled dist output with all exports
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const bscExpansionConfig = require('@arbitrage/config') as ConfigTypes;
 const {
   DEXES,

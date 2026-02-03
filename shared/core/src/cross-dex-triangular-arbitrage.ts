@@ -673,7 +673,7 @@ export class CrossDexTriangularArbitrage {
     // Start with 1 unit of token0 (1 ETH = 10^18 wei)
     let amountBigInt = ONE_ETH_WEI;
     const initialAmountBigInt = ONE_ETH_WEI;
-    let steps: TriangularStep[] = [];
+    const steps: TriangularStep[] = [];
 
     try {
       // Leg 1: token0 -> token1

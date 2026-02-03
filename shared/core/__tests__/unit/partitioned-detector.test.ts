@@ -552,8 +552,12 @@ describe('PartitionedDetector', () => {
     it('should calculate average event latency', async () => {
       await detector.start();
 
-      // Set latency stats
-      detector['eventLatencies'] = [10, 20, 30, 40, 50];
+      // P1-001 FIX: Use ring buffer API instead of direct array assignment
+      // Set latency stats via the recordEventLatency method
+      const latencies = [10, 20, 30, 40, 50];
+      for (const latency of latencies) {
+        detector['recordEventLatency'](latency);
+      }
 
       const health = detector.getPartitionHealth();
       expect(health.avgEventLatencyMs).toBe(30);

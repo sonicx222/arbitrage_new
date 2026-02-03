@@ -19,7 +19,7 @@ export {};
 // =============================================================================
 
 // Shared mock instance - will be populated by the mock factory
-let mockRedisInstance: any = null;
+const mockRedisInstance: any = null;
 let mockStreamsData: Map<string, any[]>;
 let mockConsumerGroupsData: Map<string, Map<string, any>>;
 

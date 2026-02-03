@@ -22,7 +22,7 @@ process.env.ETHEREUM_WS_URL = 'wss://mainnet.infura.io/ws/v3/test';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 // P1-3 FIX: Import config module and alias to avoid TS2451 redeclaration
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const pairInitConfig = require('@arbitrage/config');
 const {
   DEXES: pairInitDEXES,

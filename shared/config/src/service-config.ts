@@ -98,9 +98,39 @@ function warnOnProductionDefault(configName: string, defaultValue: string): void
   }
 }
 
+// =============================================================================
+// LOCALHOST DETECTION HELPER
+// FIX: Comprehensive localhost detection including IPv6 and Docker patterns
+// =============================================================================
+
+/**
+ * Check if a URL points to a localhost address.
+ * Detects common localhost patterns including:
+ * - localhost
+ * - 127.0.0.1 (IPv4 loopback)
+ * - ::1 (IPv6 loopback)
+ * - 0.0.0.0 (bind all interfaces, often used as localhost)
+ * - host.docker.internal (Docker Desktop host access)
+ * - [::1] (bracketed IPv6)
+ *
+ * @param url - URL to check
+ * @returns true if URL points to localhost
+ */
+export function isLocalhostUrl(url: string): boolean {
+  const lowered = url.toLowerCase();
+  return (
+    lowered.includes('localhost') ||
+    lowered.includes('127.0.0.1') ||
+    lowered.includes('::1') ||
+    lowered.includes('[::1]') ||
+    lowered.includes('0.0.0.0') ||
+    lowered.includes('host.docker.internal')
+  );
+}
+
 // Validate Redis URL - warn if using localhost in production
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-if (redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1')) {
+if (isLocalhostUrl(redisUrl)) {
   warnOnProductionDefault('REDIS_URL', redisUrl);
 }
 
@@ -109,7 +139,7 @@ export const SERVICE_CONFIGS = {
     url: redisUrl,
     password: process.env.REDIS_PASSWORD,
     /** Flag indicating if using production Redis (not localhost) */
-    isProductionRedis: !redisUrl.includes('localhost') && !redisUrl.includes('127.0.0.1'),
+    isProductionRedis: !isLocalhostUrl(redisUrl),
   },
   monitoring: {
     enabled: process.env.MONITORING_ENABLED === 'true',
@@ -117,12 +147,17 @@ export const SERVICE_CONFIGS = {
     endpoints: (process.env.MONITORING_ENDPOINTS || '').split(',').filter(Boolean),
   },
   /** Indicates if configuration is suitable for production use */
-  isProductionConfig: isProduction && !redisUrl.includes('localhost'),
+  isProductionConfig: isProduction && !isLocalhostUrl(redisUrl),
 };
 
 /**
  * Validate that all required production configurations are set.
  * Call this at application startup in production to fail-fast.
+ *
+ * FIX: Enhanced validation to include:
+ * - Comprehensive localhost detection (IPv6, Docker)
+ * - RPC URL validation for at least one chain
+ * - MEV provider key warnings
  *
  * @throws Error if required production configuration is missing
  */
@@ -132,15 +167,79 @@ export function validateProductionConfig(): void {
   }
 
   const missingConfigs: string[] = [];
+  const warnings: string[] = [];
 
-  if (!process.env.REDIS_URL || process.env.REDIS_URL.includes('localhost')) {
-    missingConfigs.push('REDIS_URL (production Redis instance required)');
+  // Redis URL validation - use comprehensive localhost check
+  if (!process.env.REDIS_URL || isLocalhostUrl(process.env.REDIS_URL)) {
+    missingConfigs.push('REDIS_URL (production Redis instance required - localhost not allowed)');
   }
 
+  // Wallet credentials validation
   if (!process.env.WALLET_PRIVATE_KEY && !process.env.WALLET_MNEMONIC) {
     missingConfigs.push('WALLET_PRIVATE_KEY or WALLET_MNEMONIC (wallet credentials required for execution)');
   }
 
+  // RPC URL validation - at least one chain should have a dedicated RPC URL set
+  // Maps chain name to env var name for common chains
+  const chainRpcEnvVars: Record<string, string> = {
+    arbitrum: 'ARBITRUM_RPC_URL',
+    bsc: 'BSC_RPC_URL',
+    base: 'BASE_RPC_URL',
+    polygon: 'POLYGON_RPC_URL',
+    optimism: 'OPTIMISM_RPC_URL',
+    ethereum: 'ETHEREUM_RPC_URL',
+    avalanche: 'AVALANCHE_RPC_URL',
+    fantom: 'FANTOM_RPC_URL',
+    zksync: 'ZKSYNC_RPC_URL',
+    linea: 'LINEA_RPC_URL',
+    solana: 'SOLANA_RPC_URL',
+  };
+
+  // Check if at least one chain-specific RPC URL is configured
+  const configuredChainRpcs = Object.entries(chainRpcEnvVars).filter(
+    ([, envVar]) => process.env[envVar] && !isLocalhostUrl(process.env[envVar]!)
+  );
+
+  if (configuredChainRpcs.length === 0) {
+    // Check for provider API keys as fallback (dRPC, Ankr, etc.)
+    const hasProviderKeys = !!(
+      process.env.DRPC_API_KEY ||
+      process.env.ANKR_API_KEY ||
+      process.env.INFURA_API_KEY ||
+      process.env.ALCHEMY_API_KEY
+    );
+
+    if (!hasProviderKeys) {
+      missingConfigs.push(
+        'RPC Configuration: Either set chain-specific URLs (e.g., ARBITRUM_RPC_URL) ' +
+        'or provider API keys (DRPC_API_KEY, ANKR_API_KEY, INFURA_API_KEY, or ALCHEMY_API_KEY)'
+      );
+    }
+  }
+
+  // MEV provider key warnings (optional but recommended for production)
+  if (!process.env.FLASHBOTS_AUTH_KEY) {
+    warnings.push('FLASHBOTS_AUTH_KEY not set - MEV protection on Ethereum will be limited');
+  }
+
+  // Solana-specific validation if Solana partition is enabled
+  if (process.env.PARTITION_ID === 'solana-native') {
+    if (!process.env.SOLANA_RPC_URL || isLocalhostUrl(process.env.SOLANA_RPC_URL)) {
+      missingConfigs.push('SOLANA_RPC_URL (required for solana-native partition)');
+    }
+    // Check for premium Solana providers
+    if (!process.env.HELIUS_API_KEY && !process.env.TRITON_API_KEY) {
+      warnings.push('HELIUS_API_KEY or TRITON_API_KEY recommended for Solana production');
+    }
+  }
+
+  // Log warnings
+  if (warnings.length > 0) {
+    console.warn('\n⚠️  Production configuration warnings:');
+    warnings.forEach(w => console.warn(`  - ${w}`));
+  }
+
+  // Throw if critical configs are missing
   if (missingConfigs.length > 0) {
     throw new Error(
       `Production configuration validation failed!\n\n` +
@@ -334,6 +433,52 @@ export const BRIDGE_COSTS: BridgeCostConfig[] = [
   { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'ethereum', feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
   { bridge: 'wormhole', sourceChain: 'arbitrum', targetChain: 'solana', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
   { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'arbitrum', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
+
+  // Phase 4: Connext bridge routes (liquidity network + optimistic messaging)
+  // Data source: https://bridge.connext.network/ - 0.03-0.05% fee, 60-120s latency
+  // Connext uses a hub-and-spoke model with liquidity pools and fast path for common routes
+  // Research impact: +5-8% more cross-chain opportunities
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'bsc', feePercentage: 0.04, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.95 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'base', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'arbitrum', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'base', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'optimism', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'arbitrum', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'optimism', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+
+  // Phase 3: Hyperlane bridge routes (permissionless interoperability)
+  // Data source: https://www.hyperlane.xyz/ - 0.05% fee, 100-300s latency
+  // Hyperlane supports interchain messaging with customizable security modules
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 150, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'avalanche', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'bsc', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'polygon', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 150, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
 ];
 
 // =============================================================================
@@ -474,5 +619,256 @@ export function getAllBridgeOptionsFast(
 ): BridgeCostConfig[] {
   const routeKey: BridgeCostKey = `${sourceChain}:${targetChain}`;
   return BRIDGE_COST_BY_ROUTE.get(routeKey) || [];
+}
+
+// =============================================================================
+// PHASE 3: DYNAMIC BRIDGE SELECTION ALGORITHM
+// Multi-factor scoring considering latency, cost, and reliability
+// =============================================================================
+
+/**
+ * Urgency level for bridge selection.
+ * Affects weighting of latency vs cost in scoring.
+ */
+export type BridgeUrgency = 'low' | 'medium' | 'high';
+
+/**
+ * Result from dynamic bridge selection.
+ */
+export interface OptimalBridgeResult {
+  config: BridgeCostConfig;
+  score: number;
+  normalizedLatency: number;
+  normalizedCost: number;
+  reliabilityScore: number;
+}
+
+/**
+ * Phase 3: Urgency-based weight configuration for bridge scoring.
+ *
+ * - High urgency: Prioritize latency (time-sensitive arbitrage)
+ * - Medium urgency: Balanced approach
+ * - Low urgency: Prioritize cost savings
+ */
+const BRIDGE_SCORE_WEIGHTS: Record<BridgeUrgency, {
+  latency: number;
+  cost: number;
+  reliability: number;
+}> = {
+  high: { latency: 0.6, cost: 0.2, reliability: 0.2 },
+  medium: { latency: 0.35, cost: 0.4, reliability: 0.25 },
+  low: { latency: 0.15, cost: 0.55, reliability: 0.3 },
+};
+
+/**
+ * Maximum reasonable latency for normalization (1 hour).
+ * Bridges slower than this are heavily penalized.
+ */
+const MAX_REASONABLE_LATENCY_SECONDS = 3600;
+
+/**
+ * Phase 3: Select optimal bridge using multi-factor scoring.
+ *
+ * Unlike `getBridgeCost()` which always returns lowest-fee bridge,
+ * this function considers:
+ * - Latency (weighted by urgency)
+ * - Cost (fee percentage + minimum fee)
+ * - Reliability (historical success rate)
+ *
+ * Research impact: +3-5% net profit per trade from better bridge selection.
+ *
+ * @param sourceChain - Source chain
+ * @param targetChain - Target chain
+ * @param tradeSizeUsd - Trade size in USD (affects cost calculation)
+ * @param urgency - How time-sensitive the opportunity is
+ * @returns Optimal bridge config with scoring details, or undefined if no routes
+ */
+export function selectOptimalBridge(
+  sourceChain: string,
+  targetChain: string,
+  tradeSizeUsd: number = 1000,
+  urgency: BridgeUrgency = 'medium'
+): OptimalBridgeResult | undefined {
+  const options = getAllBridgeOptions(sourceChain, targetChain);
+
+  if (options.length === 0) {
+    return undefined;
+  }
+
+  // If only one option, return it directly
+  if (options.length === 1) {
+    const config = options[0];
+    return {
+      config,
+      score: 1.0,
+      // FIX P3-001: Clamp to [0,1] range - native bridges can have latency > MAX_REASONABLE_LATENCY
+      normalizedLatency: Math.max(0, 1.0 - (config.estimatedLatencySeconds / MAX_REASONABLE_LATENCY_SECONDS)),
+      normalizedCost: 1.0, // Best by default
+      reliabilityScore: config.reliability,
+    };
+  }
+
+  const weights = BRIDGE_SCORE_WEIGHTS[urgency];
+  let bestResult: OptimalBridgeResult | undefined;
+  let bestScore = -1;
+
+  // Find min/max values for normalization
+  let minLatency = Infinity;
+  let maxLatency = 0;
+  let minCost = Infinity;
+  let maxCost = 0;
+
+  // Calculate actual costs for each bridge
+  const bridgeCosts = options.map(opt => {
+    const percentageFee = tradeSizeUsd * (opt.feePercentage / 100);
+    return Math.max(percentageFee, opt.minFeeUsd);
+  });
+
+  for (let i = 0; i < options.length; i++) {
+    const opt = options[i];
+    const cost = bridgeCosts[i];
+
+    minLatency = Math.min(minLatency, opt.estimatedLatencySeconds);
+    maxLatency = Math.max(maxLatency, opt.estimatedLatencySeconds);
+    minCost = Math.min(minCost, cost);
+    maxCost = Math.max(maxCost, cost);
+  }
+
+  // Score each bridge option
+  for (let i = 0; i < options.length; i++) {
+    const opt = options[i];
+    const cost = bridgeCosts[i];
+
+    // Normalize latency (lower is better, 0-1 scale, capped at max reasonable)
+    // normalizedLatency = 1.0 means instant, 0.0 means >= MAX_REASONABLE_LATENCY
+    const cappedLatency = Math.min(opt.estimatedLatencySeconds, MAX_REASONABLE_LATENCY_SECONDS);
+    let normalizedLatency: number;
+    if (maxLatency === minLatency) {
+      normalizedLatency = 1.0;
+    } else {
+      // Invert so lower latency = higher score
+      normalizedLatency = 1.0 - ((cappedLatency - minLatency) / (maxLatency - minLatency));
+    }
+
+    // Normalize cost (lower is better, 0-1 scale)
+    let normalizedCost: number;
+    if (maxCost === minCost) {
+      normalizedCost = 1.0;
+    } else {
+      // Invert so lower cost = higher score
+      normalizedCost = 1.0 - ((cost - minCost) / (maxCost - minCost));
+    }
+
+    // Reliability is already 0-1 scale
+    const reliabilityScore = opt.reliability;
+
+    // Calculate weighted score
+    const score = (
+      weights.latency * normalizedLatency +
+      weights.cost * normalizedCost +
+      weights.reliability * reliabilityScore
+    );
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestResult = {
+        config: opt,
+        score,
+        normalizedLatency,
+        normalizedCost,
+        reliabilityScore,
+      };
+    }
+  }
+
+  return bestResult;
+}
+
+/**
+ * Phase 3: Fast-path version of selectOptimalBridge.
+ * Skips toLowerCase() normalization - use when inputs are guaranteed lowercase.
+ */
+export function selectOptimalBridgeFast(
+  sourceChain: string,
+  targetChain: string,
+  tradeSizeUsd: number = 1000,
+  urgency: BridgeUrgency = 'medium'
+): OptimalBridgeResult | undefined {
+  const options = getAllBridgeOptionsFast(sourceChain, targetChain);
+
+  if (options.length === 0) {
+    return undefined;
+  }
+
+  // If only one option, return it directly
+  if (options.length === 1) {
+    const config = options[0];
+    return {
+      config,
+      score: 1.0,
+      // FIX P3-001: Clamp to [0,1] range - native bridges can have latency > MAX_REASONABLE_LATENCY
+      normalizedLatency: Math.max(0, 1.0 - (config.estimatedLatencySeconds / MAX_REASONABLE_LATENCY_SECONDS)),
+      normalizedCost: 1.0,
+      reliabilityScore: config.reliability,
+    };
+  }
+
+  const weights = BRIDGE_SCORE_WEIGHTS[urgency];
+  let bestResult: OptimalBridgeResult | undefined;
+  let bestScore = -1;
+
+  // Pre-compute costs and find ranges
+  const bridgeCosts: number[] = [];
+  let minLatency = Infinity;
+  let maxLatency = 0;
+  let minCost = Infinity;
+  let maxCost = 0;
+
+  for (const opt of options) {
+    const percentageFee = tradeSizeUsd * (opt.feePercentage / 100);
+    const cost = Math.max(percentageFee, opt.minFeeUsd);
+    bridgeCosts.push(cost);
+
+    minLatency = Math.min(minLatency, opt.estimatedLatencySeconds);
+    maxLatency = Math.max(maxLatency, opt.estimatedLatencySeconds);
+    minCost = Math.min(minCost, cost);
+    maxCost = Math.max(maxCost, cost);
+  }
+
+  // Score each option
+  for (let i = 0; i < options.length; i++) {
+    const opt = options[i];
+    const cost = bridgeCosts[i];
+
+    const cappedLatency = Math.min(opt.estimatedLatencySeconds, MAX_REASONABLE_LATENCY_SECONDS);
+    const normalizedLatency = maxLatency === minLatency
+      ? 1.0
+      : 1.0 - ((cappedLatency - minLatency) / (maxLatency - minLatency));
+
+    const normalizedCost = maxCost === minCost
+      ? 1.0
+      : 1.0 - ((cost - minCost) / (maxCost - minCost));
+
+    const reliabilityScore = opt.reliability;
+
+    const score = (
+      weights.latency * normalizedLatency +
+      weights.cost * normalizedCost +
+      weights.reliability * reliabilityScore
+    );
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestResult = {
+        config: opt,
+        score,
+        normalizedLatency,
+        normalizedCost,
+        reliabilityScore,
+      };
+    }
+  }
+
+  return bestResult;
 }
 

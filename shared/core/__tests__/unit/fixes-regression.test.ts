@@ -1017,7 +1017,7 @@ describe('P0-3 Deep-Dive: Coordinator Heartbeat Failure Handling', () => {
 describe('P0-4 Deep-Dive: Leadership Election Lock Renewal', () => {
   it('should return false if lock is held by different instance', async () => {
     const lockValue = 'instance-1';
-    let storedValue = 'instance-2'; // Different instance has lock
+    const storedValue = 'instance-2'; // Different instance has lock
 
     const renewLeaderLock = async (instanceId: string): Promise<boolean> => {
       // Simulate get
@@ -1037,7 +1037,7 @@ describe('P0-4 Deep-Dive: Leadership Election Lock Renewal', () => {
 
   it('should return true if we hold the lock', async () => {
     const instanceId = 'instance-1';
-    let storedValue = 'instance-1'; // We have the lock
+    const storedValue = 'instance-1'; // We have the lock
     let expireCalled = false;
 
     const renewLeaderLock = async (id: string): Promise<boolean> => {
@@ -1058,7 +1058,7 @@ describe('P0-4 Deep-Dive: Leadership Election Lock Renewal', () => {
 
   it('should refresh TTL when already holding lock', async () => {
     const instanceId = 'my-instance';
-    let storedValue = instanceId;
+    const storedValue = instanceId;
     let ttlExtended = false;
 
     const tryAcquireLeadership = async (): Promise<boolean> => {

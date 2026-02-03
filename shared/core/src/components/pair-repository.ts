@@ -16,6 +16,8 @@
  */
 
 import type { Pair } from '../../../types/src';
+// HOT-PATH: Import cached token pair key utility to avoid string allocation
+import { getTokenPairKeyCached } from './token-utils';
 
 // =============================================================================
 // Types
@@ -443,12 +445,13 @@ export class PairRepository {
    * T1.1: Generate normalized token pair key for O(1) index lookup.
    * Tokens are sorted alphabetically (lowercase) to ensure consistent key
    * regardless of token order in the pair.
+   *
+   * HOT-PATH FIX: Now uses cached version from token-utils to avoid
+   * repeated toLowerCase() and string concatenation in tight loops.
    */
   private getTokenPairKey(token0: string, token1: string): string {
-    const t0 = token0.toLowerCase();
-    const t1 = token1.toLowerCase();
-    // Sort alphabetically for consistent key
-    return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+    // HOT-PATH: Use cached version to avoid string allocation
+    return getTokenPairKeyCached(token0, token1);
   }
 
   /**

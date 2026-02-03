@@ -96,8 +96,15 @@ export class ConfigManager {
 
   /**
    * Reset the singleton instance (for testing).
+   * FIX: Also clear rules from existing instance to prevent stale rules
+   * if a reference to the old instance is held elsewhere.
    */
   static resetInstance(): void {
+    if (ConfigManager.instance) {
+      // Clear rules from existing instance before nullifying
+      // This is defensive - helps if old instance reference is held elsewhere
+      ConfigManager.instance.rules.clear();
+    }
     ConfigManager.instance = null;
   }
 

@@ -51,6 +51,52 @@ const BRIDGE_ROUTE_ESTIMATES: Record<string, { latency: number; cost: number }> 
   'arbitrum-ethereum-native': { latency: 604800, cost: 0.005 },
   'optimism-ethereum-native': { latency: 604800, cost: 0.005 },
   'base-ethereum-native': { latency: 604800, cost: 0.005 },
+
+  // Phase 4: Connext routes (liquidity network + optimistic messaging)
+  // Connext uses liquidity pools with relayers for fast settlement
+  // Latency: 60-120s typical, Cost: ~0.03-0.05% fee
+  // Research impact: +5-8% more cross-chain opportunities
+  'ethereum-arbitrum-connext': { latency: 90, cost: 0.0006 },
+  'ethereum-optimism-connext': { latency: 90, cost: 0.0006 },
+  'ethereum-polygon-connext': { latency: 90, cost: 0.0006 },
+  'ethereum-bsc-connext': { latency: 120, cost: 0.0008 },
+  'ethereum-base-connext': { latency: 90, cost: 0.0006 },
+  'arbitrum-ethereum-connext': { latency: 90, cost: 0.0004 },
+  'arbitrum-optimism-connext': { latency: 60, cost: 0.0003 },
+  'arbitrum-polygon-connext': { latency: 90, cost: 0.0004 },
+  'arbitrum-base-connext': { latency: 60, cost: 0.0003 },
+  'optimism-ethereum-connext': { latency: 90, cost: 0.0004 },
+  'optimism-arbitrum-connext': { latency: 60, cost: 0.0003 },
+  'optimism-polygon-connext': { latency: 90, cost: 0.0004 },
+  'optimism-base-connext': { latency: 60, cost: 0.0003 },
+  'polygon-ethereum-connext': { latency: 90, cost: 0.0004 },
+  'polygon-arbitrum-connext': { latency: 90, cost: 0.0004 },
+  'polygon-optimism-connext': { latency: 90, cost: 0.0004 },
+  'base-ethereum-connext': { latency: 90, cost: 0.0004 },
+  'base-arbitrum-connext': { latency: 60, cost: 0.0003 },
+  'base-optimism-connext': { latency: 60, cost: 0.0003 },
+
+  // Phase 3: Hyperlane routes (permissionless interoperability)
+  // Hyperlane offers customizable security with ISM (Interchain Security Module)
+  // Latency: 100-200s typical, Cost: ~0.05% fee
+  'ethereum-arbitrum-hyperlane': { latency: 120, cost: 0.0008 },
+  'ethereum-optimism-hyperlane': { latency: 120, cost: 0.0008 },
+  'ethereum-polygon-hyperlane': { latency: 150, cost: 0.0008 },
+  'ethereum-base-hyperlane': { latency: 120, cost: 0.0008 },
+  'ethereum-avalanche-hyperlane': { latency: 180, cost: 0.0008 },
+  'ethereum-bsc-hyperlane': { latency: 180, cost: 0.0008 },
+  'arbitrum-ethereum-hyperlane': { latency: 120, cost: 0.0005 },
+  'arbitrum-optimism-hyperlane': { latency: 90, cost: 0.0003 },
+  'arbitrum-base-hyperlane': { latency: 90, cost: 0.0003 },
+  'arbitrum-polygon-hyperlane': { latency: 120, cost: 0.0003 },
+  'optimism-ethereum-hyperlane': { latency: 120, cost: 0.0005 },
+  'optimism-arbitrum-hyperlane': { latency: 90, cost: 0.0003 },
+  'optimism-base-hyperlane': { latency: 90, cost: 0.0003 },
+  'base-ethereum-hyperlane': { latency: 120, cost: 0.0005 },
+  'base-arbitrum-hyperlane': { latency: 90, cost: 0.0003 },
+  'base-optimism-hyperlane': { latency: 90, cost: 0.0003 },
+  'polygon-ethereum-hyperlane': { latency: 150, cost: 0.0005 },
+  'polygon-arbitrum-hyperlane': { latency: 120, cost: 0.0003 },
 };
 
 // Default estimate for unknown routes

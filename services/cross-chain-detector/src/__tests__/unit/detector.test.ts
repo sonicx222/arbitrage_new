@@ -1136,7 +1136,7 @@ describe('Version Counter Edge Cases', () => {
   });
 
   it('should rebuild cache after version reset', () => {
-    let version = 1;
+    const version = 1;
     let cachedVersion = -1;
     let cacheRebuilt = false;
 

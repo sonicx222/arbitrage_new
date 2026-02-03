@@ -245,6 +245,11 @@ export {
   // Hot-path optimized versions (skip toLowerCase normalization)
   getBridgeCostFast,
   getAllBridgeOptionsFast,
+  // Phase 3: Dynamic bridge selection (multi-factor scoring)
+  selectOptimalBridge,
+  selectOptimalBridgeFast,
+  BridgeUrgency,
+  OptimalBridgeResult,
   // Fix 1.1: Centralized flash loan constants
   AAVE_V3_FEE_BPS,
   BPS_DENOMINATOR,

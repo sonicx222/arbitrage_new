@@ -571,7 +571,7 @@ describe('S3.3.3.11: Arbitrage Pair Potential', () => {
 describe('S3.3.3.12: Summary Statistics', () => {
   it('should report correct total Solana token count', () => {
     const solanaTokens = CORE_TOKENS.solana || [];
-    // eslint-disable-next-line no-console
+     
     console.log(`Total Solana tokens configured: ${solanaTokens.length}`);
     expect(solanaTokens.length).toBeGreaterThanOrEqual(15);
   });
@@ -596,7 +596,7 @@ describe('S3.3.3.12: Summary Statistics', () => {
       else if (['mSOL', 'jitoSOL', 'BSOL'].includes(token.symbol)) categories.lst++;
     }
 
-    // eslint-disable-next-line no-console
+     
     console.log('Token category distribution:', categories);
 
     expect(categories.anchor).toBe(1);
@@ -615,7 +615,7 @@ describe('S3.3.3.12: Summary Statistics', () => {
       decimals[token.decimals] = (decimals[token.decimals] || 0) + 1;
     }
 
-    // eslint-disable-next-line no-console
+     
     console.log('Decimal distribution:', decimals);
 
     // Expected decimal distribution for 15 Solana tokens:

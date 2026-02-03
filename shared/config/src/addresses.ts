@@ -358,6 +358,16 @@ export const BRIDGE_CONTRACTS: Readonly<Record<string, Record<string, string>>> 
     arbitrum: '0xa5f208e072434bC67592E4C49C1B991BA79BCA46',
     base: '0xbebdb6C8ddC678FfA9f8748f85C815C556Dd8ac6',
   },
+  // Phase 4: Connext bridge contracts (Amarok upgrade - liquidity network)
+  // Source: https://docs.connext.network/resources/deployments
+  connext: {
+    ethereum: '0x8898B472C54c31894e3B9bb83cEA802a5d0e63C6', // Connext Router (Mainnet)
+    arbitrum: '0xEE9deC2712cCE65174B561151701Bf54b99C24C8', // Connext Router (Arbitrum One)
+    optimism: '0x8f7492DE823025b4CfaAB1D34c58963F2af5DEDA', // Connext Router (Optimism)
+    polygon: '0x11984dc4465481512eb5b777E44061C158CF2259', // Connext Router (Polygon)
+    bsc: '0xCd401c10afa37d641d2F594852DA94C700e4F2CE', // Connext Router (BSC)
+    base: '0xB8448C6f7f7887D36DcA487370778e419e9ebE3F', // Connext Router (Base)
+  },
 } as const;
 
 /**

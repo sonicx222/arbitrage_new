@@ -185,9 +185,18 @@ export class PartitionedDetector extends EventEmitter {
   // Health tracking
   // P6-FIX: Add max size constant to prevent unbounded memory growth
   private static readonly MAX_LATENCY_SAMPLES = 1000;
-  protected eventLatencies: number[] = [];
+  // P1-001 FIX: Use ring buffer instead of array with slice() to avoid memory churn
+  // Float64Array is pre-allocated and reused - no GC pressure in hot path
+  protected eventLatencies: Float64Array = new Float64Array(PartitionedDetector.MAX_LATENCY_SAMPLES);
+  protected eventLatencyIndex: number = 0;  // Current write position
+  protected eventLatencyCount: number = 0;  // Number of samples written (up to MAX_LATENCY_SAMPLES)
   protected healthMonitoringInterval: NodeJS.Timeout | null = null;
   protected startTime: number = 0;
+
+  // P1-002 FIX: Cache for normalized token pairs to avoid repeated string allocations in hot path
+  // LRU-style cache with bounded size to prevent memory growth
+  private static readonly MAX_NORMALIZED_PAIR_CACHE_SIZE = 10000;
+  private normalizedPairCache: Map<string, string> = new Map();
 
   // Lifecycle state
   private running: boolean = false;
@@ -247,10 +256,20 @@ export class PartitionedDetector extends EventEmitter {
    * @returns Normalized token pair string
    */
   protected normalizeTokenPair(pairKey: string): string {
+    // P1-002 FIX: Check cache first to avoid repeated string allocations
+    const cached = this.normalizedPairCache.get(pairKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
     // P2-3 FIX: Use lastIndexOf instead of split() to avoid array allocation in hot path
     // Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
     const lastSep = pairKey.lastIndexOf('_');
-    if (lastSep === -1) return pairKey;
+    if (lastSep === -1) {
+      // Cache and return unchanged key
+      this.cacheNormalizedPair(pairKey, pairKey);
+      return pairKey;
+    }
 
     const token1 = pairKey.slice(lastSep + 1);
     const beforeLastSep = pairKey.slice(0, lastSep);
@@ -265,7 +284,31 @@ export class PartitionedDetector extends EventEmitter {
     const normalizedToken0 = this.normalizeToken(token0);
     const normalizedToken1 = this.normalizeToken(token1);
 
-    return `${normalizedToken0}_${normalizedToken1}`;
+    const result = `${normalizedToken0}_${normalizedToken1}`;
+
+    // Cache the result for future lookups
+    this.cacheNormalizedPair(pairKey, result);
+
+    return result;
+  }
+
+  /**
+   * P1-002 FIX: Cache normalized pair with bounded size to prevent memory leak.
+   * Uses simple eviction: clear half the cache when full.
+   */
+  private cacheNormalizedPair(key: string, value: string): void {
+    // Evict half the cache if at capacity (simple but effective for this use case)
+    if (this.normalizedPairCache.size >= PartitionedDetector.MAX_NORMALIZED_PAIR_CACHE_SIZE) {
+      // Get first half of entries to delete (oldest entries in Map insertion order)
+      const entriesToDelete = Math.floor(this.normalizedPairCache.size / 2);
+      let deleted = 0;
+      for (const cacheKey of this.normalizedPairCache.keys()) {
+        if (deleted >= entriesToDelete) break;
+        this.normalizedPairCache.delete(cacheKey);
+        deleted++;
+      }
+    }
+    this.normalizedPairCache.set(key, value);
   }
 
   // ===========================================================================
@@ -425,7 +468,11 @@ export class PartitionedDetector extends EventEmitter {
 
     // Clear tracking data
     this.chainPrices.clear();
-    this.eventLatencies = [];
+    // P1-001 FIX: Reset ring buffer state (no allocation - just reset indices)
+    this.eventLatencyIndex = 0;
+    this.eventLatencyCount = 0;
+    // P1-002 FIX: Clear normalization cache to free memory
+    this.normalizedPairCache.clear();
   }
 
   // ===========================================================================
@@ -685,9 +732,15 @@ export class PartitionedDetector extends EventEmitter {
       status = 'degraded';
     }
 
-    const avgLatency = this.eventLatencies.length > 0
-      ? this.eventLatencies.reduce((a, b) => a + b, 0) / this.eventLatencies.length
-      : 0;
+    // P1-001 FIX: Calculate average from ring buffer without creating new arrays
+    let avgLatency = 0;
+    if (this.eventLatencyCount > 0) {
+      let sum = 0;
+      for (let i = 0; i < this.eventLatencyCount; i++) {
+        sum += this.eventLatencies[i];
+      }
+      avgLatency = sum / this.eventLatencyCount;
+    }
 
     return {
       partitionId: this.config.partitionId,
@@ -714,15 +767,19 @@ export class PartitionedDetector extends EventEmitter {
   }
 
   /**
-   * P6-FIX: Record event latency with bounded array to prevent memory leak.
+   * P6-FIX + P1-001 FIX: Record event latency using ring buffer.
+   * O(1) operation with zero memory allocation - critical for hot path performance.
    * Keeps only the most recent MAX_LATENCY_SAMPLES entries.
    * Subclasses should use this method to record latencies safely.
    */
   protected recordEventLatency(latencyMs: number): void {
-    this.eventLatencies.push(latencyMs);
-    // Trim array if it exceeds max size - keep only recent samples
-    if (this.eventLatencies.length > PartitionedDetector.MAX_LATENCY_SAMPLES) {
-      this.eventLatencies = this.eventLatencies.slice(-PartitionedDetector.MAX_LATENCY_SAMPLES);
+    // Write to current position in ring buffer
+    this.eventLatencies[this.eventLatencyIndex] = latencyMs;
+    // Advance index with wrap-around
+    this.eventLatencyIndex = (this.eventLatencyIndex + 1) % PartitionedDetector.MAX_LATENCY_SAMPLES;
+    // Track count up to max (for accurate average when buffer not yet full)
+    if (this.eventLatencyCount < PartitionedDetector.MAX_LATENCY_SAMPLES) {
+      this.eventLatencyCount++;
     }
   }
 

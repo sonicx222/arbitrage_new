@@ -199,7 +199,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Fix 9.3: Use extracted bridge profitability helper
       // Validate profit still viable after bridge fees
       const ethPriceUsd = getDefaultPrice('ETH');
-      const expectedProfit = opportunity.expectedProfit || 0;
+      // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+      const expectedProfit = opportunity.expectedProfit ?? 0;
 
       // Fix 2.2: Ensure totalFee is bigint with proper handling of all formats
       // The bridge quote may return:

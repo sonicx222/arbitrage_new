@@ -859,8 +859,9 @@ export abstract class BaseExecutionStrategy {
       }
     }
 
-    const expectedProfit = opportunity.expectedProfit || 0;
-    const minProfitThreshold = ARBITRAGE_CONFIG.minProfitThreshold || 10;
+    // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+    const expectedProfit = opportunity.expectedProfit ?? 0;
+    const minProfitThreshold = ARBITRAGE_CONFIG.minProfitThreshold ?? 10;
     const requiredProfit = minProfitThreshold * 1.2;
 
     if (expectedProfit < requiredProfit) {
@@ -944,7 +945,8 @@ export abstract class BaseExecutionStrategy {
     }
 
     const amountIn = BigInt(opportunity.amountIn);
-    const expectedProfit = opportunity.expectedProfit || 0;
+    // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+    const expectedProfit = opportunity.expectedProfit ?? 0;
     const expectedProfitWei = ethers.parseUnits(
       Math.max(0, expectedProfit).toFixed(18),
       18
@@ -1181,9 +1183,10 @@ export abstract class BaseExecutionStrategy {
     receipt: ethers.TransactionReceipt,
     opportunity: ArbitrageOpportunity
   ): Promise<number> {
-    const gasPrice = receipt.gasPrice || BigInt(0);
+    const gasPrice = receipt.gasPrice ?? BigInt(0);
     const gasCost = parseFloat(ethers.formatEther(receipt.gasUsed * gasPrice));
-    const expectedProfit = opportunity.expectedProfit || 0;
+    // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+    const expectedProfit = opportunity.expectedProfit ?? 0;
     return expectedProfit - gasCost;
   }
 
@@ -1286,7 +1289,8 @@ export abstract class BaseExecutionStrategy {
     }
 
     const opportunityAge = Date.now() - opportunity.timestamp;
-    const expectedProfit = opportunity.expectedProfit || 0;
+    // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
+    const expectedProfit = opportunity.expectedProfit ?? 0;
 
     if (!ctx.simulationService.shouldSimulate(expectedProfit, opportunityAge)) {
       ctx.stats.simulationsSkipped++;

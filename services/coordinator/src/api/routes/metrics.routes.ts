@@ -9,7 +9,7 @@
 
 import { Router, Request, Response } from 'express';
 import { apiAuth, apiAuthorize } from '@shared/security';
-import { findKLargest } from '@arbitrage/core';
+import { findKLargest, getRedisClient } from '@arbitrage/core';
 import type { CoordinatorStateProvider } from '../types';
 
 /**
@@ -113,6 +113,56 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
         instanceId: state.getInstanceId(),
         lockKey: state.getLockKey()
       });
+    }
+  );
+
+  /**
+   * Phase 4: GET /api/redis/stats
+   * Returns Redis command usage statistics.
+   *
+   * Provides visibility into Redis usage for free-tier optimization.
+   * Helps monitor Upstash 10,000 commands/day limit.
+   *
+   * @see ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 4 - Redis Usage Optimization
+   */
+  router.get(
+    '/redis/stats',
+    readAuth,
+    apiAuthorize('metrics', 'read'),
+    async (_req: Request, res: Response) => {
+      try {
+        const redis = await getRedisClient();
+        const stats = redis.getCommandStats();
+        res.json(stats);
+      } catch (error) {
+        res.status(500).json({
+          error: 'Failed to get Redis stats',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+  );
+
+  /**
+   * Phase 4: GET /api/redis/dashboard
+   * Returns formatted Redis usage dashboard (text/plain).
+   *
+   * Useful for terminal display and quick diagnostics.
+   */
+  router.get(
+    '/redis/dashboard',
+    readAuth,
+    apiAuthorize('metrics', 'read'),
+    async (_req: Request, res: Response) => {
+      try {
+        const redis = await getRedisClient();
+        const dashboard = redis.getUsageDashboard();
+        res.type('text/plain').send(dashboard);
+      } catch (error) {
+        // Phase 4 FIX: Include error details for debugging (consistent with text/plain response type)
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        res.status(500).type('text/plain').send(`Failed to get Redis dashboard: ${errorMsg}`);
+      }
     }
   );
 

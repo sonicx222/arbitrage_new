@@ -64,6 +64,8 @@ import {
   resolveFee,
   meetsThreshold
 } from './components/price-calculator';
+// HOT-PATH: Import cached token pair key utility to avoid string allocation
+import { getTokenPairKeyCached } from './components/token-utils';
 import {
   Dex,
   Token,
@@ -216,12 +218,20 @@ export abstract class BaseDetector {
   protected config: DetectorConfig;
   protected chain: string;
 
+  // HOT-PATH FIX: Pre-cached min profit threshold to avoid lookup on every arbitrage check
+  protected readonly cachedMinProfitThreshold: number;
+
   // Token metadata for USD estimation (chain-specific)
   protected tokenMetadata: any;
 
   constructor(config: DetectorConfig, deps?: BaseDetectorDeps) {
     this.config = config;
     this.chain = config.chain;
+
+    // HOT-PATH FIX: Pre-cache min profit threshold at construction time
+    // This avoids repeated object lookup during arbitrage detection
+    const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
+    this.cachedMinProfitThreshold = chainMinProfits[this.chain] ?? 0.003; // Default 0.3%
 
     // DI: Use injected logger/perfLogger if provided, otherwise create defaults
     this.logger = deps?.logger ?? createLogger(`${this.chain}-detector`);
@@ -745,11 +755,13 @@ export abstract class BaseDetector {
   /**
    * Get minimum profit threshold for this chain.
    * Override in subclass for chain-specific thresholds.
+   *
+   * HOT-PATH FIX: Returns pre-cached value computed at construction time
+   * to avoid repeated object lookup during arbitrage detection.
    */
   getMinProfitThreshold(): number {
-    const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
-    // S2.2.3 FIX: Use ?? instead of || to correctly handle 0 min profit (if any chain allows it)
-    return chainMinProfits[this.chain] ?? 0.003; // Default 0.3%
+    // HOT-PATH: Return cached value instead of lookup
+    return this.cachedMinProfitThreshold;
   }
 
   /**
@@ -1765,15 +1777,17 @@ export abstract class BaseDetector {
    * T1.1: Generate normalized token pair key for O(1) index lookup.
    * Tokens are sorted alphabetically (lowercase) to ensure consistent key
    * regardless of token order in the pair.
+   *
+   * HOT-PATH FIX: Now uses cached version from token-utils to avoid
+   * repeated toLowerCase() and string concatenation in tight loops.
+   *
    * @param token0 First token address
    * @param token1 Second token address
    * @returns Normalized key "tokenA_tokenB" where tokenA < tokenB
    */
   protected getTokenPairKey(token0: string, token1: string): string {
-    const t0 = token0.toLowerCase();
-    const t1 = token1.toLowerCase();
-    // Sort alphabetically for consistent key
-    return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+    // HOT-PATH: Use cached version to avoid string allocation
+    return getTokenPairKeyCached(token0, token1);
   }
 
   /**

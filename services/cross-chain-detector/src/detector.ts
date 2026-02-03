@@ -204,6 +204,8 @@ export class CrossChainDetectorService {
   // Intervals
   private opportunityDetectionInterval: NodeJS.Timeout | null = null;
   private healthMonitoringInterval: NodeJS.Timeout | null = null;
+  // Phase 3: ETH price refresh interval for accurate bridge cost estimation
+  private ethPriceRefreshInterval: NodeJS.Timeout | null = null;
 
   // P1-5 FIX: Reusable concurrency guards for async operations
   // Replaces manual boolean flags (isMonitoringHealth, isDetecting) with OperationGuard
@@ -391,6 +393,9 @@ export class CrossChainDetectorService {
       // Start health monitoring
       this.startHealthMonitoring();
 
+      // Phase 3: Start ETH price refresh for accurate bridge cost estimation
+      this.startEthPriceRefresh();
+
       this.logger.info('Cross-Chain Detector Service started successfully', {
         crossChainEnabled: ARBITRAGE_CONFIG.crossChainEnabled,
         mlPredictorActive: this.mlPredictorInitialized,
@@ -490,6 +495,11 @@ export class CrossChainDetectorService {
     if (this.healthMonitoringInterval) {
       clearInterval(this.healthMonitoringInterval);
       this.healthMonitoringInterval = null;
+    }
+    // Phase 3: Clear ETH price refresh interval
+    if (this.ethPriceRefreshInterval) {
+      clearInterval(this.ethPriceRefreshInterval);
+      this.ethPriceRefreshInterval = null;
     }
   }
 
@@ -637,6 +647,90 @@ export class CrossChainDetectorService {
       if (update.price > 100 && update.price < 100000) {
         this.bridgeCostEstimator.updateEthPrice(update.price);
       }
+    }
+  }
+
+  // ===========================================================================
+  // Phase 3: Real-Time ETH Price Feed
+  // ===========================================================================
+
+  /** ETH price refresh interval in milliseconds (5 seconds per research report) */
+  private static readonly ETH_PRICE_REFRESH_INTERVAL_MS = 5000;
+
+  /**
+   * Phase 3 Enhancement: Start periodic ETH price refresh from PriceOracle.
+   *
+   * This ensures bridge cost estimation uses fresh ETH prices even when
+   * no WETH trading activity is occurring. Per research report:
+   * - Current: ETH price cached at startup, only updated on WETH pair events
+   * - Enhanced: Periodic refresh every 5 seconds from PriceOracle
+   *
+   * Impact: +5-10% cost estimation accuracy
+   */
+  private startEthPriceRefresh(): void {
+    // P3-002 FIX: Defensive guard - clear existing interval if called twice
+    if (this.ethPriceRefreshInterval) {
+      clearInterval(this.ethPriceRefreshInterval);
+      this.ethPriceRefreshInterval = null;
+    }
+
+    // Refresh immediately on start
+    this.refreshEthPrice().catch(error => {
+      this.logger.warn('Initial ETH price refresh failed', {
+        error: (error as Error).message
+      });
+    });
+
+    // Set up periodic refresh (5 second interval per research recommendation)
+    this.ethPriceRefreshInterval = setInterval(async () => {
+      if (!this.stateManager.isRunning()) return;
+
+      try {
+        await this.refreshEthPrice();
+      } catch (error) {
+        this.logger.warn('ETH price refresh failed', {
+          error: (error as Error).message
+        });
+      }
+    }, CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS);
+
+    this.logger.info('ETH price refresh started', {
+      intervalMs: CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS
+    });
+  }
+
+  /**
+   * Refresh ETH price from PriceOracle and update BridgeCostEstimator.
+   */
+  private async refreshEthPrice(): Promise<void> {
+    if (!this.priceOracle || !this.bridgeCostEstimator) return;
+
+    try {
+      // Fetch ETH price from PriceOracle (handles caching, fallback internally)
+      const ethPrice = await this.priceOracle.getPrice('ETH');
+
+      // Only update if we got a valid, non-stale price
+      if (ethPrice.price > 0 && !ethPrice.isStale) {
+        // Sanity check: ETH should be in reasonable range
+        if (ethPrice.price > 100 && ethPrice.price < 100000) {
+          this.bridgeCostEstimator.updateEthPrice(ethPrice.price);
+          this.logger.debug('ETH price refreshed from PriceOracle', {
+            price: ethPrice.price,
+            source: ethPrice.source
+          });
+        }
+      } else if (ethPrice.isStale) {
+        this.logger.debug('ETH price is stale, skipping update', {
+          price: ethPrice.price,
+          source: ethPrice.source,
+          timestamp: ethPrice.timestamp
+        });
+      }
+    } catch (error) {
+      // Log but don't throw - price feed is best-effort
+      this.logger.debug('Failed to refresh ETH price', {
+        error: (error as Error).message
+      });
     }
   }
 

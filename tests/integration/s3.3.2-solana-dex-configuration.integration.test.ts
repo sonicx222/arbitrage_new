@@ -678,7 +678,7 @@ describe('S3.3.2.10: Summary Statistics', () => {
     }
 
     // Log for debugging during test runs
-    // eslint-disable-next-line no-console
+     
     console.log('DEX type distribution:', typeDistribution);
     expect(Object.keys(typeDistribution).length).toBeGreaterThan(1);
   });

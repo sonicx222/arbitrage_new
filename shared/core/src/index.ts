@@ -49,7 +49,7 @@ export {
   /** @internal Use '@arbitrage/core/internal' for test cleanup functions */
   resetRedisInstance
 } from './redis';
-export type { RedisClientDeps, RedisConstructor } from './redis';
+export type { RedisClientDeps, RedisConstructor, RedisCommandStats } from './redis';
 
 export {
   RedisStreamsClient,
@@ -439,7 +439,21 @@ export type {
 // 4.2 Stream & System Health
 // =============================================================================
 
-export { EnhancedHealthMonitor, getEnhancedHealthMonitor, recordHealthMetric, getCurrentSystemHealth } from './monitoring/enhanced-health-monitor';
+export {
+  EnhancedHealthMonitor,
+  getEnhancedHealthMonitor,
+  recordHealthMetric,
+  getCurrentSystemHealth,
+  // Phase 4: Memory monitoring exports
+  detectDeploymentPlatform,
+  getMemoryThresholds,
+  PLATFORM_MEMORY_THRESHOLDS
+} from './monitoring/enhanced-health-monitor';
+export type {
+  // Phase 4: Memory monitoring types
+  DeploymentPlatform,
+  MemoryThresholds
+} from './monitoring/enhanced-health-monitor';
 
 export {
   StreamHealthMonitor,

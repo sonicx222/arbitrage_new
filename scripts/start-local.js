@@ -200,7 +200,7 @@ async function main() {
   // Start services
   log('\nStarting services...\n', 'cyan');
 
-  let failedServices = [];
+  const failedServices = [];
   for (const service of SERVICES) {
     try {
       await startService(service);

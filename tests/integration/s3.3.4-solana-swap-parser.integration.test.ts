@@ -1313,7 +1313,7 @@ describe('S3.3.4.18: Summary Statistics', () => {
     };
 
     const totalTests = Object.values(testCategories).reduce((a, b) => a + b, 0);
-    // eslint-disable-next-line no-console
+     
     console.log(`S3.3.4 Total planned tests: ${totalTests}`);
     expect(totalTests).toBeGreaterThanOrEqual(80);
   });

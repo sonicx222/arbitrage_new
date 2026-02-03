@@ -112,6 +112,9 @@ export {
 
   // Token pair keys (consolidated here - single source of truth)
   getTokenPairKey,
+  getTokenPairKeyCached,  // HOT-PATH: Use this in performance-critical code
+  getTokenPairKeyCacheStats,
+  clearTokenPairKeyCache,
   parseTokenPairKey,
   isSameTokenPair,
 

@@ -13,6 +13,108 @@ import { getStreamHealthMonitor, StreamHealthSummary } from './stream-health-mon
 
 const logger = createLogger('enhanced-health-monitor');
 
+// =============================================================================
+// Phase 4: Memory Monitoring Configuration
+// Platform-aware thresholds for free-tier deployments
+// =============================================================================
+
+/**
+ * Deployment platform detection for platform-specific optimizations.
+ * Different platforms have different memory constraints.
+ */
+export type DeploymentPlatform = 'fly' | 'railway' | 'oracle' | 'render' | 'local' | 'unknown';
+
+/**
+ * Detect current deployment platform from environment variables.
+ */
+export function detectDeploymentPlatform(): DeploymentPlatform {
+  if (process.env.FLY_APP_NAME !== undefined) return 'fly';
+  if (process.env.RAILWAY_ENVIRONMENT !== undefined) return 'railway';
+  if (process.env.OCI_RESOURCE_PRINCIPAL_VERSION !== undefined) return 'oracle';
+  if (process.env.RENDER_SERVICE_NAME !== undefined) return 'render';
+  if (process.env.NODE_ENV === 'development') return 'local';
+  return 'unknown';
+}
+
+/**
+ * Phase 4: Memory threshold configuration per deployment platform.
+ *
+ * Different platforms have different memory limits:
+ * - Fly.io free tier: 256MB (tight constraints)
+ * - Railway free tier: 512MB (moderate constraints)
+ * - Oracle Cloud free: 24GB (abundant headroom)
+ * - Local development: Usually 8GB+ (relaxed)
+ *
+ * @see ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 6 - Memory Optimization
+ */
+export interface MemoryThresholds {
+  /** Memory usage ratio (0-1) that triggers warning */
+  warning: number;
+  /** Memory usage ratio (0-1) that triggers critical alert */
+  critical: number;
+  /** Heap size in MB that triggers warning */
+  heapWarningMb: number;
+  /** Heap size in MB that triggers critical alert */
+  heapCriticalMb: number;
+}
+
+/**
+ * Platform-specific memory thresholds.
+ * Fly.io has tighter constraints due to 256MB limit.
+ */
+export const PLATFORM_MEMORY_THRESHOLDS: Record<DeploymentPlatform, MemoryThresholds> = {
+  // Fly.io: 256MB limit, need early warning at 150MB
+  fly: {
+    warning: 0.60,    // 60% = ~153MB
+    critical: 0.78,   // 78% = ~200MB (before 256MB OOM)
+    heapWarningMb: 150,
+    heapCriticalMb: 200,
+  },
+  // Railway: 512MB limit, moderate thresholds
+  railway: {
+    warning: 0.70,
+    critical: 0.85,
+    heapWarningMb: 350,
+    heapCriticalMb: 430,
+  },
+  // Oracle Cloud: 24GB available, relaxed thresholds
+  oracle: {
+    warning: 0.80,
+    critical: 0.95,
+    heapWarningMb: 2000,
+    heapCriticalMb: 4000,
+  },
+  // Render: Similar to Railway
+  render: {
+    warning: 0.70,
+    critical: 0.85,
+    heapWarningMb: 350,
+    heapCriticalMb: 430,
+  },
+  // Local development: Relaxed thresholds
+  local: {
+    warning: 0.80,
+    critical: 0.95,
+    heapWarningMb: 2000,
+    heapCriticalMb: 8000,
+  },
+  // Unknown: Conservative defaults
+  unknown: {
+    warning: 0.75,
+    critical: 0.90,
+    heapWarningMb: 500,
+    heapCriticalMb: 800,
+  },
+};
+
+/**
+ * Get memory thresholds for current deployment platform.
+ */
+export function getMemoryThresholds(): MemoryThresholds {
+  const platform = detectDeploymentPlatform();
+  return PLATFORM_MEMORY_THRESHOLDS[platform];
+}
+
 export interface HealthMetric {
   name: string;
   value: number;
@@ -257,25 +359,87 @@ export class EnhancedHealthMonitor {
       actions: ['log', 'notify', 'scale_up']
     });
 
-    // Memory usage critical
+    // Memory usage critical - uses platform-aware thresholds
+    const memThresholds = getMemoryThresholds();
     this.addAlertRule({
       name: 'memory_critical',
       condition: (metrics) => {
         const memoryMetrics = metrics.filter(m => m.name === 'memory_usage');
-        return memoryMetrics.some(m => m.value > 0.95); // 95% memory usage
+        return memoryMetrics.some(m => m.value > memThresholds.critical);
       },
       severity: 'critical',
-      message: 'Critical memory usage - risk of OOM',
+      message: `Critical memory usage - risk of OOM (threshold: ${Math.round(memThresholds.critical * 100)}%)`,
       cooldown: 60000, // 1 minute
       actions: ['log', 'notify', 'restart_service']
+    });
+
+    // Phase 4: Memory usage warning - early detection for constrained platforms
+    this.addAlertRule({
+      name: 'memory_warning',
+      condition: (metrics) => {
+        const memoryMetrics = metrics.filter(m => m.name === 'memory_usage');
+        // Warning if above warning threshold but below critical
+        return memoryMetrics.some(m =>
+          m.value > memThresholds.warning && m.value <= memThresholds.critical
+        );
+      },
+      severity: 'warning',
+      message: `High memory usage detected (threshold: ${Math.round(memThresholds.warning * 100)}%)`,
+      cooldown: 300000, // 5 minutes (less aggressive than critical)
+      actions: ['log', 'notify', 'trigger_gc']
+    });
+
+    // Phase 4: Heap size alert - absolute MB thresholds for Fly.io/Railway
+    this.addAlertRule({
+      name: 'heap_size_critical',
+      condition: () => {
+        const heapUsedMb = process.memoryUsage().heapUsed / (1024 * 1024);
+        return heapUsedMb > memThresholds.heapCriticalMb;
+      },
+      severity: 'critical',
+      message: `Heap size exceeds ${memThresholds.heapCriticalMb}MB - immediate action required`,
+      cooldown: 60000,
+      actions: ['log', 'notify', 'restart_service', 'clear_caches']
+    });
+
+    // Phase 4: Heap size warning - early detection
+    this.addAlertRule({
+      name: 'heap_size_warning',
+      condition: () => {
+        const heapUsedMb = process.memoryUsage().heapUsed / (1024 * 1024);
+        return heapUsedMb > memThresholds.heapWarningMb &&
+               heapUsedMb <= memThresholds.heapCriticalMb;
+      },
+      severity: 'warning',
+      message: `Heap size exceeds ${memThresholds.heapWarningMb}MB - consider clearing caches`,
+      cooldown: 300000,
+      actions: ['log', 'trigger_gc']
     });
   }
 
   private initializeDefaultThresholds(): void {
+    // Phase 4: Use platform-aware memory thresholds
+    const memThresholds = getMemoryThresholds();
+    const platform = detectDeploymentPlatform();
+
     this.addThreshold({ metric: 'error_rate', warning: 0.05, critical: 0.1, direction: 'above' });
     this.addThreshold({ metric: 'latency', warning: 1000, critical: 5000, direction: 'above' });
-    this.addThreshold({ metric: 'memory_usage', warning: 0.8, critical: 0.95, direction: 'above' });
+    // Memory thresholds are now platform-specific for free-tier optimization
+    this.addThreshold({
+      metric: 'memory_usage',
+      warning: memThresholds.warning,
+      critical: memThresholds.critical,
+      direction: 'above'
+    });
     this.addThreshold({ metric: 'cpu_usage', warning: 0.7, critical: 0.9, direction: 'above' });
+
+    logger.info('Memory thresholds initialized', {
+      platform,
+      warningPercent: Math.round(memThresholds.warning * 100),
+      criticalPercent: Math.round(memThresholds.critical * 100),
+      heapWarningMb: memThresholds.heapWarningMb,
+      heapCriticalMb: memThresholds.heapCriticalMb,
+    });
   }
 
   private async performHealthCheck(): Promise<void> {
@@ -542,6 +706,42 @@ export class EnhancedHealthMonitor {
       case 'restart_service':
         // Would trigger service restart
         logger.info('Service restart triggered', { rule: rule.name });
+        break;
+
+      // Phase 4: Memory management actions for free-tier optimization
+      case 'trigger_gc':
+        // Attempt to trigger garbage collection if exposed (Node.js --expose-gc)
+        if (global.gc) {
+          try {
+            global.gc();
+            logger.info('Manual garbage collection triggered', { rule: rule.name });
+          } catch (error) {
+            logger.warn('Failed to trigger GC', { error });
+          }
+        } else {
+          logger.debug('GC not exposed (run with --expose-gc to enable)', { rule: rule.name });
+        }
+        break;
+
+      case 'clear_caches':
+        // Signal to clear internal caches - emit event for handlers to pick up
+        logger.info('Cache clear requested', { rule: rule.name });
+        // Publish cache clear request for services to handle
+        const cacheMessage = {
+          type: 'cache_clear_request',
+          data: {
+            reason: rule.message,
+            severity: rule.severity,
+            requestedAt: Date.now(),
+          },
+          timestamp: Date.now(),
+          source: 'enhanced-health-monitor'
+        };
+        await this.dualPublish(
+          'stream:system-commands',
+          'system-commands',
+          cacheMessage
+        );
         break;
 
       default:

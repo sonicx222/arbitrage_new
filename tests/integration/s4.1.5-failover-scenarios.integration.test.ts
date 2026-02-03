@@ -346,7 +346,7 @@ describe('S4.1.5: Failover Scenarios', () => {
 
       it('should allow leadership on explicit activation', () => {
         // Given: Coordinator config with isStandby = true
-        let config = {
+        const config = {
           isStandby: true,
           canBecomeLeader: true
         };
@@ -435,7 +435,7 @@ describe('S4.1.5: Failover Scenarios', () => {
 
       it('should skip activation if already leader', () => {
         // Given: Coordinator already leader
-        let isLeader = true;
+        const isLeader = true;
         let isActivating = false;
 
         const attemptActivation = () => {

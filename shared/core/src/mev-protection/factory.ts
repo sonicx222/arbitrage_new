@@ -12,12 +12,16 @@ import {
   MevProviderConfig,
   MevMetrics,
   CHAIN_MEV_STRATEGIES,
+  CHAIN_MEV_FALLBACK_STRATEGIES,
   MEV_DEFAULTS,
 } from './types';
 import { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider';
 import { L2SequencerProvider, createL2SequencerProvider, isL2SequencerChain } from './l2-sequencer-provider';
 import { StandardProvider, createStandardProvider } from './standard-provider';
 import { AsyncMutex } from '../async/async-mutex';
+import { createLogger } from '../logger';
+
+const logger = createLogger('mev-provider-factory');
 
 // =============================================================================
 // Factory Configuration
@@ -262,6 +266,110 @@ export class MevProviderFactory {
    */
   getProvider(chain: string): IMevProvider | undefined {
     return this.providers.get(chain);
+  }
+
+  /**
+   * Phase 4: Get ordered list of MEV providers for a chain (primary + fallbacks).
+   *
+   * Returns providers in fallback order:
+   * 1. Primary provider (chain's default MEV strategy)
+   * 2. Fallback providers (if configured and different from primary)
+   *
+   * Use this for implementing retry logic with provider fallback.
+   * Research impact: +2-3% execution success rate.
+   *
+   * @param chainConfig - Chain wallet configuration for provider creation
+   * @returns Array of providers in fallback order (may be empty if none available)
+   */
+  getProviderFallbackChain(chainConfig: ChainWalletConfig): IMevProvider[] {
+    const { chain } = chainConfig;
+    const providers: IMevProvider[] = [];
+    const seenStrategies = new Set<MevStrategy>();
+
+    // Get fallback strategies for this chain
+    const strategies = CHAIN_MEV_FALLBACK_STRATEGIES[chain] || ['standard'];
+
+    for (const strategy of strategies) {
+      // Skip if we already have a provider for this strategy
+      if (seenStrategies.has(strategy)) continue;
+      seenStrategies.add(strategy);
+
+      // Skip Jito for EVM factory (Solana uses different types)
+      if (strategy === 'jito') continue;
+
+      try {
+        // Create provider for this strategy
+        const provider = this.createProviderForStrategy(chainConfig, strategy);
+        if (provider) {
+          providers.push(provider);
+        }
+      } catch (error) {
+        // Phase 4 FIX: Log the error - don't silently swallow
+        // This is expected for chains without certain strategies configured
+        logger.debug('Failed to create MEV provider for fallback strategy', {
+          chain,
+          strategy,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return providers;
+  }
+
+  /**
+   * Phase 4: Create a provider for a specific MEV strategy.
+   * Used internally by getProviderFallbackChain.
+   *
+   * @param chainConfig - Chain wallet configuration
+   * @param strategy - MEV strategy to use
+   * @returns Provider instance or undefined if strategy not applicable
+   */
+  private createProviderForStrategy(
+    chainConfig: ChainWalletConfig,
+    strategy: MevStrategy
+  ): IMevProvider | undefined {
+    const { chain, provider, wallet } = chainConfig;
+
+    // Build provider config
+    const config: MevProviderConfig = {
+      chain,
+      provider,
+      wallet,
+      enabled: this.globalConfig.enabled,
+      flashbotsAuthKey: this.globalConfig.flashbotsAuthKey,
+      bloxrouteAuthHeader: this.globalConfig.bloxrouteAuthHeader,
+      flashbotsRelayUrl: this.globalConfig.flashbotsRelayUrl,
+      submissionTimeoutMs: this.globalConfig.submissionTimeoutMs,
+      maxRetries: this.globalConfig.maxRetries,
+      fallbackToPublic: this.globalConfig.fallbackToPublic,
+    };
+
+    switch (strategy) {
+      case 'flashbots':
+        // Only valid for Ethereum mainnet
+        if (chain === 'ethereum' || chain === 'goerli' || chain === 'sepolia') {
+          return createFlashbotsProvider(config);
+        }
+        return undefined;
+
+      case 'sequencer':
+        // Only valid for L2 chains
+        if (isL2SequencerChain(chain)) {
+          return createL2SequencerProvider(config);
+        }
+        return undefined;
+
+      case 'jito':
+        // Jito requires Solana-specific types, not supported in EVM factory
+        return undefined;
+
+      case 'bloxroute':
+      case 'fastlane':
+      case 'standard':
+      default:
+        return createStandardProvider(config);
+    }
   }
 
   /**

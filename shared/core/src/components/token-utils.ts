@@ -105,6 +105,90 @@ export function getTokenPairKey(token0: string, token1: string): string {
   return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
 }
 
+// =============================================================================
+// HOT-PATH OPTIMIZATION: Token Pair Key Cache
+// FIX: Avoid repeated toLowerCase() and string concatenation in tight loops
+// =============================================================================
+
+/**
+ * LRU-style cache for token pair keys.
+ * Caches normalized keys to avoid repeated string operations.
+ *
+ * Performance impact:
+ * - First access: O(n) for normalization + concatenation
+ * - Subsequent access: O(1) Map lookup, no string allocation
+ *
+ * Memory: ~200 bytes per entry * 10000 entries = ~2MB max
+ */
+const TOKEN_PAIR_KEY_CACHE = new Map<string, string>();
+const TOKEN_PAIR_KEY_CACHE_MAX_SIZE = 10000;
+
+/**
+ * HOT-PATH: Get token pair key with caching.
+ * Use this version in performance-critical code paths like:
+ * - Reserve update handlers
+ * - Arbitrage detection loops
+ * - Price comparison iterations
+ *
+ * @param token0 - First token address (any case)
+ * @param token1 - Second token address (any case)
+ * @returns Cached canonical token pair key
+ */
+export function getTokenPairKeyCached(token0: string, token1: string): string {
+  // Create lookup key from raw addresses (fast concat, no normalization yet)
+  // Use | separator since addresses don't contain |
+  const lookupKey = `${token0}|${token1}`;
+
+  // Fast path: return cached result
+  let cached = TOKEN_PAIR_KEY_CACHE.get(lookupKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Also check reverse order (same logical pair)
+  const reverseLookupKey = `${token1}|${token0}`;
+  cached = TOKEN_PAIR_KEY_CACHE.get(reverseLookupKey);
+  if (cached !== undefined) {
+    // Cache under this order too for future lookups
+    if (TOKEN_PAIR_KEY_CACHE.size < TOKEN_PAIR_KEY_CACHE_MAX_SIZE) {
+      TOKEN_PAIR_KEY_CACHE.set(lookupKey, cached);
+    }
+    return cached;
+  }
+
+  // Slow path: compute and cache
+  const result = getTokenPairKey(token0, token1);
+
+  // Evict oldest entries if at capacity (simple FIFO eviction)
+  if (TOKEN_PAIR_KEY_CACHE.size >= TOKEN_PAIR_KEY_CACHE_MAX_SIZE) {
+    // Delete first 1000 entries (10% batch eviction for efficiency)
+    const keysToDelete = Array.from(TOKEN_PAIR_KEY_CACHE.keys()).slice(0, 1000);
+    for (const key of keysToDelete) {
+      TOKEN_PAIR_KEY_CACHE.delete(key);
+    }
+  }
+
+  TOKEN_PAIR_KEY_CACHE.set(lookupKey, result);
+  return result;
+}
+
+/**
+ * Get token pair key cache statistics (for monitoring).
+ */
+export function getTokenPairKeyCacheStats(): { size: number; maxSize: number } {
+  return {
+    size: TOKEN_PAIR_KEY_CACHE.size,
+    maxSize: TOKEN_PAIR_KEY_CACHE_MAX_SIZE,
+  };
+}
+
+/**
+ * Clear the token pair key cache (for testing).
+ */
+export function clearTokenPairKeyCache(): void {
+  TOKEN_PAIR_KEY_CACHE.clear();
+}
+
 /**
  * Parse a token pair key back into token addresses.
  *

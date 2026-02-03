@@ -314,7 +314,7 @@ export class SharedMemoryCache {
     }
 
     // Find insertion point (end of data)
-    let offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
+    const offset = Atomics.load(this.metadataView, SharedMemoryCache.DATA_START_OFFSET);
     let dataOffset = offset;
 
     // Find the end of existing data

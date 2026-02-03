@@ -1098,7 +1098,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
         return;
       }
 
-      let profitPercentage = getOptionalNumber(data, 'profitPercentage');
+      const profitPercentage = getOptionalNumber(data, 'profitPercentage');
       if (profitPercentage !== undefined) {
         if (profitPercentage < -100 || profitPercentage > 10000) {
           this.logger.warn('Invalid profit percentage, rejecting opportunity', {

@@ -409,8 +409,12 @@ describe('S3.1.1 PartitionedDetector Integration Tests', () => {
     it('should calculate average event latency', async () => {
       detector = await createStartedDetector();
 
-      // Inject latency data
-      detector['eventLatencies'] = [10, 20, 30, 40, 50];
+      // P1-001 FIX: Use ring buffer API instead of direct array assignment
+      // Inject latency data via the recordEventLatency method
+      const latencies = [10, 20, 30, 40, 50];
+      for (const latency of latencies) {
+        detector['recordEventLatency'](latency);
+      }
 
       const health = detector.getPartitionHealth();
 

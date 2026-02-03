@@ -1211,7 +1211,7 @@ describe('S3.1.4.15: P2 Refactored Service Entry Point', () => {
 describe('S3.1.4.16: P19-FIX Shutdown Guard', () => {
   let setupProcessHandlers: typeof import('../../shared/core/src').setupProcessHandlers;
   let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let mockDetector: any;
 
   beforeAll(async () => {
@@ -1476,7 +1476,7 @@ describe('S3.1.4.19: validateAndFilterChains Error Path Tests', () => {
 describe('S3.1.4.20: Process Handler Cleanup Tests', () => {
   let setupProcessHandlers: typeof import('../../shared/core/src').setupProcessHandlers;
   let mockLogger: { info: jest.Mock; warn: jest.Mock; error: jest.Mock; debug: jest.Mock };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   let mockDetector: any;
 
   beforeAll(async () => {

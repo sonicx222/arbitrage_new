@@ -251,6 +251,53 @@ export const CHAIN_MEV_STRATEGIES: Record<string, MevStrategy> = {
 };
 
 /**
+ * Phase 4: Multi-MEV Provider Fallback Stack
+ *
+ * Fallback strategies per chain for when primary MEV provider fails.
+ * Research impact: +2-3% execution success rate through redundancy.
+ *
+ * Fallback Order (per chain):
+ * - Primary provider fails → Try secondary provider
+ * - Secondary fails → Try tertiary (if available)
+ * - All MEV providers fail → Fall back to public mempool
+ *
+ * @see ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 2.2 - Multi-Provider MEV Protection Stack
+ */
+export const CHAIN_MEV_FALLBACK_STRATEGIES: Record<string, MevStrategy[]> = {
+  // Ethereum: Flashbots → MEV Blocker (standard) → Public mempool
+  ethereum: ['flashbots', 'standard'],
+
+  // BSC: BloXroute → Standard (public mempool with optimizations)
+  bsc: ['bloxroute', 'standard'],
+
+  // Polygon: Fastlane → Standard
+  polygon: ['fastlane', 'standard'],
+
+  // L2s already have inherent MEV protection via sequencer
+  // Fallback to standard if sequencer submission fails
+  arbitrum: ['sequencer', 'standard'],
+  optimism: ['sequencer', 'standard'],
+  base: ['sequencer', 'standard'],
+  zksync: ['sequencer', 'standard'],
+  linea: ['sequencer', 'standard'],
+
+  // Standard chains - no fallback needed (already at lowest level)
+  avalanche: ['standard'],
+  fantom: ['standard'],
+
+  // Solana - Jito is primary, standard fallback
+  solana: ['jito', 'standard'],
+};
+
+/**
+ * Get fallback MEV strategies for a chain.
+ * Returns ordered list of strategies to try, primary first.
+ */
+export function getMevFallbackStrategies(chain: string): MevStrategy[] {
+  return CHAIN_MEV_FALLBACK_STRATEGIES[chain] || ['standard'];
+}
+
+/**
  * Default configuration values
  */
 export const MEV_DEFAULTS = {

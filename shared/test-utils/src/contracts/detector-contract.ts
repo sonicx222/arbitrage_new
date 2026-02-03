@@ -202,7 +202,7 @@ export async function verifyDetectorProvider(options: {
   providerVersion?: string;
   publishVerificationResult?: boolean;
 }) {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+   
   const { Verifier } = require('@pact-foundation/pact');
 
   const verifier = new Verifier({

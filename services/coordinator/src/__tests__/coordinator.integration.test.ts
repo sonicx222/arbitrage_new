@@ -112,9 +112,9 @@ function createMockStateManager() {
     getState: jest.fn().mockImplementation(() => state.running ? 'RUNNING' : 'STOPPED'),
     isRunning: jest.fn().mockImplementation(() => state.running),
     isStopped: jest.fn().mockImplementation(() => !state.running),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     executeStart: jest.fn().mockImplementation(executeStartImpl as any),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     executeStop: jest.fn().mockImplementation(executeStopImpl as any),
     on: jest.fn(),
     removeAllListeners: jest.fn(),
@@ -229,7 +229,7 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should handle Redis connection failures gracefully', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (mockDeps.getRedisClient as any).mockRejectedValue(new Error('Redis connection failed'));
 
       await expect(coordinator.start(0)).rejects.toThrow('Redis connection failed');

@@ -22,7 +22,7 @@ process.env.ETHEREUM_WS_URL = 'wss://mainnet.infura.io/ws/v3/test';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 // Use require to avoid ts-jest transformation caching issues
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const {
   CHAINS,
   CORE_TOKENS,

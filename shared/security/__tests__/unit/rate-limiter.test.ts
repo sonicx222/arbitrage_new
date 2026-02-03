@@ -48,7 +48,7 @@ const setupMockDefaults = () => {
 jest.mock('../../../core/src/logger', () => {
   // Import RecordingLogger inside the factory to avoid hoisting issues
   // Using direct path to avoid circular dependency issues with barrel exports
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+   
   const { RecordingLogger: RL } = require('../../../core/src/logging/testing-logger');
   // Create a single instance that will be reused
   const logger = new RL();

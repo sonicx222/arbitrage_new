@@ -419,7 +419,7 @@ describe('BaseExecutionStrategy - NaN Gas Price Validation (Fix 3.2)', () => {
       expect(nanValue > 1000).toBe(false);
       // NaN is the only value in JS that is not equal to itself (IEEE 754)
       // This is why min/max bounds checks fail silently for NaN
-      // eslint-disable-next-line no-self-compare
+       
       expect(nanValue !== nanValue).toBe(true);
     });
   });

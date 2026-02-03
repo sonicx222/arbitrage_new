@@ -22,7 +22,7 @@ import type { RedisConstructor } from '@arbitrage/core';
 // Mock Redis Implementation
 // =============================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type MockRedisInstance = any;
 
 /**

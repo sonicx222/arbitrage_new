@@ -489,7 +489,7 @@ describe('Pending Opportunity Handler', () => {
    */
   function createMockHandler(): PendingOpportunityHandler {
     let processed = 0;
-    let errors = 0;
+    const errors = 0;
     let ignored = 0;
 
     return {
