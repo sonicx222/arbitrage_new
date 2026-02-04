@@ -49,8 +49,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Install dependencies
         run: npm ci
+
 
       - name: Run Unit Tests (Shard ${{ matrix.shard }}/3)
         run: npm test -- --selectProjects unit --shard=${{ matrix.shard }}/3 --ci --coverage
@@ -104,6 +110,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Install dependencies
         run: npm ci
@@ -164,6 +175,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Install dependencies
         run: npm ci
 
@@ -199,6 +215,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Install dependencies
         run: npm ci
@@ -246,6 +267,11 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Install dependencies
         run: npm ci
 
@@ -271,6 +297,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Install dependencies
         run: npm ci
