@@ -69,6 +69,7 @@ const createMockStats = (overrides: Partial<ExecutionStats> = {}): ExecutionStat
   simulationsPerformed: 60,
   simulationsSkipped: 20,
   simulationPredictedReverts: 8,
+  simulationProfitabilityRejections: 2,
   simulationErrors: 2,
   circuitBreakerTrips: 0,
   circuitBreakerBlocks: 0,
@@ -465,6 +466,7 @@ describe('SimulationMetricsCollector', () => {
     test('should track transactions skipped due to simulation failure', () => {
       const stats = createMockStats({
         simulationPredictedReverts: 12,
+        simulationProfitabilityRejections: 0, // Reset to test just reverts
       });
 
       const config: SimulationMetricsCollectorConfig = {

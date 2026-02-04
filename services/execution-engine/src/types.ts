@@ -450,6 +450,8 @@ export interface ExecutionStats {
   simulationsSkipped: number;
   /** Executions aborted due to simulation predicting revert */
   simulationPredictedReverts: number;
+  /** Executions aborted because simulation revealed unprofitable trade (gas too high) */
+  simulationProfitabilityRejections: number;
   /** Simulation service errors (proceeded with execution) */
   simulationErrors: number;
   // Circuit breaker metrics (Phase 1.3)
@@ -492,6 +494,7 @@ export function createInitialStats(): ExecutionStats {
     simulationsPerformed: 0,
     simulationsSkipped: 0,
     simulationPredictedReverts: 0,
+    simulationProfitabilityRejections: 0,
     simulationErrors: 0,
     // Circuit breaker metrics (Phase 1.3)
     circuitBreakerTrips: 0,

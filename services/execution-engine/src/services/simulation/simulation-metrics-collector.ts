@@ -68,6 +68,9 @@ export interface SimulationMetricsSnapshot {
   /** Executions aborted due to simulation predicting revert */
   simulationPredictedReverts: number;
 
+  /** Executions aborted due to simulation revealing unprofitable trade */
+  simulationProfitabilityRejections: number;
+
   /** Simulation service errors */
   simulationErrors: number;
 
@@ -174,10 +177,12 @@ export function createSimulationMetricsCollector(
         simulationsPerformed: snapshot.simulationsPerformed,
         simulationsSkipped: snapshot.simulationsSkipped,
         simulationPredictedReverts: snapshot.simulationPredictedReverts,
+        simulationProfitabilityRejections: snapshot.simulationProfitabilityRejections,
         simulationErrors: snapshot.simulationErrors,
         simulationSuccessRate: snapshot.simulationSuccessRate,
         simulationAverageLatencyMs: snapshot.simulationAverageLatencyMs,
-        transactionsSkippedBySimulation: snapshot.simulationPredictedReverts,
+        transactionsSkippedBySimulation:
+          snapshot.simulationPredictedReverts + snapshot.simulationProfitabilityRejections,
         fallbackUsed: snapshot.fallbackUsed,
         cacheHits: snapshot.cacheHits,
         providerHealthy,
@@ -276,6 +281,7 @@ export function createSimulationMetricsCollector(
       simulationsPerformed: stats.simulationsPerformed,
       simulationsSkipped: stats.simulationsSkipped,
       simulationPredictedReverts: stats.simulationPredictedReverts,
+      simulationProfitabilityRejections: stats.simulationProfitabilityRejections,
       simulationErrors: stats.simulationErrors,
       simulationSuccessRate,
       simulationAverageLatencyMs,

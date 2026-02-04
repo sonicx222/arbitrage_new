@@ -143,6 +143,11 @@ export {
   toDisplayTokenPair,
   toInternalTokenPair,
   normalizeToInternalFormat,
+  // Phase 3: Pre-validation types
+  PreValidationConfig,
+  PreValidationSimulationCallback,
+  PreValidationSimulationRequest,
+  PreValidationSimulationResult,
 } from './types';
 
 // Stream consumption module

@@ -88,6 +88,8 @@ import {
   toDisplayTokenPair,
   // Phase 3: Pre-validation config for sample-based opportunity validation
   PreValidationConfig,
+  PreValidationSimulationCallback,
+  PreValidationSimulationRequest,
 } from './types';
 
 // Phase 3: Whale Activity Tracker imports
@@ -248,6 +250,8 @@ export class CrossChainDetectorService {
   private preValidationBudgetResetTime = 0;
   private preValidationSuccessCount = 0;
   private preValidationFailCount = 0;
+  // Phase 3: Simulation callback for pre-validation (injected by orchestrator)
+  private simulationCallback: PreValidationSimulationCallback | null = null;
 
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
@@ -268,6 +272,9 @@ export class CrossChainDetectorService {
     } as Required<DetectorConfig>;
     this.whaleConfig = this.config.whaleConfig!;
     this.mlConfig = this.config.mlConfig!;
+
+    // Phase 3: Set simulation callback for pre-validation
+    this.simulationCallback = userConfig.simulationCallback ?? null;
 
     // FIX: Configuration validation
     this.validateConfiguration();
@@ -1949,32 +1956,68 @@ export class CrossChainDetectorService {
     const startTime = Date.now();
 
     try {
-      // Note: Pre-validation requires SimulationService integration
-      // This is a placeholder that logs the validation attempt
-      // Full integration requires SimulationService dependency injection
-      //
-      // TODO: Integrate with SimulationService when available
-      // For now, return true (pass through) and log for monitoring
-      this.logger.debug('Pre-validation check (placeholder - awaiting SimulationService integration)', {
-        token: opportunity.token,
-        sourceChain: opportunity.sourceChain,
-        sourceDex: opportunity.sourceDex,
-        netProfit: opportunity.netProfit,
-        preferredProvider: config.preferredProvider,
-      });
-
-      // Check latency constraint
-      const latency = Date.now() - startTime;
-      if (latency > config.maxLatencyMs) {
-        this.logger.debug('Pre-validation exceeded max latency', {
-          latencyMs: latency,
-          maxLatencyMs: config.maxLatencyMs,
+      // If no simulation callback is configured, pass through (fail-open)
+      if (!this.simulationCallback) {
+        this.logger.debug('Pre-validation skipped: no simulation callback configured', {
+          token: opportunity.token,
+          sourceChain: opportunity.sourceChain,
+          netProfit: opportunity.netProfit,
         });
+        return true;
       }
 
-      // Return true for now (placeholder)
-      // When SimulationService is integrated, this will return actual validation result
-      return true;
+      // Build simulation request
+      const simRequest: PreValidationSimulationRequest = {
+        chain: opportunity.sourceChain,
+        tokenPair: opportunity.token,
+        dex: opportunity.sourceDex,
+        tradeSizeUsd: opportunity.tradeSizeUsd ?? this.config.defaultTradeSizeUsd,
+        expectedPrice: opportunity.sourcePrice,
+      };
+
+      // Execute simulation with timeout
+      const simResult = await Promise.race([
+        this.simulationCallback(simRequest),
+        new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), config.maxLatencyMs)
+        ),
+      ]);
+
+      const latencyMs = Date.now() - startTime;
+
+      // Timeout - fail-open
+      if (simResult === null) {
+        this.logger.debug('Pre-validation timed out, allowing opportunity', {
+          token: opportunity.token,
+          latencyMs,
+          maxLatencyMs: config.maxLatencyMs,
+        });
+        return true;
+      }
+
+      // Log simulation result
+      this.logger.debug('Pre-validation completed', {
+        token: opportunity.token,
+        sourceChain: opportunity.sourceChain,
+        success: simResult.success,
+        wouldRevert: simResult.wouldRevert,
+        latencyMs: simResult.latencyMs,
+      });
+
+      // Track success/fail metrics
+      if (simResult.success && !simResult.wouldRevert) {
+        this.preValidationSuccessCount++;
+        return true;
+      } else {
+        this.preValidationFailCount++;
+        this.logger.info('Pre-validation rejected opportunity', {
+          token: opportunity.token,
+          sourceChain: opportunity.sourceChain,
+          reason: simResult.wouldRevert ? 'would_revert' : 'simulation_failed',
+          error: simResult.error,
+        });
+        return false;
+      }
     } catch (error) {
       this.logger.warn('Pre-validation failed with error, allowing opportunity', {
         error: (error as Error).message,
@@ -2006,6 +2049,22 @@ export class CrossChainDetectorService {
       failCount: this.preValidationFailCount,
       successRate: total > 0 ? this.preValidationSuccessCount / total : 0,
     };
+  }
+
+  /**
+   * Phase 3: Set simulation callback for pre-validation.
+   *
+   * Allows runtime injection of simulation capability after detector initialization.
+   * The orchestrator can call this once SimulationService is ready.
+   *
+   * @param callback - The simulation callback or null to disable
+   */
+  setSimulationCallback(callback: PreValidationSimulationCallback | null): void {
+    this.simulationCallback = callback;
+    this.logger.info('Pre-validation simulation callback updated', {
+      hasCallback: !!callback,
+      preValidationEnabled: this.config.preValidationConfig?.enabled ?? false,
+    });
   }
 
   // ===========================================================================

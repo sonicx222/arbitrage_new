@@ -98,7 +98,7 @@ private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): P
 
 ### Neutral
 
-- **SimulationService dependency**: Full integration requires SimulationService availability at detector level (currently placeholder implementation)
+- **SimulationService dependency**: Integration uses callback injection pattern to avoid tight coupling. The detector accepts a `PreValidationSimulationCallback` that the orchestrator wires to SimulationService at runtime.
 
 ## Alternatives Considered
 
@@ -118,9 +118,15 @@ private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): P
 - `services/cross-chain-detector/src/types.ts` - PreValidationConfig type definition
 - `services/cross-chain-detector/src/detector.ts` - Implementation location
 
+## Implementation Status
+
+1. **SimulationService integration**: ✅ Completed via `PreValidationSimulationCallback` injection pattern
+2. **Configuration types**: ✅ `PreValidationConfig`, `PreValidationSimulationRequest`, `PreValidationSimulationResult`
+3. **Runtime injection**: ✅ `setSimulationCallback()` method for late binding
+
 ## Future Work
 
-1. **SimulationService integration**: Complete the integration with SimulationService for actual transaction simulation
-2. **PendingStateSimulator integration**: Use pending state simulation for mempool-based opportunity validation
-3. **ML-assisted validation**: Train a model on historical opportunity success/failure data
-4. **Cross-detector rollout**: Apply pre-validation to unified detector and Solana detector
+1. **PendingStateSimulator integration**: Use pending state simulation for mempool-based opportunity validation
+2. **ML-assisted validation**: Train a model on historical opportunity success/failure data
+3. **Cross-detector rollout**: Apply pre-validation to unified detector and Solana detector
+4. **Enhanced metrics**: Add detailed pre-validation latency and success rate dashboards
