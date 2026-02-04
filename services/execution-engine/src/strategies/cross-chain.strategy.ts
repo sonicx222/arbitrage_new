@@ -177,6 +177,47 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         });
       }
 
+      // ==========================================================================
+      // Phase 2.1: Pre-flight Simulation for Source Chain Buy Transaction
+      // ==========================================================================
+      // Simulate the source chain buy transaction BEFORE bridge quote to catch issues early.
+      // This prevents wasting bridge API quota on opportunities that would fail anyway.
+      const sourceWalletForSim = ctx.wallets.get(sourceChain);
+      if (sourceWalletForSim && ctx.providers.get(sourceChain)) {
+        try {
+          // Prepare buy transaction for simulation
+          const buySimTx = await this.prepareDexSwapTransaction(opportunity, sourceChain, ctx);
+          buySimTx.from = await sourceWalletForSim.getAddress();
+
+          const buySimResult = await this.performSimulation(opportunity, buySimTx, sourceChain, ctx);
+
+          if (buySimResult?.wouldRevert) {
+            ctx.stats.simulationPredictedReverts++;
+
+            this.logger.warn('Aborting cross-chain execution: source buy simulation predicted revert', {
+              opportunityId: opportunity.id,
+              revertReason: buySimResult.revertReason,
+              simulationLatencyMs: buySimResult.latencyMs,
+              provider: buySimResult.provider,
+              sourceChain,
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(ExecutionErrorCode.SIMULATION_REVERT, `source buy simulation predicted revert - ${buySimResult.revertReason || 'unknown reason'}`),
+              sourceChain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+        } catch (simError) {
+          // Log but continue - simulation preparation failure shouldn't block execution
+          this.logger.debug('Could not prepare source buy for simulation, proceeding', {
+            opportunityId: opportunity.id,
+            error: getErrorMessage(simError),
+          });
+        }
+      }
+
       // Step 1: Get bridge quote
       const bridgeAmount = opportunity.amountIn || '0';
       const bridgeQuote = await bridgeRouter.quote({

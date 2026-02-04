@@ -102,6 +102,7 @@ const DEFAULT_CONFIG: SimulationConfig = {
 
 // Base prices for tokens (in USD)
 // S3.1.2: Extended for all 11 chains with their native and common tokens
+// Enhancement S5: Added chain-specific governance, LST, and meme tokens
 const BASE_PRICES: Record<string, number> = {
   // Major assets
   WETH: 3200,
@@ -126,6 +127,7 @@ const BASE_PRICES: Record<string, number> = {
   BUSD: 1.0,
   DAI: 1.0,
   FRAX: 1.0,
+  sUSD: 1.0,      // Synthetix USD
 
   // Governance tokens
   ARB: 1.15,      // Arbitrum
@@ -136,25 +138,93 @@ const BASE_PRICES: Record<string, number> = {
   LINK: 15.0,
   AAVE: 185,
   GMX: 30,
+  CRV: 0.55,      // Curve
+  PENDLE: 4.50,   // Pendle Finance
+  MAGIC: 0.85,    // Treasure/Arbitrum
 
-  // LST tokens
+  // LST tokens (Liquid Staking)
   wstETH: 3400,
   rETH: 3350,
   stETH: 3200,
+  cbETH: 3250,    // Coinbase staked ETH
   mSOL: 185,      // Marinade staked SOL
+  jitoSOL: 190,   // Jito staked SOL
+  stMATIC: 0.90,  // Lido staked MATIC
 
   // Chain-specific DEX tokens
   CAKE: 2.50,     // PancakeSwap
   JOE: 0.45,      // Trader Joe
   AERO: 1.20,     // Aerodrome
   VELO: 0.12,     // Velodrome
+  QUICK: 0.045,   // QuickSwap
+  XVS: 8.50,      // Venus Protocol (BSC)
+
+  // Meme tokens
+  PEPE: 0.000012,
+  SHIB: 0.000022,
+  DOGE: 0.12,
 
   // Solana tokens
   JUP: 0.85,      // Jupiter
   RAY: 4.50,      // Raydium
   ORCA: 3.20,     // Orca
   BONK: 0.000025,
-  WIF: 2.50
+  WIF: 2.50,
+  JTO: 3.80,      // Jito governance
+  PYTH: 0.45,     // Pyth Network
+  MNDE: 0.12,     // Marinade governance
+  W: 0.35,        // Wormhole
+  BSOL: 180,      // BlazeStake SOL
+};
+
+/**
+ * Chain-specific token pairs for more realistic simulation.
+ * These supplement the common pairs with chain-native assets.
+ * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S5
+ */
+export const CHAIN_SPECIFIC_PAIRS: Record<string, string[][]> = {
+  ethereum: [
+    ['stETH', 'WETH'], ['rETH', 'WETH'], ['cbETH', 'WETH'],
+    ['wstETH', 'WETH'], ['PEPE', 'WETH'], ['SHIB', 'WETH'],
+    ['CRV', 'WETH'], ['AAVE', 'WETH'],
+  ],
+  arbitrum: [
+    ['ARB', 'WETH'], ['ARB', 'USDC'], ['GMX', 'WETH'],
+    ['MAGIC', 'WETH'], ['PENDLE', 'WETH'],
+  ],
+  optimism: [
+    ['OP', 'WETH'], ['OP', 'USDC'], ['VELO', 'WETH'],
+    ['sUSD', 'USDC'],
+  ],
+  base: [
+    ['AERO', 'WETH'], ['cbETH', 'WETH'], ['AERO', 'USDC'],
+  ],
+  bsc: [
+    ['CAKE', 'WBNB'], ['XVS', 'WBNB'], ['CAKE', 'BUSD'],
+    ['BTCB', 'WBNB'],
+  ],
+  polygon: [
+    ['stMATIC', 'WMATIC'], ['QUICK', 'WMATIC'], ['QUICK', 'USDC'],
+  ],
+  avalanche: [
+    ['JOE', 'WAVAX'], ['JOE', 'USDC'],
+  ],
+  fantom: [
+    ['WFTM', 'USDC'], ['WFTM', 'DAI'],
+  ],
+  zksync: [
+    ['WETH', 'USDC'],
+  ],
+  linea: [
+    ['WETH', 'USDC'],
+  ],
+  solana: [
+    ['SOL', 'USDC'], ['JUP', 'SOL'], ['RAY', 'SOL'],
+    ['ORCA', 'SOL'], ['BONK', 'SOL'], ['WIF', 'SOL'],
+    ['JTO', 'SOL'], ['PYTH', 'SOL'], ['mSOL', 'SOL'],
+    ['jitoSOL', 'SOL'], ['MNDE', 'SOL'], ['W', 'SOL'],
+    ['BSOL', 'SOL'],
+  ],
 };
 
 // DEX names per chain
@@ -357,6 +427,62 @@ export function isSimulationMode(): boolean {
   return process.env.SIMULATION_MODE === 'true';
 }
 
+/**
+ * Check if execution simulation mode is enabled.
+ * This mode simulates transaction execution (dry-run) without real blockchain transactions.
+ */
+export function isExecutionSimulationMode(): boolean {
+  return process.env.EXECUTION_SIMULATION_MODE === 'true';
+}
+
+/**
+ * Check if hybrid execution mode is enabled.
+ *
+ * Hybrid mode enables:
+ * - Real strategy selection logic (not SimulationStrategy override)
+ * - Real pre-execution validation and checks
+ * - Mocked transaction submission (no real blockchain transactions)
+ *
+ * This allows testing the full execution pipeline including strategy routing
+ * for all opportunity types (intra-chain, cross-chain, flash-loan, triangular,
+ * quadrilateral) without making actual transactions.
+ *
+ * Set via: EXECUTION_HYBRID_MODE=true
+ *
+ * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S4
+ */
+export function isHybridExecutionMode(): boolean {
+  return process.env.EXECUTION_HYBRID_MODE === 'true';
+}
+
+/**
+ * Get simulation mode summary for logging/debugging.
+ */
+export function getSimulationModeSummary(): {
+  simulationMode: boolean;
+  executionSimulation: boolean;
+  hybridMode: boolean;
+  effectiveMode: 'production' | 'simulation' | 'hybrid';
+} {
+  const simulationMode = isSimulationMode();
+  const executionSimulation = isExecutionSimulationMode();
+  const hybridMode = isHybridExecutionMode();
+
+  let effectiveMode: 'production' | 'simulation' | 'hybrid' = 'production';
+  if (hybridMode) {
+    effectiveMode = 'hybrid';
+  } else if (simulationMode || executionSimulation) {
+    effectiveMode = 'simulation';
+  }
+
+  return {
+    simulationMode,
+    executionSimulation,
+    hybridMode,
+    effectiveMode,
+  };
+}
+
 // =============================================================================
 // Export
 // =============================================================================
@@ -381,11 +507,75 @@ export interface SimulatedSyncEvent {
 }
 
 /**
- * Simulated arbitrage opportunity
+ * Opportunity type for strategy routing.
+ * Matches StrategyType in execution-engine for proper routing tests.
+ */
+export type SimulatedOpportunityType =
+  | 'intra-chain'
+  | 'cross-chain'
+  | 'flash-loan'
+  | 'triangular'
+  | 'quadrilateral';
+
+/**
+ * Bridge protocol for cross-chain opportunities.
+ */
+export type SimulatedBridgeProtocol = 'stargate' | 'across' | 'native';
+
+/**
+ * Simulated arbitrage opportunity.
+ *
+ * Enhanced to support all execution strategy types:
+ * - intra-chain: Same chain, different DEXes
+ * - cross-chain: Different chains, bridge required
+ * - flash-loan: Uses flash loan for capital-free execution
+ * - triangular: 3-hop arbitrage (A -> B -> C -> A)
+ * - quadrilateral: 4-hop arbitrage (A -> B -> C -> D -> A)
+ *
+ * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md
  */
 export interface SimulatedOpportunity {
   id: string;
+
+  // =========================================================================
+  // Strategy Routing Fields (NEW - for comprehensive testing)
+  // =========================================================================
+
+  /** Opportunity type for strategy routing */
+  type: SimulatedOpportunityType;
+
+  /** Source chain (buyChain) - for cross-chain, same as chain for intra-chain */
+  buyChain: string;
+
+  /** Destination chain (sellChain) - for cross-chain, same as chain for intra-chain */
+  sellChain: string;
+
+  /** Whether to use flash loan for execution */
+  useFlashLoan: boolean;
+
+  /** Bridge protocol for cross-chain opportunities */
+  bridgeProtocol?: SimulatedBridgeProtocol;
+
+  // =========================================================================
+  // Multi-Hop Fields (for triangular/quadrilateral)
+  // =========================================================================
+
+  /** Number of hops for multi-hop arbitrage (3 for triangular, 4 for quadrilateral) */
+  hops?: number;
+
+  /** Token path for multi-hop (e.g., ['WETH', 'USDC', 'WBTC', 'WETH']) */
+  path?: string[];
+
+  /** Intermediate tokens (tokens between start and end) */
+  intermediateTokens?: string[];
+
+  // =========================================================================
+  // Original Fields (preserved for backward compatibility)
+  // =========================================================================
+
+  /** Primary chain (for intra-chain, same as buyChain/sellChain) */
   chain: string;
+
   buyDex: string;
   sellDex: string;
   tokenPair: string;
@@ -397,6 +587,22 @@ export interface SimulatedOpportunity {
   timestamp: number;
   expiresAt: number;
   isSimulated: true;
+
+  // =========================================================================
+  // Execution Hints (optional, for realistic testing)
+  // =========================================================================
+
+  /** Expected gas cost in USD */
+  expectedGasCost?: number;
+
+  /** Expected profit after gas (for validation) */
+  expectedProfit?: number;
+
+  /** Flash loan fee percentage (for flash-loan type) */
+  flashLoanFee?: number;
+
+  /** Bridge fee in USD (for cross-chain type) */
+  bridgeFee?: number;
 }
 
 /**
@@ -597,6 +803,17 @@ export class ChainSimulator extends EventEmitter {
     return hash;
   }
 
+  /**
+   * Detect and emit arbitrage opportunities with varied types.
+   *
+   * Enhancement: Now generates different opportunity types:
+   * - 70%: intra-chain (same chain, different DEXes)
+   * - 15%: flash-loan (uses flash loan for capital-free execution)
+   * - 10%: triangular (3-hop circular arbitrage)
+   * - 5%: quadrilateral (4-hop circular arbitrage)
+   *
+   * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md
+   */
   private detectAndEmitOpportunities(): void {
     // Group pairs by token pair (to find same-pair different-dex opportunities)
     const pairsByTokens = new Map<string, { pair: SimulatedPairConfig; price: number }[]>();
@@ -644,31 +861,175 @@ export class ChainSimulator extends EventEmitter {
       const netProfit = grossProfit - totalFees;
 
       if (netProfit > 0.001) {  // Only emit if > 0.1% profit
-        const opportunity: SimulatedOpportunity = {
-          id: `sim-${this.config.chainId}-${++this.opportunityId}`,
-          chain: this.config.chainId,
-          buyDex: buyPair.pair.dex,
-          sellDex: sellPair.pair.dex,
+        // Determine opportunity type based on random distribution
+        const opportunity = this.createOpportunityWithType(
           tokenPair,
-          buyPrice: minPrice,
-          sellPrice: maxPrice,
-          profitPercentage: netProfit * 100,
-          estimatedProfitUsd: netProfit * 10000, // Assume $10k position
-          confidence: 0.8 + Math.random() * 0.15,
-          timestamp: Date.now(),
-          expiresAt: Date.now() + 5000,  // 5 second expiry
-          isSimulated: true
-        };
+          buyPair,
+          sellPair,
+          minPrice,
+          maxPrice,
+          netProfit
+        );
 
         this.emit('opportunity', opportunity);
         this.logger.debug('Simulated arbitrage opportunity', {
           id: opportunity.id,
+          type: opportunity.type,
           profit: `${opportunity.profitPercentage.toFixed(2)}%`,
           buyDex: opportunity.buyDex,
-          sellDex: opportunity.sellDex
+          sellDex: opportunity.sellDex,
+          useFlashLoan: opportunity.useFlashLoan,
         });
       }
     }
+
+    // Occasionally generate multi-hop opportunities
+    if (Math.random() < 0.15) {
+      this.generateMultiHopOpportunity();
+    }
+  }
+
+  /**
+   * Create an opportunity with appropriate type based on random distribution.
+   *
+   * Distribution:
+   * - 70%: intra-chain
+   * - 15%: flash-loan (intra-chain but uses flash loan)
+   * - 15%: other types (handled by generateMultiHopOpportunity)
+   */
+  private createOpportunityWithType(
+    tokenPair: string,
+    buyPair: { pair: SimulatedPairConfig; price: number },
+    sellPair: { pair: SimulatedPairConfig; price: number },
+    minPrice: number,
+    maxPrice: number,
+    netProfit: number
+  ): SimulatedOpportunity {
+    const rand = Math.random();
+    const estimatedProfitUsd = netProfit * 10000; // Assume $10k position
+    const estimatedGasCost = 5 + Math.random() * 15; // $5-20 gas
+
+    // Base opportunity fields
+    const baseOpportunity = {
+      id: `sim-${this.config.chainId}-${++this.opportunityId}`,
+      chain: this.config.chainId,
+      buyChain: this.config.chainId,
+      sellChain: this.config.chainId,
+      buyDex: buyPair.pair.dex,
+      sellDex: sellPair.pair.dex,
+      tokenPair,
+      buyPrice: minPrice,
+      sellPrice: maxPrice,
+      profitPercentage: netProfit * 100,
+      estimatedProfitUsd,
+      confidence: 0.8 + Math.random() * 0.15,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + 5000,
+      isSimulated: true as const,
+      expectedGasCost: estimatedGasCost,
+      expectedProfit: estimatedProfitUsd - estimatedGasCost,
+    };
+
+    // 70% intra-chain (standard)
+    if (rand < 0.70) {
+      return {
+        ...baseOpportunity,
+        type: 'intra-chain',
+        useFlashLoan: false,
+      };
+    }
+
+    // 30% flash-loan (uses flash loan for capital-free execution)
+    const flashLoanFee = 0.0009; // Aave V3 fee: 0.09%
+    return {
+      ...baseOpportunity,
+      type: 'flash-loan',
+      useFlashLoan: true,
+      flashLoanFee,
+      expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
+    };
+  }
+
+  /**
+   * Generate multi-hop (triangular/quadrilateral) opportunities.
+   *
+   * These are more complex opportunities that test the flash loan strategy
+   * with multi-hop swap paths.
+   *
+   * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S3
+   */
+  private generateMultiHopOpportunity(): void {
+    // Need at least 3 different tokens for triangular
+    const tokens = this.getAvailableTokens();
+    if (tokens.length < 3) return;
+
+    // Randomly choose triangular (3-hop) or quadrilateral (4-hop)
+    const hops = Math.random() < 0.7 ? 3 : 4;
+    const type: SimulatedOpportunityType = hops === 3 ? 'triangular' : 'quadrilateral';
+
+    // Select random tokens for the path
+    const shuffled = [...tokens].sort(() => Math.random() - 0.5);
+    const path = shuffled.slice(0, hops);
+    path.push(path[0]); // Complete the cycle
+
+    // Simulate profit (simplified - in reality would calculate from reserves)
+    const baseProfit = 0.002 + Math.random() * 0.008; // 0.2% - 1% profit
+    const feePerHop = 0.003; // 0.3% per hop
+    const totalFees = feePerHop * hops;
+    const netProfit = baseProfit - totalFees;
+
+    if (netProfit <= 0) return; // Not profitable after fees
+
+    const estimatedProfitUsd = netProfit * 10000;
+    const estimatedGasCost = 10 + Math.random() * 30; // Higher gas for multi-hop
+    const flashLoanFee = 0.0009;
+
+    const opportunity: SimulatedOpportunity = {
+      id: `sim-${this.config.chainId}-${type}-${++this.opportunityId}`,
+      type,
+      chain: this.config.chainId,
+      buyChain: this.config.chainId,
+      sellChain: this.config.chainId,
+      buyDex: this.config.pairs[0]?.dex || 'unknown',
+      sellDex: this.config.pairs[0]?.dex || 'unknown',
+      tokenPair: `${path[0]}/${path[1]}`,
+      buyPrice: 1,
+      sellPrice: 1 + netProfit,
+      profitPercentage: netProfit * 100,
+      estimatedProfitUsd,
+      confidence: 0.75 + Math.random() * 0.15, // Slightly lower confidence for multi-hop
+      timestamp: Date.now(),
+      expiresAt: Date.now() + 3000, // Shorter expiry for complex opportunities
+      isSimulated: true,
+      useFlashLoan: true,
+      hops,
+      path,
+      intermediateTokens: path.slice(1, -1),
+      expectedGasCost: estimatedGasCost,
+      expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
+      flashLoanFee,
+    };
+
+    this.emit('opportunity', opportunity);
+    this.logger.debug('Simulated multi-hop opportunity', {
+      id: opportunity.id,
+      type: opportunity.type,
+      hops: opportunity.hops,
+      path: opportunity.path,
+      profit: `${opportunity.profitPercentage.toFixed(2)}%`,
+    });
+  }
+
+  /**
+   * Get list of unique tokens available for multi-hop paths.
+   */
+  private getAvailableTokens(): string[] {
+    const tokens = new Set<string>();
+    for (const pair of this.config.pairs) {
+      tokens.add(pair.token0Symbol);
+      tokens.add(pair.token1Symbol);
+    }
+    return Array.from(tokens);
   }
 
   getBlockNumber(): number {
@@ -749,4 +1110,394 @@ export function resetSimulatorInstance(): void {
     simulatorInstance = null;
   }
   stopAllChainSimulators();
+}
+
+// =============================================================================
+// Cross-Chain Simulator (Solution S2)
+// =============================================================================
+
+/**
+ * Bridge cost configuration for cross-chain opportunities.
+ * Costs are in USD and include protocol fees + typical gas.
+ */
+export interface BridgeCostConfig {
+  /** Fixed cost in USD */
+  fixedCost: number;
+  /** Percentage fee (0.001 = 0.1%) */
+  percentageFee: number;
+  /** Estimated bridge time in seconds */
+  estimatedTimeSeconds: number;
+}
+
+/**
+ * Default bridge costs per route.
+ * Format: 'sourceChain-destChain' -> costs
+ */
+const DEFAULT_BRIDGE_COSTS: Record<string, BridgeCostConfig> = {
+  // Stargate routes (L1 <-> L2)
+  'ethereum-arbitrum': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-optimism': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-base': { fixedCost: 15, percentageFee: 0.0006, estimatedTimeSeconds: 600 },
+  'ethereum-polygon': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 1200 },
+  'ethereum-avalanche': { fixedCost: 25, percentageFee: 0.0008, estimatedTimeSeconds: 900 },
+  'ethereum-bsc': { fixedCost: 20, percentageFee: 0.0006, estimatedTimeSeconds: 900 },
+
+  // L2 <-> L2 routes (faster, cheaper)
+  'arbitrum-optimism': { fixedCost: 5, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'arbitrum-base': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'optimism-base': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
+  'optimism-arbitrum': { fixedCost: 5, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'base-arbitrum': { fixedCost: 4, percentageFee: 0.0004, estimatedTimeSeconds: 120 },
+  'base-optimism': { fixedCost: 3, percentageFee: 0.0003, estimatedTimeSeconds: 60 },
+
+  // Asia chains
+  'bsc-polygon': { fixedCost: 8, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
+  'polygon-bsc': { fixedCost: 8, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
+  'avalanche-bsc': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
+  'avalanche-polygon': { fixedCost: 10, percentageFee: 0.0005, estimatedTimeSeconds: 300 },
+};
+
+/**
+ * Configuration for CrossChainSimulator
+ */
+export interface CrossChainSimulatorConfig {
+  /** Chains to simulate cross-chain opportunities between */
+  chains: string[];
+  /** Update interval in milliseconds */
+  updateIntervalMs: number;
+  /** Base volatility (percentage per update) */
+  volatility: number;
+  /** Minimum profit threshold after bridge costs (percentage) */
+  minProfitThreshold: number;
+  /** Tokens to track across chains */
+  tokens: string[];
+  /** Custom bridge costs (optional) */
+  bridgeCosts?: Record<string, BridgeCostConfig>;
+}
+
+/**
+ * Cross-chain price differential simulator.
+ *
+ * Maintains price state across multiple chains and detects arbitrage
+ * opportunities when price differentials exceed bridge costs.
+ *
+ * Events emitted:
+ * - 'opportunity': SimulatedOpportunity - Cross-chain arbitrage opportunity
+ * - 'priceUpdate': { chain, token, price } - Price change notification
+ *
+ * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S2
+ */
+export class CrossChainSimulator extends EventEmitter {
+  private config: CrossChainSimulatorConfig;
+  private running = false;
+  private interval: NodeJS.Timeout | null = null;
+  private logger = createLogger('cross-chain-simulator');
+  private opportunityId = 0;
+
+  /**
+   * Price state per chain per token.
+   * Map<chain, Map<token, priceUsd>>
+   */
+  private chainPrices: Map<string, Map<string, number>> = new Map();
+
+  /**
+   * Bridge costs between chain pairs.
+   * Map<'sourceChain-destChain', BridgeCostConfig>
+   */
+  private bridgeCosts: Map<string, BridgeCostConfig>;
+
+  constructor(config: CrossChainSimulatorConfig) {
+    super();
+    this.config = {
+      ...config,
+      minProfitThreshold: config.minProfitThreshold ?? 0.002, // Default 0.2%
+    };
+    this.bridgeCosts = new Map(
+      Object.entries(config.bridgeCosts ?? DEFAULT_BRIDGE_COSTS)
+    );
+    this.initializePrices();
+  }
+
+  /**
+   * Initialize price state for all chains and tokens.
+   * Adds small per-chain variation to create potential opportunities.
+   */
+  private initializePrices(): void {
+    for (const chain of this.config.chains) {
+      const chainPriceMap = new Map<string, number>();
+
+      for (const token of this.config.tokens) {
+        const basePrice = BASE_PRICES[token];
+        if (!basePrice) continue;
+
+        // Add chain-specific variation (±0.5%)
+        const variation = 1 + (Math.random() - 0.5) * 0.01;
+        chainPriceMap.set(token, basePrice * variation);
+      }
+
+      this.chainPrices.set(chain, chainPriceMap);
+    }
+
+    this.logger.info('Cross-chain simulator prices initialized', {
+      chains: this.config.chains.length,
+      tokens: this.config.tokens.length,
+      bridgeRoutes: this.bridgeCosts.size,
+    });
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+
+    this.logger.info('Starting cross-chain simulator', {
+      chains: this.config.chains,
+      updateInterval: this.config.updateIntervalMs,
+      minProfitThreshold: `${this.config.minProfitThreshold * 100}%`,
+    });
+
+    this.interval = setInterval(() => {
+      this.simulateTick();
+    }, this.config.updateIntervalMs);
+
+    // Initial opportunity check
+    this.detectAllCrossChainOpportunities();
+  }
+
+  stop(): void {
+    if (!this.running) return;
+    this.running = false;
+
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+
+    this.logger.info('Cross-chain simulator stopped');
+  }
+
+  /**
+   * Simulate price updates across all chains.
+   */
+  private simulateTick(): void {
+    // Update prices for each chain
+    for (const chain of this.config.chains) {
+      const chainPrices = this.chainPrices.get(chain);
+      if (!chainPrices) continue;
+
+      for (const token of this.config.tokens) {
+        const currentPrice = chainPrices.get(token);
+        if (!currentPrice) continue;
+
+        // Apply random walk with volatility
+        const change = (Math.random() - 0.5) * 2 * this.config.volatility;
+        const newPrice = currentPrice * (1 + change);
+        chainPrices.set(token, newPrice);
+
+        this.emit('priceUpdate', { chain, token, price: newPrice });
+      }
+    }
+
+    // Detect cross-chain opportunities
+    this.detectAllCrossChainOpportunities();
+  }
+
+  /**
+   * Check all chain pairs for cross-chain arbitrage opportunities.
+   */
+  private detectAllCrossChainOpportunities(): void {
+    for (let i = 0; i < this.config.chains.length; i++) {
+      for (let j = 0; j < this.config.chains.length; j++) {
+        if (i === j) continue;
+
+        const sourceChain = this.config.chains[i];
+        const destChain = this.config.chains[j];
+
+        for (const token of this.config.tokens) {
+          const opportunity = this.detectCrossChainOpportunity(
+            token,
+            sourceChain,
+            destChain
+          );
+
+          if (opportunity) {
+            this.emit('opportunity', opportunity);
+            this.logger.debug('Simulated cross-chain opportunity', {
+              id: opportunity.id,
+              token,
+              buyChain: opportunity.buyChain,
+              sellChain: opportunity.sellChain,
+              profit: `${opportunity.profitPercentage.toFixed(2)}%`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Detect cross-chain opportunity for a specific token between two chains.
+   */
+  private detectCrossChainOpportunity(
+    token: string,
+    sourceChain: string,
+    destChain: string
+  ): SimulatedOpportunity | null {
+    const sourcePrice = this.chainPrices.get(sourceChain)?.get(token);
+    const destPrice = this.chainPrices.get(destChain)?.get(token);
+
+    if (!sourcePrice || !destPrice) return null;
+
+    // Check if dest price is higher (we buy on source, sell on dest)
+    if (destPrice <= sourcePrice) return null;
+
+    // Get bridge costs
+    const bridgeKey = `${sourceChain}-${destChain}`;
+    const bridgeCost = this.bridgeCosts.get(bridgeKey);
+
+    if (!bridgeCost) {
+      // No bridge route available
+      return null;
+    }
+
+    // Calculate profit
+    const grossProfitUsd = destPrice - sourcePrice;
+    const positionSize = 10000; // Assume $10k position
+    const grossProfitTotal = (grossProfitUsd / sourcePrice) * positionSize;
+
+    // Calculate bridge costs
+    const bridgeFeeUsd = bridgeCost.fixedCost + (positionSize * bridgeCost.percentageFee);
+
+    // Net profit
+    const netProfitUsd = grossProfitTotal - bridgeFeeUsd;
+    const netProfitPercentage = netProfitUsd / positionSize;
+
+    // Only emit if profitable above threshold
+    if (netProfitPercentage < this.config.minProfitThreshold) {
+      return null;
+    }
+
+    // Determine bridge protocol
+    const bridgeProtocol: SimulatedBridgeProtocol =
+      sourceChain === 'ethereum' || destChain === 'ethereum'
+        ? 'stargate'
+        : 'across';
+
+    // Estimate gas cost (source chain swap + bridge + dest chain swap)
+    const estimatedGasCost = this.estimateGasCost(sourceChain, destChain);
+
+    return {
+      id: `sim-xchain-${++this.opportunityId}`,
+      type: 'cross-chain',
+      chain: sourceChain, // Primary chain for compatibility
+      buyChain: sourceChain,
+      sellChain: destChain,
+      buyDex: DEXES[sourceChain]?.[0] || 'dex',
+      sellDex: DEXES[destChain]?.[0] || 'dex',
+      tokenPair: `${token}/USDC`,
+      buyPrice: sourcePrice,
+      sellPrice: destPrice,
+      profitPercentage: netProfitPercentage * 100,
+      estimatedProfitUsd: netProfitUsd,
+      confidence: 0.7 + Math.random() * 0.15, // Lower confidence for cross-chain
+      timestamp: Date.now(),
+      expiresAt: Date.now() + bridgeCost.estimatedTimeSeconds * 1000,
+      isSimulated: true,
+      useFlashLoan: false, // Cross-chain typically doesn't use flash loans
+      bridgeProtocol,
+      bridgeFee: bridgeFeeUsd,
+      expectedGasCost: estimatedGasCost,
+      expectedProfit: netProfitUsd - estimatedGasCost,
+    };
+  }
+
+  /**
+   * Estimate gas cost for cross-chain execution.
+   */
+  private estimateGasCost(sourceChain: string, destChain: string): number {
+    // Base gas costs per chain (in USD)
+    const chainGasCosts: Record<string, number> = {
+      ethereum: 25,
+      arbitrum: 1.5,
+      optimism: 1.0,
+      base: 0.5,
+      polygon: 0.3,
+      bsc: 0.5,
+      avalanche: 2.0,
+      fantom: 0.2,
+      zksync: 1.0,
+      linea: 0.8,
+      solana: 0.01,
+    };
+
+    const sourceGas = chainGasCosts[sourceChain] || 5;
+    const destGas = chainGasCosts[destChain] || 5;
+
+    // Total: source swap + bridge tx + dest swap
+    return sourceGas + destGas + 2; // Extra $2 for bridge tx
+  }
+
+  /**
+   * Get current price for a token on a specific chain.
+   */
+  getPrice(chain: string, token: string): number | undefined {
+    return this.chainPrices.get(chain)?.get(token);
+  }
+
+  /**
+   * Get all prices for a token across all chains.
+   */
+  getAllPricesForToken(token: string): Map<string, number> {
+    const prices = new Map<string, number>();
+    for (const [chain, chainPrices] of this.chainPrices) {
+      const price = chainPrices.get(token);
+      if (price) {
+        prices.set(chain, price);
+      }
+    }
+    return prices;
+  }
+
+  isRunning(): boolean {
+    return this.running;
+  }
+}
+
+// =============================================================================
+// Cross-Chain Simulator Factory
+// =============================================================================
+
+let crossChainSimulatorInstance: CrossChainSimulator | null = null;
+
+/**
+ * Get or create the cross-chain simulator singleton.
+ */
+export function getCrossChainSimulator(
+  config?: Partial<CrossChainSimulatorConfig>
+): CrossChainSimulator {
+  if (!crossChainSimulatorInstance) {
+    const defaultConfig: CrossChainSimulatorConfig = {
+      chains: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'bsc', 'avalanche'],
+      updateIntervalMs: parseInt(process.env.SIMULATION_UPDATE_INTERVAL_MS || '2000', 10),
+      volatility: parseFloat(process.env.SIMULATION_VOLATILITY || '0.015'),
+      minProfitThreshold: 0.002, // 0.2%
+      tokens: ['WETH', 'WBTC', 'USDC', 'USDT', 'LINK', 'UNI', 'AAVE'],
+    };
+
+    crossChainSimulatorInstance = new CrossChainSimulator({
+      ...defaultConfig,
+      ...config,
+    });
+  }
+
+  return crossChainSimulatorInstance;
+}
+
+/**
+ * Stop and reset the cross-chain simulator.
+ */
+export function stopCrossChainSimulator(): void {
+  if (crossChainSimulatorInstance) {
+    crossChainSimulatorInstance.stop();
+    crossChainSimulatorInstance = null;
+  }
 }

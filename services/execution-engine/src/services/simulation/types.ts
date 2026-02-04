@@ -16,8 +16,13 @@ import { ethers } from 'ethers';
 
 /**
  * Simulation provider identifier
+ *
+ * - tenderly: Primary EVM simulation via Tenderly API (25K/month free)
+ * - alchemy: Fallback EVM simulation via Alchemy eth_call (300M CU/month free)
+ * - local: Last resort EVM simulation via local RPC eth_call
+ * - helius: Solana simulation via Helius API (100K credits/month free)
  */
-export type SimulationProviderType = 'tenderly' | 'alchemy' | 'local';
+export type SimulationProviderType = 'tenderly' | 'alchemy' | 'local' | 'helius';
 
 /**
  * Result of a transaction simulation
@@ -379,6 +384,9 @@ export interface ISimulationService {
  *
  * Note: Goerli testnet has been deprecated as of January 2024.
  * Use Sepolia for Ethereum testnet simulation.
+ *
+ * Solana uses chainId 101 (mainnet-beta). Different from EVM chains,
+ * Solana simulation uses the Helius provider instead of Tenderly/Alchemy.
  */
 export const CHAIN_IDS: Record<string, number> = {
   ethereum: 1,
@@ -394,7 +402,24 @@ export const CHAIN_IDS: Record<string, number> = {
   zksync: 324,
   linea: 59144,
   fantom: 250,
+  /** Solana mainnet-beta - uses Helius provider, not EVM simulation */
+  solana: 101,
 };
+
+/**
+ * Check if a chain is Solana (requires different simulation provider).
+ */
+export function isSolanaChain(chain: string): boolean {
+  return chain.toLowerCase() === 'solana';
+}
+
+/**
+ * Check if a chain is EVM-compatible (uses Tenderly/Alchemy/Local providers).
+ */
+export function isEvmChain(chain: string): boolean {
+  const normalizedChain = chain.toLowerCase();
+  return normalizedChain !== 'solana' && normalizedChain in CHAIN_IDS;
+}
 
 /**
  * Fix 6.3: WETH (Wrapped Native Token) address mapping per chain.
@@ -534,6 +559,38 @@ export const ALCHEMY_CONFIG = {
    * Approximate compute units per eth_call operation.
    */
   computeUnitsPerCall: 26,
+};
+
+/**
+ * Helius simulation configuration for Solana.
+ *
+ * Helius provides enhanced Solana RPC with simulation capabilities.
+ * Free tier: 100,000 credits/month (simulateTransaction = 1 credit)
+ *
+ * @see HeliusSimulationProvider in helius-provider.ts
+ * @see https://docs.helius.dev/
+ */
+export const HELIUS_CONFIG = {
+  /**
+   * URL template for Helius RPC endpoint.
+   */
+  rpcUrlTemplate: 'https://mainnet.helius-rpc.com/?api-key={apiKey}',
+  /**
+   * Enhanced transactions API URL for detailed simulation.
+   */
+  enhancedApiUrl: 'https://api.helius.xyz/v0',
+  /**
+   * Free tier monthly credit limit.
+   */
+  freeMonthlyCredits: 100_000,
+  /**
+   * Credits per simulateTransaction call.
+   */
+  creditsPerSimulation: 1,
+  /**
+   * Default timeout for simulation requests in ms.
+   */
+  defaultTimeoutMs: 5000,
 };
 
 // =============================================================================

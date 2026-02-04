@@ -1,6 +1,6 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.6
+> **Document Version:** 2.7
 > **Last Updated:** 2026-02-04
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
@@ -673,16 +673,29 @@ This section documents the major enhancements implemented in January 2026.
 
 **Problem**: Transactions sent without simulation result in failed txs consuming gas.
 
-**Solution**: Pre-flight simulation using Tenderly and Alchemy providers.
+**Solution**: Pre-flight simulation using multi-provider approach with chain-specific routing.
 
 | Component | Purpose |
 |-----------|---------|
-| SimulationService | Orchestrates simulation with provider fallback |
-| TenderlyProvider | Primary simulation via Tenderly API |
-| AlchemyProvider | Fallback simulation via Alchemy |
+| SimulationService | Orchestrates simulation with provider fallback and chain routing |
+| TenderlyProvider | Primary EVM simulation via Tenderly API |
+| AlchemyProvider | Fallback EVM simulation via Alchemy |
+| HeliusSimulationProvider | Solana simulation via Helius API (NEW) |
+| LocalSimulationProvider | Tertiary fallback using eth_call |
 | SimulationMetricsCollector | Tracks success rates and latency |
 
+#### Chain-Specific Simulation (Amendment: 2026-02-04)
+
+SimulationService now routes requests based on chain:
+
+| Chain Type | Primary Provider | Fallback | Monthly Budget |
+|------------|------------------|----------|----------------|
+| EVM (10 chains) | Tenderly | Alchemy → Local | 25K simulations |
+| Solana | Helius API | Native RPC | 100K credits |
+
 **Key Files**: `services/execution-engine/src/services/simulation/`
+
+**Related ADR**: [ADR-016: Transaction Simulation](./adr/ADR-016-transaction-simulation.md)
 
 ### 10.2 MEV Protection Enhancement (Phase 1.2) ✅ COMPLETE
 
@@ -734,6 +747,46 @@ This section documents the major enhancements implemented in January 2026.
 **Status**: Contract and strategy complete, testnet deployment pending.
 
 **Key Files**: `contracts/src/FlashLoanArbitrage.sol`, `services/execution-engine/src/strategies/flash-loan.strategy.ts`
+
+### 10.7 Detector Pre-validation (Phase 4.1) ✅ NEW
+
+**Problem**: Many detected opportunities fail during execution, wasting gas and execution engine resources.
+
+**Solution**: Sample-based pre-validation at the detector level to filter out opportunities that would fail.
+
+| Configuration | Default | Purpose |
+|---------------|---------|---------|
+| enabled | false | Master switch for pre-validation |
+| sampleRate | 0.1 (10%) | Fraction of opportunities to validate |
+| minProfitForValidation | $50 USD | Skip validation for small opportunities |
+| maxLatencyMs | 100ms | Latency bound for validation |
+| monthlyBudget | 2,500 | Simulation budget for pre-validation |
+| preferredProvider | alchemy | Use free-tier provider to preserve Tenderly |
+
+**Key Features**:
+- Budget-limited: Monthly simulation limits prevent runaway costs
+- Sample-based: Only validates a fraction to stay within rate limits
+- Fail-open: On errors, allows opportunity through
+- Metrics: Tracks success/failure rates for monitoring
+
+**Key Files**: `services/cross-chain-detector/src/detector.ts`, `services/cross-chain-detector/src/types.ts`
+
+**Related ADR**: [ADR-023: Detector Pre-validation](./adr/ADR-023-detector-prevalidation.md)
+
+### 10.8 Strategy Simulation Enhancements (Phase 4.2) ✅ NEW
+
+**Problem**: CrossChainStrategy only simulated sell-side; FlashLoanStrategy didn't validate simulated profit.
+
+**Solution**: Enhanced pre-flight simulation across strategies.
+
+| Strategy | Enhancement | Benefit |
+|----------|-------------|---------|
+| CrossChainStrategy | Buy-side simulation | Catch failures before bridge quote |
+| FlashLoanStrategy | Profit validation from gas | Avoid unprofitable trades from gas spikes |
+
+**Key Files**:
+- `services/execution-engine/src/strategies/cross-chain.strategy.ts`
+- `services/execution-engine/src/strategies/flash-loan.strategy.ts`
 
 ---
 
@@ -832,9 +885,12 @@ The following Architecture Decision Records document key decisions:
 ### Phase 4 Performance Optimization (ADR-022+)
 - [ADR-022: Hot-Path Memory Optimization](./adr/ADR-022-hot-path-memory-optimization.md)
 
-### RPC & ML Optimizations (ADR-024, ADR-025) ✅ NEW
+### RPC & ML Optimizations (ADR-024, ADR-025)
 - [ADR-024: RPC Rate Limiting Strategy](./adr/ADR-024-rpc-rate-limiting.md) - Token bucket rate limiting with hot-path exemptions
 - [ADR-025: ML Model Lifecycle Management](./adr/ADR-025-ml-model-lifecycle.md) - Model persistence, warmup, and staleness detection
+
+### Simulation Enhancements (ADR-023) ✅ NEW
+- [ADR-023: Detector Pre-validation](./adr/ADR-023-detector-prevalidation.md) - Sample-based opportunity validation before publishing
 
 ---
 
@@ -850,6 +906,7 @@ The following Architecture Decision Records document key decisions:
 | 2.4 | 2026-01-31 | Config Alignment | Corrected DEX count (62→54), token count (165→143) to match actual config |
 | 2.5 | 2026-02-04 | Bug Hunt Fixes | Added ADR-022 (hot-path memory optimization), corrected data plane diagram (no MongoDB), documented ring buffer and normalization cache patterns |
 | 2.6 | 2026-02-04 | RPC/ML ADRs | Added ADR-024 (RPC rate limiting), ADR-025 (ML model lifecycle) - documenting existing implementations from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md |
+| 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
 
 ---
 

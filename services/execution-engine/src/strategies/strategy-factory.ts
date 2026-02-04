@@ -85,6 +85,20 @@ export interface StrategyFactoryConfig {
   logger: Logger;
   /** Whether simulation mode is active */
   isSimulationMode: boolean;
+  /**
+   * Hybrid execution mode (Solution S4).
+   *
+   * When enabled:
+   * - Real strategy selection logic is used (not SimulationStrategy)
+   * - Strategies execute real validation and pre-execution logic
+   * - Only the final transaction submission is mocked
+   *
+   * This allows testing the full strategy routing and execution logic
+   * without making real blockchain transactions.
+   *
+   * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S4
+   */
+  isHybridMode?: boolean;
 }
 
 /**
@@ -115,12 +129,14 @@ export interface RegisteredStrategies {
 export class ExecutionStrategyFactory {
   private readonly logger: Logger;
   private isSimulationMode: boolean;
+  private isHybridMode: boolean;
 
   private strategies: RegisteredStrategies = {};
 
   constructor(config: StrategyFactoryConfig) {
     this.logger = config.logger;
     this.isSimulationMode = config.isSimulationMode;
+    this.isHybridMode = config.isHybridMode ?? false;
   }
 
   // ===========================================================================
@@ -206,6 +222,34 @@ export class ExecutionStrategyFactory {
     return this.isSimulationMode;
   }
 
+  /**
+   * Enable or disable hybrid execution mode.
+   *
+   * Hybrid mode uses real strategy selection but mocks transaction submission.
+   * This allows testing strategy routing and execution logic without
+   * real blockchain transactions.
+   *
+   * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S4
+   */
+  setHybridMode(enabled: boolean): void {
+    const previous = this.isHybridMode;
+    this.isHybridMode = enabled;
+
+    if (previous !== enabled) {
+      this.logger.info('Strategy factory hybrid mode changed', {
+        previous,
+        current: enabled,
+      });
+    }
+  }
+
+  /**
+   * Check if hybrid execution mode is active.
+   */
+  getHybridMode(): boolean {
+    return this.isHybridMode;
+  }
+
   // ===========================================================================
   // Strategy Resolution
   // ===========================================================================
@@ -228,8 +272,9 @@ export class ExecutionStrategyFactory {
    * @throws Error if no suitable strategy is available
    */
   resolve(opportunity: ArbitrageOpportunity): StrategyResolution {
-    // Priority 1: Simulation mode overrides everything
-    if (this.isSimulationMode) {
+    // Priority 1: Simulation mode overrides everything (unless hybrid mode is active)
+    // Hybrid mode uses real strategy selection with mocked transaction submission
+    if (this.isSimulationMode && !this.isHybridMode) {
       if (!this.strategies.simulation) {
         throw new Error('[ERR_NO_STRATEGY] Simulation mode enabled but no simulation strategy registered');
       }
@@ -238,6 +283,14 @@ export class ExecutionStrategyFactory {
         strategy: this.strategies.simulation,
         reason: 'Simulation mode is active',
       };
+    }
+
+    // Log if hybrid mode is active (simulation mode enabled but using real strategies)
+    if (this.isHybridMode) {
+      this.logger.debug('Hybrid mode: using real strategy selection', {
+        opportunityId: opportunity.id,
+        opportunityType: opportunity.type,
+      });
     }
 
     // Priority 2: Flash loan opportunities (including triangular and quadrilateral)

@@ -86,6 +86,8 @@ import {
   MLPredictionConfig,
   // FIX 7.1: Import toDisplayTokenPair for pending opportunity formatting
   toDisplayTokenPair,
+  // Phase 3: Pre-validation config for sample-based opportunity validation
+  PreValidationConfig,
 } from './types';
 
 // Phase 3: Whale Activity Tracker imports
@@ -148,6 +150,16 @@ const DEFAULT_ML_CONFIG: MLPredictionConfig = {
  */
 const isProduction = process.env.NODE_ENV === 'production';
 
+/** Phase 3: Default pre-validation configuration */
+const DEFAULT_PRE_VALIDATION_CONFIG: PreValidationConfig = {
+  enabled: false, // Disabled by default until SimulationService integration is complete
+  sampleRate: 0.1, // 10% of opportunities
+  minProfitForValidation: 50, // Only validate $50+ opportunities
+  maxLatencyMs: 100, // Skip if validation takes too long
+  monthlyBudget: 2500, // 10% of Tenderly's 25K/month
+  preferredProvider: 'alchemy', // Preserve Tenderly budget for execution
+};
+
 const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
   // FIX 3.1: Production interval increased from 50ms to 100ms
   // 50ms was too aggressive - detection cycles would overlap and get skipped
@@ -162,6 +174,8 @@ const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
   estimatedSwapGas: 200000,
   whaleConfig: DEFAULT_WHALE_CONFIG,
   mlConfig: DEFAULT_ML_CONFIG,
+  // Phase 3: Pre-validation config (disabled by default)
+  preValidationConfig: DEFAULT_PRE_VALIDATION_CONFIG,
 };
 
 // =============================================================================
@@ -229,6 +243,12 @@ export class CrossChainDetectorService {
   // Task 1.3.3: Counter for pending opportunities received from mempool
   private pendingOpportunitiesReceived = 0;
 
+  // Phase 3: Pre-validation state tracking
+  private preValidationBudgetUsed = 0;
+  private preValidationBudgetResetTime = 0;
+  private preValidationSuccessCount = 0;
+  private preValidationFailCount = 0;
+
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
   // These are now managed by mlPredictionManager for single-responsibility design
@@ -243,6 +263,8 @@ export class CrossChainDetectorService {
       ...userConfig,
       whaleConfig: { ...DEFAULT_WHALE_CONFIG, ...userConfig.whaleConfig },
       mlConfig: { ...DEFAULT_ML_CONFIG, ...userConfig.mlConfig },
+      // Phase 3: Merge pre-validation config
+      preValidationConfig: { ...DEFAULT_PRE_VALIDATION_CONFIG, ...userConfig.preValidationConfig },
     } as Required<DetectorConfig>;
     this.whaleConfig = this.config.whaleConfig!;
     this.mlConfig = this.config.mlConfig!;
@@ -1820,15 +1842,170 @@ export class CrossChainDetectorService {
   /**
    * ADR-014: Publish opportunity via OpportunityPublisher module.
    * The module handles deduplication, conversion, and caching.
+   *
+   * Phase 3: Added sample-based pre-validation to filter out opportunities
+   * that would fail execution. Pre-validation is optional and budget-limited.
    */
   private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
     if (!this.opportunityPublisher) return;
 
     try {
+      // Phase 3: Sample-based pre-validation
+      const preValidConfig = this.config.preValidationConfig;
+      if (preValidConfig?.enabled) {
+        const shouldPreValidate = await this.shouldPreValidate(opportunity, preValidConfig);
+
+        if (shouldPreValidate) {
+          const isValid = await this.preValidateOpportunity(opportunity, preValidConfig);
+          if (!isValid) {
+            this.preValidationFailCount++;
+            this.logger.debug('Opportunity failed pre-validation, skipping publish', {
+              token: opportunity.token,
+              sourceChain: opportunity.sourceChain,
+              targetChain: opportunity.targetChain,
+              netProfit: opportunity.netProfit,
+            });
+            return;
+          }
+          this.preValidationSuccessCount++;
+        }
+      }
+
       await this.opportunityPublisher.publish(opportunity);
     } catch (error) {
       this.logger.error('Failed to publish arbitrage opportunity', { error });
     }
+  }
+
+  /**
+   * Phase 3: Determine if an opportunity should be pre-validated.
+   *
+   * Pre-validation is sample-based to stay within rate limits.
+   * Conditions for pre-validation:
+   * 1. Sample rate check (random)
+   * 2. Profit above minimum threshold
+   * 3. Budget not exhausted
+   *
+   * @param opportunity - The opportunity to potentially validate
+   * @param config - Pre-validation configuration
+   * @returns True if opportunity should be pre-validated
+   */
+  private async shouldPreValidate(
+    opportunity: CrossChainOpportunity,
+    config: PreValidationConfig
+  ): Promise<boolean> {
+    // Check monthly budget reset
+    const now = Date.now();
+    const monthStart = new Date(now);
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthStartMs = monthStart.getTime();
+
+    if (this.preValidationBudgetResetTime < monthStartMs) {
+      // New month - reset budget
+      this.preValidationBudgetUsed = 0;
+      this.preValidationBudgetResetTime = now;
+      this.logger.info('Pre-validation budget reset for new month', {
+        budget: config.monthlyBudget,
+      });
+    }
+
+    // Check budget exhaustion
+    if (this.preValidationBudgetUsed >= config.monthlyBudget) {
+      return false;
+    }
+
+    // Check profit threshold
+    if (opportunity.netProfit < config.minProfitForValidation) {
+      return false;
+    }
+
+    // Sample rate check (random selection)
+    if (Math.random() >= config.sampleRate) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Phase 3: Pre-validate an opportunity by simulating the buy transaction.
+   *
+   * Uses SimulationService to check if the opportunity would succeed.
+   * This is a lightweight check that doesn't guarantee success but filters
+   * out obviously bad opportunities (reverts, insufficient liquidity, etc.).
+   *
+   * @param opportunity - The opportunity to validate
+   * @param config - Pre-validation configuration
+   * @returns True if opportunity passes validation (or validation skipped)
+   */
+  private async preValidateOpportunity(
+    opportunity: CrossChainOpportunity,
+    config: PreValidationConfig
+  ): Promise<boolean> {
+    // Increment budget usage
+    this.preValidationBudgetUsed++;
+
+    const startTime = Date.now();
+
+    try {
+      // Note: Pre-validation requires SimulationService integration
+      // This is a placeholder that logs the validation attempt
+      // Full integration requires SimulationService dependency injection
+      //
+      // TODO: Integrate with SimulationService when available
+      // For now, return true (pass through) and log for monitoring
+      this.logger.debug('Pre-validation check (placeholder - awaiting SimulationService integration)', {
+        token: opportunity.token,
+        sourceChain: opportunity.sourceChain,
+        sourceDex: opportunity.sourceDex,
+        netProfit: opportunity.netProfit,
+        preferredProvider: config.preferredProvider,
+      });
+
+      // Check latency constraint
+      const latency = Date.now() - startTime;
+      if (latency > config.maxLatencyMs) {
+        this.logger.debug('Pre-validation exceeded max latency', {
+          latencyMs: latency,
+          maxLatencyMs: config.maxLatencyMs,
+        });
+      }
+
+      // Return true for now (placeholder)
+      // When SimulationService is integrated, this will return actual validation result
+      return true;
+    } catch (error) {
+      this.logger.warn('Pre-validation failed with error, allowing opportunity', {
+        error: (error as Error).message,
+        token: opportunity.token,
+      });
+      // On error, allow the opportunity (fail-open to avoid blocking valid opportunities)
+      return true;
+    }
+  }
+
+  /**
+   * Phase 3: Get pre-validation metrics.
+   */
+  getPreValidationMetrics(): {
+    budgetUsed: number;
+    budgetRemaining: number;
+    successCount: number;
+    failCount: number;
+    successRate: number;
+  } {
+    const config = this.config.preValidationConfig;
+    const budget = config?.monthlyBudget ?? 0;
+    const total = this.preValidationSuccessCount + this.preValidationFailCount;
+
+    return {
+      budgetUsed: this.preValidationBudgetUsed,
+      budgetRemaining: Math.max(0, budget - this.preValidationBudgetUsed),
+      successCount: this.preValidationSuccessCount,
+      failCount: this.preValidationFailCount,
+      successRate: total > 0 ? this.preValidationSuccessCount / total : 0,
+    };
   }
 
   // ===========================================================================

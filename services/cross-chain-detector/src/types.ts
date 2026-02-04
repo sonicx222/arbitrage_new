@@ -332,6 +332,58 @@ export interface DetectorConfig {
   whaleConfig?: WhaleAnalysisConfig;
   /** ML prediction configuration */
   mlConfig?: MLPredictionConfig;
+  /** Phase 3: Pre-validation configuration for sample-based opportunity validation */
+  preValidationConfig?: PreValidationConfig;
+}
+
+/**
+ * Phase 3: Pre-validation configuration for sample-based opportunity validation.
+ *
+ * Pre-validation simulates a sample of opportunities before publishing to filter
+ * out opportunities that would fail execution. This reduces wasted execution
+ * engine resources and improves opportunity quality.
+ *
+ * Budget considerations:
+ * - Tenderly: 25K simulations/month (preserve for execution)
+ * - Alchemy: 300M CU/month (can use for pre-validation)
+ * - Pre-validation uses ~10% of budget, leaving 90% for execution
+ *
+ * @see ADR-023: Detector Pre-validation
+ */
+export interface PreValidationConfig {
+  /** Enable pre-validation (default: false) */
+  enabled: boolean;
+  /**
+   * Sample rate for pre-validation (0-1).
+   * Only this fraction of opportunities are pre-validated.
+   * Example: 0.1 means 10% of opportunities are validated.
+   * Default: 0.1
+   */
+  sampleRate: number;
+  /**
+   * Minimum profit threshold for pre-validation in USD.
+   * Opportunities below this threshold skip pre-validation.
+   * Default: 50
+   */
+  minProfitForValidation: number;
+  /**
+   * Maximum latency for pre-validation in ms.
+   * Skip pre-validation if it takes longer.
+   * Default: 100
+   */
+  maxLatencyMs: number;
+  /**
+   * Monthly simulation budget for pre-validation.
+   * Pre-validation stops when budget is exhausted.
+   * Default: 2500 (10% of Tenderly's 25K/month)
+   */
+  monthlyBudget: number;
+  /**
+   * Preferred simulation provider for pre-validation.
+   * Use 'alchemy' to preserve Tenderly budget for execution.
+   * Default: 'alchemy'
+   */
+  preferredProvider: 'tenderly' | 'alchemy' | 'local';
 }
 
 /**

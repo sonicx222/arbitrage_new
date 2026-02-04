@@ -86,6 +86,10 @@ export {
   type BridgeProfitabilityResult,
 } from '../services/bridge-profitability-analyzer';
 
+// Hybrid mode exports
+export { checkHybridExecutionMode as isHybridExecutionMode };
+export type { HybridModeConfig };
+
 // Lazy-initialized logger for module-level validation
 let _moduleLogger: ILogger | null = null;
 function getModuleLogger(): ILogger {
@@ -102,6 +106,38 @@ import type {
 } from '../types';
 import { TRANSACTION_TIMEOUT_MS, withTimeout } from '../types';
 import type { SimulationRequest, SimulationResult } from '../services/simulation/types';
+
+// =============================================================================
+// Hybrid Mode Support (Solution S4)
+// =============================================================================
+
+/**
+ * Check if hybrid execution mode is enabled.
+ * Hybrid mode uses real strategy logic but mocks transaction submission.
+ *
+ * @see docs/reports/SIMULATION_MODE_ENHANCEMENT_RESEARCH.md - Solution S4
+ */
+function checkHybridExecutionMode(): boolean {
+  return process.env.EXECUTION_HYBRID_MODE === 'true';
+}
+
+/**
+ * Configuration for hybrid mode mock transactions.
+ */
+interface HybridModeConfig {
+  /** Mock transaction success rate (0-1, default: 0.95) */
+  successRate: number;
+  /** Mock gas used in transaction (default: 150000) */
+  mockGasUsed: bigint;
+  /** Mock latency in milliseconds (default: 100) */
+  mockLatencyMs: number;
+}
+
+const DEFAULT_HYBRID_CONFIG: HybridModeConfig = {
+  successRate: parseFloat(process.env.EXECUTION_HYBRID_SUCCESS_RATE || '0.95'),
+  mockGasUsed: BigInt(process.env.EXECUTION_HYBRID_GAS_USED || '150000'),
+  mockLatencyMs: parseInt(process.env.EXECUTION_HYBRID_LATENCY_MS || '100', 10),
+};
 
 /**
  * Phase 2 Enhancement: RBF (Replace-By-Fee) retry configuration.
@@ -1124,6 +1160,159 @@ export abstract class BaseExecutionStrategy {
     operationName: string
   ): Promise<T> {
     return withTimeout(operation, operationName, TRANSACTION_TIMEOUT_MS);
+  }
+
+  // ===========================================================================
+  // Hybrid Mode Support (Solution S4)
+  // ===========================================================================
+
+  /**
+   * Check if hybrid execution mode is active.
+   * Hybrid mode runs real strategy logic but mocks transaction submission.
+   */
+  protected isHybridMode(): boolean {
+    return checkHybridExecutionMode();
+  }
+
+  /**
+   * Create a mock transaction result for hybrid mode.
+   *
+   * This allows testing real strategy logic without actual blockchain transactions.
+   * The mock simulates realistic transaction behavior including:
+   * - Configurable success rate
+   * - Realistic gas usage
+   * - Simulated latency
+   *
+   * @param tx - The transaction that would have been submitted
+   * @param chain - The target chain
+   * @param options - Execution options
+   * @returns Mock transaction result matching submitTransaction return type
+   */
+  protected async createHybridModeResult(
+    tx: ethers.TransactionRequest,
+    chain: string,
+    options: {
+      opportunityId: string;
+      expectedProfit?: number;
+      initialGasPrice: bigint;
+    }
+  ): Promise<{
+    success: boolean;
+    receipt?: ethers.TransactionReceipt;
+    txHash?: string;
+    error?: string;
+    nonce?: number;
+    usedMevProtection?: boolean;
+    isHybridMock?: boolean;
+  }> {
+    // Simulate network latency
+    await new Promise(resolve => setTimeout(resolve, DEFAULT_HYBRID_CONFIG.mockLatencyMs));
+
+    // Check success rate
+    if (Math.random() > DEFAULT_HYBRID_CONFIG.successRate) {
+      this.logger.info('HYBRID_MODE: Mock transaction failed (simulated failure)', {
+        chain,
+        opportunityId: options.opportunityId,
+        successRate: DEFAULT_HYBRID_CONFIG.successRate,
+      });
+      return {
+        success: false,
+        error: '[HYBRID_MOCK] Simulated transaction failure',
+        isHybridMock: true,
+      };
+    }
+
+    // Generate mock transaction hash
+    const mockTxHash = '0x' + Array.from({ length: 64 }, () =>
+      Math.floor(Math.random() * 16).toString(16)
+    ).join('');
+
+    // Generate mock nonce
+    const mockNonce = Math.floor(Math.random() * 1000000);
+
+    this.logger.info('HYBRID_MODE: Mock transaction submitted', {
+      chain,
+      opportunityId: options.opportunityId,
+      mockTxHash,
+      mockNonce,
+      to: tx.to,
+      value: tx.value?.toString(),
+      gasLimit: tx.gasLimit?.toString(),
+      gasPrice: options.initialGasPrice.toString(),
+      expectedProfit: options.expectedProfit,
+    });
+
+    // Create mock receipt (partial - only essential fields for testing)
+    const mockReceipt = {
+      hash: mockTxHash,
+      blockNumber: Math.floor(Date.now() / 1000),
+      blockHash: '0x' + Array.from({ length: 64 }, () =>
+        Math.floor(Math.random() * 16).toString(16)
+      ).join(''),
+      index: 0,
+      from: tx.from as string,
+      to: tx.to as string,
+      gasUsed: DEFAULT_HYBRID_CONFIG.mockGasUsed,
+      gasPrice: options.initialGasPrice,
+      status: 1,
+      logs: [],
+      logsBloom: '0x',
+      cumulativeGasUsed: DEFAULT_HYBRID_CONFIG.mockGasUsed,
+      type: 2,
+      // Required methods
+      toJSON: () => ({}),
+      getBlock: async () => null as unknown,
+      getTransaction: async () => null as unknown,
+      getResult: async () => '',
+      confirmations: async () => 1,
+      fee: DEFAULT_HYBRID_CONFIG.mockGasUsed * options.initialGasPrice,
+      blobGasUsed: null,
+      blobGasPrice: null,
+      root: null,
+      contractAddress: null,
+    } as unknown as ethers.TransactionReceipt;
+
+    return {
+      success: true,
+      receipt: mockReceipt,
+      txHash: mockTxHash,
+      nonce: mockNonce,
+      usedMevProtection: false,
+      isHybridMock: true,
+    };
+  }
+
+  /**
+   * Submit a transaction with hybrid mode support.
+   *
+   * In hybrid mode, returns a mock result instead of submitting to blockchain.
+   * This allows testing strategy logic end-to-end without real transactions.
+   */
+  protected async submitTransactionWithHybridSupport(
+    tx: ethers.TransactionRequest,
+    chain: string,
+    ctx: StrategyContext,
+    options: {
+      opportunityId: string;
+      expectedProfit?: number;
+      initialGasPrice: bigint;
+    }
+  ): Promise<{
+    success: boolean;
+    receipt?: ethers.TransactionReceipt;
+    txHash?: string;
+    error?: string;
+    nonce?: number;
+    usedMevProtection?: boolean;
+    isHybridMock?: boolean;
+  }> {
+    // Check if hybrid mode is active
+    if (this.isHybridMode()) {
+      return this.createHybridModeResult(tx, chain, options);
+    }
+
+    // Normal transaction submission
+    return this.submitTransaction(tx, chain, ctx, options);
   }
 
   // ===========================================================================

@@ -24,6 +24,7 @@ import {
   createCancellableTimeout,
   isDeprecatedChain,
   getDeprecationWarning,
+  isSolanaChain,
 } from './types';
 
 // =============================================================================
@@ -178,9 +179,12 @@ export class SimulationService implements ISimulationService {
   /**
    * Fix 7.2: Validate provider priority configuration.
    * Warns about invalid or unregistered provider types.
+   *
+   * Note: 'helius' is valid but not included in providerPriority by default
+   * since it's only used for Solana chains (routed automatically).
    */
   private validateProviderPriority(): void {
-    const validTypes: SimulationProviderType[] = ['tenderly', 'alchemy', 'local'];
+    const validTypes: SimulationProviderType[] = ['tenderly', 'alchemy', 'local', 'helius'];
     const registeredProviders = Array.from(this.providers.keys());
 
     for (const type of this.config.providerPriority) {
@@ -250,6 +254,10 @@ export class SimulationService implements ISimulationService {
    * Fix 5.1: Implements request coalescing to prevent duplicate simulations.
    * If a simulation for the same request is already in progress, the caller
    * waits for that result instead of starting a duplicate simulation.
+   *
+   * Chain Routing (Solana Enhancement):
+   * - Solana chains are routed to HeliusSimulationProvider automatically
+   * - EVM chains use Tenderly/Alchemy/Local providers with health-based selection
    */
   async simulate(request: SimulationRequest): Promise<SimulationResult> {
     if (this.stopped) {
@@ -282,8 +290,16 @@ export class SimulationService implements ISimulationService {
       return pending;
     }
 
-    // Fix 5.1: Create promise for this simulation and store in pending map
-    const simulationPromise = this.executeSimulationWithFallback(request, cacheKey);
+    // Chain routing: Solana uses Helius provider, EVM uses standard providers
+    let simulationPromise: Promise<SimulationResult>;
+
+    if (isSolanaChain(request.chain)) {
+      simulationPromise = this.executeSolanaSimulation(request, cacheKey);
+    } else {
+      simulationPromise = this.executeSimulationWithFallback(request, cacheKey);
+    }
+
+    // Fix 5.1: Store in pending map for request coalescing
     this.pendingRequests.set(cacheKey, simulationPromise);
 
     try {
@@ -292,6 +308,43 @@ export class SimulationService implements ISimulationService {
       // Fix 5.1: Always clean up pending request
       this.pendingRequests.delete(cacheKey);
     }
+  }
+
+  /**
+   * Execute simulation for Solana chain using Helius provider.
+   *
+   * Solana simulation is routed separately because:
+   * 1. Different provider (Helius instead of Tenderly/Alchemy)
+   * 2. Different transaction format (base64 encoded instead of EVM tx)
+   * 3. Different result format (program logs instead of EVM logs)
+   */
+  private async executeSolanaSimulation(
+    request: SimulationRequest,
+    cacheKey: string
+  ): Promise<SimulationResult> {
+    // Get Helius provider
+    const heliusProvider = this.providers.get('helius');
+
+    if (!heliusProvider || !heliusProvider.isEnabled()) {
+      this.logger.warn('Solana simulation requested but Helius provider not available', {
+        chain: request.chain,
+        hasProvider: !!heliusProvider,
+        isEnabled: heliusProvider?.isEnabled(),
+      });
+      return this.createErrorResult(
+        'Solana simulation not available: Helius provider not configured'
+      );
+    }
+
+    // Execute simulation with Helius
+    const result = await this.tryProvider(heliusProvider, request);
+
+    // Cache successful results
+    if (result.success) {
+      this.addToCache(cacheKey, result);
+    }
+
+    return result;
   }
 
   /**

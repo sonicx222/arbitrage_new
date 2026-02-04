@@ -533,6 +533,41 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         );
       }
 
+      // Phase 2.3: Enhanced profit validation from simulation result
+      // If simulation succeeded and returned gas estimates, verify profitability with actual gas
+      if (simulationResult?.success && simulationResult.gasUsed) {
+        const simulatedGasUnits = BigInt(simulationResult.gasUsed);
+        const revalidatedProfit = this.analyzeProfitability({
+          expectedProfitUsd: opportunity.expectedProfit ?? 0,
+          flashLoanAmountWei: amountIn,
+          estimatedGasUnits: simulatedGasUnits,
+          gasPriceWei: gasPrice,
+          chain,
+          ethPriceUsd: nativeTokenPriceUsd,
+        });
+
+        if (!revalidatedProfit.isProfitable) {
+          ctx.stats.simulationPredictedReverts++;
+          this.logger.warn('Aborting execution: simulation gas estimate makes trade unprofitable', {
+            opportunityId: opportunity.id,
+            estimatedGas: estimatedGas.toString(),
+            simulatedGas: simulatedGasUnits.toString(),
+            netProfitUsd: revalidatedProfit.netProfitUsd,
+            breakdown: revalidatedProfit.breakdown,
+          });
+
+          return createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.HIGH_FEES,
+              `Simulation revealed higher gas (${simulatedGasUnits}), making trade unprofitable: net ${revalidatedProfit.netProfitUsd.toFixed(2)} USD`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          );
+        }
+      }
+
       // Apply MEV protection
       const protectedTx = await this.applyMEVProtection(flashLoanTx, chain, ctx);
 

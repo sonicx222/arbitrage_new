@@ -267,10 +267,109 @@ interface PendingStateSimulatorConfig {
 - ✅ Simulation coverage > 80% of high-value trades
 - ✅ Provider fallback working correctly
 
+## Amendment 2: Solana Simulation Support (Phase 2.4)
+
+### Context for Amendment
+
+The system supports 11 blockchains, but Solana (chainId 101) had no simulation support, leading to an expected ~20% failed transaction rate on Solana trades.
+
+### Decision Amendment
+
+Add Solana-specific simulation via Helius API with native Solana RPC fallback:
+
+#### Architecture Extension
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      SimulationService                          │
+│  ├── EVM Providers (unchanged)                                  │
+│  │   ├── TenderlyProvider                                       │
+│  │   ├── AlchemyProvider                                        │
+│  │   └── LocalSimulationProvider                                │
+│  │                                                              │
+│  └── Solana Provider (NEW)                                      │
+│      └── HeliusSimulationProvider                               │
+│          ├── Primary: Helius Enhanced Transactions API          │
+│          └── Fallback: Native Solana RPC simulateTransaction    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Chain Routing
+
+SimulationService automatically routes requests based on chain:
+
+```typescript
+async simulate(request: SimulationRequest): Promise<SimulationResult> {
+  if (isSolanaChain(request.chain)) {
+    return this.executeSolanaSimulation(request, cacheKey);
+  }
+  return this.simulateEvm(request);
+}
+```
+
+#### Key Components Added
+
+1. **HeliusSimulationProvider** (`helius-provider.ts`)
+   - Implements `ISimulationProvider` interface
+   - Uses Helius Enhanced Transactions API for primary simulation
+   - Falls back to native Solana RPC `simulateTransaction` when Helius unavailable
+   - Tracks rate limit consumption (100K credits/month free tier)
+   - Handles Solana-specific error formats (InstructionError, etc.)
+
+2. **Solana Types** (in `types.ts`)
+   - `SolanaSimulationRequest` - Solana-specific request format
+   - `SolanaSimulationResult` - Extended result with program logs, compute units
+   - `SolanaAccountChange` - Account state changes from simulation
+   - Chain detection utilities: `isSolanaChain()`, `isEvmChain()`
+
+#### Configuration Added
+
+```typescript
+export const HELIUS_CONFIG = {
+  /** Base URL for Helius RPC (without API key) */
+  baseUrl: 'https://mainnet.helius-rpc.com',
+  /** Free tier monthly credits */
+  freeTierCredits: 100_000,
+  /** Default commitment level */
+  defaultCommitment: 'confirmed' as const,
+  /** Timeout for simulation requests (ms) */
+  timeoutMs: 10_000,
+};
+```
+
+#### Budget Allocation
+
+| Provider | Chain | Monthly Free Tier | Purpose |
+|----------|-------|-------------------|---------|
+| Tenderly | EVM | 25,000 | Primary EVM simulation |
+| Alchemy | EVM | ~Unlimited CU | Fallback EVM simulation |
+| Helius | Solana | 100,000 | Primary Solana simulation |
+| Native RPC | Solana | Unlimited | Fallback Solana simulation |
+
+### Files Created (Amendment 2)
+
+- `services/execution-engine/src/services/simulation/helius-provider.ts`
+- `services/execution-engine/src/services/simulation/helius-provider.test.ts`
+
+### Files Modified (Amendment 2)
+
+- `services/execution-engine/src/services/simulation/types.ts` - Added Solana types and chain detection
+- `services/execution-engine/src/services/simulation/simulation.service.ts` - Added chain routing
+- `services/execution-engine/src/services/simulation/index.ts` - Added exports
+
+### Success Criteria (Amendment 2)
+
+- ✅ Solana simulation latency < 500ms average
+- ✅ Automatic fallback to native RPC when Helius unavailable
+- ✅ Rate limit tracking and graceful degradation
+- ✅ Consistent interface with EVM simulation providers
+
 ## References
 
 - [Tenderly Simulation API](https://docs.tenderly.co/simulations-and-forks/simulation-api)
 - [Alchemy eth_call](https://docs.alchemy.com/reference/eth-call)
+- [Helius Enhanced Transactions API](https://docs.helius.dev/solana-rpc-nodes/sending-transactions)
+- [Solana simulateTransaction RPC](https://solana.com/docs/rpc/http/simulatetransaction)
 - [Implementation Plan v2.0](../../reports/implementation_plan_v2.md) Task 1.1
 
 ## Confidence Level

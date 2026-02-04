@@ -30,6 +30,7 @@ export {
   SIMULATION_DEFAULTS,
   TENDERLY_CONFIG,
   ALCHEMY_CONFIG,
+  HELIUS_CONFIG,
   CircularBuffer,
   // Fix 1.1: Export shared utilities that were defined but not exported
   getWethAddress,
@@ -39,6 +40,9 @@ export {
   updateRollingAverage,
   // Fix 9.4: Export shared revert reason extraction utility
   extractRevertReason,
+  // Chain type utilities for routing
+  isSolanaChain,
+  isEvmChain,
 } from './types';
 
 // Base Provider (for extension)
@@ -48,6 +52,8 @@ export { BaseSimulationProvider } from './base-simulation-provider';
  * Simulation Providers
  *
  * Provider hierarchy (from ADR-016 + Phase 2 amendments):
+ *
+ * ## EVM Chains (Ethereum, Arbitrum, Base, etc.)
  *
  * 1. TenderlyProvider (Primary) - Full-featured simulation with state changes and logs
  *    - Best accuracy, detailed execution traces
@@ -66,12 +72,30 @@ export { BaseSimulationProvider } from './base-simulation-provider';
  *    - Fix 1.1/1.2: Added as third-tier fallback for resilience
  *    - Useful when external simulation providers are unavailable
  *
- * Configure provider priority in SimulationServiceConfig.providerPriority
+ * ## Solana Chain
+ *
+ * 4. HeliusSimulationProvider - Solana-specific simulation via Helius API
+ *    - Uses Solana's native simulateTransaction RPC method
+ *    - 100,000 credits/month free tier
+ *    - Falls back to native Solana RPC when Helius unavailable
+ *    - Automatically routed when chain is 'solana'
+ *
+ * Configure EVM provider priority in SimulationServiceConfig.providerPriority
  * Default: ['tenderly', 'alchemy', 'local']
+ * Solana routing is automatic (no priority configuration needed)
  */
 export { TenderlyProvider, createTenderlyProvider } from './tenderly-provider';
 export { AlchemySimulationProvider, createAlchemyProvider } from './alchemy-provider';
 export { LocalSimulationProvider, createLocalProvider } from './local-provider';
+export {
+  HeliusSimulationProvider,
+  createHeliusProvider,
+  type SolanaSimulationRequest,
+  type SolanaSimulationResult,
+  type SolanaAccountChange,
+  type SolanaInnerInstruction,
+  type HeliusProviderConfig,
+} from './helius-provider';
 
 // Service
 export {
