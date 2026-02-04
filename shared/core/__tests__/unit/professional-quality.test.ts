@@ -1,11 +1,13 @@
 /**
- * Professional Quality Monitor Integration Tests
+ * Professional Quality Monitor Unit Tests
  *
- * Tests the integration between ProfessionalQualityMonitor and:
- * - Redis storage operations
+ * Unit tests with mocked Redis for:
  * - Score calculation with real metrics
  * - Feature impact assessment across sessions
  * - Quality history persistence
+ *
+ * NOTE: Relabeled from integration test - uses mock Redis implementation,
+ * so this is actually a unit test, not an integration test.
  *
  * @see ADR-009: Test Architecture
  */
@@ -18,10 +20,10 @@ import {
 import type { QualityMonitorRedis } from '@arbitrage/core';
 
 // =============================================================================
-// Mock Redis Implementation for Integration Tests
+// Mock Redis Implementation for Unit Tests
 // =============================================================================
 
-function createIntegrationMockRedis(): QualityMonitorRedis & {
+function createMockRedis(): QualityMonitorRedis & {
   storage: Map<string, string>;
   clear: () => void;
   getStorageSize: () => number;
@@ -53,13 +55,13 @@ function createIntegrationMockRedis(): QualityMonitorRedis & {
   };
 }
 
-describe('ProfessionalQualityMonitor Integration', () => {
+describe('ProfessionalQualityMonitor Unit Tests', () => {
   let monitor: ProfessionalQualityMonitor;
-  let mockRedis: ReturnType<typeof createIntegrationMockRedis>;
+  let mockRedis: ReturnType<typeof createMockRedis>;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockRedis = createIntegrationMockRedis();
+    mockRedis = createMockRedis();
     monitor = new ProfessionalQualityMonitor({ redis: mockRedis });
   });
 
@@ -135,7 +137,7 @@ describe('ProfessionalQualityMonitor Integration', () => {
     });
   });
 
-  describe('Feature Impact Assessment Integration', () => {
+  describe('Feature Impact Assessment', () => {
     it('should correctly assess positive feature impact', async () => {
       // Create baseline with lower scores
       const baseline: ProfessionalQualityScore = {
@@ -239,7 +241,7 @@ describe('ProfessionalQualityMonitor Integration', () => {
     });
   });
 
-  describe('Data Persistence Integration', () => {
+  describe('Data Persistence', () => {
     it('should correctly store and retrieve detection metrics', async () => {
       const testResult = {
         latency: 2.5,
@@ -286,7 +288,7 @@ describe('ProfessionalQualityMonitor Integration', () => {
     });
   });
 
-  describe('Error Resilience Integration', () => {
+  describe('Error Resilience', () => {
     it('should gracefully handle Redis connection failures', async () => {
       // Simulate Redis failure - override get method
       const originalGet = mockRedis.get;

@@ -1,9 +1,12 @@
 /**
- * Phase 1 Integration Tests: Vault-Model DEX Adapters
+ * Vault-Model DEX Adapters Extended Unit Tests
  *
- * Tests for the implemented DEX adapters (Balancer V2, GMX, Platypus, Beethoven X)
+ * Unit tests for DEX adapters (Balancer V2, GMX, Platypus, Beethoven X)
  * that handle vault-model and pool-model DEXes which don't follow the standard
  * factory pattern.
+ *
+ * NOTE: Relabeled from integration test - uses mocked ethers provider
+ * and mocked fetch, so this is actually a unit test.
  *
  * @see ADR-003: Partitioned Detector Strategy
  * @see shared/core/src/dex-adapters/
@@ -154,7 +157,7 @@ describe('Phase 1.1: Vault-Model DEXes Configuration', () => {
 // Phase 1.2: Balancer V2 Adapter Tests
 // =============================================================================
 
-describe('Phase 1.2: Balancer V2 Adapter Integration', () => {
+describe('Phase 1.2: Balancer V2 Adapter Unit Tests', () => {
   let adapter: BalancerV2Adapter;
   let mockProvider: ethers.JsonRpcProvider;
 
@@ -293,7 +296,7 @@ describe('Phase 1.2: Balancer V2 Adapter Integration', () => {
 // Phase 1.3: GMX Adapter Tests
 // =============================================================================
 
-describe('Phase 1.3: GMX Adapter Integration', () => {
+describe('Phase 1.3: GMX Adapter Unit Tests', () => {
   let adapter: GmxAdapter;
   let mockProvider: ethers.JsonRpcProvider;
 
@@ -375,7 +378,7 @@ describe('Phase 1.3: GMX Adapter Integration', () => {
 // Phase 1.4: Platypus Adapter Tests
 // =============================================================================
 
-describe('Phase 1.4: Platypus Adapter Integration', () => {
+describe('Phase 1.4: Platypus Adapter Unit Tests', () => {
   let adapter: PlatypusAdapter;
   let mockProvider: ethers.JsonRpcProvider;
 
@@ -436,10 +439,10 @@ describe('Phase 1.4: Platypus Adapter Integration', () => {
 });
 
 // =============================================================================
-// Phase 1.5: Adapter Registry Integration
+// Phase 1.5: Adapter Registry Unit Tests
 // =============================================================================
 
-describe('Phase 1.5: Adapter Registry Integration', () => {
+describe('Phase 1.5: Adapter Registry Unit Tests', () => {
   let registry: AdapterRegistry;
   let mockProvider: ethers.JsonRpcProvider;
 
@@ -637,10 +640,10 @@ describe('Phase 1.5: Adapter Registry Integration', () => {
 });
 
 // =============================================================================
-// Phase 1.6: Config-to-Adapter Integration
+// Phase 1.6: Config-to-Adapter Unit Tests
 // =============================================================================
 
-describe('Phase 1.6: Config to Adapter Integration', () => {
+describe('Phase 1.6: Config to Adapter Unit Tests', () => {
   describe('Contract addresses match between config and adapter types', () => {
     it('should have matching Balancer V2 Arbitrum address', () => {
       const configDex = DEXES['arbitrum']?.find((d: any) => d.name === 'balancer_v2');
@@ -694,7 +697,7 @@ describe('Phase 1.6: Config to Adapter Integration', () => {
 });
 
 // =============================================================================
-// End-to-End Integration Test
+// End-to-End Unit Test (with mocked providers)
 // =============================================================================
 
 describe('End-to-End: Adapter Lifecycle', () => {

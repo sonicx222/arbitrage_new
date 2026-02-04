@@ -629,7 +629,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
           gasCost: submitResult.receipt
             ? parseFloat(ethers.formatEther(
-                submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice || gasPrice)
+                submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice ?? gasPrice)
               ))
             : undefined,
         }

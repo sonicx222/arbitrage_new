@@ -1,8 +1,11 @@
 /**
- * S1.2 Smart Swap Event Filter Integration Tests
+ * S1.2 Smart Swap Event Filter Extended Unit Tests
  *
- * End-to-end testing of Smart Swap Event Filtering implementation
+ * Unit tests for Smart Swap Event Filtering implementation with mocked Redis.
  * Validates the hypothesis: 99% event reduction with 100% signal retention
+ *
+ * NOTE: Relabeled from integration test - uses fully mocked ioredis
+ * so this is actually a unit test, not an integration test.
  *
  * @see IMPLEMENTATION_PLAN.md S1.2: Smart Swap Event Filtering
  * @see S1.2.1-S1.2.5: Filter Implementation Tasks
@@ -96,7 +99,7 @@ import type {
   FilterStats
 } from '@arbitrage/core';
 
-import { delay, measurePerformance, generateRandomHash, generateRandomAddress } from '../../shared/test-utils/src';
+import { delay, measurePerformance, generateRandomHash, generateRandomAddress } from '@arbitrage/test-utils';
 
 // Define SwapEvent interface locally to avoid import issues
 interface SwapEvent {
@@ -137,7 +140,7 @@ function createMockSwapEvent(overrides: Partial<SwapEvent> = {}): SwapEvent {
   } as SwapEvent;
 }
 
-describe('S1.2 Smart Swap Event Filter Integration Tests', () => {
+describe('S1.2 Smart Swap Event Filter Extended Unit Tests', () => {
   let filter: SwapEventFilter;
 
   beforeAll(async () => {

@@ -1,19 +1,16 @@
 /**
- * Phase 1 & Phase 2 Integration Tests
+ * MEV Protection Providers Unit Tests
  *
- * Validates the implementations from:
- *
- * Phase 1:
+ * Unit tests with mocked wallet and provider for:
  * - Precision fixes for BigInt conversions
- * - Fallback price updates
- * - Cross-chain expectedProfit handling
- *
- * Phase 2 (MEV Protection):
  * - Mutex protection for concurrent metrics updates
  * - Nonce management (respecting pre-allocated nonces)
  * - Orphaned promises prevention (cancellable timeouts)
- * - Receipt timeout handling (distinguish from tx failure)
+ * - Receipt timeout handling
  * - Provider selection per chain
+ *
+ * NOTE: Relabeled from integration test - uses mocked ethers provider
+ * and mocked wallet, so this is actually a unit test.
  */
 
 import { ethers } from 'ethers';
@@ -229,7 +226,7 @@ describe('Phase 1: Precision Fixes', () => {
 // Phase 2: MEV Protection Integration Tests
 // =============================================================================
 
-describe('Phase 2: MEV Protection Integration', () => {
+describe('MEV Protection Unit Tests', () => {
   let mockProvider: ethers.JsonRpcProvider;
   let mockWallet: ethers.Wallet;
 
@@ -713,7 +710,7 @@ describe('Phase 2: MEV Protection Integration', () => {
 // Cross-Cutting Integration Tests
 // =============================================================================
 
-describe('Cross-Cutting: Phase 1 + Phase 2 Integration', () => {
+describe('Cross-Cutting: MEV Protection Unit Tests', () => {
   let mockProvider: ethers.JsonRpcProvider;
   let mockWallet: ethers.Wallet;
 

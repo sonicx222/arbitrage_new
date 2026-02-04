@@ -1,13 +1,13 @@
 /**
- * Phase 3-5 Integration Tests: Cross-Chain Execution & Authentication
+ * Cross-Chain Execution Unit Tests
  *
- * End-to-end tests for:
- * - Phase 3: Cross-chain execution via bridge router
- * - Phase 4: API key authentication
- * - Phase 5: Security middleware integration
+ * Unit tests with mocked dependencies for:
+ * - Bridge router functionality
+ * - API key authentication
+ * - Security middleware
  *
- * Tests the full execution flow from opportunity detection through
- * cross-chain bridge execution with proper authentication.
+ * NOTE: Relabeled from integration test - uses mocked @arbitrage/core,
+ * mocked providers, and mocked wallets, so this is actually a unit test.
  *
  * @see ADR-014: Cross-Chain Execution Design
  * @see Phase 4: REST API Authentication
@@ -167,7 +167,7 @@ function createExpressMocks(options: {
 // Phase 3: Bridge Router Integration Tests
 // =============================================================================
 
-describe('Phase 3: Cross-Chain Execution Integration', () => {
+describe('Cross-Chain Execution Unit Tests', () => {
   let router: StargateRouter;
   let providers: Map<string, ethers.Provider>;
 
@@ -470,7 +470,7 @@ describe('Phase 3: Cross-Chain Execution Integration', () => {
 // Phase 3: Bridge Router Factory Tests
 // =============================================================================
 
-describe('BridgeRouterFactory Integration', () => {
+describe('BridgeRouterFactory Unit Tests', () => {
   let factory: BridgeRouterFactory;
   let providers: Map<string, ethers.Provider>;
 
@@ -519,7 +519,7 @@ describe('BridgeRouterFactory Integration', () => {
 // Phase 4: API Key Authentication Integration Tests
 // =============================================================================
 
-describe('Phase 4: API Key Authentication Integration', () => {
+describe('API Key Authentication Unit Tests', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -541,7 +541,7 @@ describe('Phase 4: API Key Authentication Integration', () => {
   beforeAll(async () => {
     // Dynamic import after mocks are set up
     // Use relative path since @shared/security isn't in Jest moduleNameMapper
-    const authModule = await import('../../shared/security/src/auth');
+    const authModule = await import('../../../../../shared/security/src/auth');
     apiAuth = authModule.apiAuth;
     apiAuthorize = authModule.apiAuthorize;
     initializeApiKeys = authModule.initializeApiKeys;

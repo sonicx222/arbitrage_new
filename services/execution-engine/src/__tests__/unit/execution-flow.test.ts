@@ -1,14 +1,16 @@
 /**
- * End-to-End Execution Flow Integration Tests
+ * Execution Flow Unit Tests
  *
- * Tests the complete data flow from opportunity detection through
- * coordination to (simulated) execution.
+ * Unit tests for execution engine with mocked Redis and dependencies.
+ *
+ * NOTE: Relabeled from integration test - uses fully mocked ioredis
+ * and mocked @arbitrage/core dependencies, so this is actually a unit test.
  *
  * This test validates:
- * 1. Opportunities published to Redis Streams are consumed by execution engine
+ * 1. Opportunities published to mocked Redis Streams
  * 2. Simulation mode correctly bypasses blockchain transactions
- * 3. Execution results are published to results stream
- * 4. The complete pipeline works end-to-end
+ * 3. Execution results are published to mocked results stream
+ * 4. The execution pipeline logic works correctly
  *
  * @see ADR-002: Redis Streams over Pub/Sub
  */
@@ -245,11 +247,11 @@ const getMockRedis = () => (globalThis as any).__mockRedisInstance;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import after mocks are set up
-import { ExecutionEngineService, SimulationConfig } from '../../services/execution-engine/src/engine';
+import { ExecutionEngineService, SimulationConfig } from '../../engine';
 import { RedisStreamsClient, resetRedisStreamsInstance } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
-describe('End-to-End Execution Flow Integration Tests', () => {
+describe('Execution Flow Unit Tests', () => {
   beforeAll(() => {
     mockStreams = getMockStreams();
     mockConsumerGroups = (globalThis as any).__mockConsumerGroups;

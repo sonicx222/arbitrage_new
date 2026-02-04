@@ -93,6 +93,53 @@ export * from './helpers';
 // Contract Testing (P3-4: Contract Testing)
 export * from './contracts';
 
+// Integration Test Utilities (Phase 1: Test Infrastructure Setup)
+// Note: Using selective exports to avoid naming conflicts with existing modules
+export {
+  // Harness
+  IntegrationTestHarness,
+  // Redis helpers
+  createTestRedisClient,
+  flushTestRedis,
+  waitForStreamMessage,
+  publishToStream,
+  ensureConsumerGroup,
+  // Test data
+  createTestPriceUpdate,
+  createArbitrageScenario,
+  createTestOpportunity,
+  TEST_TOKENS,
+  TEST_PAIRS,
+  // Async helpers (renamed to avoid conflict with integration-patterns)
+  withTimeout,
+  retryAsync,
+  // Redis pool
+  RedisTestPool,
+  getRedisPool,
+  shutdownRedisPool,
+  warmupRedisPool,
+  // Test isolation (renamed to avoid conflict with redis-test-helper)
+  createIsolatedContext,
+  withIsolation,
+  createParallelContexts,
+  cleanupContexts,
+  // Stream utils
+  waitForMessages,
+  assertStreamContains,
+  publishBatch,
+  publishBatchWithResult,
+  StreamCollector,
+  createStreamCollector,
+} from './integration';
+export type {
+  TestComponent,
+  IsolatedTestContext,
+} from './integration';
+// Re-export with different names to avoid conflicts
+export { waitFor as waitForIntegration } from './integration';
+export { IsolatedRedisClient as IntegrationRedisClient } from './integration';
+export type { StreamMessage as IntegrationStreamMessage } from './integration';
+
 // =============================================================================
 // Legacy Exports (kept for backward compatibility)
 // =============================================================================

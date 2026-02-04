@@ -1183,7 +1183,19 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         return;
       }
 
-      const state: BridgeRecoveryState = JSON.parse(existing);
+      let state: BridgeRecoveryState;
+      try {
+        state = JSON.parse(existing);
+      } catch (parseError) {
+        // Corrupt data in Redis - clean up and return
+        this.logger.warn('Corrupt bridge recovery state, deleting key', {
+          bridgeId,
+          key,
+          error: getErrorMessage(parseError),
+        });
+        await redis.del(key);
+        return;
+      }
       state.status = status;
       state.lastCheckAt = Date.now();
       if (errorMessage) {
@@ -1259,7 +1271,18 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           const stateJson = await redis.get(key);
           if (!stateJson) continue;
 
-          const state: BridgeRecoveryState = JSON.parse(stateJson);
+          let state: BridgeRecoveryState;
+          try {
+            state = JSON.parse(stateJson);
+          } catch (parseError) {
+            // Corrupt data in Redis - clean up and continue
+            this.logger.warn('Corrupt bridge recovery state during scan, deleting key', {
+              key,
+              error: getErrorMessage(parseError),
+            });
+            await redis.del(key);
+            continue;
+          }
 
           // Skip already recovered/failed bridges
           if (state.status === 'recovered' || state.status === 'failed') {

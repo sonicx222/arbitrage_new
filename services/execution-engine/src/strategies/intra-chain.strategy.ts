@@ -254,7 +254,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
           actualProfit,
           gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
           gasCost: submitResult.receipt
-            ? parseFloat(ethers.formatEther(submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice || gasPrice)))
+            ? parseFloat(ethers.formatEther(submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice ?? gasPrice)))
             : undefined,
         }
       );
