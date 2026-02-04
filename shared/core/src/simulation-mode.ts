@@ -100,81 +100,94 @@ const DEFAULT_CONFIG: SimulationConfig = {
   dexesPerChain: 2
 };
 
+/**
+ * Get token price with case-insensitive lookup.
+ *
+ * Fix P3-005: Normalize token symbols to uppercase for consistent lookup.
+ * This prevents failures when symbols come from external sources with different casing.
+ */
+function getTokenPrice(symbol: string): number {
+  return BASE_PRICES[symbol.toUpperCase()] || 1;
+}
+
 // Base prices for tokens (in USD)
 // S3.1.2: Extended for all 11 chains with their native and common tokens
 // Enhancement S5: Added chain-specific governance, LST, and meme tokens
+//
+// Fix P3-005: All keys normalized to UPPERCASE for consistent lookup.
+// Use getTokenPrice() helper for case-insensitive access.
 const BASE_PRICES: Record<string, number> = {
   // Major assets
-  WETH: 3200,
-  ETH: 3200,      // BSC bridged ETH
-  WBTC: 65000,
-  BTCB: 65000,    // BSC wrapped BTC
+  'WETH': 3200,
+  'ETH': 3200,      // BSC bridged ETH
+  'WBTC': 65000,
+  'BTCB': 65000,    // BSC wrapped BTC
 
   // Native tokens by chain
-  WBNB: 580,      // BSC
-  BNB: 580,
-  MATIC: 0.85,    // Polygon
-  WMATIC: 0.85,
-  AVAX: 35,       // Avalanche
-  WAVAX: 35,
-  FTM: 0.45,      // Fantom
-  WFTM: 0.45,
-  SOL: 175,       // Solana
+  'WBNB': 580,      // BSC
+  'BNB': 580,
+  'MATIC': 0.85,    // Polygon
+  'WMATIC': 0.85,
+  'AVAX': 35,       // Avalanche
+  'WAVAX': 35,
+  'FTM': 0.45,      // Fantom
+  'WFTM': 0.45,
+  'SOL': 175,       // Solana
 
   // Stablecoins
-  USDC: 1.0,
-  USDT: 1.0,
-  BUSD: 1.0,
-  DAI: 1.0,
-  FRAX: 1.0,
-  sUSD: 1.0,      // Synthetix USD
+  'USDC': 1.0,
+  'USDT': 1.0,
+  'BUSD': 1.0,
+  'DAI': 1.0,
+  'FRAX': 1.0,
+  'SUSD': 1.0,      // Synthetix USD (normalized)
 
   // Governance tokens
-  ARB: 1.15,      // Arbitrum
-  OP: 2.50,       // Optimism
-  UNI: 12.50,     // Uniswap
+  'ARB': 1.15,      // Arbitrum
+  'OP': 2.50,       // Optimism
+  'UNI': 12.50,     // Uniswap
 
   // DeFi tokens
-  LINK: 15.0,
-  AAVE: 185,
-  GMX: 30,
-  CRV: 0.55,      // Curve
-  PENDLE: 4.50,   // Pendle Finance
-  MAGIC: 0.85,    // Treasure/Arbitrum
+  'LINK': 15.0,
+  'AAVE': 185,
+  'GMX': 30,
+  'CRV': 0.55,      // Curve
+  'PENDLE': 4.50,   // Pendle Finance
+  'MAGIC': 0.85,    // Treasure/Arbitrum
 
-  // LST tokens (Liquid Staking)
-  wstETH: 3400,
-  rETH: 3350,
-  stETH: 3200,
-  cbETH: 3250,    // Coinbase staked ETH
-  mSOL: 185,      // Marinade staked SOL
-  jitoSOL: 190,   // Jito staked SOL
-  stMATIC: 0.90,  // Lido staked MATIC
+  // LST tokens (Liquid Staking) - normalized to uppercase
+  'WSTETH': 3400,
+  'RETH': 3350,
+  'STETH': 3200,
+  'CBETH': 3250,    // Coinbase staked ETH
+  'MSOL': 185,      // Marinade staked SOL
+  'JITOSOL': 190,   // Jito staked SOL
+  'STMATIC': 0.90,  // Lido staked MATIC
 
   // Chain-specific DEX tokens
-  CAKE: 2.50,     // PancakeSwap
-  JOE: 0.45,      // Trader Joe
-  AERO: 1.20,     // Aerodrome
-  VELO: 0.12,     // Velodrome
-  QUICK: 0.045,   // QuickSwap
-  XVS: 8.50,      // Venus Protocol (BSC)
+  'CAKE': 2.50,     // PancakeSwap
+  'JOE': 0.45,      // Trader Joe
+  'AERO': 1.20,     // Aerodrome
+  'VELO': 0.12,     // Velodrome
+  'QUICK': 0.045,   // QuickSwap
+  'XVS': 8.50,      // Venus Protocol (BSC)
 
   // Meme tokens
-  PEPE: 0.000012,
-  SHIB: 0.000022,
-  DOGE: 0.12,
+  'PEPE': 0.000012,
+  'SHIB': 0.000022,
+  'DOGE': 0.12,
 
   // Solana tokens
-  JUP: 0.85,      // Jupiter
-  RAY: 4.50,      // Raydium
-  ORCA: 3.20,     // Orca
-  BONK: 0.000025,
-  WIF: 2.50,
-  JTO: 3.80,      // Jito governance
-  PYTH: 0.45,     // Pyth Network
-  MNDE: 0.12,     // Marinade governance
-  W: 0.35,        // Wormhole
-  BSOL: 180,      // BlazeStake SOL
+  'JUP': 0.85,      // Jupiter
+  'RAY': 4.50,      // Raydium
+  'ORCA': 3.20,     // Orca
+  'BONK': 0.000025,
+  'WIF': 2.50,
+  'JTO': 3.80,      // Jito governance
+  'PYTH': 0.45,     // Pyth Network
+  'MNDE': 0.12,     // Marinade governance
+  'W': 0.35,        // Wormhole
+  'BSOL': 180,      // BlazeStake SOL
 };
 
 /**
@@ -270,8 +283,8 @@ export class PriceSimulator extends EventEmitter {
   private initializePrices(): void {
     // Initialize base prices for all pairs
     for (const [token0, token1] of this.config.pairs) {
-      const price0 = BASE_PRICES[token0] || 1;
-      const price1 = BASE_PRICES[token1] || 1;
+      const price0 = getTokenPrice(token0);
+      const price1 = getTokenPrice(token1);
       const pairPrice = price0 / price1;
 
       for (const chain of this.config.chains) {
@@ -376,8 +389,8 @@ export class PriceSimulator extends EventEmitter {
     token1: string,
     price: number
   ): SimulatedPriceUpdate {
-    const price0 = BASE_PRICES[token0] || 1;
-    const price1 = BASE_PRICES[token1] || 1;
+    const price0 = getTokenPrice(token0);
+    const price1 = getTokenPrice(token1);
 
     return {
       chain,
@@ -622,6 +635,10 @@ export interface ChainSimulatorConfig {
   maxArbitrageSpread: number;
   /** Pairs to simulate as [address, token0Symbol, token1Symbol, dex, fee][] */
   pairs: SimulatedPairConfig[];
+  /** Minimum position size in USD (default: 1000) */
+  minPositionSize?: number;
+  /** Maximum position size in USD (default: 50000) */
+  maxPositionSize?: number;
 }
 
 export interface SimulatedPairConfig {
@@ -652,18 +669,44 @@ export class ChainSimulator extends EventEmitter {
   private logger = createLogger('chain-simulator');
   private opportunityId = 0;
 
+  /**
+   * Fix P3-004: Configurable position size range for realistic opportunity sizing.
+   */
+  private readonly minPositionSize: number;
+  private readonly maxPositionSize: number;
+
   constructor(config: ChainSimulatorConfig) {
     super();
     this.config = config;
     this.blockNumber = Math.floor(Date.now() / 1000);
+    this.minPositionSize = config.minPositionSize ?? 1000;
+    this.maxPositionSize = config.maxPositionSize ?? 50000;
     this.initializeReserves();
+  }
+
+  /**
+   * Calculate a realistic position size using log-normal distribution.
+   *
+   * Fix P3-004: Vary position sizes to simulate realistic market conditions.
+   * Uses log-normal distribution to create more small/medium opportunities
+   * with occasional large ones.
+   */
+  private calculatePositionSize(): number {
+    // Log-normal distribution for realistic position sizing
+    const logMin = Math.log(this.minPositionSize);
+    const logMax = Math.log(this.maxPositionSize);
+    const logRandom = logMin + Math.random() * (logMax - logMin);
+    const positionSize = Math.exp(logRandom);
+
+    // Round to nearest $10 for cleaner numbers
+    return Math.round(positionSize / 10) * 10;
   }
 
   private initializeReserves(): void {
     for (const pair of this.config.pairs) {
       // Initialize with realistic reserve values based on token prices
-      const basePrice0 = BASE_PRICES[pair.token0Symbol] || 1;
-      const basePrice1 = BASE_PRICES[pair.token1Symbol] || 1;
+      const basePrice0 = getTokenPrice(pair.token0Symbol);
+      const basePrice1 = getTokenPrice(pair.token1Symbol);
 
       // Calculate reserves to achieve the correct price ratio
       // reserve0 / reserve1 = price1 / price0 (inverted because of AMM math)
@@ -894,8 +937,9 @@ export class ChainSimulator extends EventEmitter {
    *
    * Distribution:
    * - 70%: intra-chain
-   * - 15%: flash-loan (intra-chain but uses flash loan)
-   * - 15%: other types (handled by generateMultiHopOpportunity)
+   * - 30%: flash-loan (intra-chain but uses flash loan)
+   *
+   * Fix P2-003: Validate that opportunity type matches chain configuration.
    */
   private createOpportunityWithType(
     tokenPair: string,
@@ -906,7 +950,9 @@ export class ChainSimulator extends EventEmitter {
     netProfit: number
   ): SimulatedOpportunity {
     const rand = Math.random();
-    const estimatedProfitUsd = netProfit * 10000; // Assume $10k position
+    // Fix P3-004: Use dynamic position sizing instead of hardcoded $10k
+    const positionSize = this.calculatePositionSize();
+    const estimatedProfitUsd = netProfit * positionSize;
     const estimatedGasCost = 5 + Math.random() * 15; // $5-20 gas
 
     // Base opportunity fields
@@ -930,24 +976,96 @@ export class ChainSimulator extends EventEmitter {
       expectedProfit: estimatedProfitUsd - estimatedGasCost,
     };
 
+    let opportunity: SimulatedOpportunity;
+
     // 70% intra-chain (standard)
     if (rand < 0.70) {
-      return {
+      opportunity = {
         ...baseOpportunity,
         type: 'intra-chain',
         useFlashLoan: false,
       };
+    } else {
+      // 30% flash-loan (uses flash loan for capital-free execution)
+      const flashLoanFee = 0.0009; // Aave V3 fee: 0.09%
+      opportunity = {
+        ...baseOpportunity,
+        type: 'flash-loan',
+        useFlashLoan: true,
+        flashLoanFee,
+        expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
+      };
     }
 
-    // 30% flash-loan (uses flash loan for capital-free execution)
-    const flashLoanFee = 0.0009; // Aave V3 fee: 0.09%
-    return {
-      ...baseOpportunity,
-      type: 'flash-loan',
-      useFlashLoan: true,
-      flashLoanFee,
-      expectedProfit: estimatedProfitUsd * (1 - flashLoanFee) - estimatedGasCost,
-    };
+    // Fix P2-003: Validate opportunity type consistency
+    this.validateOpportunityTypeConsistency(opportunity);
+
+    return opportunity;
+  }
+
+  /**
+   * Validate that opportunity type matches chain and DEX configuration.
+   *
+   * Fix P2-003: Prevent inconsistent opportunities (e.g., cross-chain type with same chains).
+   */
+  private validateOpportunityTypeConsistency(opportunity: SimulatedOpportunity): void {
+    // Validation 1: Cross-chain must have different chains
+    if (opportunity.type === 'cross-chain') {
+      if (opportunity.buyChain === opportunity.sellChain) {
+        throw new Error(
+          `[SIMULATION_ERROR] Cross-chain opportunity must have different buy/sell chains. ` +
+          `Got: buyChain=${opportunity.buyChain}, sellChain=${opportunity.sellChain}`
+        );
+      }
+    }
+
+    // Validation 2: Intra-chain must have same chain
+    if (opportunity.type === 'intra-chain') {
+      if (opportunity.buyChain !== opportunity.sellChain) {
+        throw new Error(
+          `[SIMULATION_ERROR] Intra-chain opportunity must have same buy/sell chains. ` +
+          `Got: buyChain=${opportunity.buyChain}, sellChain=${opportunity.sellChain}`
+        );
+      }
+    }
+
+    // Validation 3: Multi-hop must use flash loan
+    if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
+      if (!opportunity.useFlashLoan) {
+        throw new Error(
+          `[SIMULATION_ERROR] Multi-hop (${opportunity.type}) must use flash loan. ` +
+          `Got: useFlashLoan=${opportunity.useFlashLoan}`
+        );
+      }
+    }
+
+    // Validation 4: Multi-hop must have path
+    if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
+      if (!opportunity.path || opportunity.path.length === 0) {
+        throw new Error(
+          `[SIMULATION_ERROR] Multi-hop (${opportunity.type}) must have valid path. ` +
+          `Got: path=${opportunity.path}`
+        );
+      }
+
+      // Validate circular path (first === last)
+      if (opportunity.path[0] !== opportunity.path[opportunity.path.length - 1]) {
+        throw new Error(
+          `[SIMULATION_ERROR] Multi-hop path must be circular (first === last token). ` +
+          `Got: start=${opportunity.path[0]}, end=${opportunity.path[opportunity.path.length - 1]}`
+        );
+      }
+    }
+
+    // Validation 5: Flash-loan type must have useFlashLoan=true
+    if (opportunity.type === 'flash-loan') {
+      if (!opportunity.useFlashLoan) {
+        throw new Error(
+          `[SIMULATION_ERROR] Flash-loan opportunity must have useFlashLoan=true. ` +
+          `Got: useFlashLoan=${opportunity.useFlashLoan}`
+        );
+      }
+    }
   }
 
   /**
@@ -980,7 +1098,9 @@ export class ChainSimulator extends EventEmitter {
 
     if (netProfit <= 0) return; // Not profitable after fees
 
-    const estimatedProfitUsd = netProfit * 10000;
+    // Fix P3-004: Use dynamic position sizing for multi-hop opportunities
+    const positionSize = this.calculatePositionSize();
+    const estimatedProfitUsd = netProfit * positionSize;
     const estimatedGasCost = 10 + Math.random() * 30; // Higher gas for multi-hop
     const flashLoanFee = 0.0009;
 
@@ -1227,8 +1347,11 @@ export class CrossChainSimulator extends EventEmitter {
       const chainPriceMap = new Map<string, number>();
 
       for (const token of this.config.tokens) {
-        const basePrice = BASE_PRICES[token];
-        if (!basePrice) continue;
+        const basePrice = getTokenPrice(token);
+        if (basePrice === 1 && !BASE_PRICES[token.toUpperCase()]) {
+          // Token not in BASE_PRICES, skip it
+          continue;
+        }
 
         // Add chain-specific variation (±0.5%)
         const variation = 1 + (Math.random() - 0.5) * 0.01;
@@ -1336,6 +1459,9 @@ export class CrossChainSimulator extends EventEmitter {
 
   /**
    * Detect cross-chain opportunity for a specific token between two chains.
+   *
+   * Fix P2-002: Use careful floating-point handling to avoid precision loss.
+   * Bridge fees are calculated with explicit rounding to 2 decimal places.
    */
   private detectCrossChainOpportunity(
     token: string,
@@ -1359,16 +1485,27 @@ export class CrossChainSimulator extends EventEmitter {
       return null;
     }
 
+    // Validate bridge fee percentage (must be decimal, not basis points)
+    if (bridgeCost.percentageFee > 1.0) {
+      this.logger.warn('Bridge percentage fee appears to be in basis points, not decimal', {
+        route: bridgeKey,
+        percentageFee: bridgeCost.percentageFee,
+        expectedRange: '0.0001 to 0.1 (0.01% to 10%)',
+      });
+    }
+
     // Calculate profit
     const grossProfitUsd = destPrice - sourcePrice;
     const positionSize = 10000; // Assume $10k position
     const grossProfitTotal = (grossProfitUsd / sourcePrice) * positionSize;
 
-    // Calculate bridge costs
-    const bridgeFeeUsd = bridgeCost.fixedCost + (positionSize * bridgeCost.percentageFee);
+    // Calculate bridge costs with rounding to avoid floating-point precision loss
+    // Fixed cost + (position * percentage fee)
+    const percentageFeeUsd = positionSize * bridgeCost.percentageFee;
+    const bridgeFeeUsd = Math.round((bridgeCost.fixedCost + percentageFeeUsd) * 100) / 100;
 
-    // Net profit
-    const netProfitUsd = grossProfitTotal - bridgeFeeUsd;
+    // Net profit (rounded to 2 decimals)
+    const netProfitUsd = Math.round((grossProfitTotal - bridgeFeeUsd) * 100) / 100;
     const netProfitPercentage = netProfitUsd / positionSize;
 
     // Only emit if profitable above threshold

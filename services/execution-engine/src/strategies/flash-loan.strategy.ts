@@ -547,7 +547,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         });
 
         if (!revalidatedProfit.isProfitable) {
-          ctx.stats.simulationPredictedReverts++;
+          ctx.stats.simulationProfitabilityRejections++;
           this.logger.warn('Aborting execution: simulation gas estimate makes trade unprofitable', {
             opportunityId: opportunity.id,
             estimatedGas: estimatedGas.toString(),

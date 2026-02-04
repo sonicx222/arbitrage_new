@@ -452,7 +452,8 @@ describe('CrossChainStrategy - Simulation Integration', () => {
     mockStrategyMethods(strategy);
   });
 
-  it('should abort execution when destination simulation predicts revert', async () => {
+  it('should abort execution when source buy simulation predicts revert', async () => {
+    // Phase 2.1: Now catches buy-side failures BEFORE destination simulation
     const mockSimService = createMockSimulationService({
       shouldSimulate: jest.fn().mockReturnValue(true),
       simulate: jest.fn().mockResolvedValue({
@@ -469,7 +470,8 @@ describe('CrossChainStrategy - Simulation Integration', () => {
     const result = await strategy.execute(opportunity, ctx);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('destination sell simulation predicted revert');
+    // Now catches at source buy simulation (runs before bridge quote)
+    expect(result.error).toContain('source buy simulation predicted revert');
     expect(result.error).toContain('INSUFFICIENT_OUTPUT_AMOUNT');
     expect(ctx.stats.simulationPredictedReverts).toBe(1);
   });

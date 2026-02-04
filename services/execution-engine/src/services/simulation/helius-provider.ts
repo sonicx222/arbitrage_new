@@ -135,6 +135,12 @@ export interface HeliusProviderConfig extends SimulationProviderConfig {
   useEnhancedSimulation?: boolean;
   /** Default commitment level */
   defaultCommitment?: 'processed' | 'confirmed' | 'finalized';
+  /**
+   * Cooldown period in ms after Helius failure before retrying.
+   * During cooldown, fallback RPC is used instead.
+   * Default: 60000 (1 minute)
+   */
+  failureCooldownMs?: number;
 }
 
 // =============================================================================
@@ -170,6 +176,7 @@ export class HeliusSimulationProvider extends BaseSimulationProvider {
   // Fallback tracking
   private fallbackUsedCount = 0;
   private heliusUnavailableUntil = 0;
+  private readonly failureCooldownMs: number;
 
   constructor(config: HeliusProviderConfig) {
     // Override type to 'helius' (will be cast, see note below)
@@ -180,6 +187,7 @@ export class HeliusSimulationProvider extends BaseSimulationProvider {
     this.fallbackRpcUrl = config.fallbackRpcUrl;
     this.useEnhancedSimulation = config.useEnhancedSimulation ?? false;
     this.defaultCommitment = config.defaultCommitment ?? 'confirmed';
+    this.failureCooldownMs = config.failureCooldownMs ?? 60000; // Default: 1 minute
 
     // Build Helius RPC URL if API key provided
     if (this.heliusApiKey) {
@@ -237,7 +245,7 @@ export class HeliusSimulationProvider extends BaseSimulationProvider {
         return result;
       } catch (error) {
         // Helius failed - mark as temporarily unavailable and try fallback
-        this.heliusUnavailableUntil = Date.now() + 60000; // 1 minute cooldown
+        this.heliusUnavailableUntil = Date.now() + this.failureCooldownMs;
         this.logger.warn('Helius simulation failed, trying fallback', {
           error: getSimulationErrorMessage(error),
         });

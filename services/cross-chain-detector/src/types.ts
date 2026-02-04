@@ -334,6 +334,12 @@ export interface DetectorConfig {
   mlConfig?: MLPredictionConfig;
   /** Phase 3: Pre-validation configuration for sample-based opportunity validation */
   preValidationConfig?: PreValidationConfig;
+  /**
+   * Phase 3: Simulation callback for pre-validation.
+   * Injected by orchestrator to avoid direct SimulationService dependency.
+   * @see ADR-023: Detector Pre-validation
+   */
+  simulationCallback?: PreValidationSimulationCallback;
 }
 
 /**
@@ -421,6 +427,53 @@ export interface MLPredictionConfig {
   /** Cache prediction results for this duration in ms (default: 1000) */
   cacheTtlMs: number;
 }
+
+// =============================================================================
+// Pre-validation Simulation Interface
+// =============================================================================
+
+/**
+ * Simulation request for pre-validation.
+ * Simplified interface for detector pre-validation (doesn't need full transaction).
+ */
+export interface PreValidationSimulationRequest {
+  /** Chain for simulation */
+  chain: string;
+  /** Token pair being traded */
+  tokenPair: string;
+  /** DEX to simulate on */
+  dex: string;
+  /** Estimated trade size in USD */
+  tradeSizeUsd: number;
+  /** Expected price */
+  expectedPrice: number;
+}
+
+/**
+ * Result of pre-validation simulation.
+ */
+export interface PreValidationSimulationResult {
+  /** Whether simulation succeeded */
+  success: boolean;
+  /** Whether the transaction would revert */
+  wouldRevert: boolean;
+  /** Latency of simulation in ms */
+  latencyMs: number;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Callback interface for pre-validation simulation.
+ *
+ * This allows the detector to simulate opportunities without direct dependency
+ * on SimulationService. The orchestrator wires the callback to SimulationService.
+ *
+ * @see ADR-023: Detector Pre-validation
+ */
+export type PreValidationSimulationCallback = (
+  request: PreValidationSimulationRequest
+) => Promise<PreValidationSimulationResult>;
 
 // =============================================================================
 // Re-exports for convenience
