@@ -24,7 +24,6 @@ import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@je
 import Redis from 'ioredis';
 import {
   createTestRedisClient,
-  flushTestRedis,
   ensureConsumerGroup,
 } from '@arbitrage/test-utils';
 
@@ -129,16 +128,18 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
     }
   });
 
-  beforeEach(async () => {
-    await flushTestRedis(redis);
-  });
+  // Note: We use unique stream/key names per test to avoid interference,
+  // so we don't need beforeEach flush which can cause race conditions
+  // with parallel test execution.
 
   describe('Execution Request Publishing', () => {
     it('should publish execution request to stream:execution-requests', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-requests:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const request = createExecutionRequest();
 
       const messageId = await redis.xadd(
-        STREAMS.EXECUTION_REQUESTS,
+        testStream,
         '*',
         'data', JSON.stringify(request)
       );
@@ -146,7 +147,7 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
       expect(messageId).toBeDefined();
 
       // Verify stream has the message
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.EXECUTION_REQUESTS, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       // Ensure result is not null before accessing
       expect(result).not.toBeNull();
@@ -167,18 +168,21 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
     });
 
     it('should preserve request priority ordering', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-requests:prio:${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       // Create requests with different priorities
       const highPriority = createExecutionRequest({ priority: 'high', requestId: 'req-high' });
       const mediumPriority = createExecutionRequest({ priority: 'medium', requestId: 'req-medium' });
       const lowPriority = createExecutionRequest({ priority: 'low', requestId: 'req-low' });
 
       // Publish in mixed order
-      await redis.xadd(STREAMS.EXECUTION_REQUESTS, '*', 'data', JSON.stringify(mediumPriority));
-      await redis.xadd(STREAMS.EXECUTION_REQUESTS, '*', 'data', JSON.stringify(highPriority));
-      await redis.xadd(STREAMS.EXECUTION_REQUESTS, '*', 'data', JSON.stringify(lowPriority));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(mediumPriority));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(highPriority));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(lowPriority));
 
       // Read all requests
-      const result = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.EXECUTION_REQUESTS, '0');
+      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       const requests = messages.map(([, fields]) => {
@@ -300,15 +304,17 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
 
   describe('Execution Result Publishing', () => {
     it('should publish successful execution result', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-results:success:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const request = createExecutionRequest();
       const result = createExecutionResult(request, {
         status: 'success',
         actualProfit: 48.5,
       });
 
-      await redis.xadd(STREAMS.EXECUTION_RESULTS, '*', 'data', JSON.stringify(result));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
 
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.EXECUTION_RESULTS, '0');
+      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = readResult![0];
       const [, fields] = messages[0];
@@ -324,6 +330,8 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
     });
 
     it('should publish failed execution result with error', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-results:failed:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const request = createExecutionRequest();
       const result = createExecutionResult(request, {
         status: 'failed',
@@ -332,9 +340,9 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
         txHash: undefined,
       });
 
-      await redis.xadd(STREAMS.EXECUTION_RESULTS, '*', 'data', JSON.stringify(result));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
 
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.EXECUTION_RESULTS, '0');
+      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = readResult![0];
       const [, fields] = messages[0];
@@ -349,6 +357,8 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
     });
 
     it('should publish expired execution result for deadline exceeded', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-results:expired:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const request = createExecutionRequest({
         deadline: Date.now() - 1000, // Already expired
       });
@@ -357,9 +367,9 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
         errorMessage: 'Deadline exceeded',
       });
 
-      await redis.xadd(STREAMS.EXECUTION_RESULTS, '*', 'data', JSON.stringify(result));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(result));
 
-      const readResult = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.EXECUTION_RESULTS, '0');
+      const readResult = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = readResult![0];
       const [, fields] = messages[0];
@@ -375,8 +385,10 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
 
   describe('Consumer Group for Execution Engine', () => {
     it('should create execution engine consumer group', async () => {
-      const streamName = STREAMS.EXECUTION_REQUESTS;
-      const groupName = 'execution-engine-group';
+      // Use unique stream/group names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const streamName = `stream:execution-requests:cg:${testId}`;
+      const groupName = `execution-engine-group-${testId}`;
 
       // Create stream with initial message
       await redis.xadd(streamName, '*', 'data', 'init');
@@ -489,10 +501,15 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
 
   describe('Request-Response Correlation', () => {
     it('should correlate execution results with requests by ID', async () => {
+      // Use unique stream names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const requestStream = `stream:execution-requests:corr:${testId}`;
+      const resultStream = `stream:execution-results:corr:${testId}`;
+
       const request = createExecutionRequest({ requestId: 'unique-request-123' });
 
       // Publish request
-      await redis.xadd(STREAMS.EXECUTION_REQUESTS, '*', 'data', JSON.stringify(request));
+      await redis.xadd(requestStream, '*', 'data', JSON.stringify(request));
 
       // Simulate execution and publish result
       const result = createExecutionResult(request, {
@@ -500,10 +517,10 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
         actualProfit: 52.3,
       });
 
-      await redis.xadd(STREAMS.EXECUTION_RESULTS, '*', 'data', JSON.stringify(result));
+      await redis.xadd(resultStream, '*', 'data', JSON.stringify(result));
 
       // Read result and correlate with request
-      const resultMessages = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.EXECUTION_RESULTS, '0');
+      const resultMessages = await redis.xread('COUNT', 10, 'STREAMS', resultStream, '0');
 
       const [, messages] = resultMessages![0];
       const [, fields] = messages[0];
@@ -520,6 +537,8 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
 
   describe('Backpressure Handling', () => {
     it('should handle high volume of execution requests', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:execution-requests:hv:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const requestCount = 100;
 
       // Publish many requests rapidly
@@ -527,7 +546,7 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
       for (let i = 0; i < requestCount; i++) {
         publishPromises.push(
           redis.xadd(
-            STREAMS.EXECUTION_REQUESTS,
+            testStream,
             '*',
             'data', JSON.stringify(createExecutionRequest({ requestId: `req-${i}` }))
           )
@@ -537,16 +556,21 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
       await Promise.all(publishPromises);
 
       // Verify all requests were published
-      const streamLength = await redis.xlen(STREAMS.EXECUTION_REQUESTS);
+      const streamLength = await redis.xlen(testStream);
       expect(streamLength).toBe(requestCount);
     });
 
     it('should process requests in batches', async () => {
-      const streamName = STREAMS.EXECUTION_REQUESTS;
-      const groupName = 'batch-processor';
+      // Use unique stream/group names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const streamName = `stream:execution-requests:batch:${testId}`;
+      const groupName = `batch-processor-${testId}`;
       const consumerName = 'executor-1';
       const batchSize = 10;
       const totalRequests = 50;
+
+      // Create consumer group first (MKSTREAM creates stream if needed)
+      await ensureConsumerGroup(redis, streamName, groupName);
 
       // Publish many requests
       for (let i = 0; i < totalRequests; i++) {
@@ -556,9 +580,6 @@ describe('[Level 1] Coordinator → Execution Engine Integration', () => {
           'data', JSON.stringify(createExecutionRequest({ requestId: `req-${i}` }))
         );
       }
-
-      // Create consumer group
-      await ensureConsumerGroup(redis, streamName, groupName);
 
       // Process in batches
       let totalProcessed = 0;

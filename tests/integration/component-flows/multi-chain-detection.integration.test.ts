@@ -372,8 +372,8 @@ describe('[Level 1] Multi-Chain Detection Integration', () => {
       '$partitionId partition',
       ({ partitionId, chains, region }) => {
         it(`should detect opportunities across ${partitionId} chains`, async () => {
-          // Use unique stream name to avoid interference
-          const testStream = `stream:opportunities:partition:${partitionId}:${Date.now()}`;
+          // Use unique stream name to avoid interference (add random suffix for uniqueness across parallel tests)
+          const testStream = `stream:opportunities:partition:${partitionId}:${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
           // Publish opportunities for all chains in partition
           for (const chain of chains) {

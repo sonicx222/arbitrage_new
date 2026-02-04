@@ -24,7 +24,6 @@ import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@je
 import Redis from 'ioredis';
 import {
   createTestRedisClient,
-  flushTestRedis,
   publishToStream,
   ensureConsumerGroup,
 } from '@arbitrage/test-utils';
@@ -129,17 +128,19 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     }
   });
 
-  beforeEach(async () => {
-    await flushTestRedis(redis);
-  });
+  // Note: We use unique stream/key names per test to avoid interference,
+  // so we don't need beforeEach flush which can cause race conditions
+  // with parallel test execution.
 
   describe('Price Update Stream', () => {
     it('should publish price updates to stream:price-updates', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:price-updates:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const priceUpdate = createTestPriceUpdate();
 
       // Publish price update to stream
       const messageId = await redis.xadd(
-        STREAMS.PRICE_UPDATES,
+        testStream,
         '*',
         'data', JSON.stringify(priceUpdate)
       );
@@ -148,17 +149,17 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
       expect(typeof messageId).toBe('string');
 
       // Verify stream has the message
-      const streamLength = await redis.xlen(STREAMS.PRICE_UPDATES);
+      const streamLength = await redis.xlen(testStream);
       expect(streamLength).toBe(1);
 
       // Read the message back
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.PRICE_UPDATES, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       expect(result).toBeDefined();
       expect(result).toHaveLength(1);
 
       const [streamName, messages] = result![0];
-      expect(streamName).toBe(STREAMS.PRICE_UPDATES);
+      expect(streamName).toBe(testStream);
       expect(messages).toHaveLength(1);
 
       const [, fields] = messages[0];
@@ -175,6 +176,8 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     });
 
     it('should handle multiple price updates from different DEXs', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:price-updates:multi:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const updates = [
         createTestPriceUpdate({ dex: 'uniswap_v3', price: 2500 }),
         createTestPriceUpdate({ dex: 'sushiswap', price: 2495, pairAddress: '0x397FF1542f962076d0BFE58eA045FfA2d347ACa0' }),
@@ -183,15 +186,15 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
 
       // Publish all updates
       for (const update of updates) {
-        await redis.xadd(STREAMS.PRICE_UPDATES, '*', 'data', JSON.stringify(update));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(update));
       }
 
       // Verify stream length
-      const streamLength = await redis.xlen(STREAMS.PRICE_UPDATES);
+      const streamLength = await redis.xlen(testStream);
       expect(streamLength).toBe(3);
 
       // Read all messages
-      const result = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.PRICE_UPDATES, '0');
+      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       expect(messages).toHaveLength(3);
@@ -211,6 +214,8 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     });
 
     it('should preserve message order in the stream', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:price-updates:order:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const timestamps: number[] = [];
 
       // Publish 5 price updates with sequential timestamps
@@ -218,14 +223,14 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
         const timestamp = Date.now() + i;
         timestamps.push(timestamp);
         await redis.xadd(
-          STREAMS.PRICE_UPDATES,
+          testStream,
           '*',
           'data', JSON.stringify(createTestPriceUpdate({ timestamp }))
         );
       }
 
       // Read all messages
-      const result = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.PRICE_UPDATES, '0');
+      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
 
       // Verify order is preserved
       const [, messages] = result![0];
@@ -243,12 +248,14 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
 
   describe('Opportunity Stream', () => {
     it('should publish opportunities to stream:opportunities', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:opportunities:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const opportunity = createTestOpportunity();
 
-      await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opportunity));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
 
       // Read and verify
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.OPPORTUNITIES, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       const [, fields] = messages[0];
@@ -265,6 +272,9 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     });
 
     it('should filter opportunities by profitability threshold', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:opportunities:filter:${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       // Publish opportunities with varying profits
       const opportunities = [
         createTestOpportunity({ expectedProfit: 10, id: 'opp-low' }),
@@ -273,11 +283,11 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
       ];
 
       for (const opp of opportunities) {
-        await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opp));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(opp));
       }
 
       // Read all opportunities
-      const result = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.OPPORTUNITIES, '0');
+      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       const allOpps = messages.map(([, fields]) => {
@@ -298,8 +308,10 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
 
   describe('Consumer Group Processing', () => {
     it('should create consumer group for coordinator', async () => {
-      const groupName = 'coordinator-group';
-      const streamName = STREAMS.OPPORTUNITIES;
+      // Use unique stream/group names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const groupName = `coordinator-group-${testId}`;
+      const streamName = `stream:opportunities:cg:${testId}`;
 
       // Create stream with initial message
       await redis.xadd(streamName, '*', 'data', 'init');
@@ -314,9 +326,14 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     });
 
     it('should consume messages with consumer group', async () => {
-      const streamName = STREAMS.OPPORTUNITIES;
-      const groupName = 'coordinator-consumer-test';
+      // Use unique stream/group names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const streamName = `stream:opportunities:consume:${testId}`;
+      const groupName = `coordinator-consumer-test-${testId}`;
       const consumerName = 'worker-1';
+
+      // Create consumer group first (MKSTREAM creates stream if needed)
+      await ensureConsumerGroup(redis, streamName, groupName);
 
       // Create stream and add messages
       const opp1 = createTestOpportunity({ id: 'opp-1' });
@@ -325,10 +342,7 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
       await redis.xadd(streamName, '*', 'data', JSON.stringify(opp1));
       await redis.xadd(streamName, '*', 'data', JSON.stringify(opp2));
 
-      // Create consumer group starting from beginning
-      await ensureConsumerGroup(redis, streamName, groupName);
-
-      // Read messages via consumer group (start from '0' to get existing messages)
+      // Read messages via consumer group (start from '>' to get new messages)
       const result = await redis.xreadgroup(
         'GROUP', groupName, consumerName,
         'COUNT', 10,
@@ -352,8 +366,10 @@ describe('[Level 1] Detector → Coordinator Integration', () => {
     });
 
     it('should handle multiple consumers in same group', async () => {
-      const streamName = 'stream:test-multi-consumer';
-      const groupName = 'coordinator-multi-consumer';
+      // Use unique stream/group names to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const streamName = `stream:test-multi-consumer:${testId}`;
+      const groupName = `coordinator-multi-consumer-${testId}`;
 
       // Create consumer group first (MKSTREAM creates stream if needed)
       await ensureConsumerGroup(redis, streamName, groupName);

@@ -24,7 +24,6 @@ import { jest, describe, it, expect, beforeAll, afterAll, beforeEach } from '@je
 import Redis from 'ioredis';
 import {
   createTestRedisClient,
-  flushTestRedis,
 } from '@arbitrage/test-utils';
 
 // Stream names (matching RedisStreamsClient.STREAMS)
@@ -190,14 +189,16 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     }
   });
 
-  beforeEach(async () => {
-    await flushTestRedis(redis);
-  });
+  // Note: We use unique stream/key names per test to avoid interference,
+  // so we don't need beforeEach flush which can cause race conditions
+  // with parallel test execution.
 
   describe('Price Data Storage', () => {
     it('should store price data in Redis cache', async () => {
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const priceData = createPriceData({ dex: 'uniswap_v3', price: 2500 });
-      const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}${priceData.chain}:${priceData.dex}:${priceData.pairKey}`;
+      const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${priceData.chain}:${priceData.dex}:${priceData.pairKey}`;
 
       await redis.set(cacheKey, JSON.stringify(priceData), 'EX', 300); // 5 minute TTL
 
@@ -210,6 +211,8 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should store prices from multiple DEXs for same pair', async () => {
+      // Use unique prefix to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const chain = 'ethereum';
       const pairKey = 'WETH_USDC';
 
@@ -221,12 +224,12 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
       // Store all prices
       for (const priceData of dexPrices) {
-        const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}${chain}:${priceData.dex}:${pairKey}`;
+        const cacheKey = `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:${priceData.dex}:${pairKey}`;
         await redis.set(cacheKey, JSON.stringify(priceData), 'EX', 300);
       }
 
       // Verify we can retrieve all prices
-      const keys = await redis.keys(`${CACHE_KEYS.PRICE_PREFIX}${chain}:*:${pairKey}`);
+      const keys = await redis.keys(`${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:*:${pairKey}`);
       expect(keys).toHaveLength(3);
 
       // Read and compare prices
@@ -241,7 +244,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should track price history with sorted set', async () => {
-      const historyKey = `${CACHE_KEYS.PRICE_PREFIX}history:ethereum:uniswap_v3:WETH_USDC`;
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const historyKey = `${CACHE_KEYS.PRICE_PREFIX}history:test:${testId}:ethereum:uniswap_v3:WETH_USDC`;
 
       // Add price history entries
       const baseTimestamp = Date.now();
@@ -273,11 +278,13 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
   describe('Price Update Stream', () => {
     it('should publish price updates to stream', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:price-updates:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const priceData = createPriceData();
 
-      await redis.xadd(STREAMS.PRICE_UPDATES, '*', 'data', JSON.stringify(priceData));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(priceData));
 
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.PRICE_UPDATES, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       expect(messages).toHaveLength(1);
@@ -293,6 +300,8 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should handle high-frequency price updates', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:price-updates:hf:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const updateCount = 50;
       const promises: Promise<string | null>[] = [];
 
@@ -303,18 +312,20 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
           timestamp: Date.now() + i,
         });
 
-        promises.push(redis.xadd(STREAMS.PRICE_UPDATES, '*', 'data', JSON.stringify(priceData)));
+        promises.push(redis.xadd(testStream, '*', 'data', JSON.stringify(priceData)));
       }
 
       await Promise.all(promises);
 
-      const streamLength = await redis.xlen(STREAMS.PRICE_UPDATES);
+      const streamLength = await redis.xlen(testStream);
       expect(streamLength).toBe(updateCount);
     });
   });
 
   describe('Swap Event Processing', () => {
     it('should publish swap events to stream', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:swap-events:pub:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const swapEvent = {
         dex: 'uniswap_v3',
         chain: 'ethereum',
@@ -334,9 +345,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
         timestamp: Date.now(),
       };
 
-      await redis.xadd(STREAMS.SWAP_EVENTS, '*', 'data', JSON.stringify(swapEvent));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify(swapEvent));
 
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.SWAP_EVENTS, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       const [, fields] = messages[0];
@@ -351,6 +362,8 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should derive price from swap event', async () => {
+      // Use unique stream name to avoid interference from parallel tests
+      const testStream = `stream:swap-events:price:${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const swapEvent = {
         dex: 'uniswap_v3',
         amount0In: '1000000000000000000', // 1 WETH (18 decimals)
@@ -367,9 +380,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
       expect(impliedPrice).toBe(2520);
 
-      await redis.xadd(STREAMS.SWAP_EVENTS, '*', 'data', JSON.stringify({ ...swapEvent, impliedPrice }));
+      await redis.xadd(testStream, '*', 'data', JSON.stringify({ ...swapEvent, impliedPrice }));
 
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.SWAP_EVENTS, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       const [, fields] = messages[0];
@@ -385,6 +398,10 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
   describe('Arbitrage Detection', () => {
     it('should detect cross-DEX arbitrage opportunity', async () => {
+      // Use unique keys/streams to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const testStream = `stream:opportunities:detect:${testId}`;
+
       // Store prices from two DEXs with price difference
       const uniswapPrice = createPriceData({
         dex: 'uniswap_v3',
@@ -398,13 +415,13 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
         pairAddress: TEST_PAIRS.SUSHISWAP_WETH_USDC.address,
       });
 
-      // Store in cache
+      // Store in cache with unique keys
       await redis.set(
-        `${CACHE_KEYS.PRICE_PREFIX}ethereum:uniswap_v3:WETH_USDC`,
+        `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:ethereum:uniswap_v3:WETH_USDC`,
         JSON.stringify(uniswapPrice)
       );
       await redis.set(
-        `${CACHE_KEYS.PRICE_PREFIX}ethereum:sushiswap:WETH_USDC`,
+        `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:ethereum:sushiswap:WETH_USDC`,
         JSON.stringify(sushiPrice)
       );
 
@@ -420,11 +437,11 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       if (priceSpreadPercent >= minSpreadThreshold) {
         const opportunity = createOpportunity(uniswapPrice, sushiPrice);
 
-        await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opportunity));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
       }
 
       // Verify opportunity was published
-      const result = await redis.xread('COUNT', 1, 'STREAMS', STREAMS.OPPORTUNITIES, '0');
+      const result = await redis.xread('COUNT', 1, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       expect(messages).toHaveLength(1);
@@ -442,8 +459,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should not publish opportunity when spread is below threshold', async () => {
-      // Ensure clean state - delete any existing opportunities stream
-      await redis.del(STREAMS.OPPORTUNITIES);
+      // Use unique stream to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const testStream = `stream:opportunities:below:${testId}`;
 
       // Prices with minimal difference
       const uniswapPrice = createPriceData({ dex: 'uniswap_v3', price: 2500 });
@@ -458,16 +476,20 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       // Simulate the detection logic: only publish if spread exceeds threshold
       if (priceSpreadPercent >= minSpreadThreshold) {
         const opportunity = createOpportunity(uniswapPrice, sushiPrice);
-        await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opportunity));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
       }
 
       // Verify no opportunity published (short block to check if any messages exist)
-      const result = await redis.xread('COUNT', 1, 'BLOCK', 100, 'STREAMS', STREAMS.OPPORTUNITIES, '0');
+      const result = await redis.xread('COUNT', 1, 'BLOCK', 100, 'STREAMS', testStream, '0');
 
       expect(result).toBeNull();
     });
 
     it('should filter opportunities by net profit after gas', async () => {
+      // Use unique stream to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const testStream = `stream:opportunities:gas:${testId}`;
+
       // High spread but low liquidity might not cover gas
       const buyPrice = createPriceData({ dex: 'uniswap_v3', price: 2500 });
       const sellPrice = createPriceData({ dex: 'sushiswap', price: 2510 }); // $10 spread
@@ -484,15 +506,19 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       const minNetProfit = 5; // $5 minimum
 
       if (netProfit >= minNetProfit) {
-        await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opportunity));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
       }
 
       // Verify no opportunity published
-      const streamLength = await redis.xlen(STREAMS.OPPORTUNITIES);
+      const streamLength = await redis.xlen(testStream);
       expect(streamLength).toBe(0);
     });
 
     it('should detect multiple simultaneous opportunities', async () => {
+      // Use unique stream to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const testStream = `stream:opportunities:multi:${testId}`;
+
       // Setup prices for multiple pairs with arbitrage potential
       const pairs = [
         {
@@ -536,12 +562,12 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
             timestamp: Date.now(),
           };
 
-          await redis.xadd(STREAMS.OPPORTUNITIES, '*', 'data', JSON.stringify(opportunity));
+          await redis.xadd(testStream, '*', 'data', JSON.stringify(opportunity));
         }
       }
 
       // Verify all profitable opportunities were published
-      const result = await redis.xread('COUNT', 10, 'STREAMS', STREAMS.OPPORTUNITIES, '0');
+      const result = await redis.xread('COUNT', 10, 'STREAMS', testStream, '0');
 
       const [, messages] = result![0];
       expect(messages.length).toBeGreaterThanOrEqual(2);
@@ -563,6 +589,10 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
   describe('Opportunity Scoring and Ranking', () => {
     it('should score opportunities by expected profit', async () => {
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const rankingKey = `opportunities:ranked:${testId}`;
+
       const opportunities = [
         createOpportunity(
           createPriceData({ dex: 'uniswap_v3', price: 2500 }),
@@ -582,8 +612,6 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       ];
 
       // Store in sorted set by net profit for ranking
-      const rankingKey = 'opportunities:ranked';
-
       for (const opp of opportunities) {
         await redis.zadd(rankingKey, opp.netProfit, JSON.stringify(opp));
       }
@@ -598,6 +626,10 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should apply confidence weighting to opportunity score', async () => {
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const rankingKey = `opportunities:weighted:${testId}`;
+
       const opportunities = [
         { profit: 100, confidence: 0.9, id: 'high-conf-low-profit' },
         { profit: 150, confidence: 0.5, id: 'low-conf-high-profit' },
@@ -611,8 +643,6 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       }));
 
       // Store by weighted score
-      const rankingKey = 'opportunities:weighted';
-
       for (const opp of weightedOpps) {
         await redis.zadd(rankingKey, opp.weightedScore, JSON.stringify(opp));
       }
@@ -630,7 +660,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
   describe('Price Matrix Updates', () => {
     it('should update price matrix with new price data', async () => {
-      const matrixKey = 'pricematrix:ethereum:WETH_USDC';
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const matrixKey = `pricematrix:${testId}:ethereum:WETH_USDC`;
 
       // Store prices from all DEXs as hash fields
       const dexPrices = {
@@ -661,7 +693,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should handle stale price data', async () => {
-      const matrixKey = 'pricematrix:ethereum:WETH_USDC';
+      // Use unique key to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const matrixKey = `pricematrix:${testId}:ethereum:WETH_USDC`;
       const maxAge = 30000; // 30 seconds
 
       // Store prices with different timestamps
@@ -689,6 +723,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
   describe('Multi-Chain Price Updates', () => {
     it('should track prices across multiple chains', async () => {
+      // Use unique stream/keys to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const testStream = `stream:price-updates:multichain:${testId}`;
       const chains = ['ethereum', 'bsc', 'polygon', 'arbitrum'];
 
       // Publish price updates for each chain
@@ -698,23 +735,23 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
           price: 2500 + Math.random() * 20 - 10, // Slight variations
         });
 
-        await redis.xadd(STREAMS.PRICE_UPDATES, '*', 'data', JSON.stringify(priceData));
+        await redis.xadd(testStream, '*', 'data', JSON.stringify(priceData));
 
-        // Also store in per-chain cache
+        // Also store in per-chain cache with unique prefix
         await redis.set(
-          `${CACHE_KEYS.PRICE_PREFIX}${chain}:uniswap_v3:WETH_USDC`,
+          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`,
           JSON.stringify(priceData)
         );
       }
 
       // Verify all chains have price data
-      const streamMessages = await redis.xlen(STREAMS.PRICE_UPDATES);
+      const streamMessages = await redis.xlen(testStream);
       expect(streamMessages).toBe(4);
 
       // Verify cache entries
       for (const chain of chains) {
         const cached = await redis.get(
-          `${CACHE_KEYS.PRICE_PREFIX}${chain}:uniswap_v3:WETH_USDC`
+          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`
         );
         expect(cached).toBeDefined();
         expect(JSON.parse(cached!).chain).toBe(chain);
@@ -722,6 +759,9 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
     });
 
     it('should detect cross-chain arbitrage potential', async () => {
+      // Use unique keys to avoid interference from parallel tests
+      const testId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
       // Store significantly different prices on different chains
       const chainPrices = {
         ethereum: 2500,
@@ -731,7 +771,7 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
 
       for (const [chain, price] of Object.entries(chainPrices)) {
         await redis.set(
-          `${CACHE_KEYS.PRICE_PREFIX}${chain}:uniswap_v3:WETH_USDC`,
+          `${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`,
           JSON.stringify({ chain, price, timestamp: Date.now() })
         );
       }
@@ -739,7 +779,7 @@ describe('[Level 1] Price Update → Opportunity Detection Integration', () => {
       // Compare prices across chains
       const prices = await Promise.all(
         Object.keys(chainPrices).map(async chain => {
-          const data = await redis.get(`${CACHE_KEYS.PRICE_PREFIX}${chain}:uniswap_v3:WETH_USDC`);
+          const data = await redis.get(`${CACHE_KEYS.PRICE_PREFIX}test:${testId}:${chain}:uniswap_v3:WETH_USDC`);
           return JSON.parse(data!);
         })
       );
