@@ -412,6 +412,35 @@ export class RedisClient {
   }
 
   /**
+   * Get a value and refresh its TTL in a single operation (Redis 6.2+).
+   *
+   * P2-FIX: GETEX command combines GET + EXPIRE into single round-trip.
+   * Use for hot cache entries that should have their TTL extended on access.
+   * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 4.3
+   * Impact: -50-100 commands/day by eliminating separate EXPIRE calls
+   *
+   * @param key - The cache key to retrieve
+   * @param ttlSeconds - New TTL to set on the key (refreshes expiration)
+   * @returns The cached value or null if not found
+   */
+  async getex<T = any>(key: string, ttlSeconds: number): Promise<T | null> {
+    try {
+      this.trackCommand('getex');
+      // GETEX key EX seconds - gets value and sets new expiration
+      const value = await this.client.getex(key, 'EX', ttlSeconds);
+      return value ? JSON.parse(value) : null;
+    } catch (error) {
+      // Fallback to regular GET if GETEX not supported (older Redis versions)
+      if ((error as Error).message?.includes('unknown command')) {
+        this.logger.debug('GETEX not supported, falling back to GET', { key });
+        return this.get<T>(key);
+      }
+      this.logger.error('Error in getex', { error, key });
+      return null;
+    }
+  }
+
+  /**
    * Raw setex - sets a key with expiration, no JSON serialization.
    * Used by QualityMonitor and other components that manage their own serialization.
    */
@@ -948,25 +977,45 @@ export class RedisClient {
   /**
    * P1-FIX: Use SCAN instead of KEYS to avoid blocking Redis
    * KEYS command blocks on large datasets; SCAN is non-blocking and iterative.
+   *
+   * P2-FIX: Use MGET for batch retrieval instead of sequential GETs.
+   * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 4.3
+   * Impact: -100-200 commands/day
    */
   async getAllServiceHealth(): Promise<Record<string, ServiceHealth>> {
     try {
       const health: Record<string, ServiceHealth> = {};
       let cursor = '0';
+      const allKeys: string[] = [];
 
       // P1-FIX: Use SCAN iterator for non-blocking key enumeration
+      // Phase 1: Collect all keys first
       do {
         const [nextCursor, keys] = await this.scan(cursor, 'MATCH', 'health:*', 'COUNT', 100);
         cursor = nextCursor;
+        allKeys.push(...keys);
+      } while (cursor !== '0');
 
-        for (const key of keys) {
-          const serviceName = key.replace('health:', '');
-          const serviceHealth = await this.get<ServiceHealth>(key);
-          if (serviceHealth) {
-            health[serviceName] = serviceHealth;
+      // P2-FIX: Use MGET for batch retrieval (single round-trip vs N round-trips)
+      if (allKeys.length > 0) {
+        this.trackCommand('mget');
+        const values = await this.client.mget(...allKeys);
+
+        // Map results back to service names
+        for (let i = 0; i < allKeys.length; i++) {
+          const key = allKeys[i];
+          const value = values[i];
+          if (value) {
+            try {
+              const serviceName = key.replace('health:', '');
+              health[serviceName] = JSON.parse(value);
+            } catch {
+              // Skip malformed entries
+              this.logger.warn('Malformed health entry, skipping', { key });
+            }
           }
         }
-      } while (cursor !== '0');
+      }
 
       return health;
     } catch (error) {

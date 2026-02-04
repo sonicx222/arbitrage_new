@@ -8,6 +8,39 @@ import { createLogger } from '../logger';
 
 const logger = createLogger('worker-pool');
 
+// =============================================================================
+// P2-FIX: Platform-Aware Worker Pool Configuration
+// @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 5.3
+// =============================================================================
+
+/**
+ * Detect if running on memory-constrained hosting platforms.
+ * - Fly.io: 256MB free tier
+ * - Railway: 512MB free tier
+ * - Render: 512MB free tier
+ */
+const IS_FLY_IO = process.env.FLY_APP_NAME !== undefined;
+const IS_RAILWAY = process.env.RAILWAY_ENVIRONMENT !== undefined;
+const IS_RENDER = process.env.RENDER_SERVICE_NAME !== undefined;
+const IS_CONSTRAINED_HOST = IS_FLY_IO || IS_RAILWAY || IS_RENDER ||
+  process.env.CONSTRAINED_MEMORY === 'true';
+
+/**
+ * Platform-aware default configuration.
+ *
+ * Constrained hosts (256-512MB): 2 workers, 300 queue size
+ * - Reduces memory footprint by ~20MB (2 fewer worker threads)
+ * - Still provides parallelism for CPU-intensive tasks
+ *
+ * Standard hosts (1GB+): 4 workers, 1000 queue size
+ * - Full parallelism for path finding and JSON parsing
+ */
+const POOL_DEFAULTS = {
+  poolSize: IS_FLY_IO ? 2 : IS_CONSTRAINED_HOST ? 3 : 4,
+  maxQueueSize: IS_CONSTRAINED_HOST ? 300 : 1000,
+  taskTimeout: 30000,
+} as const;
+
 export interface Task {
   id: string;
   type: string;
@@ -905,9 +938,16 @@ let workerPool: EventProcessingWorkerPool | null = null;
  * Get the singleton worker pool instance.
  * Creates a new instance if one doesn't exist.
  *
- * @param poolSize - Optional pool size (only used when creating new instance)
- * @param maxQueueSize - Optional max queue size (only used when creating new instance)
- * @param taskTimeout - Optional task timeout in ms (only used when creating new instance)
+ * P2-FIX: Uses platform-aware defaults for memory-constrained hosts.
+ * - Fly.io (256MB): 2 workers, 300 queue
+ * - Other constrained: 3 workers, 300 queue
+ * - Standard hosts: 4 workers, 1000 queue
+ *
+ * @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 5.3
+ *
+ * @param poolSize - Optional pool size (defaults to platform-aware value)
+ * @param maxQueueSize - Optional max queue size (defaults to platform-aware value)
+ * @param taskTimeout - Optional task timeout in ms (default: 30000)
  * @returns The singleton EventProcessingWorkerPool instance
  */
 export function getWorkerPool(
@@ -916,7 +956,23 @@ export function getWorkerPool(
   taskTimeout?: number
 ): EventProcessingWorkerPool {
   if (!workerPool) {
-    workerPool = new EventProcessingWorkerPool(poolSize, maxQueueSize, taskTimeout);
+    // P2-FIX: Use platform-aware defaults when not explicitly specified
+    const effectivePoolSize = poolSize ?? POOL_DEFAULTS.poolSize;
+    const effectiveQueueSize = maxQueueSize ?? POOL_DEFAULTS.maxQueueSize;
+    const effectiveTimeout = taskTimeout ?? POOL_DEFAULTS.taskTimeout;
+
+    logger.info('Creating worker pool with platform-aware configuration', {
+      platform: IS_FLY_IO ? 'fly.io' : IS_CONSTRAINED_HOST ? 'constrained' : 'standard',
+      poolSize: effectivePoolSize,
+      maxQueueSize: effectiveQueueSize,
+      taskTimeout: effectiveTimeout,
+    });
+
+    workerPool = new EventProcessingWorkerPool(
+      effectivePoolSize,
+      effectiveQueueSize,
+      effectiveTimeout
+    );
   }
   return workerPool;
 }

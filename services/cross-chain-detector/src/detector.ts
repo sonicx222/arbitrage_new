@@ -1130,19 +1130,40 @@ export class CrossChainDetectorService {
       this.mlPredictionsCache.clear();
 
       if (this.mlPredictionManager && this.mlPredictionManager.isReady()) {
-        // Build list of pairs to fetch predictions for
+        // P2-FIX: Pre-filter by minimum spread (>0.5%) before ML predictions
+        // @see docs/reports/ENHANCEMENT_OPTIMIZATION_RESEARCH.md Section 3.4
+        // Impact: -30-50% ML latency per cycle by eliminating low-value pairs
+        const MIN_SPREAD_THRESHOLD = 0.005; // 0.5%
+
+        // Build list of pairs to fetch predictions for, pre-filtered by spread
         const pairsToFetch: Array<{ chain: string; pairKey: string; price: number }> = [];
 
         for (const tokenPair of indexedSnapshot.tokenPairs) {
           const chainPrices = indexedSnapshot.byToken.get(tokenPair);
-          if (chainPrices) {
-            for (const pricePoint of chainPrices) {
-              pairsToFetch.push({
-                chain: pricePoint.chain,
-                pairKey: pricePoint.pairKey,
-                price: pricePoint.price,
-              });
+          if (!chainPrices || chainPrices.length < 2) continue;
+
+          // P2-FIX: Calculate price spread across chains for this token pair
+          let minPrice = Infinity;
+          let maxPrice = -Infinity;
+          for (const point of chainPrices) {
+            if (point.price > 0) {
+              if (point.price < minPrice) minPrice = point.price;
+              if (point.price > maxPrice) maxPrice = point.price;
             }
+          }
+
+          // P2-FIX: Only fetch ML predictions for pairs with meaningful spread
+          // Pairs below 0.5% spread are unlikely to be profitable after costs
+          const spread = minPrice > 0 ? (maxPrice - minPrice) / minPrice : 0;
+          if (spread < MIN_SPREAD_THRESHOLD) continue;
+
+          // This token pair has potential - include all its price points
+          for (const pricePoint of chainPrices) {
+            pairsToFetch.push({
+              chain: pricePoint.chain,
+              pairKey: pricePoint.pairKey,
+              price: pricePoint.price,
+            });
           }
         }
 

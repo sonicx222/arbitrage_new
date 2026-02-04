@@ -1,6 +1,6 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.5
+> **Document Version:** 2.6
 > **Last Updated:** 2026-02-04
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
@@ -498,7 +498,9 @@ All phases remain within Upstash 10K/day limit due to batching.
 **RPC Endpoints (varies)**
 - Multi-provider rotation (3+ providers per chain)
 - Local response caching (30-second TTL)
-- Request deduplication
+- Request deduplication (enabled by default)
+- Token bucket rate limiting (opt-in, see [ADR-024](./adr/ADR-024-rpc-rate-limiting.md))
+- Batch size optimization (20 requests per batch)
 
 ### 7.3 Memory Optimization
 
@@ -793,7 +795,7 @@ The core arbitrage math is implemented in Rust and compiled to WebAssembly (WASM
 
 | Priority | Item | Effort | Expected Impact |
 |----------|------|--------|-----------------|
-| **P1** | ML Model Training | Medium | +15-25% prediction accuracy |
+| **P1** | ML Model Training | Medium | +15-25% prediction accuracy (model persistence complete, see [ADR-025](./adr/ADR-025-ml-model-lifecycle.md)) |
 | **P2** | Cross-Chain Multi-Hop | High | +50% ROI potential |
 | **P3** | Jito Integration | Low | Solana MEV protection |
 | **P4** | WASM Engine | Very High | 10-50x math speedup (optional) |
@@ -827,8 +829,12 @@ The following Architecture Decision Records document key decisions:
 - [ADR-019: Factory-Level Event Subscriptions](./adr/ADR-019-factory-subscriptions.md)
 - [ADR-020: Flash Loan Integration](./adr/ADR-020-flash-loan.md)
 
-### Phase 4 Performance Optimization (ADR-022+) ✅ NEW
+### Phase 4 Performance Optimization (ADR-022+)
 - [ADR-022: Hot-Path Memory Optimization](./adr/ADR-022-hot-path-memory-optimization.md)
+
+### RPC & ML Optimizations (ADR-024, ADR-025) ✅ NEW
+- [ADR-024: RPC Rate Limiting Strategy](./adr/ADR-024-rpc-rate-limiting.md) - Token bucket rate limiting with hot-path exemptions
+- [ADR-025: ML Model Lifecycle Management](./adr/ADR-025-ml-model-lifecycle.md) - Model persistence, warmup, and staleness detection
 
 ---
 
@@ -843,6 +849,7 @@ The following Architecture Decision Records document key decisions:
 | 2.3 | 2026-01-25 | Optimization Evaluation | Added feature status table, WASM clarification, 13/15 optimizations confirmed complete |
 | 2.4 | 2026-01-31 | Config Alignment | Corrected DEX count (62→54), token count (165→143) to match actual config |
 | 2.5 | 2026-02-04 | Bug Hunt Fixes | Added ADR-022 (hot-path memory optimization), corrected data plane diagram (no MongoDB), documented ring buffer and normalization cache patterns |
+| 2.6 | 2026-02-04 | RPC/ML ADRs | Added ADR-024 (RPC rate limiting), ADR-025 (ML model lifecycle) - documenting existing implementations from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md |
 
 ---
 
