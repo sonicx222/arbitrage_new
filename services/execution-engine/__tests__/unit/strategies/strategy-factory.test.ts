@@ -79,6 +79,7 @@ const createMockContext = (): StrategyContext => ({
     simulationsPerformed: 0,
     simulationsSkipped: 0,
     simulationPredictedReverts: 0,
+    simulationProfitabilityRejections: 0,
     simulationErrors: 0,
     circuitBreakerTrips: 0,
     circuitBreakerBlocks: 0,

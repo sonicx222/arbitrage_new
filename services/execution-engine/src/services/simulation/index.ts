@@ -145,3 +145,16 @@ export {
   type SynchronizerState,
   type SynchronizerMetrics,
 } from './hot-fork-synchronizer';
+
+// Batch Quoter Service (Performance Optimization - Task P1)
+// Uses MultiPathQuoter contract to batch getAmountsOut() calls
+// @see contracts/src/MultiPathQuoter.sol
+export {
+  BatchQuoterService,
+  createBatchQuoterService,
+  type QuoteRequest,
+  type QuoteResult,
+  type ArbitrageSimulationResult,
+  type BatchQuoterConfig,
+  type BatchQuoterMetrics,
+} from './batch-quoter.service';

@@ -23,6 +23,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
    */
   function createMultiHopSimulator(): ChainSimulator {
     const pairs: SimulatedPairConfig[] = [
+      // Uniswap pairs for multi-hop
       {
         address: '0x1000000000000000000000000000000000000001',
         token0Symbol: 'WETH',
@@ -59,13 +60,32 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
         dex: 'uniswap_v3',
         fee: 0.003,
       },
+      // Sushiswap pairs for intra-chain arbitrage (same tokens, different DEX)
+      {
+        address: '0x2000000000000000000000000000000000000001',
+        token0Symbol: 'WETH',
+        token1Symbol: 'USDC',
+        token0Decimals: 18,
+        token1Decimals: 6,
+        dex: 'sushiswap',
+        fee: 0.003,
+      },
+      {
+        address: '0x2000000000000000000000000000000000000002',
+        token0Symbol: 'WBTC',
+        token1Symbol: 'WETH',
+        token0Decimals: 8,
+        token1Decimals: 18,
+        dex: 'sushiswap',
+        fee: 0.003,
+      },
     ];
 
     const config: ChainSimulatorConfig = {
       chainId: 'ethereum',
-      updateIntervalMs: 100,
+      updateIntervalMs: 50, // Faster ticks for test reliability
       volatility: 0.01,
-      arbitrageChance: 0.15, // 15% chance to generate multi-hop
+      arbitrageChance: 0.5, // 50% chance to generate multi-hop (increased for test reliability)
       minArbitrageSpread: 0.005,
       maxArbitrageSpread: 0.02,
       pairs,
@@ -77,8 +97,11 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
   describe('Triangular Opportunities (3-hop)', () => {
     it('should generate triangular path with 3 unique tokens + circular return', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return; // Prevent multiple done() calls
+
         if (opportunity.type === 'triangular') {
           expect(opportunity.hops).toBe(3);
           expect(opportunity.path).toBeDefined();
@@ -99,6 +122,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
           expect(opportunity.intermediateTokens).toBeDefined();
           expect(opportunity.intermediateTokens!.length).toBe(2);
 
+          completed = true;
           simulator.stop();
           done();
         }
@@ -108,8 +132,10 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
 
       // Timeout after 10 seconds
       setTimeout(() => {
-        simulator.stop();
-        done(new Error('No triangular opportunity detected within timeout'));
+        if (!completed) {
+          simulator.stop();
+          done(new Error('No triangular opportunity detected within timeout'));
+        }
       }, 10000);
     });
 
@@ -237,10 +263,13 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
   describe('Multi-Hop Confidence', () => {
     it('should have slightly lower confidence than intra-chain', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
 
       const confidences: { type: string; confidence: number }[] = [];
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return; // Prevent processing after done() is called
+
         confidences.push({
           type: opportunity.type,
           confidence: opportunity.confidence,
@@ -248,6 +277,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
 
         // Stop after collecting a few samples
         if (confidences.length >= 5) {
+          completed = true;
           simulator.stop();
 
           // Multi-hop opportunities should have lower confidence
@@ -276,11 +306,13 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       simulator.start();
 
       setTimeout(() => {
-        simulator.stop();
-        if (confidences.length === 0) {
-          done(new Error('No opportunities detected'));
-        } else {
-          done(); // Pass if we got some data
+        if (!completed) {
+          simulator.stop();
+          if (confidences.length === 0) {
+            done(new Error('No opportunities detected'));
+          } else {
+            done(); // Pass if we got some data
+          }
         }
       }, 10000);
     });
@@ -289,8 +321,11 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
   describe('Multi-Hop Expiry', () => {
     it('should have shorter expiry than intra-chain', (done) => {
       const simulator = createMultiHopSimulator();
+      let completed = false;
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return; // Prevent multiple done() calls
+
         const expiryMs = opportunity.expiresAt - opportunity.timestamp;
 
         if (opportunity.type === 'triangular' || opportunity.type === 'quadrilateral') {
@@ -301,6 +336,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
           expect(expiryMs).toBeLessThanOrEqual(5000);
         }
 
+        completed = true;
         simulator.stop();
         done();
       });
@@ -358,11 +394,15 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
       const simulator = createMultiHopSimulator();
 
       let opportunityTypes: string[] = [];
+      let completed = false;
 
       simulator.on('opportunity', (opportunity: SimulatedOpportunity) => {
+        if (completed) return; // Prevent processing after done() is called
+
         opportunityTypes.push(opportunity.type);
 
         if (opportunityTypes.length >= 20) {
+          completed = true;
           simulator.stop();
 
           // Should have variety (not all multi-hop)
@@ -375,7 +415,7 @@ describe('ChainSimulator - Multi-Hop Opportunities', () => {
           expect(multiHopCount).toBeGreaterThan(0);
           expect(intraChainCount).toBeGreaterThan(0);
 
-          // Intra-chain should be more common (70% vs 15%)
+          // Intra-chain should be more common than multi-hop
           expect(intraChainCount).toBeGreaterThan(multiHopCount);
 
           done();

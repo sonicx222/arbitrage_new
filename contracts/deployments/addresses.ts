@@ -67,6 +67,31 @@ export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
 };
 
 // =============================================================================
+// MultiPathQuoter Contract Addresses
+// =============================================================================
+
+/**
+ * MultiPathQuoter contract addresses by chain.
+ *
+ * This contract batches getAmountsOut() calls for multiple swap paths in a single RPC call,
+ * reducing latency from N sequential calls to 1 batched call.
+ *
+ * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
+ * @see contracts/src/MultiPathQuoter.sol
+ */
+export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
+  // Testnets - update after deployment
+  // sepolia: '0x...', // TODO: Deploy and update
+  // arbitrumSepolia: '0x...', // TODO: Deploy and update
+
+  // Mainnets - update after security audit and deployment
+  // ethereum: '0x...', // TODO: Deploy after audit
+  // arbitrum: '0x...', // TODO: Deploy after audit
+  // base: '0x...', // TODO: Deploy after audit
+  // optimism: '0x...', // TODO: Deploy after audit
+};
+
+// =============================================================================
 // Approved DEX Routers
 // =============================================================================
 
@@ -183,4 +208,21 @@ export function getAavePoolAddress(chain: string): string {
  */
 export function getApprovedRouters(chain: string): string[] {
   return APPROVED_ROUTERS[chain] || [];
+}
+
+/**
+ * Check if a chain has a deployed MultiPathQuoter contract
+ * P3 Fix: Use truthiness check to catch undefined, null, AND empty string
+ */
+export function hasDeployedQuoter(chain: string): boolean {
+  const address = MULTI_PATH_QUOTER_ADDRESSES[chain];
+  return !!address; // Falsy check catches undefined, null, and empty string
+}
+
+/**
+ * Get the MultiPathQuoter contract address for a chain
+ * @returns The address or undefined if not deployed
+ */
+export function getQuoterAddress(chain: string): string | undefined {
+  return MULTI_PATH_QUOTER_ADDRESSES[chain];
 }

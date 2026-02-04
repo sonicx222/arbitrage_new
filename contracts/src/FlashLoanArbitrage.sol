@@ -592,6 +592,11 @@ contract FlashLoanArbitrage is
         uint256 currentAmount = amount;
         address currentToken = asset;
 
+        // Gas optimization: Pre-allocate path array once, reuse across iterations
+        // Saves ~200 gas per swap step by avoiding repeated memory allocation
+        // (Same pattern as _executeSwaps)
+        address[] memory path = new address[](2);
+
         for (uint256 i = 0; i < pathLength;) {
             SwapStep calldata step = swapPath[i];
 
@@ -599,8 +604,7 @@ contract FlashLoanArbitrage is
                 return (0, flashLoanFee); // Invalid path
             }
 
-            // Get expected output from router
-            address[] memory path = new address[](2);
+            // Reuse pre-allocated path array
             path[0] = step.tokenIn;
             path[1] = step.tokenOut;
 

@@ -171,8 +171,9 @@ describe('BridgeCostEstimator', () => {
       const cost = estimator.estimateBridgeCost('ethereum', 'polygon', priceUpdate);
 
       // For stablecoins, cost in token units equals cost in USD
-      // Fallback: $2 / $1 = 2 USDC
-      expect(cost).toBeCloseTo(2, 1);
+      // ethereum→polygon uses configured Stargate bridge with minFeeUsd: $1
+      // $1 / $1 per USDC = 1 USDC
+      expect(cost).toBeCloseTo(1, 1);
     });
   });
 

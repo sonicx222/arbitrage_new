@@ -927,7 +927,8 @@ export class ChainSimulator extends EventEmitter {
     }
 
     // Occasionally generate multi-hop opportunities
-    if (Math.random() < 0.15) {
+    // Fix: Use config.arbitrageChance instead of hardcoded 0.15 for test configurability
+    if (Math.random() < this.config.arbitrageChance) {
       this.generateMultiHopOpportunity();
     }
   }
@@ -1091,7 +1092,10 @@ export class ChainSimulator extends EventEmitter {
     path.push(path[0]); // Complete the cycle
 
     // Simulate profit (simplified - in reality would calculate from reserves)
-    const baseProfit = 0.002 + Math.random() * 0.008; // 0.2% - 1% profit
+    // Fix: Multi-hop opportunities need higher base profit to cover cumulative fees
+    // 3-hop: totalFees = 0.9%, baseProfit = [0.8%, 2.0%] → netProfit = [0%, 1.1%]
+    // 4-hop: totalFees = 1.2%, baseProfit = [0.8%, 2.0%] → netProfit = [0%, 0.8%]
+    const baseProfit = 0.008 + Math.random() * 0.012; // 0.8% - 2% profit
     const feePerHop = 0.003; // 0.3% per hop
     const totalFees = feePerHop * hops;
     const netProfit = baseProfit - totalFees;
