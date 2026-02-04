@@ -158,3 +158,4 @@ deployments/localhost/
 .openzeppelin/
 slow-tests.json
 slow-tests.previous.json
+full_codebase.txt
