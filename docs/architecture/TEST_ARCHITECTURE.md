@@ -316,6 +316,368 @@ describe('MyService', () => {
 
 ---
 
+## Three-Level Integration Testing Strategy
+
+**Date Added**: February 4, 2026
+**Status**: Active - Replaces mock-heavy integration tests
+
+### Overview
+
+Integration tests in this project follow a **three-level strategy** that balances speed with realism. **All levels use real in-memory Redis** (via `redis-memory-server`) instead of mocks.
+
+**Key Principle**: ❌ **No MockRedisClient** - Use `createIsolatedRedisClient()` for all Redis testing.
+
+### Why This Approach?
+
+**Previous Problem**:
+- Many "integration" tests used elaborate MockRedisClient implementations (180+ lines)
+- Mocks don't test real Redis behavior (serialization, atomicity, TTL, race conditions)
+- High maintenance burden (update mocks when Redis behavior changes)
+
+**Solution**:
+- Eliminate all Redis mocks
+- Use real in-memory Redis (fast, ~50-100ms overhead)
+- Define three clear levels based on scope and dependencies
+
+---
+
+### Level 1: Component Integration
+
+**Purpose**: Test internal component orchestration with real Redis, mock external APIs
+
+**When to Use**:
+- Testing multiple internal classes working together
+- Business logic spanning multiple components
+- Data flow transformations
+- Redis operations (streams, locks, caching)
+
+**What to Mock**: External APIs (blockchain RPCs, price feeds, third-party services)
+**What NOT to Mock**: Redis, internal services
+
+**File Pattern**: `**/__tests__/integration/**/*.test.ts` or `**/__tests__/integration/level1/**/*.test.ts`
+
+**Speed Target**: <30s per suite
+
+**Example**:
+```typescript
+import { createIsolatedRedisClient, cleanupTestRedis } from '@arbitrage/test-utils';
+import { createMockProvider } from '@arbitrage/test-utils/mocks';
+
+describe('[Level 1] CrossChainDetector Component Integration', () => {
+  let redis: IsolatedRedisClient;
+  let detector: CrossChainDetector;
+
+  beforeAll(async () => {
+    // Real in-memory Redis (NOT mocked)
+    redis = await createIsolatedRedisClient('cross-chain-detector-component');
+
+    detector = new CrossChainDetector({
+      redis, // Real Redis
+      provider: createMockProvider() // Mock external blockchain API
+    });
+  });
+
+  afterAll(async () => {
+    await cleanupTestRedis(redis);
+  });
+
+  it('should detect opportunity and store in real Redis', async () => {
+    await detector.detectOpportunity(priceUpdate);
+
+    // Read from REAL Redis to verify serialization
+    const opportunities = await redis.xRead(
+      'STREAMS', 'stream:opportunities', '0'
+    );
+
+    expect(opportunities).toHaveLength(1);
+    expect(JSON.parse(opportunities[0].data)).toMatchObject({
+      token: 'WETH/USDC',
+      profitPercentage: expect.any(Number)
+    });
+  });
+
+  it('should handle concurrent operations with real Redis atomicity', async () => {
+    // Test that was IMPOSSIBLE with mocks - real concurrent access
+    const results = await Promise.all([
+      detector.detectOpportunity(opp1),
+      detector.detectOpportunity(opp2),
+      detector.detectOpportunity(opp3)
+    ]);
+
+    // Real Redis ensures atomic operations
+    const count = await redis.get('opportunity:count');
+    expect(count).toBe('3');
+  });
+});
+```
+
+---
+
+### Level 2: Service Integration
+
+**Purpose**: Test complete service behavior with real infrastructure, minimal mocking
+
+**When to Use**:
+- Testing full service lifecycle (start, process, stop)
+- Redis Streams consumption patterns
+- Distributed locking behavior
+- State persistence and recovery
+- Service-to-service communication
+
+**What to Mock**: External APIs where necessary (blockchain forks are expensive)
+**What NOT to Mock**: Redis, internal message passing, state management
+
+**File Pattern**: `**/__tests__/integration/**/*.service.integration.test.ts` or `**/__tests__/integration/level2/**/*.test.ts`
+
+**Speed Target**: <2min per suite
+
+**Example**:
+```typescript
+import { createIsolatedRedisClient, cleanupTestRedis } from '@arbitrage/test-utils';
+
+describe('[Level 2] Coordinator Service Integration', () => {
+  let redis: IsolatedRedisClient;
+  let coordinator1: CoordinatorService;
+  let coordinator2: CoordinatorService;
+
+  beforeAll(async () => {
+    redis = await createIsolatedRedisClient('coordinator-service');
+  });
+
+  afterAll(async () => {
+    await coordinator1?.stop();
+    await coordinator2?.stop();
+    await cleanupTestRedis(redis);
+  });
+
+  it('should elect leader using real Redis distributed locks', async () => {
+    // Test REAL distributed locking (impossible with mocks)
+    coordinator1 = new CoordinatorService({ redis });
+    coordinator2 = new CoordinatorService({ redis });
+
+    await Promise.all([
+      coordinator1.start(),
+      coordinator2.start()
+    ]);
+
+    // Real Redis lock atomicity ensures only one leader
+    expect(coordinator1.isLeader !== coordinator2.isLeader).toBe(true);
+
+    const leaders = [coordinator1, coordinator2].filter(c => c.isLeader);
+    expect(leaders).toHaveLength(1);
+  });
+
+  it('should consume Redis Streams with real XREADGROUP', async () => {
+    coordinator1 = new CoordinatorService({ redis });
+    await coordinator1.start();
+
+    // Publish to REAL Redis Stream
+    await redis.xAdd('stream:opportunities', '*', {
+      data: JSON.stringify({ token: 'WETH', profit: 100 })
+    });
+
+    // Wait for REAL stream consumption
+    await waitFor(() => coordinator1.getProcessedCount() > 0, 5000);
+
+    expect(coordinator1.getProcessedCount()).toBe(1);
+  });
+
+  it('should handle TTL expiration correctly', async () => {
+    // Test that was difficult with mocks - real TTL behavior
+    await redis.set('temp:key', 'value', { EX: 1 }); // 1 second TTL
+
+    expect(await redis.get('temp:key')).toBe('value');
+
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    expect(await redis.get('temp:key')).toBeNull(); // Real expiration
+  });
+});
+```
+
+---
+
+### Level 3: System E2E Integration
+
+**Purpose**: Test complete user journeys with all real dependencies
+
+**When to Use**:
+- Critical end-to-end workflows
+- Deployment validation
+- Production readiness verification
+- Cross-service integration flows
+
+**What to Mock**: Minimize mocking - use Anvil forks for blockchain, real Redis
+**What NOT to Mock**: Redis, internal services, core infrastructure
+
+**File Pattern**: `tests/e2e/**/*.e2e.test.ts` or `**/__tests__/integration/level3/**/*.test.ts`
+
+**Speed Target**: <5min per suite
+
+**Example**:
+```typescript
+import { startTestSystem, stopTestSystem } from '@arbitrage/test-utils/e2e';
+
+describe('[Level 3] Arbitrage Execution Flow E2E', () => {
+  let testEnv: TestEnvironment;
+
+  beforeAll(async () => {
+    // Start full system: Redis + Anvil fork + all services
+    testEnv = await startTestSystem({
+      redis: 'memory', // Real in-memory Redis
+      fork: 'ethereum',
+      services: ['coordinator', 'detector', 'execution-engine']
+    });
+  }, 60000);
+
+  afterAll(async () => {
+    await stopTestSystem(testEnv);
+  });
+
+  it('should detect and execute arbitrage end-to-end', async () => {
+    // Set up price discrepancy on real fork
+    await testEnv.anvil.setPrice('UNISWAP_WETH_USDC', 2500);
+    await testEnv.anvil.setPrice('SUSHISWAP_WETH_USDC', 2550);
+
+    // Wait for real detection
+    const opportunity = await testEnv.detector.waitForOpportunity({
+      timeout: 30000
+    });
+
+    expect(opportunity.profitPercentage).toBeGreaterThan(1);
+
+    // Wait for real execution
+    const execution = await testEnv.executionEngine.waitForExecution({
+      opportunityId: opportunity.id,
+      timeout: 60000
+    });
+
+    // Verify real on-chain result
+    const receipt = await testEnv.anvil.getTransactionReceipt(execution.txHash);
+    expect(receipt.status).toBe(1);
+  });
+});
+```
+
+---
+
+### Comparison Table
+
+| Aspect | Level 1 (Component) | Level 2 (Service) | Level 3 (System E2E) |
+|--------|---------------------|-------------------|----------------------|
+| **Redis** | Real (in-memory) | Real (in-memory) | Real (in-memory or dedicated) |
+| **External APIs** | Mocked | Mostly mocked | Real (Anvil fork) |
+| **Services** | Individual components | Full service | All services |
+| **Speed** | <30s | <2min | <5min |
+| **Parallelization** | High (75% workers) | Medium (50% workers) | Serial (1 worker) |
+| **When to Use** | Component logic | Service behavior | End-to-end flows |
+
+---
+
+### Migration from MockRedisClient
+
+**Before (Bad - 180 lines of mock code)**:
+```typescript
+class MockRedisClient {
+  private store: Map<string, string> = new Map();
+
+  async set(key: string, value: string, options?: any) {
+    // ... 40 lines of mock logic
+  }
+
+  async get(key: string): Promise<string | null> {
+    // ... 20 lines of mock logic
+  }
+
+  // ... 120 more lines of mock methods
+}
+
+describe('Integration Test', () => {
+  let mockRedis: MockRedisClient;
+
+  beforeEach(() => {
+    mockRedis = new MockRedisClient();
+  });
+
+  it('test with mock Redis', async () => {
+    await mockRedis.set('key', 'value');
+    // Doesn't test real serialization, TTL, atomicity, etc.
+  });
+});
+```
+
+**After (Good - 0 lines of mock code, real Redis)**:
+```typescript
+import { createIsolatedRedisClient, cleanupTestRedis } from '@arbitrage/test-utils';
+
+describe('Integration Test', () => {
+  let redis: IsolatedRedisClient;
+
+  beforeAll(async () => {
+    redis = await createIsolatedRedisClient('integration-test');
+  });
+
+  afterAll(async () => {
+    await cleanupTestRedis(redis);
+  });
+
+  it('test with real Redis', async () => {
+    await redis.set('key', 'value');
+    // Tests REAL Redis behavior: serialization, TTL, atomicity, race conditions
+  });
+});
+```
+
+**Benefits**:
+- ✅ 180 lines of mock code → 0 lines
+- ✅ Tests real Redis behavior (catches serialization bugs, race conditions)
+- ✅ No mock maintenance burden
+- ✅ Still fast (~50-100ms overhead vs ~10ms with mocks)
+- ✅ Catches bugs that mocks would miss
+
+---
+
+### Best Practices
+
+**DO**:
+- ✅ Always use `createIsolatedRedisClient()` for Redis in integration tests
+- ✅ Clean up with `cleanupTestRedis()` in `afterAll()`
+- ✅ Test serialization round-trips (write → read → verify)
+- ✅ Test concurrent operations where relevant
+- ✅ Use `beforeAll()` for Redis setup (faster than `beforeEach()`)
+- ✅ Choose the simplest level that validates the behavior
+
+**DON'T**:
+- ❌ Never create MockRedisClient or similar mock implementations
+- ❌ Don't use `beforeEach()` for Redis setup (slow, unnecessary)
+- ❌ Don't mock Redis for "speed" - in-memory Redis is fast enough
+- ❌ Don't skip testing race conditions because mocks made it hard
+- ❌ Don't test everything in Level 3 - use Level 1-2 for component logic
+
+---
+
+### Troubleshooting
+
+**Test flakiness with real Redis**:
+- Ensure proper database isolation (each suite gets unique DB 0-15)
+- Use unique key prefixes if sharing databases
+- Always clean up in `afterAll()`, not `afterEach()`
+- Check for leaked connections (use `redis.isOpen` before operations)
+
+**Slow tests**:
+- Move expensive operations to `beforeAll()` instead of `beforeEach()`
+- Use Level 1 instead of Level 2 where possible
+- Parallelize test suites (Jest runs suites in parallel)
+- Consider if test belongs in unit tests instead
+
+**CI failures**:
+- Verify `redis-memory-server` starts correctly in CI
+- Check `jest.globalSetup.ts` and `jest.globalTeardown.ts` are running
+- Ensure adequate timeout (60s for integration tests)
+- Check for port conflicts if running parallel CI jobs
+
+---
+
 ## Test Utilities
 
 ### Test Data Builders
