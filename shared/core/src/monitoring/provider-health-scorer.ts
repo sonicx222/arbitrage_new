@@ -940,7 +940,7 @@ export class ProviderHealthScorer {
     let unhealthyCount = 0;
 
     for (const metrics of this.metrics.values()) {
-      chainCounts[metrics.chainId] = (chainCounts[metrics.chainId] || 0) + 1;
+      chainCounts[metrics.chainId] = (chainCounts[metrics.chainId] ?? 0) + 1;
       totalScore += metrics.overallScore;
 
       if (!this.isProviderHealthy(metrics.url, metrics.chainId)) {

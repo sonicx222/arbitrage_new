@@ -66,6 +66,69 @@ export interface FactoryConfig {
 }
 
 // =============================================================================
+// P2-4: FactoryReference Type (Data Clump Elimination)
+// =============================================================================
+
+/**
+ * P2-4 FIX: FactoryReference type eliminates the repeated (chain, address) parameter pair.
+ * Used by lookup functions to reference a factory by its chain and address.
+ * @see docs/research/REFACTORING_IMPLEMENTATION_PLAN.md P2-4
+ */
+export interface FactoryReference {
+  /** Chain identifier (e.g., 'arbitrum', 'bsc') */
+  chain: string;
+  /** Factory contract address (case-insensitive) */
+  address: string;
+}
+
+/**
+ * Create a FactoryReference from chain and address strings.
+ * Helper for callers migrating from separate parameters.
+ */
+export function createFactoryRef(chain: string, address: string): FactoryReference {
+  return { chain, address };
+}
+
+// =============================================================================
+// P2-1: Consolidated Factory Validation (Composable Validator Pattern)
+// =============================================================================
+
+/**
+ * P2-1 FIX: Validation severity levels for composable validation.
+ * CRITICAL errors prevent startup; WARNING errors are logged but non-blocking.
+ */
+export type ValidationSeverity = 'critical' | 'warning';
+
+/**
+ * P2-1 FIX: Single validation error with severity and context.
+ */
+export interface FactoryValidationError {
+  severity: ValidationSeverity;
+  message: string;
+  chain: string;
+  dexName: string;
+}
+
+/**
+ * P2-1 FIX: Options for factory registry validation.
+ * Allows callers to customize which checks run.
+ */
+export interface FactoryValidationOptions {
+  /** Skip validation entirely (default: false) */
+  skip?: boolean;
+  /** Check that DEX name exists in DEXES config (default: true) */
+  checkDexExists?: boolean;
+  /** Check that factory.chain matches registry key (default: true) */
+  checkChainMatch?: boolean;
+  /** Check Ethereum address format (default: true) */
+  checkAddressFormat?: boolean;
+  /** Check factory address matches DEXES config (default: true, skipped for vault-model) */
+  checkAddressMatchesDexes?: boolean;
+  /** Check chain exists in CHAINS config (default: true) */
+  checkChainExists?: boolean;
+}
+
+// =============================================================================
 // Factory ABIs
 // =============================================================================
 
@@ -720,56 +783,129 @@ for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
 }
 
 // =============================================================================
-// P0-CONFIG: Validate factory registry at load time
-// This prevents runtime failures from misconfigured factories.
+// P2-1: Unified Factory Registry Validation
+// Consolidates validateFactoryRegistryAtLoad(), validateFactoryRegistry(),
+// and validateFactoryRegistryAtLoadTime() into a single composable validator.
 // =============================================================================
 
 /**
- * Validate factory registry at module load.
- * Throws if critical validation errors are found.
- * Skipped in test environment to allow partial configs.
+ * P2-1 FIX: Unified factory registry validation with composable checks.
+ * Replaces three separate validation functions with one configurable implementation.
+ *
+ * @param options - Validation options to customize which checks run
+ * @returns Array of validation errors (empty if valid)
  */
-function validateFactoryRegistryAtLoad(): void {
-  // Skip validation in test environment to allow flexible test fixtures
-  if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
-    return;
+export function validateFactoryRegistryUnified(
+  options: FactoryValidationOptions = {}
+): FactoryValidationError[] {
+  const {
+    skip = false,
+    checkDexExists = true,
+    checkChainMatch = true,
+    checkAddressFormat = true,
+    checkAddressMatchesDexes = true,
+    checkChainExists = true,
+  } = options;
+
+  if (skip) {
+    return [];
   }
 
-  const errors: string[] = [];
+  const errors: FactoryValidationError[] = [];
 
   for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
+    // Check 1: Chain exists in CHAINS config
+    if (checkChainExists && !CHAINS[chain]) {
+      errors.push({
+        severity: 'critical',
+        message: `Factory registry references unknown chain: ${chain}`,
+        chain,
+        dexName: '*',
+      });
+      continue; // Can't validate factories for unknown chain
+    }
+
     const chainDexes = DEXES[chain] || [];
     const dexByName = new Map(chainDexes.map(d => [d.name, d]));
 
     for (const factory of factories) {
-      // P0: Check DEX name exists - prevents orphaned factory configs
+      // Check 2: DEX name exists in DEXES config
       const dex = dexByName.get(factory.dexName);
-      if (!dex) {
-        errors.push(
-          `[CRITICAL] Factory '${factory.dexName}' on ${chain} not found in DEXES config. ` +
-          `Either add DEX to DEXES[${chain}] or remove factory from DEX_FACTORY_REGISTRY.`
-        );
-        continue;
+      if (checkDexExists && !dex) {
+        errors.push({
+          severity: 'critical',
+          message: `Factory '${factory.dexName}' not found in DEXES config. ` +
+            `Either add DEX to DEXES[${chain}] or remove from DEX_FACTORY_REGISTRY.`,
+          chain,
+          dexName: factory.dexName,
+        });
+        continue; // Skip further checks for this factory
       }
 
-      // P0: Check chain consistency - prevents misrouted subscriptions
-      if (factory.chain !== chain) {
-        errors.push(
-          `[CRITICAL] Factory '${factory.dexName}' chain mismatch: ` +
-          `factory.chain='${factory.chain}' but registry key='${chain}'. ` +
-          `Update factory.chain to match registry key.`
-        );
+      // Check 3: Factory chain field matches registry key
+      if (checkChainMatch && factory.chain !== chain) {
+        errors.push({
+          severity: 'critical',
+          message: `Chain mismatch: factory.chain='${factory.chain}' but registry key='${chain}'`,
+          chain,
+          dexName: factory.dexName,
+        });
       }
 
-      // Note: Address format and factory address match are WARNING-level
-      // and checked by validateFactoryRegistry() for debugging
+      // Check 4: Valid Ethereum address format (40 hex chars after 0x)
+      if (checkAddressFormat && !/^0x[a-fA-F0-9]{40}$/.test(factory.address)) {
+        errors.push({
+          severity: 'warning',
+          message: `Invalid address format: ${factory.address}`,
+          chain,
+          dexName: factory.dexName,
+        });
+      }
+
+      // Check 5: Factory address matches DEXES config (skip for vault-model DEXes)
+      if (checkAddressMatchesDexes && dex && !isVaultModelDex(factory.dexName)) {
+        if (dex.factoryAddress.toLowerCase() !== factory.address.toLowerCase()) {
+          errors.push({
+            severity: 'warning',
+            message: `Address mismatch: registry=${factory.address}, DEXES=${dex.factoryAddress}`,
+            chain,
+            dexName: factory.dexName,
+          });
+        }
+      }
     }
   }
 
-  if (errors.length > 0) {
+  return errors;
+}
+
+/**
+ * P2-1 FIX: Run validation at module load time.
+ * Throws on CRITICAL errors, logs WARNING errors.
+ * Private function - called automatically at module load.
+ */
+function runLoadTimeValidation(): void {
+  // Skip in test environment
+  if (process.env.NODE_ENV === 'test' ||
+      process.env.JEST_WORKER_ID ||
+      process.env.SKIP_CONFIG_VALIDATION === 'true') {
+    return;
+  }
+
+  const errors = validateFactoryRegistryUnified();
+  const criticalErrors = errors.filter(e => e.severity === 'critical');
+  const warnings = errors.filter(e => e.severity === 'warning');
+
+  // Log warnings (non-blocking)
+  for (const warning of warnings) {
+    console.warn(`[FACTORY_VALIDATION] Warning: ${warning.message} (${warning.chain}/${warning.dexName})`);
+  }
+
+  // Throw on critical errors
+  if (criticalErrors.length > 0) {
     const errorMessage = [
       'Factory registry validation failed at load time:',
-      ...errors.map((e, i) => `  ${i + 1}. ${e}`),
+      ...criticalErrors.map((e, i) => `  ${i + 1}. [${e.chain}/${e.dexName}] ${e.message}`),
       '',
       'Fix these issues to start the service.',
     ].join('\n');
@@ -779,7 +915,7 @@ function validateFactoryRegistryAtLoad(): void {
 }
 
 // Run validation at module load (production only)
-validateFactoryRegistryAtLoad();
+runLoadTimeValidation();
 
 // =============================================================================
 // Helper Functions
@@ -874,6 +1010,49 @@ export function isUniswapV2Style(chain: string, address: string): boolean {
   return type === 'uniswap_v2';
 }
 
+// =============================================================================
+// P2-15: Factory Type Checker Factory Function
+// Eliminates duplicated pattern across isUniswapV2Style, isUniswapV3Style, etc.
+// =============================================================================
+
+/**
+ * P2-15 FIX: Factory function that creates type checkers for any FactoryType.
+ * Eliminates the duplicated pattern where each style checker does the same thing.
+ *
+ * @param targetType - The FactoryType to check for
+ * @returns A function that checks if a factory is of the given type
+ *
+ * @example
+ * const isUniswapV2 = createFactoryTypeChecker('uniswap_v2');
+ * if (isUniswapV2('arbitrum', '0x...')) { ... }
+ */
+export function createFactoryTypeChecker(targetType: FactoryType): (chain: string, address: string) => boolean {
+  return (chain: string, address: string): boolean => {
+    const type = getFactoryType(chain, address);
+    return type === targetType;
+  };
+}
+
+/**
+ * P2-15 FIX: Overloaded version that accepts FactoryReference.
+ *
+ * @param targetType - The FactoryType to check for
+ * @param ref - FactoryReference containing chain and address
+ * @returns true if factory matches the target type
+ */
+export function isFactoryType(targetType: FactoryType, ref: FactoryReference): boolean;
+export function isFactoryType(targetType: FactoryType, chain: string, address: string): boolean;
+export function isFactoryType(
+  targetType: FactoryType,
+  chainOrRef: string | FactoryReference,
+  address?: string
+): boolean {
+  if (typeof chainOrRef === 'object') {
+    return getFactoryType(chainOrRef.chain, chainOrRef.address) === targetType;
+  }
+  return getFactoryType(chainOrRef, address!) === targetType;
+}
+
 /**
  * Check if factory uses UniswapV3-style events.
  * Note: Algebra-based DEXes have similar concentrated liquidity but different events.
@@ -884,8 +1063,7 @@ export function isUniswapV2Style(chain: string, address: string): boolean {
  * @returns true if factory is UniswapV3-compatible (standard V3 event signature)
  */
 export function isUniswapV3Style(chain: string, address: string): boolean {
-  const type = getFactoryType(chain, address);
-  return type === 'uniswap_v3';
+  return isFactoryType('uniswap_v3', chain, address);
 }
 
 /**
@@ -897,8 +1075,7 @@ export function isUniswapV3Style(chain: string, address: string): boolean {
  * @returns true if factory is Algebra-based
  */
 export function isAlgebraStyle(chain: string, address: string): boolean {
-  const type = getFactoryType(chain, address);
-  return type === 'algebra';
+  return isFactoryType('algebra', chain, address);
 }
 
 /**
@@ -909,8 +1086,7 @@ export function isAlgebraStyle(chain: string, address: string): boolean {
  * @returns true if factory is Solidly-compatible
  */
 export function isSolidlyStyle(chain: string, address: string): boolean {
-  const type = getFactoryType(chain, address);
-  return type === 'solidly';
+  return isFactoryType('solidly', chain, address);
 }
 
 /**
@@ -959,6 +1135,9 @@ export function isVaultModelDex(dexName: string): boolean {
  * Validate factory registry consistency with DEXES config.
  * Used for testing and debugging.
  *
+ * P2-1 FIX: Now delegates to unified validateFactoryRegistryUnified() for consistency.
+ * This is a backward-compatible wrapper that returns string[] format.
+ *
  * Validation rules:
  * 1. Each factory must have a corresponding DEX in DEXES config
  * 2. Factory address must be valid Ethereum address format
@@ -968,108 +1147,7 @@ export function isVaultModelDex(dexName: string): boolean {
  * @returns Array of validation errors (empty if valid)
  */
 export function validateFactoryRegistry(): string[] {
-  const errors: string[] = [];
-
-  for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
-    const chainDexes = DEXES[chain] || [];
-    const dexByName = new Map(chainDexes.map(d => [d.name, d]));
-
-    for (const factory of factories) {
-      // Check DEX name exists
-      const dex = dexByName.get(factory.dexName);
-      if (!dex) {
-        errors.push(`Factory ${factory.dexName} on ${chain} not found in DEXES config`);
-        continue;
-      }
-
-      // Check address format
-      if (!/^0x[a-fA-F0-9]{40}$/.test(factory.address)) {
-        errors.push(`Invalid address format for ${factory.dexName} on ${chain}: ${factory.address}`);
-      }
-
-      // Check chain matches
-      if (factory.chain !== chain) {
-        errors.push(`Factory ${factory.dexName} has chain mismatch: ${factory.chain} vs ${chain}`);
-      }
-
-      // Check factory address matches DEXES config (skip vault-model DEXes)
-      // Vault-model DEXes intentionally use different addresses (vault vs factory)
-      if (!isVaultModelDex(factory.dexName)) {
-        if (dex.factoryAddress.toLowerCase() !== factory.address.toLowerCase()) {
-          errors.push(
-            `Factory address mismatch for ${factory.dexName} on ${chain}: ` +
-            `registry=${factory.address}, DEXES=${dex.factoryAddress}`
-          );
-        }
-      }
-    }
-  }
-
-  return errors;
+  // P2-1 FIX: Delegate to unified validator and convert to string[] for backward compatibility
+  const structuredErrors = validateFactoryRegistryUnified();
+  return structuredErrors.map(e => `[${e.chain}/${e.dexName}] ${e.message}`);
 }
-
-// =============================================================================
-// Load-Time Validation (P0-CONFIG)
-// =============================================================================
-
-/**
- * Validates factory registry at module load time.
- * Throws if critical validation errors are found to prevent runtime failures.
- *
- * Called automatically when this module is imported.
- *
- * @throws {Error} If any validation error is found
- * @see docs/refactoring-roadmap.md - P0-CONFIG
- */
-function validateFactoryRegistryAtLoadTime(): void {
-  // Skip validation in test environment to allow mocking
-  if (process.env.NODE_ENV === 'test' || process.env.SKIP_CONFIG_VALIDATION === 'true') {
-    return;
-  }
-
-  const errors: string[] = [];
-
-  for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
-    // Validate chain exists in CHAINS config
-    if (!CHAINS[chain]) {
-      errors.push(`Factory registry references unknown chain: ${chain}`);
-      continue;
-    }
-
-    // Validate each factory
-    for (const factory of factories) {
-      // Validate address format (40 hex chars after 0x)
-      if (!/^0x[a-fA-F0-9]{40}$/.test(factory.address)) {
-        errors.push(
-          `Invalid factory address format for ${factory.dexName} on ${chain}: ${factory.address}`
-        );
-      }
-
-      // Validate chain field matches registry key
-      if (factory.chain !== chain) {
-        errors.push(
-          `Factory chain mismatch for ${factory.dexName}: expected ${chain}, got ${factory.chain}`
-        );
-      }
-
-      // Validate DEX exists in DEXES config for this chain
-      const chainDexes = DEXES[chain] || [];
-      const dexExists = chainDexes.some(d => d.name === factory.dexName);
-      if (!dexExists) {
-        errors.push(
-          `Factory ${factory.dexName} on ${chain} not found in DEXES config`
-        );
-      }
-    }
-  }
-
-  // Throw aggregated error if any validation failed
-  if (errors.length > 0) {
-    throw new Error(
-      `Factory registry validation failed:\n  - ${errors.join('\n  - ')}`
-    );
-  }
-}
-
-// Run validation at module load time
-validateFactoryRegistryAtLoadTime();

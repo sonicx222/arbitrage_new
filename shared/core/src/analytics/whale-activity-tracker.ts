@@ -379,9 +379,9 @@ export class WhaleActivityTracker {
     profile.activeChains.add(tx.chain);
 
     // Track frequent tokens
-    const tokenCount = profile.frequentTokens.get(tx.tokenIn) || 0;
+    const tokenCount = profile.frequentTokens.get(tx.tokenIn) ?? 0;
     profile.frequentTokens.set(tx.tokenIn, tokenCount + 1);
-    const outCount = profile.frequentTokens.get(tx.tokenOut) || 0;
+    const outCount = profile.frequentTokens.get(tx.tokenOut) ?? 0;
     profile.frequentTokens.set(tx.tokenOut, outCount + 1);
 
     // Add to recent transactions (maintain limit)

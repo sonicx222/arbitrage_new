@@ -177,7 +177,7 @@ export class SharedMemoryCache {
   // Atomic operations for thread safety
   increment(key: string, delta: number = 1): number {
     if (!this.config.enableAtomicOperations) {
-      const current = this.get(key) || 0;
+      const current = this.get(key) ?? 0;
       const newValue = current + delta;
       this.set(key, newValue);
       return newValue;

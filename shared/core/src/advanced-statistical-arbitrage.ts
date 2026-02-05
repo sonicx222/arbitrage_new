@@ -335,7 +335,7 @@ export class AdvancedStatisticalArbitrage {
     }
 
     const toTransitions = fromTransitions.get(fromRegime)!;
-    const currentCount = toTransitions.get(toRegime) || 0;
+    const currentCount = toTransitions.get(toRegime) ?? 0;
     toTransitions.set(toRegime, currentCount + 1);
   }
 
@@ -351,7 +351,7 @@ export class AdvancedStatisticalArbitrage {
     if (!fromTransitions) return 0;
 
     const totalTransitions = Array.from(fromTransitions.values()).reduce((a, b) => a + b, 0);
-    const toTransitions = fromTransitions.get(toRegime) || 0;
+    const toTransitions = fromTransitions.get(toRegime) ?? 0;
 
     return totalTransitions > 0 ? toTransitions / totalTransitions : 0;
   }

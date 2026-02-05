@@ -339,7 +339,7 @@ export class PriceSimulator extends EventEmitter {
 
   private updateChainPrices(chain: string): void {
     // Increment block number
-    const currentBlock = this.blockNumbers.get(chain) || 0;
+    const currentBlock = this.blockNumbers.get(chain) ?? 0;
     this.blockNumbers.set(chain, currentBlock + 1);
 
     const dexes = DEXES[chain] || ['dex1', 'dex2'];
@@ -404,7 +404,7 @@ export class PriceSimulator extends EventEmitter {
       liquidity: Math.random() * 10000000 + 100000,
       volume24h: Math.random() * 50000000 + 1000000,
       timestamp: Date.now(),
-      blockNumber: this.blockNumbers.get(chain) || 0,
+      blockNumber: this.blockNumbers.get(chain) ?? 0,
       isSimulated: true
     };
   }

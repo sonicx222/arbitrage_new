@@ -50,7 +50,7 @@ import {
   BPS_DENOMINATOR_BIGINT,
   FLASH_LOAN_ARBITRAGE_ABI,
 } from '@arbitrage/config';
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage, isValidPrice } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
@@ -180,37 +180,13 @@ export interface ExecuteArbitrageParams {
   minProfit: bigint;
 }
 
-/**
- * Parameters for profitability analysis
- */
-export interface ProfitabilityParams {
-  expectedProfitUsd: number;
-  flashLoanAmountWei: bigint;
-  estimatedGasUnits: bigint;
-  gasPriceWei: bigint;
-  chain: string;
-  ethPriceUsd: number;
-  userCapitalWei?: bigint;
-}
-
-/**
- * Result of profitability analysis
- */
-export interface ProfitabilityAnalysis {
-  isProfitable: boolean;
-  netProfitUsd: number;
-  flashLoanFeeUsd: number;
-  gasCostUsd: number;
-  flashLoanNetProfit: number;
-  directExecutionNetProfit: number;
-  recommendation: 'flash-loan' | 'direct' | 'skip';
-  breakdown: {
-    expectedProfit: number;
-    flashLoanFee: number;
-    gasCost: number;
-    totalCosts: number;
-  };
-}
+// P2-8: Import from extracted FlashLoanFeeCalculator
+// Note: Types re-exported at end of file for backward compatibility
+import {
+  FlashLoanFeeCalculator,
+  type ProfitabilityParams,
+  type ProfitabilityAnalysis,
+} from './flash-loan-fee-calculator';
 
 // =============================================================================
 // ABI Interface
@@ -244,6 +220,7 @@ const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
  */
 export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly config: FlashLoanStrategyConfig;
+  private readonly feeCalculator: FlashLoanFeeCalculator;
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -298,6 +275,11 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     this.config = config;
+
+    // P2-8: Initialize fee calculator with config's fee overrides
+    this.feeCalculator = new FlashLoanFeeCalculator({
+      feeOverrides: config.feeOverrides,
+    });
   }
 
   // ===========================================================================
@@ -385,11 +367,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Bug 4.1 Fix: Validate buyPrice is valid before execution
     // Invalid price would cause division by zero or wildly incorrect calculations
     // in profit conversion (USD -> token units). Abort early instead of using fallback.
-    const buyPriceValid = opportunity.buyPrice !== undefined &&
-                          opportunity.buyPrice !== null &&
-                          Number.isFinite(opportunity.buyPrice) &&
-                          opportunity.buyPrice > 0;
-    if (!buyPriceValid) {
+    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
+    if (!isValidPrice(opportunity.buyPrice)) {
       this.logger.error('[ERR_INVALID_PRICE] Cannot execute flash loan with invalid buyPrice', {
         opportunityId: opportunity.id,
         buyPrice: opportunity.buyPrice,
@@ -656,107 +635,34 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   }
 
   // ===========================================================================
-  // Flash Loan Fee Calculation
+  // Flash Loan Fee Calculation (P2-8: Delegated to FlashLoanFeeCalculator)
   // ===========================================================================
 
   /**
    * Calculate flash loan fee for a given amount.
+   * P2-8: Delegates to FlashLoanFeeCalculator for testability.
    *
    * @param amount - Flash loan amount in wei
    * @param chain - Chain identifier
    * @returns Fee amount in wei
    */
   calculateFlashLoanFee(amount: bigint, chain: string): bigint {
-    // Check for custom fee override
-    const feeOverride = this.config.feeOverrides?.[chain];
-    if (feeOverride !== undefined) {
-      return (amount * BigInt(feeOverride)) / BPS_DENOMINATOR;
-    }
-
-    // Use chain-specific fee from FLASH_LOAN_PROVIDERS config
-    const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
-    if (flashLoanConfig) {
-      return (amount * BigInt(flashLoanConfig.fee)) / BPS_DENOMINATOR;
-    }
-
-    // Default to Aave V3 fee (0.09%)
-    return (amount * AAVE_V3_FEE_BPS) / BPS_DENOMINATOR;
+    return this.feeCalculator.calculateFlashLoanFee(amount, chain);
   }
 
   // ===========================================================================
-  // Profitability Analysis
+  // Profitability Analysis (P2-8: Delegated to FlashLoanFeeCalculator)
   // ===========================================================================
 
   /**
    * Analyze profitability of flash loan vs direct execution.
+   * P2-8: Delegates to FlashLoanFeeCalculator for testability.
    *
    * @param params - Profitability parameters
    * @returns Profitability analysis result
    */
   analyzeProfitability(params: ProfitabilityParams): ProfitabilityAnalysis {
-    const {
-      expectedProfitUsd,
-      flashLoanAmountWei,
-      estimatedGasUnits,
-      gasPriceWei,
-      chain,
-      ethPriceUsd,
-      userCapitalWei,
-    } = params;
-
-    // Calculate flash loan fee in wei, then USD
-    const flashLoanFeeWei = this.calculateFlashLoanFee(flashLoanAmountWei, chain);
-    const flashLoanFeeEth = parseFloat(ethers.formatEther(flashLoanFeeWei));
-    const flashLoanFeeUsd = flashLoanFeeEth * ethPriceUsd;
-
-    // Calculate gas cost in USD
-    const gasCostWei = estimatedGasUnits * gasPriceWei;
-    const gasCostEth = parseFloat(ethers.formatEther(gasCostWei));
-    const gasCostUsd = gasCostEth * ethPriceUsd;
-
-    // Total costs for flash loan execution
-    const totalCosts = flashLoanFeeUsd + gasCostUsd;
-
-    // Net profit calculations
-    const flashLoanNetProfit = expectedProfitUsd - totalCosts;
-    const directExecutionNetProfit = expectedProfitUsd - gasCostUsd;
-
-    // Determine profitability
-    const isProfitable = flashLoanNetProfit > 0;
-    const netProfitUsd = flashLoanNetProfit;
-
-    // Determine recommendation
-    let recommendation: 'flash-loan' | 'direct' | 'skip';
-
-    if (!isProfitable) {
-      recommendation = 'skip';
-    } else if (userCapitalWei !== undefined && userCapitalWei >= flashLoanAmountWei) {
-      // User has capital for direct execution
-      if (directExecutionNetProfit > flashLoanNetProfit) {
-        recommendation = 'direct';
-      } else {
-        recommendation = 'flash-loan';
-      }
-    } else {
-      // User doesn't have capital, must use flash loan
-      recommendation = 'flash-loan';
-    }
-
-    return {
-      isProfitable,
-      netProfitUsd,
-      flashLoanFeeUsd,
-      gasCostUsd,
-      flashLoanNetProfit,
-      directExecutionNetProfit,
-      recommendation,
-      breakdown: {
-        expectedProfit: expectedProfitUsd,
-        flashLoanFee: flashLoanFeeUsd,
-        gasCost: gasCostUsd,
-        totalCosts,
-      },
-    };
+    return this.feeCalculator.analyzeProfitability(params);
   }
 
   // ===========================================================================
@@ -804,12 +710,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
     // This method may be called from execute() which now validates buyPrice,
     // but also from tests or other code paths. Defensive programming requires validation here.
-    const buyPriceValid = opportunity.buyPrice !== undefined &&
-                          opportunity.buyPrice !== null &&
-                          Number.isFinite(opportunity.buyPrice) &&
-                          opportunity.buyPrice > 0;
-
-    if (!buyPriceValid) {
+    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
+    if (!isValidPrice(opportunity.buyPrice)) {
       throw new Error(
         `[ERR_INVALID_PRICE] Cannot build swap steps with invalid buyPrice: ${opportunity.buyPrice}. ` +
         `This would cause incorrect profit calculations.`
@@ -868,12 +770,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
     // Using a fallback of 1 would produce wildly incorrect intermediate amounts
-    const buyPriceValid = opportunity.buyPrice !== undefined &&
-                          opportunity.buyPrice !== null &&
-                          Number.isFinite(opportunity.buyPrice) &&
-                          opportunity.buyPrice > 0;
-
-    if (!buyPriceValid) {
+    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
+    if (!isValidPrice(opportunity.buyPrice)) {
       throw new Error(
         `[ERR_INVALID_PRICE] Cannot estimate intermediate amount with invalid buyPrice: ${opportunity.buyPrice}`
       );
@@ -1115,12 +1013,8 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     const expectedProfitUsd = opportunity.expectedProfit ?? 0;
 
     // Validate buyPrice strictly - throw if invalid
-    const buyPriceValid = opportunity.buyPrice !== undefined &&
-                          opportunity.buyPrice !== null &&
-                          Number.isFinite(opportunity.buyPrice) &&
-                          opportunity.buyPrice > 0;
-
-    if (!buyPriceValid) {
+    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
+    if (!isValidPrice(opportunity.buyPrice)) {
       throw new Error(
         `[ERR_INVALID_PRICE] Cannot prepare flash loan transaction with invalid buyPrice: ${opportunity.buyPrice}`
       );
@@ -1450,3 +1344,11 @@ export function createFlashLoanStrategy(
 ): FlashLoanStrategy {
   return new FlashLoanStrategy(logger, config);
 }
+
+// =============================================================================
+// Type Re-exports (P2-8: Backward compatibility for consumers)
+// =============================================================================
+
+// Re-export types from FlashLoanFeeCalculator for consumers that import from
+// this file. Prefer importing directly from './flash-loan-fee-calculator'.
+export type { ProfitabilityParams, ProfitabilityAnalysis } from './flash-loan-fee-calculator';

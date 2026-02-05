@@ -100,6 +100,19 @@ export class LRUCache<K, V> {
   }
 
   /**
+   * Get a value without updating LRU order. O(1)
+   *
+   * Use this for read-only access in hot paths where you don't want
+   * to affect eviction priority. Does NOT increment hit/miss counters.
+   *
+   * @param key - Key to look up
+   * @returns The cached value, or undefined if not found
+   */
+  peek(key: K): V | undefined {
+    return this.cache.get(key);
+  }
+
+  /**
    * Check if a key exists without updating LRU order. O(1)
    *
    * @param key - Key to check

@@ -504,7 +504,7 @@ export class LiquidityDepthAnalyzer {
   private findOptimalTradeSize(levels: LiquidityLevel[]): number {
     // Optimal trade size is where marginal slippage cost equals marginal opportunity gain
     // Simplified: find the knee of the slippage curve
-    if (levels.length < 2) return levels[0]?.tradeSizeUsd || 0;
+    if (levels.length < 2) return levels[0]?.tradeSizeUsd ?? 0;
 
     for (let i = 1; i < levels.length; i++) {
       const prevSlippage = levels[i - 1].slippagePercent;
@@ -524,7 +524,7 @@ export class LiquidityDepthAnalyzer {
       }
     }
 
-    return levels[0]?.tradeSizeUsd || 0;
+    return levels[0]?.tradeSizeUsd ?? 0;
   }
 
   private findMaxTradeSizeForSlippage(levels: LiquidityLevel[], maxSlippage: number): number {
@@ -559,8 +559,8 @@ export class LiquidityDepthAnalyzer {
 
     // Score from symmetry (buy/sell depth similar) (max 0.2)
     if (buyLevels.length > 0 && sellLevels.length > 0) {
-      const buyDepth = buyLevels[buyLevels.length - 1]?.tradeSizeUsd || 0;
-      const sellDepth = sellLevels[sellLevels.length - 1]?.tradeSizeUsd || 0;
+      const buyDepth = buyLevels[buyLevels.length - 1]?.tradeSizeUsd ?? 0;
+      const sellDepth = sellLevels[sellLevels.length - 1]?.tradeSizeUsd ?? 0;
       const minDepth = Math.min(buyDepth, sellDepth);
       const maxDepth = Math.max(buyDepth, sellDepth);
       const symmetry = maxDepth > 0 ? minDepth / maxDepth : 0;

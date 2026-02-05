@@ -63,6 +63,14 @@ import {
   // R5: Factory integration
   FactoryIntegrationService,
   createFactoryIntegrationService,
+  // P1-1: Event processing pure functions
+  decodeSyncEventData,
+  decodeSwapEventData,
+  parseBlockNumber,
+  buildExtendedPair,
+  buildPriceUpdate,
+  buildSwapEvent,
+  ExtendedPair as EventProcessorExtendedPair,
 } from './detector';
 import { CHAINS, DEXES, CORE_TOKENS, ARBITRAGE_CONFIG, EVENT_CONFIG, EVENT_SIGNATURES, DETECTOR_CONFIG, TOKEN_METADATA, FALLBACK_TOKEN_PRICES, getEnabledDexes, dexFeeToPercentage, getAllFactoryAddresses, getFactoryByAddress, validateFactoryRegistry } from '../../config/src';
 import {
@@ -87,15 +95,8 @@ import {
 // =============================================================================
 // Pre-compiled ABI Type Constants (Hot Path Optimization)
 // =============================================================================
-// These constants are used in the hot path (processSyncEvent, processSwapEvent)
-// to avoid repeated array allocation and parsing on every event.
-// Performance impact: ~0.1-0.5ms savings per event.
-
-/** Pre-compiled ABI types for Sync event decoding (uint112 reserve0, uint112 reserve1) */
-const SYNC_EVENT_ABI_TYPES = ['uint112', 'uint112'] as const;
-
-/** Pre-compiled ABI types for Swap event decoding (uint256 amount0In, amount1In, amount0Out, amount1Out) */
-const SWAP_EVENT_ABI_TYPES = ['uint256', 'uint256', 'uint256', 'uint256'] as const;
+// P1-1 Refactor: Moved to detector/event-processor.ts for pure function extraction.
+// Constants are now used internally by decodeSyncEventData() and decodeSwapEventData().
 
 export interface DetectorConfig {
   chain: string;
@@ -108,14 +109,10 @@ export interface DetectorConfig {
 }
 
 /**
- * Extended pair interface with reserve data
+ * Extended pair interface with reserve data.
+ * P1-1 Refactor: Re-export from event-processor for backwards compatibility.
  */
-export interface ExtendedPair extends Pair {
-  reserve0: string;
-  reserve1: string;
-  blockNumber: number;
-  lastUpdate: number;
-}
+export type ExtendedPair = EventProcessorExtendedPair;
 
 /**
  * Snapshot of pair data for thread-safe arbitrage detection.
@@ -797,41 +794,23 @@ export abstract class BaseDetector {
    * Object.assign is NOT atomic in JavaScript - it iterates properties sequentially.
    * A concurrent reader could observe partial updates (new reserve0, old reserve1).
    * Fix: Create new immutable pair object and atomically swap references in maps.
+   *
+   * P1-1 Refactor: Uses pure functions from event-processor for decoding/building.
+   * State mutations (Map.set()) remain here to preserve atomic update pattern.
    */
   protected async processSyncEvent(log: any, pair: Pair): Promise<void> {
     try {
-      // Decode reserve data from log data using pre-compiled ABI types
-      const decodedData = ethers.AbiCoder.defaultAbiCoder().decode(
-        SYNC_EVENT_ABI_TYPES,
-        log.data
-      );
+      // P1-1: Use pure decoding function (moved from inline ethers.AbiCoder call)
+      const syncData = decodeSyncEventData(log.data);
+      const blockNumber = parseBlockNumber(log.blockNumber);
 
-      const reserve0 = decodedData[0].toString();
-      const reserve1 = decodedData[1].toString();
-      const blockNumber = typeof log.blockNumber === 'string'
-        ? parseInt(log.blockNumber, 16)
-        : log.blockNumber;
-
-      // P0-1 FIX: Create NEW immutable pair object instead of mutating existing
-      // This ensures readers see either ALL old values or ALL new values, never a mix
-      const updatedPair: ExtendedPair = {
-        // Copy all existing properties
-        name: pair.name,
-        address: pair.address,
-        token0: pair.token0,
-        token1: pair.token1,
-        dex: pair.dex,
-        fee: pair.fee,
-        // Update with new values
-        reserve0,
-        reserve1,
-        blockNumber,
-        lastUpdate: Date.now()
-      };
+      // P1-1: Use pure function to build immutable pair object
+      // P0-1 FIX: Creates NEW immutable pair object instead of mutating existing.
+      // This ensures readers see either ALL old values or ALL new values, never a mix.
+      const updatedPair = buildExtendedPair(pair, syncData, blockNumber);
 
       // P0-1 FIX: Atomic pointer swap - Map.set() is atomic in V8
       // All readers will see either the old pair or the new pair, never partial state
-      const pairKey = `${pair.dex}_${pair.token0}_${pair.token1}`;
       const fullPairKey = this.findPairKey(pair);
       if (fullPairKey) {
         this.pairs.set(fullPairKey, updatedPair);
@@ -844,22 +823,8 @@ export abstract class BaseDetector {
       // Calculate price using the updated pair
       const price = this.calculatePrice(updatedPair);
 
-      // Create price update
-      const priceUpdate: PriceUpdate = {
-        pairKey: `${pair.dex}_${pair.token0}_${pair.token1}`,
-        dex: pair.dex,
-        chain: this.chain,
-        token0: pair.token0,
-        token1: pair.token1,
-        price,
-        reserve0,
-        reserve1,
-        blockNumber,
-        timestamp: Date.now(),
-        latency: 0,
-        // Include DEX-specific fee for accurate arbitrage calculations (supports Maverick 1bp, Curve 4bp, etc.)
-        fee: pair.fee
-      };
+      // P1-1: Use pure function to build price update
+      const priceUpdate = buildPriceUpdate(pair, syncData, price, blockNumber, this.chain);
 
       // Publish price update (uses Redis Streams batching)
       await this.publishPriceUpdate(priceUpdate);
@@ -875,24 +840,24 @@ export abstract class BaseDetector {
   /**
    * Process Swap event (trade).
    * Default implementation - can be overridden for chain-specific behavior.
+   *
+   * P1-1 Refactor: Uses pure functions from event-processor for decoding/building.
    */
   protected async processSwapEvent(log: any, pair: Pair): Promise<void> {
     try {
-      // Decode swap data using pre-compiled ABI types
-      const decodedData = ethers.AbiCoder.defaultAbiCoder().decode(
-        SWAP_EVENT_ABI_TYPES,
-        log.data
+      // P1-1: Use pure decoding function (moved from inline ethers.AbiCoder call)
+      const swapData = decodeSwapEventData(log.data, log.topics);
+
+      // Calculate USD value (business logic - remains here)
+      const usdValue = await this.estimateUsdValue(
+        pair,
+        swapData.amount0In,
+        swapData.amount1In,
+        swapData.amount0Out,
+        swapData.amount1Out
       );
 
-      const amount0In = decodedData[0].toString();
-      const amount1In = decodedData[1].toString();
-      const amount0Out = decodedData[2].toString();
-      const amount1Out = decodedData[3].toString();
-
-      // Calculate USD value
-      const usdValue = await this.estimateUsdValue(pair, amount0In, amount1In, amount0Out, amount1Out);
-
-      // Apply filtering based on configuration
+      // Apply filtering based on configuration (business logic - remains here)
       if (usdValue < EVENT_CONFIG.swapEvents.minAmountUSD) {
         // Apply sampling for small trades
         if (Math.random() > EVENT_CONFIG.swapEvents.samplingRate) {
@@ -900,26 +865,8 @@ export abstract class BaseDetector {
         }
       }
 
-      const blockNumber = typeof log.blockNumber === 'string'
-        ? parseInt(log.blockNumber, 16)
-        : log.blockNumber;
-
-      const swapEvent: SwapEvent = {
-        pairAddress: pair.address,
-        sender: log.topics?.[1] ? '0x' + log.topics[1].slice(26) : '0x0',
-        recipient: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '0x0',
-        amount0In,
-        amount1In,
-        amount0Out,
-        amount1Out,
-        to: log.topics?.[2] ? '0x' + log.topics[2].slice(26) : '0x0',
-        blockNumber,
-        transactionHash: log.transactionHash || '0x0',
-        timestamp: Date.now(),
-        dex: pair.dex,
-        chain: this.chain,
-        usdValue
-      };
+      // P1-1: Use pure function to build swap event
+      const swapEvent = buildSwapEvent(pair, swapData, log, this.chain, usdValue);
 
       // Publish swap event (uses Smart Swap Event Filter)
       await this.publishSwapEvent(swapEvent);
@@ -1444,16 +1391,18 @@ export abstract class BaseDetector {
   /**
    * Create a snapshot of pair data for thread-safe arbitrage detection.
    * This captures reserve values at a point in time to avoid race conditions.
-   * @param pair The pair to snapshot
+   * @param pair The pair to snapshot (may be ExtendedPair with reserves)
    * @returns PairSnapshot with immutable reserve values, or null if reserves not available
    */
   protected createPairSnapshot(pair: Pair): PairSnapshot | null {
-    // Capture reserves atomically (both at same instant)
-    const reserve0 = (pair as any).reserve0;
-    const reserve1 = (pair as any).reserve1;
+    // Type-safe cast: pairs in this.pairs are upgraded to ExtendedPair after processSyncEvent
+    // The Pair type doesn't include reserves, but ExtendedPair does
+    // Fix 3.1: Use proper type cast instead of `as any` for type safety
+    const extendedPair = pair as ExtendedPair;
 
     // Skip pairs without initialized reserves
-    if (!reserve0 || !reserve1) {
+    // Reserves are populated by processSyncEvent; new pairs may not have them yet
+    if (!extendedPair.reserve0 || !extendedPair.reserve1) {
       return null;
     }
 
@@ -1462,8 +1411,8 @@ export abstract class BaseDetector {
       dex: pair.dex,
       token0: pair.token0,
       token1: pair.token1,
-      reserve0: reserve0,
-      reserve1: reserve1,
+      reserve0: extendedPair.reserve0,
+      reserve1: extendedPair.reserve1,
       // BUG FIX: Fallback should be in percentage (0.003 = 0.3%), not basis points (30)
       // Pair.fee is already converted from basis points to percentage during initialization
       // S2.2.3 FIX: Use ?? instead of || to correctly handle fee: 0
@@ -1854,6 +1803,11 @@ export abstract class BaseDetector {
   /**
    * P0-1 FIX: Update a pair reference in the token index atomically.
    * Replaces the old pair reference with the new one in-place.
+   *
+   * Thread Safety Note: getPairsForTokens() returns a shallow copy of the array,
+   * so callers can safely iterate while this method updates the source array.
+   * Array element assignment (pairsForKey[index] = newPair) is atomic in V8.
+   *
    * @param oldPair The old pair reference to replace
    * @param newPair The new pair reference
    */

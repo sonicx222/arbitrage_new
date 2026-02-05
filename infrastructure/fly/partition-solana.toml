@@ -1,0 +1,97 @@
+# Fly.io Deployment Configuration for Solana Partition
+#
+# Partition: solana-native
+# Chains: Solana (non-EVM)
+# Region: us-west1 (San Jose - close to Solana validators)
+# Resource Profile: standard (512MB)
+#
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-006: Free Hosting Provider Selection
+# @see ADR-007: Cross-Region Failover Strategy
+#
+# Deployment:
+#   fly deploy -c infrastructure/fly/partition-solana.toml
+#
+# Scaling:
+#   fly scale memory 512 -c infrastructure/fly/partition-solana.toml
+#
+# Setting secrets:
+#   fly secrets set REDIS_URL="redis://..." -c infrastructure/fly/partition-solana.toml
+#   fly secrets set SOLANA_RPC_URL="https://..." -c infrastructure/fly/partition-solana.toml
+#   fly secrets set SOLANA_WS_URL="wss://..." -c infrastructure/fly/partition-solana.toml
+
+app = "arbitrage-solana"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "services/partition-solana/Dockerfile"
+  [build.args]
+    NODE_ENV = "production"
+
+[env]
+  NODE_ENV = "production"
+  PARTITION_ID = "solana-native"
+  PARTITION_CHAINS = "solana"
+  REGION_ID = "us-west1"
+  LOG_LEVEL = "info"
+  HEALTH_CHECK_PORT = "3001"
+  ENABLE_CROSS_REGION_HEALTH = "true"
+  # Solana-specific configuration
+  # Chain-specific RPC URLs set via secrets (fly secrets set)
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+[checks]
+  [checks.health]
+    grace_period = "30s"
+    # FIX P1-1: Standardized to 15s interval per ADR-007
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+  [checks.ready]
+    grace_period = "60s"
+    interval = "15s"
+    method = "GET"
+    path = "/ready"
+    port = 3001
+    timeout = "5s"
+    type = "http"
+
+# Processes
+[processes]
+  app = "node dist/index.js"
+
+# Deploy strategy
+[deploy]
+  release_command = "echo 'Solana partition deploying...'"
+  strategy = "rolling"
+
+# Secrets to configure (via fly secrets set):
+# REDIS_URL - Upstash Redis connection URL
+# SOLANA_RPC_URL - Solana RPC endpoint (e.g., Helius, QuickNode)
+# SOLANA_WS_URL - Solana WebSocket endpoint
+# HELIUS_API_KEY - Helius API key for enhanced RPC features (optional)

@@ -149,7 +149,7 @@ export class ErrorRecoveryOrchestrator {
         // Retry for transient errors
         const retryableErrors = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'timeout'];
         return retryableErrors.some(code => context.error.message.includes(code)) &&
-          (context.attemptCount || 0) < 3;
+          (context.attemptCount ?? 0) < 3;
       },
       execute: async (context) => {
         const retryMechanism = new RetryMechanism({
@@ -218,7 +218,7 @@ export class ErrorRecoveryOrchestrator {
       priority: 60,
       canHandle: (context) => {
         // Trigger self-healing for persistent failures
-        return (context.attemptCount || 0) >= 5;
+        return (context.attemptCount ?? 0) >= 5;
       },
       execute: async (context) => {
         // P3-1 FIX: Await the promise to get the manager instance
@@ -251,7 +251,7 @@ export class ErrorRecoveryOrchestrator {
             code: (context.error as any).code,
             stack: context.error.stack
           },
-          retryCount: context.attemptCount || 0,
+          retryCount: context.attemptCount ?? 0,
           maxRetries: 5,
           service: context.service,
           priority: 'medium',

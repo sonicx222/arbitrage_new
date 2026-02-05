@@ -346,7 +346,7 @@ export class FlashbotsProvider extends BaseMevProvider {
               error: txResult.revert || txResult.error || 'Transaction reverted',
               results: result.results.map((r: any) => ({
                 txHash: r.txHash || '',
-                gasUsed: BigInt(r.gasUsed || 0),
+                gasUsed: BigInt(r.gasUsed ?? 0),
                 success: !r.error && !r.revert,
                 revertReason: r.revert,
               })),
@@ -360,12 +360,12 @@ export class FlashbotsProvider extends BaseMevProvider {
         profit: result.coinbaseDiff ? BigInt(result.coinbaseDiff) : undefined,
         gasUsed: result.totalGasUsed ? BigInt(result.totalGasUsed) : undefined,
         effectiveGasPrice: result.gasFees
-          ? BigInt(result.gasFees) / BigInt(result.totalGasUsed || 1)
+          ? BigInt(result.gasFees) / BigInt(result.totalGasUsed ?? 1)
           : undefined,
         coinbaseDiff: result.coinbaseDiff ? BigInt(result.coinbaseDiff) : undefined,
         results: result.results?.map((r: any) => ({
           txHash: r.txHash || '',
-          gasUsed: BigInt(r.gasUsed || 0),
+          gasUsed: BigInt(r.gasUsed ?? 0),
           success: !r.error && !r.revert,
           revertReason: r.revert,
         })),

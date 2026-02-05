@@ -80,6 +80,13 @@ import { createBridgeCostEstimator, BridgeCostEstimator } from './bridge-cost-es
 import { createMLPredictionManager, MLPredictionManager } from './ml-prediction-manager';
 // P0-7: Import PreValidationOrchestrator for extracted pre-validation logic
 import { PreValidationOrchestrator } from './pre-validation-orchestrator';
+// P2-2: Import ConfidenceCalculator for extracted confidence calculation logic
+// Note: WhaleActivitySummary is already imported from @arbitrage/core
+import {
+  createConfidenceCalculator,
+  ConfidenceCalculator,
+  type WhaleActivitySummary as ConfidenceWhaleActivitySummary,
+} from './confidence-calculator';
 // TYPE-CONSOLIDATION: Import shared types from types.ts
 import {
   CrossChainOpportunity,
@@ -250,6 +257,10 @@ export class CrossChainDetectorService {
   // Extracted for SRP - see REFACTORING_IMPLEMENTATION_PLAN.md P0-7
   private preValidationOrchestrator: PreValidationOrchestrator | null = null;
 
+  // P2-2: Confidence calculation delegated to ConfidenceCalculator
+  // Extracted for SRP - see REFACTORING_IMPLEMENTATION_PLAN.md P2-2
+  private confidenceCalculator: ConfidenceCalculator | null = null;
+
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
   // These are now managed by mlPredictionManager for single-responsibility design
@@ -280,6 +291,15 @@ export class CrossChainDetectorService {
     if (userConfig.simulationCallback) {
       this.preValidationOrchestrator.setSimulationCallback(userConfig.simulationCallback);
     }
+
+    // P2-2: Initialize ConfidenceCalculator with ML and whale configs
+    this.confidenceCalculator = createConfidenceCalculator(
+      {
+        ml: this.mlConfig,
+        whale: this.whaleConfig,
+      },
+      this.logger
+    );
 
     // FIX: Configuration validation
     this.validateConfiguration();
@@ -1519,110 +1539,23 @@ export class CrossChainDetectorService {
     });
   }
 
+  /**
+   * P2-2: Delegated to ConfidenceCalculator for single-responsibility design.
+   * @see confidence-calculator.ts
+   */
   private calculateConfidence(
     lowPrice: {update: PriceUpdate; price: number},
     highPrice: {price: number},
     whaleData?: WhaleActivitySummary,
     mlPrediction?: { source?: PredictionResult | null; target?: PredictionResult | null }
   ): number {
-    // BUG-B2-FIX: Guard against division by zero and invalid prices
-    if (lowPrice.price <= 0 || highPrice.price <= 0 || !Number.isFinite(lowPrice.price) || !Number.isFinite(highPrice.price)) {
-      this.logger.warn('Invalid prices in confidence calculation', {
-        lowPrice: lowPrice.price,
-        highPrice: highPrice.price,
-      });
-      return 0; // Zero confidence for invalid data
-    }
-
-    // Base confidence on price difference and data freshness
-    let confidence = Math.min(highPrice.price / lowPrice.price - 1, 0.5) * 2; // 0-1 scale
-
-    // BUG-B2-FIX: Ensure confidence is a valid number
-    if (!Number.isFinite(confidence) || confidence < 0) {
+    // P2-2: Delegate to ConfidenceCalculator
+    if (!this.confidenceCalculator) {
+      this.logger.warn('ConfidenceCalculator not initialized');
       return 0;
     }
 
-    // Reduce confidence for stale data
-    const agePenalty = Math.max(0, (Date.now() - lowPrice.update.timestamp) / 60000); // 1 minute = 1.0 penalty
-    confidence *= Math.max(0.1, 1 - agePenalty * 0.1);
-
-    // Phase 3: ML prediction confidence adjustment
-    // Uses actual predictions instead of static boost
-    let mlConfidenceBoost = 1.0;
-    let mlSupported = false;
-
-    if (this.mlConfig.enabled && mlPrediction) {
-      const { source, target } = mlPrediction;
-
-      // For cross-chain arbitrage: buy on source (low price), sell on target (high price)
-      // Favorable: source price going up (buy now before it increases) OR
-      //            target price stable/up (will still be high when we sell)
-      // Unfavorable: source price going down (wait for lower) OR
-      //              target price going down (opportunity may disappear)
-
-      if (source && source.confidence >= this.mlConfig.minConfidence) {
-        if (source.direction === 'up') {
-          // Source price predicted to go up - good to buy now
-          mlConfidenceBoost *= this.mlConfig.alignedBoost;
-          mlSupported = true;
-        } else if (source.direction === 'down') {
-          // Source price predicted to go down - maybe wait
-          mlConfidenceBoost *= this.mlConfig.opposedPenalty;
-        }
-      }
-
-      if (target && target.confidence >= this.mlConfig.minConfidence) {
-        if (target.direction === 'up' || target.direction === 'sideways') {
-          // Target price stable or going up - opportunity will persist
-          mlConfidenceBoost *= mlSupported ? 1.05 : this.mlConfig.alignedBoost;
-          mlSupported = true;
-        } else if (target.direction === 'down') {
-          // Target price predicted to drop - opportunity may vanish
-          mlConfidenceBoost *= this.mlConfig.opposedPenalty;
-          mlSupported = false;
-        }
-      }
-
-      confidence *= mlConfidenceBoost;
-
-      this.logger.debug('ML prediction applied to confidence', {
-        sourceDirection: source?.direction,
-        sourceConfidence: source?.confidence,
-        targetDirection: target?.direction,
-        targetConfidence: target?.confidence,
-        mlConfidenceBoost,
-        mlSupported,
-      });
-    }
-
-    // Phase 3: Whale activity confidence adjustment
-    if (whaleData) {
-      const { dominantDirection, netFlowUsd, superWhaleCount } = whaleData;
-
-      // Boost confidence if whale direction aligns with opportunity
-      // For cross-chain arb: we're buying low, selling high
-      // Bullish whale activity on source chain (buying) supports our buy side
-      if (dominantDirection === 'bullish') {
-        confidence *= this.whaleConfig.whaleBullishBoost;
-      } else if (dominantDirection === 'bearish') {
-        confidence *= this.whaleConfig.whaleBearishPenalty;
-      }
-
-      // Super whale activity = high conviction signal
-      if (superWhaleCount > 0) {
-        confidence *= this.whaleConfig.superWhaleBoost;
-      }
-
-      // Large net flow indicates strong directional conviction
-      if (Math.abs(netFlowUsd) > this.whaleConfig.significantFlowThresholdUsd) {
-        confidence *= 1.1; // Additional 10% boost for significant flow
-      }
-    }
-
-    // Cap confidence at 95%
-    confidence = Math.min(confidence, 0.95);
-
-    return confidence;
+    return this.confidenceCalculator.calculate(lowPrice, highPrice, whaleData, mlPrediction);
   }
 
   private filterValidOpportunities(opportunities: CrossChainOpportunity[]): CrossChainOpportunity[] {

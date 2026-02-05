@@ -362,7 +362,7 @@ export class JitoProvider {
 
       return {
         success: true,
-        gasUsed: BigInt(result?.unitsConsumed || 0),
+        gasUsed: BigInt(result?.unitsConsumed ?? 0),
       };
     } catch (error) {
       return {

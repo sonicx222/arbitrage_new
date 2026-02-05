@@ -874,7 +874,9 @@ export class PartitionedDetector extends EventEmitter {
     const prices = new Map<string, PricePoint>();
 
     for (const [chainId, chainPriceMap] of this.chainPrices) {
-      const pricePoint = chainPriceMap.get(pairKey);
+      // P1-1 FIX: Use peek() for read-only access in hot path
+      // Avoids unnecessary delete+set operations that get() does to maintain LRU order
+      const pricePoint = chainPriceMap.peek(pairKey);
       if (pricePoint) {
         prices.set(chainId, pricePoint);
       }

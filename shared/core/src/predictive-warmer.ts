@@ -276,7 +276,7 @@ export class PredictiveCacheWarmer {
     for (const [pairKey, history] of this.accessHistory) {
       stats[pairKey] = {
         accessCount: history.length,
-        lastAccess: history[history.length - 1] || 0
+        lastAccess: history[history.length - 1] ?? 0
       };
     }
 

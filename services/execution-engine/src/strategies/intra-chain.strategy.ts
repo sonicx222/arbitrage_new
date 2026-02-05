@@ -69,7 +69,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
     if (!chain) {
       return createErrorResult(
         opportunity.id,
-        ExecutionErrorCode.NO_CHAIN,
+        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        formatExecutionError(ExecutionErrorCode.NO_CHAIN, 'buyChain is required'),
         'unknown',
         opportunity.buyDex || 'unknown'
       );

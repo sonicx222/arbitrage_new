@@ -54,6 +54,23 @@ export function isFiniteNumber(value: unknown): value is number {
 }
 
 /**
+ * Type guard for valid prices (finite, positive numbers).
+ * Validates prices are not undefined, null, NaN, Infinity, negative, or zero.
+ * HOT-PATH: Used in execution strategies for price validation.
+ *
+ * @example
+ * ```typescript
+ * if (isValidPrice(opportunity.buyPrice)) {
+ *   // TypeScript knows buyPrice is a valid number
+ *   const profit = calculateProfit(opportunity.buyPrice);
+ * }
+ * ```
+ */
+export function isValidPrice(value: unknown): value is number {
+  return typeof value === 'number' && isFinite(value) && value > 0;
+}
+
+/**
  * Type guard for integers.
  */
 export function isInteger(value: unknown): value is number {

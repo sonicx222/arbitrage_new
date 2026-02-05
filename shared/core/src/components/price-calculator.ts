@@ -495,12 +495,23 @@ export function calculateConfidence(
 // =============================================================================
 
 /**
- * Validate that a price is valid for calculations.
+ * Type guard that validates a price is valid for calculations.
+ * Accepts `unknown` to allow validation of potentially undefined values.
  *
- * @param price - Price to validate
- * @returns True if valid
+ * HOT-PATH: Used in execution strategies for price validation.
+ *
+ * @param price - Price to validate (can be any type)
+ * @returns True if valid, and narrows type to `number`
+ *
+ * @example
+ * ```typescript
+ * if (isValidPrice(opportunity.buyPrice)) {
+ *   // TypeScript knows buyPrice is a valid number
+ *   const profit = calculateProfit(opportunity.buyPrice);
+ * }
+ * ```
  */
-export function isValidPrice(price: number): boolean {
+export function isValidPrice(price: unknown): price is number {
   return typeof price === 'number' && isFinite(price) && price > 0;
 }
 

@@ -279,7 +279,7 @@ export class SelfHealingManager {
   // Manually trigger recovery for a service
   async triggerRecovery(serviceName: string, error?: Error): Promise<boolean> {
     // P5-FIX: Rate limit recovery triggers to prevent spam/abuse
-    const lastRecovery = this.recoveryRateLimiter.get(serviceName) || 0;
+    const lastRecovery = this.recoveryRateLimiter.get(serviceName) ?? 0;
     const now = Date.now();
     if (now - lastRecovery < this.RECOVERY_COOLDOWN_MS) {
       logger.warn(`Recovery rate limited for ${serviceName}`, {

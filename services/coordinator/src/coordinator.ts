@@ -74,6 +74,9 @@ import { StreamConsumerManager } from './streaming';
 import { HealthMonitor, DegradationLevel } from './health';
 import { OpportunityRouter } from './opportunities';
 
+// P2-11: Import IntervalManager for centralized interval lifecycle management
+import { IntervalManager } from './interval-manager';
+
 // =============================================================================
 // Service Name Patterns (FIX 3.2: Configurable instead of hardcoded)
 // =============================================================================
@@ -252,16 +255,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private static readonly STARTUP_GRACE_PERIOD_MS = 60000; // 60 seconds
   private startTime: number = 0;
 
-  // Intervals
-  // P0-3 FIX: healthCheckInterval REMOVED (legacy polling removed, all services use streams)
-  private metricsUpdateInterval: NodeJS.Timeout | null = null;
-  private leaderHeartbeatInterval: NodeJS.Timeout | null = null;
-  // REFACTOR: Separate interval for opportunity cleanup to prevent race conditions
-  // with concurrent stream consumers adding opportunities
-  private opportunityCleanupInterval: NodeJS.Timeout | null = null;
-  // FIX P1: Dedicated interval for general cleanup operations (activePairs, alertCooldowns)
-  // This runs independently of legacy health polling mode
-  private generalCleanupInterval: NodeJS.Timeout | null = null;
+  // P2-11: Centralized interval management (replaces individual interval fields)
+  private readonly intervalManager = new IntervalManager();
 
   // Stream consumers (blocking read pattern - replaces setInterval polling)
   private streamConsumers: StreamConsumer[] = [];
@@ -650,25 +645,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private async clearAllIntervals(): Promise<void> {
-    // P0-3 FIX: healthCheckInterval removed (legacy polling removed)
-    if (this.metricsUpdateInterval) {
-      clearInterval(this.metricsUpdateInterval);
-      this.metricsUpdateInterval = null;
-    }
-    if (this.leaderHeartbeatInterval) {
-      clearInterval(this.leaderHeartbeatInterval);
-      this.leaderHeartbeatInterval = null;
-    }
-    // REFACTOR: Clear opportunity cleanup interval
-    if (this.opportunityCleanupInterval) {
-      clearInterval(this.opportunityCleanupInterval);
-      this.opportunityCleanupInterval = null;
-    }
-    // FIX P1: Clear general cleanup interval
-    if (this.generalCleanupInterval) {
-      clearInterval(this.generalCleanupInterval);
-      this.generalCleanupInterval = null;
-    }
+    // P2-11: Use IntervalManager for centralized cleanup
+    await this.intervalManager.clearAll();
+
     // Stop all stream consumers (replaces setInterval pattern)
     await Promise.all(this.streamConsumers.map(c => c.stop()));
     this.streamConsumers = [];
@@ -786,7 +765,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private startLeaderHeartbeat(): void {
-    const { heartbeatIntervalMs, lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
+    const { heartbeatIntervalMs, instanceId } = this.config.leaderElection;
     let consecutiveHeartbeatFailures = 0;
     const maxHeartbeatFailures = 3;
 
@@ -800,57 +779,62 @@ export class CoordinatorService implements CoordinatorStateProvider {
       effectiveInterval
     });
 
-    this.leaderHeartbeatInterval = setInterval(async () => {
-      // P1-8 FIX: Use stateManager.isRunning() for consistency
-      if (!this.stateManager.isRunning() || !this.redis) return;
+    // P2-11: Use IntervalManager for centralized lifecycle management
+    this.intervalManager.register({
+      name: 'leader-heartbeat',
+      intervalMs: effectiveInterval,
+      callback: async () => {
+        // P1-8 FIX: Use stateManager.isRunning() for consistency
+        if (!this.stateManager.isRunning() || !this.redis) return;
 
-      try {
-        if (this.isLeader) {
-          // P0-4 fix: Use dedicated renewal method for better encapsulation
-          const renewed = await this.renewLeaderLock();
-          if (renewed) {
-            // P0-3 fix: Reset failure count on successful heartbeat
-            consecutiveHeartbeatFailures = 0;
+        try {
+          if (this.isLeader) {
+            // P0-4 fix: Use dedicated renewal method for better encapsulation
+            const renewed = await this.renewLeaderLock();
+            if (renewed) {
+              // P0-3 fix: Reset failure count on successful heartbeat
+              consecutiveHeartbeatFailures = 0;
+            } else {
+              // Lost leadership (another instance took over or lock expired)
+              this.isLeader = false;
+              this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
+            }
           } else {
-            // Lost leadership (another instance took over or lock expired)
-            this.isLeader = false;
-            this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
+            // Try to acquire leadership
+            await this.tryAcquireLeadership();
           }
-        } else {
-          // Try to acquire leadership
-          await this.tryAcquireLeadership();
-        }
 
-      } catch (error) {
-        // P0-3 fix: Track consecutive failures and demote if threshold exceeded
-        consecutiveHeartbeatFailures++;
-        this.logger.error('Leader heartbeat failed', {
-          error,
-          consecutiveFailures: consecutiveHeartbeatFailures,
-          maxFailures: maxHeartbeatFailures,
-          wasLeader: this.isLeader
-        });
-
-        // If we're the leader and have too many failures, demote self
-        // This prevents a zombie leader scenario where we think we're leading
-        // but can't actually renew our lock
-        if (this.isLeader && consecutiveHeartbeatFailures >= maxHeartbeatFailures) {
-          this.isLeader = false;
-          this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
-            failures: consecutiveHeartbeatFailures
+        } catch (error) {
+          // P0-3 fix: Track consecutive failures and demote if threshold exceeded
+          consecutiveHeartbeatFailures++;
+          this.logger.error('Leader heartbeat failed', {
+            error,
+            consecutiveFailures: consecutiveHeartbeatFailures,
+            maxFailures: maxHeartbeatFailures,
+            wasLeader: this.isLeader
           });
 
-          // Send critical alert
-          this.sendAlert({
-            type: 'LEADER_DEMOTION',
-            message: `Leader demoted due to ${consecutiveHeartbeatFailures} consecutive heartbeat failures`,
-            severity: 'critical',
-            data: { instanceId, failures: consecutiveHeartbeatFailures },
-            timestamp: Date.now()
-          });
+          // If we're the leader and have too many failures, demote self
+          // This prevents a zombie leader scenario where we think we're leading
+          // but can't actually renew our lock
+          if (this.isLeader && consecutiveHeartbeatFailures >= maxHeartbeatFailures) {
+            this.isLeader = false;
+            this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
+              failures: consecutiveHeartbeatFailures
+            });
+
+            // Send critical alert
+            this.sendAlert({
+              type: 'LEADER_DEMOTION',
+              message: `Leader demoted due to ${consecutiveHeartbeatFailures} consecutive heartbeat failures`,
+              severity: 'critical',
+              data: { instanceId, failures: consecutiveHeartbeatFailures },
+              timestamp: Date.now()
+            });
+          }
         }
-      }
-    }, effectiveInterval); // S4.1.1-FIX-3: Use jittered interval
+      },
+    });
   }
 
   // ===========================================================================
@@ -1201,15 +1185,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Runs every 10 seconds to clean up expired opportunities.
    */
   private startOpportunityCleanup(): void {
-    this.opportunityCleanupInterval = setInterval(() => {
-      if (!this.stateManager.isRunning()) return;
+    // P2-11: Use IntervalManager for centralized lifecycle management
+    this.intervalManager.register({
+      name: 'opportunity-cleanup',
+      intervalMs: this.OPPORTUNITY_CLEANUP_INTERVAL_MS,
+      callback: () => {
+        if (!this.stateManager.isRunning()) return;
 
-      try {
-        this.cleanupExpiredOpportunities();
-      } catch (error) {
-        this.logger.error('Opportunity cleanup failed', { error });
-      }
-    }, this.OPPORTUNITY_CLEANUP_INTERVAL_MS);
+        try {
+          this.cleanupExpiredOpportunities();
+        } catch (error) {
+          this.logger.error('Opportunity cleanup failed', { error });
+        }
+      },
+    });
 
     this.logger.info('Opportunity cleanup interval started', {
       intervalMs: this.OPPORTUNITY_CLEANUP_INTERVAL_MS,
@@ -1635,22 +1624,27 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private startHealthMonitoring(): void {
+    // P2-11: Use IntervalManager for centralized lifecycle management
     // Update metrics periodically
-    this.metricsUpdateInterval = setInterval(async () => {
-      // P1-8 FIX: Use stateManager.isRunning() for consistency
-      if (!this.stateManager.isRunning()) return;
+    this.intervalManager.register({
+      name: 'metrics-update',
+      intervalMs: 5000,
+      callback: async () => {
+        // P1-8 FIX: Use stateManager.isRunning() for consistency
+        if (!this.stateManager.isRunning()) return;
 
-      try {
-        this.updateSystemMetrics();
-        this.checkForAlerts();
+        try {
+          this.updateSystemMetrics();
+          this.checkForAlerts();
 
-        // Report own health to stream
-        await this.reportHealth();
+          // Report own health to stream
+          await this.reportHealth();
 
-      } catch (error) {
-        this.logger.error('Metrics update failed', { error });
-      }
-    }, 5000);
+        } catch (error) {
+          this.logger.error('Metrics update failed', { error });
+        }
+      },
+    });
 
     // P0-3 FIX: Legacy health polling REMOVED (was deprecated since v2.0.0)
     // All services now use Redis Streams exclusively (ADR-002)
@@ -1659,19 +1653,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // FIX P1: Use dedicated interval for cleanup operations
     // This runs regardless of legacy polling mode to ensure cleanup always happens
     // Previous bug: cleanup only ran if legacy polling was disabled due to ?? operator
-    this.generalCleanupInterval = setInterval(() => {
-      if (!this.stateManager.isRunning()) return;
+    this.intervalManager.register({
+      name: 'general-cleanup',
+      intervalMs: 10000,
+      callback: () => {
+        if (!this.stateManager.isRunning()) return;
 
-      try {
-        // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
-        this.alertCooldownManager?.cleanup(Date.now());
+        try {
+          // P2-3 FIX: Periodically cleanup stale alert cooldowns to prevent memory leak
+          this.alertCooldownManager?.cleanup(Date.now());
 
-        // Cleanup stale active pairs to prevent unbounded memory growth
-        this.cleanupActivePairs();
-      } catch (error) {
-        this.logger.error('Cleanup operations failed', { error });
-      }
-    }, 10000);
+          // Cleanup stale active pairs to prevent unbounded memory growth
+          this.cleanupActivePairs();
+        } catch (error) {
+          this.logger.error('Cleanup operations failed', { error });
+        }
+      },
+    });
   }
 
   private async reportHealth(): Promise<void> {

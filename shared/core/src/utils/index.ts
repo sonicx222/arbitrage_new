@@ -91,3 +91,42 @@ export {
   asBps,
   asDecimal,
 } from './fee-utils';
+
+// =============================================================================
+// Common Validators - Lightweight Hot-Path Validation
+// =============================================================================
+
+export {
+  // Type Guards
+  isDefined,
+  isNonEmptyString,
+  isPositiveNumber,
+  isNonNegativeNumber,
+  isFiniteNumber,
+  isValidPrice,
+  isInteger,
+  isPositiveInteger,
+  isNonEmptyArray,
+  isPlainObject,
+  hasKey,
+
+  // Validation (throw on failure)
+  validateNonEmptyString,
+  validatePositiveNumber,
+  validateNonNegativeNumber,
+  validatePositiveInteger,
+  validateInRange,
+
+  // Safe Parsing
+  parseNumberSafe,
+  parseIntegerSafe,
+  parseBooleanSafe,
+
+  // Address Validators
+  looksLikeEthereumAddress,
+  looksLikeSolanaAddress,
+
+  // Assertions
+  assert,
+  assertDefined,
+} from './common-validators';

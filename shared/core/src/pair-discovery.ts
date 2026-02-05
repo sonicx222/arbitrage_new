@@ -661,7 +661,7 @@ export class PairDiscoveryService extends EventEmitter implements Resettable {
 
   private incrementFailureCount(chain: string, dexName: string): void {
     const key = `${chain}:${dexName}`;
-    const count = (this.failureCount.get(key) || 0) + 1;
+    const count = (this.failureCount.get(key) ?? 0) + 1;
     this.failureCount.set(key, count);
 
     if (count >= this.config.circuitBreakerThreshold) {

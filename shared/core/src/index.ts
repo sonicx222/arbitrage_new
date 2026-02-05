@@ -2,6 +2,7 @@
  * @arbitrage/core - Core Library
  *
  * R8: Public API Surface Reduction
+ * P0-6: Sub-Entry Points for Tree-Shaking
  *
  * This module provides the public API for the arbitrage system. Exports are
  * organized into three categories:
@@ -10,6 +11,39 @@
  * Core services, utilities, and types that are part of the stable public API.
  * These exports follow semantic versioning and won't have breaking changes
  * in minor releases.
+ *
+ * ## SUB-ENTRY POINTS (P0-6 Refactor)
+ * For better tree-shaking and faster imports, use specific sub-paths:
+ *
+ * ```typescript
+ * // Instead of importing everything from '@arbitrage/core':
+ * import { PriceMatrix } from '@arbitrage/core';
+ *
+ * // Prefer specific imports for tree-shaking:
+ * import { PriceMatrix } from '@arbitrage/core/caching';
+ * import { AsyncMutex } from '@arbitrage/core/async';
+ * import { CircuitBreaker } from '@arbitrage/core/resilience';
+ * import { createPinoLogger } from '@arbitrage/core/logging';
+ * ```
+ *
+ * Available sub-entry points:
+ * - `@arbitrage/core/caching` - Cache utilities (PriceMatrix, PairCache, etc.)
+ * - `@arbitrage/core/analytics` - Analytics/ML (MLOpportunityScorer, etc.)
+ * - `@arbitrage/core/async` - Async primitives (AsyncMutex, WorkerPool, etc.)
+ * - `@arbitrage/core/resilience` - Error handling (CircuitBreaker, Retry, etc.)
+ * - `@arbitrage/core/monitoring` - Health monitoring (StreamHealth, etc.)
+ * - `@arbitrage/core/logging` - Logger utilities (Pino logger, etc.)
+ * - `@arbitrage/core/data-structures` - High-perf structures (LRUCache, etc.)
+ * - `@arbitrage/core/solana` - Solana utilities (SolanaDetector, etc.)
+ * - `@arbitrage/core/risk` - Risk management (Kelly, Drawdown, etc.)
+ * - `@arbitrage/core/components` - Pure calculations (price, arbitrage)
+ * - `@arbitrage/core/utils` - Common validators and utilities
+ * - `@arbitrage/core/detector` - Detector infrastructure
+ * - `@arbitrage/core/rpc` - RPC batching utilities
+ * - `@arbitrage/core/mev-protection` - MEV protection providers
+ * - `@arbitrage/core/bridge-router` - Cross-chain bridge routing
+ * - `@arbitrage/core/dex-adapters` - DEX adapters (Balancer, GMX, etc.)
+ * - `@arbitrage/core/factory-subscription` - Factory event subscriptions
  *
  * ## INTERNAL API (Unstable)
  * Implementation details, testing utilities, and low-level APIs. These may
@@ -237,7 +271,8 @@ export {
   CircuitBreakerRegistry,
   createCircuitBreaker,
   getCircuitBreakerRegistry,
-  withCircuitBreaker
+  withCircuitBreaker,
+  resetCircuitBreakerRegistry
 } from './resilience/circuit-breaker';
 
 // Simple Circuit Breaker (lightweight failure tracking)
@@ -684,6 +719,18 @@ export type {
   PricePoint,
   CrossChainDiscrepancy
 } from './partitioned-detector';
+
+// P2-14: Cross-chain price tracking (extracted from partitioned-detector)
+export {
+  CrossChainPriceTracker,
+  createCrossChainPriceTracker,
+} from './cross-chain-price-tracker';
+export type {
+  CrossChainPriceTrackerConfig,
+  PriceTrackerLogger,
+  PricePoint as CrossChainPricePoint,
+  CrossChainDiscrepancy as CrossChainPriceDiscrepancy,
+} from './cross-chain-price-tracker';
 
 // =============================================================================
 // 6.2 Arbitrage Detection Components
@@ -1443,6 +1490,8 @@ export {
   isPositiveNumber,
   isNonNegativeNumber,
   isFiniteNumber,
+  // Note: isValidPrice already exported from price-calculator.ts (line 947)
+  // The common-validators version is available as isValidPriceTypeGuard if needed
   isInteger,
   isPositiveInteger,
   isNonEmptyArray,

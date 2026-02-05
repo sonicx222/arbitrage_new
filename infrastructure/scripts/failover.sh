@@ -23,8 +23,12 @@ if [ -f "$SCRIPT_DIR/lib/health-utils.sh" ]; then
 fi
 
 # Default configuration
-HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-10}
+# HEALTH_CHECK_INTERVAL: Time between health checks in seconds (default: 15s per ADR-007)
+HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-15}
+# FAILOVER_THRESHOLD: Number of consecutive health check failures before triggering failover
+# Example: FAILOVER_THRESHOLD=3 means "fail 3 times in a row, then failover"
 FAILOVER_THRESHOLD=${FAILOVER_THRESHOLD:-3}
+# ALERT_WEBHOOK: URL to send failover alerts (optional)
 ALERT_WEBHOOK=${ALERT_WEBHOOK:-}
 
 # Lock file for preventing concurrent monitor instances
@@ -73,22 +77,35 @@ build_health_url() {
     fi
 }
 
+# Service endpoint definitions
+# Port mappings (per ADR-003 and docker-compose.partition.yml):
+#   - Coordinator:           3000
+#   - partition-asia-fast:   3011
+#   - partition-l2-fast:     3012
+#   - partition-high-value:  3013
+#   - cross-chain-detector:  3014
+#   - execution-engine:      3015
+#   - partition-solana:      3016
 declare -A SERVICE_ENDPOINTS=(
     ["coordinator-primary"]="$(build_health_url "${COORDINATOR_PRIMARY_URL:-http://localhost:3000}")"
     ["coordinator-standby"]="$(build_health_url "${COORDINATOR_STANDBY_URL:-}")"
     ["partition-asia-fast"]="$(build_health_url "${PARTITION_ASIA_FAST_URL:-http://localhost:3011}")"
     ["partition-l2-fast"]="$(build_health_url "${PARTITION_L2_FAST_URL:-http://localhost:3012}")"
     ["partition-high-value"]="$(build_health_url "${PARTITION_HIGH_VALUE_URL:-http://localhost:3013}")"
+    ["partition-solana"]="$(build_health_url "${PARTITION_SOLANA_URL:-http://localhost:3016}")"
     ["cross-chain-detector"]="$(build_health_url "${CROSS_CHAIN_URL:-http://localhost:3014}")"
     ["execution-engine"]="$(build_health_url "${EXECUTION_URL:-http://localhost:3015}")"
 )
 
 # Standby service mappings
+# Maps primary services to their standby counterparts for failover
+# Empty string means no standby configured (service enters degraded mode on failure)
 declare -A STANDBY_SERVICES=(
     ["coordinator-primary"]="coordinator-standby"
     ["partition-asia-fast"]=""
     ["partition-l2-fast"]=""
     ["partition-high-value"]=""
+    ["partition-solana"]=""
 )
 
 # Failure counters
@@ -360,6 +377,7 @@ usage() {
     echo "  PARTITION_ASIA_FAST_URL"
     echo "  PARTITION_L2_FAST_URL"
     echo "  PARTITION_HIGH_VALUE_URL"
+    echo "  PARTITION_SOLANA_URL"
     echo "  CROSS_CHAIN_URL"
     echo "  EXECUTION_URL"
 }

@@ -1385,7 +1385,7 @@ export class WebSocketManager {
    */
   handleRateLimit(url: string): void {
     const existing = this.excludedProviders.get(url);
-    const count = (existing?.count || 0) + 1;
+    const count = (existing?.count ?? 0) + 1;
 
     // Exponential exclusion: 30s * 2^(count-1), max 5 minutes
     const baseExcludeMs = 30000;

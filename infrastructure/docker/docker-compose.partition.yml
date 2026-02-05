@@ -173,7 +173,8 @@ services:
           cpus: '0.25'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
-      interval: 10s
+      # FIX P1-1: Standardize to 15s interval per ADR-007 (was 10s)
+      interval: 15s
       timeout: 10s
       start_period: 30s
       retries: 3
@@ -224,7 +225,8 @@ services:
           cpus: '0.5'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
-      interval: 30s
+      # FIX P1-1: Standardize to 15s interval per ADR-007 (was 30s)
+      interval: 15s
       timeout: 10s
       start_period: 30s
       retries: 3
@@ -272,7 +274,8 @@ services:
           cpus: '0.5'
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3001/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
-      interval: 10s
+      # FIX P1-1: Standardize to 15s interval per ADR-007 (was 10s)
+      interval: 15s
       timeout: 10s
       start_period: 30s
       retries: 3
@@ -396,6 +399,8 @@ services:
       partition-l2-turbo:
         condition: service_healthy
       partition-high-value:
+        condition: service_healthy
+      partition-solana:
         condition: service_healthy
       cross-chain-detector:
         condition: service_healthy

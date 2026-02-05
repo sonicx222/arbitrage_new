@@ -480,10 +480,10 @@ export class EnhancedHealthMonitor {
       services[serviceName] = {
         name: serviceName,
         status: this.determineServiceStatus(health),
-        uptime: health.uptime || 0,
+        uptime: health.uptime ?? 0,
         responseTime: health.lastHeartbeat ? Date.now() - health.lastHeartbeat : 0,
         errorRate: 0, // Would need error tracking
-        lastSeen: health.lastHeartbeat || 0
+        lastSeen: health.lastHeartbeat ?? 0
       };
     }
 
@@ -551,7 +551,7 @@ export class EnhancedHealthMonitor {
   private determineServiceStatus(health: any): 'healthy' | 'degraded' | 'unhealthy' {
     if (!health) return 'unhealthy';
 
-    const timeSinceLastHeartbeat = Date.now() - (health.lastHeartbeat || 0);
+    const timeSinceLastHeartbeat = Date.now() - (health.lastHeartbeat ?? 0);
 
     if (timeSinceLastHeartbeat > 300000) return 'unhealthy'; // 5 minutes
     if (timeSinceLastHeartbeat > 60000) return 'degraded'; // 1 minute
@@ -564,7 +564,7 @@ export class EnhancedHealthMonitor {
     const recentMetrics = this.metricsBuffer.slice(-100); // Last 100 metrics
 
     for (const rule of this.alertRules) {
-      const lastAlert = this.lastAlerts.get(rule.name) || 0;
+      const lastAlert = this.lastAlerts.get(rule.name) ?? 0;
 
       // Check cooldown
       if (now - lastAlert < rule.cooldown) continue;

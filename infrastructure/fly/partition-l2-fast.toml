@@ -60,7 +60,8 @@ primary_region = "sin"
 [checks]
   [checks.health]
     grace_period = "30s"
-    interval = "10s"
+    # FIX P1-1: Standardized to 15s interval per ADR-007 (was 10s)
+    interval = "15s"
     method = "GET"
     path = "/health"
     port = 3001

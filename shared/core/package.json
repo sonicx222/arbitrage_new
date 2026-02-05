@@ -16,6 +16,74 @@
     "./deprecated": {
       "types": "./dist/deprecated/index.d.ts",
       "default": "./dist/deprecated/index.js"
+    },
+    "./caching": {
+      "types": "./dist/caching/index.d.ts",
+      "default": "./dist/caching/index.js"
+    },
+    "./analytics": {
+      "types": "./dist/analytics/index.d.ts",
+      "default": "./dist/analytics/index.js"
+    },
+    "./async": {
+      "types": "./dist/async/index.d.ts",
+      "default": "./dist/async/index.js"
+    },
+    "./resilience": {
+      "types": "./dist/resilience/index.d.ts",
+      "default": "./dist/resilience/index.js"
+    },
+    "./monitoring": {
+      "types": "./dist/monitoring/index.d.ts",
+      "default": "./dist/monitoring/index.js"
+    },
+    "./logging": {
+      "types": "./dist/logging/index.d.ts",
+      "default": "./dist/logging/index.js"
+    },
+    "./data-structures": {
+      "types": "./dist/data-structures/index.d.ts",
+      "default": "./dist/data-structures/index.js"
+    },
+    "./solana": {
+      "types": "./dist/solana/index.d.ts",
+      "default": "./dist/solana/index.js"
+    },
+    "./risk": {
+      "types": "./dist/risk/index.d.ts",
+      "default": "./dist/risk/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "default": "./dist/components/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "default": "./dist/utils/index.js"
+    },
+    "./detector": {
+      "types": "./dist/detector/index.d.ts",
+      "default": "./dist/detector/index.js"
+    },
+    "./rpc": {
+      "types": "./dist/rpc/index.d.ts",
+      "default": "./dist/rpc/index.js"
+    },
+    "./mev-protection": {
+      "types": "./dist/mev-protection/index.d.ts",
+      "default": "./dist/mev-protection/index.js"
+    },
+    "./bridge-router": {
+      "types": "./dist/bridge-router/index.d.ts",
+      "default": "./dist/bridge-router/index.js"
+    },
+    "./dex-adapters": {
+      "types": "./dist/dex-adapters/index.d.ts",
+      "default": "./dist/dex-adapters/index.js"
+    },
+    "./factory-subscription": {
+      "types": "./dist/factory-subscription/index.d.ts",
+      "default": "./dist/factory-subscription/index.js"
     }
   },
   "scripts": {

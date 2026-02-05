@@ -86,3 +86,24 @@ export {
   DEFAULT_BATCHER_CONFIG,
   DEFAULT_SWAP_FILTER_CONFIG,
 } from './types';
+
+// =============================================================================
+// Event Processor (P1-1 Refactor)
+// =============================================================================
+
+export {
+  decodeSyncEventData,
+  decodeSwapEventData,
+  parseBlockNumber,
+  buildExtendedPair,
+  buildPriceUpdate,
+  buildSwapEvent,
+  generatePairKey,
+} from './event-processor';
+
+export type {
+  ExtendedPair,
+  DecodedSyncEvent,
+  DecodedSwapEvent,
+  RawEventLog,
+} from './event-processor';

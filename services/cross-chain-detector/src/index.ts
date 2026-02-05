@@ -189,3 +189,17 @@ export {
   MLPredictionManager,
   MLPredictionManagerConfig,
 } from './ml-prediction-manager';
+
+// P2-2: Confidence calculator module
+export {
+  createConfidenceCalculator,
+  ConfidenceCalculator,
+  type ConfidenceCalculatorConfig,
+  type ConfidenceCalculatorLogger,
+  type WhaleActivitySummary,
+  type MLPredictionPair,
+  type PriceData as ConfidencePriceData,
+  type MLConfidenceConfig,
+  type WhaleConfidenceConfig,
+  DEFAULT_CONFIDENCE_CONFIG,
+} from './confidence-calculator';

@@ -47,14 +47,39 @@ import {
 import { BaseExecutionStrategy } from './base.strategy';
 // Phase 5.2: Flash loan support for destination chain
 import type { FlashLoanProviderFactory } from './flash-loan-providers/provider-factory';
+// Fix 7.2: Import FlashLoanStrategy for destination chain flash loan execution
+import { FlashLoanStrategy } from './flash-loan.strategy';
 
 export class CrossChainStrategy extends BaseExecutionStrategy {
   // Phase 5.2: Optional flash loan provider factory for destination chain flash loans
   private readonly flashLoanProviderFactory?: FlashLoanProviderFactory;
+  // Fix 7.2: Flash loan strategy instance for destination chain execution
+  private readonly flashLoanStrategy?: FlashLoanStrategy;
 
-  constructor(logger: Logger, flashLoanProviderFactory?: FlashLoanProviderFactory) {
+  /**
+   * Create a CrossChainStrategy instance.
+   *
+   * @param logger - Logger instance
+   * @param flashLoanProviderFactory - Optional factory for checking flash loan support
+   * @param flashLoanStrategy - Optional FlashLoanStrategy for destination chain atomic execution.
+   *                            If provided, enables flash loan execution on supported destination chains.
+   */
+  constructor(
+    logger: Logger,
+    flashLoanProviderFactory?: FlashLoanProviderFactory,
+    flashLoanStrategy?: FlashLoanStrategy
+  ) {
     super(logger);
     this.flashLoanProviderFactory = flashLoanProviderFactory;
+    this.flashLoanStrategy = flashLoanStrategy;
+  }
+
+  /**
+   * Fix 7.2: Get the flash loan strategy for destination chain execution.
+   * Returns undefined if not configured.
+   */
+  private getFlashLoanStrategy(): FlashLoanStrategy | undefined {
+    return this.flashLoanStrategy;
   }
 
   /**
@@ -70,6 +95,92 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       return false;
     }
     return this.flashLoanProviderFactory.isFullySupported(destChain);
+  }
+
+  /**
+   * Fix 7.2: Execute destination sell using flash loan for atomic execution.
+   *
+   * This method delegates to FlashLoanStrategy for the sell transaction on the
+   * destination chain. Benefits include:
+   * - Atomic execution (reverts if unprofitable after bridge delay)
+   * - Protection against price movement during bridge wait time
+   * - Can execute larger positions without holding capital on destination chain
+   *
+   * @param sellOpportunity - The sell opportunity with reversed tokens (bridgeToken -> originalTokenIn)
+   * @param destChain - Destination chain identifier
+   * @param ctx - Strategy context with providers and wallets
+   * @returns ExecutionResult from the flash loan execution
+   */
+  private async executeDestinationFlashLoan(
+    sellOpportunity: ArbitrageOpportunity,
+    destChain: string,
+    ctx: StrategyContext
+  ): Promise<ExecutionResult> {
+    const flashLoanStrategy = this.getFlashLoanStrategy();
+
+    // Check if flash loan strategy is available
+    if (!flashLoanStrategy) {
+      return createErrorResult(
+        sellOpportunity.id,
+        formatExecutionError(
+          ExecutionErrorCode.NO_STRATEGY,
+          'FlashLoanStrategy not configured for destination chain execution'
+        ),
+        destChain,
+        sellOpportunity.buyDex || 'unknown'
+      );
+    }
+
+    // Create a destination-specific context ensuring the correct chain is used
+    const destCtx: StrategyContext = {
+      ...ctx,
+      // The opportunity's buyChain should already be set to destChain
+    };
+
+    this.logger.info('Executing destination sell via flash loan', {
+      opportunityId: sellOpportunity.id,
+      destChain,
+      tokenIn: sellOpportunity.tokenIn,
+      tokenOut: sellOpportunity.tokenOut,
+      amountIn: sellOpportunity.amountIn,
+    });
+
+    try {
+      const result = await flashLoanStrategy.execute(sellOpportunity, destCtx);
+
+      if (result.success) {
+        this.logger.info('Destination flash loan sell succeeded', {
+          opportunityId: sellOpportunity.id,
+          destChain,
+          txHash: result.transactionHash,
+          actualProfit: result.actualProfit,
+        });
+      } else {
+        this.logger.warn('Destination flash loan sell failed', {
+          opportunityId: sellOpportunity.id,
+          destChain,
+          error: result.error,
+        });
+      }
+
+      return result;
+    } catch (error) {
+      this.logger.error('Destination flash loan execution threw exception', {
+        opportunityId: sellOpportunity.id,
+        destChain,
+        error: getErrorMessage(error),
+      });
+
+      return createErrorResult(
+        sellOpportunity.id,
+        formatExecutionError(
+          ExecutionErrorCode.FLASH_LOAN_ERROR,
+          `Destination flash loan failed: ${getErrorMessage(error)}`
+        ),
+        destChain,
+        sellOpportunity.buyDex || 'unknown'
+      );
+    }
   }
 
   async execute(
@@ -93,7 +204,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (sourceChain === destChain) {
       return createErrorResult(
         opportunity.id,
-        ExecutionErrorCode.SAME_CHAIN,
+        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        formatExecutionError(ExecutionErrorCode.SAME_CHAIN, 'Cross-chain requires different chains'),
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -103,7 +215,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
     if (!ctx.bridgeRouterFactory) {
       return createErrorResult(
         opportunity.id,
-        ExecutionErrorCode.NO_BRIDGE,
+        // Issue 6.1 Fix: Use formatExecutionError for consistent error formatting
+        formatExecutionError(ExecutionErrorCode.NO_BRIDGE, 'Bridge router factory not initialized'),
         sourceChain,
         opportunity.buyDex || 'unknown'
       );
@@ -614,17 +727,84 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // Phase 5.2: Check if destination chain supports flash loans
       // Using flash loans provides atomic execution and protection against price movement
       const useDestFlashLoan = this.isDestinationFlashLoanSupported(destChain);
+
+      // Fix 7.2: Variables for sell transaction result (shared between flash loan and DEX swap paths)
+      let sellReceipt: ethers.TransactionReceipt | null = null;
+      let sellTxHash: string | undefined;
+      let usedMevProtection = false;
+      let usedDestFlashLoan = false;
+
+      // Fix 7.2: Try flash loan execution if supported
       if (useDestFlashLoan) {
-        this.logger.info('Destination chain supports flash loans - using atomic sell', {
+        this.logger.info('Destination chain supports flash loans - attempting atomic sell', {
           opportunityId: opportunity.id,
           destChain,
           sellAmount,
           bridgeToken,
         });
+
         // Mark the sell opportunity to use flash loan execution
         sellOpportunity.useFlashLoan = true;
+
+        // Execute via FlashLoanStrategy
+        const flashLoanResult = await this.executeDestinationFlashLoan(sellOpportunity, destChain, ctx);
+
+        if (flashLoanResult.success) {
+          // Flash loan succeeded - use its result
+          sellTxHash = flashLoanResult.transactionHash;
+          usedDestFlashLoan = true;
+
+          this.logger.info('Destination flash loan sell completed successfully', {
+            opportunityId: opportunity.id,
+            destChain,
+            sellTxHash,
+            actualProfit: flashLoanResult.actualProfit,
+          });
+
+          // Skip to final calculations (Step 6)
+          // We still need to calculate final profit including bridge costs
+          const sourceGasPrice = await this.getOptimalGasPrice(sourceChain, ctx);
+          let sourceNativeTokenPriceUsd = getNativeTokenPrice(sourceChain, { suppressWarning: true });
+          const DEFAULT_NATIVE_TOKEN_PRICE_USD = 2000;
+          if (!Number.isFinite(sourceNativeTokenPriceUsd) || sourceNativeTokenPriceUsd <= 0) {
+            sourceNativeTokenPriceUsd = DEFAULT_NATIVE_TOKEN_PRICE_USD;
+          }
+          const bridgeGasCostNative = bridgeResult.gasUsed
+            ? parseFloat(ethers.formatEther(bridgeResult.gasUsed * sourceGasPrice))
+            : 0;
+          const bridgeGasCostUsd = bridgeGasCostNative * sourceNativeTokenPriceUsd;
+
+          // Combine bridge cost with flash loan result's gas cost
+          const totalGasCostUsd = bridgeGasCostUsd + (flashLoanResult.gasCost ?? 0);
+
+          // Flash loan result already includes profit calculation
+          const actualProfitUsd = (flashLoanResult.actualProfit ?? 0) - bridgeGasCostUsd;
+
+          // Fix 7.2: Return success using correct createSuccessResult signature
+          return createSuccessResult(
+            opportunity.id,
+            sellTxHash || bridgeResult.sourceTxHash || '',
+            destChain, // Report final chain where sell occurred
+            opportunity.sellDex || 'unknown',
+            {
+              actualProfit: actualProfitUsd,
+              gasCost: totalGasCostUsd,
+              latencyMs: Date.now() - startTime,
+              usedMevProtection: false, // Flash loan handles its own MEV protection
+            }
+          );
+        } else {
+          // Flash loan failed - fall back to standard DEX swap
+          this.logger.warn('Destination flash loan failed, falling back to direct DEX swap', {
+            opportunityId: opportunity.id,
+            destChain,
+            flashLoanError: flashLoanResult.error,
+          });
+          // Continue with standard DEX swap below
+        }
       }
 
+      // Standard DEX swap path (used when flash loans not supported or flash loan failed)
       const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, destChain, ctx);
 
       // Ensure token approval for DEX router before swap
@@ -699,9 +879,7 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // This was previously missing, leaving sell transactions vulnerable to MEV attacks
       const protectedSellTx = await this.applyMEVProtection(sellTx, destChain, ctx);
 
-      let sellReceipt: ethers.TransactionReceipt | null = null;
-      let sellTxHash: string | undefined;
-      let usedMevProtection = false;
+      // Note: sellReceipt, sellTxHash, usedMevProtection declared above (Fix 7.2)
 
       try {
         // Fix 9.3: Check MEV eligibility for destination chain and use protected submission if available

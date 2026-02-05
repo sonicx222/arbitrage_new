@@ -12,6 +12,8 @@
 #   ./health-check.sh <service>    # Check specific service
 #
 # @see ADR-007: Cross-Region Failover Strategy
+# @see ADR-003: Partitioned Chain Detectors
+# @see ADR-010: WebSocket Connection Resilience
 
 set -e
 
@@ -113,14 +115,26 @@ release_lock() {
 }
 
 # Service definitions
+# Port mappings (per ADR-003 and docker-compose.partition.yml):
+#   - Coordinator:           3000
+#   - partition-asia-fast:   3011
+#   - partition-l2-fast:     3012
+#   - partition-high-value:  3013
+#   - cross-chain-detector:  3014
+#   - execution-engine:      3015
+#   - partition-solana:      3016
+#   - Redis:                 6379 (configurable via REDIS_PORT)
+REDIS_PORT=${REDIS_PORT:-6379}
+
 declare -A SERVICES=(
     ["coordinator"]="http://localhost:3000/health"
     ["partition-asia-fast"]="http://localhost:3011/health"
     ["partition-l2-fast"]="http://localhost:3012/health"
     ["partition-high-value"]="http://localhost:3013/health"
+    ["partition-solana"]="http://localhost:3016/health"
     ["cross-chain-detector"]="http://localhost:3014/health"
     ["execution-engine"]="http://localhost:3015/health"
-    ["redis"]="redis://localhost:6379"
+    ["redis"]="redis://localhost:$REDIS_PORT"
 )
 
 # Override with environment variables
@@ -128,6 +142,7 @@ declare -A SERVICES=(
 [ -n "$PARTITION_ASIA_FAST_URL" ] && SERVICES["partition-asia-fast"]="$PARTITION_ASIA_FAST_URL/health"
 [ -n "$PARTITION_L2_FAST_URL" ] && SERVICES["partition-l2-fast"]="$PARTITION_L2_FAST_URL/health"
 [ -n "$PARTITION_HIGH_VALUE_URL" ] && SERVICES["partition-high-value"]="$PARTITION_HIGH_VALUE_URL/health"
+[ -n "$PARTITION_SOLANA_URL" ] && SERVICES["partition-solana"]="$PARTITION_SOLANA_URL/health"
 [ -n "$CROSS_CHAIN_URL" ] && SERVICES["cross-chain-detector"]="$CROSS_CHAIN_URL/health"
 [ -n "$EXECUTION_URL" ] && SERVICES["execution-engine"]="$EXECUTION_URL/health"
 [ -n "$REDIS_URL" ] && SERVICES["redis"]="$REDIS_URL"

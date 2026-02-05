@@ -79,6 +79,13 @@ export type {
   RegisteredStrategies,
 } from './strategy-factory';
 
+// P2-8: Flash Loan Fee Calculator (extracted for testability)
+export {
+  FlashLoanFeeCalculator,
+  createFlashLoanFeeCalculator,
+} from './flash-loan-fee-calculator';
+export type { FlashLoanFeeCalculatorConfig } from './flash-loan-fee-calculator';
+
 // Flash Loan Provider Abstraction (Fix 1.1)
 export {
   FlashLoanProviderFactory,
