@@ -235,7 +235,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       if (!submitResult.success) {
         return createErrorResult(
           opportunity.id,
-          submitResult.error || 'Transaction submission failed',
+          // Fix 6.1: Use formatExecutionError for consistent error formatting
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, submitResult.error || 'Transaction submission failed'),
           chain,
           opportunity.buyDex || 'unknown'
         );
@@ -246,6 +247,23 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         ? await this.calculateActualProfit(submitResult.receipt, opportunity)
         : undefined;
 
+      // Calculate gas cost with sanity check for abnormal values
+      let gasCost: number | undefined;
+      if (submitResult.receipt) {
+        const effectiveGasPrice = submitResult.receipt.gasPrice ?? gasPrice;
+        // Sanity check: gasPrice should be < 10000 gwei (10^13 wei) under normal conditions
+        // This catches data corruption without blocking execution
+        const MAX_SANE_GAS_PRICE = 10n ** 13n; // 10000 gwei
+        if (effectiveGasPrice > MAX_SANE_GAS_PRICE) {
+          this.logger.warn('Abnormally high gas price detected in receipt', {
+            opportunityId: opportunity.id,
+            gasPrice: effectiveGasPrice.toString(),
+            maxSane: MAX_SANE_GAS_PRICE.toString(),
+          });
+        }
+        gasCost = parseFloat(ethers.formatEther(submitResult.receipt.gasUsed * effectiveGasPrice));
+      }
+
       return createSuccessResult(
         opportunity.id,
         submitResult.txHash || submitResult.receipt?.hash || '',
@@ -254,9 +272,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         {
           actualProfit,
           gasUsed: submitResult.receipt ? Number(submitResult.receipt.gasUsed) : undefined,
-          gasCost: submitResult.receipt
-            ? parseFloat(ethers.formatEther(submitResult.receipt.gasUsed * (submitResult.receipt.gasPrice ?? gasPrice)))
-            : undefined,
+          gasCost,
         }
       );
     } catch (error) {
@@ -269,7 +285,8 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
 
       return createErrorResult(
         opportunity.id,
-        errorMessage || 'Unknown error during execution',
+        // Fix 6.1: Use formatExecutionError for consistent error formatting
+        formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, errorMessage || 'Unknown error during execution'),
         chain,
         opportunity.buyDex || 'unknown'
       );

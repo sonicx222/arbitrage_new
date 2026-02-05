@@ -4,6 +4,20 @@
  * Provides a clean factory pattern for strategy selection and dispatch.
  * Encapsulates the strategy selection logic that was previously in engine.ts.
  *
+ * ## Fix 1.1: Chain Support Scope
+ *
+ * **IMPORTANT**: This execution engine currently supports EVM chains ONLY.
+ * The architecture references "11 chains (10 EVM + Solana)" but:
+ *
+ * - **EVM Chains (supported)**: Ethereum, BSC, Arbitrum, Base, Polygon, Optimism,
+ *   Avalanche, Fantom, zkSync, Linea - Use strategies in this directory
+ * - **Solana (not supported here)**: Requires separate Solana-native execution
+ *   logic due to fundamental differences (accounts model, SPL tokens, etc.)
+ *
+ * Solana detection is handled by `shared/core/src/solana/` but Solana execution
+ * would require a separate SolanaExecutionEngine with program-based execution.
+ * See ADR-025 (if exists) for Solana execution roadmap.
+ *
  * Benefits:
  * - Single Responsibility: Strategy selection logic in one place
  * - Extensibility: Easy to add new strategy types

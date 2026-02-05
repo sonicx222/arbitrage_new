@@ -71,9 +71,19 @@ import { BaseExecutionStrategy } from './base.strategy';
 const AAVE_V3_FEE_BPS = AAVE_V3_FEE_BPS_BIGINT;
 const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 
-// Fix 2.1: Static assertion to ensure Aave V3 fee matches documentation (ADR-020)
-// This validates at module load time that the imported constant is 9 bps (0.09%)
-// If this fails, it indicates a configuration mismatch that needs investigation
+/**
+ * Fix 2.1: Static assertion to ensure Aave V3 fee matches official documentation.
+ *
+ * Aave V3 flash loan premium (fee):
+ * - Default: 0.09% (9 basis points) for regular flash loans
+ * - 0% for flash loans taken from FlashLoanSimple with approved borrowers
+ *
+ * This validates at module load time that the imported constant is 9 bps.
+ * If this fails, it indicates a configuration mismatch that needs investigation.
+ *
+ * @see https://docs.aave.com/developers/guides/flash-loans - Official Aave V3 documentation
+ * @see ADR-020 - Flash Loan Integration architectural decision
+ */
 const EXPECTED_AAVE_V3_FEE_BPS = 9n;
 if (AAVE_V3_FEE_BPS !== EXPECTED_AAVE_V3_FEE_BPS) {
   throw new Error(
@@ -809,18 +819,17 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    * Supports triangular arbitrage (3-hop) and more complex routes.
    * The path must start and end with the same asset (the flash-loaned token).
    *
-   * TODO (Issue 1.2): Integrate N-hop execution into execute() method.
-   * Priority: Medium | Effort: 2 days | Depends on: ArbitrageOpportunity type update
+   * DONE (Issue 1.2): N-hop execution integrated into execute() method.
    *
-   * Current status: Method implemented and tested (see flash-loan.strategy.test.ts),
-   * but not yet called from execute() because:
-   * 1. ArbitrageOpportunity type doesn't support multi-hop path specification
-   * 2. Opportunity detection services don't emit N-hop opportunities yet
+   * Integration status (completed):
+   * ✅ NHopArbitrageOpportunity type defined in types.ts with `hops: SwapHop[]`
+   * ✅ isNHopOpportunity() type guard implemented
+   * ✅ prepareFlashLoanContractTransaction() calls buildNHopSwapSteps() when hops detected
+   * ✅ Method tested (see flash-loan.strategy.test.ts)
    *
-   * Integration steps:
-   * 1. Extend ArbitrageOpportunity with optional `hops?: HopDefinition[]`
-   * 2. Update opportunity detectors to emit triangular/quadrilateral paths
-   * 3. Call buildNHopSwapSteps() when hops are present in opportunity
+   * Remaining work (external to execution-engine):
+   * - Opportunity detectors need to emit NHopArbitrageOpportunity with populated hops array
+   * - See unified-detector service for triangular/quadrilateral path detection
    *
    * @example
    * // 3-hop triangular arbitrage: WETH -> USDC -> DAI -> WETH

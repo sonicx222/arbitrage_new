@@ -145,11 +145,21 @@ function createPartitionPriceUpdate(
 
 /**
  * Normalize a token pair string for cross-chain matching.
- * Format: DEX_TOKEN0_TOKEN1 -> NORMALIZED_TOKEN0_NORMALIZED_TOKEN1
+ * Handles both formats:
+ * - "TOKEN0_TOKEN1" (2 parts) -> "NORMALIZED_TOKEN0_NORMALIZED_TOKEN1"
+ * - "DEX_TOKEN0_TOKEN1" (3+ parts) -> "NORMALIZED_TOKEN0_NORMALIZED_TOKEN1"
+ *
+ * This matches production behavior in partitioned-detector.ts:normalizeTokenPair()
  */
 function normalizeTokenPair(pairKey: string): string {
   const parts = pairKey.split('_');
-  if (parts.length < 3) return pairKey;
+
+  // Need at least 2 parts for a valid pair
+  if (parts.length < 2) return pairKey;
+
+  // Always use last 2 parts as token0 and token1
+  // For "TOKEN0_TOKEN1" -> parts.length = 2, indices are 0 and 1
+  // For "DEX_TOKEN0_TOKEN1" -> parts.length = 3, indices are 1 and 2
   const token0 = normalizeTokenForCrossChain(parts[parts.length - 2]);
   const token1 = normalizeTokenForCrossChain(parts[parts.length - 1]);
   return `${token0}_${token1}`;
@@ -540,6 +550,22 @@ describe('[Multi-Partition] Cross-Partition Price Synchronization', () => {
       // Both should be grouped under WETH_USDT
       expect(grouped.has('WETH_USDT')).toBe(true);
       expect(grouped.get('WETH_USDT')!.length).toBe(2);
+    });
+
+    it('should normalize 2-part pair keys without DEX prefix', () => {
+      // Direct unit test for normalizeTokenPair edge case
+      // Regression test for: 2-part keys (TOKEN0_TOKEN1) must also be normalized
+
+      // 2-part keys: TOKEN0_TOKEN1 (no DEX prefix)
+      expect(normalizeTokenPair('WETH.e_USDT')).toBe('WETH_USDT');
+      expect(normalizeTokenPair('ETH_USDC')).toBe('WETH_USDC'); // ETH -> WETH
+
+      // 3-part keys: DEX_TOKEN0_TOKEN1 (standard format)
+      expect(normalizeTokenPair('uniswap_WETH.e_USDT')).toBe('WETH_USDT');
+      expect(normalizeTokenPair('pancakeswap_ETH_USDC')).toBe('WETH_USDC');
+
+      // Edge case: single part (invalid) returns unchanged
+      expect(normalizeTokenPair('WETH')).toBe('WETH');
     });
 
     it('should handle multiple token pairs across partitions', async () => {

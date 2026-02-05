@@ -112,12 +112,21 @@ export interface PathFinderStats {
 // Default Configuration
 // =============================================================================
 
+/**
+ * Default configuration for multi-leg path finding.
+ * Timeouts and thresholds can be overridden via environment variables.
+ *
+ * Environment variables:
+ * - MULTI_LEG_TIMEOUT_MS: Path finding timeout (default: 5000ms)
+ * - MULTI_LEG_MIN_PROFIT: Minimum profit threshold (default: 0.001 = 0.1%)
+ * - MULTI_LEG_MAX_CANDIDATES: Max candidates per hop (default: 15)
+ */
 const DEFAULT_CONFIG: MultiLegPathConfig = {
-  minProfitThreshold: 0.001,
+  minProfitThreshold: parseFloat(process.env.MULTI_LEG_MIN_PROFIT || '0.001'),
   maxPathLength: 7,
   minPathLength: 5,
-  maxCandidatesPerHop: 15,
-  timeoutMs: 5000,
+  maxCandidatesPerHop: parseInt(process.env.MULTI_LEG_MAX_CANDIDATES || '15', 10),
+  timeoutMs: parseInt(process.env.MULTI_LEG_TIMEOUT_MS || '5000', 10),
   minConfidence: 0.4
 };
 
@@ -145,6 +154,18 @@ export class MultiLegPathFinder {
   // BUG FIX: Removed instance-level tokenPairs and startTime
   // These are now passed via ExecutionContext to prevent race conditions
   // when findMultiLegOpportunities is called concurrently
+  /**
+   * Fix 5.1: Stats for monitoring path finder performance.
+   *
+   * Note: These stats are intentionally NOT protected by mutex/atomic operations.
+   * Concurrent access may cause minor inaccuracies (lost updates), but:
+   * 1. Stats are for monitoring only, not critical execution logic
+   * 2. Approximate stats are acceptable for dashboards and alerting
+   * 3. Atomic operations would add latency to the hot path
+   *
+   * If exact stats are required, consider aggregating from getStats() calls
+   * rather than modifying this to use atomic counters.
+   */
   private stats: {
     totalCalls: number;
     totalOpportunitiesFound: number;

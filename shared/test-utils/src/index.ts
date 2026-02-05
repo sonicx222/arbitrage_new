@@ -93,6 +93,9 @@ export * from './helpers';
 // Contract Testing (P3-4: Contract Testing)
 export * from './contracts';
 
+// Price Data Generators (Phase 3, Task 3.1)
+export * from './generators';
+
 // Integration Test Utilities (Phase 1: Test Infrastructure Setup)
 // Note: Using selective exports to avoid naming conflicts with existing modules
 export {

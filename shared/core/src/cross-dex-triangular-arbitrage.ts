@@ -101,19 +101,33 @@ export interface DynamicSlippageConfig {
   liquidityPenaltyScale: number;
 }
 
+/**
+ * Default slippage configuration.
+ * Can be overridden via environment variables for different deployment environments.
+ *
+ * Environment variables:
+ * - SLIPPAGE_BASE: Base slippage floor (default: 0.003 = 0.3%)
+ * - SLIPPAGE_MAX: Maximum slippage cap (default: 0.10 = 10%)
+ * - SLIPPAGE_MIN_LIQUIDITY_USD: Minimum liquidity for full confidence (default: 100000)
+ */
 const DEFAULT_SLIPPAGE_CONFIG: DynamicSlippageConfig = {
-  baseSlippage: 0.003,      // 0.3% base slippage floor
+  baseSlippage: parseFloat(process.env.SLIPPAGE_BASE || '0.003'),
   priceImpactScale: 5.0,    // Price impact multiplied by this factor
-  maxSlippage: 0.10,        // 10% hard cap (was 2%)
-  minLiquidityUsd: 100000,  // $100K minimum for full confidence
+  maxSlippage: parseFloat(process.env.SLIPPAGE_MAX || '0.10'),
+  minLiquidityUsd: parseInt(process.env.SLIPPAGE_MIN_LIQUIDITY_USD || '100000', 10),
   liquidityPenaltyScale: 2.0 // Penalty factor for low liquidity
 };
 
+/**
+ * Environment variable configuration:
+ * - TRIANGULAR_MIN_PROFIT: Minimum profit threshold (default: 0.005 = 0.5%)
+ * - TRIANGULAR_MAX_EXECUTION_TIME_MS: Max execution time (default: 5000ms)
+ */
 export class CrossDexTriangularArbitrage {
   private cache = getHierarchicalCache();
-  private minProfitThreshold = 0.005; // 0.5% minimum profit
-  private maxSlippage = 0.10; // T1.2: Increased cap to 10% (dynamic calculation handles most cases)
-  private maxExecutionTime = 5000; // 5 seconds max execution time
+  private minProfitThreshold = parseFloat(process.env.TRIANGULAR_MIN_PROFIT || '0.005');
+  private maxSlippage = parseFloat(process.env.SLIPPAGE_MAX || '0.10');
+  private maxExecutionTime = parseInt(process.env.TRIANGULAR_MAX_EXECUTION_TIME_MS || '5000', 10);
 
   /** T1.2: Dynamic slippage configuration */
   private slippageConfig: DynamicSlippageConfig;
@@ -288,7 +302,18 @@ export class CrossDexTriangularArbitrage {
   ): Promise<QuadrilateralOpportunity[]> {
     const opportunities: QuadrilateralOpportunity[] = [];
     const startTime = Date.now();
-    const TIMEOUT_MS = 2000; // 2 second timeout per base token
+
+    // Fix 10.2: Adaptive timeout based on pool count
+    // - Small datasets (<100 pools): 1000ms minimum
+    // - Large datasets (>500 pools): 5000ms maximum
+    // - Scaling: ~4ms per pool between min/max
+    const MIN_TIMEOUT_MS = 1000;
+    const MAX_TIMEOUT_MS = 5000;
+    const MS_PER_POOL = 4;
+    const TIMEOUT_MS = Math.min(
+      MAX_TIMEOUT_MS,
+      Math.max(MIN_TIMEOUT_MS, allPools.length * MS_PER_POOL)
+    );
 
     // Build adjacency map: token -> Set of connected tokens with liquidity
     const adjacency = this.buildAdjacencyMap(tokenPairs);
@@ -310,7 +335,12 @@ export class CrossDexTriangularArbitrage {
     for (const tokenA of sortedNeighborsA) {
       // Timeout check
       if (Date.now() - startTime > TIMEOUT_MS) {
-        logger.debug('Quadrilateral search timeout', { baseToken, found: opportunities.length });
+        logger.debug('Quadrilateral search timeout', {
+          baseToken,
+          found: opportunities.length,
+          timeoutMs: TIMEOUT_MS,
+          poolCount: allPools.length
+        });
         break;
       }
 

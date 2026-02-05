@@ -279,7 +279,8 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
           });
           return createErrorResult(
             opportunity.id,
-            `${ExecutionErrorCode.GAS_SPIKE} on ${sourceChain}: ${errorMessage}`,
+            // Fix 6.1: Use formatExecutionError for consistent error formatting
+            formatExecutionError(ExecutionErrorCode.GAS_SPIKE, `on ${sourceChain}: ${errorMessage}`),
             sourceChain,
             opportunity.buyDex || 'unknown'
           );
@@ -485,7 +486,9 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
         return createErrorResult(
           opportunity.id,
-          ExecutionErrorCode.QUOTE_EXPIRED,
+          // Fix 6.1: formatExecutionError already returns the full error message for enum values
+          // but using the helper ensures consistent pattern across the codebase
+          formatExecutionError(ExecutionErrorCode.QUOTE_EXPIRED, 'Bridge quote expired before execution'),
           sourceChain,
           opportunity.buyDex || 'unknown'
         );

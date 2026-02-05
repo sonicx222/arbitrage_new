@@ -23,21 +23,32 @@ jest.mock('../../src/logger', () => ({
 }));
 
 // Mock ethers
-jest.mock('ethers', () => ({
-  ethers: {
-    JsonRpcProvider: jest.fn().mockImplementation(() => ({
-      getFeeData: jest.fn<() => Promise<{
-        gasPrice: bigint;
-        maxFeePerGas: bigint;
-        maxPriorityFeePerGas: bigint;
-      }>>().mockResolvedValue({
-        gasPrice: BigInt(30000000000), // 30 gwei
-        maxFeePerGas: BigInt(35000000000),
-        maxPriorityFeePerGas: BigInt(2000000000)
-      })
-    }))
-  }
-}));
+// Fix: Include AbiCoder mock to prevent import errors from event-processor.ts
+// when importing from @arbitrage/core (which transitively imports event-processor)
+jest.mock('ethers', () => {
+  const mockAbiCoder = {
+    decode: jest.fn().mockReturnValue([BigInt(1000000), BigInt(2000000)]),
+    encode: jest.fn().mockReturnValue('0x')
+  };
+  return {
+    ethers: {
+      JsonRpcProvider: jest.fn().mockImplementation(() => ({
+        getFeeData: jest.fn<() => Promise<{
+          gasPrice: bigint;
+          maxFeePerGas: bigint;
+          maxPriorityFeePerGas: bigint;
+        }>>().mockResolvedValue({
+          gasPrice: BigInt(30000000000), // 30 gwei
+          maxFeePerGas: BigInt(35000000000),
+          maxPriorityFeePerGas: BigInt(2000000000)
+        })
+      })),
+      AbiCoder: {
+        defaultAbiCoder: jest.fn().mockReturnValue(mockAbiCoder)
+      }
+    }
+  };
+});
 
 // Mock config
 jest.mock('@arbitrage/config', () => ({

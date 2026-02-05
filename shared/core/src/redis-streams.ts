@@ -834,6 +834,11 @@ export class RedisStreamsClient {
  * FIX 6.1: Minimal logger interface for StreamConsumer.
  * Compatible with winston, pino, and test mock loggers.
  * Uses Record<string, unknown> for type safety and consistency with ILogger.
+ *
+ * Fix 6.2: This interface only requires `error()` to support minimal error-only loggers.
+ * For full logging capabilities, use `ILogger` from '@arbitrage/core'.
+ *
+ * @see shared/core/src/logging/types.ts - Canonical ILogger interface
  */
 export interface StreamConsumerLogger {
   error: (msg: string, ctx?: Record<string, unknown>) => void;

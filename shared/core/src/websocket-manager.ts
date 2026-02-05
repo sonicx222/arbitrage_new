@@ -243,6 +243,28 @@ export class WebSocketManager {
   /** Whether pool startup is in progress */
   private workerPoolStarting = false;
 
+  // ==========================================================================
+  // Finding 2.2 Fix: Proactive Staleness Detection via RPC Requests
+  // Enables detectDataGaps() to query eth_blockNumber without waiting for
+  // the next block event (passive detection).
+  // ==========================================================================
+
+  /** Counter for unique JSON-RPC request IDs (separate from subscription IDs) */
+  private nextRequestId = 1_000_000; // Start at 1M to avoid collision with subscription IDs
+
+  /**
+   * Pending RPC requests awaiting response.
+   * Maps request ID to { resolve, reject, timeout } for Promise-based request handling.
+   */
+  private pendingRequests: Map<number, {
+    resolve: (result: unknown) => void;
+    reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
+  }> = new Map();
+
+  /** Default timeout for RPC requests in ms */
+  private readonly rpcRequestTimeoutMs = 5000;
+
   constructor(config: WebSocketConfig) {
     this.config = {
       reconnectInterval: 1000,  // Base delay for exponential backoff
@@ -740,6 +762,18 @@ export class WebSocketManager {
       this.pendingConfirmations = null;
     }
 
+    // Finding 2.2 Fix: Clean up pending RPC requests to prevent memory leak
+    // Similar to pendingConfirmations cleanup above
+    for (const [id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      try {
+        pending.reject(new Error('WebSocket disconnected'));
+      } catch {
+        // Ignore errors during cleanup
+      }
+    }
+    this.pendingRequests.clear();
+
     // P0-2 fix: Clear handler sets to prevent memory leaks
     // P1-2 FIX: Also clear errorHandlers and eventHandlers which were previously missed
     this.messageHandlers.clear();
@@ -1023,6 +1057,21 @@ export class WebSocketManager {
       }
     }
 
+    // Finding 2.2 Fix: Handle pending RPC request responses
+    // This enables proactive staleness detection via sendRequest()
+    if (message.id !== undefined && this.pendingRequests.has(message.id)) {
+      const pending = this.pendingRequests.get(message.id)!;
+      this.pendingRequests.delete(message.id);
+      clearTimeout(pending.timeout);
+
+      if (message.error) {
+        pending.reject(new Error(message.error.message || `RPC error: ${JSON.stringify(message.error)}`));
+      } else {
+        pending.resolve(message.result);
+      }
+      // Don't return - still notify message handlers for logging/debugging
+    }
+
     // S3.3: Check for rate limit errors in JSON-RPC responses
     if (message.error && this.isRateLimitError(message.error)) {
       this.handleRateLimit(this.getCurrentUrl());
@@ -1082,6 +1131,76 @@ export class WebSocketManager {
     for (const subscription of this.subscriptions.values()) {
       this.sendSubscription(subscription);
     }
+  }
+
+  // ===========================================================================
+  // Finding 2.2 Fix: JSON-RPC Request Method for Proactive Staleness Detection
+  // ===========================================================================
+
+  /**
+   * Send a JSON-RPC request and wait for the response.
+   *
+   * Finding 2.2 Fix: Enables proactive staleness detection by allowing
+   * eth_blockNumber queries without waiting for the next block event.
+   *
+   * @param method - JSON-RPC method name (e.g., 'eth_blockNumber')
+   * @param params - Method parameters (default: [])
+   * @param timeoutMs - Request timeout in ms (default: 5000)
+   * @returns Promise resolving to the result or rejecting on error/timeout
+   *
+   * @example
+   * const blockNumber = await wsManager.sendRequest('eth_blockNumber');
+   * // Returns hex string like '0x1234567'
+   */
+  async sendRequest<T = unknown>(
+    method: string,
+    params: unknown[] = [],
+    timeoutMs: number = this.rpcRequestTimeoutMs
+  ): Promise<T> {
+    if (!this.isConnected || !this.ws) {
+      throw new Error('WebSocket not connected');
+    }
+
+    const id = this.nextRequestId++;
+
+    return new Promise<T>((resolve, reject) => {
+      // Set up timeout for the request
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`RPC request timeout: ${method} (${timeoutMs}ms)`));
+      }, timeoutMs);
+
+      // Store the pending request
+      this.pendingRequests.set(id, {
+        resolve: resolve as (result: unknown) => void,
+        reject,
+        timeout
+      });
+
+      // Send the request
+      try {
+        const message = {
+          jsonrpc: '2.0',
+          id,
+          method,
+          params
+        };
+
+        this.ws!.send(JSON.stringify(message));
+
+        // Track for budget if enabled
+        if (this.useBudgetAwareSelection) {
+          this.recordRequestForBudget(method);
+        }
+
+        this.logger.debug('Sent RPC request', { id, method });
+      } catch (error) {
+        // Clean up on send failure
+        clearTimeout(timeout);
+        this.pendingRequests.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 
   /**
@@ -1212,11 +1331,16 @@ export class WebSocketManager {
    * S3.3: Detect data gaps after reconnection.
    * Compares last known block to current block and emits 'dataGap' event if blocks were missed.
    *
-   * @experimental This method is a placeholder for future RPC integration.
-   * Currently, gap detection relies on the passive `checkForDataGap()` method
-   * which triggers when new block messages arrive.
+   * Finding 2.2 Fix: Now implements proactive staleness detection via eth_blockNumber RPC call.
+   * Previously this was a placeholder that always returned null, relying on passive detection.
    *
-   * @returns Information about any detected gap, or null if no gap (always null currently)
+   * @returns Information about any detected gap, or null if no gap/error
+   *
+   * @example
+   * const gap = await wsManager.detectDataGaps();
+   * if (gap) {
+   *   console.log(`Missed ${gap.missedBlocks} blocks (${gap.fromBlock} to ${gap.toBlock})`);
+   * }
    */
   async detectDataGaps(): Promise<{
     fromBlock: number;
@@ -1230,23 +1354,66 @@ export class WebSocketManager {
       return null;
     }
 
-    /**
-     * TODO: Implement proactive staleness detection via eth_blockNumber RPC call.
-     *
-     * Implementation requires:
-     * 1. Add pendingRequests Map<number, { resolve, reject, timeout }> for request tracking
-     * 2. Add response handler in onMessage to match JSON-RPC responses by id
-     * 3. Implement sendRequest(method, params): Promise<result> with timeout
-     * 4. Call eth_blockNumber and compare with lastKnownBlock
-     *
-     * Priority: P3 (Enhancement) - Current passive approach via checkForDataGap()
-     * works correctly, this would add proactive detection without waiting for next block.
-     *
-     * @see https://ethereum.org/en/developers/docs/apis/json-rpc/#eth_blocknumber
-     */
-    // For now, rely on checkForDataGap() which triggers on incoming block messages
-    // This passive approach detects gaps when the next block arrives
-    return null;
+    // Can't query if not connected
+    if (!this.isConnected || !this.ws) {
+      return null;
+    }
+
+    try {
+      // Finding 2.2 Fix: Proactive staleness detection via eth_blockNumber RPC
+      // This allows gap detection without waiting for the next block event
+      const result = await this.sendRequest<string>('eth_blockNumber', [], 3000);
+
+      // Parse hex block number (e.g., '0x1234567' -> 19088743)
+      const currentBlock = parseInt(result, 16);
+
+      if (isNaN(currentBlock)) {
+        this.logger.warn('Failed to parse eth_blockNumber result', { result });
+        return null;
+      }
+
+      const missedBlocks = currentBlock - lastKnownBlock - 1;
+
+      if (missedBlocks > 0) {
+        const gapInfo = {
+          fromBlock: lastKnownBlock + 1,
+          toBlock: currentBlock - 1,
+          missedBlocks
+        };
+
+        this.logger.warn('Proactive gap detection found missing blocks', {
+          chainId: this.chainId,
+          lastKnownBlock,
+          currentBlock,
+          missedBlocks
+        });
+
+        // Emit the same event as passive detection for consistency
+        this.emit('dataGap', {
+          chainId: this.chainId,
+          ...gapInfo,
+          url: this.getCurrentUrl()
+        });
+
+        return gapInfo;
+      }
+
+      // No gap - we're up to date
+      // Update last known block if current is newer
+      if (currentBlock > lastKnownBlock) {
+        this.qualityMetrics.lastBlockNumber = currentBlock;
+        this.healthScorer.recordBlock(this.getCurrentUrl(), this.chainId, currentBlock);
+      }
+
+      return null;
+    } catch (error) {
+      // Log but don't throw - proactive detection is best-effort
+      this.logger.debug('Proactive gap detection failed (falling back to passive)', {
+        chainId: this.chainId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    }
   }
 
   /**

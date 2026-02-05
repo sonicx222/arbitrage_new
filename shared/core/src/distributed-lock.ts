@@ -21,7 +21,16 @@ import { createLogger } from './logger';
 // Types
 // =============================================================================
 
-/** Logger interface for dependency injection */
+/**
+ * Logger interface for dependency injection.
+ *
+ * Fix 6.2: This minimal interface is kept for backwards compatibility with test mocks
+ * that may not implement the full ILogger interface (e.g., missing child(), fatal()).
+ * For production code, prefer using `ILogger` from '@arbitrage/core/logging/types'.
+ *
+ * @see shared/core/src/logging/types.ts - Canonical ILogger interface
+ * @see shared/core/src/logging/testing-logger.ts - RecordingLogger, NullLogger for tests
+ */
 interface Logger {
   info: (message: string, meta?: object) => void;
   error: (message: string, meta?: object) => void;
