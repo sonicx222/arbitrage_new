@@ -27,6 +27,8 @@ import { createLogger, getPerformanceLogger, PerformanceLogger } from './logger'
 import { getRedisClient, RedisClient } from './redis';
 import { getRedisStreamsClient, RedisStreamsClient } from './redis-streams';
 import { WebSocketManager, WebSocketConfig, WebSocketMessage } from './websocket-manager';
+// P0-1 FIX: Import LRUCache for bounded price tracking
+import { LRUCache } from './data-structures';
 import {
   CHAINS,
   CORE_TOKENS,
@@ -180,7 +182,11 @@ export class PartitionedDetector extends EventEmitter {
   protected chainConfigs: Map<string, typeof CHAINS[keyof typeof CHAINS]> = new Map();
 
   // Cross-chain price tracking
-  protected chainPrices: Map<string, Map<string, PricePoint>> = new Map();
+  // P0-1 FIX: Use LRUCache per chain to prevent unbounded memory growth
+  // Max 50,000 pairs per chain bounds memory at ~50MB total (11 chains x 4.5MB each)
+  // LRUCache maintains O(1) get/set while auto-evicting oldest entries
+  private static readonly MAX_PRICE_CACHE_PER_CHAIN = 50000;
+  protected chainPrices: Map<string, LRUCache<string, PricePoint>> = new Map();
 
   // Health tracking
   // P6-FIX: Add max size constant to prevent unbounded memory growth
@@ -657,7 +663,10 @@ export class PartitionedDetector extends EventEmitter {
       lastBlockTimestamp: 0
     });
 
-    this.chainPrices.set(chainId, new Map());
+    // P0-1 FIX: Use LRUCache to bound memory per chain
+    this.chainPrices.set(chainId, new LRUCache<string, PricePoint>(
+      PartitionedDetector.MAX_PRICE_CACHE_PER_CHAIN
+    ));
   }
 
   private updateChainHealth(chainId: string, status: ChainHealth['status'], wsConnected: boolean): void {

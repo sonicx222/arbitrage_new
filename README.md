@@ -40,17 +40,29 @@ The codebase has undergone a comprehensive code quality review addressing critic
 
 For detailed technical information, please refer to the specialized documentation in the `docs/` folder:
 
-### Technical Guides
-- [**System Architecture**](docs/architecture.md): Detailed microservices design and technology stack.
-- [**Deployment Guide**](docs/deployment.md): Step-by-step setup for free-tier cloud providers.
-- [**Performance Optimizations**](docs/optimizations.md): WASM engine, Matrix Caching, and multi-threading.
-- [**Trading Strategies**](docs/strategies.md): Arbitrage logic and token selection methodology.
-- [**Developer Guide**](docs/development.md): Refactoring history, roadmap, and coding standards.
+### Architecture & Design
+- [**System Architecture**](docs/architecture/ARCHITECTURE_V2.md): Comprehensive system design (v2.8)
+- [**Data Flow**](docs/architecture/DATA_FLOW.md): Visual diagrams of system data flow and processing pipelines
+- [**Current State**](docs/architecture/CURRENT_STATE.md): Service inventory and partition mapping
+- [**Architecture Decision Records**](docs/architecture/adr/README.md): 27 ADRs with rationale and confidence levels
 
-### Assessment Reports
-- [**Project Assessment**](docs/reports/assessment.md): Scorecard and critical findings.
-- [**Security Audit**](docs/reports/security_audit.md): NPM security and code hardening status.
-- [**Resilience Report**](docs/reports/resilience_report.md): Self-healing and fault tolerance analysis.
+### Developer Guides
+- [**Local Development**](docs/local-development.md): Setup guide for Windows, macOS, and Linux
+- [**Deployment Guide**](docs/deployment.md): Step-by-step setup for free-tier cloud providers
+- [**Trading Strategies**](docs/strategies.md): Arbitrage logic and token selection methodology
+- [**Code Conventions**](docs/agent/code_conventions.md): TypeScript best practices and patterns
+- [**Free Tier Reference**](docs/Free_Tiers.md): Cloud provider free tier limits and optimization
+
+### Testing & Quality
+- [**Test Architecture**](docs/architecture/TEST_ARCHITECTURE.md): Testing strategy and patterns
+- [**Manual Test Steps**](docs/MANUAL_TESTSTEPS.md): Manual testing procedures
+- [**Integration Migration Guide**](docs/testing/integration-migration-guide.md): Test consolidation guide
+
+### Reports & Research
+- [**Critical Assessment**](docs/reports/CRITICAL_ASSESSMENT_REPORT.md): System assessment and findings
+- [**Security Audit**](docs/reports/security_audit.md): NPM security and code hardening status
+- [**Flash Loan Research**](docs/research/FLASHLOAN_MEV_ENHANCEMENT_RESEARCH.md): MEV protection strategies
+- [**Secrets Management**](docs/security/SECRETS_MANAGEMENT.md): Security best practices
 
 ---
 
@@ -128,7 +140,7 @@ For detailed strategy documentation, see [Trading Strategies](docs/strategies.md
 ---
 
 ## 🤝 Contributing
-Please see the [Developer Guide](docs/development.md) for contribution guidelines and project roadmap.
+Please see the [Local Development Guide](docs/local-development.md) for setup instructions and the [Code Conventions](docs/agent/code_conventions.md) for coding standards.
 
 ## 📄 License
 MIT License - see [LICENSE](LICENSE) for details.

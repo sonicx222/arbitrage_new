@@ -342,6 +342,8 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
 
 ## 5. Data Flow
 
+> **See Also**: [DATA_FLOW.md](DATA_FLOW.md) for comprehensive visual diagrams of all data flows.
+
 ### 5.1 Price Update Flow (Critical Path)
 
 ```

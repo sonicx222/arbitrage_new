@@ -11,6 +11,22 @@ import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
  *
  * Provides validation functions that can be used by FlashLoanArbitrage
  * and any future arbitrage contracts.
+ *
+ * ## Current Usage Status
+ *
+ * NOTE: FlashLoanArbitrage.sol currently performs validation inline within
+ * executeArbitrage() for the following reasons:
+ * 1. Inline validation allows early revert with cheaper gas costs
+ * 2. The validation is tightly coupled with the flash loan callback flow
+ * 3. Using the library would require duplicating the SwapStep struct
+ *
+ * This library is available for:
+ * - New arbitrage contracts that want pre-packaged validation
+ * - Contracts that perform validation separately from execution
+ * - Testing and simulation utilities that need validation logic
+ *
+ * The library provides more detailed error messages (with indices and addresses)
+ * compared to the inline validation, which may be useful for debugging.
  */
 library SwapPathValidator {
     using EnumerableSet for EnumerableSet.AddressSet;

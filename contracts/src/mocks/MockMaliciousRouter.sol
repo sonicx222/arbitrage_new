@@ -66,15 +66,18 @@ contract MockMaliciousRouter {
             attackCount++;
 
             // Attempt reentrancy attack by calling executeArbitrage again
+            // Fix P1: Updated signature to match v1.2.0 which added deadline parameter
+            // The 5th parameter is deadline (uint256) - use block.timestamp + 300
             bytes memory attackData = abi.encodeWithSignature(
-                "executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256)",
+                "executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)",
                 path[0],
                 amountIn,
                 new bytes(0), // Empty swap path
-                0
+                0,            // minProfit
+                block.timestamp + 300  // deadline
             );
 
-            // This should fail due to reentrancy guard
+            // This should fail due to reentrancy guard (not due to malformed calldata)
             (bool success, ) = attackTarget.call(attackData);
             require(!success, "Reentrancy attack should have failed");
         }

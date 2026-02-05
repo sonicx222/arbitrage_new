@@ -310,12 +310,17 @@ describe('FlashLoanArbitrage - Mainnet Fork Integration', function () {
       ];
 
       // Estimate gas (will revert but gives us gas estimate)
+      // Fix P2: Add deadline parameter (5th argument) required since v1.2.0
+      const block = await ethers.provider.getBlock('latest');
+      const deadline = BigInt(block!.timestamp) + 300n;
+
       try {
         const gasEstimate = await flashLoanArbitrage.executeArbitrage.estimateGas(
           MAINNET_ADDRESSES.WETH,
           flashLoanAmount,
           swapPath,
-          0n
+          0n,
+          deadline
         );
         console.log(`  Estimated gas: ${gasEstimate.toString()}`);
       } catch (error: unknown) {

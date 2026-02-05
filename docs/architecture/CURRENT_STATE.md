@@ -1,14 +1,18 @@
 # Current Architecture State
 
-**Date:** January 24, 2026
-**Version:** 1.0
-**Task:** 1.3 - Document Existing Architecture
+**Date:** February 5, 2026
+**Version:** 1.1
+**Last Updated:** 2026-02-05
 
 ---
 
 ## Overview
 
 This document provides a snapshot of the current arbitrage trading system architecture, including service inventory, partition mapping, Redis Streams topology, and health monitoring.
+
+**See Also:**
+- [Data Flow Diagrams](DATA_FLOW.md) - Visual representation of all system data flows
+- [System Architecture](ARCHITECTURE_V2.md) - Comprehensive architecture design document
 
 ---
 
@@ -184,11 +188,48 @@ ETHEREUM_WS_URL=wss://...
 
 ## Related ADRs
 
-- [ADR-002: Redis Streams](adr/ADR-002-redis-streams.md) - Message transport
-- [ADR-003: Partitioned Detectors](adr/ADR-003-partitions.md) - Partition architecture
-- [ADR-007: Failover Strategy](adr/ADR-007-failover-strategy.md) - Leader election & failover
-- [ADR-009: Test Architecture](adr/ADR-009-test-architecture.md) - Testing patterns
-- [ADR-014: Modular Detector Components](adr/ADR-014-modular-detector-components.md) - Detector refactoring
+### Core Infrastructure
+- [ADR-002: Redis Streams](adr/ADR-002.md) - Message transport
+- [ADR-003: Partitioned Detectors](adr/ADR-003.md) - Partition architecture
+- [ADR-007: Failover Strategy](adr/ADR-007.md) - Leader election & failover
+
+### Performance & Optimization
+- [ADR-011: Tier 1 Performance](adr/ADR-011.md) - O(1) indexing, event batching
+- [ADR-012: Worker Threads](adr/ADR-012.md) - Multi-leg path finding
+- [ADR-013: Dynamic Gas Pricing](adr/ADR-013.md) - Gas price cache
+- [ADR-022: Hot-Path Memory](adr/ADR-022.md) - Ring buffers, LRU cache
+- [ADR-023: Detector Pre-validation](adr/ADR-023.md) - Sample-based validation
+- [ADR-024: RPC Rate Limiting](adr/ADR-024.md) - Token bucket algorithm
+- [ADR-027: Nonce Pre-allocation](adr/ADR-027.md) - Nonce pool for latency
+
+### Code Architecture
+- [ADR-009: Test Architecture](adr/ADR-009.md) - Testing patterns
+- [ADR-014: Modular Detector](adr/ADR-014.md) - Component extraction
+- [ADR-015: Pino Logger](adr/ADR-015.md) - Logger with DI pattern
+- [ADR-026: Integration Tests](adr/ADR-026.md) - Test consolidation
+
+### Execution & Risk
+- [ADR-016: Transaction Simulation](adr/ADR-016.md) - Pre-flight simulation
+- [ADR-017: MEV Protection](adr/ADR-017.md) - Flashbots, Jito integration
+- [ADR-018: Circuit Breaker](adr/ADR-018.md) - Failure protection
+- [ADR-020: Flash Loan](adr/ADR-020.md) - Aave V3 integration
+- [ADR-021: Capital Risk](adr/ADR-021.md) - Kelly criterion, EV filtering
+
+### ML & Advanced
+- [ADR-025: ML Model Lifecycle](adr/ADR-025.md) - Model persistence and retraining
+
+---
+
+## Recent Architectural Changes (Since v1.0)
+
+| Date | Change | ADR |
+|------|--------|-----|
+| 2026-02-04 | Hot-path memory optimization with ring buffers | ADR-022 |
+| 2026-02-04 | Detector pre-validation at 10% sampling rate | ADR-023 |
+| 2026-02-04 | Multi-provider RPC rate limiting | ADR-024 |
+| 2026-02-04 | ML model lifecycle management | ADR-025 |
+| 2026-02-04 | Integration test consolidation (34→18 files) | ADR-026 |
+| 2026-02-04 | Nonce pre-allocation pool (5-10ms savings) | ADR-027 |
 
 ---
 
@@ -199,3 +240,4 @@ ETHEREUM_WS_URL=wss://...
   - Partition assignments change
   - Redis Streams topology changes
   - New health endpoints are added
+  - New ADRs are created

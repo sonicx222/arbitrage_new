@@ -264,8 +264,10 @@ XX% - Explanation of confidence factors
 ## Related Documents
 
 - [Architecture v2.0](../ARCHITECTURE_V2.md) - Main architecture document
+- [Current State](../CURRENT_STATE.md) - Service inventory and partition mapping
 - [Deployment Guide](../../deployment.md) - Deployment instructions
-- [Development Guide](../../development.md) - Development setup
+- [Local Development](../../local-development.md) - Development setup
+- [Code Conventions](../../agent/code_conventions.md) - Coding standards
 
 ## Change Log
 

@@ -177,7 +177,19 @@ jest.mock('@arbitrage/config', () => mockConfig);
 jest.mock('../../../config/src', () => mockConfig);
 
 // Import after mocks
-import { PartitionedDetector, PartitionedDetectorConfig, ChainHealth, PartitionHealth, PartitionedDetectorDeps, PartitionedDetectorLogger, TokenNormalizeFn, RecordingLogger } from '@arbitrage/core';
+import {
+  PartitionedDetector,
+  PartitionedDetectorConfig,
+  ChainHealth,
+  PartitionHealth,
+  PartitionedDetectorDeps,
+  PartitionedDetectorLogger,
+  TokenNormalizeFn,
+  RecordingLogger,
+  // P0-1 FIX: Import LRUCache for test setup (chainPrices now uses LRUCache)
+  LRUCache
+} from '@arbitrage/core';
+import type { PricePoint } from '@arbitrage/core';
 
 // Initialize the recording logger after imports
 recordingLogger = new RecordingLogger();
@@ -651,13 +663,14 @@ describe('PartitionedDetector', () => {
     it('should aggregate prices across chains', async () => {
       await detector.start();
 
-      // Simulate price updates
-      detector['chainPrices'].set('ethereum', new Map([
-        ['WETH_USDC', { price: 2500, timestamp: Date.now() }]
-      ]));
-      detector['chainPrices'].set('bsc', new Map([
-        ['WETH_USDC', { price: 2510, timestamp: Date.now() }]
-      ]));
+      // P0-1 FIX: Simulate price updates using LRUCache (chainPrices now uses LRUCache)
+      const ethCache = new LRUCache<string, PricePoint>(50000);
+      ethCache.set('WETH_USDC', { price: 2500, timestamp: Date.now() });
+      detector['chainPrices'].set('ethereum', ethCache);
+
+      const bscCache = new LRUCache<string, PricePoint>(50000);
+      bscCache.set('WETH_USDC', { price: 2510, timestamp: Date.now() });
+      detector['chainPrices'].set('bsc', bscCache);
 
       const prices = detector.getCrossChainPrices('WETH_USDC');
       expect(prices.size).toBe(2);
@@ -668,13 +681,14 @@ describe('PartitionedDetector', () => {
     it('should identify cross-chain price discrepancies', async () => {
       await detector.start();
 
-      // Set up price discrepancy
-      detector['chainPrices'].set('ethereum', new Map([
-        ['WETH_USDC', { price: 2500, timestamp: Date.now() }]
-      ]));
-      detector['chainPrices'].set('bsc', new Map([
-        ['WETH_USDC', { price: 2600, timestamp: Date.now() }] // 4% difference
-      ]));
+      // P0-1 FIX: Set up price discrepancy using LRUCache (chainPrices now uses LRUCache)
+      const ethCache = new LRUCache<string, PricePoint>(50000);
+      ethCache.set('WETH_USDC', { price: 2500, timestamp: Date.now() });
+      detector['chainPrices'].set('ethereum', ethCache);
+
+      const bscCache = new LRUCache<string, PricePoint>(50000);
+      bscCache.set('WETH_USDC', { price: 2600, timestamp: Date.now() }); // 4% difference
+      detector['chainPrices'].set('bsc', bscCache);
 
       const discrepancies = detector.findCrossChainDiscrepancies(0.01); // 1% threshold
       expect(discrepancies.length).toBeGreaterThan(0);

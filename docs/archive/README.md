@@ -1,8 +1,15 @@
 # Implementation Plans Archive
 
-This directory contains **completed and obsolete** implementation plans that have been superseded by `FINAL_IMPLEMENTATION_PLAN.md` in the project root.
+> **Last Updated:** 2026-02-05
 
-These files are kept for historical reference only.
+This directory contains **completed and obsolete** implementation plans. All plans have been successfully implemented and the system is now in maintenance mode.
+
+**For current work, see:**
+- [Architecture Decision Records](../architecture/adr/README.md) - Tracked decisions with status
+- [Current State](../architecture/CURRENT_STATE.md) - Service inventory and topology
+- [DECISION_LOG.md](../architecture/DECISION_LOG.md) - Operational decisions
+
+These archived files are kept for historical reference only.
 
 ## Archived Files
 
@@ -49,19 +56,29 @@ These files are kept for historical reference only.
   - Phase 2: Scaling + Performance (detection latency, Redis Streams) ✅
   - Phase 3: Reliability + Emerging Chains (11 chains target) ✅
 
-## Active Plans
+## Current Planning Approach
 
-The **only active implementation plan** is:
+All major implementation plans have been completed. The system now uses:
 
-📄 **`FINAL_IMPLEMENTATION_PLAN.md`** (project root)
+1. **Architecture Decision Records (ADRs)** for architectural changes
+   - Location: [`docs/architecture/adr/`](../architecture/adr/)
+   - 27 ADRs tracking decisions with confidence levels
+   - New features require new ADRs
 
-This consolidated plan contains:
-- All remaining open tasks
-- Priority assignments (P0/P1/P2/P3)
-- Effort estimates
-- Success metrics
-- Next immediate actions
+2. **GitHub Issues** for bug fixes and minor enhancements
+   - Use labels: `bug`, `enhancement`, `documentation`
+   - Link to relevant ADRs when applicable
 
----
+3. **DECISION_LOG.md** for operational decisions
+   - Location: [`docs/architecture/DECISION_LOG.md`](../architecture/DECISION_LOG.md)
+   - Smaller decisions not requiring full ADRs
 
-**Last Updated:** 2026-02-01
+## Completed Milestones
+
+| Milestone | Date | Plans Completed |
+|-----------|------|-----------------|
+| Phase 1: Foundation | Jan 2025 | Multi-chain (6→11 chains) |
+| Phase 2: Performance | Jan 2026 | Tier 1 optimizations, Redis Streams |
+| Phase 3: Execution | Jan 2026 | Simulation, MEV protection, circuit breaker |
+| Phase 4: Capital | Jan 2026 | Flash loans, risk management |
+| Phase 5: Optimization | Feb 2026 | Hot-path memory, nonce pools, test consolidation |

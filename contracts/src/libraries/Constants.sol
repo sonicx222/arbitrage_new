@@ -9,6 +9,20 @@ pragma solidity ^0.8.19;
  *
  * This library provides centralized constants that can be imported by
  * FlashLoanArbitrage and any future contracts in the system.
+ *
+ * ## Current Usage Status
+ *
+ * NOTE: FlashLoanArbitrage.sol currently defines these constants inline
+ * (as public constants for external visibility). This library is available
+ * for new contracts that don't need public constant visibility.
+ *
+ * When to use this library:
+ * - New contracts that need these constants internally
+ * - Contracts where gas optimization matters (internal constants save gas)
+ *
+ * When to use inline constants (like FlashLoanArbitrage):
+ * - When constants need to be readable externally via contract ABI
+ * - When constants are used as part of the contract's public interface
  */
 library Constants {
     // ==========================================================================

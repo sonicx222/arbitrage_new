@@ -78,6 +78,8 @@ import { createOpportunityPublisher, OpportunityPublisher } from './opportunity-
 import { createBridgeCostEstimator, BridgeCostEstimator } from './bridge-cost-estimator';
 // ADR-014: Import MLPredictionManager for centralized ML prediction handling
 import { createMLPredictionManager, MLPredictionManager } from './ml-prediction-manager';
+// P0-7: Import PreValidationOrchestrator for extracted pre-validation logic
+import { PreValidationOrchestrator } from './pre-validation-orchestrator';
 // TYPE-CONSOLIDATION: Import shared types from types.ts
 import {
   CrossChainOpportunity,
@@ -86,10 +88,9 @@ import {
   MLPredictionConfig,
   // FIX 7.1: Import toDisplayTokenPair for pending opportunity formatting
   toDisplayTokenPair,
-  // Phase 3: Pre-validation config for sample-based opportunity validation
+  // P0-7: Pre-validation types (config and callback used for DI)
   PreValidationConfig,
   PreValidationSimulationCallback,
-  PreValidationSimulationRequest,
 } from './types';
 
 // Phase 3: Whale Activity Tracker imports
@@ -245,13 +246,9 @@ export class CrossChainDetectorService {
   // Task 1.3.3: Counter for pending opportunities received from mempool
   private pendingOpportunitiesReceived = 0;
 
-  // Phase 3: Pre-validation state tracking
-  private preValidationBudgetUsed = 0;
-  private preValidationBudgetResetTime = 0;
-  private preValidationSuccessCount = 0;
-  private preValidationFailCount = 0;
-  // Phase 3: Simulation callback for pre-validation (injected by orchestrator)
-  private simulationCallback: PreValidationSimulationCallback | null = null;
+  // P0-7: Pre-validation delegated to PreValidationOrchestrator
+  // Extracted for SRP - see REFACTORING_IMPLEMENTATION_PLAN.md P0-7
+  private preValidationOrchestrator: PreValidationOrchestrator | null = null;
 
   // ADR-014: ML Integration now handled by MLPredictionManager module
   // REMOVED: priceHistoryCache, priceHistoryMaxLength, mlPredictionCache
@@ -273,8 +270,16 @@ export class CrossChainDetectorService {
     this.whaleConfig = this.config.whaleConfig!;
     this.mlConfig = this.config.mlConfig!;
 
-    // Phase 3: Set simulation callback for pre-validation
-    this.simulationCallback = userConfig.simulationCallback ?? null;
+    // P0-7: Initialize PreValidationOrchestrator with config and simulation callback
+    this.preValidationOrchestrator = new PreValidationOrchestrator(
+      this.config.preValidationConfig!,
+      this.logger,
+      this.config.defaultTradeSizeUsd
+    );
+    // Set simulation callback if provided
+    if (userConfig.simulationCallback) {
+      this.preValidationOrchestrator.setSimulationCallback(userConfig.simulationCallback);
+    }
 
     // FIX: Configuration validation
     this.validateConfiguration();
@@ -1850,31 +1855,19 @@ export class CrossChainDetectorService {
    * ADR-014: Publish opportunity via OpportunityPublisher module.
    * The module handles deduplication, conversion, and caching.
    *
-   * Phase 3: Added sample-based pre-validation to filter out opportunities
-   * that would fail execution. Pre-validation is optional and budget-limited.
+   * P0-7: Pre-validation logic delegated to PreValidationOrchestrator.
+   * The orchestrator handles sampling, budget management, and simulation.
    */
   private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
     if (!this.opportunityPublisher) return;
 
     try {
-      // Phase 3: Sample-based pre-validation
-      const preValidConfig = this.config.preValidationConfig;
-      if (preValidConfig?.enabled) {
-        const shouldPreValidate = await this.shouldPreValidate(opportunity, preValidConfig);
-
-        if (shouldPreValidate) {
-          const isValid = await this.preValidateOpportunity(opportunity, preValidConfig);
-          if (!isValid) {
-            this.preValidationFailCount++;
-            this.logger.debug('Opportunity failed pre-validation, skipping publish', {
-              token: opportunity.token,
-              sourceChain: opportunity.sourceChain,
-              targetChain: opportunity.targetChain,
-              netProfit: opportunity.netProfit,
-            });
-            return;
-          }
-          this.preValidationSuccessCount++;
+      // P0-7: Delegate pre-validation to orchestrator
+      if (this.preValidationOrchestrator) {
+        const result = await this.preValidationOrchestrator.validateOpportunity(opportunity);
+        if (!result.allowed) {
+          // Opportunity filtered by pre-validation
+          return;
         }
       }
 
@@ -1884,152 +1877,11 @@ export class CrossChainDetectorService {
     }
   }
 
-  /**
-   * Phase 3: Determine if an opportunity should be pre-validated.
-   *
-   * Pre-validation is sample-based to stay within rate limits.
-   * Conditions for pre-validation:
-   * 1. Sample rate check (random)
-   * 2. Profit above minimum threshold
-   * 3. Budget not exhausted
-   *
-   * @param opportunity - The opportunity to potentially validate
-   * @param config - Pre-validation configuration
-   * @returns True if opportunity should be pre-validated
-   */
-  private async shouldPreValidate(
-    opportunity: CrossChainOpportunity,
-    config: PreValidationConfig
-  ): Promise<boolean> {
-    // Check monthly budget reset
-    const now = Date.now();
-    const monthStart = new Date(now);
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthStartMs = monthStart.getTime();
-
-    if (this.preValidationBudgetResetTime < monthStartMs) {
-      // New month - reset budget
-      this.preValidationBudgetUsed = 0;
-      this.preValidationBudgetResetTime = now;
-      this.logger.info('Pre-validation budget reset for new month', {
-        budget: config.monthlyBudget,
-      });
-    }
-
-    // Check budget exhaustion
-    if (this.preValidationBudgetUsed >= config.monthlyBudget) {
-      return false;
-    }
-
-    // Check profit threshold
-    if (opportunity.netProfit < config.minProfitForValidation) {
-      return false;
-    }
-
-    // Sample rate check (random selection)
-    if (Math.random() >= config.sampleRate) {
-      return false;
-    }
-
-    return true;
-  }
+  // P0-7: Pre-validation methods extracted to PreValidationOrchestrator
+  // See pre-validation-orchestrator.ts for implementation
 
   /**
-   * Phase 3: Pre-validate an opportunity by simulating the buy transaction.
-   *
-   * Uses SimulationService to check if the opportunity would succeed.
-   * This is a lightweight check that doesn't guarantee success but filters
-   * out obviously bad opportunities (reverts, insufficient liquidity, etc.).
-   *
-   * @param opportunity - The opportunity to validate
-   * @param config - Pre-validation configuration
-   * @returns True if opportunity passes validation (or validation skipped)
-   */
-  private async preValidateOpportunity(
-    opportunity: CrossChainOpportunity,
-    config: PreValidationConfig
-  ): Promise<boolean> {
-    // Increment budget usage
-    this.preValidationBudgetUsed++;
-
-    const startTime = Date.now();
-
-    try {
-      // If no simulation callback is configured, pass through (fail-open)
-      if (!this.simulationCallback) {
-        this.logger.debug('Pre-validation skipped: no simulation callback configured', {
-          token: opportunity.token,
-          sourceChain: opportunity.sourceChain,
-          netProfit: opportunity.netProfit,
-        });
-        return true;
-      }
-
-      // Build simulation request
-      const simRequest: PreValidationSimulationRequest = {
-        chain: opportunity.sourceChain,
-        tokenPair: opportunity.token,
-        dex: opportunity.sourceDex,
-        tradeSizeUsd: opportunity.tradeSizeUsd ?? this.config.defaultTradeSizeUsd,
-        expectedPrice: opportunity.sourcePrice,
-      };
-
-      // Execute simulation with timeout
-      const simResult = await Promise.race([
-        this.simulationCallback(simRequest),
-        new Promise<null>((resolve) =>
-          setTimeout(() => resolve(null), config.maxLatencyMs)
-        ),
-      ]);
-
-      const latencyMs = Date.now() - startTime;
-
-      // Timeout - fail-open
-      if (simResult === null) {
-        this.logger.debug('Pre-validation timed out, allowing opportunity', {
-          token: opportunity.token,
-          latencyMs,
-          maxLatencyMs: config.maxLatencyMs,
-        });
-        return true;
-      }
-
-      // Log simulation result
-      this.logger.debug('Pre-validation completed', {
-        token: opportunity.token,
-        sourceChain: opportunity.sourceChain,
-        success: simResult.success,
-        wouldRevert: simResult.wouldRevert,
-        latencyMs: simResult.latencyMs,
-      });
-
-      // Track success/fail metrics
-      if (simResult.success && !simResult.wouldRevert) {
-        this.preValidationSuccessCount++;
-        return true;
-      } else {
-        this.preValidationFailCount++;
-        this.logger.info('Pre-validation rejected opportunity', {
-          token: opportunity.token,
-          sourceChain: opportunity.sourceChain,
-          reason: simResult.wouldRevert ? 'would_revert' : 'simulation_failed',
-          error: simResult.error,
-        });
-        return false;
-      }
-    } catch (error) {
-      this.logger.warn('Pre-validation failed with error, allowing opportunity', {
-        error: (error as Error).message,
-        token: opportunity.token,
-      });
-      // On error, allow the opportunity (fail-open to avoid blocking valid opportunities)
-      return true;
-    }
-  }
-
-  /**
-   * Phase 3: Get pre-validation metrics.
+   * P0-7: Get pre-validation metrics from orchestrator.
    */
   getPreValidationMetrics(): {
     budgetUsed: number;
@@ -2038,33 +1890,28 @@ export class CrossChainDetectorService {
     failCount: number;
     successRate: number;
   } {
-    const config = this.config.preValidationConfig;
-    const budget = config?.monthlyBudget ?? 0;
-    const total = this.preValidationSuccessCount + this.preValidationFailCount;
-
-    return {
-      budgetUsed: this.preValidationBudgetUsed,
-      budgetRemaining: Math.max(0, budget - this.preValidationBudgetUsed),
-      successCount: this.preValidationSuccessCount,
-      failCount: this.preValidationFailCount,
-      successRate: total > 0 ? this.preValidationSuccessCount / total : 0,
-    };
+    if (!this.preValidationOrchestrator) {
+      return {
+        budgetUsed: 0,
+        budgetRemaining: 0,
+        successCount: 0,
+        failCount: 0,
+        successRate: 0,
+      };
+    }
+    return this.preValidationOrchestrator.getMetrics();
   }
 
   /**
-   * Phase 3: Set simulation callback for pre-validation.
+   * P0-7: Set simulation callback via orchestrator.
    *
    * Allows runtime injection of simulation capability after detector initialization.
-   * The orchestrator can call this once SimulationService is ready.
+   * The orchestrator calls this once SimulationService is ready.
    *
    * @param callback - The simulation callback or null to disable
    */
   setSimulationCallback(callback: PreValidationSimulationCallback | null): void {
-    this.simulationCallback = callback;
-    this.logger.info('Pre-validation simulation callback updated', {
-      hasCallback: !!callback,
-      preValidationEnabled: this.config.preValidationConfig?.enabled ?? false,
-    });
+    this.preValidationOrchestrator?.setSimulationCallback(callback);
   }
 
   // ===========================================================================

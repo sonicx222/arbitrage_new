@@ -4,43 +4,51 @@
 // Updated 2025-01-10: Consolidated with ServiceStateManager and template method pattern
 
 import { ethers } from 'ethers';
+
+// P0-5 FIX: Import directly from source modules to avoid circular dependency
+// (base-detector.ts was imported from ./index which re-exports base-detector.ts)
+
+// Redis infrastructure
+import { RedisClient } from './redis';
+import { RedisStreamsClient, StreamBatcher } from './redis-streams';
+
+// Logging
+import { createLogger, getPerformanceLogger, PerformanceLogger } from './logger';
+import type { ServiceLogger } from './logging';
+
+// Event batching
+import { EventBatcher, BatchedEvent, createEventBatcher } from './event-batcher';
+
+// WebSocket
+import { WebSocketManager, WebSocketMessage } from './websocket-manager';
+
+// Analytics
+import { SwapEventFilter } from './analytics/swap-event-filter';
+import type { WhaleAlert, VolumeAggregate } from './analytics/swap-event-filter';
+
+// Service lifecycle
+import { ServiceStateManager, ServiceState, createServiceState } from './service-state';
+
+// Async utilities
+import { AsyncMutex } from './async/async-mutex';
+
+// Pair discovery and caching (S2.2.5)
+import { PairDiscoveryService, getPairDiscoveryService } from './pair-discovery';
+import { PairCacheService, getPairCacheService } from './caching/pair-cache';
+
+// Gas pricing
+import { getGasPriceCache, GAS_UNITS } from './caching/gas-price-cache';
+
+// Factory subscription (Task 2.1.2)
 import {
-  RedisClient,
-  createLogger,
-  getPerformanceLogger,
-  PerformanceLogger,
-  ServiceLogger,  // P0-FIX: Use consolidated ServiceLogger type
-  EventBatcher,
-  BatchedEvent,
-  createEventBatcher,
-  WebSocketManager,
-  WebSocketMessage,
-  RedisStreamsClient,
-  StreamBatcher,
-  SwapEventFilter,
-  WhaleAlert,
-  VolumeAggregate,
-  ServiceStateManager,
-  ServiceState,
-  createServiceState,
-  // P1-1 FIX: Lifecycle mutex to prevent start/stop race conditions
-  AsyncMutex,
-  // S2.2.5: Pair Discovery and Caching
-  PairDiscoveryService,
-  getPairDiscoveryService,
-  PairCacheService,
-  getPairCacheService,
-  // Phase 2: Dynamic gas pricing
-  getGasPriceCache,
-  GAS_UNITS,
-  // Task 2.1.2: Factory Subscription Service
   FactorySubscriptionService,
   createFactorySubscriptionService,
-  PairCreatedEvent,
   FactoryEventSignatures,
-  // R7 Consolidation: Use shared retry utility
-  retryWithLogging,
-} from './index';
+} from './factory-subscription';
+import type { PairCreatedEvent } from './factory-subscription';
+
+// Retry utility (R7 consolidation)
+import { retryWithLogging } from './resilience/retry-mechanism';
 // Phase 1 Refactor: Use extracted DetectorConnectionManager (MIGRATION_PLAN.md)
 // Phase 1.5 Refactor: Use extracted PairInitializationService (MIGRATION_PLAN.md)
 // R5 Refactor: Use extracted HealthMonitor and FactoryIntegration

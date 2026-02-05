@@ -168,8 +168,7 @@ interface CoordinatorConfig {
   opportunityCleanupIntervalMs?: number; // Cleanup interval (default: 10000)
   pairTtlMs?: number;              // Active pair expiry time (default: 300000)
   alertCooldownMs?: number;        // Alert cooldown duration (default: 300000)
-  // FIX: Option to disable legacy Redis polling (all services use streams now)
-  enableLegacyHealthPolling?: boolean; // Default: false (streams-only mode)
+  // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
 }
 
 // P2 FIX: Proper type for stream messages with typed data access
@@ -254,7 +253,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private startTime: number = 0;
 
   // Intervals
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+  // P0-3 FIX: healthCheckInterval REMOVED (legacy polling removed, all services use streams)
   private metricsUpdateInterval: NodeJS.Timeout | null = null;
   private leaderHeartbeatInterval: NodeJS.Timeout | null = null;
   // REFACTOR: Separate interval for opportunity cleanup to prevent race conditions
@@ -344,9 +343,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       alertCooldownMs: config?.alertCooldownMs ?? parseInt(
         process.env.ALERT_COOLDOWN_MS ||
         (process.env.NODE_ENV === 'development' ? '30000' : '300000')
-      ),
-      // FIX: Legacy polling disabled by default - all services now use streams
-      enableLegacyHealthPolling: config?.enableLegacyHealthPolling ?? (process.env.ENABLE_LEGACY_HEALTH_POLLING === 'true')
+      )
+      // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
 
     // FIX: Initialize configurable constants from config
@@ -652,10 +650,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   private async clearAllIntervals(): Promise<void> {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    // P0-3 FIX: healthCheckInterval removed (legacy polling removed)
     if (this.metricsUpdateInterval) {
       clearInterval(this.metricsUpdateInterval);
       this.metricsUpdateInterval = null;
@@ -1657,39 +1652,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
     }, 5000);
 
-    // FIX 7.1: Legacy health polling is DEPRECATED and scheduled for removal.
-    // All services now use Redis Streams (ADR-002). This code path is only kept for
-    // backward compatibility with older services that don't publish to streams yet.
-    //
-    // DEPRECATION NOTICE:
-    // - Current status: Disabled by default (enableLegacyHealthPolling: false)
-    // - Scheduled removal: Next major version
-    // - Migration: Ensure all services publish to stream:health instead of Redis keys
-    // - To verify: Check that ENABLE_LEGACY_HEALTH_POLLING is not set in any deployment
-    //
-    // @deprecated Since v2.0.0 - Will be removed in v3.0.0
-    if (this.config.enableLegacyHealthPolling) {
-      this.logger.warn('⚠️ DEPRECATED: Legacy health polling enabled. This feature will be removed in v3.0.0. Migrate to streams-only mode by setting ENABLE_LEGACY_HEALTH_POLLING=false');
-      this.healthCheckInterval = setInterval(async () => {
-        // P1-8 FIX: Use stateManager.isRunning() for consistency
-        if (!this.stateManager.isRunning() || !this.redis) return;
+    // P0-3 FIX: Legacy health polling REMOVED (was deprecated since v2.0.0)
+    // All services now use Redis Streams exclusively (ADR-002)
+    // See REFACTORING_IMPLEMENTATION_PLAN.md P0-3 for details
 
-        try {
-          const allHealth = await this.redis.getAllServiceHealth();
-          for (const [serviceName, health] of Object.entries(allHealth)) {
-            // Only update if we don't have recent stream data
-            const existing = this.serviceHealth.get(serviceName);
-            if (!existing || (Date.now() - existing.lastHeartbeat) > 30000) {
-              this.serviceHealth.set(serviceName, health as ServiceHealth);
-            }
-          }
-        } catch (error) {
-          this.logger.error('Legacy health polling failed', { error });
-        }
-      }, 10000);
-    }
-
-    // FIX P1: Use dedicated interval for cleanup operations (not tied to legacy polling)
+    // FIX P1: Use dedicated interval for cleanup operations
     // This runs regardless of legacy polling mode to ensure cleanup always happens
     // Previous bug: cleanup only ran if legacy polling was disabled due to ?? operator
     this.generalCleanupInterval = setInterval(() => {
