@@ -354,6 +354,86 @@ export function supportsFlashLoan(chainId: string): boolean {
 }
 
 // =============================================================================
+// MULTI PATH QUOTER CONFIGURATION (Tier 2 Enhancement)
+// Addresses for the MultiPathQuoter contract per chain
+// Enables batched quote fetching for 50-200ms latency reduction
+// =============================================================================
+
+/**
+ * MultiPathQuoter contract addresses per chain.
+ *
+ * @see contracts/src/MultiPathQuoter.sol
+ * @see services/execution-engine/src/services/simulation/batch-quoter.service.ts
+ *
+ * ## Deployment Status
+ * When deploying MultiPathQuoter to a new chain:
+ * 1. Deploy the contract using: npx hardhat run scripts/deploy-quoter.ts --network <chain>
+ * 2. Add the deployed address here
+ * 3. The BatchQuoterService will automatically use batched quotes instead of sequential
+ *
+ * ## Performance Impact
+ * - Without quoter: N sequential RPC calls (~50-200ms per call)
+ * - With quoter: 1 batched RPC call (~50ms total)
+ * - For 3-hop paths: 150-600ms → 50ms (3-12x improvement)
+ *
+ * ## Fallback Behavior
+ * If quoter address is not configured for a chain, BatchQuoterService
+ * automatically falls back to sequential getAmountsOut() calls.
+ * This is safe but slower.
+ */
+export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
+  // Primary chains - deploy quoter for maximum performance
+  // TODO: Update these addresses after deploying MultiPathQuoter contract
+  //
+  // Deployment command:
+  //   npx hardhat run scripts/deploy-quoter.ts --network <chain>
+  //
+  // After deployment, update the address below:
+  //   ethereum: '0x<deployed_address>',
+
+  // Mainnet deployments
+  // ethereum: '',  // Not yet deployed - uses fallback
+  // arbitrum: '',  // Not yet deployed - uses fallback
+  // base: '',      // Not yet deployed - uses fallback
+  // optimism: '',  // Not yet deployed - uses fallback
+  // polygon: '',   // Not yet deployed - uses fallback
+  // bsc: '',       // Not yet deployed - uses fallback
+  // avalanche: '', // Not yet deployed - uses fallback
+  // fantom: '',    // Not yet deployed - uses fallback
+
+  // Note: zkSync and Linea require separate contract deployment due to
+  // different EVM compatibility. See docs/deployment/l2-contracts.md
+
+  // Testnet deployments (for development/testing)
+  // sepolia: '',
+  // arbitrum_sepolia: '',
+  // base_sepolia: '',
+};
+
+/**
+ * Check if MultiPathQuoter is deployed for a chain.
+ * @param chainId - Chain identifier
+ * @returns true if quoter is deployed and configured
+ */
+export function hasMultiPathQuoter(chainId: string): boolean {
+  const address = MULTI_PATH_QUOTER_ADDRESSES[chainId.toLowerCase()];
+  return address !== undefined && address !== '' && address !== '0x0000000000000000000000000000000000000000';
+}
+
+/**
+ * Get MultiPathQuoter address for a chain.
+ * @param chainId - Chain identifier
+ * @returns Contract address or undefined if not deployed
+ */
+export function getMultiPathQuoterAddress(chainId: string): string | undefined {
+  const address = MULTI_PATH_QUOTER_ADDRESSES[chainId.toLowerCase()];
+  if (!address || address === '' || address === '0x0000000000000000000000000000000000000000') {
+    return undefined;
+  }
+  return address;
+}
+
+// =============================================================================
 // BRIDGE COST CONFIGURATION (P1-5 FIX)
 // =============================================================================
 
@@ -372,7 +452,16 @@ export interface BridgeCostConfig {
   bridge: string;
   sourceChain: string;
   targetChain: string;
-  feePercentage: number;  // In percentage (e.g., 0.06 = 0.06%)
+  /**
+   * Fee in basis points (6 = 0.06%). Use bpsToDecimal() from @arbitrage/core to convert.
+   * @example 6 bps = 0.06%, 4 bps = 0.04%, 0 bps = 0%
+   */
+  feeBps: number;
+  /**
+   * @deprecated Use `feeBps` instead. Will be removed in v2.0.0.
+   * Legacy field: feePercentage where 0.06 means 0.06%
+   */
+  feePercentage?: number;
   minFeeUsd: number;      // Minimum fee in USD
   estimatedLatencySeconds: number;
   reliability: number;    // 0-1 scale
@@ -380,105 +469,105 @@ export interface BridgeCostConfig {
 
 export const BRIDGE_COSTS: BridgeCostConfig[] = [
   // Stargate (LayerZero) - Good for stablecoins
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'bsc', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'arbitrum', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'optimism', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'polygon', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'bsc', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'base', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'ethereum', feeBps: 6, feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'optimism', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'base', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
 
   // Across Protocol - Fast with relayer model
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.04, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'optimism', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'base', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'optimism', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'polygon', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'base', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'arbitrum', targetChain: 'ethereum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'arbitrum', targetChain: 'optimism', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'optimism', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'base', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 60, reliability: 0.97 },
 
   // Native bridges (L2 -> L1 are slower)
-  { bridge: 'native', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
-  { bridge: 'native', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
-  { bridge: 'native', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
+  { bridge: 'native', sourceChain: 'arbitrum', targetChain: 'ethereum', feeBps: 0, feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
+  { bridge: 'native', sourceChain: 'optimism', targetChain: 'ethereum', feeBps: 0, feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
+  { bridge: 'native', sourceChain: 'base', targetChain: 'ethereum', feeBps: 0, feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 604800, reliability: 0.99 }, // 7 days
 
   // S3.2.1-FIX: Avalanche bridge routes (Stargate supports Avalanche)
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'avalanche', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'ethereum', feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'avalanche', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'avalanche', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'ethereum', feeBps: 6, feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'avalanche', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'avalanche', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
 
   // S3.2.2-FIX: Fantom bridge routes (Stargate supports Fantom)
-  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'fantom', feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'ethereum', feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
-  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'fantom', feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'ethereum', targetChain: 'fantom', feeBps: 6, feePercentage: 0.06, minFeeUsd: 1, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'ethereum', feeBps: 6, feePercentage: 0.06, minFeeUsd: 0.5, estimatedLatencySeconds: 180, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'fantom', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
+  { bridge: 'stargate', sourceChain: 'arbitrum', targetChain: 'fantom', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.3, estimatedLatencySeconds: 90, reliability: 0.95 },
 
   // S3.1.2-FIX: zkSync bridge routes (native bridge + Across)
-  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'zksync', feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 900, reliability: 0.99 }, // ~15 min
-  { bridge: 'native', sourceChain: 'zksync', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 86400, reliability: 0.99 }, // ~24 hours
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'zksync', feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
-  { bridge: 'across', sourceChain: 'zksync', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
+  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'zksync', feeBps: 0, feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 900, reliability: 0.99 }, // ~15 min
+  { bridge: 'native', sourceChain: 'zksync', targetChain: 'ethereum', feeBps: 0, feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 86400, reliability: 0.99 }, // ~24 hours
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'zksync', feeBps: 5, feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
+  { bridge: 'across', sourceChain: 'zksync', targetChain: 'ethereum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 2, estimatedLatencySeconds: 180, reliability: 0.96 },
 
   // S3.1.2-FIX: Linea bridge routes (native bridge + Across)
-  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'linea', feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 1200, reliability: 0.99 }, // ~20 min
-  { bridge: 'native', sourceChain: 'linea', targetChain: 'ethereum', feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 28800, reliability: 0.99 }, // ~8 hours
-  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'linea', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
-  { bridge: 'across', sourceChain: 'linea', targetChain: 'ethereum', feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'native', sourceChain: 'ethereum', targetChain: 'linea', feeBps: 0, feePercentage: 0.0, minFeeUsd: 3, estimatedLatencySeconds: 1200, reliability: 0.99 }, // ~20 min
+  { bridge: 'native', sourceChain: 'linea', targetChain: 'ethereum', feeBps: 0, feePercentage: 0.0, minFeeUsd: 5, estimatedLatencySeconds: 28800, reliability: 0.99 }, // ~8 hours
+  { bridge: 'across', sourceChain: 'ethereum', targetChain: 'linea', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
+  { bridge: 'across', sourceChain: 'linea', targetChain: 'ethereum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 2, estimatedLatencySeconds: 120, reliability: 0.97 },
 
   // S3.3.7-FIX: Solana bridge routes (Wormhole is primary Solana ↔ EVM bridge)
-  { bridge: 'wormhole', sourceChain: 'ethereum', targetChain: 'solana', feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
-  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'ethereum', feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
-  { bridge: 'wormhole', sourceChain: 'arbitrum', targetChain: 'solana', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
-  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'arbitrum', feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'ethereum', targetChain: 'solana', feeBps: 10, feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'ethereum', feeBps: 10, feePercentage: 0.1, minFeeUsd: 5, estimatedLatencySeconds: 300, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'arbitrum', targetChain: 'solana', feeBps: 8, feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
+  { bridge: 'wormhole', sourceChain: 'solana', targetChain: 'arbitrum', feeBps: 8, feePercentage: 0.08, minFeeUsd: 3, estimatedLatencySeconds: 240, reliability: 0.92 },
 
   // Phase 4: Connext bridge routes (liquidity network + optimistic messaging)
   // Data source: https://bridge.connext.network/ - 0.03-0.05% fee, 60-120s latency
   // Connext uses a hub-and-spoke model with liquidity pools and fast path for common routes
   // Research impact: +5-8% more cross-chain opportunities
-  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'bsc', feePercentage: 0.04, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.95 },
-  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'base', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'arbitrum', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'polygon', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'base', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'arbitrum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'optimism', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
-  { bridge: 'connext', sourceChain: 'base', targetChain: 'arbitrum', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
-  { bridge: 'connext', sourceChain: 'base', targetChain: 'optimism', feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'optimism', feeBps: 3, feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'polygon', feeBps: 3, feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'bsc', feeBps: 4, feePercentage: 0.04, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.95 },
+  { bridge: 'connext', sourceChain: 'ethereum', targetChain: 'base', feeBps: 3, feePercentage: 0.03, minFeeUsd: 1, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'ethereum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'optimism', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'polygon', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'arbitrum', targetChain: 'base', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'ethereum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'polygon', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'optimism', targetChain: 'base', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'ethereum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'polygon', targetChain: 'optimism', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'ethereum', feeBps: 3, feePercentage: 0.03, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.96 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'arbitrum', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
+  { bridge: 'connext', sourceChain: 'base', targetChain: 'optimism', feeBps: 3, feePercentage: 0.025, minFeeUsd: 0.3, estimatedLatencySeconds: 60, reliability: 0.97 },
 
   // Phase 3: Hyperlane bridge routes (permissionless interoperability)
   // Data source: https://www.hyperlane.xyz/ - 0.05% fee, 100-300s latency
   // Hyperlane supports interchain messaging with customizable security modules
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'arbitrum', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'optimism', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'polygon', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 150, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'base', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'avalanche', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'bsc', feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'polygon', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'base', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'optimism', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'ethereum', feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 150, reliability: 0.94 },
-  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'arbitrum', feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'arbitrum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'optimism', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'polygon', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 150, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'base', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'avalanche', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'ethereum', targetChain: 'bsc', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1.5, estimatedLatencySeconds: 180, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'ethereum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'optimism', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'base', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'arbitrum', targetChain: 'polygon', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'ethereum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'optimism', targetChain: 'base', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'ethereum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 120, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'base', targetChain: 'optimism', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 90, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'ethereum', feeBps: 5, feePercentage: 0.05, minFeeUsd: 1, estimatedLatencySeconds: 150, reliability: 0.94 },
+  { bridge: 'hyperlane', sourceChain: 'polygon', targetChain: 'arbitrum', feeBps: 4, feePercentage: 0.04, minFeeUsd: 0.5, estimatedLatencySeconds: 120, reliability: 0.94 },
 ];
 
 // =============================================================================
@@ -517,7 +606,7 @@ for (const config of BRIDGE_COSTS) {
 
   // Track best (lowest fee) bridge per route
   const currentBest = BEST_BRIDGE_BY_ROUTE.get(routeKey);
-  if (!currentBest || config.feePercentage < currentBest.feePercentage) {
+  if (!currentBest || config.feeBps < currentBest.feeBps) {
     BEST_BRIDGE_BY_ROUTE.set(routeKey, config);
   }
 }
@@ -571,7 +660,8 @@ export function calculateBridgeCostUsd(
   const config = getBridgeCost(sourceChain, targetChain, bridge);
   if (!config) return undefined;
 
-  const percentageFee = amountUsd * (config.feePercentage / 100);
+  // Convert feeBps to decimal: 6 bps = 0.06% = 0.0006
+  const percentageFee = amountUsd * (config.feeBps / 10000);
   const fee = Math.max(percentageFee, config.minFeeUsd);
 
   return {
@@ -718,9 +808,9 @@ export function selectOptimalBridge(
   let minCost = Infinity;
   let maxCost = 0;
 
-  // Calculate actual costs for each bridge
+  // Calculate actual costs for each bridge (feeBps / 10000 to get decimal)
   const bridgeCosts = options.map(opt => {
-    const percentageFee = tradeSizeUsd * (opt.feePercentage / 100);
+    const percentageFee = tradeSizeUsd * (opt.feeBps / 10000);
     return Math.max(percentageFee, opt.minFeeUsd);
   });
 
@@ -825,7 +915,7 @@ export function selectOptimalBridgeFast(
   let maxCost = 0;
 
   for (const opt of options) {
-    const percentageFee = tradeSizeUsd * (opt.feePercentage / 100);
+    const percentageFee = tradeSizeUsd * (opt.feeBps / 10000);
     const cost = Math.max(percentageFee, opt.minFeeUsd);
     bridgeCosts.push(cost);
 

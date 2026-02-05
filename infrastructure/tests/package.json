@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Infrastructure configuration tests for Phase 3 multi-region deployment",
   "scripts": {
+    "build": "echo 'No build needed for infrastructure tests'",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"

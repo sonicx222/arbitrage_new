@@ -276,7 +276,7 @@ describe('Service Config Module', () => {
         expect(cost.bridge).toBeDefined();
         expect(cost.sourceChain).toBeDefined();
         expect(cost.targetChain).toBeDefined();
-        expect(typeof cost.feePercentage).toBe('number');
+        expect(typeof cost.feeBps).toBe('number');
         expect(typeof cost.minFeeUsd).toBe('number');
         expect(typeof cost.estimatedLatencySeconds).toBe('number');
         expect(typeof cost.reliability).toBe('number');
@@ -298,7 +298,7 @@ describe('Service Config Module', () => {
     it('should return bridge cost for valid route', () => {
       const cost = getBridgeCost('ethereum', 'arbitrum');
       expect(cost).toBeDefined();
-      expect(cost!.feePercentage).toBeGreaterThanOrEqual(0);
+      expect(cost!.feeBps).toBeGreaterThanOrEqual(0);
     });
 
     it('should return undefined for invalid route', () => {
@@ -321,8 +321,8 @@ describe('Service Config Module', () => {
       const all = getAllBridgeOptions('ethereum', 'arbitrum');
 
       if (all.length > 1) {
-        const lowestFee = Math.min(...all.map((b: { feePercentage: number }) => b.feePercentage));
-        expect(best!.feePercentage).toBe(lowestFee);
+        const lowestFee = Math.min(...all.map((b: { feeBps: number }) => b.feeBps));
+        expect(best!.feeBps).toBe(lowestFee);
       }
     });
 

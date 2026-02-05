@@ -1,6 +1,6 @@
 # Architecture Design v2.0 - Professional Multi-Chain Arbitrage System
 
-> **Document Version:** 2.7
+> **Document Version:** 2.8
 > **Last Updated:** 2026-02-04
 > **Status:** Approved for Implementation
 > **Authors:** Architecture Analysis Session
@@ -169,6 +169,7 @@ The architecture combines two patterns:
 │  ├── Chain Detector Partition 2 (L2-Fast: Arbitrum, Optimism, Base)             │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
 │  ├── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
+│  ├── Mempool Detector (bloXroute BDN: Pre-block arbitrage)                      │
 │  └── Factory Subscription Manager (ADR-019: 40x RPC reduction) ✅ NEW           │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
@@ -252,6 +253,47 @@ Solana requires a dedicated partition due to fundamental architectural differenc
 
 **Solana Tokens (15 tokens)**:
 SOL, USDC, USDT, JUP, RAY, ORCA, BONK, WIF, JTO, PYTH, mSOL, jitoSOL, BSOL, W, MNDE
+
+### 4.2.2 Mempool Detector (Pre-Block Arbitrage)
+
+The Mempool Detector service provides **pre-block arbitrage detection** by monitoring pending transactions before they are included in blocks.
+
+| Aspect | Details |
+|--------|---------|
+| **Port** | 3007 |
+| **Purpose** | Detect arbitrage opportunities from pending transactions |
+| **Data Source** | bloXroute BDN (Blockchain Distribution Network) |
+| **Supported Chains** | Ethereum, BSC (configurable) |
+| **Output Stream** | `stream:pending-opportunities` |
+
+**Key Features**:
+- **bloXroute Integration**: Connects to bloXroute BDN WebSocket feed for real-time pending transaction data
+- **Swap Decoder**: Decodes DEX router calls (UniswapV2/V3, PancakeSwap, etc.) to extract swap intents
+- **High Performance**: O(1) latency tracking with circular buffers, sub-millisecond decode times
+- **Backpressure Protection**: Circular buffer with configurable size to prevent memory overflow
+- **Batched Publishing**: Efficient Redis Streams publishing with configurable batch size/timeout
+- **Health Monitoring**: HTTP endpoints for health checks, readiness, and statistics
+
+**Architecture**:
+```
+bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
+                                       ↓
+                              PendingSwapIntent
+                                       ↓
+                         Cross-Chain Detector (consumer)
+```
+
+**Configuration**:
+- `MEMPOOL_CONFIG.enabled`: Enable/disable mempool detection
+- `MEMPOOL_CONFIG.bloxroute.enabled`: Enable bloXroute feed
+- `MEMPOOL_CONFIG.filters.minSwapSizeUsd`: Minimum swap size (default: $1000)
+- `MEMPOOL_CONFIG.service.maxBufferSize`: Transaction buffer size (default: 10000)
+- `MEMPOOL_CONFIG.service.batchSize`: Redis publishing batch size (default: 100)
+
+**Use Case**: Detect large pending swaps before block inclusion, allowing the system to:
+1. Front-run arbitrage opportunities with MEV protection
+2. Predict price impact before transactions execute
+3. Optimize trade timing based on mempool activity
 
 ### 4.3 Event Processing Strategy
 
@@ -869,28 +911,36 @@ The following Architecture Decision Records document key decisions:
 - [ADR-007: Cross-Region Failover](./adr/ADR-007-failover-strategy.md)
 - [ADR-008: Chain/DEX/Token Selection](./adr/ADR-008-chain-dex-token-selection.md)
 
-### Extended Architecture (ADR-009 to ADR-015)
+### Testing & Operations (ADR-009, ADR-026)
 - [ADR-009: Test Architecture](./adr/ADR-009-test-architecture.md)
+- [ADR-026: Integration Test Consolidation](./adr/ADR-026-integration-test-consolidation.md)
+
+### Connection & Performance (ADR-010 to ADR-013)
 - [ADR-010: WebSocket Connection Resilience](./adr/ADR-010-websocket-resilience.md)
+- [ADR-011: Tier 1 Performance Optimizations](./adr/ADR-011-tier1-optimizations.md)
+- [ADR-012: Worker Thread Multi-Leg Path Finding](./adr/ADR-012-worker-thread-path-finding.md)
+- [ADR-013: Dynamic Gas Price Cache](./adr/ADR-013-dynamic-gas-pricing.md)
+
+### Code Architecture (ADR-014, ADR-015)
 - [ADR-014: Modular Detector Components](./adr/ADR-014-modular-detector-components.md)
 - [ADR-015: Pino Logger Migration](./adr/ADR-015-pino-logger-migration.md)
 
-### Phase 1-3 Enhancements (ADR-016 to ADR-020)
+### Execution Reliability - Phase 1 (ADR-016 to ADR-018)
 - [ADR-016: Transaction Simulation Integration](./adr/ADR-016-transaction-simulation.md)
 - [ADR-017: MEV Protection Enhancement](./adr/ADR-017-mev-protection.md)
 - [ADR-018: Execution Circuit Breaker](./adr/ADR-018-circuit-breaker.md)
+
+### Detection & Capital - Phase 2-3 (ADR-019 to ADR-021)
 - [ADR-019: Factory-Level Event Subscriptions](./adr/ADR-019-factory-subscriptions.md)
 - [ADR-020: Flash Loan Integration](./adr/ADR-020-flash-loan.md)
+- [ADR-021: Capital Risk Management](./adr/ADR-021-capital-risk-management.md)
 
-### Phase 4 Performance Optimization (ADR-022+)
+### Performance Optimization - Phase 4 (ADR-022 to ADR-027)
 - [ADR-022: Hot-Path Memory Optimization](./adr/ADR-022-hot-path-memory-optimization.md)
-
-### RPC & ML Optimizations (ADR-024, ADR-025)
-- [ADR-024: RPC Rate Limiting Strategy](./adr/ADR-024-rpc-rate-limiting.md) - Token bucket rate limiting with hot-path exemptions
-- [ADR-025: ML Model Lifecycle Management](./adr/ADR-025-ml-model-lifecycle.md) - Model persistence, warmup, and staleness detection
-
-### Simulation Enhancements (ADR-023) ✅ NEW
-- [ADR-023: Detector Pre-validation](./adr/ADR-023-detector-prevalidation.md) - Sample-based opportunity validation before publishing
+- [ADR-023: Detector Pre-validation](./adr/ADR-023-detector-prevalidation.md)
+- [ADR-024: RPC Rate Limiting Strategy](./adr/ADR-024-rpc-rate-limiting.md)
+- [ADR-025: ML Model Lifecycle Management](./adr/ADR-025-ml-model-lifecycle.md)
+- [ADR-027: Nonce Pre-allocation Pool](./adr/ADR-027-nonce-preallocation-pool.md)
 
 ---
 
@@ -907,6 +957,7 @@ The following Architecture Decision Records document key decisions:
 | 2.5 | 2026-02-04 | Bug Hunt Fixes | Added ADR-022 (hot-path memory optimization), corrected data plane diagram (no MongoDB), documented ring buffer and normalization cache patterns |
 | 2.6 | 2026-02-04 | RPC/ML ADRs | Added ADR-024 (RPC rate limiting), ADR-025 (ML model lifecycle) - documenting existing implementations from RPC_PREDICTION_OPTIMIZATION_RESEARCH.md |
 | 2.7 | 2026-02-04 | Simulation Enhancements | Added Solana simulation (HeliusProvider), detector pre-validation (ADR-023), strategy simulation enhancements |
+| 2.8 | 2026-02-04 | Documentation Update | Added Mempool Detector service (port 3007), completed ADR references (all 27 ADRs), updated service count to 9 |
 
 ---
 

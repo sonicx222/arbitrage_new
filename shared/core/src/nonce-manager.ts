@@ -47,6 +47,14 @@ interface ChainNonceState {
   lockQueue: Array<() => void>;
   /** Whether the lock is currently held */
   isLocked: boolean;
+  /**
+   * Tier 2 Enhancement: Pre-allocated nonce pool for burst submissions.
+   * Array of pre-fetched nonces ready for instant allocation.
+   * Reduces lock contention and eliminates network latency during bursts.
+   */
+  noncePool: number[];
+  /** Whether a pool replenishment is in progress */
+  isReplenishing: boolean;
 }
 
 export interface NonceManagerConfig {
@@ -56,6 +64,19 @@ export interface NonceManagerConfig {
   pendingTimeoutMs: number;
   /** Max pending transactions per chain. Default: 10 */
   maxPendingPerChain: number;
+  /**
+   * Tier 2 Enhancement: Pre-allocation pool size per chain.
+   * Pre-fetches N nonces ahead of time for instant burst submissions.
+   * Set to 0 to disable pre-allocation (default behavior).
+   * Default: 5 (provides 5 instant nonces per chain before needing network sync)
+   */
+  preAllocationPoolSize: number;
+  /**
+   * Tier 2 Enhancement: Auto-replenish threshold.
+   * When pool drops to this size, trigger background replenishment.
+   * Default: 2 (replenish when only 2 nonces remain in pool)
+   */
+  poolReplenishThreshold: number;
 }
 
 // =============================================================================
@@ -65,7 +86,10 @@ export interface NonceManagerConfig {
 const DEFAULT_CONFIG: NonceManagerConfig = {
   syncIntervalMs: 30000,
   pendingTimeoutMs: 300000,
-  maxPendingPerChain: 10
+  maxPendingPerChain: 10,
+  // Tier 2 Enhancement: Pre-allocation pool for burst submissions
+  preAllocationPoolSize: 5,
+  poolReplenishThreshold: 2,
 };
 
 // =============================================================================
@@ -92,19 +116,29 @@ export class NonceManager {
 
     // Initialize chain state
     // P0-FIX-2: Use queue-based mutex instead of simple lock
+    // Tier 2: Initialize empty nonce pool
     this.chainStates.set(chain, {
       confirmedNonce: -1,
       pendingNonce: -1,
       lastSync: 0,
       pendingTxs: new Map(),
       lockQueue: [],
-      isLocked: false
+      isLocked: false,
+      noncePool: [],
+      isReplenishing: false,
     });
 
     logger.info('Wallet registered for nonce management', {
       chain,
       address: wallet.address.slice(0, 10) + '...'
     });
+
+    // Tier 2: Pre-fill nonce pool if enabled
+    if (this.config.preAllocationPoolSize > 0) {
+      this.replenishNoncePool(chain).catch(error => {
+        logger.warn('Failed to pre-fill nonce pool on registration', { chain, error });
+      });
+    }
   }
 
   /**
@@ -114,6 +148,9 @@ export class NonceManager {
    * P0-FIX-2: Uses queue-based mutex to prevent race conditions.
    * The previous implementation had a TOCTOU race where multiple callers
    * could pass the lock check before any of them set the lock.
+   *
+   * Tier 2 Enhancement: Uses pre-allocated nonce pool for instant allocation
+   * during bursts, reducing lock contention and network latency.
    */
   async getNextNonce(chain: string): Promise<number> {
     const state = this.chainStates.get(chain);
@@ -121,6 +158,52 @@ export class NonceManager {
       throw new Error(`No wallet registered for chain: ${chain}`);
     }
 
+    // Tier 2: Try to get nonce from pre-allocated pool first (fast path)
+    // NOTE: The length check and shift() are NOT atomic across async boundaries.
+    // Two concurrent callers could both see length > 0, both call shift(), and one gets undefined.
+    // This is INTENTIONAL - undefined result safely falls through to standard lock path below.
+    // The trade-off is: occasional fallback vs. always acquiring lock on pool access.
+    if (this.config.preAllocationPoolSize > 0 && state.noncePool.length > 0) {
+      const pooledNonce = state.noncePool.shift();
+      if (pooledNonce !== undefined) {
+        // Track pending transaction (still need lock for pendingTxs)
+        await this.acquireLock(state);
+        try {
+          // Check max pending limit
+          if (state.pendingTxs.size >= this.config.maxPendingPerChain) {
+            // Put nonce back in pool and throw
+            state.noncePool.unshift(pooledNonce);
+            throw new Error(`Max pending transactions (${this.config.maxPendingPerChain}) reached for ${chain}`);
+          }
+
+          state.pendingTxs.set(pooledNonce, {
+            nonce: pooledNonce,
+            timestamp: Date.now(),
+            status: 'pending'
+          });
+
+          logger.debug('Nonce allocated from pool', {
+            chain,
+            nonce: pooledNonce,
+            pending: state.pendingTxs.size,
+            poolRemaining: state.noncePool.length
+          });
+
+          // Trigger background replenishment if pool is low
+          if (state.noncePool.length <= this.config.poolReplenishThreshold && !state.isReplenishing) {
+            this.replenishNoncePool(chain).catch(error => {
+              logger.warn('Failed to replenish nonce pool', { chain, error });
+            });
+          }
+
+          return pooledNonce;
+        } finally {
+          this.releaseLock(state);
+        }
+      }
+    }
+
+    // Standard path: Pool empty or disabled, allocate from pendingNonce
     // P0-FIX-2: Acquire lock using queue-based mutex
     await this.acquireLock(state);
 
@@ -149,7 +232,7 @@ export class NonceManager {
         status: 'pending'
       });
 
-      logger.debug('Nonce allocated', { chain, nonce, pending: state.pendingTxs.size });
+      logger.debug('Nonce allocated (direct)', { chain, nonce, pending: state.pendingTxs.size });
 
       return nonce;
     } finally {
@@ -201,6 +284,96 @@ export class NonceManager {
       // No waiters, release the lock
       state.isLocked = false;
     }
+  }
+
+  /**
+   * Tier 2 Enhancement: Replenish the nonce pre-allocation pool.
+   *
+   * Called automatically when:
+   * - Wallet is registered (initial fill)
+   * - Pool drops to replenishThreshold during getNextNonce()
+   *
+   * @param chain - Chain to replenish pool for
+   */
+  private async replenishNoncePool(chain: string): Promise<void> {
+    const state = this.chainStates.get(chain);
+    if (!state || state.isReplenishing) return;
+
+    // Prevent concurrent replenishment
+    state.isReplenishing = true;
+
+    try {
+      // Calculate how many nonces to pre-allocate
+      const targetSize = this.config.preAllocationPoolSize;
+      const currentSize = state.noncePool.length;
+      const needed = targetSize - currentSize;
+
+      if (needed <= 0) {
+        return; // Pool is already at target size
+      }
+
+      // Acquire lock to safely read/update pendingNonce
+      await this.acquireLock(state);
+
+      try {
+        // Ensure we have a valid base nonce
+        if (state.confirmedNonce === -1 || Date.now() - state.lastSync > this.config.syncIntervalMs) {
+          await this.syncNonce(chain);
+        }
+
+        // Allocate nonces for the pool (don't track as pending - they're reserved)
+        const newNonces: number[] = [];
+        for (let i = 0; i < needed; i++) {
+          newNonces.push(state.pendingNonce);
+          state.pendingNonce++;
+        }
+
+        // Add to pool
+        state.noncePool.push(...newNonces);
+
+        logger.info('Nonce pool replenished', {
+          chain,
+          added: needed,
+          poolSize: state.noncePool.length,
+          nextNonce: state.pendingNonce
+        });
+      } finally {
+        this.releaseLock(state);
+      }
+    } catch (error) {
+      logger.error('Failed to replenish nonce pool', {
+        chain,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      state.isReplenishing = false;
+    }
+  }
+
+  /**
+   * Tier 2 Enhancement: Get current pool status for monitoring.
+   *
+   * @param chain - Chain to check
+   * @returns Pool status or null if chain not registered
+   */
+  getPoolStatus(chain: string): { poolSize: number; isReplenishing: boolean } | null {
+    const state = this.chainStates.get(chain);
+    if (!state) return null;
+
+    return {
+      poolSize: state.noncePool.length,
+      isReplenishing: state.isReplenishing
+    };
+  }
+
+  /**
+   * Tier 2 Enhancement: Manually trigger pool replenishment.
+   * Useful for pre-warming before expected burst activity.
+   *
+   * @param chain - Chain to replenish
+   */
+  async warmPool(chain: string): Promise<void> {
+    return this.replenishNoncePool(chain);
   }
 
   /**
@@ -274,8 +447,16 @@ export class NonceManager {
     state.confirmedNonce = -1;
     state.pendingNonce = -1;
     state.lastSync = 0;
+    // Tier 2: Clear pool on reset
+    state.noncePool = [];
+    state.isReplenishing = false;
 
     await this.syncNonce(chain);
+
+    // Tier 2: Replenish pool after reset if enabled
+    if (this.config.preAllocationPoolSize > 0) {
+      await this.replenishNoncePool(chain);
+    }
 
     logger.info('Chain nonce state reset', { chain, newNonce: state.confirmedNonce });
   }
@@ -285,8 +466,16 @@ export class NonceManager {
    *
    * P0-FIX-1: pendingCount now only counts transactions with status='pending',
    * not confirmed ones that are waiting for lower nonces to advance.
+   *
+   * Tier 2: Now includes pool status for monitoring burst readiness.
    */
-  getState(chain: string): { confirmed: number; pending: number; pendingCount: number } | null {
+  getState(chain: string): {
+    confirmed: number;
+    pending: number;
+    pendingCount: number;
+    poolSize: number;
+    isReplenishing: boolean;
+  } | null {
     const state = this.chainStates.get(chain);
     if (!state) return null;
 
@@ -301,7 +490,10 @@ export class NonceManager {
     return {
       confirmed: state.confirmedNonce,
       pending: state.pendingNonce,
-      pendingCount: pendingStatusCount
+      pendingCount: pendingStatusCount,
+      // Tier 2: Pool status
+      poolSize: state.noncePool.length,
+      isReplenishing: state.isReplenishing
     };
   }
 
@@ -441,15 +633,35 @@ export function getNonceManager(config?: Partial<NonceManagerConfig>): NonceMana
 }
 
 /**
- * FIX 1.2: Simplified async version - just returns the sync version.
- * Kept for backwards compatibility, but the sync version is sufficient
- * since the constructor is synchronous.
- *
  * @deprecated Use getNonceManager() instead - the sync version is sufficient.
+ *
+ * This async wrapper exists only for backward compatibility and will be removed
+ * in the next major version. The constructor is synchronous, so there's no
+ * benefit to the async version.
+ *
+ * Migration: Replace `await getNonceManagerAsync()` with `getNonceManager()`
+ *
  * @param config - Optional configuration (only used on first call)
  * @returns Promise resolving to the singleton NonceManager instance
  */
-export async function getNonceManagerAsync(config?: Partial<NonceManagerConfig>): Promise<NonceManager> {
+let deprecationWarningLastShown = 0;
+const DEPRECATION_WARNING_THROTTLE_MS = 60000; // 1 minute between warnings
+export async function getNonceManagerAsync(
+  config?: Partial<NonceManagerConfig>
+): Promise<NonceManager> {
+  const now = Date.now();
+  // Show warning: always in development, throttled in production
+  const shouldWarn =
+    process.env.NODE_ENV !== 'production' ||
+    now - deprecationWarningLastShown > DEPRECATION_WARNING_THROTTLE_MS;
+
+  if (shouldWarn) {
+    deprecationWarningLastShown = now;
+    logger.warn(
+      'getNonceManagerAsync is deprecated. Use getNonceManager() instead. ' +
+      'This function will be removed in the next major version.'
+    );
+  }
   return getNonceManager(config);
 }
 

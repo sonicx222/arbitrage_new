@@ -178,7 +178,9 @@ export function createHealthReporter(config: HealthReporterConfig): HealthReport
     const serviceName = `unified-detector-${partitionId}`;
 
     try {
-      await streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, {
+      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
+      // MAXLEN: 1,000 (configured in STREAM_MAX_LENGTHS)
+      await streamsClient.xaddWithLimit(RedisStreamsClient.STREAMS.HEALTH, {
         // FIX 6.3: Health field naming standardization
         // 'name' is the standard field per ServiceHealth interface
         // FIX 8.1: Removed deprecated 'service' field - coordinator now uses 'name' only

@@ -148,10 +148,13 @@ export {
 
 // Batch Quoter Service (Performance Optimization - Task P1)
 // Uses MultiPathQuoter contract to batch getAmountsOut() calls
+// Tier 2 Enhancement: Auto-resolves quoter address from MULTI_PATH_QUOTER_ADDRESSES registry
 // @see contracts/src/MultiPathQuoter.sol
+// @see shared/config/src/service-config.ts MULTI_PATH_QUOTER_ADDRESSES
 export {
   BatchQuoterService,
   createBatchQuoterService,
+  createBatchQuoterForChain,  // Tier 2: Chain-aware factory with auto-resolution
   type QuoteRequest,
   type QuoteResult,
   type ArbitrageSimulationResult,

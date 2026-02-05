@@ -106,6 +106,7 @@ docker --version  # Optional: Should show Docker version
 │              ┌─────────────────────────────┐                    │
 │              │     Redis Streams :6379     │                    │
 │              │  stream:opportunities       │                    │
+│              │  stream:execution-requests  │                    │
 │              │  stream:price-updates       │                    │
 │              │  stream:swap-events         │                    │
 │              │  stream:health              │                    │
@@ -802,4 +803,5 @@ The full architecture uses approximately:
 - [Deployment Guide](./deployment.md) - Cloud deployment instructions
 - [Architecture Overview](./architecture/ARCHITECTURE_V2.md) - System design
 - [ADR-002: Redis Streams](./architecture/adr/ADR-002-redis-streams.md) - Event streaming design
-- [Test Architecture](./TEST_ARCHITECTURE.md) - Testing patterns
+- [Test Architecture](./architecture/TEST_ARCHITECTURE.md) - Testing patterns
+- [Manual Test Steps](./MANUAL_TESTSTEPS.md) - Manual testing procedures

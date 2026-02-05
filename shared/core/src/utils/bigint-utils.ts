@@ -40,6 +40,36 @@ export const DEFAULT_SCALE = 10000n;
 export const HIGH_PRECISION_SCALE = 1000000n;
 
 // =============================================================================
+// Price Bounds (Single Source of Truth)
+// =============================================================================
+
+/**
+ * Minimum safe price value for arbitrage calculations.
+ *
+ * At 1e-18:
+ * - Supports tokens with 18 decimals at extremely low prices (memecoins)
+ * - 1/price = 1e18 which is still within Number's safe range
+ * - Matches SimpleArbitrageDetector and isValidPrice() defaults
+ *
+ * @see SimpleArbitrageDetector.minSafePrice
+ * @see isValidPrice() in unified-detector/types.ts
+ */
+export const MIN_SAFE_PRICE = 1e-18;
+
+/**
+ * Maximum safe price value for arbitrage calculations.
+ *
+ * At 1e18:
+ * - Symmetric with MIN_SAFE_PRICE (1/MIN = MAX)
+ * - Prevents precision loss in floating-point calculations
+ * - Beyond this, Number precision degrades significantly
+ *
+ * @see SimpleArbitrageDetector.maxSafePrice
+ * @see isValidPrice() in unified-detector/types.ts
+ */
+export const MAX_SAFE_PRICE = 1e18;
+
+// =============================================================================
 // Fraction Conversions
 // =============================================================================
 
@@ -203,6 +233,116 @@ export function bigIntClamp(value: bigint, min: bigint, max: bigint): bigint {
  */
 export function bigIntAbs(value: bigint): bigint {
   return value < 0n ? -value : value;
+}
+
+// =============================================================================
+// Safe Division for Token Amounts
+// =============================================================================
+
+/**
+ * Maximum safe integer for precise conversion (2^53 - 1).
+ * Beyond this, Number loses precision.
+ */
+export const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * Safely convert a BigInt token amount to a human-readable number by dividing
+ * by the token's decimal places.
+ *
+ * CRITICAL: This function handles the precision loss problem when converting
+ * very large BigInt values (> 2^53) to Number. Instead of converting the raw
+ * BigInt first (which loses precision), it:
+ * 1. Performs integer division in BigInt space
+ * 2. Handles the fractional part separately
+ * 3. Only converts to Number when values are safe
+ *
+ * @param amount - Token amount as BigInt or string
+ * @param decimals - Token decimals (default: 18)
+ * @returns Human-readable number, or null if conversion would be unsafe
+ *
+ * @example
+ * // Convert 1.5 ETH (18 decimals) to number
+ * safeBigIntToDecimal(1500000000000000000n, 18) // 1.5
+ *
+ * // Very large amount that would overflow
+ * safeBigIntToDecimal(BigInt('999999999999999999999999999999999999'), 18) // null
+ */
+export function safeBigIntToDecimal(
+  amount: bigint | string,
+  decimals: number = 18
+): number | null {
+  try {
+    // Parse if string
+    const bigAmount = typeof amount === 'string' ? BigInt(amount) : amount;
+
+    // Fast path: if the raw BigInt is within safe range, direct conversion is fine
+    if (bigAmount <= MAX_SAFE_BIGINT && bigAmount >= -MAX_SAFE_BIGINT) {
+      const divisor = Math.pow(10, decimals);
+      return Number(bigAmount) / divisor;
+    }
+
+    // Slow path for large values: divide in BigInt space first
+    const divisor = 10n ** BigInt(decimals);
+
+    // Integer division in BigInt space (safe, no precision loss)
+    const integerPart = bigAmount / divisor;
+    const remainder = bigAmount % divisor;
+
+    // Check if the integer part is safe to convert
+    if (integerPart > MAX_SAFE_BIGINT || integerPart < -MAX_SAFE_BIGINT) {
+      // Value is astronomically large (> 9 quadrillion tokens)
+      // Return null to indicate unsafe conversion
+      return null;
+    }
+
+    // Convert parts to Number (both are now in safe range)
+    const intNum = Number(integerPart);
+    const fracNum = Number(remainder) / Number(divisor);
+
+    const result = intNum + fracNum;
+
+    // Final safety check
+    if (!Number.isFinite(result)) {
+      return null;
+    }
+
+    return result;
+  } catch {
+    // Invalid BigInt string or other error
+    return null;
+  }
+}
+
+/**
+ * Batch convert multiple BigInt amounts to decimals safely.
+ * Returns an object with all converted values, or null if any conversion fails.
+ *
+ * @param amounts - Object with BigInt/string values
+ * @param decimals - Token decimals for each field (or single value for all)
+ * @returns Object with converted numbers, or null if any conversion fails
+ *
+ * @example
+ * safeBigIntBatchToDecimal(
+ *   { amount0In: '1000000', amount1Out: '2000000' },
+ *   { amount0In: 6, amount1Out: 18 }
+ * )
+ */
+export function safeBigIntBatchToDecimal<K extends string>(
+  amounts: Record<K, bigint | string>,
+  decimals: Record<K, number> | number
+): Record<K, number> | null {
+  const result = {} as Record<K, number>;
+
+  for (const key of Object.keys(amounts) as K[]) {
+    const dec = typeof decimals === 'number' ? decimals : decimals[key];
+    const converted = safeBigIntToDecimal(amounts[key], dec);
+    if (converted === null) {
+      return null; // One failure means whole batch fails
+    }
+    result[key] = converted;
+  }
+
+  return result;
 }
 
 // =============================================================================

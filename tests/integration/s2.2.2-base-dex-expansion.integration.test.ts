@@ -539,11 +539,11 @@ describe('Cross-Chain DEX Configuration Consistency', () => {
     const baseDexes = getEnabledDexes('base');
     const arbitrumDexes = getEnabledDexes('arbitrum');
 
-    // All fees should be convertible
+    // All fees should be convertible (use feeBps as primary)
     [...baseDexes, ...arbitrumDexes].forEach(dex => {
-      const feePct = dexFeeToPercentage(dex.fee);
+      const feePct = dexFeeToPercentage(dex.feeBps);
       const roundTrip = percentageToBasisPoints(feePct);
-      expect(roundTrip).toBe(dex.fee);
+      expect(roundTrip).toBe(dex.feeBps);
     });
   });
 
@@ -554,7 +554,7 @@ describe('Cross-Chain DEX Configuration Consistency', () => {
 
     expect(maverick).toBeDefined();
     otherDexes.forEach(dex => {
-      expect(maverick!.fee).toBeLessThanOrEqual(dex.fee);
+      expect(maverick!.feeBps).toBeLessThanOrEqual(dex.feeBps);
     });
   });
 });

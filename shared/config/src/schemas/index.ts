@@ -309,7 +309,8 @@ export const BridgeCostConfigSchema = z.object({
   bridge: z.string().min(1, 'Bridge name is required'),
   sourceChain: z.string().min(1),
   targetChain: z.string().min(1),
-  feePercentage: z.number().min(0).max(100, 'Fee percentage cannot exceed 100%'),
+  feeBps: BasisPointsSchema.describe('Fee in basis points (6 = 0.06%)'),
+  feePercentage: z.number().min(0).max(100).optional(), // @deprecated - backward compatibility
   minFeeUsd: z.number().min(0),
   estimatedLatencySeconds: PositiveIntSchema,
   reliability: PercentageDecimalSchema.describe('Reliability score (0-1)'),

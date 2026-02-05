@@ -12,8 +12,10 @@ This document provides step-by-step manual testing procedures to verify the enti
 | P1 Asia-Fast | 3001 | `/health` | BSC, Polygon, Avalanche, Fantom detection |
 | P2 L2-Turbo | 3002 | `/health` | Arbitrum, Optimism, Base detection |
 | P3 High-Value | 3003 | `/health` | Ethereum, zkSync, Linea detection |
+| P4 Solana (optional) | 3004 | `/health` | Solana detection |
 | Execution Engine | 3005 | `/health` | Trade execution |
 | Cross-Chain | 3006 | `/health` | Cross-chain arbitrage detection |
+| Unified Detector (deprecated) | 3007 | `/health` | Legacy single-detector mode |
 
 ## Redis Streams
 
@@ -21,9 +23,12 @@ This document provides step-by-step manual testing procedures to verify the enti
 |--------|---------|
 | `stream:health` | Service heartbeats |
 | `stream:opportunities` | Detected arbitrage opportunities |
-| `stream:execution-requests` | Forwarded to execution |
+| `stream:execution-requests` | Forwarded to execution engine |
 | `stream:price-updates` | Price feed data |
 | `stream:swap-events` | Swap event data |
+| `stream:whale-alerts` | Large transaction alerts |
+| `stream:volume-aggregates` | Aggregated volume data |
+| `stream:pending-opportunities` | Pending mempool opportunities |
 
 ---
 
@@ -64,13 +69,23 @@ npm run dev:redis
 
 ### 2.2 Start All Services with Simulation
 ```bash
-# In new terminal - set simulation mode for testing
-set SIMULATION_MODE=true
-set EXECUTION_SIMULATION_MODE=true
-npm run dev:all
+# Option A: Use built-in simulation scripts (recommended)
+npm run dev:simulate:full
+
+# Option B: Set environment variables manually
+# Windows (cmd):
+set SIMULATION_MODE=true && set EXECUTION_SIMULATION_MODE=true && npm run dev:all
+
+# Linux/Mac:
+SIMULATION_MODE=true EXECUTION_SIMULATION_MODE=true npm run dev:all
+
+# Option C: Add to .env.local file:
+# SIMULATION_MODE=true
+# EXECUTION_SIMULATION_MODE=true
+# Then run: npm run dev:all
 ```
 
-**Expected:** All 6 services start, logs show "Starting..."
+**Expected:** All 6 core services start, logs show "Starting..."
 
 ### 2.3 Verify Startup
 ```bash
@@ -215,7 +230,14 @@ curl http://localhost:3000/api/metrics
 
 ### 6.1 Verify Leader Status
 ```bash
+# Windows:
 curl http://localhost:3000/api/health | findstr isLeader
+
+# Linux/Mac:
+curl http://localhost:3000/api/health | grep isLeader
+
+# Or view full response:
+curl -s http://localhost:3000/api/health | python -m json.tool
 ```
 
 **Expected:** `"isLeader": true`
@@ -241,7 +263,11 @@ curl http://localhost:3000/api/services
 
 ### 7.1 Verify Simulation Mode Active
 ```bash
+# Windows:
 curl http://localhost:3005/health | findstr simulationMode
+
+# Linux/Mac:
+curl http://localhost:3005/health | grep simulationMode
 ```
 
 **Expected:** `"simulationMode": true`
@@ -317,7 +343,14 @@ Press `Ctrl+C` in the `dev:all` terminal
 ```bash
 npm run dev:stop
 npm run dev:cleanup
+
+# Windows:
 del .redis-memory-config.json
+
+# Linux/Mac:
+rm -f .redis-memory-config.json
+
+# Then rebuild and restart:
 npm run build:clean
 npm run dev:redis:memory
 npm run dev:all
@@ -327,17 +360,21 @@ npm run dev:all
 
 ## Success Criteria
 
-- [ ] All 6 services start and show healthy status
+- [ ] All 6 core services start and show healthy status (Coordinator, P1-P3, Cross-Chain, Execution)
 - [ ] Redis streams created and receiving messages
 - [ ] Health heartbeats appearing in `stream:health`
+- [ ] Price updates appearing in `stream:price-updates` (simulation mode)
 - [ ] Coordinator is leader with valid lock
 - [ ] Dashboard displays system metrics
 - [ ] Graceful shutdown releases resources
 
+> **Note:** Optional services (P4 Solana, Unified Detector) are not started by `dev:all`
+
 ## Critical Files
 
 - `package.json` - npm scripts
+- `shared/constants/service-ports.json` - **Port configuration (single source of truth)**
 - `shared/core/src/redis-streams.ts` - Stream definitions
 - `services/coordinator/src/coordinator.ts` - Coordinator logic
-- `scripts/lib/services-config.js` - Port configuration
+- `scripts/lib/services-config.js` - Service startup configuration
 - `docs/local-development.md` - Full documentation

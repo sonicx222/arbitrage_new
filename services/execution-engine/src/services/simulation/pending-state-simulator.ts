@@ -34,6 +34,9 @@ import {
   BaseMetrics,
 } from './types';
 
+// Fee utilities - import from canonical source
+import { type UniswapV3FeeTier, VALID_V3_FEE_TIERS, v3TierToDecimal } from '@arbitrage/core';
+
 // =============================================================================
 // Default Logger (Fix 4.1)
 // =============================================================================
@@ -93,7 +96,15 @@ export interface PendingSwapIntent {
   nonce: number;
   chainId: number;
   firstSeen: number;
-  /** V3 pool fee tier (100, 500, 3000, or 10000). Defaults to 3000 (0.3%) */
+  /**
+   * Uniswap V3 pool fee tier. Valid values: 100, 500, 3000, 10000.
+   * Use v3TierToDecimal() from @arbitrage/core to convert to decimal.
+   * @example 3000 = 0.3% (most common for volatile pairs)
+   */
+  feeTier?: UniswapV3FeeTier;
+  /**
+   * @deprecated Use `feeTier` instead. Will be removed in v2.0.0.
+   */
   fee?: number;
   /** Whether this is a native ETH input swap (requires msg.value) */
   isNativeInput?: boolean;
@@ -957,8 +968,8 @@ export class PendingStateSimulator {
     const amountOutMin = intent.expectedAmountOut -
       (intent.expectedAmountOut * BigInt(Math.floor(intent.slippageTolerance * 10000))) / 10000n;
 
-    // Use fee from intent, default to 3000 (0.3%) if not specified
-    const fee = intent.fee ?? 3000;
+    // Use feeTier from intent, fall back to legacy fee, default to 3000 (0.3%)
+    const fee = intent.feeTier ?? intent.fee ?? 3000;
 
     // Fix 7.3: Check if this is a multi-hop swap (path length > 2)
     if (intent.path.length > 2) {

@@ -24,13 +24,23 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-008](./ADR-008-chain-dex-token-selection.md) | Chain/DEX/Token Selection Strategy | Accepted | 2025-01-10 | 92% |
 | [ADR-009](./ADR-009-test-architecture.md) | Test Architecture | Accepted | 2025-01-12 | 90% |
 | [ADR-010](./ADR-010-websocket-resilience.md) | WebSocket Connection Resilience | Accepted | 2026-01-15 | 95% |
+| [ADR-011](./ADR-011-tier1-optimizations.md) | Tier 1 Performance Optimizations | Accepted | 2026-01-15 | 95% |
+| [ADR-012](./ADR-012-worker-thread-path-finding.md) | Worker Thread Multi-Leg Path Finding | Accepted | 2026-01-16 | 90% |
+| [ADR-013](./ADR-013-dynamic-gas-pricing.md) | Dynamic Gas Price Cache | Accepted | 2026-01-16 | 92% |
 | [ADR-014](./ADR-014-modular-detector-components.md) | Modular Detector Components | Accepted | 2026-01-18 | 92% |
+| [ADR-015](./ADR-015-pino-logger-migration.md) | Pino Logger Migration with DI Pattern | Accepted | 2026-01-19 | 92% |
 | [ADR-016](./ADR-016-transaction-simulation.md) | Transaction Simulation Integration | Accepted | 2026-01-22 | 92% |
 | [ADR-017](./ADR-017-mev-protection.md) | MEV Protection Enhancement | Accepted | 2026-01-23 | 90% |
 | [ADR-018](./ADR-018-circuit-breaker.md) | Execution Circuit Breaker | Accepted | 2026-01-23 | 95% |
 | [ADR-019](./ADR-019-factory-subscriptions.md) | Factory-Level Event Subscriptions | Accepted | 2026-01-23 | 92% |
 | [ADR-020](./ADR-020-flash-loan.md) | Flash Loan Integration | Accepted | 2026-01-24 | 85% |
+| [ADR-021](./ADR-021-capital-risk-management.md) | Capital Risk Management | Accepted | 2026-01-27 | 90% |
 | [ADR-022](./ADR-022-hot-path-memory-optimization.md) | Hot-Path Memory Optimization | Accepted | 2026-02-04 | 95% |
+| [ADR-023](./ADR-023-detector-prevalidation.md) | Detector Pre-validation | Accepted | 2026-02-04 | 92% |
+| [ADR-024](./ADR-024-rpc-rate-limiting.md) | RPC Rate Limiting Strategy | Accepted | 2026-02-04 | 90% |
+| [ADR-025](./ADR-025-ml-model-lifecycle.md) | ML Model Lifecycle Management | Accepted | 2026-02-04 | 88% |
+| [ADR-026](./ADR-026-integration-test-consolidation.md) | Integration Test Consolidation | Accepted | 2026-02-04 | 95% |
+| [ADR-027](./ADR-027-nonce-preallocation-pool.md) | Nonce Pre-allocation Pool | Accepted | 2026-02-04 | 90% |
 
 ## Decision Summary
 
@@ -94,51 +104,115 @@ An Architecture Decision Record captures an important architectural decision mad
    - Health-based provider selection
    - Proactive staleness detection
 
+### Performance Optimization (Tier 1)
+
+10. **Tier 1 Performance Optimizations** (ADR-011)
+    - O(1) token pair indexing (100-1000x speedup)
+    - Dynamic slippage calculation based on liquidity
+    - Event batching optimization (5ms from 25ms)
+    - LRU cache with O(1) operations
+    - Chain-specific staleness thresholds
+
+11. **Worker Thread Path Finding** (ADR-012)
+    - Offload CPU-intensive DFS to worker threads
+    - Non-blocking multi-leg arbitrage discovery
+    - Prevents event loop blocking
+
+12. **Dynamic Gas Pricing** (ADR-013)
+    - Real-time gas price cache per chain
+    - Accurate profitability calculations
+    - 30s refresh cycle with Redis fallback
+
 ### Code Architecture
 
-10. **Modular Detector Components** (ADR-014)
+13. **Modular Detector Components** (ADR-014)
     - ChainInstanceManager for lifecycle management
     - HealthReporter for health monitoring
     - MetricsCollector for metrics logging
     - Factory functions for dependency injection
 
+14. **Pino Logger Migration** (ADR-015)
+    - Migration from Winston to Pino (2-5ms latency reduction)
+    - Dependency injection pattern for testing
+    - Structured logging with performance optimization
+
 ### Execution Reliability (Phase 1)
 
-11. **Transaction Simulation** (ADR-016)
+15. **Transaction Simulation** (ADR-016)
     - Pre-flight simulation via Tenderly/Alchemy
     - 30%+ reduction in failed transactions
     - Configurable threshold and bypass options
 
-12. **MEV Protection Enhancement** (ADR-017)
+16. **MEV Protection Enhancement** (ADR-017)
     - Chain-aware MEV providers (Flashbots, Jito, L2)
     - MEV risk analyzer with recommendations
     - Jito bundles for Solana protection
 
-13. **Execution Circuit Breaker** (ADR-018)
+17. **Execution Circuit Breaker** (ADR-018)
     - Consecutive failure protection
     - Automatic recovery with HALF_OPEN testing
     - API controls for manual override
 
 ### Detection Optimization (Phase 2)
 
-14. **Factory-Level Event Subscriptions** (ADR-019)
+18. **Factory-Level Event Subscriptions** (ADR-019)
     - 40x subscription reduction
     - Subscribe to ~25 factories vs 1000+ pairs
     - Dynamic pair discovery
 
 ### Capital Efficiency (Phase 3)
 
-15. **Flash Loan Integration** (ADR-020)
+19. **Flash Loan Integration** (ADR-020)
     - Aave V3 flash loans (0.09% fee)
     - Zero-capital arbitrage
     - Custom FlashLoanArbitrage.sol contract
 
+20. **Capital Risk Management** (ADR-021)
+    - Daily loss limits and circuit breakers
+    - Kelly Criterion position sizing
+    - Expected value filtering for trades
+    - Risk-adjusted opportunity scoring
+
 ### Performance Optimization (Phase 4)
 
-16. **Hot-Path Memory Optimization** (ADR-022)
+21. **Hot-Path Memory Optimization** (ADR-022)
     - Ring buffer for event latencies (zero allocation)
     - LRU cache for normalized token pairs
     - 99% reduction in hot-path memory churn
+
+22. **Detector Pre-validation** (ADR-023)
+    - Sample-based validation at detector level
+    - 10% sampling rate to stay within rate limits
+    - Filters out opportunities that would fail execution
+    - Reduces wasted gas and simulation costs
+
+23. **RPC Rate Limiting Strategy** (ADR-024)
+    - Token bucket algorithm per provider
+    - Multi-provider fallback chains
+    - Graceful degradation under rate limits
+    - Monitoring and alerting for quota usage
+
+24. **ML Model Lifecycle Management** (ADR-025)
+    - Model persistence and versioning
+    - Lazy loading with performance monitoring
+    - Automatic retraining pipeline
+    - Model performance tracking
+
+### Test Architecture (Phase 4)
+
+25. **Integration Test Consolidation** (ADR-026)
+    - Consolidated 34 files to 18 (47% reduction)
+    - Removed 90%+ duplicate code
+    - Clear unit vs integration test separation
+    - Real in-memory Redis for all integration tests
+
+### Execution Performance (Phase 4)
+
+26. **Nonce Pre-allocation Pool** (ADR-027)
+    - Pre-allocates nonces to eliminate sync latency
+    - 5-10ms latency reduction during bursts
+    - Background replenishment at threshold
+    - Configurable pool size (default: 5)
 
 ## How to Use These ADRs
 

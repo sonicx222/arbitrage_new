@@ -172,7 +172,8 @@ const CHAIN_TEST_DATA: ChainTestData[] = [
         router: '0x1A05EB736873485655F29a37DEf8a0AA87F5a447'
       },
       beethoven_x: {
-        factory: '0x60467cb225092cE0c989361934311175f437Cf53',
+        // Beethoven X uses Balancer V2 Vault model: factory=vault=router
+        factory: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',
         router: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce'
       }
     },

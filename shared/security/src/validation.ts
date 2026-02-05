@@ -17,7 +17,7 @@ const SUPPORTED_CHAINS = ['ethereum', 'bsc', 'arbitrum', 'base', 'polygon', 'opt
 type SupportedChain = typeof SUPPORTED_CHAINS[number];
 
 // Arbitrage opportunity validation
-export const validateArbitrageRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateArbitrageRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     // P0-4 FIX: Use centralized SUPPORTED_CHAINS
     sourceChain: Joi.string().valid(...SUPPORTED_CHAINS).required(),
@@ -37,11 +37,12 @@ export const validateArbitrageRequest = (req: Request, res: Response, next: Next
       error: error.details[0].message,
       body: req.body
     });
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message,
       field: error.details[0].path.join('.')
     });
+    return;
   }
 
   req.body = value; // Use validated/sanitized data
@@ -49,7 +50,7 @@ export const validateArbitrageRequest = (req: Request, res: Response, next: Next
 };
 
 // Health check validation
-export const validateHealthRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateHealthRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     service: Joi.string().min(1).max(100).optional(),
     detailed: Joi.boolean().default(false)
@@ -58,10 +59,11 @@ export const validateHealthRequest = (req: Request, res: Response, next: NextFun
   const { error, value } = schema.validate(req.query);
 
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message
     });
+    return;
   }
 
   req.query = value;
@@ -69,7 +71,7 @@ export const validateHealthRequest = (req: Request, res: Response, next: NextFun
 };
 
 // Metrics request validation
-export const validateMetricsRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateMetricsRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     service: Joi.string().min(1).max(100).required(),
     startTime: Joi.date().iso().optional(),
@@ -83,10 +85,11 @@ export const validateMetricsRequest = (req: Request, res: Response, next: NextFu
   const { error, value } = schema.validate(req.query);
 
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message
     });
+    return;
   }
 
   req.query = value;
@@ -94,7 +97,7 @@ export const validateMetricsRequest = (req: Request, res: Response, next: NextFu
 };
 
 // Configuration update validation
-export const validateConfigUpdate = (req: Request, res: Response, next: NextFunction) => {
+export const validateConfigUpdate = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     service: Joi.string().min(1).max(100).required(),
     config: Joi.object({
@@ -115,10 +118,11 @@ export const validateConfigUpdate = (req: Request, res: Response, next: NextFunc
       error: error.details[0].message,
       body: req.body
     });
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message
     });
+    return;
   }
 
   req.body = value;
@@ -126,7 +130,7 @@ export const validateConfigUpdate = (req: Request, res: Response, next: NextFunc
 };
 
 // Authentication request validation
-export const validateLoginRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateLoginRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     username: Joi.string().min(3).max(50).required(),
     password: Joi.string().min(1).required() // Length check done in service
@@ -135,17 +139,18 @@ export const validateLoginRequest = (req: Request, res: Response, next: NextFunc
   const { error, value } = schema.validate(req.body);
 
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message
     });
+    return;
   }
 
   req.body = value;
   next();
 };
 
-export const validateRegisterRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateRegisterRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     username: Joi.string().min(3).max(50).required(),
     email: Joi.string().email().required(),
@@ -155,10 +160,11 @@ export const validateRegisterRequest = (req: Request, res: Response, next: NextF
   const { error, value } = schema.validate(req.body);
 
   if (error) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       message: error.details[0].message
     });
+    return;
   }
 
   req.body = value;
@@ -166,7 +172,7 @@ export const validateRegisterRequest = (req: Request, res: Response, next: NextF
 };
 
 // Webhook validation for external integrations
-export const validateWebhookRequest = (req: Request, res: Response, next: NextFunction) => {
+export const validateWebhookRequest = (req: Request, res: Response, next: NextFunction): void => {
   const schema = Joi.object({
     event: Joi.string().valid('arbitrage_opportunity', 'price_update', 'error').required(),
     data: Joi.object().required(),
@@ -181,10 +187,11 @@ export const validateWebhookRequest = (req: Request, res: Response, next: NextFu
       error: error.details[0].message,
       ip: req.ip
     });
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Invalid webhook payload',
       message: error.details[0].message
     });
+    return;
   }
 
   // Verify webhook signature if provided
@@ -193,16 +200,18 @@ export const validateWebhookRequest = (req: Request, res: Response, next: NextFu
     const webhookSecret = process.env.WEBHOOK_SECRET;
     if (!webhookSecret) {
       logger.error('Webhook signature provided but WEBHOOK_SECRET not configured');
-      return res.status(500).json({
+      res.status(500).json({
         error: 'Webhook signature verification not configured'
       });
+      return;
     }
     const expectedSignature = generateWebhookSignature(value, webhookSecret);
     if (expectedSignature !== value.signature) {
       logger.warn('Webhook signature verification failed', { ip: req.ip });
-      return res.status(401).json({
+      res.status(401).json({
         error: 'Invalid webhook signature'
       });
+      return;
     }
   }
 

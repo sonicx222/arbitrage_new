@@ -10,6 +10,7 @@
 
 import { ethers } from 'ethers';
 import { type Logger, createServiceLogger } from '../../types';
+import { getMultiPathQuoterAddress } from '@arbitrage/config';
 
 // =============================================================================
 // Types
@@ -59,7 +60,13 @@ export interface ArbitrageSimulationResult {
 export interface BatchQuoterConfig {
   /** JSON RPC provider */
   provider: ethers.JsonRpcProvider;
-  /** MultiPathQuoter contract address (optional - uses fallback if not set) */
+  /**
+   * Chain ID for auto-resolving quoter address from registry.
+   * If quoterAddress is also provided, quoterAddress takes precedence.
+   * @see shared/config/src/service-config.ts MULTI_PATH_QUOTER_ADDRESSES
+   */
+  chainId?: string;
+  /** MultiPathQuoter contract address (optional - auto-resolved from chainId if not set) */
   quoterAddress?: string;
   /** Logger instance */
   logger?: Logger;
@@ -119,6 +126,13 @@ const DEX_ROUTER_ABI = [
  *
  * @example
  * ```typescript
+ * // Option 1: Auto-resolve quoter address from registry (recommended)
+ * const quoter = new BatchQuoterService({
+ *   provider,
+ *   chainId: 'arbitrum',  // Auto-resolves from MULTI_PATH_QUOTER_ADDRESSES
+ * });
+ *
+ * // Option 2: Explicit quoter address (overrides registry)
  * const quoter = new BatchQuoterService({
  *   provider,
  *   quoterAddress: '0x...',
@@ -146,11 +160,29 @@ export class BatchQuoterService {
 
   constructor(config: BatchQuoterConfig) {
     this.provider = config.provider;
-    this.quoterAddress = config.quoterAddress;
     this.logger = config.logger ?? createServiceLogger('batch-quoter');
     this.timeoutMs = config.timeoutMs ?? 5000;
 
-    // Initialize contract if address provided
+    // Tier 2 Enhancement: Auto-resolve quoter address from registry if chainId provided
+    // Priority: explicit quoterAddress > auto-resolved from chainId > fallback (no batching)
+    if (config.quoterAddress) {
+      this.quoterAddress = config.quoterAddress;
+    } else if (config.chainId) {
+      const resolvedAddress = getMultiPathQuoterAddress(config.chainId);
+      if (resolvedAddress) {
+        this.quoterAddress = resolvedAddress;
+        this.logger.info('Auto-resolved MultiPathQuoter address from registry', {
+          chainId: config.chainId,
+          quoterAddress: resolvedAddress,
+        });
+      } else {
+        this.logger.debug('No MultiPathQuoter deployed for chain, using fallback', {
+          chainId: config.chainId,
+        });
+      }
+    }
+
+    // Initialize contract if address available (explicit or auto-resolved)
     if (this.quoterAddress) {
       this.quoterContract = new ethers.Contract(
         this.quoterAddress,
@@ -544,4 +576,35 @@ export class BatchQuoterService {
  */
 export function createBatchQuoterService(config: BatchQuoterConfig): BatchQuoterService {
   return new BatchQuoterService(config);
+}
+
+/**
+ * Tier 2 Enhancement: Create a BatchQuoterService with auto-resolved quoter address.
+ * Convenience factory that auto-resolves quoter address from the MULTI_PATH_QUOTER_ADDRESSES registry.
+ *
+ * @param provider - JSON RPC provider
+ * @param chainId - Chain identifier (e.g., 'arbitrum', 'ethereum')
+ * @param options - Additional configuration options
+ * @returns BatchQuoterService instance with auto-resolved quoter address
+ *
+ * @example
+ * ```typescript
+ * const quoter = createBatchQuoterForChain(provider, 'arbitrum');
+ * // Automatically uses MULTI_PATH_QUOTER_ADDRESSES['arbitrum'] if deployed
+ * ```
+ */
+export function createBatchQuoterForChain(
+  provider: ethers.JsonRpcProvider,
+  chainId: string,
+  options?: {
+    logger?: Logger;
+    timeoutMs?: number;
+  }
+): BatchQuoterService {
+  return new BatchQuoterService({
+    provider,
+    chainId,
+    logger: options?.logger,
+    timeoutMs: options?.timeoutMs,
+  });
 }

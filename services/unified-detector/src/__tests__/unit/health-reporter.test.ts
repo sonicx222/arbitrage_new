@@ -29,7 +29,7 @@ interface MockCrossRegionHealthManager extends EventEmitter {
 
 describe('HealthReporter', () => {
   let logger: RecordingLogger;
-  let mockStreamsClient: { xadd: jest.Mock };
+  let mockStreamsClient: { xadd: jest.Mock; xaddWithLimit: jest.Mock };
   let mockStateManager: { isRunning: jest.Mock };
   let mockCrossRegionHealth: MockCrossRegionHealthManager;
   let mockGetCrossRegionHealthManager: jest.Mock;
@@ -42,6 +42,8 @@ describe('HealthReporter', () => {
 
     mockStreamsClient = {
       xadd: jest.fn().mockResolvedValue('stream-id'),
+      // ADR-002: Code now uses xaddWithLimit for bounded stream growth
+      xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
     };
 
     mockStateManager = {
@@ -138,7 +140,8 @@ describe('HealthReporter', () => {
 
       await reporter.start();
 
-      expect(mockGetCrossRegionHealthManager).not.toHaveBeenCalled?.();
+      // FIX 8.1: Removed optional chaining - toHaveBeenCalled() is always callable
+      expect(mockGetCrossRegionHealthManager).not.toHaveBeenCalled();
     });
 
     it('should start health monitoring interval', async () => {
@@ -375,7 +378,8 @@ describe('HealthReporter', () => {
       await Promise.resolve();
       await Promise.resolve(); // Allow multiple microtask cycles
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     });
 
     it('should skip publishing when service is not running', async () => {
@@ -405,11 +409,13 @@ describe('HealthReporter', () => {
       await Promise.resolve();
 
       // Should not publish when service is not running
-      expect(mockStreamsClient.xadd).not.toHaveBeenCalled();
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      expect(mockStreamsClient.xaddWithLimit).not.toHaveBeenCalled();
     });
 
     it('should handle publish errors gracefully', async () => {
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis connection error'));
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis connection error'));
 
       const mockGetHealthData = jest.fn().mockResolvedValue({
         partitionId: 'test-partition',

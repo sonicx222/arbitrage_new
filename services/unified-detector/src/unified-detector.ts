@@ -30,8 +30,6 @@ import {
   getRedisClient,
   RedisStreamsClient,
   getRedisStreamsClient,
-  CrossRegionHealthManager,
-  getCrossRegionHealthManager,
   GracefulDegradationManager,
   getGracefulDegradationManager,
   FailoverEvent
@@ -148,7 +146,6 @@ export class UnifiedChainDetector extends EventEmitter {
   private streamsClient: RedisStreamsClient | null = null;
   private injectedRedis: RedisClient | null = null;
   private injectedStreamsClient: RedisStreamsClient | null = null;
-  private crossRegionHealth: CrossRegionHealthManager | null = null;
   private degradationManager: GracefulDegradationManager | null = null;
 
   private config: Required<BaseDetectorConfig>;
@@ -158,21 +155,6 @@ export class UnifiedChainDetector extends EventEmitter {
   private chainInstanceManager: ChainInstanceManager | null = null;
   private healthReporter: HealthReporter | null = null;
   private metricsCollector: MetricsCollector | null = null;
-
-  /**
-   * @deprecated Since v2.0.0 - Use chainInstanceManager.getChainInstance() instead
-   *
-   * FIX 7.2: Legacy chainInstances Map is deprecated.
-   * Kept for backward compatibility with existing API consumers calling getChainInstance().
-   * This map is populated from chainInstanceManager after successful chain startup.
-   *
-   * Migration path:
-   * - Internal code: Use chainInstanceManager.getChainInstance(chainId)
-   * - External code: Use UnifiedChainDetector.getChainInstance(chainId) (unchanged API)
-   *
-   * Scheduled removal: Next major version
-   */
-  private chainInstances: Map<string, ChainDetectorInstance> = new Map();
 
   private startTime: number = 0;
   private chainInstanceFactory: ChainInstanceFactory;
@@ -253,10 +235,8 @@ export class UnifiedChainDetector extends EventEmitter {
         throw new Error('Failed to initialize Redis Streams client - service cannot start');
       }
 
-      // Initialize cross-region health if enabled
-      if (this.config.enableCrossRegionHealth) {
-        await this.initializeCrossRegionHealth();
-      }
+      // CrossRegionHealth is managed exclusively by HealthReporter
+      // This prevents: (a) double event subscriptions, (b) resource waste, (c) lifecycle conflicts
 
       // Initialize degradation manager
       this.degradationManager = getGracefulDegradationManager();
@@ -289,14 +269,6 @@ export class UnifiedChainDetector extends EventEmitter {
 
       // Start chain instances via manager
       const startResult = await this.chainInstanceManager.startAll();
-
-      // Update legacy chainInstances map for backward compatibility
-      for (const chainId of startResult.startedChains) {
-        const instance = this.chainInstanceManager.getChainInstance(chainId);
-        if (instance) {
-          this.chainInstances.set(chainId, instance);
-        }
-      }
 
       // REFACTOR 9.1: Use HealthReporter for health monitoring
       this.healthReporter = createHealthReporter({
@@ -406,17 +378,6 @@ export class UnifiedChainDetector extends EventEmitter {
         this.chainInstanceManager = null;
       }
 
-      // Clear legacy chainInstances map
-      this.chainInstances.clear();
-
-      // Stop cross-region health if not managed by health reporter
-      // (for backward compatibility with tests that inject crossRegionHealth directly)
-      if (this.crossRegionHealth) {
-        this.crossRegionHealth.removeAllListeners();
-        await this.crossRegionHealth.stop();
-        this.crossRegionHealth = null;
-      }
-
       // BUG-FIX: Clear degradation manager reference to allow proper cleanup
       // Note: The manager is a singleton, so we don't stop it, just clear our reference
       this.degradationManager = null;
@@ -446,30 +407,6 @@ export class UnifiedChainDetector extends EventEmitter {
   }
 
   // ===========================================================================
-  // Health Monitoring
-  // ===========================================================================
-
-  private async initializeCrossRegionHealth(): Promise<void> {
-    this.crossRegionHealth = getCrossRegionHealthManager({
-      instanceId: this.config.instanceId,
-      regionId: this.config.regionId,
-      serviceName: `unified-detector-${this.config.partitionId}`,
-      healthCheckIntervalMs: this.partition?.healthCheckIntervalMs || 15000,
-      failoverTimeoutMs: this.partition?.failoverTimeoutMs || 60000,
-      canBecomeLeader: false, // Detectors don't lead, coordinator does
-      isStandby: false
-    });
-
-    await this.crossRegionHealth.start();
-
-    // Listen for failover events
-    this.crossRegionHealth.on('failoverEvent', (event: FailoverEvent) => {
-      this.logger.info('Received failover event', event);
-      this.emit('failoverEvent', event);
-    });
-  }
-
-  // ===========================================================================
   // Public Getters
   // ===========================================================================
 
@@ -486,59 +423,23 @@ export class UnifiedChainDetector extends EventEmitter {
   }
 
   getChains(): string[] {
-    // REFACTOR 9.1: Delegate to chain instance manager when available
-    if (this.chainInstanceManager) {
-      return this.chainInstanceManager.getChains();
-    }
-    return Array.from(this.chainInstances.keys());
+    return this.chainInstanceManager?.getChains() ?? [];
   }
 
   /**
    * Returns list of chain IDs that are currently healthy (connected status)
    */
   getHealthyChains(): string[] {
-    // REFACTOR 9.1: Delegate to chain instance manager when available
-    if (this.chainInstanceManager) {
-      return this.chainInstanceManager.getHealthyChains();
-    }
-    // Fallback to legacy implementation
-    // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
-    const healthyChains: string[] = [];
-    for (const [chainId, instance] of this.chainInstances) {
-      const stats = instance.getStats();
-      if (stats.status === 'connected') {
-        healthyChains.push(chainId);
-      }
-    }
-    return healthyChains;
+    return this.chainInstanceManager?.getHealthyChains() ?? [];
   }
 
   getChainInstance(chainId: string): ChainDetectorInstance | undefined {
-    // REFACTOR 9.1: Delegate to chain instance manager when available
-    if (this.chainInstanceManager) {
-      return this.chainInstanceManager.getChainInstance(chainId);
-    }
-    return this.chainInstances.get(chainId);
+    return this.chainInstanceManager?.getChainInstance(chainId);
   }
 
   getStats(): UnifiedDetectorStats {
-    // REFACTOR 9.1: Use chain instance manager's stats when available
-    let chainStats: Map<string, ChainStats>;
-    let chains: string[];
-
-    if (this.chainInstanceManager) {
-      chainStats = this.chainInstanceManager.getStats();
-      chains = this.chainInstanceManager.getChains();
-    } else {
-      // Fallback to legacy implementation
-      // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
-      chainStats = new Map<string, ChainStats>();
-      chains = [];
-      for (const [chainId, instance] of this.chainInstances) {
-        chainStats.set(chainId, instance.getStats());
-        chains.push(chainId);
-      }
-    }
+    const chainStats = this.chainInstanceManager?.getStats() ?? new Map<string, ChainStats>();
+    const chains = this.chainInstanceManager?.getChains() ?? [];
 
     // Calculate totals from chain stats
     let totalEvents = 0;
@@ -566,19 +467,8 @@ export class UnifiedChainDetector extends EventEmitter {
     let totalEvents = 0;
     let totalLatency = 0;
 
-    // FIX Issue 1.1: Use chainInstanceManager stats instead of stale chainInstances map
-    // This ensures we have current chain status after reconnections/failures
-    let chainStats: Map<string, ChainStats>;
-    if (this.chainInstanceManager) {
-      chainStats = this.chainInstanceManager.getStats();
-    } else {
-      // Fallback to legacy chainInstances map for backward compatibility
-      // FIX Perf 10.4: Iterate Map directly instead of creating intermediate array
-      chainStats = new Map();
-      for (const [chainId, instance] of this.chainInstances) {
-        chainStats.set(chainId, instance.getStats());
-      }
-    }
+    // Get current chain stats from manager
+    const chainStats = this.chainInstanceManager?.getStats() ?? new Map<string, ChainStats>();
 
     // FIX: Calculate uptime safely - if startTime is 0, service hasn't started yet
     const uptimeMs = this.startTime > 0 ? Date.now() - this.startTime : 0;

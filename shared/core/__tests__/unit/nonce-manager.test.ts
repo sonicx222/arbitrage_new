@@ -10,6 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { NonceManager, getNonceManager, resetNonceManager } from '@arbitrage/core';
+import { waitForCondition } from '@arbitrage/test-utils';
 import { ethers } from 'ethers';
 
 // =============================================================================
@@ -55,6 +56,7 @@ function createMockWallet(address: string, provider: MockProvider): ethers.Walle
 // =============================================================================
 // Tests
 // =============================================================================
+// Note: waitForCondition imported from @arbitrage/test-utils (FIX #10: DRY)
 
 describe('P0-2: NonceManager', () => {
   let nonceManager: NonceManager;
@@ -68,7 +70,9 @@ describe('P0-2: NonceManager', () => {
     nonceManager = new NonceManager({
       syncIntervalMs: 60000, // Long interval for tests
       pendingTimeoutMs: 5000,
-      maxPendingPerChain: 5
+      maxPendingPerChain: 5,
+      preAllocationPoolSize: 0, // Disable pool for existing tests
+      poolReplenishThreshold: 0
     });
 
     mockProvider = new MockProvider();
@@ -285,7 +289,9 @@ describe('P0-2: NonceManager', () => {
       expect(state).toEqual({
         confirmed: 1,
         pending: 2,
-        pendingCount: 1
+        pendingCount: 1,
+        poolSize: 0, // Pool disabled in test config
+        isReplenishing: false
       });
     });
   });
@@ -383,7 +389,9 @@ describe('P0-2: NonceManager', () => {
       const highCapacityManager = new NonceManager({
         syncIntervalMs: 60000,
         pendingTimeoutMs: 300000,
-        maxPendingPerChain: 100
+        maxPendingPerChain: 100,
+        preAllocationPoolSize: 0, // Disable pool for this test
+        poolReplenishThreshold: 0
       });
       highCapacityManager.registerWallet('ethereum', mockWallet);
 
@@ -451,7 +459,9 @@ describe('P0-2: NonceManager', () => {
       const highCapacityManager = new NonceManager({
         syncIntervalMs: 60000,
         pendingTimeoutMs: 300000,
-        maxPendingPerChain: 200
+        maxPendingPerChain: 200,
+        preAllocationPoolSize: 0, // Disable pool for this test
+        poolReplenishThreshold: 0
       });
       highCapacityManager.registerWallet('ethereum', mockWallet);
 
@@ -488,7 +498,9 @@ describe('P0-2: NonceManager', () => {
       const highCapacityManager = new NonceManager({
         syncIntervalMs: 60000,
         pendingTimeoutMs: 300000,
-        maxPendingPerChain: 100
+        maxPendingPerChain: 100,
+        preAllocationPoolSize: 0, // Disable pool for this test
+        poolReplenishThreshold: 0
       });
       highCapacityManager.registerWallet('ethereum', mockWallet);
 
@@ -505,6 +517,258 @@ describe('P0-2: NonceManager', () => {
       expect(results).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
 
       highCapacityManager.stop();
+    });
+  });
+
+  // ===========================================================================
+  // Tier 2 Enhancement: Nonce Pre-allocation Pool Tests
+  // ===========================================================================
+
+  describe('Tier 2: Nonce Pre-allocation Pool', () => {
+    let poolManager: NonceManager;
+    let poolMockProvider: MockProvider;
+    let poolMockWallet: ethers.Wallet;
+
+    beforeEach(() => {
+      poolMockProvider = new MockProvider();
+      poolMockWallet = createMockWallet('0x2234567890123456789012345678901234567890', poolMockProvider);
+    });
+
+    afterEach(() => {
+      if (poolManager) {
+        poolManager.stop();
+      }
+    });
+
+    it('should pre-allocate nonces on wallet registration', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => {
+          const status = poolManager.getPoolStatus('ethereum');
+          return status !== null && status.poolSize === 5 && !status.isReplenishing;
+        },
+        { timeout: 1000, description: 'pool to fill with 5 nonces' }
+      );
+
+      const poolStatus = poolManager.getPoolStatus('ethereum');
+      expect(poolStatus).not.toBeNull();
+      expect(poolStatus!.poolSize).toBe(5);
+      expect(poolStatus!.isReplenishing).toBe(false);
+    });
+
+    it('should allocate from pool for fast-path allocation', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'pool to fill' }
+      );
+
+      // Allocate nonces - should come from pool
+      const nonces: number[] = [];
+      for (let i = 0; i < 3; i++) {
+        const nonce = await poolManager.getNextNonce('ethereum');
+        nonces.push(nonce);
+      }
+
+      // Nonces should be sequential
+      expect(nonces).toEqual([0, 1, 2]);
+    });
+
+    it('should trigger replenishment when pool falls below threshold', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'initial pool fill' }
+      );
+
+      // Drain pool below threshold
+      for (let i = 0; i < 4; i++) {
+        await poolManager.getNextNonce('ethereum');
+      }
+
+      // Fix #5: Wait for replenishment using condition
+      await waitForCondition(
+        () => (poolManager.getPoolStatus('ethereum')?.poolSize ?? 0) > 0,
+        { timeout: 1000, description: 'pool replenishment' }
+      );
+
+      const poolStatus = poolManager.getPoolStatus('ethereum');
+      expect(poolStatus).not.toBeNull();
+      // Pool should have been replenished
+      expect(poolStatus!.poolSize).toBeGreaterThan(0);
+    });
+
+    it('should handle burst allocation efficiently', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 50,
+        preAllocationPoolSize: 10,
+        poolReplenishThreshold: 3
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 10,
+        { timeout: 1000, description: 'pool to fill with 10 nonces' }
+      );
+
+      // Burst allocation
+      const promises = Array.from({ length: 10 }, () =>
+        poolManager.getNextNonce('ethereum')
+      );
+
+      const nonces = await Promise.all(promises);
+
+      // All nonces should be unique
+      const uniqueNonces = new Set(nonces);
+      expect(uniqueNonces.size).toBe(10);
+
+      // Should be sequential when sorted
+      const sortedNonces = [...nonces].sort((a, b) => a - b);
+      expect(sortedNonces).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    });
+
+    it('should warm pool on demand', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'initial pool fill' }
+      );
+
+      // Drain pool
+      for (let i = 0; i < 5; i++) {
+        await poolManager.getNextNonce('ethereum');
+      }
+
+      // Pool should be empty or nearly empty
+      let poolStatus = poolManager.getPoolStatus('ethereum');
+      expect(poolStatus!.poolSize).toBeLessThan(5);
+
+      // Warm the pool
+      await poolManager.warmPool('ethereum');
+
+      // Fix #5: Wait for warm to complete using condition
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'pool warm completion' }
+      );
+
+      // Pool should be full again
+      poolStatus = poolManager.getPoolStatus('ethereum');
+      expect(poolStatus!.poolSize).toBe(5);
+    });
+
+    it('should return null pool status for unregistered chain', () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      const status = poolManager.getPoolStatus('unknown');
+      expect(status).toBeNull();
+    });
+
+    it('should include pool status in getState', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'pool to fill' }
+      );
+
+      const state = poolManager.getState('ethereum');
+      expect(state).not.toBeNull();
+      expect(state!.poolSize).toBe(5);
+      expect(state!.isReplenishing).toBe(false);
+    });
+
+    it('should clear and refill pool on resetChain', async () => {
+      poolManager = new NonceManager({
+        syncIntervalMs: 60000,
+        pendingTimeoutMs: 5000,
+        maxPendingPerChain: 20,
+        preAllocationPoolSize: 5,
+        poolReplenishThreshold: 2
+      });
+
+      poolManager.registerWallet('ethereum', poolMockWallet);
+
+      // Fix #5: Use deterministic waiting instead of fixed timeout
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'initial pool fill' }
+      );
+
+      // Allocate some nonces
+      await poolManager.getNextNonce('ethereum');
+      await poolManager.getNextNonce('ethereum');
+
+      // Reset should clear and refill pool
+      await poolManager.resetChain('ethereum');
+
+      // Fix #5: Wait for refill using condition
+      await waitForCondition(
+        () => poolManager.getPoolStatus('ethereum')?.poolSize === 5,
+        { timeout: 1000, description: 'pool refill after reset' }
+      );
+
+      const poolStatus = poolManager.getPoolStatus('ethereum');
+      expect(poolStatus!.poolSize).toBe(5);
     });
   });
 });

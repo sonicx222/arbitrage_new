@@ -259,6 +259,11 @@ export {
   FLASH_LOAN_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,
+  // Tier 2 Enhancement: MultiPathQuoter contract addresses
+  // Enables batched quote fetching for 50-200ms latency reduction
+  MULTI_PATH_QUOTER_ADDRESSES,
+  hasMultiPathQuoter,
+  getMultiPathQuoterAddress,
 } from './service-config';
 
 // =============================================================================

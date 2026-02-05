@@ -12,7 +12,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 
 ---
 
-## Service Inventory (8 Services)
+## Service Inventory (9 Services)
 
 | Service | Port | Type | Description |
 |---------|------|------|-------------|
@@ -23,7 +23,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 | **Partition Solana** | 3004 | Detector | P4: Solana (non-EVM) |
 | **Execution Engine** | 3005 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | Detector | Cross-chain arbitrage opportunities |
-| **Unified Detector** | 3007 | Optional | Legacy unified detector (deprecated) |
+| **Mempool Detector** | 3007 | Detector | Pre-block arbitrage via bloXroute BDN |
 
 ---
 

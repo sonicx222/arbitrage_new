@@ -14,6 +14,19 @@
  * @see .claude/plans/component-architecture-proposal.md
  */
 
+// Fee utilities - import from canonical source
+import {
+  bpsToDecimal as canonicalBpsToDecimal,
+  decimalToBps as canonicalDecimalToBps,
+  v3TierToDecimal as canonicalV3TierToDecimal,
+  percentToDecimal as canonicalPercentToDecimal,
+  isValidFeeDecimal,
+  getDefaultFeeForDex,
+  resolveFeeValue,
+  FEE_CONSTANTS,
+  LOW_FEE_DEXES as CANONICAL_LOW_FEE_DEXES,
+} from '../utils/fee-utils';
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -369,82 +382,59 @@ export function calculateProfitBetweenSources(
  */
 
 /**
- * Default fees by DEX type.
- * Low-fee DEXes like Curve and Balancer use 0.04%.
- * Most AMMs use 0.3%.
+ * Default fees by DEX type - now uses canonical constants.
+ * @deprecated Use FEE_CONSTANTS from '@arbitrage/core' instead
  */
-const LOW_FEE_DEXES = new Set(['curve', 'balancer']);
-const DEFAULT_AMM_FEE = 0.003; // 0.3% as decimal (30 bps)
-const DEFAULT_LOW_FEE = 0.0004; // 0.04% as decimal (4 bps)
+const LOW_FEE_DEXES = CANONICAL_LOW_FEE_DEXES;
+const DEFAULT_AMM_FEE = FEE_CONSTANTS.DEFAULT; // 0.3% as decimal (30 bps)
+const DEFAULT_LOW_FEE = FEE_CONSTANTS.LOW_FEE; // 0.04% as decimal (4 bps)
 
 /**
  * Get default fee for a DEX.
- *
- * @param dexName - Name of the DEX (case-insensitive)
- * @returns Default fee as decimal
+ * @deprecated Use getDefaultFeeForDex from '@arbitrage/core' instead
  */
 export function getDefaultFee(dexName?: string): number {
-  if (dexName && LOW_FEE_DEXES.has(dexName.toLowerCase())) {
-    return DEFAULT_LOW_FEE;
-  }
-  return DEFAULT_AMM_FEE;
+  return getDefaultFeeForDex(dexName);
 }
 
 /**
  * Resolve fee from multiple sources with fallback.
- * Uses nullish coalescing to correctly handle fee: 0.
- *
- * @param explicitFee - Explicit fee value (may be undefined)
- * @param dexName - DEX name for default lookup
- * @returns Resolved fee as decimal
+ * @deprecated Use resolveFeeValue from '@arbitrage/core' instead
  */
 export function resolveFee(explicitFee: number | undefined, dexName?: string): number {
-  // Use ?? to correctly handle fee: 0
-  return explicitFee ?? getDefaultFee(dexName);
+  return resolveFeeValue(explicitFee, dexName);
 }
 
 /**
  * Convert basis points to decimal fee.
- * E.g., 30 basis points = 0.003 (0.3%)
- *
- * @param basisPoints - Fee in basis points
- * @returns Fee as decimal
+ * @deprecated Use bpsToDecimal from '@arbitrage/core' instead
  */
 export function basisPointsToDecimal(basisPoints: number): number {
-  return basisPoints / 10000;
+  return canonicalBpsToDecimal(basisPoints);
 }
 
 /**
  * Convert decimal fee to basis points.
- * E.g., 0.003 (0.3%) = 30 basis points
- *
- * @param decimal - Fee as decimal
- * @returns Fee in basis points
+ * @deprecated Use decimalToBps from '@arbitrage/core' instead
  */
 export function decimalToBasisPoints(decimal: number): number {
-  return decimal * 10000;
+  return canonicalDecimalToBps(decimal);
 }
 
 /**
  * Convert Uniswap V3 per-million fee to decimal.
- * E.g., 3000 (per million) = 0.003 (0.3%)
- *
- * @param perMillion - Fee in per-million format (Uniswap V3 style)
- * @returns Fee as decimal
+ * @deprecated Use v3TierToDecimal from '@arbitrage/core' instead
  */
 export function perMillionToDecimal(perMillion: number): number {
-  return perMillion / 1_000_000;
+  return canonicalV3TierToDecimal(perMillion);
 }
 
 /**
  * Convert percentage fee to decimal.
- * E.g., 0.3 (percent) = 0.003 (decimal)
- *
- * @param percentage - Fee as percentage (0.3 = 0.3%)
- * @returns Fee as decimal
+ * @deprecated Use percentToDecimal from '@arbitrage/core' instead
  */
 export function percentageToDecimal(percentage: number): number {
-  return percentage / 100;
+  return canonicalPercentToDecimal(percentage);
 }
 
 // =============================================================================
@@ -536,12 +526,10 @@ export function areValidReserves(
 
 /**
  * Validate that a fee is in valid decimal format.
- *
- * @param fee - Fee to validate
- * @returns True if valid (0 <= fee < 1)
+ * @deprecated Use isValidFeeDecimal from '@arbitrage/core' instead
  */
 export function isValidFee(fee: number): boolean {
-  return typeof fee === 'number' && isFinite(fee) && fee >= 0 && fee < 1;
+  return isValidFeeDecimal(fee);
 }
 
 // =============================================================================

@@ -23,6 +23,8 @@ const createMockLogger = (): Logger => ({
 // Create mock Redis streams client
 const createMockStreamsClient = () => ({
   xadd: jest.fn().mockResolvedValue('stream-id'),
+  // ADR-002: Code now uses xaddWithLimit for bounded stream growth
+  xaddWithLimit: jest.fn().mockResolvedValue('stream-id'),
 });
 
 // Sample tokens for testing (Token type has: address, symbol, decimals, chainId - no name)
@@ -157,7 +159,8 @@ describe('WhaleAlertPublisher', () => {
 
       await publisher.publishWhaleAlert(alert);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(
         'Whale alert published',
         expect.objectContaining({
@@ -168,7 +171,8 @@ describe('WhaleAlertPublisher', () => {
     });
 
     it('should handle publish errors gracefully', async () => {
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis error'));
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis error'));
 
       const alert = {
         event: {
@@ -226,11 +230,13 @@ describe('WhaleAlertPublisher', () => {
 
       await publisher.publishSwapEvent(swap);
 
-      expect(mockStreamsClient.xadd).toHaveBeenCalled();
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
     });
 
     it('should handle publish errors gracefully', async () => {
-      mockStreamsClient.xadd.mockRejectedValue(new Error('Redis error'));
+      // ADR-002: Uses xaddWithLimit for bounded stream growth
+      mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis error'));
 
       const swap = {
         pairAddress: '0xpair123',

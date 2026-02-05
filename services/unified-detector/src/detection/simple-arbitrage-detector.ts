@@ -4,20 +4,46 @@
  * Detects simple two-pool arbitrage opportunities between DEXes.
  * Extracted from chain-instance.ts for single-responsibility principle.
  *
+ * ## Hot-Path Performance
+ *
+ * This module is in the HOT PATH (called 100-1000 times/sec).
+ * - ⚠️ No allocations in tight loops
+ * - ⚠️ Uses pre-computed BigInt values from PairSnapshot
+ * - ⚠️ Fee validation is trusted (done at source)
+ *
+ * ## Price Calculation Safety
+ *
+ * Uses configurable price bounds to prevent:
+ * - Division by zero (price near 0)
+ * - Overflow on inversion (1/price when price is tiny)
+ * - Precision loss (price > 1e18)
+ *
+ * See FIX 4.1 in docs/reports/BUG_FIX_LOG_2026-02.md for details.
+ *
+ * ## Fee Representation
+ *
+ * Fees are in DECIMAL format (0.003 = 0.30%).
+ * See types.ts for conversion functions if working with basis points.
+ *
+ * @module detection/simple-arbitrage-detector
  * @see R3 - Chain Instance Detection Strategies
- * @see REFACTORING_ROADMAP.md
+ * @see docs/reports/BUG_FIX_LOG_2026-02.md - Fix 4.1
+ * @see ADR-014 - Modular Detector Components
  */
 
 import {
   // P0-1 FIX: Use precision-safe price calculation
   calculatePriceFromBigIntReserves,
+  // FIX 6: Use shared price bounds constants
+  MIN_SAFE_PRICE,
+  MAX_SAFE_PRICE,
 } from '@arbitrage/core';
 
 import { ARBITRAGE_CONFIG, DETECTOR_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
-// P0-2 FIX: Use centralized fee validation (FIX 9.3)
-import { validateFee } from '../types';
+// NOTE: Fee validation is done at source (pair creation) and SnapshotManager.
+// This detector trusts pre-validated fee values for hot-path performance.
 
 /**
  * Snapshot of pair data for thread-safe arbitrage detection.
@@ -49,6 +75,19 @@ export interface SimpleArbitrageConfig {
   confidence: number;
   /** Opportunity expiry time in milliseconds */
   expiryMs: number;
+  /**
+   * Minimum safe price for calculations (prevents division overflow).
+   * Default: 1e-18 (supports tokens with up to 18 decimals at very low prices).
+   *
+   * FIX 4.1: Lowered from 1e-15 to 1e-18 to support low-value memecoins.
+   * At 1e-18, the inverse (1/price) = 1e18 which is still safe for Number.
+   */
+  minSafePrice?: number;
+  /**
+   * Maximum safe price for calculations (prevents precision loss).
+   * Default: 1e18 (inverse of minSafePrice for symmetry).
+   */
+  maxSafePrice?: number;
 }
 
 /**
@@ -59,12 +98,20 @@ export interface SimpleArbitrageConfig {
 export class SimpleArbitrageDetector {
   private readonly config: SimpleArbitrageConfig;
   private readonly minProfitThreshold: number;
+  // FIX 4.1: Configurable price bounds for different token types
+  private readonly minSafePrice: number;
+  private readonly maxSafePrice: number;
 
   constructor(config: SimpleArbitrageConfig) {
     this.config = config;
     // Use chain-specific minimum profit threshold
     const chainMinProfits = ARBITRAGE_CONFIG.chainMinProfits as Record<string, number>;
     this.minProfitThreshold = chainMinProfits[config.chainId] ?? 0.003; // Default 0.3%
+
+    // FIX 4.1 + FIX 6: Use shared price bounds constants from @arbitrage/core
+    // Ensures consistency with isValidPrice() and other validators
+    this.minSafePrice = config.minSafePrice ?? MIN_SAFE_PRICE;
+    this.maxSafePrice = config.maxSafePrice ?? MAX_SAFE_PRICE;
   }
 
   /**
@@ -96,14 +143,12 @@ export class SimpleArbitrageDetector {
       return null;
     }
 
-    // FIX Bug 4.1: Validate prices BEFORE any division
-    const MIN_SAFE_PRICE = 1e-15;
-    const MAX_SAFE_PRICE = 1e15;
-
-    if (!Number.isFinite(price1) || price1 < MIN_SAFE_PRICE || price1 > MAX_SAFE_PRICE) {
+    // FIX 4.1: Validate prices BEFORE any division using configurable bounds
+    // This prevents division overflow and precision loss while supporting memecoins
+    if (!Number.isFinite(price1) || price1 < this.minSafePrice || price1 > this.maxSafePrice) {
       return null;
     }
-    if (!Number.isFinite(price2Raw) || price2Raw < MIN_SAFE_PRICE || price2Raw > MAX_SAFE_PRICE) {
+    if (!Number.isFinite(price2Raw) || price2Raw < this.minSafePrice || price2Raw > this.maxSafePrice) {
       return null;
     }
 
@@ -116,8 +161,10 @@ export class SimpleArbitrageDetector {
     // Calculate price difference as a percentage of the lower price
     const priceDiff = Math.abs(price1 - price2) / minPrice;
 
-    // Calculate fee-adjusted profit (P0-2 FIX: use centralized validateFee)
-    const totalFees = validateFee(pair1.fee) + validateFee(pair2.fee);
+    // Calculate fee-adjusted profit
+    // NOTE: Fees are validated at source (pair creation) and again in SnapshotManager.
+    // Direct use here avoids redundant validation in the hot path.
+    const totalFees = pair1.fee + pair2.fee;
     const netProfitPct = priceDiff - totalFees;
 
     // Check if profitable after fees
@@ -191,8 +238,6 @@ export class SimpleArbitrageDetector {
 
     return token1_0 === token2_1 && token1_1 === token2_0;
   }
-
-  // P0-2 FIX: Removed private validateFee() - now uses centralized version from ../types
 
   /**
    * Get the minimum profit threshold for this detector.

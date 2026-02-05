@@ -116,7 +116,7 @@ For each potential bug, engage in extended reasoning. **Use explicit thinking bl
 - If uncertain at any step: ASK for more context rather than guessing
 
 ### Task
-Analyze the following code/module for:
+Do a deep dive analysis of the following code/module for:
 
 1. **Critical Bugs (P0)**
    - Race conditions in async operations

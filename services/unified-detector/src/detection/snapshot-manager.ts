@@ -5,8 +5,40 @@
  * Snapshots capture reserve values at a point in time to avoid race conditions
  * when reserves are updated by concurrent Sync events.
  *
+ * ## Hot-Path Performance
+ *
+ * This module is in the HOT PATH. Key optimizations:
+ * - Time-based cache with configurable TTL (default 100ms)
+ * - Version-based cache invalidation for DexPool conversion
+ * - Pre-allocated arrays (FIX 10.2) to avoid dynamic resizing
+ * - BigInt values pre-computed during snapshot creation
+ *
+ * ## Cache Coherency
+ *
+ * Uses two-level caching:
+ * 1. **Snapshot Cache**: Time-based TTL, stores Map<address, PairSnapshot>
+ * 2. **DexPool Cache**: Version-based, invalidates on any snapshot mutation
+ *
+ * FIX Race 5.1: Captures version ONCE before checking to avoid TOCTOU race.
+ *
+ * ## BigInt Parsing
+ *
+ * Reserve values come as strings from events. This module:
+ * - Parses to BigInt with try-catch for invalid formats
+ * - Rejects zero reserves (division by zero protection)
+ * - Caches BigInt values in snapshot for hot-path use
+ *
+ * ## Testing
+ *
+ * Comprehensive tests in `__tests__/unit/snapshot-manager.test.ts`:
+ * - BigInt edge cases (very large, leading zeros)
+ * - Cache invalidation scenarios
+ * - Concurrent access patterns
+ *
+ * @module detection/snapshot-manager
  * @see R3 - Chain Instance Detection Strategies
- * @see REFACTORING_ROADMAP.md
+ * @see docs/reports/BUG_FIX_LOG_2026-02.md - Fix 2.3, 10.2
+ * @see ADR-022 - Hot-Path Memory Optimization
  */
 
 import {
@@ -168,11 +200,12 @@ export class SnapshotManager {
       return this.dexPoolCache;
     }
 
-    // Convert snapshots to DexPool format
-    const pools: DexPool[] = [];
-
+    // FIX 10.2: Pre-allocate array to avoid dynamic resizing
+    // For ~500 pairs, avoids ~10 array copies during growth
+    const pools: DexPool[] = new Array(pairsSnapshot.size);
+    let i = 0;
     for (const snapshot of pairsSnapshot.values()) {
-      pools.push(this.convertSnapshotToDexPool(snapshot));
+      pools[i++] = this.convertSnapshotToDexPool(snapshot);
     }
 
     // Update cache with captured version
@@ -199,16 +232,15 @@ export class SnapshotManager {
     // Estimate liquidity from reserves (simplified USD estimation)
     const liquidity = Number(snapshot.reserve0BigInt) * price * 2;
 
-    // Validate fee (same logic as chain-instance)
-    const validatedFee = validateFee(snapshot.fee);
-
+    // FIX 6.2: Fee already validated in createPairSnapshot() - don't validate again
+    // HOT-PATH OPT: Removes redundant validateFee() call per snapshot conversion
     return {
       dex: snapshot.dex,
       token0: snapshot.token0,
       token1: snapshot.token1,
       reserve0: snapshot.reserve0,
       reserve1: snapshot.reserve1,
-      fee: Math.round(validatedFee * 10000), // Convert to basis points
+      fee: Math.round(snapshot.fee * 10000), // Convert to basis points
       liquidity,
       price,
     };

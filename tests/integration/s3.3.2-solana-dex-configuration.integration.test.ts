@@ -196,7 +196,8 @@ describe('S3.3.2.2: Solana DEX Configuration in shared/config', () => {
     chain: string;
     factoryAddress: string;
     routerAddress: string;
-    fee: number;
+    feeBps: number;
+    fee?: number;
     enabled?: boolean;
     type?: string;
   }>;
@@ -225,7 +226,7 @@ describe('S3.3.2.2: Solana DEX Configuration in shared/config', () => {
     const raydium = solanaDexConfigs.find(d => d.name === 'raydium');
     expect(raydium).toBeDefined();
     expect(raydium?.factoryAddress).toBe(EXPECTED_DEX_PROGRAMS.RAYDIUM_AMM);
-    expect(raydium?.fee).toBe(25);
+    expect(raydium?.feeBps).toBe(25);
   });
 
   it('should have Raydium CLMM configured', () => {
@@ -239,7 +240,7 @@ describe('S3.3.2.2: Solana DEX Configuration in shared/config', () => {
     expect(orca).toBeDefined();
     // Orca Whirlpool program ID (not the old token swap)
     expect(orca?.factoryAddress).toBe(EXPECTED_DEX_PROGRAMS.ORCA_WHIRLPOOL);
-    expect(orca?.fee).toBe(30);
+    expect(orca?.feeBps).toBe(30);
   });
 
   it('should have Meteora DLMM configured', () => {
@@ -276,8 +277,8 @@ describe('S3.3.2.2: Solana DEX Configuration in shared/config', () => {
   it('should have reasonable fee values for all DEXs', () => {
     for (const dex of solanaDexConfigs) {
       // Fees should be 0-100 basis points typically
-      expect(dex.fee).toBeGreaterThanOrEqual(0);
-      expect(dex.fee).toBeLessThanOrEqual(100);
+      expect(dex.feeBps).toBeGreaterThanOrEqual(0);
+      expect(dex.feeBps).toBeLessThanOrEqual(100);
     }
   });
 });
@@ -468,7 +469,8 @@ describe('S3.3.2.5: Integration with Solana Chain Config', () => {
 describe('S3.3.2.6: DEX Fee Structure', () => {
   let solanaDexConfigs: Array<{
     name: string;
-    fee: number;
+    feeBps: number;
+    fee?: number;
     type?: string;
   }>;
 
@@ -478,44 +480,44 @@ describe('S3.3.2.6: DEX Fee Structure', () => {
 
   it('should have Jupiter with 0 fee (aggregator)', () => {
     const jupiter = solanaDexConfigs.find(d => d.name === 'jupiter');
-    expect(jupiter?.fee).toBe(0);
+    expect(jupiter?.feeBps).toBe(0);
   });
 
   it('should have Raydium AMM with 25 basis points fee', () => {
     const raydium = solanaDexConfigs.find(d => d.name === 'raydium');
-    expect(raydium?.fee).toBe(25);
+    expect(raydium?.feeBps).toBe(25);
   });
 
   it('should have Raydium CLMM with dynamic fee (25 default)', () => {
     const raydiumClmm = solanaDexConfigs.find(d => d.name === 'raydium-clmm');
-    expect(raydiumClmm?.fee).toBeGreaterThanOrEqual(1);
-    expect(raydiumClmm?.fee).toBeLessThanOrEqual(100);
+    expect(raydiumClmm?.feeBps).toBeGreaterThanOrEqual(1);
+    expect(raydiumClmm?.feeBps).toBeLessThanOrEqual(100);
   });
 
   it('should have Orca with 30 basis points fee', () => {
     const orca = solanaDexConfigs.find(d => d.name === 'orca');
-    expect(orca?.fee).toBe(30);
+    expect(orca?.feeBps).toBe(30);
   });
 
   it('should have Meteora with dynamic fee (20 default)', () => {
     const meteora = solanaDexConfigs.find(d => d.name === 'meteora');
-    expect(meteora?.fee).toBeGreaterThanOrEqual(1);
-    expect(meteora?.fee).toBeLessThanOrEqual(100);
+    expect(meteora?.feeBps).toBeGreaterThanOrEqual(1);
+    expect(meteora?.feeBps).toBeLessThanOrEqual(100);
   });
 
   it('should have Phoenix with 10 basis points taker fee', () => {
     const phoenix = solanaDexConfigs.find(d => d.name === 'phoenix');
-    expect(phoenix?.fee).toBe(10);
+    expect(phoenix?.feeBps).toBe(10);
   });
 
   it('should have Lifinity with 20 basis points fee', () => {
     const lifinity = solanaDexConfigs.find(d => d.name === 'lifinity');
-    expect(lifinity?.fee).toBe(20);
+    expect(lifinity?.feeBps).toBe(20);
   });
 
-  it('should have all fees as integers (basis points)', () => {
+  it('should have all feeBps as integers (basis points)', () => {
     for (const dex of solanaDexConfigs) {
-      expect(Number.isInteger(dex.fee)).toBe(true);
+      expect(Number.isInteger(dex.feeBps)).toBe(true);
     }
   });
 });
@@ -685,7 +687,7 @@ describe('S3.3.2.10: Summary Statistics', () => {
 
   it('should calculate average fee across Solana DEXs', () => {
     const solanaDexConfigs = DEXES.solana || [];
-    const fees = solanaDexConfigs.map(d => d.fee);
+    const fees = solanaDexConfigs.map(d => d.feeBps);
     const avgFee = fees.reduce((a, b) => a + b, 0) / fees.length;
 
     console.log(`Average Solana DEX fee: ${avgFee.toFixed(2)} basis points`);

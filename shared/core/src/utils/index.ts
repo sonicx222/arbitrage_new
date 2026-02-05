@@ -8,6 +8,11 @@ export {
   // Scale factors
   DEFAULT_SCALE,
   HIGH_PRECISION_SCALE,
+  MAX_SAFE_BIGINT,
+
+  // Price bounds (single source of truth for arbitrage price validation)
+  MIN_SAFE_PRICE,
+  MAX_SAFE_PRICE,
 
   // Fraction conversions
   fractionToBigInt,
@@ -21,6 +26,10 @@ export {
   bigIntToNumber,
   numberToBigInt,
 
+  // P0 FIX: Safe token amount conversions (prevents precision loss for large values)
+  safeBigIntToDecimal,
+  safeBigIntBatchToDecimal,
+
   // Comparison
   bigIntMin,
   bigIntMax,
@@ -30,3 +39,55 @@ export {
   // Formatting
   formatWeiAsEth,
 } from './bigint-utils';
+
+// =============================================================================
+// Fee Utilities - Single Source of Truth
+// =============================================================================
+
+export {
+  // Branded Types
+  type FeeBasisPoints,
+  type FeeDecimal,
+  type UniswapV3FeeTier,
+
+  // Constants
+  BPS_DENOMINATOR,
+  V3_FEE_DENOMINATOR,
+  PERCENT_DENOMINATOR,
+  FEE_CONSTANTS,
+  FEE_UNISWAP_V2_DECIMAL,
+  FEE_UNISWAP_V3_LOW_DECIMAL,
+  FEE_UNISWAP_V3_MEDIUM_DECIMAL,
+  FEE_UNISWAP_V3_HIGH_DECIMAL,
+  FEE_DEFAULT_DECIMAL,
+  VALID_V3_FEE_TIERS,
+  LOW_FEE_DEXES,
+
+  // Primary Conversion Functions
+  bpsToDecimal,
+  decimalToBps,
+  v3TierToDecimal,
+  decimalToV3Tier,
+  percentToDecimal,
+  decimalToPercent,
+
+  // Backward Compatibility Aliases
+  basisPointsToDecimal,
+  decimalToBasisPoints,
+  dexFeeToPercentage,
+  percentageToBasisPoints,
+  perMillionToDecimal,
+  percentageToDecimal,
+
+  // Validation
+  isValidV3FeeTier,
+  isValidFeeDecimal,
+  isValidFeeBps,
+  validateFee,
+  getDefaultFeeForDex,
+  resolveFeeValue,
+
+  // Type Helpers
+  asBps,
+  asDecimal,
+} from './fee-utils';

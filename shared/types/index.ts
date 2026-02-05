@@ -1,5 +1,12 @@
 // Shared types for the arbitrage detection system
 
+// Fee branded types - single source of truth in @arbitrage/core/utils/fee-utils
+// Re-exported here for convenience in type definitions
+/** Fee in basis points (30 = 0.30%). Range: 0-10000 */
+export type FeeBasisPoints = number & { readonly __brand: 'FeeBasisPoints' };
+/** Fee as decimal (0.003 = 0.30%). Range: 0-1 */
+export type FeeDecimal = number & { readonly __brand: 'FeeDecimal' };
+
 export interface Chain {
   id: number;
   name: string;
@@ -31,7 +38,16 @@ export interface Dex {
   chain: string;
   factoryAddress: string;
   routerAddress: string;
-  fee: number; // Config stores in basis points (e.g., 30 = 0.30%). Use dexFeeToPercentage() to convert.
+  /**
+   * Fee in basis points (30 = 0.30%). Use bpsToDecimal() from @arbitrage/core to convert.
+   * @example 30 = 0.30%, 4 = 0.04%, 100 = 1.00%
+   */
+  feeBps: FeeBasisPoints;
+  /**
+   * @deprecated Use `feeBps` instead. Will be removed in v2.0.0.
+   * Legacy field maintained for backward compatibility during migration.
+   */
+  fee?: number;
   enabled?: boolean; // Optional: defaults to true if not specified
   /** S3.3.2: DEX type classification (primarily for Solana non-factory DEXs) */
   type?: DexType;
@@ -51,7 +67,16 @@ export interface Pair {
   token0: string; // Token address
   token1: string; // Token address
   dex: string;    // DEX name
-  fee?: number;   // Fee as decimal percentage (e.g., 0.003 = 0.3%). Converted from Dex.fee at initialization.
+  /**
+   * Fee as decimal (0.003 = 0.30%). Converted from Dex.feeBps at initialization.
+   * @example 0.003 = 0.30%, 0.0004 = 0.04%, 0.01 = 1.00%
+   */
+  feeDecimal?: FeeDecimal;
+  /**
+   * @deprecated Use `feeDecimal` instead. Will be removed in v2.0.0.
+   * Legacy field maintained for backward compatibility during migration.
+   */
+  fee?: number;
   reserve0?: string;
   reserve1?: string;
   blockNumber?: number;
@@ -83,7 +108,10 @@ export interface PriceUpdate {
   blockNumber: number;
   timestamp: number;
   latency: number;
-  fee?: number; // DEX fee in decimal percentage (e.g., 0.003 = 0.3%)
+  /** Fee as decimal (0.003 = 0.30%) */
+  feeDecimal?: FeeDecimal;
+  /** @deprecated Use `feeDecimal` instead */
+  fee?: number;
 }
 
 /**

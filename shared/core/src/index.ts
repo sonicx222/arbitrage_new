@@ -952,6 +952,11 @@ export {
   // Scale factors
   DEFAULT_SCALE,
   HIGH_PRECISION_SCALE,
+  MAX_SAFE_BIGINT,
+
+  // FIX 6: Price bounds constants (single source of truth)
+  MIN_SAFE_PRICE,
+  MAX_SAFE_PRICE,
 
   // BigInt <-> Number conversions
   fractionToBigInt,
@@ -961,6 +966,10 @@ export {
   bigIntToNumber,
   numberToBigInt,
 
+  // Safe token amount conversions (P0 FIX: prevents precision loss)
+  safeBigIntToDecimal,
+  safeBigIntBatchToDecimal,
+
   // BigInt arithmetic
   bigIntMin,
   bigIntMax,
@@ -969,6 +978,50 @@ export {
 
   // Formatting
   formatWeiAsEth,
+} from './utils';
+
+// =============================================================================
+// 8.4 Fee Utilities - Single Source of Truth (FEE_REPRESENTATION_ANALYSIS)
+// =============================================================================
+
+export {
+  // Branded Types
+  type FeeBasisPoints,
+  type FeeDecimal,
+  type UniswapV3FeeTier,
+
+  // Constants
+  BPS_DENOMINATOR,
+  V3_FEE_DENOMINATOR,
+  PERCENT_DENOMINATOR,
+  FEE_CONSTANTS,
+  FEE_UNISWAP_V2_DECIMAL,
+  FEE_UNISWAP_V3_LOW_DECIMAL,
+  FEE_UNISWAP_V3_MEDIUM_DECIMAL,
+  FEE_UNISWAP_V3_HIGH_DECIMAL,
+  FEE_DEFAULT_DECIMAL,
+  VALID_V3_FEE_TIERS,
+  LOW_FEE_DEXES,
+
+  // Primary Conversion Functions (canonical names)
+  bpsToDecimal,
+  decimalToBps,
+  v3TierToDecimal,
+  decimalToV3Tier,
+  percentToDecimal,
+  decimalToPercent,
+
+  // Validation
+  isValidV3FeeTier,
+  isValidFeeDecimal,
+  isValidFeeBps,
+  validateFee,
+  getDefaultFeeForDex,
+  resolveFeeValue,
+
+  // Type Helpers
+  asBps,
+  asDecimal,
 } from './utils';
 
 // #############################################################################
@@ -1139,11 +1192,11 @@ export type {
 // =============================================================================
 
 // P0-2 FIX: Nonce Manager for Transaction Sequencing
-// CRITICAL-4 FIX: Added getNonceManagerAsync for race-safe initialization
+// NOTE: getNonceManagerAsync is deprecated - use getNonceManager() directly
 export {
   NonceManager,
   getNonceManager,
-  getNonceManagerAsync,
+  getNonceManagerAsync, // @deprecated - use getNonceManager() instead
   resetNonceManager
 } from './nonce-manager';
 export type { NonceManagerConfig } from './nonce-manager';

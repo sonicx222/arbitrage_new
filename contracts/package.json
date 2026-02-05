@@ -9,6 +9,7 @@
     "tar": "^7.5.7"
   },
   "scripts": {
+    "build": "hardhat compile",
     "compile": "hardhat compile",
     "test": "hardhat test",
     "test:fork": "cross-env FORK_ENABLED=true hardhat test test/FlashLoanArbitrage.fork.test.ts",

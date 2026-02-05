@@ -392,6 +392,7 @@ export const TimerPresets = {
  * Wait for a condition to be true, with fake timer support.
  *
  * This is useful for testing async code that depends on timers.
+ * FIX 10: Added `description` parameter for better error messages.
  *
  * @param condition - Function that returns true when condition is met
  * @param options - Configuration options
@@ -404,6 +405,7 @@ export const TimerPresets = {
  *   await waitForCondition(() => isComplete, {
  *     timeout: 5000,
  *     interval: 100,
+ *     description: 'process completion',
  *   });
  *
  *   expect(isComplete).toBe(true);
@@ -413,12 +415,22 @@ export const TimerPresets = {
 export async function waitForCondition(
   condition: () => boolean | Promise<boolean>,
   options: {
+    /** Maximum time to wait in milliseconds (default: 5000) */
     timeout?: number;
+    /** Polling interval in milliseconds (default: 100) */
     interval?: number;
+    /** Advance fake timers automatically (default: true when fake timers active) */
     advanceTimers?: boolean;
+    /** Description for error message (e.g., "lock release") */
+    description?: string;
   } = {}
 ): Promise<void> {
-  const { timeout = 5000, interval = 100, advanceTimers = true } = options;
+  const {
+    timeout = 5000,
+    interval = 100,
+    advanceTimers = true,
+    description = 'condition',
+  } = options;
   const startTime = Date.now();
 
   while (true) {
@@ -426,7 +438,7 @@ export async function waitForCondition(
     if (result) return;
 
     if (Date.now() - startTime > timeout) {
-      throw new Error(`Condition not met within ${timeout}ms`);
+      throw new Error(`Timeout waiting for ${description} after ${timeout}ms`);
     }
 
     if (advanceTimers && _fakeTimersActive) {

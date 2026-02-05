@@ -118,9 +118,9 @@ describe('S2.2.3 BSC DEX Expansion', () => {
 
     it('should have fees in basis points (positive integers)', () => {
       bscDexes.forEach(dex => {
-        expect(dex.fee).toBeGreaterThan(0);
-        expect(dex.fee).toBeLessThan(1000); // Max 10%
-        expect(Number.isInteger(dex.fee)).toBe(true);
+        expect(dex.feeBps).toBeGreaterThan(0);
+        expect(dex.feeBps).toBeLessThan(1000); // Max 10%
+        expect(Number.isInteger(dex.feeBps)).toBe(true);
       });
     });
 
@@ -159,7 +159,7 @@ describe('S2.2.3 BSC DEX Expansion', () => {
     });
 
     it('should have standard 0.3% fee (30 basis points)', () => {
-      expect(mdex?.fee).toBe(30);
+      expect(mdex?.feeBps).toBe(30);
     });
 
     it('should be marked as chain bsc', () => {
@@ -186,7 +186,7 @@ describe('S2.2.3 BSC DEX Expansion', () => {
 
     it('should have low fee for stablecoin swaps (4 basis points)', () => {
       // Curve/Ellipsis uses ~0.04% fee for stable pools
-      expect(ellipsis?.fee).toBe(4);
+      expect(ellipsis?.feeBps).toBe(4);
     });
 
     it('should be marked as chain bsc', () => {
@@ -213,7 +213,7 @@ describe('S2.2.3 BSC DEX Expansion', () => {
 
     it('should have competitive 0.1% fee (10 basis points)', () => {
       // Nomiswap uses 0.1% fee
-      expect(nomiswap?.fee).toBe(10);
+      expect(nomiswap?.feeBps).toBe(10);
     });
 
     it('should be marked as chain bsc', () => {
@@ -234,7 +234,7 @@ describe('S2.2.3 BSC DEX Expansion', () => {
 
       expect(ellipsis).toBeDefined();
       otherDexes.forEach(dex => {
-        expect(ellipsis!.fee).toBeLessThanOrEqual(dex.fee);
+        expect(ellipsis!.feeBps).toBeLessThanOrEqual(dex.feeBps);
       });
     });
 
@@ -242,12 +242,12 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       const biswap = bscDexes.find(d => d.name === 'biswap');
       const nomiswap = bscDexes.find(d => d.name === 'nomiswap');
 
-      expect(biswap?.fee).toBe(10);
-      expect(nomiswap?.fee).toBe(10);
+      expect(biswap?.feeBps).toBe(10);
+      expect(nomiswap?.feeBps).toBe(10);
     });
 
     it('should have fee distribution supporting various arbitrage strategies', () => {
-      const fees = bscDexes.map(d => d.fee).sort((a, b) => a - b);
+      const fees = bscDexes.map(d => d.feeBps).sort((a, b) => a - b);
 
       // Should have variety of fees for different strategies
       // Low: 4 (Ellipsis - stables), 10 (Biswap, Nomiswap)
@@ -260,13 +260,13 @@ describe('S2.2.3 BSC DEX Expansion', () => {
 
     it('should convert fees correctly to decimal percentage', () => {
       bscDexes.forEach(dex => {
-        const pct = dexFeeToPercentage(dex.fee);
+        const pct = dexFeeToPercentage(dex.feeBps);
         expect(pct).toBeLessThan(1);
         expect(pct).toBeGreaterThan(0);
 
         // Round-trip conversion
         const backToBp = percentageToBasisPoints(pct);
-        expect(backToBp).toBe(dex.fee);
+        expect(backToBp).toBe(dex.feeBps);
       });
     });
   });
@@ -283,8 +283,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       const ellipsis = bscDexes.find(d => d.name === 'ellipsis');
       const pancakeV3 = bscDexes.find(d => d.name === 'pancakeswap_v3');
 
-      const ellipsisFee = dexFeeToPercentage(ellipsis!.fee);  // 0.0004
-      const pancakeFee = dexFeeToPercentage(pancakeV3!.fee);  // 0.0025
+      const ellipsisFee = dexFeeToPercentage(ellipsis!.feeBps);  // 0.0004
+      const pancakeFee = dexFeeToPercentage(pancakeV3!.feeBps);  // 0.0025
 
       // Total round-trip fee for Ellipsis <-> PancakeSwap
       const totalFees = ellipsisFee + pancakeFee;
@@ -299,8 +299,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       const biswap = bscDexes.find(d => d.name === 'biswap');
       const nomiswap = bscDexes.find(d => d.name === 'nomiswap');
 
-      const biswapFee = dexFeeToPercentage(biswap!.fee);
-      const nomiswapFee = dexFeeToPercentage(nomiswap!.fee);
+      const biswapFee = dexFeeToPercentage(biswap!.feeBps);
+      const nomiswapFee = dexFeeToPercentage(nomiswap!.feeBps);
 
       // Same fee structure enables direct price comparison
       expect(biswapFee).toBe(nomiswapFee);
@@ -315,8 +315,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       const mdex = bscDexes.find(d => d.name === 'mdex');
       const pancakeV2 = bscDexes.find(d => d.name === 'pancakeswap_v2');
 
-      const mdexFee = dexFeeToPercentage(mdex!.fee);      // 0.003
-      const pancakeFee = dexFeeToPercentage(pancakeV2!.fee); // 0.0025
+      const mdexFee = dexFeeToPercentage(mdex!.feeBps);      // 0.003
+      const pancakeFee = dexFeeToPercentage(pancakeV2!.feeBps); // 0.0025
 
       const totalFees = mdexFee + pancakeFee;
       const minProfit = ARBITRAGE_CONFIG.chainMinProfits.bsc; // 0.003
@@ -362,8 +362,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
           const dex1 = bscDexes[i];
           const dex2 = bscDexes[j];
 
-          const fee1 = dexFeeToPercentage(dex1.fee);
-          const fee2 = dexFeeToPercentage(dex2.fee);
+          const fee1 = dexFeeToPercentage(dex1.feeBps);
+          const fee2 = dexFeeToPercentage(dex2.feeBps);
           const minSpread = fee1 + fee2 + minProfit;
 
           const key = `${dex1.name}<->${dex2.name}`;
@@ -391,8 +391,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
           const dex1 = bscDexes[i];
           const dex2 = bscDexes[j];
 
-          const fee1 = dexFeeToPercentage(dex1.fee);
-          const fee2 = dexFeeToPercentage(dex2.fee);
+          const fee1 = dexFeeToPercentage(dex1.feeBps);
+          const fee2 = dexFeeToPercentage(dex2.feeBps);
           const minSpread = fee1 + fee2 + minProfit;
 
           paths.push({
@@ -535,8 +535,8 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       const price2 = 303;  // BNB price on Ellipsis (1% higher)
 
       const priceDiff = Math.abs(price1 - price2) / Math.min(price1, price2);
-      const mdexFee = dexFeeToPercentage(mdex!.fee);
-      const ellipsisFee = dexFeeToPercentage(ellipsis!.fee);
+      const mdexFee = dexFeeToPercentage(mdex!.feeBps);
+      const ellipsisFee = dexFeeToPercentage(ellipsis!.feeBps);
       const totalFees = mdexFee + ellipsisFee;
       const netProfit = priceDiff - totalFees;
 
@@ -606,7 +606,7 @@ describe('S2.2.3 BSC DEX Expansion', () => {
       for (let i = 0; i < 10000; i++) {
         const dexes = getEnabledDexes('bsc');
         const mdex = dexes.find(d => d.name === 'mdex');
-        const fee = mdex ? dexFeeToPercentage(mdex.fee) : 0;
+        const fee = mdex ? dexFeeToPercentage(mdex.feeBps) : 0;
       }
 
       const endTime = performance.now();
@@ -629,9 +629,9 @@ describe('S2.2.3 Regression Tests', () => {
 
       bscDexes.forEach(dex => {
         // Basis points should be positive integers
-        expect(Number.isInteger(dex.fee)).toBe(true);
-        expect(dex.fee).toBeGreaterThan(0);
-        expect(dex.fee).toBeLessThan(1000);
+        expect(Number.isInteger(dex.feeBps)).toBe(true);
+        expect(dex.feeBps).toBeGreaterThan(0);
+        expect(dex.feeBps).toBeLessThan(1000);
       });
     });
 
@@ -639,7 +639,7 @@ describe('S2.2.3 Regression Tests', () => {
       const bscDexes = DEXES.bsc;
 
       bscDexes.forEach(dex => {
-        const pct = dexFeeToPercentage(dex.fee);
+        const pct = dexFeeToPercentage(dex.feeBps);
         expect(pct).toBeLessThan(1);
         expect(pct).toBeGreaterThan(0);
       });
@@ -712,7 +712,7 @@ describe('S2.2.3 Regression Tests', () => {
 
     it('should use ?? not ternary (? :) for dex.fee conversion', () => {
       // Test that dexFeeToPercentage is called even for fee: 0
-      // The old pattern: dex.fee ? dexFeeToPercentage(dex.fee) : 0.003
+      // The old pattern: dex.fee ? dexFeeToPercentage(dex.feeBps) : 0.003
       // Would skip conversion for fee: 0
 
       const zeroFeeBp = 0;

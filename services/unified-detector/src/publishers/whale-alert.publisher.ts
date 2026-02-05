@@ -13,7 +13,7 @@
  * @see ADR-003: Partitioned Chain Detectors
  */
 
-import { RedisStreamsClient, WhaleAlert } from '@arbitrage/core';
+import { RedisStreamsClient, WhaleAlert, safeBigIntToDecimal } from '@arbitrage/core';
 import { SwapEvent, Token } from '@arbitrage/types';
 import type { Logger } from '../types';
 import { STABLECOIN_SYMBOLS, DEFAULT_TOKEN_DECIMALS } from '../constants';
@@ -85,7 +85,9 @@ export class WhaleAlertPublisher {
         impact: 0
       };
 
-      await this.streamsClient.xadd(
+      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
+      // MAXLEN: 5,000 (configured in STREAM_MAX_LENGTHS)
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.WHALE_ALERTS,
         whaleTransaction
       );
@@ -105,7 +107,9 @@ export class WhaleAlertPublisher {
    */
   async publishSwapEvent(event: SwapEvent): Promise<void> {
     try {
-      await this.streamsClient.xadd(
+      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
+      // MAXLEN: 50,000 (configured in STREAM_MAX_LENGTHS)
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.SWAP_EVENTS,
         event
       );
@@ -139,6 +143,9 @@ export class WhaleAlertPublisher {
   /**
    * Estimate USD value of a swap for whale detection.
    * Uses stablecoin amounts directly or estimates via reserve ratios.
+   *
+   * P0 FIX: Uses safeBigIntToDecimal to prevent precision loss for
+   * extremely large swap amounts (> 2^53 wei).
    */
   estimateSwapUsdValue(
     pair: ExtendedPairInfo,
@@ -153,11 +160,29 @@ export class WhaleAlertPublisher {
       const token0Decimals = this.getTokenDecimals(pair.token0);
       const token1Decimals = this.getTokenDecimals(pair.token1);
 
-      // Convert amounts to human-readable numbers
-      const amt0In = Number(BigInt(amount0In)) / Math.pow(10, token0Decimals);
-      const amt1In = Number(BigInt(amount1In)) / Math.pow(10, token1Decimals);
-      const amt0Out = Number(BigInt(amount0Out)) / Math.pow(10, token0Decimals);
-      const amt1Out = Number(BigInt(amount1Out)) / Math.pow(10, token1Decimals);
+      // P0 FIX: Use safeBigIntToDecimal for precision-safe conversion
+      // This function divides in BigInt space first, avoiding precision loss
+      // for values > MAX_SAFE_INTEGER (2^53)
+      const amt0In = safeBigIntToDecimal(amount0In, token0Decimals);
+      const amt1In = safeBigIntToDecimal(amount1In, token1Decimals);
+      const amt0Out = safeBigIntToDecimal(amount0Out, token0Decimals);
+      const amt1Out = safeBigIntToDecimal(amount1Out, token1Decimals);
+
+      // If any conversion returned null, the amount is astronomically large
+      // (> 9 quadrillion tokens) - return 0 to indicate estimation failure
+      if (amt0In === null || amt1In === null || amt0Out === null || amt1Out === null) {
+        // FIX 11: Add context to help debug which amounts caused overflow
+        this.logger.debug('USD value estimation skipped: amount too large for safe conversion', {
+          pair: pair.address?.slice(0, 10),
+          failedFields: [
+            amt0In === null && 'amount0In',
+            amt1In === null && 'amount1In',
+            amt0Out === null && 'amount0Out',
+            amt1Out === null && 'amount1Out',
+          ].filter(Boolean),
+        });
+        return 0;
+      }
 
       // If token0 is a stablecoin, use its amounts directly as USD
       if (this.isStablecoin(token0Symbol)) {
@@ -170,19 +195,12 @@ export class WhaleAlertPublisher {
       }
 
       // Neither token is a stablecoin - estimate using reserve ratios
-      // CRITICAL FIX: Guard against zero/invalid reserves to prevent division by zero
-      let reserve0: number;
-      let reserve1: number;
-      try {
-        reserve0 = Number(BigInt(pair.reserve0)) / Math.pow(10, token0Decimals);
-        reserve1 = Number(BigInt(pair.reserve1)) / Math.pow(10, token1Decimals);
-      } catch {
-        // Invalid reserve format (not a valid BigInt string)
-        return 0;
-      }
+      // P0 FIX: Use safeBigIntToDecimal for reserves too
+      const reserve0 = safeBigIntToDecimal(pair.reserve0, token0Decimals);
+      const reserve1 = safeBigIntToDecimal(pair.reserve1, token1Decimals);
 
-      // CRITICAL FIX: Explicit check for zero, NaN, Infinity before division
-      if (!reserve0 || !reserve1 || !Number.isFinite(reserve0) || !Number.isFinite(reserve1)) {
+      // Guard against null (conversion failure) or zero reserves
+      if (reserve0 === null || reserve1 === null || !reserve0 || !reserve1) {
         return 0;
       }
 

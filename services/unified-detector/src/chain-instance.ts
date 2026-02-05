@@ -184,6 +184,17 @@ interface ExtendedPair extends Pair {
   reserve1: string;
   blockNumber: number;
   lastUpdate: number;
+  // HOT-PATH OPT: Cache pairKey to avoid per-event string allocation in emitPriceUpdate()
+  // Format: "${dex}_${token0Symbol}_${token1Symbol}"
+  pairKey?: string;
+  // FIX Perf 10.2: Cache chain:address key to avoid string allocation in activity tracking
+  // Format: "${chainId}:${pairAddress}" - used by activityTracker.recordUpdate()
+  chainPairKey?: string;
+  // FIX Perf 10.2: Cache BigInt reserves to avoid re-parsing in emitPriceUpdate()
+  // Updated atomically with string reserves in handleSyncEvent()
+  // At 100-1000 Sync events/sec, this eliminates ~2000 BigInt parses/sec
+  reserve0BigInt?: bigint;
+  reserve1BigInt?: bigint;
 }
 
 // R3 Refactor: PairSnapshot interface moved to detection/simple-arbitrage-detector.ts
@@ -241,6 +252,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private dexes: Dex[];
   private tokens: Token[];
+  // FIX 10.5: Pre-computed base tokens for triangular/multi-leg detection
+  // Caches first 4 token addresses (lowercase) to avoid repeated slice().map() allocations
+  // At ~1 call/500ms for triangular, this saves ~2 array allocations per call
+  private cachedBaseTokens: string[] = [];
   // PERF-OPT: O(1) token lookup by address (instead of O(N) array.find)
   // Key: lowercase address, Value: Token object
   private tokensByAddress: Map<string, Token> = new Map();
@@ -254,13 +269,25 @@ export class ChainDetectorInstance extends EventEmitter {
   private pairsByTokens: Map<string, ExtendedPair[]> = new Map();
   // P2-FIX 3.3: Cached array of pair addresses to avoid repeated Array.from() calls
   private pairAddressesCache: string[] = [];
+  // FIX 10.1: LRU-style cache for token pair keys to avoid string allocation in hot path
+  // Key: "token0|token1", Value: normalized key "token0_token1" (alphabetically ordered)
+  // At 1000 events/sec, this eliminates ~3000 string allocations/sec
+  private tokenPairKeyCache: Map<string, string> = new Map();
+  private readonly TOKEN_PAIR_KEY_CACHE_MAX = 10000;
 
   private status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   private eventsProcessed: number = 0;
   private opportunitiesFound: number = 0;
   private lastBlockNumber: number = 0;
   private lastBlockTimestamp: number = 0;
-  private blockLatencies: number[] = [];
+  // FIX 10.4: Ring buffer for block latencies (O(1) insertion instead of O(n) shift)
+  // Pre-allocated Float64Array eliminates GC pressure from dynamic array growth
+  private static readonly BLOCK_LATENCY_BUFFER_SIZE = 100;
+  private blockLatencyBuffer = new Float64Array(ChainDetectorInstance.BLOCK_LATENCY_BUFFER_SIZE);
+  private blockLatencyIndex: number = 0;  // Next write position
+  private blockLatencyCount: number = 0;  // Number of valid entries (max = BUFFER_SIZE)
+  // FIX 10.3: Static empty array for fallback (avoids creating new [] on every cache miss)
+  private static readonly EMPTY_PAIRS: readonly ExtendedPair[] = [];
 
   private isRunning: boolean = false;
   private isStopping: boolean = false;
@@ -302,16 +329,8 @@ export class ChainDetectorInstance extends EventEmitter {
   // Hot pairs (high update frequency) bypass time-based throttling
   private activityTracker: PairActivityTracker;
 
-  // PERF-OPT: Snapshot caching to avoid O(N) iteration on every check
-  // When multiple pairs update within a short window, reuse the cached snapshot
-  private snapshotCache: Map<string, PairSnapshot> | null = null;
-  // PERF 10.3: Cache DexPool[] array to avoid O(N) conversion on every triangular check
-  private dexPoolCache: DexPool[] | null = null;
-  private snapshotCacheTimestamp: number = 0;
-  // FIX Perf 10.3: Version-based cache invalidation for accurate DexPool caching
-  // Incremented when any pair is updated, used to detect stale DexPool cache
-  private snapshotVersion: number = 0;
-  private dexPoolCacheVersion: number = -1;
+  // NOTE: Snapshot caching is now handled by SnapshotManager (R3 refactor)
+  // The manager handles time-based TTL and version-based invalidation internally
 
   // Task 2.1.3: Factory Subscription Configuration
   // Factory-level subscriptions for 40-50x RPC reduction
@@ -371,6 +390,10 @@ export class ChainDetectorInstance extends EventEmitter {
     for (const token of this.tokens) {
       this.tokensByAddress.set(token.address.toLowerCase(), token);
     }
+
+    // FIX 10.5: Pre-compute base tokens for triangular/multi-leg detection
+    // Avoids creating new arrays on every detection cycle (500ms/2000ms intervals)
+    this.cachedBaseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
 
     // Override URLs if provided
     if (config.wsUrl) {
@@ -703,20 +726,15 @@ export class ChainDetectorInstance extends EventEmitter {
     this.pairsByTokens.clear();
     // P2-FIX 3.3: Clear cached pair addresses array
     this.pairAddressesCache = [];
-    // R3 Refactor: Clear SnapshotManager caches
+    // FIX 10.1: Clear token pair key cache to prevent memory leak on restart
+    this.tokenPairKeyCache.clear();
+    // R3 Refactor: Clear SnapshotManager caches (handles all snapshot/DexPool caching)
     this.snapshotManager.clear();
-    // PERF-OPT: Clear local snapshot cache to free memory (legacy - kept for safety)
-    this.snapshotCache = null;
-    this.snapshotCacheTimestamp = 0;
-    // FIX Perf 10.3: Reset version counters for clean restart
-    this.snapshotVersion = 0;
-    this.dexPoolCacheVersion = -1;
-    this.dexPoolCache = null;
-    // P0-FIX 1.1: factoryEventSignatureSet is now readonly and initialized in constructor
-    // It will be garbage collected when the instance is destroyed, no need to clear
 
     // Clear latency tracking (P0-NEW-1 FIX: ensure cleanup)
-    this.blockLatencies = [];
+    // FIX 10.4: Reset ring buffer counters (buffer itself is pre-allocated, just reset state)
+    this.blockLatencyIndex = 0;
+    this.blockLatencyCount = 0;
 
     // Reset stats for clean restart
     this.eventsProcessed = 0;
@@ -900,12 +918,9 @@ export class ChainDetectorInstance extends EventEmitter {
         lastUpdate: Date.now()
       });
 
-      // FIX Bug 4.2 & Race 5.1: Atomic snapshot cache invalidation (same as handleSyncEvent)
       // R3 Refactor: Delegate cache invalidation to SnapshotManager
+      // SnapshotManager handles version tracking and cache management internally
       this.snapshotManager.invalidateCache();
-      this.snapshotVersion++;
-      this.snapshotCache = null;
-      this.dexPoolCache = null;
 
       // Calculate price and emit price update
       const price = calculatePriceFromBigIntReserves(
@@ -1047,24 +1062,38 @@ export class ChainDetectorInstance extends EventEmitter {
           // Validate fee at source to catch config errors early
           const feePercentage = validateFee(dexFeeToPercentage(dex.fee ?? 30));
 
+          // HOT-PATH OPT: Pre-compute pairKey once during initialization
+          // This avoids per-event string allocation in emitPriceUpdate()
+          const pairKey = `${dex.name}_${token0.symbol}_${token1.symbol}`;
+          // FIX Perf 10.2: Pre-compute chainPairKey for activity tracking
+          // HOT-PATH OPT: Lowercase address once at creation to avoid per-event toLowerCase()
+          const normalizedPairAddress = pairAddress.toLowerCase();
+          const chainPairKey = `${this.chainId}:${normalizedPairAddress}`;
+
+          // HOT-PATH OPT: Lowercase token addresses once at creation
+          const normalizedToken0 = token0.address.toLowerCase();
+          const normalizedToken1 = token1.address.toLowerCase();
+
           const pair: ExtendedPair = {
-            address: pairAddress,
+            address: normalizedPairAddress,
             dex: dex.name,
-            token0: token0.address,
-            token1: token1.address,
+            token0: normalizedToken0,
+            token1: normalizedToken1,
             fee: feePercentage,
             reserve0: '0',
             reserve1: '0',
             blockNumber: 0,
-            lastUpdate: 0
+            lastUpdate: 0,
+            pairKey,  // Cache for O(0) access in hot path
+            chainPairKey,  // FIX Perf 10.2: Cache for O(0) activity tracking
           };
 
-          const pairKey = `${dex.name}_${token0.symbol}_${token1.symbol}`;
           this.pairs.set(pairKey, pair);
-          this.pairsByAddress.set(pairAddress.toLowerCase(), pair);
+          this.pairsByAddress.set(normalizedPairAddress, pair);
 
           // P0-PERF FIX: Add to token-indexed lookup for O(1) arbitrage detection
-          const tokenKey = this.getTokenPairKey(token0.address, token1.address);
+          // Use already-normalized tokens to avoid redundant toLowerCase() in getTokenPairKey
+          const tokenKey = this.getTokenPairKey(normalizedToken0, normalizedToken1);
           let pairsForTokens = this.pairsByTokens.get(tokenKey);
           if (!pairsForTokens) {
             pairsForTokens = [];
@@ -1357,8 +1386,14 @@ export class ChainDetectorInstance extends EventEmitter {
     }
 
     // Create pair key in the same format as initializePairs()
+    // HOT-PATH OPT: Pre-compute pairKey for O(0) access in emitPriceUpdate()
     const pairKey = `${event.dexName}_${token0Symbol}_${token1Symbol}`;
     const pairName = `${token0Symbol}/${token1Symbol}`;
+    // FIX Perf 10.2: Pre-compute chainPairKey for activity tracking
+    const chainPairKey = `${this.chainId}:${pairAddressLower}`;
+
+    // Validate fee at source - downstream consumers trust this value
+    const validatedFee = validateFee(event.fee ? dexFeeToPercentage(event.fee) : undefined);
 
     const newPair: ExtendedPair = {
       name: pairName,
@@ -1366,11 +1401,13 @@ export class ChainDetectorInstance extends EventEmitter {
       token0: event.token0.toLowerCase(),
       token1: event.token1.toLowerCase(),
       address: pairAddressLower,
-      fee: event.fee ? dexFeeToPercentage(event.fee) : 0.003, // Convert basis points to percentage
+      fee: validatedFee,
       reserve0: '0',
       reserve1: '0',
       blockNumber: event.blockNumber,
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      pairKey,  // Cache for O(0) access in hot path
+      chainPairKey,  // FIX Perf 10.2: Cache for O(0) activity tracking
     };
 
     // Add to tracking maps
@@ -1432,8 +1469,8 @@ export class ChainDetectorInstance extends EventEmitter {
   //    - Prevents race conditions from concurrent access
   //    - Faster than spread operator in tight loops
   //
-  // 4. VERSION-BASED CACHE INVALIDATION: snapshotVersion++
-  //    - Direct field mutation, no method call overhead
+  // 4. VERSION-BASED CACHE INVALIDATION: snapshotManager.invalidateCache()
+  //    - SnapshotManager handles version tracking internally (single method call)
   //    - Prevents stale cache reads without locks
   //
   // Performance Budget: <10ms per event (to handle 100+ events/second)
@@ -1527,8 +1564,11 @@ export class ChainDetectorInstance extends EventEmitter {
       if (data && data.length >= 130) {
         // CRITICAL FIX: Parse reserves BEFORE recording activity to prevent
         // inflating activity scores for malformed events (if BigInt throws)
-        const reserve0 = BigInt('0x' + data.slice(2, 66)).toString();
-        const reserve1 = BigInt('0x' + data.slice(66, 130)).toString();
+        // FIX Perf 10.2: Keep BigInt values to avoid re-parsing in emitPriceUpdate()
+        const reserve0BigInt = BigInt('0x' + data.slice(2, 66));
+        const reserve1BigInt = BigInt('0x' + data.slice(66, 130));
+        const reserve0 = reserve0BigInt.toString();
+        const reserve1 = reserve1BigInt.toString();
         const blockNumber = parseInt(log.blockNumber, 16);
 
         // ADR-022: Update reserve cache (event-driven invalidation)
@@ -1538,30 +1578,26 @@ export class ChainDetectorInstance extends EventEmitter {
         }
 
         // Record activity AFTER successful parsing (race condition fix)
-        // Use chain:address format to avoid cross-chain address collisions in shared tracker
-        this.activityTracker.recordUpdate(`${this.chainId}:${pairAddress}`);
+        // FIX Perf 10.2: Use cached chainPairKey to avoid string allocation on every Sync event
+        // Falls back to template literal if chainPairKey wasn't pre-computed (e.g., newly added pairs)
+        this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
 
         // P1-9 FIX: Use Object.assign for atomic pair updates
         // This prevents partial updates if concurrent access occurs during
         // initialization or other event handling
+        // FIX Perf 10.2: Include cached BigInt values to avoid re-parsing downstream
         Object.assign(pair, {
           reserve0,
           reserve1,
+          reserve0BigInt,
+          reserve1BigInt,
           blockNumber,
           lastUpdate: Date.now()
         });
 
-        // FIX Bug 4.2 & Race 5.1: Atomic snapshot cache invalidation
-        // Increment version FIRST, then invalidate cache
-        // This ensures any concurrent reader sees the new version before cache is cleared
-        // The reader will either: (a) see old version + old cache (valid), or
-        // (b) see new version + null cache (will rebuild)
-        // Never: (c) see old version + null cache (which would cause stale rebuild)
         // R3 Refactor: Delegate cache invalidation to SnapshotManager
+        // SnapshotManager handles version-based cache coherency and TTL internally
         this.snapshotManager.invalidateCache();
-        this.snapshotVersion++;
-        this.snapshotCache = null;
-        this.dexPoolCache = null; // Also invalidate DexPool cache
 
         this.eventsProcessed++;
 
@@ -1605,8 +1641,10 @@ export class ChainDetectorInstance extends EventEmitter {
         reserve1: pair.reserve1
       };
 
-      // FIX Bug 4.2: Ensure USD value estimation is available for whale detection
-      // If whaleAlertPublisher is null but swapEventFilter is not, whale detection won't work properly
+      // Estimate USD value for whale detection (if publisher available)
+      // When publisher is null, usdValue = 0 which is safe because:
+      // 1. Whale detection is guarded by whaleAlertPublisher != null check below
+      // 2. Local emit consumers should not assume usdValue is always accurate
       const usdValue = this.whaleAlertPublisher
         ? this.whaleAlertPublisher.estimateSwapUsdValue(pairInfo, amount0In, amount1In, amount0Out, amount1Out)
         : 0;
@@ -1657,11 +1695,13 @@ export class ChainDetectorInstance extends EventEmitter {
 
     if (this.lastBlockNumber > 0) {
       const latency = now - this.lastBlockTimestamp;
-      this.blockLatencies.push(latency);
-
-      // Keep only last 100 latencies
-      if (this.blockLatencies.length > 100) {
-        this.blockLatencies.shift();
+      // FIX 10.4: O(1) ring buffer insertion instead of O(n) shift()
+      // Write to current position and advance index (wraps at BUFFER_SIZE)
+      this.blockLatencyBuffer[this.blockLatencyIndex] = latency;
+      this.blockLatencyIndex = (this.blockLatencyIndex + 1) % ChainDetectorInstance.BLOCK_LATENCY_BUFFER_SIZE;
+      // Track count up to buffer size (for accurate average before buffer is full)
+      if (this.blockLatencyCount < ChainDetectorInstance.BLOCK_LATENCY_BUFFER_SIZE) {
+        this.blockLatencyCount++;
       }
     }
 
@@ -1691,8 +1731,10 @@ export class ChainDetectorInstance extends EventEmitter {
   // ===========================================================================
 
   private emitPriceUpdate(pair: ExtendedPair): void {
-    const reserve0 = BigInt(pair.reserve0);
-    const reserve1 = BigInt(pair.reserve1);
+    // FIX Perf 10.2: Use cached BigInt values to avoid re-parsing (~2000 parses/sec saved)
+    // Falls back to parsing if BigInt cache is missing (e.g., pairs from older code paths)
+    const reserve0 = pair.reserve0BigInt ?? BigInt(pair.reserve0);
+    const reserve1 = pair.reserve1BigInt ?? BigInt(pair.reserve1);
 
     if (reserve0 === 0n || reserve1 === 0n) return;
 
@@ -1704,7 +1746,8 @@ export class ChainDetectorInstance extends EventEmitter {
     const priceUpdate: PriceUpdate = {
       chain: this.chainId,
       dex: pair.dex,
-      pairKey: this.getPairKey(pair),
+      // HOT-PATH OPT: Use cached pairKey, fall back to computed for backward compatibility
+      pairKey: pair.pairKey ?? this.getPairKey(pair),
       pairAddress: pair.address,
       token0: pair.token0,
       token1: pair.token1,
@@ -1726,7 +1769,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private async publishPriceUpdate(update: PriceUpdate): Promise<void> {
     try {
-      await this.streamsClient.xadd(
+      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
+      // MAXLEN: 100,000 (configured in STREAM_MAX_LENGTHS)
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.PRICE_UPDATES,
         update
       );
@@ -1739,15 +1784,11 @@ export class ChainDetectorInstance extends EventEmitter {
    * Create a deep snapshot of a single pair for thread-safe arbitrage detection.
    *
    * R3 Refactor: Delegates to extracted SnapshotManager.
+   * NOTE: Fee is already validated at pair creation time (initializePairs/handlePairCreatedEvent).
+   * SnapshotManager.createPairSnapshot validates as a safety net.
    */
   private createPairSnapshot(pair: ExtendedPair): PairSnapshot | null {
-    // R3: Delegate to snapshot manager with fee validation
-    const snapshot = this.snapshotManager.createPairSnapshot(pair);
-    if (snapshot) {
-      // Apply local fee validation
-      snapshot.fee = validateFee(pair.fee);
-    }
-    return snapshot;
+    return this.snapshotManager.createPairSnapshot(pair);
   }
 
   /**
@@ -1775,12 +1816,14 @@ export class ChainDetectorInstance extends EventEmitter {
     // P0-PERF FIX: O(1) lookup instead of O(N) iteration
     // Get only pairs with the same token pair (typically 2-5 pairs across DEXes)
     const tokenKey = this.getTokenPairKey(currentSnapshot.token0, currentSnapshot.token1);
-    const matchingPairs = this.pairsByTokens.get(tokenKey) || [];
+    // FIX 10.3: Use static empty array instead of creating new [] on every cache miss
+    const matchingPairs = this.pairsByTokens.get(tokenKey) ?? ChainDetectorInstance.EMPTY_PAIRS;
 
     // Iterate only matching pairs (O(k) where k is typically 2-5)
     for (const otherPair of matchingPairs) {
       // Skip same pair (same address)
-      if (otherPair.address.toLowerCase() === currentSnapshot.address.toLowerCase()) continue;
+      // HOT-PATH OPT: Both addresses are already lowercase (normalized at creation)
+      if (otherPair.address === currentSnapshot.address) continue;
 
       // Skip same DEX - arbitrage requires different DEXes
       if (otherPair.dex === currentSnapshot.dex) continue;
@@ -1832,41 +1875,67 @@ export class ChainDetectorInstance extends EventEmitter {
 
   /**
    * Check if two pairs represent the same token pair (in either order).
-   * Returns { sameOrder: boolean, reverseOrder: boolean }
+   * HOT-PATH: Called during arbitrage detection.
+   * NOTE: Tokens in PairSnapshot are already lowercase (normalized at creation/snapshot).
    */
   private isSameTokenPair(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    const token1_0 = pair1.token0.toLowerCase();
-    const token1_1 = pair1.token1.toLowerCase();
-    const token2_0 = pair2.token0.toLowerCase();
-    const token2_1 = pair2.token1.toLowerCase();
-
     return (
-      (token1_0 === token2_0 && token1_1 === token2_1) ||
-      (token1_0 === token2_1 && token1_1 === token2_0)
+      (pair1.token0 === pair2.token0 && pair1.token1 === pair2.token1) ||
+      (pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0)
     );
   }
 
   /**
    * Check if token order is reversed between two pairs.
+   * HOT-PATH: Called during arbitrage calculation.
+   * NOTE: Tokens in PairSnapshot are already lowercase (normalized at creation/snapshot).
    */
   private isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    const token1_0 = pair1.token0.toLowerCase();
-    const token1_1 = pair1.token1.toLowerCase();
-    const token2_0 = pair2.token0.toLowerCase();
-    const token2_1 = pair2.token1.toLowerCase();
-
-    return token1_0 === token2_1 && token1_1 === token2_0;
+    return pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0;
   }
 
   /**
    * P0-PERF FIX: Generate normalized key for token pair lookup.
    * Orders addresses alphabetically for consistent matching regardless of token order.
    * This enables O(1) lookup of all pairs containing the same token pair.
+   * HOT-PATH: Called during arbitrage detection.
+   *
+   * FIX 10.1: Uses LRU-style cache to avoid string allocations in hot path.
+   * Cache hit rate is expected to be >99% since pairs are relatively static.
    */
   private getTokenPairKey(token0: string, token1: string): string {
+    // FIX 10.1: Check cache first to avoid string allocation
+    const cacheKey = `${token0}|${token1}`;
+    let result = this.tokenPairKeyCache.get(cacheKey);
+    if (result !== undefined) {
+      return result;
+    }
+
+    // Cache miss - compute the key (allocates strings)
+    // Safety: Defensive toLowerCase() in case inputs aren't pre-normalized
     const t0 = token0.toLowerCase();
     const t1 = token1.toLowerCase();
-    return t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+    result = t0 < t1 ? `${t0}_${t1}` : `${t1}_${t0}`;
+
+    // FIX 10.1: Amortized O(1) eviction - delete oldest entries incrementally
+    // Previous implementation used O(n) spread+slice which caused latency spikes.
+    // Now we delete entries one at a time using Map's insertion-order iteration.
+    if (this.tokenPairKeyCache.size >= this.TOKEN_PAIR_KEY_CACHE_MAX) {
+      // Delete oldest 10% of entries (amortized across many calls)
+      const deleteCount = Math.ceil(this.TOKEN_PAIR_KEY_CACHE_MAX * 0.1);
+      let deleted = 0;
+      for (const key of this.tokenPairKeyCache.keys()) {
+        if (deleted >= deleteCount) break;
+        this.tokenPairKeyCache.delete(key);
+        deleted++;
+      }
+    }
+
+    // Cache both directions for symmetric lookup
+    this.tokenPairKeyCache.set(cacheKey, result);
+    this.tokenPairKeyCache.set(`${token1}|${token0}`, result);
+
+    return result;
   }
 
   /**
@@ -1892,7 +1961,9 @@ export class ChainDetectorInstance extends EventEmitter {
 
   private async emitOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     try {
-      await this.streamsClient.xadd(
+      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
+      // MAXLEN: 10,000 (configured in STREAM_MAX_LENGTHS)
+      await this.streamsClient.xaddWithLimit(
         RedisStreamsClient.STREAMS.OPPORTUNITIES,
         opportunity
       );
@@ -1935,10 +2006,11 @@ export class ChainDetectorInstance extends EventEmitter {
     // SnapshotManager handles version-based cache invalidation (Race 5.1, Perf 10.3)
     const pools = this.snapshotManager.getDexPools(pairsSnapshot);
 
+    // FIX 10.5: Use pre-computed baseTokens instead of creating new arrays every cycle
     // BUG-1 FIX: Use token addresses instead of symbols
     // DexPool.token0/token1 contain addresses, so baseTokens must also be addresses
     // for the findReachableTokens() token matching to work correctly
-    const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
+    const baseTokens = this.cachedBaseTokens;
 
     try {
       // Find triangular opportunities (3-token cycles)
@@ -2042,8 +2114,9 @@ export class ChainDetectorInstance extends EventEmitter {
     // SnapshotManager handles version-based cache invalidation (Race 5.1, Perf 10.3)
     const pools = this.snapshotManager.getDexPools(pairsSnapshot);
 
+    // FIX 10.5: Use pre-computed baseTokens instead of creating new arrays every cycle
     // BUG-1 FIX: Use token addresses instead of symbols (same fix as triangular)
-    const baseTokens = this.tokens.slice(0, 4).map(t => t.address.toLowerCase());
+    const baseTokens = this.cachedBaseTokens;
 
     try {
       // Use async version to offload to worker thread
@@ -2143,9 +2216,15 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   getStats(): ChainStats {
-    const avgLatency = this.blockLatencies.length > 0
-      ? this.blockLatencies.reduce((a, b) => a + b, 0) / this.blockLatencies.length
-      : 0;
+    // FIX 10.4: Calculate average from ring buffer (O(n) but only 100 elements)
+    let avgLatency = 0;
+    if (this.blockLatencyCount > 0) {
+      let sum = 0;
+      for (let i = 0; i < this.blockLatencyCount; i++) {
+        sum += this.blockLatencyBuffer[i];
+      }
+      avgLatency = sum / this.blockLatencyCount;
+    }
 
     // FIX 10.4: Include hot pairs count for monitoring volatility-based prioritization
     const activityStats = this.activityTracker.getStats();

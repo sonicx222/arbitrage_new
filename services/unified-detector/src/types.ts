@@ -8,6 +8,19 @@
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
 import { TimeoutError } from '@arbitrage/types';
 
+// Fee utilities and price bounds - import from canonical source (@arbitrage/core)
+import {
+  type FeeBasisPoints as CanonicalFeeBasisPoints,
+  type FeeDecimal as CanonicalFeeDecimal,
+  bpsToDecimal,
+  decimalToBps,
+  validateFee as canonicalValidateFee,
+  FEE_CONSTANTS,
+  // FIX 6: Use shared price bounds constants
+  MIN_SAFE_PRICE,
+  MAX_SAFE_PRICE,
+} from '@arbitrage/core';
+
 // =============================================================================
 // Logger Interface
 // =============================================================================
@@ -75,40 +88,54 @@ export function asLogger<T extends Logger>(logger: T): Logger {
 }
 
 // =============================================================================
-// Fee Types
+// Fee Types and Constants
 // =============================================================================
 
 /**
- * FIX Inconsistency 6.4: Fee representation types.
- * Use these branded types to make fee representation explicit.
+ * FIX 6.3: Fee representation standardization.
  *
- * @example
- * const fee: FeeBasisPoints = 30 as FeeBasisPoints; // 0.30%
- * const feeDecimal: FeeDecimal = 0.003 as FeeDecimal; // 0.30%
+ * IMPORTANT: This codebase uses TWO fee representations:
+ * - **Decimal** (0.003 = 0.30%): Used in pair objects, arbitrage calculations
+ * - **Basis Points** (30 = 0.30%): Used in config, DexPool interface
+ *
+ * All fee utilities are now imported from '@arbitrage/core' (single source of truth).
+ * These re-exports maintain backward compatibility.
+ *
+ * @see shared/core/src/utils/fee-utils.ts for canonical implementation
  */
 
-/** Fee in basis points (30 = 0.30%). Range: 0-10000 */
-export type FeeBasisPoints = number & { readonly __brand: 'FeeBasisPoints' };
+// Re-export branded types from canonical source
+/** @deprecated Import from '@arbitrage/core' instead */
+export type FeeBasisPoints = CanonicalFeeBasisPoints;
+/** @deprecated Import from '@arbitrage/core' instead */
+export type FeeDecimal = CanonicalFeeDecimal;
 
-/** Fee as decimal (0.003 = 0.30%). Range: 0-1 */
-export type FeeDecimal = number & { readonly __brand: 'FeeDecimal' };
+// Re-export fee constants from canonical source for backward compatibility
+/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
+export const FEE_UNISWAP_V2_DECIMAL = FEE_CONSTANTS.UNISWAP_V2;
+/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
+export const FEE_UNISWAP_V3_LOW_DECIMAL = FEE_CONSTANTS.V3_LOWEST;
+/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
+export const FEE_UNISWAP_V3_MEDIUM_DECIMAL = FEE_CONSTANTS.V3_LOW;
+/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
+export const FEE_UNISWAP_V3_HIGH_DECIMAL = FEE_CONSTANTS.V3_MEDIUM;
+/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
+export const FEE_DEFAULT_DECIMAL = FEE_CONSTANTS.DEFAULT;
 
 /**
  * Convert basis points to decimal fee.
- * @param basisPoints - Fee in basis points (e.g., 30 = 0.30%)
- * @returns Fee as decimal (e.g., 0.003)
+ * @deprecated Import bpsToDecimal from '@arbitrage/core' instead
  */
 export function basisPointsToDecimal(basisPoints: number): FeeDecimal {
-  return (basisPoints / 10000) as FeeDecimal;
+  return bpsToDecimal(basisPoints);
 }
 
 /**
  * Convert decimal fee to basis points.
- * @param decimal - Fee as decimal (e.g., 0.003 = 0.30%)
- * @returns Fee in basis points (e.g., 30)
+ * @deprecated Import decimalToBps from '@arbitrage/core' instead
  */
 export function decimalToBasisPoints(decimal: number): FeeBasisPoints {
-  return Math.round(decimal * 10000) as FeeBasisPoints;
+  return decimalToBps(decimal);
 }
 
 // =============================================================================
@@ -330,52 +357,41 @@ export async function withTimeoutResult<T>(
 
 // =============================================================================
 // Fee Validation Utilities (FIX 9.3: Centralized Fee Handling)
+// Now delegates to canonical implementation in @arbitrage/core
 // =============================================================================
 
 /**
  * Validate and sanitize a fee value for safe calculations.
- * FIX 9.3: Centralized fee validation to prevent NaN/Infinity in arbitrage calculations.
- *
- * Guards against:
- * - undefined/null values
- * - NaN (from invalid conversions)
- * - Infinity (from division errors)
- * - Negative values (invalid fees)
- * - Fees > 100% (clearly incorrect)
- *
- * @param fee - Fee value to validate (as decimal, e.g., 0.003 = 0.3%)
- * @param defaultFee - Default value if invalid (default: 0.003 = 0.3%)
- * @returns Valid fee value
+ * @deprecated Import validateFee from '@arbitrage/core' instead
  */
-export function validateFee(fee: number | undefined | null, defaultFee: number = 0.003): number {
-  if (fee === undefined || fee === null) {
-    return defaultFee;
-  }
-  if (!Number.isFinite(fee) || fee < 0 || fee > 1) {
-    return defaultFee;
-  }
-  return fee;
+export function validateFee(fee: number | undefined | null, defaultFee: number = FEE_DEFAULT_DECIMAL): number {
+  return canonicalValidateFee(fee, defaultFee);
 }
 
 /**
  * Validate a price value for safe arithmetic operations.
  * FIX 4.1: Guards against values that would cause division by zero or overflow.
  *
+ * FIX 2.1: Aligned thresholds with SimpleArbitrageDetector defaults (1e-18 to 1e18)
+ * to support memecoin prices while maintaining safety for 1/price inversions.
+ *
+ * At 1e-18, inverting gives 1e18 which is still safe for Number (MAX_SAFE_INTEGER is ~9e15,
+ * but JavaScript Numbers can represent up to ~1.8e308 with precision loss).
+ *
  * @param price - Price value to validate
  * @returns true if price is safe for calculations
+ * @see SimpleArbitrageDetector for consistent threshold usage
  */
 export function isValidPrice(price: number): boolean {
   // Must be a finite positive number
   if (!Number.isFinite(price) || price <= 0) {
     return false;
   }
-  // Must not be too small (would cause overflow when inverted)
-  // 1e-15 is the threshold - inverting gives 1e15 which is still safe
-  if (price < 1e-15) {
-    return false;
-  }
-  // Must not be too large (would cause precision loss)
-  if (price > 1e15) {
+  // FIX 6: Use shared price bounds from @arbitrage/core
+  // These are symmetric: MIN_SAFE_PRICE = 1e-18, MAX_SAFE_PRICE = 1e18
+  // At 1e-18: supports low-value memecoins, 1/price = 1e18 is safe
+  // At 1e18: prevents precision loss in floating-point
+  if (price < MIN_SAFE_PRICE || price > MAX_SAFE_PRICE) {
     return false;
   }
   return true;
