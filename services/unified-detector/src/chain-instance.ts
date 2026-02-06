@@ -51,6 +51,9 @@ import {
   // ADR-022: Reserve cache for RPC reduction
   ReserveCache,
   getReserveCache,
+  // PHASE2-TASK36: Hierarchical cache with PriceMatrix L1
+  HierarchicalCache,
+  createHierarchicalCache,
 } from '@arbitrage/core';
 
 import {
@@ -177,6 +180,14 @@ export interface ChainInstanceConfig {
    * Uses deterministic hash for consistent rollout across restarts.
    */
   reserveCacheRolloutPercent?: number;
+
+  // PHASE2-TASK36: Hierarchical Price Cache Configuration
+  /**
+   * When true, use HierarchicalCache (with PriceMatrix L1) for price caching.
+   * Provides L1/L2/L3 tiered caching with sub-microsecond reads.
+   * Default: false (disabled for safe rollout)
+   */
+  usePriceCache?: boolean;
 }
 
 interface ExtendedPair extends Pair {
@@ -364,6 +375,12 @@ export class ChainDetectorInstance extends EventEmitter {
     reserveCacheRolloutPercent: number;
   };
 
+  // PHASE2-TASK36: Hierarchical price cache with PriceMatrix L1
+  // Optional enhancement for persistent caching and monitoring
+  // Does NOT replace hot-path pairsByAddress Map (still O(1) at ~50ns)
+  private priceCache: HierarchicalCache | null = null;
+  private usePriceCache: boolean = false;
+
   constructor(config: ChainInstanceConfig) {
     super();
 
@@ -466,6 +483,27 @@ export class ChainDetectorInstance extends EventEmitter {
       ...Object.values(FactoryEventSignatures),
       ...Object.values(AdditionalEventSignatures),
     ].map(s => s.toLowerCase()));
+
+    // PHASE2-TASK36: Initialize HierarchicalCache if enabled
+    this.usePriceCache = config.usePriceCache ?? false;
+    if (this.usePriceCache) {
+      this.priceCache = createHierarchicalCache({
+        l1Enabled: true,
+        l1Size: 64, // 64MB L1 cache
+        l2Enabled: true,
+        l2Ttl: 300, // 5 minutes
+        l3Enabled: false, // Disable L3 for now
+        enablePromotion: true,
+        enableDemotion: false,
+        usePriceMatrix: true, // Use PriceMatrix for L1
+        enableTimingMetrics: false // Disable in production
+      });
+      this.logger.info('Hierarchical price cache enabled', {
+        chainId: this.chainId,
+        l1Size: 64,
+        usePriceMatrix: true
+      });
+    }
   }
 
   // ===========================================================================
@@ -1764,6 +1802,23 @@ export class ChainDetectorInstance extends EventEmitter {
     // Publish to Redis Streams
     this.publishPriceUpdate(priceUpdate);
 
+    // PHASE2-TASK37: Store in HierarchicalCache if enabled (non-blocking)
+    // Cache key format: "price:{chainId}:{pairAddress}"
+    // This provides persistent caching and cross-instance sharing
+    if (this.usePriceCache && this.priceCache) {
+      const cacheKey = `price:${this.chainId}:${pair.address.toLowerCase()}`;
+      // Fire-and-forget write to avoid blocking hot path
+      this.priceCache.set(cacheKey, {
+        price: priceUpdate.price,
+        reserve0: priceUpdate.reserve0,
+        reserve1: priceUpdate.reserve1,
+        timestamp: priceUpdate.timestamp,
+        blockNumber: priceUpdate.blockNumber
+      }).catch(error => {
+        this.logger.warn('Failed to write to price cache', { error, cacheKey });
+      });
+    }
+
     this.emit('priceUpdate', priceUpdate);
   }
 
@@ -1777,6 +1832,28 @@ export class ChainDetectorInstance extends EventEmitter {
       );
     } catch (error) {
       this.logger.error('Failed to publish price update', { error });
+    }
+  }
+
+  /**
+   * PHASE2-TASK38: Get cached price data for a pair.
+   * Useful for recovery scenarios or cross-instance coordination.
+   * Does NOT replace hot-path pairsByAddress lookup.
+   *
+   * @param pairAddress The pair address to lookup
+   * @returns Cached price data or null if not cached
+   */
+  async getCachedPrice(pairAddress: string): Promise<any> {
+    if (!this.usePriceCache || !this.priceCache) {
+      return null;
+    }
+
+    const cacheKey = `price:${this.chainId}:${pairAddress.toLowerCase()}`;
+    try {
+      return await this.priceCache.get(cacheKey);
+    } catch (error) {
+      this.logger.warn('Failed to read from price cache', { error, cacheKey });
+      return null;
     }
   }
 
@@ -2231,6 +2308,11 @@ export class ChainDetectorInstance extends EventEmitter {
     // FIX 10.4: Include hot pairs count for monitoring volatility-based prioritization
     const activityStats = this.activityTracker.getStats();
 
+    // PHASE2-TASK39: Include price cache stats if enabled
+    const cacheStats = (this.usePriceCache && this.priceCache)
+      ? this.priceCache.getStats()
+      : undefined;
+
     return {
       chainId: this.chainId,
       status: this.status,
@@ -2239,7 +2321,9 @@ export class ChainDetectorInstance extends EventEmitter {
       lastBlockNumber: this.lastBlockNumber,
       avgBlockLatencyMs: avgLatency,
       pairsMonitored: this.pairs.size,
-      hotPairsCount: activityStats.hotPairs
+      hotPairsCount: activityStats.hotPairs,
+      // PHASE2-TASK39: Optional cache statistics
+      ...(cacheStats && { priceCache: cacheStats })
     };
   }
 
