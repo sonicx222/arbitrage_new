@@ -83,6 +83,23 @@ export interface MevProviderConfig {
   fallbackToPublic?: boolean;
   /** Chain ID override (fetched from provider if not specified) */
   chainId?: number;
+  /**
+   * Use MEV-Share for Ethereum (rebate capture).
+   *
+   * MEV-Share enables capturing 50-90% of MEV value as rebates by allowing
+   * searchers to backrun transactions while sharing profits.
+   *
+   * When enabled:
+   * - Transactions submit to MEV-Share endpoint first
+   * - Falls back to standard Flashbots if MEV-Share fails
+   * - Rebate information tracked in submission result
+   *
+   * Default: true (MEV-Share enabled for value capture)
+   * Set to false to use standard Flashbots without rebates.
+   *
+   * @see ADR-028 MEV-Share Integration
+   */
+  useMevShare?: boolean;
 }
 
 /**
@@ -125,6 +142,56 @@ export interface BundleSimulationResult {
 }
 
 /**
+ * MEV-Share hint configuration
+ *
+ * Controls what transaction information is revealed to searchers.
+ * Balance privacy (hiding parameters) with value capture (allowing
+ * searchers to identify opportunities).
+ *
+ * @see https://docs.flashbots.net/flashbots-mev-share/searchers/understanding-bundles
+ */
+export interface MevShareHints {
+  /** Reveal contract address to searchers */
+  contractAddress: boolean;
+  /** Reveal function selector (first 4 bytes of calldata) */
+  functionSelector: boolean;
+  /** Reveal event logs */
+  logs: boolean;
+  /** Reveal full calldata */
+  calldata: boolean;
+  /** Reveal transaction hash */
+  hash: boolean;
+  /** Reveal transaction value (ETH amount) */
+  txValue: boolean;
+}
+
+/**
+ * MEV-Share submission options
+ */
+export interface MevShareOptions {
+  /** Hint configuration (what to reveal to searchers) */
+  hints?: MevShareHints;
+  /** Minimum rebate percentage to accept (0-100) */
+  minRebatePercent?: number;
+  /** Maximum block number for bundle inclusion */
+  maxBlockNumber?: number;
+}
+
+/**
+ * MEV-Share submission result (extends standard result with rebate info)
+ */
+export interface MevShareSubmissionResult extends MevSubmissionResult {
+  /** Rebate amount in wei (if any) */
+  rebateAmount?: bigint;
+  /** Rebate percentage (0-100) */
+  rebatePercent?: number;
+  /** MEV-Share bundle ID for tracking */
+  bundleId?: string;
+  /** Whether MEV-Share was used (vs standard Flashbots) */
+  usedMevShare?: boolean;
+}
+
+/**
  * MEV protection metrics
  */
 export interface MevMetrics {
@@ -142,6 +209,12 @@ export interface MevMetrics {
   bundlesIncluded: number;
   /** Bundles that reverted (Flashbots) */
   bundlesReverted: number;
+  /** MEV-Share rebates received (counter) */
+  mevShareRebatesReceived: number;
+  /** Total rebate amount in wei (accumulated) */
+  totalRebateWei: bigint;
+  /** Average rebate percentage (0-100) */
+  averageRebatePercent: number;
   /** Last updated timestamp */
   lastUpdated: number;
 }

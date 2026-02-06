@@ -41,6 +41,7 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-025](./ADR-025-ml-model-lifecycle.md) | ML Model Lifecycle Management | Accepted | 2026-02-04 | 88% |
 | [ADR-026](./ADR-026-integration-test-consolidation.md) | Integration Test Consolidation | Accepted | 2026-02-04 | 95% |
 | [ADR-027](./ADR-027-nonce-preallocation-pool.md) | Nonce Pre-allocation Pool | Accepted | 2026-02-04 | 90% |
+| [ADR-028](./ADR-028-mev-share-integration.md) | MEV-Share Integration | Accepted | 2026-02-06 | 90% |
 
 ## Decision Summary
 

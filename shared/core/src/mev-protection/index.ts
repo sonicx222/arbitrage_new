@@ -90,6 +90,7 @@ export type { IncrementableMetricField } from './metrics-manager';
 
 // Provider implementations
 export { FlashbotsProvider, createFlashbotsProvider } from './flashbots-provider';
+export { MevShareProvider, createMevShareProvider } from './mev-share-provider';
 export {
   L2SequencerProvider,
   createL2SequencerProvider,
@@ -144,6 +145,10 @@ export {
   MevMetrics,
   CHAIN_MEV_STRATEGIES,
   MEV_DEFAULTS,
+  // MEV-Share types
+  MevShareHints,
+  MevShareOptions,
+  MevShareSubmissionResult,
   // Solana types (for type-safe Jito usage)
   ISolanaMevProvider,
   SolanaTransactionLike,

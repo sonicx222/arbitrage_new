@@ -257,7 +257,7 @@ export class FlashbotsProvider extends BaseMevProvider {
    * CONFIG-FIX: Now uses dynamic chainId instead of hardcoded 1.
    * Supports Ethereum mainnet (1), Sepolia (11155111), Holesky (17000).
    */
-  private async prepareTransaction(
+  protected async prepareTransaction(
     tx: ethers.TransactionRequest,
     priorityFeeGwei?: number
   ): Promise<ethers.TransactionRequest> {
@@ -308,7 +308,7 @@ export class FlashbotsProvider extends BaseMevProvider {
   /**
    * Simulate bundle using eth_callBundle
    */
-  private async simulateBundle(
+  protected async simulateBundle(
     signedTransactions: string[],
     blockNumber: number
   ): Promise<BundleSimulationResult> {
@@ -470,7 +470,7 @@ export class FlashbotsProvider extends BaseMevProvider {
    * PERF: Uses exponential backoff starting at 500ms, doubling up to 4s max.
    * This reduces RPC load while maintaining responsiveness for fast blocks.
    */
-  private async waitForInclusion(
+  protected async waitForInclusion(
     bundleHash: string,
     signedTransactions: string[],
     targetBlock: number,
@@ -589,8 +589,10 @@ export class FlashbotsProvider extends BaseMevProvider {
    * PERFORMANCE-FIX: Uses async signMessage with caching instead of
    * blocking signMessageSync. Signatures are cached for 5 minutes
    * to avoid repeated signing of the same payload.
+   *
+   * Changed to protected to allow MevShareProvider to reuse authentication.
    */
-  private async getAuthHeaders(body: string): Promise<Record<string, string>> {
+  protected async getAuthHeaders(body: string): Promise<Record<string, string>> {
     const bodyHash = ethers.id(body);
 
     // Check cache first
@@ -667,8 +669,10 @@ export class FlashbotsProvider extends BaseMevProvider {
 
   /**
    * Fallback to public mempool submission
+   *
+   * Changed to protected to allow MevShareProvider to use fallback logic.
    */
-  private async fallbackToPublic(
+  protected async fallbackToPublic(
     tx: ethers.TransactionRequest,
     startTime: number,
     reason: string

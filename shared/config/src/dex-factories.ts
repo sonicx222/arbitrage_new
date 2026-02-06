@@ -783,6 +783,32 @@ for (const [chain, factories] of Object.entries(DEX_FACTORY_REGISTRY)) {
 }
 
 // =============================================================================
+// Vault Model DEX Helper (moved before validation to avoid TDZ)
+// =============================================================================
+
+/**
+ * DEXes that use vault/pool model instead of standard factory pattern.
+ * These DEXes have different factory addresses in DEXES config vs the actual
+ * vault/pool address used for event subscriptions.
+ *
+ * - balancer_v2: Uses Vault address for pool registration events
+ * - beethoven_x: Balancer V2 fork on Fantom
+ * - gmx: Uses Vault address on Avalanche
+ * - platypus: Uses Pool address on Avalanche
+ */
+const VAULT_MODEL_DEXES = new Set(['balancer_v2', 'beethoven_x', 'gmx', 'platypus']);
+
+/**
+ * Check if a DEX uses vault/pool model instead of standard factory pattern.
+ *
+ * @param dexName - DEX identifier
+ * @returns true if DEX uses vault model
+ */
+export function isVaultModelDex(dexName: string): boolean {
+  return VAULT_MODEL_DEXES.has(dexName);
+}
+
+// =============================================================================
 // P2-1: Unified Factory Registry Validation
 // Consolidates validateFactoryRegistryAtLoad(), validateFactoryRegistry(),
 // and validateFactoryRegistryAtLoadTime() into a single composable validator.
@@ -1107,28 +1133,6 @@ export function getFactoriesByType(chain: string): Map<FactoryType, FactoryConfi
   }
 
   return byType;
-}
-
-/**
- * DEXes that use vault/pool model instead of standard factory pattern.
- * These DEXes have different factory addresses in DEXES config vs the actual
- * vault/pool address used for event subscriptions.
- *
- * - balancer_v2: Uses Vault address for pool registration events
- * - beethoven_x: Balancer V2 fork on Fantom
- * - gmx: Uses Vault address on Avalanche
- * - platypus: Uses Pool address on Avalanche
- */
-const VAULT_MODEL_DEXES = new Set(['balancer_v2', 'beethoven_x', 'gmx', 'platypus']);
-
-/**
- * Check if a DEX uses vault/pool model instead of standard factory pattern.
- *
- * @param dexName - DEX identifier
- * @returns true if DEX uses vault model
- */
-export function isVaultModelDex(dexName: string): boolean {
-  return VAULT_MODEL_DEXES.has(dexName);
 }
 
 /**

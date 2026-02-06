@@ -45,6 +45,12 @@ export interface MevGlobalConfig {
   maxRetries?: number;
   /** Fallback to public mempool on failure */
   fallbackToPublic?: boolean;
+  /**
+   * Enable MEV-Share for Ethereum (rebate capture).
+   * Controlled via FEATURE_MEV_SHARE environment variable.
+   * Default: true (MEV-Share enabled for value capture)
+   */
+  useMevShare?: boolean;
 }
 
 /**
@@ -233,14 +239,23 @@ export class MevProviderFactory {
       submissionTimeoutMs: this.globalConfig.submissionTimeoutMs,
       maxRetries: this.globalConfig.maxRetries,
       fallbackToPublic: this.globalConfig.fallbackToPublic,
+      useMevShare: this.globalConfig.useMevShare,
     };
 
     // Create appropriate provider based on chain strategy
     const strategy = CHAIN_MEV_STRATEGIES[chain] || 'standard';
 
     switch (strategy) {
-      case 'flashbots':
+      case 'flashbots': {
+        // Default to MEV-Share for value capture (50-90% rebates)
+        const useMevShare = config.useMevShare !== false;
+
+        if (useMevShare && chain === 'ethereum') {
+          const { createMevShareProvider } = require('./mev-share-provider');
+          return createMevShareProvider(config);
+        }
         return createFlashbotsProvider(config);
+      }
 
       case 'sequencer':
         return createL2SequencerProvider(config);
@@ -409,11 +424,16 @@ export class MevProviderFactory {
       averageLatencyMs: 0,
       bundlesIncluded: 0,
       bundlesReverted: 0,
+      mevShareRebatesReceived: 0,
+      totalRebateWei: 0n,
+      averageRebatePercent: 0,
       lastUpdated: 0,
     };
 
     let totalLatency = 0;
     let latencyCount = 0;
+    let totalRebatePercent = 0;
+    let rebateCount = 0;
 
     for (const [chain, provider] of this.providers) {
       const metrics = provider.getMetrics();
@@ -425,10 +445,17 @@ export class MevProviderFactory {
       global.fallbackSubmissions += metrics.fallbackSubmissions;
       global.bundlesIncluded += metrics.bundlesIncluded;
       global.bundlesReverted += metrics.bundlesReverted;
+      global.mevShareRebatesReceived += metrics.mevShareRebatesReceived;
+      global.totalRebateWei += metrics.totalRebateWei;
 
       if (metrics.averageLatencyMs > 0) {
         totalLatency += metrics.averageLatencyMs * metrics.successfulSubmissions;
         latencyCount += metrics.successfulSubmissions;
+      }
+
+      if (metrics.averageRebatePercent > 0) {
+        totalRebatePercent += metrics.averageRebatePercent * metrics.mevShareRebatesReceived;
+        rebateCount += metrics.mevShareRebatesReceived;
       }
 
       if (metrics.lastUpdated > global.lastUpdated) {
@@ -438,6 +465,10 @@ export class MevProviderFactory {
 
     if (latencyCount > 0) {
       global.averageLatencyMs = totalLatency / latencyCount;
+    }
+
+    if (rebateCount > 0) {
+      global.averageRebatePercent = totalRebatePercent / rebateCount;
     }
 
     return { global, byChain };

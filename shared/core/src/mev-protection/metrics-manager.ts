@@ -25,7 +25,8 @@ export type IncrementableMetricField =
   | 'failedSubmissions'
   | 'fallbackSubmissions'
   | 'bundlesIncluded'
-  | 'bundlesReverted';
+  | 'bundlesReverted'
+  | 'mevShareRebatesReceived';
 
 // =============================================================================
 // Metrics Manager
@@ -206,6 +207,43 @@ export class MevMetricsManager {
     });
   }
 
+  /**
+   * Record MEV-Share rebate (thread-safe)
+   *
+   * Updates rebate counter, total amount, and running average percentage.
+   * Must be called atomically to ensure consistency across metrics.
+   *
+   * @param rebateWei - Rebate amount in wei
+   * @param transactionValue - Total transaction value for percentage calculation (optional)
+   */
+  async recordRebate(rebateWei: bigint, transactionValue?: bigint): Promise<void> {
+    await this.mutex.runExclusive(async () => {
+      const now = Date.now();
+
+      // Increment rebate counter
+      this.metrics.mevShareRebatesReceived++;
+
+      // Accumulate total rebate
+      this.metrics.totalRebateWei += rebateWei;
+
+      // Calculate and update running average percentage
+      if (transactionValue && transactionValue > 0n) {
+        const rebatePercent = Number((rebateWei * 10000n) / transactionValue) / 100;
+        const count = this.metrics.mevShareRebatesReceived;
+
+        if (count === 1) {
+          this.metrics.averageRebatePercent = rebatePercent;
+        } else {
+          // Running average: (old_avg * (n-1) + new_value) / n
+          this.metrics.averageRebatePercent =
+            (this.metrics.averageRebatePercent * (count - 1) + rebatePercent) / count;
+        }
+      }
+
+      this.metrics.lastUpdated = now;
+    });
+  }
+
   // ===========================================================================
   // Internal Helpers
   // ===========================================================================
@@ -222,6 +260,9 @@ export class MevMetricsManager {
       averageLatencyMs: 0,
       bundlesIncluded: 0,
       bundlesReverted: 0,
+      mevShareRebatesReceived: 0,
+      totalRebateWei: 0n,
+      averageRebatePercent: 0,
       lastUpdated: Date.now(),
     };
   }

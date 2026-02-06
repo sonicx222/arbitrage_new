@@ -73,6 +73,8 @@ import {
 import { StreamConsumerManager } from './streaming';
 import { HealthMonitor, DegradationLevel } from './health';
 import { OpportunityRouter } from './opportunities';
+// P1-8 FIX: Import LeadershipElectionService to replace inline leadership code
+import { LeadershipElectionService } from './leadership';
 
 // P2-11: Import IntervalManager for centralized interval lifecycle management
 import { IntervalManager } from './interval-manager';
@@ -223,14 +225,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private app: express.Application;
   // P2 FIX: Proper type instead of any
   private server: http.Server | null = null;
-  // REFACTOR: Removed duplicate isRunning flag - stateManager is now the single source of truth
-  // This eliminates potential sync issues between the flag and stateManager
+  // P1-8 FIX: Leadership election service (replaces inline leadership code)
+  // Manages distributed leadership election using Redis locks
+  private leadershipElection: LeadershipElectionService | null = null;
+  // P1-8 FIX: Track leadership status (delegated to LeadershipElectionService)
+  // Kept as private field for backward compatibility with existing code
   private isLeader = false;
-  // FIX: Use Promise-based mutex to prevent race condition in activateStandby()
-  // Two rapid calls could both pass the boolean check before either sets it
+  // P1-8 FIX: Activation state tracking (replaced by LeadershipElectionService.setActivating())
+  // Kept for backward compatibility during transition
   private activationPromise: Promise<boolean> | null = null;
-  // FIX 5.5: Track activation state separately from config to avoid concurrent reads of modified config
-  // During activation, this is true and bypasses standby checks without modifying config.isStandby
   private isActivating = false;
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
@@ -512,8 +515,31 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const streamHealthMonitor = this.deps.getStreamHealthMonitor();
       streamHealthMonitor.setConsumerGroup(this.config.consumerGroup);
 
-      // Try to acquire leadership
-      await this.tryAcquireLeadership();
+      // P1-8 FIX: Initialize and start LeadershipElectionService (replaces inline leadership code)
+      this.leadershipElection = new LeadershipElectionService({
+        config: this.config.leaderElection,
+        redis: this.redis,
+        logger: this.logger,
+        isStandby: this.config.isStandby ?? false,
+        canBecomeLeader: this.config.canBecomeLeader ?? true,
+        onAlert: (alert) => this.sendAlert({
+          type: alert.type,
+          message: alert.message,
+          // P1-8 FIX: Map LeadershipElectionService severity to coordinator AlertSeverity
+          // 'info' → 'low' (coordinator uses 'low' instead of 'info')
+          severity: alert.severity === 'info' ? 'low' : alert.severity,
+          data: alert.data,
+          timestamp: alert.timestamp,
+        }),
+        onLeadershipChange: (isLeader: boolean) => {
+          // P1-8 FIX: Update local isLeader field when leadership status changes
+          this.isLeader = isLeader;
+          this.logger.info('Leadership status changed', { isLeader });
+        },
+      });
+
+      // P1-8 FIX: Start leadership election service (replaces tryAcquireLeadership + startLeaderHeartbeat)
+      await this.leadershipElection.start();
 
       // REFACTOR: Removed isRunning = true - stateManager.executeStart() handles state
       // The stateManager transitions to 'running' state after this callback completes
@@ -522,8 +548,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // FIX: Await the async method for proper error handling
       await this.startStreamConsumers();
 
-      // Start leader heartbeat
-      this.startLeaderHeartbeat();
+      // P1-8 FIX: LeadershipElectionService now manages heartbeat internally
+      // Removed: this.startLeaderHeartbeat()
 
       // Start periodic health monitoring
       this.startHealthMonitoring();
@@ -566,9 +592,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
       // REFACTOR: Removed isRunning = false - stateManager.executeStop() handles state
       // The stateManager transitions to 'stopping' immediately upon entering this callback
 
-      // Release leadership if held
-      if (this.isLeader) {
-        await this.releaseLeadership();
+      // P1-8 FIX: Stop leadership election service (replaces releaseLeadership)
+      // This handles leadership release and heartbeat cleanup internally
+      if (this.leadershipElection) {
+        await this.leadershipElection.stop();
       }
 
       // Stop all intervals and stream consumers
@@ -656,186 +683,22 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // ===========================================================================
   // Leader Election (ADR-007)
   // ===========================================================================
-
-  private async tryAcquireLeadership(): Promise<boolean> {
-    if (!this.redis) return false;
-
-    // ADR-007: Respect standby configuration - don't acquire leadership if not allowed
-    if (!this.config.canBecomeLeader) {
-      this.logger.debug('Cannot become leader - canBecomeLeader is false');
-      return false;
-    }
-
-    // ADR-007: Standby instances should not proactively acquire leadership
-    // They wait for CrossRegionHealthManager to signal activation
-    // FIX 5.5: Check isActivating flag to allow activation to proceed
-    if (this.config.isStandby && !this.isActivating) {
-      this.logger.debug('Standby instance - waiting for activation signal');
-      return false;
-    }
-
-    try {
-      const { lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
-
-      // Try to set the lock with NX (only if not exists)
-      const acquired = await this.redis.setNx(lockKey, instanceId, Math.ceil(lockTtlMs / 1000));
-
-      if (acquired) {
-        this.isLeader = true;
-        this.logger.info('Acquired leadership', { instanceId });
-        return true;
-      }
-
-      // S4.1.1-FIX-1: Use atomic renewLockIfOwned instead of TOCTOU-prone get+expire
-      // This atomically checks if we own the lock and extends TTL in one operation.
-      // Eliminates race condition where lock could expire between get and expire calls.
-      const renewed = await this.redis.renewLockIfOwned(
-        lockKey,
-        instanceId,
-        Math.ceil(lockTtlMs / 1000)
-      );
-      if (renewed) {
-        // We already held the lock and successfully renewed it
-        this.isLeader = true;
-        return true;
-      }
-
-      this.logger.info('Another instance is leader', { lockKey });
-      return false;
-
-    } catch (error) {
-      this.logger.error('Failed to acquire leadership', { error });
-      return false;
-    }
-  }
-
-  /**
-   * P0-NEW-5 FIX: Truly atomic lock renewal using Lua script.
-   * Uses renewLockIfOwned() which atomically checks ownership and extends TTL.
-   * This eliminates the TOCTOU race condition that existed before.
-   *
-   * Returns true if renewal succeeded, false if lock was lost.
-   */
-  private async renewLeaderLock(): Promise<boolean> {
-    if (!this.redis) return false;
-
-    const { lockKey, lockTtlMs, instanceId } = this.config.leaderElection;
-
-    try {
-      // P0-NEW-5 FIX: Use atomic Lua script for check-and-extend
-      // This prevents the TOCTOU race where another instance could acquire
-      // the lock between our GET and EXPIRE calls
-      const renewed = await this.redis.renewLockIfOwned(
-        lockKey,
-        instanceId,
-        Math.ceil(lockTtlMs / 1000)
-      );
-      return renewed;
-
-    } catch (error) {
-      this.logger.error('Failed to renew leader lock', { error });
-      return false;
-    }
-  }
-
-  /**
-   * P0-NEW-5 FIX: Atomic lock release using Lua script.
-   * Uses releaseLockIfOwned() which atomically checks ownership and deletes.
-   * This prevents releasing a lock that was acquired by another instance.
-   */
-  private async releaseLeadership(): Promise<void> {
-    if (!this.redis || !this.isLeader) return;
-
-    try {
-      const { lockKey, instanceId } = this.config.leaderElection;
-
-      // P0-NEW-5 FIX: Use atomic Lua script for check-and-delete
-      const released = await this.redis.releaseLockIfOwned(lockKey, instanceId);
-      if (released) {
-        this.logger.info('Released leadership', { instanceId });
-      } else {
-        this.logger.warn('Lock was not released - not owned by this instance', { instanceId });
-      }
-
-      this.isLeader = false;
-
-    } catch (error) {
-      this.logger.error('Failed to release leadership', { error });
-    }
-  }
-
-  private startLeaderHeartbeat(): void {
-    const { heartbeatIntervalMs, instanceId } = this.config.leaderElection;
-    let consecutiveHeartbeatFailures = 0;
-    const maxHeartbeatFailures = 3;
-
-    // S4.1.1-FIX-3: Add jitter to prevent thundering herd on leader failover
-    // Random offset of ±2 seconds spreads leadership acquisition attempts across instances
-    const jitterMs = Math.floor(Math.random() * 4000) - 2000; // Range: -2000 to +2000
-    const effectiveInterval = Math.max(1000, heartbeatIntervalMs + jitterMs); // Minimum 1 second
-    this.logger.debug('Leader heartbeat interval with jitter', {
-      baseInterval: heartbeatIntervalMs,
-      jitter: jitterMs,
-      effectiveInterval
-    });
-
-    // P2-11: Use IntervalManager for centralized lifecycle management
-    this.intervalManager.register({
-      name: 'leader-heartbeat',
-      intervalMs: effectiveInterval,
-      callback: async () => {
-        // P1-8 FIX: Use stateManager.isRunning() for consistency
-        if (!this.stateManager.isRunning() || !this.redis) return;
-
-        try {
-          if (this.isLeader) {
-            // P0-4 fix: Use dedicated renewal method for better encapsulation
-            const renewed = await this.renewLeaderLock();
-            if (renewed) {
-              // P0-3 fix: Reset failure count on successful heartbeat
-              consecutiveHeartbeatFailures = 0;
-            } else {
-              // Lost leadership (another instance took over or lock expired)
-              this.isLeader = false;
-              this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
-            }
-          } else {
-            // Try to acquire leadership
-            await this.tryAcquireLeadership();
-          }
-
-        } catch (error) {
-          // P0-3 fix: Track consecutive failures and demote if threshold exceeded
-          consecutiveHeartbeatFailures++;
-          this.logger.error('Leader heartbeat failed', {
-            error,
-            consecutiveFailures: consecutiveHeartbeatFailures,
-            maxFailures: maxHeartbeatFailures,
-            wasLeader: this.isLeader
-          });
-
-          // If we're the leader and have too many failures, demote self
-          // This prevents a zombie leader scenario where we think we're leading
-          // but can't actually renew our lock
-          if (this.isLeader && consecutiveHeartbeatFailures >= maxHeartbeatFailures) {
-            this.isLeader = false;
-            this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
-              failures: consecutiveHeartbeatFailures
-            });
-
-            // Send critical alert
-            this.sendAlert({
-              type: 'LEADER_DEMOTION',
-              message: `Leader demoted due to ${consecutiveHeartbeatFailures} consecutive heartbeat failures`,
-              severity: 'critical',
-              data: { instanceId, failures: consecutiveHeartbeatFailures },
-              timestamp: Date.now()
-            });
-          }
-        }
-      },
-    });
-  }
+  //
+  // P1-8 FIX: Leadership election now delegated to LeadershipElectionService
+  // The following methods have been REMOVED and replaced by the service:
+  //   - tryAcquireLeadership() → leadershipElection.tryAcquireLeadership()
+  //   - renewLeaderLock() → handled internally by service heartbeat
+  //   - releaseLeadership() → leadershipElection.stop()
+  //   - startLeaderHeartbeat() → handled internally by service.start()
+  //
+  // Benefits of this refactoring (P1-8):
+  //   - Single source of truth for leadership logic (~164 lines removed)
+  //   - Reusable service (already tested with 409-line implementation)
+  //   - Cleaner separation of concerns
+  //   - Easier to test leadership behavior in isolation
+  //
+  // See: ./leadership/leadership-election-service.ts for implementation
+  // ===========================================================================
 
   // ===========================================================================
   // Redis Streams Consumer Groups (ADR-002)
@@ -1807,7 +1670,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // ===========================================================================
 
   getIsLeader(): boolean {
-    return this.isLeader;
+    // P1-8 FIX: Delegate to LeadershipElectionService if available
+    // Falls back to local field for backward compatibility
+    return this.leadershipElection?.isLeader ?? this.isLeader;
   }
 
   getInstanceId(): string {
@@ -1931,23 +1796,30 @@ export class CoordinatorService implements CoordinatorStateProvider {
   /**
    * Internal implementation of standby activation.
    * Separated to allow Promise-based mutex in activateStandby().
+   *
+   * P1-8 FIX: Now delegates to LeadershipElectionService.setActivating()
    */
   private async doActivateStandby(): Promise<boolean> {
+    if (!this.leadershipElection) {
+      this.logger.error('LeadershipElectionService not initialized');
+      return false;
+    }
+
     this.logger.warn('🚀 ACTIVATING STANDBY COORDINATOR', {
       instanceId: this.config.leaderElection.instanceId,
       regionId: this.config.regionId,
       previousIsLeader: this.isLeader
     });
 
-    // FIX 5.5: Use separate flag instead of modifying config.isStandby
-    // This prevents race conditions where other code reads config.isStandby concurrently
-    // The isActivating flag bypasses standby checks in tryAcquireLeadership
+    // P1-8 FIX: Use LeadershipElectionService.setActivating() instead of local flag
+    // This signals the service to bypass standby checks in tryAcquireLeadership
+    this.leadershipElection.setActivating(true);
+    // Update local flag for backward compatibility
     this.isActivating = true;
 
     try {
-      // Force attempt to acquire leadership
-      // tryAcquireLeadership will check isActivating flag to bypass standby check
-      const acquired = await this.tryAcquireLeadership();
+      // P1-8 FIX: Use service's tryAcquireLeadership() method
+      const acquired = await this.leadershipElection.tryAcquireLeadership();
 
       if (acquired) {
         // Successful activation - update config.isStandby atomically at the end
@@ -1966,7 +1838,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.logger.error('Error during standby activation', { error });
       return false;
     } finally {
-      // Always clear activation flag when done
+      // P1-8 FIX: Clear activation flag in both service and local field
+      this.leadershipElection.setActivating(false);
       this.isActivating = false;
     }
   }
