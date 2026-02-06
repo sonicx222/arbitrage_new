@@ -2048,7 +2048,8 @@ export class ChainDetectorInstance extends EventEmitter {
     const firstStep = opp.steps[0];
     const tokenIn = firstStep?.fromToken || opp.path[0];
     const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
-    const amountIn = firstStep?.amountIn || 0;
+    // P1 FIX: Use ?? instead of || for numeric values (0 is valid, not missing)
+    const amountIn = firstStep?.amountIn ?? 0;
 
     const opportunity: ArbitrageOpportunity = {
       id: opp.id,
@@ -2141,7 +2142,8 @@ export class ChainDetectorInstance extends EventEmitter {
     const firstStep = opp.steps[0];
     const tokenIn = firstStep?.fromToken || opp.path[0];
     const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
-    const amountIn = firstStep?.amountIn || 0;
+    // P1 FIX: Use ?? instead of || for numeric values (0 is valid, not missing)
+    const amountIn = firstStep?.amountIn ?? 0;
 
     const opportunity: ArbitrageOpportunity = {
       id: opp.id,

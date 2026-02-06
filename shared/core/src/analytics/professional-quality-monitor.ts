@@ -19,6 +19,18 @@ export interface QualityMonitorRedis {
   setex(key: string, seconds: number, value: string): Promise<string>;
   get(key: string): Promise<string | null>;
   keys(pattern: string): Promise<string[]>;
+  /**
+   * SCAN iterator for non-blocking key retrieval.
+   *
+   * Simplified signature that abstracts away Redis command syntax.
+   * Internally calls: redis.scan(cursor, 'MATCH', pattern, 'COUNT', count)
+   *
+   * @param cursor - Scan cursor ('0' to start, then use returned cursor)
+   * @param pattern - Key pattern to match (e.g., 'quality:*')
+   * @param count - Number of keys to return per iteration (hint, not guarantee)
+   * @returns Tuple of [next cursor, keys array]
+   */
+  scan(cursor: string, pattern: string, count: number): Promise<[string, string[]]>;
 }
 
 /**
@@ -159,7 +171,10 @@ export class ProfessionalQualityMonitor {
       const adapter: QualityMonitorRedis = {
         setex: (key, seconds, value) => client.setex(key, seconds, value),
         get: (key) => client.getRaw(key),
-        keys: (pattern) => client.keys(pattern)
+        keys: (pattern) => client.keys(pattern),
+        // P0 FIX: Add scan method for non-blocking key iteration
+        // Adapter wraps Redis command syntax: scan(cursor, 'MATCH', pattern, 'COUNT', count)
+        scan: (cursor, pattern, count) => client.scan(cursor, 'MATCH', pattern, 'COUNT', count)
       };
       this.redis = adapter;
       return adapter;
@@ -636,7 +651,16 @@ export class ProfessionalQualityMonitor {
   private async getDetectionLatenciesForPeriod(period: { start: number; end: number }): Promise<number[]> {
     try {
       const redis = await this.getRedis();
-      const keys = await redis.keys('quality:detection:*');
+
+      // P0 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+      const keys: string[] = [];
+      let cursor = '0';
+      do {
+        const result = await redis.scan(cursor, 'quality:detection:*', 100);
+        cursor = result[0];
+        keys.push(...result[1]);
+      } while (cursor !== '0');
+
       const latencies: number[] = [];
 
       for (const key of keys) {

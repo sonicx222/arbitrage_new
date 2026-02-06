@@ -49,15 +49,86 @@ import type { PendingOpportunity, PendingSwapIntent as SerializablePendingSwapIn
 // =============================================================================
 
 /**
+ * Validate and sanitize a numeric config value.
+ * Ensures value is a positive integer within valid range.
+ *
+ * @param value - Raw config value (may be NaN, 0, negative)
+ * @param defaultValue - Fallback if invalid
+ * @param min - Minimum valid value (inclusive)
+ * @param max - Maximum valid value (inclusive)
+ * @param fieldName - Field name for error messages
+ * @returns Validated number
+ */
+function validateNumericConfig(
+  value: number,
+  defaultValue: number,
+  min: number,
+  max: number,
+  fieldName: string
+): number {
+  // Handle NaN (from malformed parseInt)
+  if (isNaN(value)) {
+    return defaultValue;
+  }
+
+  // Validate range
+  if (value < min || value > max) {
+    console.warn(
+      `[WARN] Invalid ${fieldName}: ${value}. Must be ${min}-${max}. Using default: ${defaultValue}`
+    );
+    return defaultValue;
+  }
+
+  return value;
+}
+
+/**
  * Default service configuration.
+ *
+ * IMPORTANT: minSwapSizeUsd CAN be 0 (to capture all swaps), but other numeric
+ * fields must be positive. Using ?? is insufficient because parseInt() never
+ * returns undefined - it returns number or NaN.
  */
 export const DEFAULT_CONFIG: Partial<MempoolDetectorConfig> = {
-  healthCheckPort: MEMPOOL_CONFIG.service.port || DEFAULT_MEMPOOL_DETECTOR_PORT,
-  opportunityStream: MEMPOOL_CONFIG.streams.pendingOpportunities || 'stream:pending-opportunities',
-  minSwapSizeUsd: MEMPOOL_CONFIG.filters.minSwapSizeUsd || 1000,
-  maxBufferSize: MEMPOOL_CONFIG.service.maxBufferSize || 10000,
-  batchSize: MEMPOOL_CONFIG.service.batchSize || 100,
-  batchTimeoutMs: MEMPOOL_CONFIG.service.batchTimeoutMs || 50,
+  // Port: 1-65535 (0 is invalid, NaN is invalid)
+  healthCheckPort: validateNumericConfig(
+    MEMPOOL_CONFIG.service.port,
+    DEFAULT_MEMPOOL_DETECTOR_PORT,
+    1,
+    65535,
+    'healthCheckPort'
+  ),
+
+  // Stream name: string, safe to use ??
+  opportunityStream: MEMPOOL_CONFIG.streams.pendingOpportunities ?? 'stream:pending-opportunities',
+
+  // Min swap size: 0 is valid (capture all), but NaN is not
+  minSwapSizeUsd: isNaN(MEMPOOL_CONFIG.filters.minSwapSizeUsd)
+    ? 1000
+    : Math.max(0, MEMPOOL_CONFIG.filters.minSwapSizeUsd),
+
+  // Buffer size: Must be >= 1 (can't have 0-size buffer)
+  maxBufferSize: validateNumericConfig(
+    MEMPOOL_CONFIG.service.maxBufferSize,
+    10000,
+    1,
+    1000000,
+    'maxBufferSize'
+  ),
+
+  // Batch size: Must be >= 1 (can't batch 0 items)
+  batchSize: validateNumericConfig(
+    MEMPOOL_CONFIG.service.batchSize,
+    100,
+    1,
+    10000,
+    'batchSize'
+  ),
+
+  // Batch timeout: 0 is valid (immediate flush), but NaN is not
+  batchTimeoutMs: isNaN(MEMPOOL_CONFIG.service.batchTimeoutMs)
+    ? 50
+    : Math.max(0, MEMPOOL_CONFIG.service.batchTimeoutMs),
 };
 
 /**

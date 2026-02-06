@@ -75,6 +75,31 @@ Each chain requires HTTP and WebSocket endpoints:
 | `METRICS_ENABLED` | Enable Prometheus metrics | `true` |
 | `SIMULATION_MODE` | Run without executing | `false` |
 
+### Feature Flags
+
+| Variable | Description | Default | ADR |
+|----------|-------------|---------|-----|
+| `FEATURE_BATCHED_QUOTER` | Enable batched quote fetching | `false` | ADR-029 |
+
+**Batched Quote Fetching** (ADR-029):
+- Reduces quote latency by 75-83% (150ms → 30-50ms)
+- Requires MultiPathQuoter contract deployed on target chains
+- Configure contract addresses per chain (see below)
+- Safe to enable after deployment validation
+
+**Contract Address Configuration:**
+
+| Variable | Chain | Example |
+|----------|-------|---------|
+| `MULTI_PATH_QUOTER_ETHEREUM` | Ethereum Mainnet | `0x...` |
+| `MULTI_PATH_QUOTER_ARBITRUM` | Arbitrum One | `0x...` |
+| `MULTI_PATH_QUOTER_BASE` | Base | `0x...` |
+| `MULTI_PATH_QUOTER_POLYGON` | Polygon | `0x...` |
+| `MULTI_PATH_QUOTER_OPTIMISM` | Optimism | `0x...` |
+| `MULTI_PATH_QUOTER_BSC` | BNB Smart Chain | `0x...` |
+
+See [ADR-029: Batched Quote Fetching](architecture/adr/ADR-029-batched-quote-fetching.md) for implementation details.
+
 ### External Services
 
 | Variable | Description | Required |
@@ -247,6 +272,24 @@ Located in `shared/config/src/performance.ts`:
 | `RPC_RATE_LIMIT_PER_SEC` | RPC calls per second | `10` | ADR-024 |
 | `RPC_BURST_SIZE` | Burst allowance | `20` | ADR-024 |
 | `REDIS_BATCH_RATIO` | Commands batched | `50:1` | ADR-002 |
+
+### Quote Fetching Optimization
+
+| Setting | Description | Impact | ADR |
+|---------|-------------|--------|-----|
+| `FEATURE_BATCHED_QUOTER` | Batch DEX quotes into single RPC call | 75-83% latency reduction | ADR-029 |
+
+**Batched Quote Fetching Performance:**
+- **Sequential (Legacy):** 150ms for 2-hop paths (N RPC calls)
+- **Batched (Optimized):** 30-50ms for 2-hop paths (1 RPC call)
+- **Improvement:** 75-83% latency reduction
+- **Trade-offs:** Requires contract deployment, adds 50KB on-chain bytecode
+- **Fallback:** Automatically degrades to sequential on errors
+
+**When to Enable:**
+- After deploying MultiPathQuoter to target chains
+- For flash loan strategies with multi-hop paths
+- When quote latency is critical (high-frequency trading)
 
 ---
 

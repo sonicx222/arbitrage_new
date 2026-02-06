@@ -386,10 +386,15 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
   // TODO: Update these addresses after deploying MultiPathQuoter contract
   //
   // Deployment command:
-  //   npx hardhat run scripts/deploy-quoter.ts --network <chain>
+  //   npx hardhat run scripts/deploy-multi-path-quoter.ts --network <chain>
   //
   // After deployment, update the address below:
   //   ethereum: '0x<deployed_address>',
+  //
+  // Or set via environment variables (recommended):
+  //   MULTI_PATH_QUOTER_ETHEREUM=0x...
+  //   MULTI_PATH_QUOTER_ARBITRUM=0x...
+  //   MULTI_PATH_QUOTER_BASE=0x...
 
   // Mainnet deployments
   // ethereum: '',  // Not yet deployed - uses fallback
@@ -431,6 +436,108 @@ export function getMultiPathQuoterAddress(chainId: string): string | undefined {
     return undefined;
   }
   return address;
+}
+
+// =============================================================================
+// FEATURE FLAGS (Task 1.2: Batched Quoting)
+// =============================================================================
+
+/**
+ * Feature flags for opt-in functionality.
+ *
+ * These flags allow safe incremental rollout of new features:
+ * - Start with flag OFF (default behavior maintained)
+ * - Enable for specific services/chains to test
+ * - Gradually roll out to 100% if metrics show improvement
+ * - Instant rollback by setting flag to false
+ *
+ * @see ADR-029: Batched Quote Fetching
+ */
+export const FEATURE_FLAGS = {
+  /**
+   * Enable batched quote fetching via MultiPathQuoter contract.
+   *
+   * When enabled and contract is deployed:
+   * - Uses single RPC call for N-hop arbitrage paths (latency: ~50ms)
+   * - Falls back to sequential quotes if contract unavailable
+   *
+   * When disabled (default):
+   * - Uses existing sequential quote fetching (latency: ~150ms)
+   *
+   * Impact: 75-83% latency reduction for profit calculation
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   */
+  useBatchedQuoter: process.env.FEATURE_BATCHED_QUOTER === 'true',
+};
+
+/**
+ * Validation state to ensure validation runs only once per process.
+ * Prevents duplicate warnings in test environments or when module is
+ * imported multiple times.
+ */
+let _featureFlagValidationRun = false;
+
+/**
+ * Validate feature flag configuration and log warnings/info.
+ *
+ * Call this function during service startup (not at module load time) to:
+ * - Avoid side effects in module scope
+ * - Use proper logger instead of console
+ * - Enable suppression in test environments
+ * - Run validation once per process lifecycle
+ *
+ * @param logger - Logger instance (optional - falls back to console if not provided)
+ *
+ * @example
+ * ```typescript
+ * // In service startup (e.g., execution-engine/src/index.ts)
+ * import { validateFeatureFlags } from '@arbitrage/config';
+ *
+ * async function startService() {
+ *   const logger = createLogger('execution-engine');
+ *   validateFeatureFlags(logger); // Validate once at startup
+ *   // ... start service ...
+ * }
+ * ```
+ */
+export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unknown) => void; info: (msg: string, meta?: unknown) => void }): void {
+  // Run validation once per process
+  if (_featureFlagValidationRun) {
+    return;
+  }
+  _featureFlagValidationRun = true;
+
+  // Validate batched quoter feature
+  if (FEATURE_FLAGS.useBatchedQuoter) {
+    const deployedChains = Object.keys(MULTI_PATH_QUOTER_ADDRESSES).filter((chain) =>
+      hasMultiPathQuoter(chain)
+    );
+
+    if (deployedChains.length === 0) {
+      const message =
+        'FEATURE_BATCHED_QUOTER is enabled but no MultiPathQuoter contracts are deployed. ' +
+        'Batched quoting will fall back to sequential quotes on all chains.';
+
+      const details = {
+        deployScript: 'npx hardhat run scripts/deploy-multi-path-quoter.ts --network <chain>',
+        envVarsNeeded: 'MULTI_PATH_QUOTER_ETHEREUM, MULTI_PATH_QUOTER_ARBITRUM, etc.',
+      };
+
+      if (logger) {
+        logger.warn(message, details);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`, details);
+      }
+    } else {
+      const message = `Batched quoting enabled for chains: ${deployedChains.join(', ')}`;
+      if (logger) {
+        logger.info(message, { chains: deployedChains });
+      } else {
+        console.info(`✅ ${message}`);
+      }
+    }
+  }
 }
 
 // =============================================================================

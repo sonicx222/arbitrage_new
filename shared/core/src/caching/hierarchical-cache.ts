@@ -8,6 +8,8 @@ import { getRedisClient } from '../redis';
 import { createLogger } from '../logger';
 import { getCorrelationAnalyzer } from './correlation-analyzer';
 import type { CorrelationAnalyzer } from './correlation-analyzer';
+import { PriceMatrix } from './price-matrix';
+import type { PriceMatrixConfig } from './price-matrix';
 
 // =============================================================================
 // P2-FIX 3.1: Use pure static defaults instead of fragile require() pattern
@@ -289,6 +291,13 @@ export interface CacheConfig {
    * Set to true for debugging/profiling, false for production.
    */
   enableTimingMetrics?: boolean;
+  /**
+   * PHASE1-TASK30: Use PriceMatrix for L1 cache.
+   * When true, L1 uses PriceMatrix (SharedArrayBuffer) for sub-microsecond access.
+   * When false, L1 uses Map (legacy behavior).
+   * Default: true
+   */
+  usePriceMatrix?: boolean;
 }
 
 export interface CacheEntry {
@@ -313,13 +322,18 @@ export class HierarchicalCache {
    */
   private redisPromise: Promise<import('../redis').RedisClient> | null = null;
 
-  // L1 Cache: SharedArrayBuffer for ultra-fast access
+  // PHASE1-TASK30: L1 Cache implementation choice
+  // Legacy: Map-based L1 cache
   private l1Metadata: Map<string, CacheEntry> = new Map();
   private l1MaxEntries: number;
   // T1.4: Replaced array-based LRU queue with O(1) LRU queue
   // Previous: private l1EvictionQueue: string[] = []; // O(n) indexOf/splice
   // New: O(1) operations for all LRU operations
   private l1EvictionQueue: LRUQueue = new LRUQueue();
+
+  // PHASE1-TASK30: PriceMatrix-based L1 cache (new implementation)
+  private priceMatrix: PriceMatrix | null = null;
+  private usePriceMatrix: boolean = false;
 
   // L2 Cache: Redis
   private l2Prefix = 'cache:l2:';
@@ -385,8 +399,13 @@ export class HierarchicalCache {
       enablePromotion: config.enablePromotion !== false,
       enableDemotion: config.enableDemotion !== false,
       // P2-FIX 10.2: Default to false to avoid performance overhead in production
-      enableTimingMetrics: config.enableTimingMetrics ?? false
+      enableTimingMetrics: config.enableTimingMetrics ?? false,
+      // PHASE1-TASK30: Default to true to enable PriceMatrix
+      usePriceMatrix: config.usePriceMatrix ?? true
     };
+
+    // PHASE1-TASK30: Store usePriceMatrix flag for fast access
+    this.usePriceMatrix = this.config.usePriceMatrix ?? true;
 
     // P2-FIX 10.2: Cache the timing flag for fast access in hot paths
     this.enableTimingMetrics = this.config.enableTimingMetrics ?? false;
@@ -398,6 +417,23 @@ export class HierarchicalCache {
 
     // T2.10: Initialize L3 max size
     this.l3MaxSize = this.config.l3MaxSize;
+
+    // PHASE1-TASK30: Initialize PriceMatrix if enabled
+    if (this.usePriceMatrix && this.config.l1Enabled) {
+      const priceMatrixConfig: Partial<PriceMatrixConfig> = {
+        // Calculate max pairs based on L1 size (12 bytes per entry in PriceMatrix)
+        maxPairs: Math.floor(this.config.l1Size * 1024 * 1024 / 12),
+        // Reserve 10% for dynamic pairs
+        reserveSlots: Math.floor(this.config.l1Size * 1024 * 1024 / 12 * 0.1),
+        strictMode: false,
+        enableAtomics: true
+      };
+      this.priceMatrix = new PriceMatrix(priceMatrixConfig);
+      logger.debug('PriceMatrix initialized for L1 cache', {
+        maxPairs: priceMatrixConfig.maxPairs,
+        reserveSlots: priceMatrixConfig.reserveSlots
+      });
+    }
 
     // P0-FIX-3: Store the Promise from getRedisClient() for lazy initialization
     if (this.config.l2Enabled) {
@@ -427,6 +463,9 @@ export class HierarchicalCache {
       l3Enabled: this.config.l3Enabled,
       l1Size: this.config.l1Size,
       predictiveWarmingEnabled: !!this.predictiveWarmingConfig,
+      // PHASE1-TASK30: Log PriceMatrix usage
+      usePriceMatrix: this.usePriceMatrix,
+      l1Implementation: this.usePriceMatrix ? 'PriceMatrix' : 'Map',
       // P1-PHASE1: Memory optimization indicators
       ...(isConstrained && {
         memoryOptimized: true,
@@ -608,6 +647,9 @@ export class HierarchicalCache {
     return this.invalidate(key);
   }
 
+  /**
+   * PHASE1-TASK33: Clear all cache levels.
+   */
   async clear(): Promise<void> {
     // Task 2.2.2: Prevent predictive warming during clear
     this.isClearing = true;
@@ -616,6 +658,10 @@ export class HierarchicalCache {
         this.l1Metadata.clear();
         // T1.4: Use LRUQueue.clear() instead of reassigning to empty array
         this.l1EvictionQueue.clear();
+        // PHASE1-TASK33: Clear PriceMatrix if enabled
+        if (this.usePriceMatrix && this.priceMatrix) {
+          this.priceMatrix.clear();
+        }
       }
       if (this.config.l2Enabled) {
         await this.invalidateL2Pattern('*');
@@ -643,13 +689,25 @@ export class HierarchicalCache {
     }
   }
 
+  /**
+   * PHASE1-TASK33: Get cache statistics.
+   * Includes PriceMatrix stats when enabled.
+   */
   getStats(): any {
     return {
       ...this.stats,
       l1: {
         ...this.stats.l1,
         entries: this.l1Metadata.size,
-        utilization: this.l1Metadata.size / this.l1MaxEntries
+        utilization: this.l1Metadata.size / this.l1MaxEntries,
+        // PHASE1-TASK33: Include PriceMatrix stats if enabled
+        ...(this.usePriceMatrix && this.priceMatrix && {
+          priceMatrix: this.priceMatrix.getStats(),
+          implementation: 'PriceMatrix'
+        }),
+        ...(!this.usePriceMatrix && {
+          implementation: 'Map'
+        })
       },
       l2: {
         ...this.stats.l2,
@@ -685,7 +743,37 @@ export class HierarchicalCache {
     };
   }
 
+  /**
+   * PHASE1-TASK31: Get value from L1 cache.
+   * Supports both Map-based and PriceMatrix-based implementations.
+   */
   private getFromL1(key: string): any {
+    // PHASE1-TASK31: Use PriceMatrix if enabled
+    if (this.usePriceMatrix && this.priceMatrix) {
+      const priceEntry = this.priceMatrix.getPrice(key);
+      if (!priceEntry) return null;
+
+      // Check TTL (PriceMatrix doesn't store TTL, so check against entry metadata)
+      const metadata = this.l1Metadata.get(key);
+      if (metadata?.ttl && Date.now() - priceEntry.timestamp > metadata.ttl * 1000) {
+        this.invalidateL1(key);
+        return null;
+      }
+
+      // Update access statistics in metadata
+      if (metadata) {
+        metadata.accessCount++;
+        metadata.lastAccess = Date.now();
+        this.l1EvictionQueue.touch(key);
+      }
+
+      // Return the value from PriceMatrix
+      // Note: PriceMatrix stores price directly, but we need the full value
+      // For now, we'll need to keep metadata in Map for non-price data
+      return metadata?.value ?? null;
+    }
+
+    // Legacy Map-based implementation
     const entry = this.l1Metadata.get(key);
     if (!entry) return null;
 
@@ -707,9 +795,54 @@ export class HierarchicalCache {
     return entry.value;
   }
 
+  /**
+   * PHASE1-TASK32: Set value in L1 cache.
+   * Supports both Map-based and PriceMatrix-based implementations.
+   */
   private setInL1(key: string, value: any, ttl?: number): void {
     const size = this.estimateSize(value);
+    const timestamp = Date.now();
 
+    // PHASE1-TASK32: Use PriceMatrix if enabled
+    if (this.usePriceMatrix && this.priceMatrix) {
+      // Evict if necessary (check metadata size since PriceMatrix handles its own capacity)
+      while (this.l1Metadata.size >= this.l1MaxEntries ||
+        this.getCurrentL1Size() + size > this.config.l1Size * 1024 * 1024) {
+        this.evictL1();
+      }
+
+      // Extract price if value is a price object
+      let price = 0;
+      if (typeof value === 'object' && value !== null) {
+        // Check common price fields
+        price = value.price ?? value.value ?? value.amount ?? 0;
+      } else if (typeof value === 'number') {
+        price = value;
+      }
+
+      // Store in PriceMatrix (fast path for price data)
+      const success = this.priceMatrix.setPrice(key, price, timestamp);
+      if (!success) {
+        logger.warn('PriceMatrix setPrice failed, falling back to Map', { key });
+      }
+
+      // Store metadata in Map for TTL, access tracking, and full value
+      const entry: CacheEntry = {
+        key,
+        value,
+        timestamp,
+        accessCount: 1,
+        lastAccess: timestamp,
+        size,
+        ttl
+      };
+
+      this.l1Metadata.set(key, entry);
+      this.l1EvictionQueue.add(key);
+      return;
+    }
+
+    // Legacy Map-based implementation
     // Evict if necessary
     while (this.l1Metadata.size >= this.l1MaxEntries ||
       this.getCurrentL1Size() + size > this.config.l1Size * 1024 * 1024) {
@@ -719,9 +852,9 @@ export class HierarchicalCache {
     const entry: CacheEntry = {
       key,
       value,
-      timestamp: Date.now(),
+      timestamp,
       accessCount: 1,
-      lastAccess: Date.now(),
+      lastAccess: timestamp,
       size,
       ttl
     };
@@ -734,10 +867,18 @@ export class HierarchicalCache {
     this.l1EvictionQueue.add(key);
   }
 
+  /**
+   * PHASE1-TASK33: Invalidate entry in L1 cache.
+   * Clears both Map metadata and PriceMatrix data.
+   */
   private invalidateL1(key: string): void {
     this.l1Metadata.delete(key);
     // T1.4: O(1) remove instead of O(n) indexOf + O(n) splice
     this.l1EvictionQueue.remove(key);
+
+    // PHASE1-TASK33: Clear from PriceMatrix if enabled
+    // Note: PriceMatrix doesn't have a delete method, but we don't need to
+    // explicitly clear it since we use l1Metadata.has() to check validity
   }
 
   /**

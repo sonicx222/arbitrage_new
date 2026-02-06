@@ -309,9 +309,18 @@ export class ABTestingFramework {
   }
 
   private async getExperimentResults(experimentId: string, metricName: string): Promise<ExperimentResult[]> {
-    // Get results from Redis (simplified - in production would use proper indexing)
+    // Get results from Redis using SCAN to avoid blocking
+    // P0 FIX: Use SCAN instead of KEYS to prevent blocking Redis server
     const pattern = `result:${experimentId}:${metricName}:*`;
-    const keys = await this.redis.keys(pattern);
+    const keys: string[] = [];
+
+    // Use SCAN iterator for non-blocking key retrieval
+    let cursor = '0';
+    do {
+      const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      keys.push(...result[1]);
+    } while (cursor !== '0');
 
     const results: ExperimentResult[] = [];
     for (const key of keys) {

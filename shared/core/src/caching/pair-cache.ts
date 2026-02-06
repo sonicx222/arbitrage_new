@@ -462,7 +462,15 @@ export class PairCacheService extends EventEmitter implements Resettable {
     const pattern = this.generatePatternKey(chain);
 
     try {
-      const keys = await this.redis.keys(pattern);
+      // P0 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+      const keys: string[] = [];
+      let cursor = '0';
+      do {
+        const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = result[0];
+        keys.push(...result[1]);
+      } while (cursor !== '0');
+
       if (keys.length === 0) return 0;
 
       // Delete in parallel batches for better performance
@@ -494,7 +502,15 @@ export class PairCacheService extends EventEmitter implements Resettable {
     const pattern = this.generatePatternKey(chain, dex);
 
     try {
-      const keys = await this.redis.keys(pattern);
+      // P0 FIX: Use SCAN instead of KEYS to avoid blocking Redis
+      const keys: string[] = [];
+      let cursor = '0';
+      do {
+        const result = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = result[0];
+        keys.push(...result[1]);
+      } while (cursor !== '0');
+
       if (keys.length === 0) return 0;
 
       // Delete in parallel batches for better performance
