@@ -449,6 +449,22 @@ export {
   CorrelationPair
 } from './warming/domain';
 
+// Application Layer: Use Cases
+export {
+  WarmCacheUseCase,
+  TrackCorrelationUseCase
+} from './warming/application';
+
+// Application Layer: DTOs
+export {
+  WarmCacheRequest,
+  WarmCacheResponse,
+  TrackCorrelationRequest,
+  TrackCorrelationResponse,
+  GetCorrelatedPairsRequest,
+  GetCorrelatedPairsResponse
+} from './warming/application';
+
 // =============================================================================
 // 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)
 // =============================================================================
@@ -479,6 +495,20 @@ export {
 
 // Prometheus Helpers
 export type { IPrometheusHelpers } from './metrics/domain';
+
+// Application Layer: Use Cases
+export {
+  ExportMetricsUseCase,
+  CollectMetricsUseCase
+} from './metrics/application';
+
+// Application Layer: DTOs
+export {
+  ExportMetricsRequest,
+  ExportMetricsResponse,
+  RecordMetricRequest,
+  RecordMetricResponse
+} from './metrics/application';
 
 // =============================================================================
 // 3.2 Pair Caching (S2.2.5)
