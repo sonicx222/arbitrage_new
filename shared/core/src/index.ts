@@ -533,6 +533,13 @@ export {
   RecordMetricResponse
 } from './metrics/application';
 
+// Infrastructure Layer: Implementations
+export {
+  PrometheusMetricsCollector,
+  PrometheusExporter,
+  PrometheusHelpers
+} from './metrics/infrastructure';
+
 // =============================================================================
 // 3.2 Pair Caching (S2.2.5)
 // =============================================================================
