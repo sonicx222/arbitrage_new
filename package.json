@@ -40,6 +40,7 @@
     "start": "npm start --workspaces --if-present",
     "dev": "npm run dev --workspaces --if-present",
     "validate": "npm run test && npm run lint",
+    "validate:mev-setup": "tsx scripts/validate-mev-setup.ts",
     "quality-check": "npm run test:professional-quality",
     "docker:build": "docker-compose -f infrastructure/docker/docker-compose.yml build",
     "docker:up": "docker-compose -f infrastructure/docker/docker-compose.yml up -d",

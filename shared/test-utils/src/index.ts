@@ -96,6 +96,23 @@ export * from './contracts';
 // Price Data Generators (Phase 3, Task 3.1)
 export * from './generators';
 
+// Cache & Worker Testing Infrastructure (Phase 1: Foundation)
+// Fixtures for test data generation
+export * from './fixtures/cache-fixtures';
+export * from './fixtures/worker-fixtures';
+export * from './fixtures/performance-fixtures';
+
+// Builders for fluent test object construction
+export * from './builders/cache-state.builder';
+
+// Test harnesses for integration testing
+export * from './harnesses/cache-test.harness';
+export * from './harnesses/worker-test.harness';
+export * from './harnesses/load-test.harness';
+
+// Cache testing types
+export * from './types/cache-types';
+
 // Integration Test Utilities (Phase 1: Test Infrastructure Setup)
 // Note: Using selective exports to avoid naming conflicts with existing modules
 export {

@@ -67,6 +67,8 @@ export async function initializeMevProviders(
     submissionTimeoutMs: MEV_CONFIG.submissionTimeoutMs,
     maxRetries: MEV_CONFIG.maxRetries,
     fallbackToPublic: MEV_CONFIG.fallbackToPublic,
+    // Task 1.1: MEV-Share Integration - Enable by default for value capture
+    useMevShare: MEV_CONFIG.useMevShare,
   };
 
   const factory = new MevProviderFactory(mevGlobalConfig);

@@ -146,6 +146,13 @@ export type {
 } from './logging';
 
 // =============================================================================
+// 1.2.1 V8 Profiler (Task #46: Performance Profiling)
+// =============================================================================
+
+export { V8Profiler, getGlobalProfiler, profileHotPath } from './v8-profiler';
+export type { ProfileResult, ProfileOptions } from './v8-profiler';
+
+// =============================================================================
 // 1.3 Async Primitives
 // =============================================================================
 
@@ -386,6 +393,10 @@ export type {
   PriceMatrixStats,
   BatchUpdate
 } from './caching/price-matrix';
+
+// PHASE3-TASK43: SharedKeyRegistry for worker thread key-to-index mapping
+export { SharedKeyRegistry } from './caching/shared-key-registry';
+export type { KeyRegistryConfig } from './caching/shared-key-registry';
 
 export { HierarchicalCache, createHierarchicalCache, getHierarchicalCache } from './caching/hierarchical-cache';
 export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching/hierarchical-cache';

@@ -15,6 +15,21 @@ export const MEV_CONFIG = {
   /** Enable MEV protection globally */
   enabled: process.env.MEV_PROTECTION_ENABLED === 'true',
 
+  /**
+   * Enable MEV-Share for Ethereum (Task 1.1: MEV-Share Integration)
+   *
+   * When true: Uses MEV-Share endpoint to capture 50-90% of MEV value as rebates
+   * When false: Uses standard Flashbots relay (no rebates)
+   *
+   * MEV-Share allows searchers to backrun transactions while sharing profits.
+   * This provides value capture without sacrificing MEV protection.
+   *
+   * Default: true (enabled for value capture)
+   * @see ADR-028: MEV-Share Integration
+   * @see docs/architecture/adr/ADR-028-mev-share-integration.md
+   */
+  useMevShare: process.env.FEATURE_MEV_SHARE !== 'false', // Default true
+
   /** Flashbots auth signing key for Ethereum mainnet */
   flashbotsAuthKey: process.env.FLASHBOTS_AUTH_KEY,
 

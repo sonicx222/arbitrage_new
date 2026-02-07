@@ -744,6 +744,32 @@ export class HierarchicalCache {
   }
 
   /**
+   * PHASE3-TASK41: Get SharedArrayBuffer for worker thread access.
+   * Returns null if PriceMatrix is disabled or not using shared memory.
+   *
+   * @returns The SharedArrayBuffer containing price data, or null
+   */
+  getSharedBuffer(): SharedArrayBuffer | null {
+    if (!this.usePriceMatrix || !this.priceMatrix) {
+      return null;
+    }
+    return this.priceMatrix.getSharedBuffer();
+  }
+
+  /**
+   * PHASE3-TASK43: Get SharedArrayBuffer for key registry (key-to-index mapping).
+   * Returns null if PriceMatrix is disabled or key registry not initialized.
+   *
+   * @returns The SharedArrayBuffer containing key registry data, or null
+   */
+  getKeyRegistryBuffer(): SharedArrayBuffer | null {
+    if (!this.usePriceMatrix || !this.priceMatrix) {
+      return null;
+    }
+    return this.priceMatrix.getKeyRegistryBuffer();
+  }
+
+  /**
    * PHASE1-TASK31: Get value from L1 cache.
    * Supports both Map-based and PriceMatrix-based implementations.
    */

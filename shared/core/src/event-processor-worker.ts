@@ -2,8 +2,74 @@
 // Handles parallel processing of arbitrage detection tasks
 
 import { parentPort, workerData } from 'worker_threads';
+import { PriceMatrix } from './caching/price-matrix';
 
-const { workerId } = workerData;
+const { workerId, priceBuffer, keyRegistryBuffer } = workerData;
+
+// PHASE3-TASK42: Initialize PriceMatrix from SharedArrayBuffer
+// PHASE3-TASK43: Attach to SharedKeyRegistry for key-to-index mapping
+// This enables zero-copy price access (<1μs vs 20ms message passing)
+let workerPriceMatrix: PriceMatrix | null = null;
+
+if (priceBuffer && priceBuffer instanceof SharedArrayBuffer) {
+  try {
+    // Create PriceMatrix instance from shared buffer
+    // Workers get read-only access to price data updated by main thread
+    // Pass key registry buffer for key lookups (PHASE3-TASK43)
+    const keyRegistry = (keyRegistryBuffer && keyRegistryBuffer instanceof SharedArrayBuffer)
+      ? keyRegistryBuffer
+      : null;
+
+    workerPriceMatrix = PriceMatrix.fromSharedBuffer(priceBuffer, keyRegistry);
+
+    const registryInfo = keyRegistry ? ' with key registry' : ' (no key registry - lookups disabled)';
+    console.log(`Worker ${workerId}: PriceMatrix initialized from SharedArrayBuffer (${priceBuffer.byteLength} bytes)${registryInfo}`);
+  } catch (error) {
+    console.error(`Worker ${workerId}: Failed to initialize PriceMatrix:`, error);
+  }
+} else {
+  console.log(`Worker ${workerId}: No SharedArrayBuffer provided, price lookups disabled`);
+}
+
+/**
+ * PHASE3-TASK42: Fast price lookup using SharedArrayBuffer.
+ * Returns price from shared memory without message passing overhead.
+ *
+ * @param key - Price key (e.g., "price:eth:usd")
+ * @returns Price entry or null if not found
+ */
+function getPriceFromSharedMemory(key: string): { price: number; timestamp: number } | null {
+  if (!workerPriceMatrix) {
+    return null;
+  }
+
+  return workerPriceMatrix.getPrice(key);
+}
+
+/**
+ * PHASE3-TASK42: Batch price lookup from SharedArrayBuffer.
+ *
+ * @param keys - Array of price keys
+ * @returns Map of key to price entry
+ */
+function getBatchPricesFromSharedMemory(keys: string[]): Map<string, { price: number; timestamp: number }> {
+  const result = new Map<string, { price: number; timestamp: number }>();
+
+  if (!workerPriceMatrix) {
+    return result;
+  }
+
+  const prices = workerPriceMatrix.getBatch(keys);
+
+  for (let i = 0; i < keys.length; i++) {
+    const priceEntry = prices[i];
+    if (priceEntry !== null) {
+      result.set(keys[i], priceEntry);
+    }
+  }
+
+  return result;
+}
 
 interface TaskMessage {
   type: 'process_task';

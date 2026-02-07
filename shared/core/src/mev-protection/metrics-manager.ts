@@ -26,7 +26,9 @@ export type IncrementableMetricField =
   | 'fallbackSubmissions'
   | 'bundlesIncluded'
   | 'bundlesReverted'
-  | 'mevShareRebatesReceived';
+  | 'mevShareRebatesReceived'
+  | 'bloxrouteSubmissions'
+  | 'fastlaneSubmissions';
 
 // =============================================================================
 // Metrics Manager
@@ -263,6 +265,8 @@ export class MevMetricsManager {
       mevShareRebatesReceived: 0,
       totalRebateWei: 0n,
       averageRebatePercent: 0,
+      bloxrouteSubmissions: 0,
+      fastlaneSubmissions: 0,
       lastUpdated: Date.now(),
     };
   }

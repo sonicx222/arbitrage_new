@@ -310,12 +310,146 @@ See [SECRETS_MANAGEMENT.md](security/SECRETS_MANAGEMENT.md) for detailed guidanc
 
 ### MEV Protection
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| `MEV_PROTECTION_ENABLED` | Enable MEV protection | `true` |
-| `FLASHBOTS_ENABLED` | Use Flashbots for Ethereum | `true` |
-| `JITO_ENABLED` | Use Jito for Solana | `true` |
-| `PRIVATE_MEMPOOL_THRESHOLD` | Min value for private tx | `0.1 ETH` |
+MEV (Maximal Extractable Value) protection prevents front-running and sandwich attacks across supported chains using chain-appropriate strategies.
+
+#### Configuration Variables
+
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `MEV_PROTECTION_ENABLED` | Enable MEV protection globally | No | `false` |
+| `FLASHBOTS_AUTH_KEY` | Flashbots relay signing key (Ethereum) | For Ethereum | - |
+| `BLOXROUTE_AUTH_HEADER` | BloXroute BDN authorization (BSC) | For BSC | - |
+| `FASTLANE_URL` | Polygon Fastlane RPC URL | For Polygon | Pre-configured |
+| `MEV_SUBMISSION_TIMEOUT_MS` | Submission timeout in milliseconds | No | `30000` |
+| `MEV_MAX_RETRIES` | Maximum submission retries | No | `3` |
+| `MEV_FALLBACK_TO_PUBLIC` | Fallback to public mempool on failure | No | `true` |
+| `FEATURE_MEV_SHARE` | Enable MEV-Share for rebate capture | No | `true` |
+
+#### Chain-Specific MEV Protection
+
+| Chain | Strategy | Configuration Required | Protection Level |
+|-------|----------|------------------------|------------------|
+| Ethereum | Flashbots/MEV-Share | `FLASHBOTS_AUTH_KEY` | High (private relay) |
+| BSC | BloXroute | `BLOXROUTE_AUTH_HEADER` | High (private mempool) |
+| Polygon | Fastlane | None (uses default URL) | Medium (priority ordering) |
+| Arbitrum, Optimism, Base | L2 Sequencer | None | High (inherent protection) |
+| zkSync, Linea | L2 Sequencer | None | High (inherent protection) |
+| Solana | Jito | None (configured in Solana provider) | High (validator tips) |
+| Others | Standard (Gas optimization) | None | Low |
+
+#### Setup Guide
+
+**1. Ethereum (Flashbots & MEV-Share)**
+
+```bash
+# Generate auth key (any Ethereum private key works)
+node -e "console.log(require('ethers').Wallet.createRandom().privateKey)"
+
+# Set in .env
+FLASHBOTS_AUTH_KEY=0x1234...your-generated-key
+MEV_PROTECTION_ENABLED=true
+
+# Enable MEV-Share for 50-90% rebate capture (recommended)
+FEATURE_MEV_SHARE=true
+```
+
+**Benefits:**
+- Private transaction submission (no front-running)
+- MEV-Share captures 50-90% of MEV value as rebates
+- Automatic fallback to standard Flashbots if MEV-Share fails
+
+**2. BSC (BloXroute)**
+
+```bash
+# Sign up at https://bloxroute.com/
+# Get auth header from dashboard
+
+# Set in .env
+BLOXROUTE_AUTH_HEADER=YOUR_AUTH_HEADER_FROM_BLOXROUTE
+MEV_PROTECTION_ENABLED=true
+```
+
+**Benefits:**
+- Private mempool submission prevents front-running
+- Lower latency than public RPC on BSC
+- Automatic fallback to public RPC if BloXroute unavailable
+
+**3. Polygon (Fastlane)**
+
+```bash
+# No API key required - uses public endpoint
+
+# Set in .env
+MEV_PROTECTION_ENABLED=true
+```
+
+**Benefits:**
+- MEV-protected transaction ordering
+- Priority inclusion through Fastlane network
+- No additional cost or signup required
+
+#### Validation
+
+Verify MEV configuration before deployment:
+
+```bash
+npm run validate:mev-setup
+```
+
+The validation script checks:
+- Required API keys are configured for each enabled chain
+- URLs are properly formatted
+- Strategy mappings are correct
+- Fallback behavior is properly configured
+
+#### Monitoring Metrics
+
+Provider-specific metrics for observability:
+
+```typescript
+// Total submissions by provider
+mev_bloxroute_submissions_total{chain="bsc"}
+mev_fastlane_submissions_total{chain="polygon"}
+
+// Success rates
+mev_submission_success_rate{strategy="bloxroute"}
+mev_submission_success_rate{strategy="fastlane"}
+
+// Latency percentiles
+mev_submission_latency_ms{strategy="bloxroute",percentile="p99"}
+mev_submission_latency_ms{strategy="fastlane",percentile="p99"}
+
+// Fallback usage
+mev_fallback_submissions_total{chain="bsc",reason="bloxroute_timeout"}
+```
+
+#### Troubleshooting
+
+**BloXroute submissions failing:**
+1. Verify `BLOXROUTE_AUTH_HEADER` is correct
+2. Check BloXroute dashboard for account status
+3. Ensure fallback is enabled (`MEV_FALLBACK_TO_PUBLIC=true`)
+4. Monitor `mev_fallback_submissions_total` metric
+
+**Fastlane submissions slow:**
+1. Check Polygon network congestion
+2. Verify `FASTLANE_URL` is correct
+3. Consider increasing `MEV_SUBMISSION_TIMEOUT_MS`
+4. Monitor `mev_submission_latency_ms` metric
+
+**No MEV protection active:**
+1. Ensure `MEV_PROTECTION_ENABLED=true`
+2. Run validation script: `npm run validate:mev-setup`
+3. Check logs for initialization errors
+4. Verify chain-specific requirements are met
+
+#### References
+
+- [ADR-017: MEV Protection Architecture](../architecture/adr/ADR-017-mev-protection.md)
+- [ADR-028: MEV-Share Integration](../architecture/adr/ADR-028-mev-share-integration.md)
+- [Flashbots Documentation](https://docs.flashbots.net/)
+- [BloXroute Documentation](https://docs.bloxroute.com/)
+- [Polygon Fastlane](https://fastlane.polygon.technology/)
 
 ### Circuit Breaker
 

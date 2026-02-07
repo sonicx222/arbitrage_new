@@ -245,6 +245,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
   private maxQueueSize: number;
   private taskTimeout: number;
 
+  // PHASE3-TASK41: SharedArrayBuffer for zero-copy price access in workers
+  private priceBuffer: SharedArrayBuffer | null = null;
+
+  // PHASE3-TASK43: SharedArrayBuffer for key registry (key-to-index mapping)
+  private keyRegistryBuffer: SharedArrayBuffer | null = null;
+
   // JSON parsing statistics (Phase 2)
   private jsonParsingStats: JsonParsingStats = {
     totalSingleParses: 0,
@@ -266,12 +272,16 @@ export class EventProcessingWorkerPool extends EventEmitter {
   constructor(
     poolSize = 4,
     maxQueueSize = 1000,
-    taskTimeout = 30000 // 30 seconds
+    taskTimeout = 30000, // 30 seconds
+    priceBuffer: SharedArrayBuffer | null = null, // PHASE3-TASK41: Optional SharedArrayBuffer for price data
+    keyRegistryBuffer: SharedArrayBuffer | null = null // PHASE3-TASK43: Optional SharedArrayBuffer for key registry
   ) {
     super();
     this.poolSize = poolSize;
     this.maxQueueSize = maxQueueSize;
     this.taskTimeout = taskTimeout;
+    this.priceBuffer = priceBuffer;
+    this.keyRegistryBuffer = keyRegistryBuffer;
   }
 
   async start(): Promise<void> {
@@ -409,8 +419,14 @@ export class EventProcessingWorkerPool extends EventEmitter {
     const workerPath = path.join(__dirname, 'event-processor-worker.js');
 
     for (let i = 0; i < this.poolSize; i++) {
+      // PHASE3-TASK41: Pass SharedArrayBuffer to workers for zero-copy price access
+      // PHASE3-TASK43: Pass key registry buffer for key-to-index mapping
       const worker = new Worker(workerPath, {
-        workerData: { workerId: i }
+        workerData: {
+          workerId: i,
+          priceBuffer: this.priceBuffer, // SharedArrayBuffer is transferable
+          keyRegistryBuffer: this.keyRegistryBuffer // SharedArrayBuffer for key lookups
+        }
       });
 
       worker.on('message', (message) => this.handleWorkerMessage(message, i));
@@ -430,7 +446,12 @@ export class EventProcessingWorkerPool extends EventEmitter {
         uptime: Date.now()
       });
 
-      logger.debug(`Worker ${i} initialized`);
+      const bufferInfo = this.priceBuffer && this.keyRegistryBuffer
+        ? ' with SharedArrayBuffer + key registry'
+        : this.priceBuffer
+        ? ' with SharedArrayBuffer'
+        : '';
+      logger.debug(`Worker ${i} initialized${bufferInfo}`);
     }
   }
 

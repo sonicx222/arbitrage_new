@@ -215,6 +215,10 @@ export interface MevMetrics {
   totalRebateWei: bigint;
   /** Average rebate percentage (0-100) */
   averageRebatePercent: number;
+  /** BloXroute submissions (BSC) - Task 1.3 */
+  bloxrouteSubmissions: number;
+  /** Fastlane submissions (Polygon) - Task 1.3 */
+  fastlaneSubmissions: number;
   /** Last updated timestamp */
   lastUpdated: number;
 }

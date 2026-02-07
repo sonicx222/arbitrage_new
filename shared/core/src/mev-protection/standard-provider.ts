@@ -108,6 +108,13 @@ export class StandardProvider extends BaseMevProvider {
 
     await this.incrementMetric('totalSubmissions');
 
+    // Task 1.3: Track provider-specific metrics for observability
+    if (this.strategy === 'bloxroute' && this.privateRpcUrl) {
+      await this.incrementMetric('bloxrouteSubmissions');
+    } else if (this.strategy === 'fastlane' && this.privateRpcUrl) {
+      await this.incrementMetric('fastlaneSubmissions');
+    }
+
     // NONCE-CONSISTENCY-FIX: Prepare transaction once at the top.
     // This ensures consistent nonce across private RPC and fallback paths,
     // preventing nonce gaps in standalone usage.

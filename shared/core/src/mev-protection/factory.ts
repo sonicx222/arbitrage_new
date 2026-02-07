@@ -105,6 +105,8 @@ export class MevProviderFactory {
       submissionTimeoutMs: config.submissionTimeoutMs || MEV_DEFAULTS.submissionTimeoutMs,
       maxRetries: config.maxRetries || MEV_DEFAULTS.maxRetries,
       fallbackToPublic: config.fallbackToPublic ?? MEV_DEFAULTS.fallbackToPublic,
+      // Task 1.1: MEV-Share feature flag (default: true for value capture)
+      useMevShare: config.useMevShare ?? true, // Default to enabled
     };
 
     this.providers = new Map();
@@ -427,6 +429,8 @@ export class MevProviderFactory {
       mevShareRebatesReceived: 0,
       totalRebateWei: 0n,
       averageRebatePercent: 0,
+      bloxrouteSubmissions: 0,
+      fastlaneSubmissions: 0,
       lastUpdated: 0,
     };
 
@@ -447,6 +451,8 @@ export class MevProviderFactory {
       global.bundlesReverted += metrics.bundlesReverted;
       global.mevShareRebatesReceived += metrics.mevShareRebatesReceived;
       global.totalRebateWei += metrics.totalRebateWei;
+      global.bloxrouteSubmissions += metrics.bloxrouteSubmissions;
+      global.fastlaneSubmissions += metrics.fastlaneSubmissions;
 
       if (metrics.averageLatencyMs > 0) {
         totalLatency += metrics.averageLatencyMs * metrics.successfulSubmissions;
