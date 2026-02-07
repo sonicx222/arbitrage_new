@@ -405,6 +405,10 @@ export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from
 
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
 
+// Correlation Analyzer for predictive warming
+export { CorrelationAnalyzer, getCorrelationAnalyzer } from './caching/correlation-analyzer';
+export type { PairCorrelation as AnalyzerPairCorrelation, CorrelationStats as AnalyzerCorrelationStats } from './caching/correlation-analyzer';
+
 // =============================================================================
 // 3.1.1 Cache Optimization - Registration Strategies (Enhancement #4)
 // =============================================================================
