@@ -46,6 +46,7 @@ infrastructure/*/dist/
 # =============================================================================
 # Compiled TypeScript output (should only contain .ts source files)
 **/src/**/*.js
+!shared/test-utils/src/reporters/slow-test-reporter.js
 **/src/**/*.js.map
 **/src/**/*.d.ts
 **/src/**/*.d.ts.map

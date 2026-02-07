@@ -1603,12 +1603,12 @@ export class CrossChainDetectorService {
 
       if (tokenString.includes('/')) {
         // Format: "TOKEN0/TOKEN1"
-        const tokenParts = tokenString.split('/').filter(p => p.trim().length > 0);
+        const tokenParts = tokenString.split('/').filter((p: string) => p.trim().length > 0);
         baseToken = tokenParts[0]?.trim() || tokenString;
         quoteToken = tokenParts[1]?.trim() || getDefaultQuoteToken(whaleTx.chain);
       } else if (tokenString.includes('_')) {
         // Format: "TOKEN0_TOKEN1" or "DEX_TOKEN0_TOKEN1"
-        const tokenParts = tokenString.split('_').filter(p => p.trim().length > 0);
+        const tokenParts = tokenString.split('_').filter((p: string) => p.trim().length > 0);
         if (tokenParts.length >= 2) {
           // Take last two parts as tokens (handles DEX_TOKEN0_TOKEN1 format)
           baseToken = tokenParts[tokenParts.length - 2].trim();
