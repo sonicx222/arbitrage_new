@@ -237,6 +237,9 @@ jest.mock('@arbitrage/unified-detector', () => ({
 describe('P1 Asia-Fast Partition Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.REGION_ID;
+    delete process.env.INSTANCE_ID;
+    delete process.env.ENABLE_CROSS_REGION_HEALTH;
   });
 
   describe('Module Exports', () => {
@@ -375,6 +378,9 @@ describe('Environment Variable Handling', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+    delete process.env.REGION_ID;
+    delete process.env.INSTANCE_ID;
+    delete process.env.ENABLE_CROSS_REGION_HEALTH;
   });
 
   afterEach(async () => {
@@ -486,6 +492,9 @@ describe('Process Handler Cleanup', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+    delete process.env.REGION_ID;
+    delete process.env.INSTANCE_ID;
+    delete process.env.ENABLE_CROSS_REGION_HEALTH;
   });
 
   afterEach(() => {
@@ -521,6 +530,9 @@ describe('Typed Environment Configuration (Shared Utilities)', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+    delete process.env.REGION_ID;
+    delete process.env.INSTANCE_ID;
+    delete process.env.ENABLE_CROSS_REGION_HEALTH;
   });
 
   afterEach(() => {

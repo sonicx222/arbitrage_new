@@ -142,7 +142,7 @@ module.exports = {
     },
     {
       displayName: 'e2e',
-      testMatch: ['**/tests/e2e/**/*.test.ts'],
+      testMatch: ['**/tests/e2e/**/*.test.ts', '**/__tests__/e2e/**/*.test.ts'],
       setupFilesAfterEnv: [
         '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
         '<rootDir>/shared/test-utils/src/setup/jest.e2e.setup.ts'
@@ -153,7 +153,12 @@ module.exports = {
     },
     {
       displayName: 'performance',
-      testMatch: ['**/tests/performance/**/*.test.ts', '**/tests/performance/**/*.perf.ts'],
+      testMatch: [
+        '**/__tests__/performance/**/*.test.ts',
+        '**/__tests__/performance/**/*.perf.ts',
+        '**/tests/performance/**/*.test.ts',
+        '**/tests/performance/**/*.perf.ts'
+      ],
       setupFilesAfterEnv: [
         '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
         '<rootDir>/shared/test-utils/src/setup/jest.performance.setup.ts'
