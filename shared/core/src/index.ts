@@ -484,7 +484,8 @@ export {
 
 // Infrastructure Layer: Implementations
 export {
-  CorrelationTrackerImpl
+  CorrelationTrackerImpl,
+  HierarchicalCacheWarmer
 } from './warming/infrastructure';
 
 // =============================================================================

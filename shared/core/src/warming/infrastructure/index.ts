@@ -8,3 +8,4 @@
  */
 
 export * from './correlation-tracker.impl';
+export * from './hierarchical-cache-warmer.impl';
