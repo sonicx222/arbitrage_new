@@ -492,6 +492,19 @@ export {
   HierarchicalCacheWarmer
 } from './warming/infrastructure';
 
+// Dependency Injection: Container
+export {
+  WarmingContainer,
+  createTopNWarming,
+  createAdaptiveWarming,
+  createTestWarming
+} from './warming/container';
+export type {
+  WarmingStrategyType,
+  WarmingContainerConfig,
+  WarmingComponents
+} from './warming/container';
+
 // =============================================================================
 // 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)
 // =============================================================================

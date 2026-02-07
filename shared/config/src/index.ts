@@ -264,6 +264,9 @@ export {
   MULTI_PATH_QUOTER_ADDRESSES,
   hasMultiPathQuoter,
   getMultiPathQuoterAddress,
+  // Task 2.3: Flash Loan Protocol Aggregator feature flag
+  FEATURE_FLAGS,
+  validateFeatureFlags,
 } from './service-config';
 
 // =============================================================================

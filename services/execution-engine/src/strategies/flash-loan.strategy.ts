@@ -1617,17 +1617,17 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       );
     }
 
-    // Build 2-hop path: tokenIn → tokenIntermediate → tokenIn
+    // Build 2-hop path: tokenIn → tokenOut → tokenIn
     return [
       {
         router: buyRouter,
         tokenIn: opportunity.tokenIn!,
-        tokenOut: opportunity.tokenIntermediate || opportunity.tokenOut!,
+        tokenOut: opportunity.tokenOut!,
         amountIn: BigInt(opportunity.amountIn!),
       },
       {
         router: sellRouter,
-        tokenIn: opportunity.tokenIntermediate || opportunity.tokenOut!,
+        tokenIn: opportunity.tokenOut!,
         tokenOut: opportunity.tokenIn!,
         amountIn: 0n, // Chain from previous output
       },
