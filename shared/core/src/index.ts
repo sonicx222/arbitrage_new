@@ -418,6 +418,15 @@ export type {
   InvalidKeyError
 } from './caching/strategies';
 
+// Strategy Implementations
+export {
+  MainThreadStrategy,
+  WorkerThreadStrategy,
+  RegistryStrategyFactory
+} from './caching/strategies';
+
+export type { StrategyFactoryConfig } from './caching/strategies';
+
 // =============================================================================
 // 3.1.2 Cache Optimization - Predictive Warming (Enhancement #2)
 // =============================================================================
@@ -464,6 +473,14 @@ export {
   GetCorrelatedPairsRequest,
   GetCorrelatedPairsResponse
 } from './warming/application';
+
+// Application Layer: Warming Strategies
+export {
+  TopNStrategy,
+  ThresholdStrategy,
+  AdaptiveStrategy,
+  TimeBasedStrategy
+} from './warming/application/strategies';
 
 // =============================================================================
 // 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)

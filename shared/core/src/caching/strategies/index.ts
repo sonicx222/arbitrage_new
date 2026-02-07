@@ -9,3 +9,6 @@
 
 // Strategy Interface
 export * from './registration-strategy.interface';
+
+// Strategy Implementations
+export * from './implementations';
