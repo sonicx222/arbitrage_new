@@ -406,6 +406,81 @@ export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
 
 // =============================================================================
+// 3.1.1 Cache Optimization - Registration Strategies (Enhancement #4)
+// =============================================================================
+
+// Strategy Pattern for SharedKeyRegistry CAS optimization
+export type {
+  IRegistrationStrategy,
+  RegistrationResult,
+  RegistryStats,
+  RegistryFullError,
+  InvalidKeyError
+} from './caching/strategies';
+
+// =============================================================================
+// 3.1.2 Cache Optimization - Predictive Warming (Enhancement #2)
+// =============================================================================
+
+// Domain Layer: Interfaces
+export type {
+  ICorrelationTracker,
+  PairCorrelation,
+  TrackingResult,
+  CorrelationStats,
+  ICacheWarmer,
+  WarmingResult,
+  WarmingConfig,
+  WarmingStats,
+  IWarmingStrategy,
+  WarmingCandidate,
+  WarmingContext,
+  SelectionResult,
+  TopNStrategyConfig,
+  ThresholdStrategyConfig,
+  AdaptiveStrategyConfig,
+  TimeBasedStrategyConfig
+} from './warming/domain';
+
+// Domain Models
+export {
+  WarmingTrigger,
+  WarmingEvent,
+  CorrelationPair
+} from './warming/domain';
+
+// =============================================================================
+// 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)
+// =============================================================================
+
+// Domain Layer: Interfaces
+export type {
+  IMetricsCollector,
+  IMetricsExporter,
+  MetricDefinition,
+  MetricLabels,
+  MetricSnapshot,
+  CollectorStats,
+  ExportConfig,
+  ExportResult,
+  ExporterStats,
+  GrafanaDashboardConfig,
+  GrafanaPanelDefinition
+} from './metrics/domain';
+
+// Domain Models
+export {
+  MetricType,
+  ExportFormat,
+  MetricValue,
+  MetricTimestamp,
+  MetricThreshold
+} from './metrics/domain';
+
+// Prometheus Helpers
+export type { IPrometheusHelpers } from './metrics/domain';
+
+// =============================================================================
 // 3.2 Pair Caching (S2.2.5)
 // =============================================================================
 
