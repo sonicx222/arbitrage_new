@@ -482,6 +482,11 @@ export {
   TimeBasedStrategy
 } from './warming/application/strategies';
 
+// Infrastructure Layer: Implementations
+export {
+  CorrelationTrackerImpl
+} from './warming/infrastructure';
+
 // =============================================================================
 // 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)
 // =============================================================================
