@@ -35,7 +35,6 @@ import {
   PrometheusExporter,
   IMetricsCollector,
   IMetricsExporter,
-  ExportFormat,
   // Domain interfaces
   ICorrelationTracker,
   ICacheWarmer,
@@ -47,6 +46,10 @@ import {
   WarmingConfig,
   ExportConfig,
 } from '../../';
+
+// Import ExportFormat directly to avoid circular dependency
+// (index.ts → warming/container → warming.container.ts → index.ts)
+import { ExportFormat } from '../../metrics/domain';
 
 /**
  * Warming strategy type
