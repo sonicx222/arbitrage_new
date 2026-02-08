@@ -273,11 +273,15 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
   /**
    * Build the transaction calldata for flash loan execution
    *
-   * @param request - Flash loan request parameters
-   * @param poolAddress - PancakeSwap V3 pool address to use for flash loan
+   * @param request - Flash loan request parameters (must include poolAddress)
    * @returns Encoded calldata for the transaction
+   * @throws Error if poolAddress is not provided in request
    */
-  buildCalldata(request: FlashLoanRequest, poolAddress: string): string {
+  buildCalldata(request: FlashLoanRequest): string {
+    if (!request.poolAddress) {
+      throw new Error('[ERR_MISSING_POOL] PancakeSwap V3 requires poolAddress in request. Call findBestPool() first.');
+    }
+
     // Convert SwapStep[] to tuple array format for ABI encoding
     const swapPathTuples = request.swapPath.map(step => [
       step.router,
@@ -290,7 +294,7 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
     const deadline = Math.floor(Date.now() / 1000) + 300;
 
     return ARBITRAGE_INTERFACE.encodeFunctionData('executeArbitrage', [
-      poolAddress,
+      request.poolAddress,
       request.asset,
       request.amount,
       swapPathTuples,
@@ -302,19 +306,18 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
   /**
    * Build the complete transaction request
    *
-   * @param request - Flash loan request parameters
-   * @param poolAddress - PancakeSwap V3 pool address to use for flash loan
+   * @param request - Flash loan request parameters (must include poolAddress)
    * @param from - Sender address
    * @returns Transaction request ready for signing
+   * @throws Error if poolAddress is not provided in request
    */
   buildTransaction(
     request: FlashLoanRequest,
-    poolAddress: string,
     from: string
   ): ethers.TransactionRequest {
     return {
       to: this.contractAddress,
-      data: this.buildCalldata(request, poolAddress),
+      data: this.buildCalldata(request),
       from,
     };
   }
@@ -322,17 +325,16 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
   /**
    * Estimate gas for flash loan execution
    *
-   * @param request - Flash loan request parameters
-   * @param poolAddress - PancakeSwap V3 pool address to use for flash loan
+   * @param request - Flash loan request parameters (must include poolAddress)
    * @param provider - JSON-RPC provider for estimation
    * @returns Estimated gas units
+   * @throws Error if poolAddress is not provided in request
    */
   async estimateGas(
     request: FlashLoanRequest,
-    poolAddress: string,
     provider: ethers.JsonRpcProvider
   ): Promise<bigint> {
-    const tx = this.buildTransaction(request, poolAddress, request.initiator);
+    const tx = this.buildTransaction(request, request.initiator);
 
     try {
       return await provider.estimateGas(tx);
@@ -383,6 +385,14 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
     }
 
     // Check all routers in path are approved
+    // Security: Empty router list is a misconfiguration - require explicit approval
+    if (this.approvedRouters.length === 0) {
+      return {
+        valid: false,
+        error: '[ERR_CONFIG] No approved routers configured for PancakeSwap V3 provider',
+      };
+    }
+
     for (const step of request.swapPath) {
       if (!ethers.isAddress(step.router)) {
         return {
@@ -391,17 +401,14 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
         };
       }
 
-      // Only validate against approved routers if the list is non-empty
-      if (this.approvedRouters.length > 0) {
-        const isApproved = this.approvedRouters.some(
-          r => r.toLowerCase() === step.router.toLowerCase()
-        );
-        if (!isApproved) {
-          return {
-            valid: false,
-            error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
-          };
-        }
+      const isApproved = this.approvedRouters.some(
+        r => r.toLowerCase() === step.router.toLowerCase()
+      );
+      if (!isApproved) {
+        return {
+          valid: false,
+          error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
+        };
       }
     }
 
