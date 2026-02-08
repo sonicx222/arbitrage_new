@@ -257,6 +257,9 @@ export {
   BPS_DENOMINATOR_BIGINT,
   // Fix 9.2: Consolidated ABI
   FLASH_LOAN_ARBITRAGE_ABI,
+  // Task 2.2: Balancer V2 flash loan support
+  BALANCER_V2_FEE_BPS,
+  BALANCER_V2_FLASH_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,
   // Tier 2 Enhancement: MultiPathQuoter contract addresses
@@ -354,6 +357,10 @@ export {
   PANCAKESWAP_V3_FACTORIES,
   getPancakeSwapV3Factory,
   hasPancakeSwapV3,
+  // Balancer V2 vaults (Task 2.2)
+  BALANCER_V2_VAULTS,
+  getBalancerV2Vault,
+  hasBalancerV2,
   // Native tokens
   NATIVE_TOKENS,
   getNativeToken,

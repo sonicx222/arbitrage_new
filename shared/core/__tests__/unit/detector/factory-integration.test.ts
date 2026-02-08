@@ -95,8 +95,8 @@ describe('FactoryIntegrationService', () => {
           chain: 'ethereum',
           factoryAddress: '0xfactory',
           routerAddress: '0xrouter',
-          feeBps: 30, // 0.3% in basis points
-          fee: 30, // Deprecated field - in basis points (not decimal)
+          feeBps: 30, // NEW: 0.3% in basis points (30 bps = 0.003)
+          fee: 0.003, // DEPRECATED: 0.3% as decimal (for backward compatibility)
           type: 'amm',
         } as Dex,
       ],

@@ -1,21 +1,25 @@
 /**
- * Aave V3 Flash Loan Provider
+ * Balancer V2 Flash Loan Provider
  *
- * Fully implemented provider for Aave V3 flash loans.
- * Uses FlashLoanArbitrage.sol contract for on-chain execution.
+ * Fully implemented provider for Balancer V2 flash loans.
+ * Uses BalancerV2FlashArbitrage.sol contract for on-chain execution.
  *
- * Supported chains: ethereum, polygon, arbitrum, base, optimism, avalanche
+ * Key advantages over other protocols:
+ * - 0% flash loan fee (vs Aave V3's 0.09%)
+ * - Single Vault per chain (no pool discovery needed)
+ * - Massive liquidity across all Balancer pools
  *
- * @see contracts/src/FlashLoanArbitrage.sol
- * @see https://docs.aave.com/developers/guides/flash-loans
+ * Supported chains: ethereum, polygon, arbitrum, optimism, base, fantom (Beethoven X)
+ *
+ * @see contracts/src/BalancerV2FlashArbitrage.sol
+ * @see https://docs.balancer.fi/reference/contracts/flash-loans.html
  */
 
 import { ethers } from 'ethers';
-// Fix 1.1 & 9.2: Import centralized constants and ABI
 import {
-  AAVE_V3_FEE_BPS,
+  BALANCER_V2_FEE_BPS,
   BPS_DENOMINATOR_BIGINT,
-  FLASH_LOAN_ARBITRAGE_ABI,
+  BALANCER_V2_FLASH_ARBITRAGE_ABI,
 } from '@arbitrage/config';
 import type {
   IFlashLoanProvider,
@@ -25,35 +29,31 @@ import type {
   FlashLoanProviderCapabilities,
 } from './types';
 
-// Fix 1.1: Use centralized constant, alias for local readability
+// Alias for local readability
 const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 
 /**
  * Cached ethers.Interface for hot-path optimization.
  * Creating Interface objects is expensive - cache at module level.
- *
- * Fix 9.2: Uses centralized FLASH_LOAN_ARBITRAGE_ABI from @arbitrage/config.
- * @see service-config.ts for full ABI documentation
  */
-const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
+const BALANCER_V2_INTERFACE = new ethers.Interface(BALANCER_V2_FLASH_ARBITRAGE_ABI);
 
 /**
  * Default deadline for flash loan execution (5 minutes from now).
  * This protects against stale transactions being mined in poor market conditions.
- * Matches industry standard used by Uniswap, Sushiswap, etc.
  */
 const DEFAULT_DEADLINE_SECONDS = 300;
 
 /**
- * Aave V3 Flash Loan Provider
+ * Balancer V2 Flash Loan Provider
  *
- * Fully implemented provider that integrates with the FlashLoanArbitrage
- * smart contract for trustless on-chain execution.
+ * Fully implemented provider that integrates with the BalancerV2FlashArbitrage
+ * smart contract for trustless on-chain execution with 0% flash loan fees.
  */
-export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
-  readonly protocol: FlashLoanProtocol = 'aave_v3';
+export class BalancerV2FlashLoanProvider implements IFlashLoanProvider {
+  readonly protocol: FlashLoanProtocol = 'balancer_v2';
   readonly chain: string;
-  readonly poolAddress: string;
+  readonly poolAddress: string; // Vault address
 
   private readonly contractAddress: string;
   private readonly approvedRouters: string[];
@@ -61,23 +61,23 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
 
   constructor(config: {
     chain: string;
-    poolAddress: string;
+    poolAddress: string; // Vault address
     contractAddress: string;
     approvedRouters: string[];
     feeOverride?: number;
   }) {
     this.chain = config.chain;
-    this.poolAddress = config.poolAddress;
+    this.poolAddress = config.poolAddress; // Balancer V2 Vault address
     this.contractAddress = config.contractAddress;
     this.approvedRouters = config.approvedRouters;
     this.feeOverride = config.feeOverride;
 
     // Validate configuration
     if (!ethers.isAddress(config.contractAddress)) {
-      throw new Error(`[ERR_CONFIG] Invalid contract address for Aave V3 provider on ${config.chain}`);
+      throw new Error(`[ERR_CONFIG] Invalid contract address for Balancer V2 provider on ${config.chain}`);
     }
     if (!ethers.isAddress(config.poolAddress)) {
-      throw new Error(`[ERR_CONFIG] Invalid pool address for Aave V3 provider on ${config.chain}`);
+      throw new Error(`[ERR_CONFIG] Invalid vault address for Balancer V2 provider on ${config.chain}`);
     }
   }
 
@@ -85,7 +85,7 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
    * Check if provider is available for use
    */
   isAvailable(): boolean {
-    // Fix 3.1: Check for zero address which indicates misconfiguration
+    // Check for zero address which indicates misconfiguration
     if (this.contractAddress === '0x0000000000000000000000000000000000000000') {
       return false;
     }
@@ -98,9 +98,9 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
   getCapabilities(): FlashLoanProviderCapabilities {
     return {
       supportsMultiHop: true,
-      supportsMultiAsset: false, // FlashLoanArbitrage uses flashLoanSimple
-      maxLoanAmount: 0n, // Depends on pool liquidity
-      supportedTokens: [], // All tokens supported in Aave pools
+      supportsMultiAsset: false, // MVP: Single-asset flash loans only
+      maxLoanAmount: 0n, // Depends on Vault liquidity
+      supportedTokens: [], // All tokens in Balancer pools are supported
       status: 'fully_supported',
     };
   }
@@ -108,12 +108,15 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
   /**
    * Calculate flash loan fee for an amount
    *
+   * Balancer V2 charges 0% flash loan fees.
+   * This makes it the most cost-effective flash loan provider.
+   *
    * @param amount - Loan amount in wei
-   * @returns Fee information
+   * @returns Fee information (always 0 for Balancer V2)
    */
   calculateFee(amount: bigint): FlashLoanFeeInfo {
-    const feeBps = this.feeOverride ?? AAVE_V3_FEE_BPS;
-    const feeAmount = (amount * BigInt(feeBps)) / BPS_DENOMINATOR;
+    const feeBps = this.feeOverride ?? BALANCER_V2_FEE_BPS; // Always 0
+    const feeAmount = (amount * BigInt(feeBps)) / BPS_DENOMINATOR; // Always 0n
 
     return {
       feeBps,
@@ -138,10 +141,9 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
     ]);
 
     // Calculate deadline: current time + 5 minutes
-    // This protects against stale transactions (FlashLoanArbitrage.sol v1.2.0)
     const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
 
-    return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
+    return BALANCER_V2_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.asset,
       request.amount,
       swapPathTuples,
@@ -185,12 +187,17 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
       return await provider.estimateGas(tx);
     } catch {
       // Default gas estimate for flash loan arbitrage
-      return 500000n;
+      // Balancer V2 may use slightly more gas than Aave V3 due to Vault architecture
+      return 550000n;
     }
   }
 
   /**
    * Validate a flash loan request before execution
+   *
+   * This validation logic is identical to Aave V3 provider since both
+   * use the same swap execution mechanism. The only difference is the
+   * flash loan protocol (Vault vs Pool).
    *
    * @param request - Flash loan request to validate
    * @returns Validation result with error message if invalid
@@ -284,5 +291,12 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
    */
   getApprovedRouters(): string[] {
     return [...this.approvedRouters];
+  }
+
+  /**
+   * Get the Vault address for this provider
+   */
+  getVaultAddress(): string {
+    return this.poolAddress;
   }
 }

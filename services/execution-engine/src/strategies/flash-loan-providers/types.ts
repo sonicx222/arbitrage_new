@@ -19,6 +19,7 @@ import { ethers } from 'ethers';
  */
 export type FlashLoanProtocol =
   | 'aave_v3'
+  | 'balancer_v2'
   | 'pancakeswap_v3'
   | 'spookyswap'
   | 'syncswap';
