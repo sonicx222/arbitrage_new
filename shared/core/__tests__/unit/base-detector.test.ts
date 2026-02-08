@@ -1,7 +1,23 @@
 /**
- * BaseDetector Unit Tests
+ * @deprecated BaseDetector Unit Tests - LEGACY FILE
  *
- * Tests for the consolidated BaseDetector class including:
+ * **DO NOT EXTEND OR MODIFY THIS FILE**
+ *
+ * This file uses TestDetector extends BaseDetector pattern which is deprecated.
+ * BaseDetector itself is legacy infrastructure (see base-detector.ts deprecation notice).
+ *
+ * **Replacement Test Files (Phase 2 Migration Complete):**
+ * - event-processor.test.ts - Pure event decoding functions (24 tests)
+ * - health-monitor.test.ts - Health monitoring component (26 tests)
+ * - factory-integration.test.ts - Factory integration service (45 tests)
+ * - detector-integration.test.ts - Multi-component integration (17 tests)
+ *
+ * **Why This File Is Kept:**
+ * - Provides test coverage for legacy BaseDetector until full removal
+ * - Documents legacy patterns for migration reference
+ * - Validates backward compatibility during transition
+ *
+ * **Tests for the consolidated BaseDetector class including:**
  * - Lifecycle management (start/stop with race condition guards)
  * - Event processing (Sync and Swap events)
  * - Arbitrage detection
@@ -13,6 +29,7 @@
  *
  * @migrated from shared/core/src/base-detector.test.ts
  * @see ADR-009: Test Architecture
+ * @see Phase 2 Migration: extracted component tests (event-processor, health-monitor, factory-integration, detector-integration)
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
