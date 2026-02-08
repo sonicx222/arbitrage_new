@@ -25,8 +25,8 @@ import {
   validateFactoryRegistry,
   EVENT_CONFIG,
   EVENT_SIGNATURES,
-} from '../../../../shared/config/src';
-import type { Dex, Pair } from '../../../../shared/types/src';
+} from '@arbitrage/config';
+import type { Dex, Pair } from '@arbitrage/types';
 import { bpsToDecimal } from '../utils/fee-utils';
 
 /**

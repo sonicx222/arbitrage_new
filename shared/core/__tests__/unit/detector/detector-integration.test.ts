@@ -22,27 +22,47 @@ import {
   createDetectorHealthMonitor,
   createFactoryIntegrationService,
 } from '../../../src/detector';
+import { getRedisClient } from '../../../src/redis';
+import { getRedisStreamsClient, RedisStreamsClient } from '../../../src/redis-streams';
 import type { Pair } from '@arbitrage/types';
 
-// Mock Redis for testing
-jest.mock('@arbitrage/core/redis', () => ({
-  getRedisClient: jest.fn().mockResolvedValue({
-    set: jest.fn().mockResolvedValue('OK'),
-    get: jest.fn().mockResolvedValue(null),
-    del: jest.fn().mockResolvedValue(1),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-}));
+// Mock Redis for testing - in-memory implementation
+jest.mock('../../../src/redis', () => {
+  const inMemoryStore = new Map<string, string>();
 
-// Mock Redis Streams
-jest.mock('../../../src/redis-streams', () => ({
-  getRedisStreamsClient: jest.fn().mockResolvedValue({
-    createBatcher: jest.fn().mockReturnValue({
-      add: jest.fn(),
-      flush: jest.fn().mockResolvedValue(undefined),
-      stop: jest.fn(),
+  return {
+    getRedisClient: jest.fn().mockResolvedValue({
+      // In-memory Redis operations
+      set: jest.fn((key: string, value: string) => {
+        inMemoryStore.set(key, value);
+        return Promise.resolve('OK');
+      }),
+      get: jest.fn((key: string) => {
+        return Promise.resolve(inMemoryStore.get(key) || null);
+      }),
+      del: jest.fn((key: string) => {
+        const existed = inMemoryStore.has(key);
+        inMemoryStore.delete(key);
+        return Promise.resolve(existed ? 1 : 0);
+      }),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+      // Additional methods that might be called
+      exists: jest.fn((key: string) => Promise.resolve(inMemoryStore.has(key) ? 1 : 0)),
+      expire: jest.fn().mockResolvedValue(1),
     }),
-  }),
+  };
+});
+
+// Mock Redis Streams - implementation set up in beforeEach
+jest.mock('../../../src/redis-streams', () => ({
+  getRedisStreamsClient: jest.fn(),
+  RedisStreamsClient: {
+    STREAMS: {
+      PRICE_UPDATES: 'price-updates',
+      SWAP_EVENTS: 'swap-events',
+      WHALE_ALERTS: 'whale-alerts',
+    },
+  },
 }));
 
 // Mock WebSocket manager
@@ -85,13 +105,40 @@ describe('Detector Integration', () => {
   let mockLogger: any;
   let mockPerfLogger: any;
 
+  // Mock Redis and Streams clients
+  const mockRedis = {
+    set: jest.fn().mockResolvedValue('OK'),
+    get: jest.fn().mockResolvedValue(null),
+    del: jest.fn().mockResolvedValue(1),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+    exists: jest.fn().mockResolvedValue(0),
+    expire: jest.fn().mockResolvedValue(1),
+  };
+
+  // Create a factory for batchers - each call creates a new batcher instance
+  const createMockBatcher = () => ({
+    add: jest.fn().mockResolvedValue(undefined),
+    flush: jest.fn().mockResolvedValue([]),
+    stop: jest.fn(),
+    destroy: jest.fn().mockResolvedValue(undefined),
+  });
+
+  const mockStreamsClient = {
+    createBatcher: jest.fn().mockImplementation(createMockBatcher),
+    disconnect: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.resetModules();
 
-    // Reset config mocks
-    const { getAllFactoryAddresses } = require('@arbitrage/config');
-    getAllFactoryAddresses.mockReturnValue([]);
+    // Reset mock implementations after clearAllMocks
+    mockStreamsClient.createBatcher.mockImplementation(createMockBatcher);
+
+    // Set up Redis mocks to return test implementations
+    (getRedisClient as jest.Mock).mockResolvedValue(mockRedis);
+    (getRedisStreamsClient as jest.Mock).mockResolvedValue(mockStreamsClient);
+
+    // Note: Config mock reset removed - tests will set up their own config mocks as needed
 
     mockLogger = {
       info: jest.fn(),
@@ -112,8 +159,7 @@ describe('Detector Integration', () => {
   // =============================================================================
 
   describe('Component Initialization', () => {
-    // Skip: Requires real Redis connection, better suited for E2E tests
-    it.skip('should initialize all components in integration', async () => {
+    it('should initialize all components in integration', async () => {
       const config = {
         chain: 'ethereum',
         logger: mockLogger,
@@ -134,8 +180,7 @@ describe('Detector Integration', () => {
       expect(resources.priceUpdateBatcher).toBeDefined();
     });
 
-    // Skip: Requires real Redis connection, better suited for E2E tests
-    it.skip('should handle initialization errors gracefully', async () => {
+    it('should handle initialization errors gracefully', async () => {
       const config = {
         chain: 'ethereum',
         logger: mockLogger,
@@ -291,10 +336,11 @@ describe('Detector Integration', () => {
       expect(service).toBeDefined();
     });
 
-    // Skip: Mock reset issue, covered in factory-integration.test.ts
-    it.skip('should initialize factory subscription', async () => {
-      const { getAllFactoryAddresses } = require('@arbitrage/config');
-      getAllFactoryAddresses.mockReturnValue(['0xfactory123']);
+    it('should initialize factory subscription', async () => {
+      // Use spyOn instead of requireMock for better control
+      const config_module = require('@arbitrage/config');
+      const spy = jest.spyOn(config_module, 'getAllFactoryAddresses')
+        .mockReturnValue(['0xfactory123']);
 
       const config = {
         chain: 'ethereum',
@@ -325,6 +371,8 @@ describe('Detector Integration', () => {
 
       expect(result.factoryAddresses.size).toBe(1);
       expect(result.factoryAddresses.has('0xfactory123')).toBe(true);
+
+      spy.mockRestore();
     });
   });
 
