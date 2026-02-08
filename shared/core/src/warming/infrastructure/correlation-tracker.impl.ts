@@ -41,6 +41,17 @@ import {
  * - recordPriceUpdate: <50μs (HOT PATH)
  * - getPairsToWarm: <1ms (background)
  *
+ * **Thread Safety**:
+ * This implementation is safe for concurrent use within a single Node.js process
+ * (single-threaded event loop). The underlying CorrelationAnalyzer uses JavaScript
+ * Map which is NOT safe for concurrent writes across Worker threads.
+ *
+ * **For multi-threaded usage** (Worker threads with SharedArrayBuffer):
+ * - Do NOT share instances across workers
+ * - Each worker should maintain its own CorrelationTrackerImpl instance
+ * - Use message passing to aggregate correlation data from multiple workers
+ * - OR implement explicit locking (AsyncLock) for shared access
+ *
  * @example
  * ```typescript
  * const analyzer = new CorrelationAnalyzer({
