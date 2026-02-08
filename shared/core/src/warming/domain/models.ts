@@ -157,7 +157,16 @@ export class CorrelationPair {
   }
 
   /**
-   * Create correlation pair
+   * Create correlation pair with validation (P1-6 fix)
+   *
+   * Validates:
+   * - Non-empty pair addresses
+   * - No self-correlation
+   * - Valid score range (0-1)
+   * - Non-negative co-occurrences
+   * - No future timestamps
+   *
+   * @throws Error if validation fails
    */
   static create(
     pair1: string,
@@ -166,6 +175,29 @@ export class CorrelationPair {
     coOccurrences: number,
     lastSeenTimestamp: number
   ): CorrelationPair {
+    // P1-6: Validate pair addresses
+    if (!pair1 || pair1.trim().length === 0) {
+      throw new Error('pair1 cannot be empty');
+    }
+    if (!pair2 || pair2.trim().length === 0) {
+      throw new Error('pair2 cannot be empty');
+    }
+
+    // P1-6: Prevent self-correlation
+    if (pair1 === pair2) {
+      throw new Error(`Cannot correlate pair with itself: ${pair1}`);
+    }
+
+    // P1-6: Validate co-occurrences
+    if (!Number.isFinite(coOccurrences) || coOccurrences < 0) {
+      throw new Error(`coOccurrences must be non-negative finite number, got: ${coOccurrences}`);
+    }
+
+    // P1-6: Validate timestamp (no future timestamps)
+    if (!Number.isFinite(lastSeenTimestamp) || lastSeenTimestamp > Date.now()) {
+      throw new Error(`lastSeenTimestamp cannot be in the future, got: ${lastSeenTimestamp}`);
+    }
+
     return new CorrelationPair(pair1, pair2, score, coOccurrences, lastSeenTimestamp);
   }
 

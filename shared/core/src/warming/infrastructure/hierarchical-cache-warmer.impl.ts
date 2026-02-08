@@ -406,14 +406,15 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
   /**
    * Get L1 capacity from cache config
    *
+   * Uses public API to access L1 size (P1-3 fix: removed type casting).
+   *
    * @returns L1 capacity in number of entries
    */
   private getL1Capacity(): number {
     // HierarchicalCache calculates capacity as:
     // l1MaxEntries = Math.floor(l1Size * 1024 * 1024 / averageEntrySize)
     // We'll use a similar calculation with 1KB average
-    const config = (this.cache as any).config;
-    const l1SizeMb = config?.l1Size || 64;
+    const l1SizeMb = this.cache.getL1SizeMb();
     return Math.floor((l1SizeMb * 1024 * 1024) / 1024);
   }
 
@@ -510,12 +511,16 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
    * - Eliminates the double fetch that was occurring when value not in L1
    * - Reduces warming latency from 8.7ms toward target of <10ms
    *
+   * Type Safety (P1-4 fix):
+   * - Returns `unknown` instead of `any` for safer type handling
+   * - Cache values are opaque to warmer (just passed through)
+   *
    * @param pair - Pair to check
-   * @returns Object with inL1 flag and value
+   * @returns Object with inL1 flag and value (unknown type)
    */
   private async checkL1WithValue(
     pair: string
-  ): Promise<{ inL1: boolean; value: any }> {
+  ): Promise<{ inL1: boolean; value: unknown }> {
     // Use cache stats to detect if in L1 without type casting
     const statsBefore = this.cache.getStats();
     const l1SizeBefore = statsBefore.l1.size;
@@ -544,10 +549,14 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
    * for cache consistency. While slightly less efficient than writing
    * only to L1, warming is a background operation so this is acceptable.
    *
+   * Type Safety (P1-4 fix):
+   * - Accepts `unknown` instead of `any` for safer type handling
+   * - Value is opaque to warmer, just passed through to cache
+   *
    * @param pair - Pair to promote
-   * @param value - Value to set
+   * @param value - Value to set (unknown type from cache)
    */
-  private async promoteToL1(pair: string, value: any): Promise<void> {
+  private async promoteToL1(pair: string, value: unknown): Promise<void> {
     // Use public cache.set() API instead of type casting
     // This writes to all layers (L1/L2/L3), ensuring consistency
     await this.cache.set(pair, value);
