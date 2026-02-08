@@ -121,6 +121,14 @@ export class WarmingIntegration {
   private metricsExporter: PrometheusExporter | null = null;
   private initialized: boolean = false;
 
+  /**
+   * Track pending warming operations to prevent concurrent duplicates (P1-7 fix)
+   *
+   * Key: pair address
+   * Value: timestamp when warming started (for timeout cleanup)
+   */
+  private pendingWarmings: Map<string, number> = new Map();
+
   constructor(
     private readonly cache: HierarchicalCache | null,
     config: Partial<WarmingIntegrationConfig> = {}
@@ -235,6 +243,21 @@ export class WarmingIntegration {
       labels: ['chain'],
     });
 
+    // Define concurrent warming metric (P1-7 fix)
+    this.metricsCollector.defineMetric({
+      name: 'warming_pending_operations',
+      type: MetricType.GAUGE,
+      description: 'Number of warming operations currently in progress',
+      labels: ['chain'],
+    });
+
+    this.metricsCollector.defineMetric({
+      name: 'warming_debounced_total',
+      type: MetricType.COUNTER,
+      description: 'Total warming operations skipped due to debouncing',
+      labels: ['chain'],
+    });
+
     // Create exporter
     this.metricsExporter = new PrometheusExporter(this.metricsCollector, {
       format: ExportFormat.PROMETHEUS,
@@ -323,8 +346,27 @@ export class WarmingIntegration {
       }
     }
 
-    // 2. Trigger warming (async, non-blocking)
+    // 2. Trigger warming (async, non-blocking) with debouncing (P1-7 fix)
     if (this.cacheWarmer) {
+      // Debounce: Skip if warming already pending for this pair
+      if (this.pendingWarmings.has(pairAddress)) {
+        // Another warming operation is already in progress for this pair
+        // Skip to avoid duplicate work and metrics overcounting
+
+        // Track debouncing metric (P1-7 fix monitoring)
+        if (this.metricsCollector) {
+          this.metricsCollector.incrementCounter(
+            'warming_debounced_total',
+            { chain: chainId }
+          );
+        }
+
+        return;
+      }
+
+      // Mark warming as pending
+      this.pendingWarmings.set(pairAddress, timestamp);
+
       // Fire-and-forget warming to avoid blocking hot path
       this.cacheWarmer
         .warmForPair(pairAddress)
@@ -370,6 +412,10 @@ export class WarmingIntegration {
               }
             );
           }
+        })
+        .finally(() => {
+          // Always remove from pending set when done (success or error)
+          this.pendingWarmings.delete(pairAddress);
         });
     }
   }
@@ -429,6 +475,13 @@ export class WarmingIntegration {
         { chain: chainId }
       );
     }
+
+    // Warming concurrency metric (P1-7 fix monitoring)
+    this.metricsCollector.setGauge(
+      'warming_pending_operations',
+      this.pendingWarmings.size,
+      { chain: chainId }
+    );
   }
 
   /**
@@ -491,12 +544,58 @@ export class WarmingIntegration {
   }
 
   /**
+   * Clean up stale pending warming entries (P1-7 fix)
+   *
+   * Removes warming operations that have been pending for too long.
+   * This prevents memory leak if warming operations hang or timeout.
+   *
+   * @param maxAgeMs - Maximum age for pending operations (default: 30s)
+   */
+  cleanupStalePendingWarmings(maxAgeMs: number = 30000): void {
+    const now = Date.now();
+    let cleanedCount = 0;
+
+    for (const [pair, startTime] of this.pendingWarmings.entries()) {
+      const age = now - startTime;
+      if (age > maxAgeMs) {
+        this.pendingWarmings.delete(pair);
+        cleanedCount++;
+
+        // Log cleanup for monitoring
+        this.logger.warn('Cleaned up stale pending warming', {
+          pair,
+          ageMs: age,
+          maxAgeMs,
+        });
+      }
+    }
+
+    if (cleanedCount > 0) {
+      this.logger.info('Pending warming cleanup complete', {
+        cleaned: cleanedCount,
+        remaining: this.pendingWarmings.size,
+      });
+    }
+  }
+
+  /**
+   * Get pending warming count (for monitoring)
+   *
+   * @returns Number of warming operations currently in progress
+   */
+  getPendingWarmingCount(): number {
+    return this.pendingWarmings.size;
+  }
+
+  /**
    * Shutdown warming integration
    *
-   * Cleans up resources.
+   * Cleans up resources and pending operations.
    */
   async shutdown(): Promise<void> {
-    // No specific cleanup needed currently
+    // Clear pending warmings
+    this.pendingWarmings.clear();
+
     // Correlation analyzer and cache are managed externally
     this.initialized = false;
   }
