@@ -59,9 +59,10 @@ module.exports = {
   // Workers exceeding this limit are killed with SIGTERM (exitCode=143)
   workerIdleMemoryLimit: 0.8, // 80% of system memory
 
-  // Test timeout - default for non-project runs (projects override this)
-  // Matches unit test timeout for consistency
-  testTimeout: 10000,
+  // Test timeout - default for non-project runs
+  // Individual tests override this with jest.setTimeout() or it() timeout parameter
+  // ML and performance tests use much longer timeouts (2min - 11min)
+  testTimeout: 700000, // ~11 minutes (handles longest performance tests)
 
   // Coverage thresholds (enforce quality) - standardized to 60%
   coverageThreshold: {
@@ -170,8 +171,7 @@ module.exports = {
       ],
       // P2-3.1: MUST be serial - measuring performance requires no interference
       maxWorkers: 1,
-      // Longer timeout for performance tests (some run 10+ minutes)
-      testTimeout: 700000, // ~11 minutes (handles 650000ms tests + buffer)
+      // Note: testTimeout is not valid in project config - set at root level instead
       ...projectConfig
     },
     {
@@ -195,8 +195,7 @@ module.exports = {
       // Serial execution for ML tests (memory-intensive TensorFlow.js)
       // Prevents multiple workers from loading models simultaneously
       maxWorkers: 1,
-      // Longer timeout for TensorFlow.js initialization and training
-      testTimeout: 120000, // 2 minutes
+      // Note: testTimeout is not valid in project config - set at root level instead
       ...projectConfig
     }
   ]
