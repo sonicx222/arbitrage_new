@@ -93,11 +93,11 @@ private async checkL1(pair: string): Promise<any> {
 
 ---
 
-### 🔄 C3. Add Error Logging in WarmingIntegration
+### ✅ C3. Add Error Logging in WarmingIntegration
 
 **Issue**: Lines 324-353 in `warming-integration.ts` fire-and-forget warming promises with silent error swallowing.
 
-**Proposed Fix**:
+**Fix Applied**:
 ```typescript
 .catch(error => {
   // Log warming errors (non-fatal, best-effort optimization)
@@ -123,7 +123,16 @@ private async checkL1(pair: string): Promise<any> {
 });
 ```
 
-**Status**: Ready to apply.
+**Status**: ✅ Applied and verified.
+
+**Changes Made**:
+1. Added `createLogger` import from `@arbitrage/core`
+2. Added logger instance to WarmingIntegration class
+3. Replaced silent catch block with structured logging
+4. Added error metric increment for monitoring
+5. Preserved non-fatal error semantics (log + continue)
+
+**Impact**: Warming errors now visible in logs and metrics for debugging and monitoring.
 
 ---
 

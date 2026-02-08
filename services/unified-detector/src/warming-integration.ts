@@ -32,6 +32,8 @@ import {
   PrometheusExporter,
   MetricType,
   ExportFormat,
+  // Logging
+  createLogger,
 } from '@arbitrage/core';
 
 /**
@@ -115,6 +117,7 @@ export class WarmingIntegration {
   private correlationTracker: CorrelationTrackerImpl | null = null;
   private cacheWarmer: HierarchicalCacheWarmer | null = null;
   private metricsCollector: PrometheusMetricsCollector | null = null;
+  private logger = createLogger('warming-integration');
   private metricsExporter: PrometheusExporter | null = null;
   private initialized: boolean = false;
 
@@ -348,7 +351,25 @@ export class WarmingIntegration {
         })
         .catch(error => {
           // Warming errors are non-fatal (best-effort optimization)
-          // Log but don't throw
+          // Log error with context for debugging and monitoring
+          this.logger.warn('Cache warming failed (non-fatal)', {
+            pair: pairAddress,
+            chain: chainId,
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Increment error metric for monitoring
+          if (this.metricsCollector) {
+            this.metricsCollector.incrementCounter(
+              'warming_errors_total',
+              {
+                chain: chainId,
+                error_type: error instanceof Error ? error.name : 'Unknown',
+              }
+            );
+          }
         });
     }
   }
