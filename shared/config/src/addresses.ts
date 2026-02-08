@@ -108,6 +108,48 @@ export function hasAaveV3(chain: string): boolean {
 }
 
 // =============================================================================
+// PancakeSwap V3 Factory Addresses
+// =============================================================================
+
+/**
+ * PancakeSwap V3 Factory addresses by chain.
+ * Used for pool discovery and flash swap operations.
+ *
+ * @see https://docs.pancakeswap.finance/developers/smart-contracts/pancakeswap-exchange/v3-contracts
+ */
+export const PANCAKESWAP_V3_FACTORIES: Readonly<Record<string, string>> = {
+  bsc: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  ethereum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  arbitrum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
+  base: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  opbnb: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  linea: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+} as const;
+
+/**
+ * Get PancakeSwap V3 Factory address for a chain.
+ * @throws Error if chain not supported by PancakeSwap V3
+ */
+export function getPancakeSwapV3Factory(chain: string): string {
+  const address = PANCAKESWAP_V3_FACTORIES[chain];
+  if (!address) {
+    throw new Error(
+      `PancakeSwap V3 Factory not available on chain: ${chain}. ` +
+      `Supported chains: ${Object.keys(PANCAKESWAP_V3_FACTORIES).join(', ')}`
+    );
+  }
+  return address;
+}
+
+/**
+ * Check if PancakeSwap V3 is available on a chain.
+ */
+export function hasPancakeSwapV3(chain: string): boolean {
+  return chain in PANCAKESWAP_V3_FACTORIES;
+}
+
+// =============================================================================
 // Wrapped Native Token Addresses
 // =============================================================================
 

@@ -350,6 +350,10 @@ export {
   AAVE_V3_POOLS,
   getAaveV3Pool,
   hasAaveV3,
+  // PancakeSwap V3 factories
+  PANCAKESWAP_V3_FACTORIES,
+  getPancakeSwapV3Factory,
+  hasPancakeSwapV3,
   // Native tokens
   NATIVE_TOKENS,
   getNativeToken,
