@@ -681,11 +681,11 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Prepare and execute sell transaction on destination chain using DEX router
       //
-      // FUTURE ENHANCEMENT (M1): Flash loans on destination chain
+      // FUTURE ENHANCEMENT (FE-001): Flash loans on destination chain
       // =================================================================
       // Status: DEFERRED - Current direct DEX swap is sufficient for MVP
       // Priority: Medium | Effort: 3 days | Depends on: FlashLoanProviderFactory
-      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/142
+      // Tracking: docs/FUTURE_ENHANCEMENTS.md#FE-001
       //
       // Current Implementation: Direct DEX swap after bridge completion.
       //   - Pros: Simple, works immediately after bridge

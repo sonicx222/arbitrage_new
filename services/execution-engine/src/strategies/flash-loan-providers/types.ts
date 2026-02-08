@@ -82,9 +82,26 @@ export interface FlashLoanResult {
 
 /**
  * Flash loan fee information
+ *
+ * I8 Enhancement: Fee format documentation for cross-module clarity.
+ *
+ * Fee Format: Basis Points (bps)
+ * - 1 bps = 0.01% (one hundredth of a percent)
+ * - 100 bps = 1%
+ * - Examples:
+ *   * Aave V3: 9 bps = 0.09%
+ *   * PancakeSwap V3 (1% tier): 100 bps = 1%
+ *   * Uniswap V3 (0.3% tier): 30 bps = 0.3%
+ *
+ * Configuration Files:
+ * - service-config.ts: Use integer basis points (9, not 0.09)
+ * - Smart contracts: Use basis points with BPS_DENOMINATOR = 10000
+ *
+ * @see shared/config/src/service-config.ts Centralized fee constants
+ * @see contracts/src/ Smart contract fee implementations
  */
 export interface FlashLoanFeeInfo {
-  /** Fee in basis points (100 = 1%) */
+  /** Fee in basis points (100 = 1%). Always integer, never decimal. */
   feeBps: number;
   /** Fee amount for given loan amount (in wei) */
   feeAmount: bigint;

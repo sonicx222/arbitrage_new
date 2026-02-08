@@ -26,6 +26,8 @@ import type {
 import { LiquidityCheck as LiquidityCheckImpl } from '../domain';
 // P2 Fix: Import ethers statically (not dynamically) for hot-path performance
 import { ethers } from 'ethers';
+// I3 Fix: Import Logger type for structured logging
+import type { Logger } from '../../logger';
 
 /**
  * Cached liquidity entry
@@ -36,12 +38,13 @@ interface CachedLiquidity {
 }
 
 /**
- * P2 Fix: Cached ERC20 interface for hot-path optimization
+ * P2/I4 Fix: Cached ERC20 interface for hot-path optimization
  * Creating Interface objects is expensive (~0.5ms) - cache at module level
+ * I4: Frozen to prevent accidental modification (hot-path immutability per ADR-022)
  */
-const ERC20_INTERFACE = new ethers.Interface([
-  'function balanceOf(address owner) view returns (uint256)',
-]);
+const ERC20_INTERFACE = Object.freeze(
+  new ethers.Interface(['function balanceOf(address owner) view returns (uint256)'])
+);
 
 /**
  * Validator configuration
@@ -59,6 +62,8 @@ export interface OnChainLiquidityValidatorConfig {
   circuitBreakerThreshold?: number;
   /** M3 Fix: Circuit breaker cooldown in ms (default: 30 seconds) */
   circuitBreakerCooldownMs?: number;
+  /** I3 Fix: Optional logger for structured logging (circuit breaker events, etc.) */
+  logger?: Logger;
 }
 
 /**
@@ -69,7 +74,8 @@ export interface OnChainLiquidityValidatorConfig {
  * M3 Fix: Includes circuit breaker to skip RPC calls during sustained failures.
  */
 export class OnChainLiquidityValidator implements ILiquidityValidator {
-  private readonly config: Required<OnChainLiquidityValidatorConfig>;
+  private readonly config: Required<Omit<OnChainLiquidityValidatorConfig, 'logger'>>;
+  private readonly logger?: Logger; // I3 Fix: Optional logger
   private readonly cache = new Map<string, CachedLiquidity>();
   private readonly pendingChecks = new Map<string, Promise<LiquidityCheck>>();
 
@@ -78,6 +84,7 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   private circuitOpenUntil = 0; // Timestamp when circuit can retry
 
   constructor(config?: OnChainLiquidityValidatorConfig) {
+    this.logger = config?.logger; // I3 Fix: Store optional logger
     this.config = {
       cacheTtlMs: config?.cacheTtlMs ?? 300000, // 5 minutes
       safetyMargin: config?.safetyMargin ?? 1.1, // 10% buffer
@@ -198,19 +205,16 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       );
     }
 
-    // M3 Observability: Log HALF-OPEN state (attempting retry after cooldown)
+    // M3/I3 Observability: Log HALF-OPEN state (attempting retry after cooldown)
     if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
-      console.info(
-        JSON.stringify({
-          level: 'info',
-          component: 'OnChainLiquidityValidator',
-          event: 'circuit_breaker_half_open',
-          message: 'Circuit breaker HALF-OPEN - attempting retry',
-          details: {
-            consecutiveFailures: this.consecutiveFailures,
-            state: 'HALF-OPEN',
-          },
-        })
+      this.logCircuitEvent(
+        'info',
+        'circuit_breaker_half_open',
+        'Circuit breaker HALF-OPEN - attempting retry',
+        {
+          consecutiveFailures: this.consecutiveFailures,
+          state: 'HALF-OPEN',
+        }
       );
     }
 
@@ -266,6 +270,30 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   }
 
   /**
+   * I3 Fix: Helper method for structured circuit breaker logging
+   * Uses injected logger if available, falls back to console with formatted output
+   */
+  private logCircuitEvent(
+    level: 'info' | 'warn',
+    event: string,
+    message: string,
+    details: Record<string, unknown>
+  ): void {
+    if (this.logger) {
+      // Use structured logger if available
+      this.logger[level](message, {
+        component: 'OnChainLiquidityValidator',
+        event,
+        ...details,
+      });
+    } else {
+      // Fall back to console with readable format (no JSON.stringify overhead)
+      const logFn = level === 'warn' ? console.warn : console.info;
+      logFn(`[${level.toUpperCase()}] OnChainLiquidityValidator: ${message}`, details);
+    }
+  }
+
+  /**
    * M3 Fix: Check if circuit breaker is OPEN
    */
   private isCircuitOpen(): boolean {
@@ -293,19 +321,16 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     this.consecutiveFailures = 0;
     this.circuitOpenUntil = 0;
 
-    // M3 Observability: Log circuit closing (recovery from failure state)
+    // M3/I3 Observability: Log circuit closing (recovery from failure state)
     if (wasOpen) {
-      console.info(
-        JSON.stringify({
-          level: 'info',
-          component: 'OnChainLiquidityValidator',
-          event: 'circuit_breaker_closed',
-          message: 'Circuit breaker CLOSED - RPC health restored',
-          details: {
-            previousFailures: this.config.circuitBreakerThreshold,
-            state: 'CLOSED',
-          },
-        })
+      this.logCircuitEvent(
+        'info',
+        'circuit_breaker_closed',
+        'Circuit breaker CLOSED - RPC health restored',
+        {
+          previousFailures: this.config.circuitBreakerThreshold,
+          state: 'CLOSED',
+        }
       );
     }
   }
@@ -323,22 +348,19 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
       this.circuitOpenUntil = Date.now() + this.config.circuitBreakerCooldownMs;
 
-      // M3 Observability: Log circuit opening (first time hitting threshold)
+      // M3/I3 Observability: Log circuit opening (first time hitting threshold)
       if (wasBeforeThreshold) {
-        console.warn(
-          JSON.stringify({
-            level: 'warn',
-            component: 'OnChainLiquidityValidator',
-            event: 'circuit_breaker_opened',
-            message: 'Circuit breaker OPENED - RPC calls suspended',
-            details: {
-              consecutiveFailures: this.consecutiveFailures,
-              threshold: this.config.circuitBreakerThreshold,
-              cooldownMs: this.config.circuitBreakerCooldownMs,
-              willRetryAt: new Date(this.circuitOpenUntil).toISOString(),
-              state: 'OPEN',
-            },
-          })
+        this.logCircuitEvent(
+          'warn',
+          'circuit_breaker_opened',
+          'Circuit breaker OPENED - RPC calls suspended',
+          {
+            consecutiveFailures: this.consecutiveFailures,
+            threshold: this.config.circuitBreakerThreshold,
+            cooldownMs: this.config.circuitBreakerCooldownMs,
+            willRetryAt: new Date(this.circuitOpenUntil).toISOString(),
+            state: 'OPEN',
+          }
         );
       }
     }
