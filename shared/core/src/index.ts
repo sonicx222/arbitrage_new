@@ -955,22 +955,11 @@ export type {
   BaseDetectorLogger
 } from './base-detector';
 
-// Partitioned detector for multi-chain management (ADR-003, S3.1)
-export { PartitionedDetector } from './partitioned-detector';
-export type {
-  PartitionedDetectorConfig,
-  PartitionedDetectorDeps,
-  PartitionedDetectorLogger,
-  TokenNormalizeFn,
-  ChainHealth as PartitionChainHealth,
-  ChainHealth,
-  PartitionHealth,
-  ChainStats as PartitionChainStats,
-  PricePoint,
-  CrossChainDiscrepancy
-} from './partitioned-detector';
+// NOTE: PartitionedDetector removed - use UnifiedChainDetector instead
+// See: services/unified-detector/ for current multi-chain detection implementation
+// Migration: ADR-003 architecture evolved from inheritance to composition pattern
 
-// P2-14: Cross-chain price tracking (extracted from partitioned-detector)
+// P2-14: Cross-chain price tracking for arbitrage detection
 export {
   CrossChainPriceTracker,
   createCrossChainPriceTracker,

@@ -1,5 +1,5 @@
 /**
- * P2-14: CrossChainPriceTracker - Extracted from partitioned-detector.ts
+ * P2-14: CrossChainPriceTracker - Cross-chain price tracking module
  *
  * Manages cross-chain price tracking for arbitrage detection.
  * Uses LRU cache per chain to prevent unbounded memory growth.

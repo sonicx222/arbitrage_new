@@ -317,7 +317,7 @@ export class SolanaDetector extends EventEmitter {
   protected currentSlot = 0;
   protected healthCheckInterval: NodeJS.Timeout | null = null;
 
-  // Lifecycle protection (consistent with PartitionedDetector pattern)
+  // Lifecycle protection (prevents concurrent start/stop operations)
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
 

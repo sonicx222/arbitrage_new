@@ -14,7 +14,6 @@
 import { ethers } from 'ethers';
 import {
   BPS_DENOMINATOR_BIGINT,
-  PANCAKESWAP_V3_FACTORY_ADDRESSES,
 } from '@arbitrage/config';
 import type {
   IFlashLoanProvider,
