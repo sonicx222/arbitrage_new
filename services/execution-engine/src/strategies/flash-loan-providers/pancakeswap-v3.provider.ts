@@ -99,6 +99,11 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
 
   private readonly contractAddress: string;
   private readonly approvedRouters: string[];
+  /**
+   * I1 Fix: Pre-computed Set for O(1) router validation (hot-path optimization)
+   * Stores lowercase router addresses for case-insensitive lookups
+   */
+  private readonly approvedRoutersSet: Set<string>;
   private readonly feeOverride?: FeeTier;
 
   /**
@@ -120,6 +125,8 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
     this.poolAddress = config.poolAddress; // Factory address
     this.contractAddress = config.contractAddress;
     this.approvedRouters = config.approvedRouters;
+    // I1 Fix: Pre-compute Set for O(1) lookups in hot-path validation
+    this.approvedRoutersSet = new Set(config.approvedRouters.map(r => r.toLowerCase()));
     this.feeOverride = config.feeOverride;
 
     // Validate configuration
@@ -401,10 +408,9 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
         };
       }
 
-      const isApproved = this.approvedRouters.some(
-        r => r.toLowerCase() === step.router.toLowerCase()
-      );
-      if (!isApproved) {
+      // I1 Fix: Use Set for O(1) lookup instead of O(n) array.some()
+      // Hot-path optimization: For 10 routers × 3 hops, this saves 30 comparisons → 3 lookups
+      if (!this.approvedRoutersSet.has(step.router.toLowerCase())) {
         return {
           valid: false,
           error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,

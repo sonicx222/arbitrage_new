@@ -397,6 +397,37 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       }
     }
 
+    // I3 Fix: Validate PancakeSwap V3 configuration consistency
+    // For each chain configured with PancakeSwap V3 protocol, ensure factory address exists
+    for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
+      if (providerConfig.protocol === 'pancakeswap_v3') {
+        // Check if factory address is configured
+        if (!hasPancakeSwapV3(chain)) {
+          throw new Error(
+            `[ERR_CONFIG] PancakeSwap V3 protocol configured for chain '${chain}' ` +
+            `but factory address is missing. Add factory address to PANCAKESWAP_V3_FACTORIES ` +
+            `in shared/config/src/addresses.ts`
+          );
+        }
+
+        // Validate factory address is not zero
+        const factoryAddress = getPancakeSwapV3Factory(chain);
+        if (factoryAddress === '0x0000000000000000000000000000000000000000') {
+          throw new Error(
+            `[ERR_ZERO_ADDRESS] PancakeSwap V3 factory address for chain '${chain}' is zero address. ` +
+            `This is a misconfiguration in PANCAKESWAP_V3_FACTORIES.`
+          );
+        }
+
+        // Validate factory address format
+        if (!ethers.isAddress(factoryAddress)) {
+          throw new Error(
+            `[ERR_CONFIG] Invalid PancakeSwap V3 factory address for chain '${chain}': ${factoryAddress}`
+          );
+        }
+      }
+    }
+
     this.config = config;
 
     // P2-8: Initialize fee calculator with config's fee overrides

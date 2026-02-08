@@ -72,6 +72,11 @@ contract PancakeSwapFlashArbitrage is
     /// @notice Denominator for basis points calculations (10000 bps = 100%)
     uint256 private constant BPS_DENOMINATOR = 10000;
 
+    /// @notice Maximum number of pools that can be whitelisted in a single batch operation
+    /// @dev I2 Fix: Prevents potential DoS from extremely large batch operations
+    /// @dev Practical limit: 100 pools ~ 5M gas, well within block limit (~30M gas)
+    uint256 public constant MAX_BATCH_WHITELIST = 100;
+
     // ==========================================================================
     // State Variables
     // ==========================================================================
@@ -192,6 +197,7 @@ contract PancakeSwapFlashArbitrage is
     error InvalidAmount();
     error TransactionTooOld();
     error PoolNotFound();
+    error BatchTooLarge(uint256 requested, uint256 maximum);
 
     // ==========================================================================
     // Constructor
@@ -505,6 +511,12 @@ contract PancakeSwapFlashArbitrage is
     {
         uint256 length = pools.length;
         if (length == 0) revert("Empty pools array");
+
+        // I2 Fix: Enforce maximum batch size to prevent potential DoS
+        // Defense in depth: Owner is trusted, but explicit limits improve auditability
+        if (length > MAX_BATCH_WHITELIST) {
+            revert BatchTooLarge(length, MAX_BATCH_WHITELIST);
+        }
 
         for (uint256 i = 0; i < length; ) {
             address pool = pools[i];

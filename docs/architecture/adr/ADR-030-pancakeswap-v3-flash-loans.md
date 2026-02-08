@@ -545,6 +545,129 @@ See `contracts/docs/SECURITY_REVIEW.md` for full checklist.
 
 ---
 
+## Deployment Checklist
+
+### Router Approval Synchronization (I4)
+
+**Critical**: Routers must be approved in BOTH locations for flash loan execution to succeed:
+
+1. **Strategy Configuration** (`approvedRouters`):
+   - Location: `shared/config/src/service-config.ts` → `FLASH_LOAN_PROVIDERS`
+   - Purpose: Off-chain validation before transaction submission
+   - Example:
+     ```typescript
+     bsc: {
+       protocol: 'pancakeswap_v3',
+       address: '0x...',
+       fee: 25, // 0.25%
+       approvedRouters: [
+         '0x10ED43C718714eb63d5aA57B78B54704E256024E', // PancakeSwap V2
+         '0x3a6d8cA21D1CF76F653A67577FA0D27453350dD8', // Biswap
+       ],
+     }
+     ```
+
+2. **Smart Contract** (on-chain approval):
+   - Contract: `PancakeSwapFlashArbitrage.sol`
+   - Method: `addApprovedRouter(address router)`
+   - Purpose: On-chain validation during arbitrage execution
+   - Example:
+     ```solidity
+     await contract.addApprovedRouter('0x10ED43C718714eb63d5aA57B78B54704E256024E');
+     ```
+
+**Validation**:
+- The strategy constructor now validates configuration consistency (I3 fix)
+- Transaction will revert with `[ERR_UNAPPROVED_ROUTER]` if synchronization is missing
+
+### Pre-Deployment Validation
+
+**1. Configuration Verification**:
+```bash
+# Verify factory addresses exist
+npm run test:config:pancakeswap-v3
+
+# Check all PancakeSwap V3 chains have factory addresses
+node -e "
+  const {FLASH_LOAN_PROVIDERS, hasPancakeSwapV3} = require('./shared/config');
+  for (const [chain, config] of Object.entries(FLASH_LOAN_PROVIDERS)) {
+    if (config.protocol === 'pancakeswap_v3') {
+      console.log(\`\${chain}: \${hasPancakeSwapV3(chain) ? '✅' : '❌ MISSING'}\`);
+    }
+  }
+"
+```
+
+**2. Contract Deployment** (per chain):
+```bash
+# 1. Deploy contract
+npx hardhat run scripts/deploy-pancakeswap.ts --network bsc
+
+# 2. Verify deployment
+npx hardhat verify --network bsc <CONTRACT_ADDRESS> <FACTORY_ADDRESS> <OWNER_ADDRESS>
+
+# 3. Verify pool whitelisting (should be automated by deploy script)
+npx hardhat run scripts/verify-pool-whitelist.ts --network bsc
+
+# 4. Verify router approval (critical!)
+npx hardhat run scripts/verify-router-approval.ts --network bsc
+```
+
+**3. Integration Testing**:
+```bash
+# Test strategy with newly deployed contract
+npm run test:integration:flash-loan -- --chain bsc
+
+# Validate router synchronization
+npm run test:router-sync
+```
+
+### Post-Deployment Verification
+
+**1. Contract State Verification**:
+```typescript
+// Verify routers match between config and contract
+const configRouters = FLASH_LOAN_PROVIDERS['bsc'].approvedRouters;
+const contractRouters = await contract.getApprovedRouters();
+
+assert.deepEqual(
+  configRouters.sort().map(r => r.toLowerCase()),
+  contractRouters.sort().map(r => r.toLowerCase()),
+  'Router approval mismatch between config and contract'
+);
+```
+
+**2. Pool Whitelist Verification**:
+```typescript
+// Verify common pools are whitelisted
+const commonPools = ['0x...', '0x...'];
+for (const pool of commonPools) {
+  const isWhitelisted = await contract.isPoolWhitelisted(pool);
+  assert.isTrue(isWhitelisted, `Pool ${pool} not whitelisted`);
+}
+```
+
+**3. End-to-End Test**:
+```bash
+# Submit small test arbitrage transaction
+npm run test:e2e:flash-loan:bsc -- --amount 0.01
+
+# Monitor for successful execution
+npm run monitor:flash-loan -- --chain bsc --tail
+```
+
+### Common Deployment Failures
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `[ERR_UNAPPROVED_ROUTER]` | Router approved in config but not contract | Call `addApprovedRouter()` |
+| `[ERR_CONFIG] No approved routers` | Empty approvedRouters array | Add routers to config |
+| `InvalidFlashLoanCaller` | Pool not whitelisted | Call `whitelistPool()` or use batch script |
+| `[ERR_NO_POOL]` | Factory has no pool for pair | Verify PancakeSwap V3 pool exists on-chain |
+| Gas estimation failure | Router not approved | Synchronize router approval |
+
+---
+
 ## References
 
 - [ADR-020: Flash Loan Integration](ADR-020-flash-loan.md)
