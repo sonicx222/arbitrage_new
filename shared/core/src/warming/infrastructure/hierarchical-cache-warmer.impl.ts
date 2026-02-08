@@ -422,12 +422,18 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
    *
    * Core warming logic:
    * 1. For each candidate pair:
-   *    a. Check if already in L1 (skip if yes)
-   *    b. Fetch from L2 (Redis)
-   *    c. If found, promote to L1
+   *    a. Check if already in L1 and fetch value in one operation
+   *    b. If in L1, skip (already warm)
+   *    c. If not in L1 but value exists, promote to L1
+   *    d. If not found, track as not found
    * 2. Track metrics (attempted, warmed, already in L1, not found)
    *
    * Performance: <10ms for 5 pairs (target)
+   *
+   * Performance Optimization (P1-5 fix):
+   * - Single fetch operation per pair (eliminated double fetch)
+   * - checkL1WithValue() returns both L1 status and fetched value
+   * - Avoids redundant cache.get() calls
    *
    * @param candidates - Selected pairs to warm
    * @param sourcePair - Source pair that triggered warming
@@ -448,22 +454,23 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
     // Warm each pair
     for (const candidate of candidates) {
       try {
-        // Check if already in L1 (use cache.get which checks L1 first)
-        const l1Value = await this.checkL1(candidate.pair);
-        if (l1Value !== null) {
+        // Check L1 and fetch value in single operation (P1-5 fix)
+        const { inL1, value } = await this.checkL1WithValue(candidate.pair);
+
+        if (inL1) {
+          // Already in L1, no warming needed
           pairsAlreadyInL1++;
           continue;
         }
 
-        // Fetch from L2
-        const l2Value = await this.fetchFromL2(candidate.pair);
-        if (l2Value === null) {
+        if (value === null) {
+          // Not found in any cache layer
           pairsNotFound++;
           continue;
         }
 
-        // Promote to L1
-        await this.promoteToL1(candidate.pair, l2Value);
+        // Value exists but not in L1, promote it
+        await this.promoteToL1(candidate.pair, value);
         pairsWarmed++;
       } catch (error) {
         // Log error but continue warming other pairs
@@ -486,30 +493,29 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
   }
 
   /**
-   * Check if pair is in L1 cache
+   * Check if pair is in L1 cache and fetch value in one operation
    *
    * Uses cache stats to infer L1 presence without type casting.
    * This avoids type casting and works with the public cache API.
    *
    * Algorithm:
    * 1. Get L1 size before fetch
-   * 2. Fetch value (which checks L1 first)
+   * 2. Fetch value (which checks L1 first, then L2, then L3)
    * 3. Get L1 size after fetch
-   * 4. If size unchanged, value was in L1 (cache hit)
+   * 4. If size unchanged and value exists, it was in L1 (cache hit)
    * 5. If size changed, value was fetched from L2/L3 (cache miss)
    *
-   * Performance Note:
-   * This approach may fetch the value even if we only need to check presence.
-   * However, this tradeoff is acceptable because:
-   * - Avoids unsafe type casting (improves maintainability)
-   * - If value is in L1 (common case), we return it immediately
-   * - If value is not in L1, we'll fetch it again in fetchFromL2(), but
-   *   warming is a background operation (<10ms target, currently 8.7ms)
+   * Performance Optimization (P1-5 fix):
+   * - Single cache.get() call returns both L1 status and value
+   * - Eliminates the double fetch that was occurring when value not in L1
+   * - Reduces warming latency from 8.7ms toward target of <10ms
    *
    * @param pair - Pair to check
-   * @returns Value if in L1, null otherwise
+   * @returns Object with inL1 flag and value
    */
-  private async checkL1(pair: string): Promise<any> {
+  private async checkL1WithValue(
+    pair: string
+  ): Promise<{ inL1: boolean; value: any }> {
     // Use cache stats to detect if in L1 without type casting
     const statsBefore = this.cache.getStats();
     const l1SizeBefore = statsBefore.l1.size;
@@ -520,36 +526,13 @@ export class HierarchicalCacheWarmer implements ICacheWarmer {
     const statsAfter = this.cache.getStats();
     const l1SizeAfter = statsAfter.l1.size;
 
-    // If L1 size unchanged, value was already in L1 (hit)
+    // If L1 size unchanged and value exists, it was in L1 (hit)
     // If L1 size increased, value was promoted from L2/L3 (miss)
-    if (l1SizeBefore === l1SizeAfter && value !== null) {
-      // Value was in L1
-      return value;
-    }
+    const inL1 = l1SizeBefore === l1SizeAfter && value !== null;
 
-    // Value was not in L1 (either fetched from L2/L3 or not found)
-    return null;
+    return { inL1, value };
   }
 
-  /**
-   * Fetch value from L2 cache (Redis) or L3
-   *
-   * Uses cache.get() which checks L2/L3 after L1 miss.
-   * This method is called only after checkL1() confirms the value
-   * is NOT in L1, so cache.get() will fetch from L2 or L3.
-   *
-   * Note: This will also promote the value to L1 as a side effect,
-   * which is actually beneficial since we're about to warm it anyway.
-   *
-   * @param pair - Pair to fetch
-   * @returns Value if found in L2/L3, null otherwise
-   */
-  private async fetchFromL2(pair: string): Promise<any> {
-    // Use public cache.get() API instead of type casting
-    // Since checkL1() already confirmed value is not in L1,
-    // this will fetch from L2 or L3
-    return this.cache.get(pair);
-  }
 
   /**
    * Promote value to L1 (and all cache layers)
