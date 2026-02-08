@@ -53,7 +53,18 @@ import {
   FEATURE_FLAGS,
   hasMultiPathQuoter,
 } from '@arbitrage/config';
-import { getErrorMessage, isValidPrice } from '@arbitrage/core';
+import {
+  getErrorMessage,
+  isValidPrice,
+  // Clean Architecture: Flash Loan Aggregation (Task 2.3)
+  type IFlashLoanAggregator,
+  type IAggregatorMetrics,
+  type IProviderInfo,
+  createFlashLoanAggregator,
+  createWeightedRankingStrategy,
+  createOnChainLiquidityValidator,
+  createInMemoryAggregatorMetrics,
+} from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
@@ -139,6 +150,10 @@ const AAVE_V3_SUPPORTED_CHAINS = new Set(
  *
  * Note: Aave Pool addresses are read from FLASH_LOAN_PROVIDERS[@arbitrage/config].
  * No need to specify them here - they are auto-discovered per chain.
+ *
+ * Task 2.3: Flash Loan Protocol Aggregation (Clean Architecture)
+ * - Enable dynamic provider selection via aggregator
+ * - Fallback to hardcoded Aave V3 if disabled
  */
 export interface FlashLoanStrategyConfig {
   /** FlashLoanArbitrage contract addresses per chain */
@@ -147,6 +162,50 @@ export interface FlashLoanStrategyConfig {
   approvedRouters: Record<string, string[]>;
   /** Custom flash loan fee overrides (basis points) */
   feeOverrides?: Record<string, number>;
+
+  /**
+   * Task 2.3: Enable flash loan protocol aggregation
+   *
+   * When enabled:
+   * - Dynamically selects best provider via weighted ranking
+   * - Validates liquidity with on-chain checks (5-min cache)
+   * - Tracks provider metrics (success rate, latency)
+   * - Supports fallback on provider failures
+   *
+   * When disabled:
+   * - Uses hardcoded Aave V3 (backward compatible)
+   *
+   * @default false
+   */
+  enableAggregator?: boolean;
+
+  /**
+   * Aggregator weights (Task 2.3)
+   *
+   * @default { fees: 0.5, liquidity: 0.3, reliability: 0.15, latency: 0.05 }
+   */
+  aggregatorWeights?: {
+    fees: number;
+    liquidity: number;
+    reliability: number;
+    latency: number;
+  };
+
+  /**
+   * Maximum providers to rank (Task 2.3)
+   *
+   * @default 3
+   */
+  maxProvidersToRank?: number;
+
+  /**
+   * Enable liquidity validation (Task 2.3)
+   *
+   * When enabled, validates provider liquidity on-chain before execution.
+   *
+   * @default true (if aggregator enabled)
+   */
+  enableLiquidityValidation?: boolean;
 }
 
 /**
@@ -242,6 +301,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly feeCalculator: FlashLoanFeeCalculator;
   // Task 1.2: Cache BatchQuoterService instances per chain
   private readonly batchedQuoters: Map<string, BatchQuoterService>;
+  // Task 2.3: Flash Loan Protocol Aggregation (Clean Architecture)
+  private readonly aggregator?: IFlashLoanAggregator;
+  private readonly aggregatorMetrics?: IAggregatorMetrics;
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -302,6 +364,74 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     this.feeCalculator = new FlashLoanFeeCalculator({
       feeOverrides: config.feeOverrides,
     });
+
+    // Task 2.3: Initialize flash loan aggregator (Clean Architecture)
+    if (config.enableAggregator) {
+      this.logger.info('Initializing Flash Loan Protocol Aggregator (Clean Architecture)');
+
+      // Create metrics tracker
+      this.aggregatorMetrics = createInMemoryAggregatorMetrics({
+        maxLatencySamples: 100,
+        minSamplesForScore: 10,
+      });
+
+      // Create aggregator config from strategy config
+      const aggregatorConfig = {
+        liquidityCheckThresholdUsd: 100000, // $100K
+        rankingCacheTtlMs: 30000, // 30s
+        liquidityCacheTtlMs: 300000, // 5min
+        weights: config.aggregatorWeights ?? {
+          fees: 0.5,
+          liquidity: 0.3,
+          reliability: 0.15,
+          latency: 0.05,
+        },
+        maxProvidersToRank: config.maxProvidersToRank ?? 3,
+      };
+
+      // Create ranking strategy
+      const ranker = createWeightedRankingStrategy(aggregatorConfig);
+
+      // Create liquidity validator (only if enabled)
+      const validator = config.enableLiquidityValidation !== false
+        ? createOnChainLiquidityValidator({
+            cacheTtlMs: 300000, // 5 minutes
+            safetyMargin: 1.1, // 10% buffer
+            rpcTimeoutMs: 5000,
+            maxCacheSize: 500,
+          })
+        : null;
+
+      // Build available providers map from FLASH_LOAN_PROVIDERS config
+      const availableProviders = new Map<string, IProviderInfo[]>();
+      for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
+        const providers: IProviderInfo[] = [{
+          protocol: providerConfig.protocol as any,
+          chain,
+          poolAddress: providerConfig.address,
+          feeBps: providerConfig.fee,
+          isAvailable: true,
+        }];
+        availableProviders.set(chain, providers);
+      }
+
+      // Create aggregator
+      this.aggregator = createFlashLoanAggregator(
+        aggregatorConfig,
+        ranker,
+        validator,
+        this.aggregatorMetrics,
+        availableProviders
+      );
+
+      this.logger.info('Flash Loan Aggregator initialized', {
+        weights: aggregatorConfig.weights,
+        maxProvidersToRank: aggregatorConfig.maxProvidersToRank,
+        enableLiquidityValidation: validator !== null,
+      });
+    } else {
+      this.logger.info('Flash Loan Aggregator disabled - using hardcoded Aave V3 provider');
+    }
   }
 
   // ===========================================================================
@@ -438,6 +568,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       );
     }
 
+    // Task 2.3: Declare selectedProvider at function scope for metrics tracking
+    let selectedProvider: IProviderInfo | null = null;
+
     try {
       // Finding 10.3 Fix: Parallelize independent operations for latency reduction
       // getOptimalGasPrice and verifyOpportunityPrices don't depend on each other
@@ -458,6 +591,95 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           chain,
           opportunity.buyDex || 'unknown'
         );
+      }
+
+      // Task 2.3: Dynamic flash loan provider selection via aggregator
+      if (this.aggregator && opportunity.tokenIn) {
+        const selectionStartTime = Date.now();
+        try {
+          const providerSelection = await this.aggregator.selectProvider(opportunity, {
+            chain,
+            rpcProviders: ctx.providers,
+            estimatedValueUsd: opportunity.expectedProfit ?? 0,
+          });
+
+          // Check if selection was successful (protocol !== null)
+          if (!providerSelection.isSuccess) {
+            this.logger.warn('Aggregator rejected all providers, aborting execution', {
+              opportunityId: opportunity.id,
+              reason: providerSelection.selectionReason,
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(
+                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+                `No suitable flash loan provider: ${providerSelection.selectionReason}`
+              ),
+              chain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+
+          // Extract selected protocol
+          const selectedProtocol = providerSelection.protocol!;
+
+          // Store provider info (mock IProviderInfo for metrics)
+          selectedProvider = {
+            protocol: selectedProtocol,
+            chain,
+            poolAddress: FLASH_LOAN_PROVIDERS[chain]?.address || '',
+            feeBps: FLASH_LOAN_PROVIDERS[chain]?.fee || 0,
+            isAvailable: true,
+          };
+
+          this.logger.info('Flash loan provider selected via aggregator', {
+            opportunityId: opportunity.id,
+            protocol: selectedProtocol,
+            score: providerSelection.score?.totalScore.toFixed(3),
+            reason: providerSelection.selectionReason,
+            latencyMs: providerSelection.selectionLatencyMs,
+          });
+
+          // Validate selected protocol is supported by this strategy
+          if (!SUPPORTED_FLASH_LOAN_PROTOCOLS.has(selectedProtocol)) {
+            this.logger.warn('Aggregator selected unsupported protocol', {
+              opportunityId: opportunity.id,
+              selectedProtocol,
+              supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(
+                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+                `Selected protocol '${selectedProtocol}' not supported by this strategy`
+              ),
+              chain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+        } catch (error) {
+          this.logger.error('Flash loan provider selection failed', {
+            opportunityId: opportunity.id,
+            error: getErrorMessage(error),
+          });
+
+          return createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.FLASH_LOAN_ERROR,
+              `Provider selection failed: ${getErrorMessage(error)}`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          );
+        }
+      } else {
+        // Aggregator disabled - use hardcoded Aave V3 (backward compatible)
+        this.logger.debug('Using hardcoded Aave V3 provider (aggregator disabled)', {
+          opportunityId: opportunity.id,
+        });
       }
 
       // Fix 10.3: Parallelize independent operations for latency reduction
@@ -625,6 +847,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // This ensures consistent pattern per Doc 4.1 in index.ts:
       // execute() methods should return ExecutionResult, not throw
       if (!submitResult.success) {
+        // Task 2.3: Record failed execution in aggregator metrics
+        if (this.aggregatorMetrics && selectedProvider) {
+          this.aggregatorMetrics.recordOutcome({
+            protocol: selectedProvider.protocol,
+            success: false,
+            executionLatencyMs: 0,
+            error: submitResult.error || 'Transaction submission failed',
+          });
+        }
+
         // submitTransaction handles nonce management internally
         return createErrorResult(
           opportunity.id,
@@ -651,6 +883,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         usedMevProtection: submitResult.usedMevProtection,
       });
 
+      // Task 2.3: Record successful execution in aggregator metrics
+      if (this.aggregatorMetrics && selectedProvider) {
+        this.aggregatorMetrics.recordOutcome({
+          protocol: selectedProvider.protocol,
+          success: true,
+          executionLatencyMs: 0, // Not tracking execution time here
+        });
+      }
+
       return createSuccessResult(
         opportunity.id,
         submitResult.txHash || submitResult.receipt?.hash || '',
@@ -674,6 +915,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         chain,
         error: errorMessage,
       });
+
+      // Task 2.3: Record failed execution in aggregator metrics
+      if (this.aggregatorMetrics && selectedProvider) {
+        this.aggregatorMetrics.recordOutcome({
+          protocol: selectedProvider.protocol,
+          success: false,
+          executionLatencyMs: 0,
+          error: errorMessage || 'Unknown error during flash loan execution',
+        });
+      }
 
       return createErrorResult(
         opportunity.id,
@@ -1246,6 +1497,59 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    */
   getSupportedProtocolChains(): string[] {
     return Array.from(AAVE_V3_SUPPORTED_CHAINS);
+  }
+
+  // ===========================================================================
+  // Task 2.3: Flash Loan Aggregator Metrics
+  // ===========================================================================
+
+  /**
+   * Check if flash loan aggregator is enabled.
+   *
+   * @returns True if aggregator is enabled and initialized
+   */
+  isAggregatorEnabled(): boolean {
+    return !!this.aggregator;
+  }
+
+  /**
+   * Get flash loan aggregator metrics.
+   *
+   * Returns metrics summary if aggregator is enabled, null otherwise.
+   *
+   * @returns Aggregator metrics or null
+   */
+  getAggregatorMetrics(): string | null {
+    if (!this.aggregatorMetrics) {
+      return null;
+    }
+
+    return this.aggregatorMetrics.getMetricsSummary();
+  }
+
+  /**
+   * Get aggregated metrics as structured data.
+   *
+   * @returns Aggregated metrics or null if aggregator disabled
+   */
+  getAggregatedMetricsData(): ReturnType<IAggregatorMetrics['getAggregatedMetrics']> | null {
+    if (!this.aggregatorMetrics) {
+      return null;
+    }
+
+    return this.aggregatorMetrics.getAggregatedMetrics();
+  }
+
+  /**
+   * Clear aggregator caches (rankings and liquidity).
+   *
+   * Useful for testing or when market conditions change dramatically.
+   */
+  clearAggregatorCaches(): void {
+    if (this.aggregator) {
+      this.aggregator.clearCaches();
+      this.logger.info('Aggregator caches cleared');
+    }
   }
 
   // ===========================================================================

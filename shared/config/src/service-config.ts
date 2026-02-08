@@ -469,6 +469,68 @@ export const FEATURE_FLAGS = {
    * @default false (safe rollout - explicitly opt-in)
    */
   useBatchedQuoter: process.env.FEATURE_BATCHED_QUOTER === 'true',
+
+  /**
+   * Enable flash loan protocol aggregator (Task 2.3).
+   *
+   * When enabled:
+   * - Dynamically selects best flash loan provider via weighted ranking
+   * - Validates liquidity with on-chain checks (5-min cache)
+   * - Tracks provider metrics (success rate, latency)
+   * - Supports automatic fallback on provider failures
+   *
+   * When disabled (default):
+   * - Uses hardcoded Aave V3 provider (backward compatible)
+   *
+   * Impact:
+   * - Better fee optimization (select lowest-fee provider)
+   * - Prevents insufficient liquidity failures
+   * - Improves reliability via fallback mechanisms
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
+   */
+  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR === 'true',
+};
+
+/**
+ * Flash Loan Aggregator Configuration (Task 2.3)
+ *
+ * Configuration for intelligent flash loan provider selection.
+ * Read from environment variables with safe defaults.
+ */
+export const FLASH_LOAN_AGGREGATOR_CONFIG = {
+  /**
+   * Weighted scoring weights (must sum to 1.0)
+   * Controls how providers are ranked
+   */
+  weights: {
+    fees: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES ?? '0.5'),
+    liquidity: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY ?? '0.3'),
+    reliability: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY ?? '0.15'),
+    latency: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY ?? '0.05'),
+  },
+
+  /**
+   * Maximum providers to rank per selection
+   * Higher = more options but slower selection
+   * @default 3
+   */
+  maxProvidersToRank: parseInt(process.env.FLASH_LOAN_AGGREGATOR_MAX_PROVIDERS ?? '3', 10),
+
+  /**
+   * Enable on-chain liquidity validation
+   * When true, validates pool liquidity before execution
+   * @default true (if aggregator enabled)
+   */
+  enableLiquidityValidation: process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_VALIDATION !== 'false',
+
+  /**
+   * Liquidity check threshold in USD
+   * Only check liquidity for opportunities above this value
+   * @default 100000 ($100K)
+   */
+  liquidityCheckThresholdUsd: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_THRESHOLD_USD ?? '100000', 10),
 };
 
 /**

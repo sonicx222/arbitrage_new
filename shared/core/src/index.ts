@@ -371,6 +371,93 @@ export type { Result } from './resilience/error-handling';
 
 // #############################################################################
 // #                                                                           #
+// #                   SECTION 2A: FLASH LOAN AGGREGATION                      #
+// #                        (Clean Architecture)                               #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 2A.1 Flash Loan Aggregation - Domain Layer
+// =============================================================================
+
+export type {
+  // Core interfaces
+  IFlashLoanAggregator,
+  IProviderRanker,
+  ILiquidityValidator,
+  IAggregatorMetrics,
+
+  // Value Objects
+  ProviderScore,
+  LiquidityCheck,
+  ProviderSelection,
+  AggregatorConfig,
+  ProviderOutcome,
+
+  // Context interfaces
+  IProviderInfo,
+  IOpportunityContext,
+  IRankingContext,
+  ILiquidityContext,
+  IRankedProvider,
+  IAggregatedMetrics,
+} from './flash-loan-aggregation/domain';
+
+// =============================================================================
+// 2A.2 Flash Loan Aggregation - Application Layer
+// =============================================================================
+
+export {
+  // Use Cases
+  SelectProviderUseCase,
+  createSelectProviderUseCase,
+
+  // DTOs
+  toSelectProviderResponse,
+  toValidateLiquidityResponse,
+} from './flash-loan-aggregation/application';
+
+export type {
+  SelectProviderRequest,
+  SelectProviderResponse,
+  ValidateLiquidityRequest,
+  ValidateLiquidityResponse,
+  TrackProviderMetricsRequest,
+  TrackProviderMetricsResponse,
+  GetAggregatedMetricsRequest,
+  GetAggregatedMetricsResponse,
+  SelectProviderUseCaseDependencies,
+} from './flash-loan-aggregation/application';
+
+// =============================================================================
+// 2A.3 Flash Loan Aggregation - Infrastructure Layer
+// =============================================================================
+
+export {
+  // Strategy implementations
+  WeightedRankingStrategy,
+  createWeightedRankingStrategy,
+
+  // Validator implementations
+  OnChainLiquidityValidator,
+  createOnChainLiquidityValidator,
+
+  // Metrics implementations
+  InMemoryAggregatorMetrics,
+  createInMemoryAggregatorMetrics,
+
+  // Aggregator implementation
+  FlashLoanAggregatorImpl,
+  createFlashLoanAggregator,
+} from './flash-loan-aggregation/infrastructure';
+
+export type {
+  OnChainLiquidityValidatorConfig,
+  InMemoryAggregatorMetricsConfig,
+} from './flash-loan-aggregation/infrastructure';
+
+// #############################################################################
+// #                                                                           #
 // #                         SECTION 3: CACHING                                #
 // #                                                                           #
 // #############################################################################
