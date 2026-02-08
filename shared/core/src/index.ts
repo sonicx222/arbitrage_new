@@ -945,7 +945,18 @@ export {
 // 6.1 Base Detectors
 // =============================================================================
 
-// Base detector for chain-specific implementations
+/**
+ * @deprecated BaseDetector and related types are legacy.
+ * Use composition with extracted components instead:
+ * - initializeDetectorConnections() for Redis/Streams setup
+ * - initializePairs() for pair discovery
+ * - decodeSyncEventData(), buildPriceUpdate() for event processing
+ * - createDetectorHealthMonitor() for health monitoring
+ * - createFactoryIntegrationService() for factory subscriptions
+ *
+ * See services/unified-detector/ for composition pattern examples.
+ * Will be removed in v2.0.
+ */
 export { BaseDetector } from './base-detector';
 export type {
   DetectorConfig as BaseDetectorConfig,
