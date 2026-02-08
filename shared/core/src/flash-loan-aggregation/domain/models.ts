@@ -131,13 +131,17 @@ export class LiquidityCheck {
 
   /**
    * Create failed check result (e.g., RPC error)
+   *
+   * I1 Fix: Set hasSufficientLiquidity = false for semantic consistency.
+   * When checkPerformed = false, we cannot verify liquidity, so conservatively
+   * assume insufficient. This prevents accidental use without checking checkPerformed.
    */
   static failure(error: string, latencyMs: number): LiquidityCheck {
     return new LiquidityCheck(
-      true, // Assume sufficient on failure (graceful degradation)
+      false, // Cannot verify - conservatively assume insufficient
       0n,
       0n,
-      false,
+      false, // Check was not performed
       latencyMs,
       error
     );

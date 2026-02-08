@@ -176,10 +176,12 @@ describe('LiquidityCheck', () => {
   });
 
   describe('failure', () => {
-    it('should create failed check with graceful degradation', () => {
+    it('should create failed check with conservative assumptions (I1 fix)', () => {
       const check = LiquidityCheck.failure('RPC timeout', 5000);
 
-      expect(check.hasSufficientLiquidity).toBe(true); // Assumes sufficient
+      // I1 Fix: Changed from true to false for semantic consistency
+      // When check fails, conservatively assume insufficient rather than sufficient
+      expect(check.hasSufficientLiquidity).toBe(false); // Conservative: assume insufficient
       expect(check.checkPerformed).toBe(false);
       expect(check.error).toBe('RPC timeout');
       expect(check.checkLatencyMs).toBe(5000);

@@ -318,6 +318,10 @@ jobs:
       - name: Run linter
         run: npm run lint
 
+      - name: Validate router approvals (I2 fix)
+        run: npm run validate:routers:all
+        continue-on-error: true  # Don't fail CI yet, just warn
+
   # ===========================================================================
   # Test Summary - Aggregate results and report
   # ===========================================================================

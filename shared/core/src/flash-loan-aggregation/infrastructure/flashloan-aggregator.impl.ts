@@ -146,15 +146,12 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
           }
         );
 
-        // C4 Fix: Check if liquidity check actually succeeded (not just RPC failure fallback)
-        // When checkPerformed is false, the RPC call failed and we have no real liquidity data
-        if (!liquidityCheck.checkPerformed) {
-          // RPC check failed - try next provider rather than proceeding with unverified liquidity
-          continue;
-        }
-
-        if (!liquidityCheck.hasSufficientLiquidity) {
-          continue;
+        // C4/I1 Fix: Skip provider if liquidity check failed OR insufficient liquidity
+        // Defense in depth: Check both conditions to handle all cases
+        // - checkPerformed = false: RPC call failed, no verified data
+        // - hasSufficientLiquidity = false: Verified but insufficient
+        if (!liquidityCheck.checkPerformed || !liquidityCheck.hasSufficientLiquidity) {
+          continue; // Skip this provider
         }
 
         // Provider passed all checks
