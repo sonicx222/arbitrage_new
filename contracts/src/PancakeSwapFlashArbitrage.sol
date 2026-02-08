@@ -243,6 +243,9 @@ contract PancakeSwapFlashArbitrage is
         // Validate transaction is not stale using user-specified deadline
         if (block.timestamp > deadline) revert TransactionTooOld();
 
+        // C4 Fix: Validate pool is not zero address (clearer error, gas optimization)
+        if (pool == address(0)) revert InvalidPoolAddress();
+
         // Validate pool is whitelisted (security critical)
         if (!_whitelistedPools.contains(pool)) revert PoolNotWhitelisted();
 

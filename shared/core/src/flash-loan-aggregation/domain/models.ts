@@ -343,6 +343,9 @@ export class AggregatorConfig {
 
   /**
    * Create custom configuration with validation
+   *
+   * M2 Fix: Validates partial weights - must provide all or none.
+   * Prevents confusing errors from partial weight specifications.
    */
   static create(partial: {
     liquidityCheckThresholdUsd?: number;
@@ -358,6 +361,26 @@ export class AggregatorConfig {
     protocolLatencyDefaults?: Record<string, number>;
   }): AggregatorConfig {
     const defaults = AggregatorConfig.default();
+
+    // M2 Fix: Validate partial weights specification
+    if (partial.weights) {
+      const providedWeights = {
+        fees: partial.weights.fees,
+        liquidity: partial.weights.liquidity,
+        reliability: partial.weights.reliability,
+        latency: partial.weights.latency,
+      };
+
+      const definedCount = Object.values(providedWeights).filter(w => w !== undefined).length;
+
+      // Either all 4 weights must be provided, or none (use defaults)
+      if (definedCount !== 0 && definedCount !== 4) {
+        throw new Error(
+          `[ERR_PARTIAL_WEIGHTS] When providing weights, must specify all 4 values (fees, liquidity, reliability, latency). ` +
+          `Provided ${definedCount}/4. Either provide all weights or omit to use defaults.`
+        );
+      }
+    }
 
     return new AggregatorConfig(
       partial.liquidityCheckThresholdUsd ?? defaults.liquidityCheckThresholdUsd,

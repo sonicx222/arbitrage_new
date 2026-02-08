@@ -44,6 +44,12 @@ interface CachedRanking {
  */
 export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
   private readonly rankingCache = new Map<string, CachedRanking>();
+  /**
+   * Pending ranking operations to prevent race condition (C2 fix).
+   * Maps chain → Promise<ranked providers> to coalesce concurrent requests.
+   * Similar pattern to onchain-liquidity.validator.ts:96-113
+   */
+  private readonly pendingRankings = new Map<string, Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>>>();
 
   constructor(
     private readonly config: AggregatorConfig,
@@ -139,6 +145,13 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
             rpcProvider: context.rpcProviders?.get(chain),
           }
         );
+
+        // C4 Fix: Check if liquidity check actually succeeded (not just RPC failure fallback)
+        // When checkPerformed is false, the RPC call failed and we have no real liquidity data
+        if (!liquidityCheck.checkPerformed) {
+          // RPC check failed - try next provider rather than proceeding with unverified liquidity
+          continue;
+        }
 
         if (!liquidityCheck.hasSufficientLiquidity) {
           continue;
@@ -243,23 +256,55 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
    */
   clearCaches(): void {
     this.rankingCache.clear();
+    this.pendingRankings.clear(); // C2 fix: Clear pending operations too
     this.liquidityValidator?.clearCache();
   }
 
   /**
-   * Get ranked providers (cached or fresh)
+   * Get ranked providers (cached or fresh, with request coalescing)
+   *
+   * C2 Fix: Implements request coalescing to prevent race condition.
+   * Multiple concurrent calls for same chain will share one ranking operation.
    */
   private async getRankedProviders(
     chain: string,
     amount: bigint,
     context: IOpportunityContext
   ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>> {
-    // Check cache
+    // Check cache first
     const cached = this.rankingCache.get(chain);
     if (cached && Date.now() - cached.timestamp < this.config.rankingCacheTtlMs) {
       return cached.providers;
     }
 
+    // Request coalescing - atomic check-and-set to prevent race condition
+    let pending = this.pendingRankings.get(chain);
+    if (!pending) {
+      // Create new promise and store atomically
+      pending = this.performRanking(chain, amount, context);
+      this.pendingRankings.set(chain, pending);
+
+      // Cleanup on completion (regardless of success/failure)
+      pending.finally(() => {
+        // Only delete if this is still the same promise (not replaced)
+        if (this.pendingRankings.get(chain) === pending) {
+          this.pendingRankings.delete(chain);
+        }
+      });
+    }
+
+    // Return the promise (either newly created or existing)
+    return pending;
+  }
+
+  /**
+   * Perform actual ranking operation (extracted for request coalescing)
+   */
+  private async performRanking(
+    chain: string,
+    amount: bigint,
+    context: IOpportunityContext
+  ): Promise<ReadonlyArray<{ provider: IProviderInfo; score: any }>> {
     // Get providers for chain
     const providers = this.availableProviders.get(chain) || [];
 
@@ -312,24 +357,81 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
   }
 
   /**
-   * Classify error type
+   * Classify error type for fallback decisions
+   *
+   * M7 Fix: Expanded error patterns for better classification.
+   * Distinguishes transient errors (can retry) from permanent (should abort).
    */
   private classifyError(error: Error): 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown' {
     const message = error.message.toLowerCase();
 
-    if (message.includes('insufficient liquidity') || message.includes('reserve too low')) {
+    // Liquidity issues (try next provider with more liquidity)
+    if (
+      message.includes('insufficient liquidity') ||
+      message.includes('reserve too low') ||
+      message.includes('insufficient reserves') ||
+      message.includes('liquidity unavailable')
+    ) {
       return 'insufficient_liquidity';
     }
 
-    if (message.includes('fee too high') || message.includes('slippage exceeded')) {
+    // Fee/slippage issues (try next provider with better pricing)
+    if (
+      message.includes('fee too high') ||
+      message.includes('slippage exceeded') ||
+      message.includes('price impact too high') ||
+      message.includes('min return not met')
+    ) {
       return 'high_fees';
     }
 
-    if (message.includes('timeout') || message.includes('network error') || message.includes('503')) {
+    // Transient errors (temporary, can retry same or different provider)
+    if (
+      // Network/RPC errors
+      message.includes('timeout') ||
+      message.includes('network error') ||
+      message.includes('econnrefused') ||
+      message.includes('econnreset') ||
+      message.includes('etimedout') ||
+      message.includes('enetunreach') ||
+      message.includes('socket hang up') ||
+      // HTTP error codes
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504') ||
+      message.includes('429') || // Rate limit
+      // Transaction errors (can retry with adjusted parameters)
+      message.includes('nonce too low') ||
+      message.includes('nonce has already been used') ||
+      message.includes('replacement transaction underpriced') ||
+      message.includes('gas price too low') ||
+      message.includes('transaction underpriced') ||
+      message.includes('already known') // Transaction already in mempool
+    ) {
       return 'transient';
     }
 
-    if (message.includes('invalid') || message.includes('not supported') || message.includes('validation failed')) {
+    // Permanent errors (configuration/validation issues, don't retry)
+    if (
+      message.includes('invalid') ||
+      message.includes('not supported') ||
+      message.includes('validation failed') ||
+      // Contract state errors
+      message.includes('paused') ||
+      message.includes('contract paused') ||
+      message.includes('emergency mode') ||
+      // Permission/approval errors
+      message.includes('router not approved') ||
+      message.includes('not whitelisted') ||
+      message.includes('pool not whitelisted') ||
+      message.includes('unauthorized') ||
+      message.includes('access denied') ||
+      // Path validation errors
+      message.includes('invalid swap path') ||
+      message.includes('invalid pool') ||
+      message.includes('token mismatch') ||
+      message.includes('path validation failed')
+    ) {
       return 'permanent';
     }
 

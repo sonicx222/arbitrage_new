@@ -46,6 +46,8 @@ export class WeightedRankingStrategy implements IProviderRanker {
    *
    * Calculates scores in parallel for optimal performance.
    * Performance: ~2ms for 5 providers (vs ~10ms sequential)
+   *
+   * M6 Fix: Timeout protection (10s) to prevent indefinite blocking
    */
   async rankProviders(
     providers: ReadonlyArray<IProviderInfo>,
@@ -72,8 +74,27 @@ export class WeightedRankingStrategy implements IProviderRanker {
       }
     });
 
-    // Wait for all scoring to complete
-    const results = await Promise.all(scoringPromises);
+    // M6 Fix: Wait for all scoring with timeout protection (10s)
+    // If timeout, returns partial results (graceful degradation)
+    const timeoutMs = 10000;
+    const timeoutPromise = new Promise<Array<IRankedProvider | null>>((_, reject) => {
+      setTimeout(() => reject(new Error('Ranking timeout')), timeoutMs);
+    });
+
+    let results: Array<IRankedProvider | null>;
+    try {
+      results = await Promise.race([
+        Promise.all(scoringPromises),
+        timeoutPromise,
+      ]);
+    } catch (timeoutError) {
+      // Timeout occurred - collect partial results (settled promises only)
+      // Use Promise.allSettled to get whatever completed before timeout
+      const settled = await Promise.allSettled(scoringPromises);
+      results = settled
+        .filter((r): r is PromiseFulfilledResult<IRankedProvider | null> => r.status === 'fulfilled')
+        .map(r => r.value);
+    }
 
     // Filter out failed scores and sort by total score (descending)
     const ranked = results

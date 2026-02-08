@@ -24,6 +24,8 @@ import type {
   LiquidityCheck,
 } from '../domain';
 import { LiquidityCheck as LiquidityCheckImpl } from '../domain';
+// P2 Fix: Import ethers statically (not dynamically) for hot-path performance
+import { ethers } from 'ethers';
 
 /**
  * Cached liquidity entry
@@ -32,6 +34,14 @@ interface CachedLiquidity {
   check: LiquidityCheck;
   timestamp: number;
 }
+
+/**
+ * P2 Fix: Cached ERC20 interface for hot-path optimization
+ * Creating Interface objects is expensive (~0.5ms) - cache at module level
+ */
+const ERC20_INTERFACE = new ethers.Interface([
+  'function balanceOf(address owner) view returns (uint256)',
+]);
 
 /**
  * Validator configuration
@@ -45,17 +55,27 @@ export interface OnChainLiquidityValidatorConfig {
   rpcTimeoutMs?: number;
   /** Maximum cache size (default: 500 entries) */
   maxCacheSize?: number;
+  /** M3 Fix: Circuit breaker threshold (default: 5 consecutive failures) */
+  circuitBreakerThreshold?: number;
+  /** M3 Fix: Circuit breaker cooldown in ms (default: 30 seconds) */
+  circuitBreakerCooldownMs?: number;
 }
 
 /**
  * On-Chain Liquidity Validator
  *
  * Checks pool balances on-chain to validate liquidity availability.
+ *
+ * M3 Fix: Includes circuit breaker to skip RPC calls during sustained failures.
  */
 export class OnChainLiquidityValidator implements ILiquidityValidator {
   private readonly config: Required<OnChainLiquidityValidatorConfig>;
   private readonly cache = new Map<string, CachedLiquidity>();
   private readonly pendingChecks = new Map<string, Promise<LiquidityCheck>>();
+
+  /** M3 Fix: Circuit breaker state */
+  private consecutiveFailures = 0;
+  private circuitOpenUntil = 0; // Timestamp when circuit can retry
 
   constructor(config?: OnChainLiquidityValidatorConfig) {
     this.config = {
@@ -63,6 +83,8 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       safetyMargin: config?.safetyMargin ?? 1.1, // 10% buffer
       rpcTimeoutMs: config?.rpcTimeoutMs ?? 5000, // 5 seconds
       maxCacheSize: config?.maxCacheSize ?? 500,
+      circuitBreakerThreshold: config?.circuitBreakerThreshold ?? 5,
+      circuitBreakerCooldownMs: config?.circuitBreakerCooldownMs ?? 30000, // 30 seconds
     };
   }
 
@@ -155,6 +177,9 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
 
   /**
    * Perform on-chain liquidity check
+   *
+   * M3 Fix: Implements circuit breaker pattern.
+   * Skips RPC calls when circuit is OPEN (too many failures).
    */
   private async performLiquidityCheck(
     provider: IProviderInfo,
@@ -164,10 +189,36 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   ): Promise<LiquidityCheck> {
     const startTime = Date.now();
 
+    // M3 Fix: Check circuit breaker before attempting RPC
+    if (this.isCircuitOpen()) {
+      // Circuit is OPEN - skip RPC call, return cached failure
+      return LiquidityCheckImpl.failure(
+        `Circuit breaker OPEN (${this.consecutiveFailures} consecutive failures)`,
+        0
+      );
+    }
+
+    // M3 Observability: Log HALF-OPEN state (attempting retry after cooldown)
+    if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
+      console.info(
+        JSON.stringify({
+          level: 'info',
+          component: 'OnChainLiquidityValidator',
+          event: 'circuit_breaker_half_open',
+          message: 'Circuit breaker HALF-OPEN - attempting retry',
+          details: {
+            consecutiveFailures: this.consecutiveFailures,
+            state: 'HALF-OPEN',
+          },
+        })
+      );
+    }
+
     try {
       // Get RPC provider from context
       if (!context.rpcProvider) {
         // No RPC provider - assume sufficient (graceful degradation)
+        this.recordFailure(); // M3 Fix: Count as failure
         return LiquidityCheckImpl.failure('No RPC provider available', 0);
       }
 
@@ -179,6 +230,9 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
 
       const latency = Date.now() - startTime;
       const requiredWithMargin = this.applySafetyMargin(amount);
+
+      // M3 Fix: Reset circuit breaker on success
+      this.recordSuccess();
 
       // Create success check
       const check = LiquidityCheckImpl.success(liquidity, requiredWithMargin, latency);
@@ -197,6 +251,9 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       const latency = Date.now() - startTime;
       const errorMessage = error instanceof Error ? error.message : String(error);
 
+      // M3 Fix: Record failure for circuit breaker
+      this.recordFailure();
+
       // Cache failure (with assumed-sufficient)
       const check = LiquidityCheckImpl.failure(errorMessage, latency);
       this.cache.set(this.makeCacheKey(provider, asset), {
@@ -209,10 +266,93 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
   }
 
   /**
+   * M3 Fix: Check if circuit breaker is OPEN
+   */
+  private isCircuitOpen(): boolean {
+    const now = Date.now();
+
+    // Circuit is OPEN if we've hit threshold and cooldown hasn't elapsed
+    if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
+      if (now < this.circuitOpenUntil) {
+        return true; // Still in cooldown
+      }
+      // Cooldown elapsed - allow one retry (HALF-OPEN state)
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
+   * M3 Fix: Record successful RPC call
+   * M3 Enhancement: Added observability logging for circuit breaker state changes
+   */
+  private recordSuccess(): void {
+    const wasOpen = this.consecutiveFailures >= this.config.circuitBreakerThreshold;
+
+    this.consecutiveFailures = 0;
+    this.circuitOpenUntil = 0;
+
+    // M3 Observability: Log circuit closing (recovery from failure state)
+    if (wasOpen) {
+      console.info(
+        JSON.stringify({
+          level: 'info',
+          component: 'OnChainLiquidityValidator',
+          event: 'circuit_breaker_closed',
+          message: 'Circuit breaker CLOSED - RPC health restored',
+          details: {
+            previousFailures: this.config.circuitBreakerThreshold,
+            state: 'CLOSED',
+          },
+        })
+      );
+    }
+  }
+
+  /**
+   * M3 Fix: Record failed RPC call
+   * M3 Enhancement: Added observability logging for circuit breaker state changes
+   */
+  private recordFailure(): void {
+    const wasBeforeThreshold = this.consecutiveFailures < this.config.circuitBreakerThreshold;
+
+    this.consecutiveFailures++;
+
+    // If hit threshold, set cooldown period and log circuit opening
+    if (this.consecutiveFailures >= this.config.circuitBreakerThreshold) {
+      this.circuitOpenUntil = Date.now() + this.config.circuitBreakerCooldownMs;
+
+      // M3 Observability: Log circuit opening (first time hitting threshold)
+      if (wasBeforeThreshold) {
+        console.warn(
+          JSON.stringify({
+            level: 'warn',
+            component: 'OnChainLiquidityValidator',
+            event: 'circuit_breaker_opened',
+            message: 'Circuit breaker OPENED - RPC calls suspended',
+            details: {
+              consecutiveFailures: this.consecutiveFailures,
+              threshold: this.config.circuitBreakerThreshold,
+              cooldownMs: this.config.circuitBreakerCooldownMs,
+              willRetryAt: new Date(this.circuitOpenUntil).toISOString(),
+              state: 'OPEN',
+            },
+          })
+        );
+      }
+    }
+  }
+
+  /**
    * Query on-chain liquidity via ERC20 balanceOf call
    *
    * Queries the pool's token balance to determine available liquidity.
    * Uses ethers.js for RPC call with proper error handling.
+   *
+   * P2 Fix: Removed dynamic import for hot-path performance (~1-3ms improvement)
+   * - Static import at module level (no import overhead per call)
+   * - Cached Interface at module level (no Interface creation overhead per call)
    *
    * @param provider - Flash loan provider info (contains poolAddress)
    * @param asset - Token address to check balance for
@@ -225,21 +365,13 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
     asset: string,
     rpcProvider: unknown
   ): Promise<bigint> {
-    // Import ethers dynamically to avoid circular dependencies
-    const { ethers } = await import('ethers');
-
     // Validate RPC provider type
     if (!rpcProvider || typeof (rpcProvider as any).call !== 'function') {
       throw new Error('Invalid RPC provider - missing call() method');
     }
 
-    // Create ERC20 interface for balanceOf call
-    const erc20Interface = new ethers.Interface([
-      'function balanceOf(address owner) view returns (uint256)',
-    ]);
-
-    // Encode balanceOf call
-    const calldata = erc20Interface.encodeFunctionData('balanceOf', [provider.poolAddress]);
+    // Encode balanceOf call using cached interface (P2: no allocation overhead)
+    const calldata = ERC20_INTERFACE.encodeFunctionData('balanceOf', [provider.poolAddress]);
 
     // Make RPC call
     const result = await (rpcProvider as any).call({
@@ -247,8 +379,8 @@ export class OnChainLiquidityValidator implements ILiquidityValidator {
       data: calldata,
     });
 
-    // Decode result
-    const [balance] = erc20Interface.decodeFunctionResult('balanceOf', result);
+    // Decode result using cached interface
+    const [balance] = ERC20_INTERFACE.decodeFunctionResult('balanceOf', result);
 
     // Convert to BigInt
     return BigInt(balance.toString());

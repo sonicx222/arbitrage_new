@@ -7,7 +7,7 @@
  * @see P1-5: Bridge cost configuration
  */
 
-import { AAVE_V3_POOLS, BALANCER_V2_VAULTS } from './addresses';
+import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, PANCAKESWAP_V3_FACTORIES } from './addresses';
 
 // =============================================================================
 // FLASH LOAN CONSTANTS (Fix 1.1: Centralized constants)
@@ -288,6 +288,20 @@ export function validateProductionConfig(): void {
 /**
  * Flash loan provider configuration by chain.
  *
+ * ## Fee Format Convention (M1 Fix)
+ *
+ * ALL fees in this config are in **basis points (bps)**:
+ * - 1 bps = 0.01%
+ * - 100 bps = 1%
+ * - Example: fee: 25 = 25 bps = 0.25%
+ *
+ * **Protocol-Specific Internal Formats** (handled by providers):
+ * - Aave V3: Uses bps directly (9 bps = 0.09%)
+ * - PancakeSwap V3: Uses "fee tiers" = bps * 100 (2500 = 25 bps = 0.25%)
+ * - Balancer V2: Uses bps directly (0 bps = 0%)
+ *
+ * Providers handle conversion internally - config always uses bps.
+ *
  * ## Fix 3.1/9.2: Address Consolidation
  *
  * IMPORTANT: Aave V3 Pool addresses are also defined in:
@@ -305,7 +319,7 @@ export function validateProductionConfig(): void {
 export const FLASH_LOAN_PROVIDERS: Record<string, {
   address: string;
   protocol: string;
-  fee: number;  // Basis points (100 = 1%)
+  fee: number;  // Basis points (bps): 100 bps = 1%
 }> = {
   // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
   // FIX 3.1.3-1: Corrected Ethereum Aave V3 Pool address (was 0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF)
@@ -335,11 +349,18 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     protocol: 'aave_v3',
     fee: 9
   },
-  // BSC uses Pancakeswap flash loans (no Aave V3)
+  // BSC uses PancakeSwap V3 flash loans (no Aave V3)
   bsc: {
-    address: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',  // PancakeSwap V3 Router
+    address: PANCAKESWAP_V3_FACTORIES.bsc,  // PancakeSwap V3 Factory (for pool discovery)
     protocol: 'pancakeswap_v3',
-    fee: 25  // 0.25% flash swap fee
+    /**
+     * M1 Fix: Fee format clarification
+     * - Config format: 25 bps (basis points) = 0.25%
+     * - Contract format: 2500 (hundredths of bip) = 0.25%
+     * - Conversion: feeTier = feeBps * 100 (e.g., 25 bps → 2500)
+     * - PancakeSwapV3FlashLoanProvider handles conversion internally
+     */
+    fee: 25  // 0.25% flash swap fee (in basis points)
   },
   // S3.2.1-FIX: Added Avalanche Aave V3 flash loan provider
   avalanche: {
@@ -555,24 +576,25 @@ export const FEATURE_FLAGS = {
   /**
    * Enable flash loan protocol aggregator (Task 2.3).
    *
-   * When enabled:
+   * When enabled (default):
    * - Dynamically selects best flash loan provider via weighted ranking
    * - Validates liquidity with on-chain checks (5-min cache)
    * - Tracks provider metrics (success rate, latency)
    * - Supports automatic fallback on provider failures
    *
-   * When disabled (default):
+   * When disabled:
    * - Uses hardcoded Aave V3 provider (backward compatible)
+   * - Set FEATURE_FLASH_LOAN_AGGREGATOR=false to disable
    *
    * Impact:
    * - Better fee optimization (select lowest-fee provider)
    * - Prevents insufficient liquidity failures
    * - Improves reliability via fallback mechanisms
    *
-   * @default false (safe rollout - explicitly opt-in)
+   * @default true (production-ready - opt-out to disable)
    * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
    */
-  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR === 'true',
+  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR !== 'false',
 };
 
 /**
@@ -680,6 +702,28 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       } else {
         console.info(`✅ ${message}`);
       }
+    }
+  }
+
+  // Validate flash loan aggregator feature (C3 fix)
+  if (FEATURE_FLAGS.useFlashLoanAggregator) {
+    const message = 'Flash Loan Protocol Aggregator enabled - will dynamically select optimal provider';
+    if (logger) {
+      logger.info(message, {
+        weights: FLASH_LOAN_AGGREGATOR_CONFIG.weights,
+        liquidityThreshold: FLASH_LOAN_AGGREGATOR_CONFIG.liquidityCheckThresholdUsd,
+      });
+    } else {
+      console.info(`✅ ${message}`);
+    }
+  } else {
+    const message =
+      'Flash Loan Protocol Aggregator DISABLED - using hardcoded Aave V3 provider only. ' +
+      'Set FEATURE_FLASH_LOAN_AGGREGATOR=true to enable dynamic provider selection.';
+    if (logger) {
+      logger.warn(message);
+    } else {
+      console.warn(`⚠️  WARNING: ${message}`);
     }
   }
 }

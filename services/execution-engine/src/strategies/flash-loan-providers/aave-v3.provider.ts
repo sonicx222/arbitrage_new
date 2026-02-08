@@ -285,4 +285,11 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
   getApprovedRouters(): string[] {
     return [...this.approvedRouters];
   }
+
+  /**
+   * Get the pool address for this provider
+   */
+  getPoolAddress(): string {
+    return this.poolAddress;
+  }
 }

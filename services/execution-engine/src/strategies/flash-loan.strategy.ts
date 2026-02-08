@@ -384,15 +384,30 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     // Issue 3.1 Fix: Warn if contract exists for a chain but no approved routers
     // This will cause getRouterForDex() to fall back to DEXES config, which may
     // not have the router approved in the FlashLoanArbitrage contract
+    //
+    // C3 Fix Enhancement: CRITICAL SYNCHRONIZATION REQUIREMENT
+    // Routers MUST be approved in TWO locations for execution to succeed:
+    // 1. Strategy config (approvedRouters) - validated here (off-chain)
+    // 2. Smart contract (addApprovedRouter) - validated on-chain during execution
+    //
+    // Mismatch causes: Transaction passes off-chain validation but reverts on-chain with
+    // [ERR_UNAPPROVED_ROUTER], wasting gas and time.
+    //
+    // Verification: Use deployment validation script (see ADR-030:586-623)
+    //   npx hardhat run scripts/verify-router-approval.ts --network <chain>
+    //
+    // @see docs/architecture/adr/ADR-030-pancakeswap-v3-flash-loans.md (I4 Router Sync)
     for (const chain of Object.keys(config.contractAddresses)) {
       const routers = config.approvedRouters[chain];
       if (!routers || routers.length === 0) {
         // Use console.warn since logger isn't available in constructor
         // This is a startup-time validation, not a runtime log
         console.warn(
-          `[WARN] FlashLoanStrategy: Chain '${chain}' has contract address but no approved routers. ` +
-          `getRouterForDex() will fall back to DEXES config. Ensure those routers are approved ` +
-          `in FlashLoanArbitrage contract, otherwise transactions will fail.`
+          `[CRITICAL] FlashLoanStrategy: Chain '${chain}' has contract address but no approved routers. ` +
+          `getRouterForDex() will fall back to DEXES config. ` +
+          `MUST ensure those routers are approved in FlashLoanArbitrage contract via addApprovedRouter(), ` +
+          `otherwise ALL transactions will fail with ERR_UNAPPROVED_ROUTER. ` +
+          `Verify with: scripts/verify-router-approval.ts`
         );
       }
     }
@@ -694,12 +709,30 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           // Extract selected protocol
           const selectedProtocol = providerSelection.protocol!;
 
-          // Store provider info (mock IProviderInfo for metrics)
+          // C5 Fix: Validate provider config exists (fail fast if misconfigured)
+          const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
+          if (!flashLoanConfig) {
+            this.logger.error('[ERR_CONFIG] Flash loan provider not configured for chain', {
+              chain,
+              selectedProtocol,
+            });
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(
+                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+                `Flash loan provider not configured for chain: ${chain}`
+              ),
+              chain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+
+          // Store provider info (validated IProviderInfo for metrics)
           selectedProvider = {
             protocol: selectedProtocol,
             chain,
-            poolAddress: FLASH_LOAN_PROVIDERS[chain]?.address || '',
-            feeBps: FLASH_LOAN_PROVIDERS[chain]?.fee || 0,
+            poolAddress: flashLoanConfig.address,
+            feeBps: flashLoanConfig.fee,
             isAvailable: true,
           };
 

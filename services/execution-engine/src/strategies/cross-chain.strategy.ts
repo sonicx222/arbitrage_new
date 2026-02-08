@@ -681,13 +681,17 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
 
       // Prepare and execute sell transaction on destination chain using DEX router
       //
-      // TODO (Fix 7.2): Evaluate using flash loans on destination chain
-      // ================================================================
+      // FUTURE ENHANCEMENT (M1): Flash loans on destination chain
+      // =================================================================
+      // Status: DEFERRED - Current direct DEX swap is sufficient for MVP
       // Priority: Medium | Effort: 3 days | Depends on: FlashLoanProviderFactory
+      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/142
       //
-      // Current: Direct DEX swap after bridge completion.
+      // Current Implementation: Direct DEX swap after bridge completion.
+      //   - Pros: Simple, works immediately after bridge
+      //   - Cons: Requires capital on destination chain
       //
-      // Proposed: Use flash loan on destination chain for sell transaction.
+      // Proposed Enhancement: Flash loan on destination chain for sell transaction.
       //
       // Benefits:
       // 1. Larger positions without holding capital on dest chain
@@ -699,14 +703,23 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
       // - Flash loan fee: ~0.09% on Aave V3, ~0.25-0.30% on other protocols
       // - Requires FlashLoanArbitrage contract deployed on dest chain
       // - Increased complexity in error handling (bridge succeeded but flash loan failed)
+      // - Cross-chain flash loans are NOT atomic (bridge completes before flash loan)
       //
-      // Implementation:
+      // Decision: Deferred until production metrics show capital constraints on dest chains.
+      // Rationale: Direct swaps are simpler and sufficient for current trade sizes.
+      // Current approach handles bridge completion + DEX swap atomically without flash loan overhead.
+      //
+      // Implementation Plan (when reconsidered):
       // 1. Check if FlashLoanProviderFactory.isFullySupported(destChain)
       // 2. If supported: use FlashLoanStrategy for sell
       // 3. If not supported: fall back to direct swap (current behavior)
+      // 4. Add metrics to compare profitability: flash_loan_dest_chain vs direct_swap
       //
-      // Tracking: https://github.com/arbitrage-system/arbitrage/issues/142
-      // ================================================================
+      // Review Triggers: Reconsider if:
+      // - Average dest chain capital < $10K and affecting trade sizes
+      // - Capital lockup during bridge wait becomes significant (>5 minutes average)
+      // - Flash loan fees drop below 0.05%
+      // =================================================================
 
       // BUG-4.2-FIX: Create a "sell opportunity" with reversed tokens for destination swap
       // After bridging, we have bridgeToken (= tokenOut) on destination chain
