@@ -17,6 +17,7 @@
     "test:e2e": "jest --selectProjects e2e --passWithNoTests",
     "test:performance": "jest --selectProjects performance",
     "test:smoke": "jest --selectProjects smoke",
+    "test:ml": "jest --selectProjects ml",
     "test:perf": "npm test && node scripts/analyze-performance.js",
     "test:ci": "jest --ci --coverage --selectProjects unit integration --coverageThreshold='{}'",
     "test:debug": "cross-env DEBUG_TESTS=true jest --runInBand",

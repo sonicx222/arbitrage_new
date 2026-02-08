@@ -54,6 +54,11 @@ module.exports = {
   // - Performance tests: Serial only (measuring performance)
   // maxWorkers: process.env.CI ? 2 : '50%',  // REMOVED - now per-project
 
+  // Worker memory limit - increased for memory-intensive tests (ML, performance)
+  // Default is 0.5 (50%), but TensorFlow.js and long-running tests need more
+  // Workers exceeding this limit are killed with SIGTERM (exitCode=143)
+  workerIdleMemoryLimit: 0.8, // 80% of system memory
+
   // Test timeout - default for non-project runs (projects override this)
   // Matches unit test timeout for consistency
   testTimeout: 10000,
@@ -165,6 +170,8 @@ module.exports = {
       ],
       // P2-3.1: MUST be serial - measuring performance requires no interference
       maxWorkers: 1,
+      // Longer timeout for performance tests (some run 10+ minutes)
+      testTimeout: 700000, // ~11 minutes (handles 650000ms tests + buffer)
       ...projectConfig
     },
     {
@@ -176,6 +183,20 @@ module.exports = {
       ],
       // P2-3.1: Low parallelism for smoke tests (quick checks, may share resources)
       maxWorkers: process.env.CI ? 1 : 2,
+      ...projectConfig
+    },
+    {
+      displayName: 'ml',
+      testMatch: ['**/shared/ml/**/__tests__/**/*.test.ts'],
+      setupFilesAfterEnv: [
+        '<rootDir>/shared/test-utils/src/setup/jest-setup.ts',
+        '<rootDir>/shared/test-utils/src/setup/jest.unit.setup.ts'
+      ],
+      // Serial execution for ML tests (memory-intensive TensorFlow.js)
+      // Prevents multiple workers from loading models simultaneously
+      maxWorkers: 1,
+      // Longer timeout for TensorFlow.js initialization and training
+      testTimeout: 120000, // 2 minutes
       ...projectConfig
     }
   ]
