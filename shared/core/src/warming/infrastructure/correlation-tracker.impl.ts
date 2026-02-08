@@ -71,6 +71,9 @@ import {
  * ```
  */
 export class CorrelationTrackerImpl implements ICorrelationTracker {
+  // Track pairs for getTrackedPairs() implementation
+  private readonly trackedPairs: Set<string> = new Set();
+
   constructor(private readonly analyzer: CorrelationAnalyzer) {}
 
   /**
@@ -89,15 +92,22 @@ export class CorrelationTrackerImpl implements ICorrelationTracker {
       // Delegate to existing analyzer
       this.analyzer.recordPriceUpdate(pair, timestamp);
 
-      // Get stats to count correlations updated
-      const stats = this.analyzer.getStats();
+      // Track this pair for getTrackedPairs()
+      const normalizedPair = pair.toLowerCase();
+      this.trackedPairs.add(normalizedPair);
+
+      // TODO: CorrelationAnalyzer doesn't return correlation update count
+      // Currently returns 0 as analyzer.recordPriceUpdate() returns void
+      // Enhancement needed: Modify CorrelationAnalyzer to return update metadata
+      // For now, this field indicates operation completion, not actual correlation count
+      const correlationsUpdated = 0;
 
       const durationMs = performance.now() - startTime;
       const durationUs = durationMs * 1000;
 
       return {
         success: true,
-        correlationsUpdated: stats.trackedPairs,
+        correlationsUpdated,
         durationUs,
       };
     } catch (error) {
@@ -167,21 +177,23 @@ export class CorrelationTrackerImpl implements ICorrelationTracker {
   /**
    * Get all tracked pairs
    *
-   * @returns Array of tracked pair identifiers
+   * Returns all pairs that have been tracked via recordPriceUpdate().
+   * Useful for diagnostics, monitoring, and understanding correlation coverage.
+   *
+   * @returns Array of tracked pair identifiers (normalized lowercase)
    */
   getTrackedPairs(): string[] {
-    const stats = this.analyzer.getStats();
-    // CorrelationAnalyzer doesn't expose pair list directly
-    // So we return an empty array for now
-    // This could be enhanced to extract from analyzer if needed
-    return [];
+    return Array.from(this.trackedPairs);
   }
 
   /**
    * Reset all correlation data
+   *
+   * Clears both the underlying analyzer and the tracked pairs set.
    */
   reset(): void {
     this.analyzer.reset();
+    this.trackedPairs.clear();
   }
 
   /**
