@@ -20,10 +20,15 @@
 import {
   initializeDetectorConnections,
   createDetectorHealthMonitor,
-  createFactoryIntegrationService,
 } from '../../../src/detector';
+import {
+  FactoryIntegrationService,
+  createFactoryIntegrationService,
+} from '../../../src/detector/factory-integration';
+import type { FactoryIntegrationDeps } from '../../../src/detector/factory-integration';
 import { getRedisClient } from '../../../src/redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../../../src/redis-streams';
+import { getAllFactoryAddresses, validateFactoryRegistry } from '@arbitrage/config';
 import type { Pair } from '@arbitrage/types';
 
 // Mock Redis for testing - in-memory implementation
@@ -82,6 +87,8 @@ jest.mock('../../../src/factory-subscription', () => ({
   createFactorySubscriptionService: jest.fn(),
 }));
 
+import { createFactorySubscriptionService } from '../../../src/factory-subscription';
+
 // Mock config
 jest.mock('@arbitrage/config', () => ({
   getAllFactoryAddresses: jest.fn().mockReturnValue([]),
@@ -138,7 +145,19 @@ describe('Detector Integration', () => {
     (getRedisClient as jest.Mock).mockResolvedValue(mockRedis);
     (getRedisStreamsClient as jest.Mock).mockResolvedValue(mockStreamsClient);
 
-    // Note: Config mock reset removed - tests will set up their own config mocks as needed
+    // Set up config mocks with default empty values (tests override as needed)
+    (getAllFactoryAddresses as jest.Mock).mockReturnValue([]);
+    (validateFactoryRegistry as jest.Mock).mockReturnValue([]);
+
+    // Set up factory subscription service mock
+    const mockFactoryService = {
+      onPairCreated: jest.fn(),
+      subscribeToFactories: jest.fn().mockResolvedValue(undefined),
+      getStats: jest.fn().mockReturnValue({ subscriptions: 1 }),
+      handleFactoryEvent: jest.fn(),
+      stop: jest.fn(),
+    };
+    (createFactorySubscriptionService as jest.Mock).mockReturnValue(mockFactoryService);
 
     mockLogger = {
       info: jest.fn(),
@@ -337,42 +356,34 @@ describe('Detector Integration', () => {
     });
 
     it('should initialize factory subscription', async () => {
-      // Use spyOn instead of requireMock for better control
-      const config_module = require('@arbitrage/config');
-      const spy = jest.spyOn(config_module, 'getAllFactoryAddresses')
-        .mockReturnValue(['0xfactory123']);
+      // Follow exact pattern from factory-integration.test.ts:225-242
+      (getAllFactoryAddresses as jest.Mock).mockReturnValue(['0xfactory123']);
 
-      const config = {
-        chain: 'ethereum',
-        enabled: true,
-      };
-
-      const mockDexesByName = new Map();
-      const mockPairsByAddress = new Map();
-      const mockWsManager = {
-        subscribe: jest.fn().mockReturnValue(1),
-        unsubscribe: jest.fn(),
-        isWebSocketConnected: jest.fn().mockReturnValue(true),
-      };
-
-      const deps = {
+      // Create deps helper function like factory-integration.test.ts:126-135
+      const createMockDeps = (): FactoryIntegrationDeps => ({
         logger: mockLogger,
-        wsManager: mockWsManager as any,
-        dexesByName: mockDexesByName,
-        pairsByAddress: mockPairsByAddress,
+        wsManager: {
+          subscribe: jest.fn().mockReturnValue(1),
+          unsubscribe: jest.fn(),
+          isWebSocketConnected: jest.fn().mockReturnValue(true),
+        } as any,
+        dexesByName: new Map(),
+        pairsByAddress: new Map(),
         addPairToIndices: jest.fn(),
         isRunning: () => true,
         isStopping: () => false,
-      };
+      });
 
-      const service = createFactoryIntegrationService(config, deps);
+      // Use FactoryIntegrationService constructor directly (not factory function)
+      const service = new FactoryIntegrationService(
+        { chain: 'ethereum' },
+        createMockDeps()
+      );
 
       const result = await service.initialize();
 
       expect(result.factoryAddresses.size).toBe(1);
       expect(result.factoryAddresses.has('0xfactory123')).toBe(true);
-
-      spy.mockRestore();
     });
   });
 
