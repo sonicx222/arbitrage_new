@@ -486,6 +486,52 @@ contract PancakeSwapFlashArbitrage is
     }
 
     /**
+     * @notice Batch whitelists multiple PancakeSwap V3 pools
+     * @dev Gas-efficient alternative to calling whitelistPool() multiple times
+     * @dev Skips pools that are already whitelisted (no revert on duplicates)
+     * @dev Critical for deployment: whitelist common pools atomically with contract deployment
+     * @param pools Array of pool addresses to whitelist
+     * @return successCount Number of pools successfully added (excludes duplicates)
+     *
+     * Security: Owner-only, validates each address is non-zero
+     * Gas optimization: Single transaction for multiple pools
+     *
+     * Task 2.1 (C4): Batch whitelist management for efficient deployment
+     */
+    function whitelistMultiplePools(address[] calldata pools)
+        external
+        onlyOwner
+        returns (uint256 successCount)
+    {
+        uint256 length = pools.length;
+        if (length == 0) revert("Empty pools array");
+
+        for (uint256 i = 0; i < length; ) {
+            address pool = pools[i];
+
+            // Validate address (skip zero addresses instead of reverting entire batch)
+            if (pool != address(0)) {
+                // Try to add pool (returns false if already exists)
+                bool added = _whitelistedPools.add(pool);
+                if (added) {
+                    emit PoolWhitelisted(pool);
+                    unchecked {
+                        ++successCount;
+                    }
+                }
+                // Note: Silently skip duplicates for idempotent batch operations
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Return success count for caller verification
+        return successCount;
+    }
+
+    /**
      * @notice Removes a pool from the whitelist
      * @dev O(1) complexity using EnumerableSet
      * @param pool The pool address to remove
