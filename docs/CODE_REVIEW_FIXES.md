@@ -11,9 +11,9 @@
 
 | Priority | Count | Status |
 |----------|-------|--------|
-| Critical | 3 | ✅ Fixed |
-| Important | 5 | 🔄 In Progress |
-| Minor | 5 | 📋 Documented |
+| Critical | 3 | ✅ All Fixed |
+| Important | 5 | 📋 Documented for Sprint 1 |
+| Minor | 5 | 📋 Documented for Tech Debt |
 
 ---
 
@@ -44,11 +44,11 @@
 
 ---
 
-### 🔄 C2. Remove Type Casting in HierarchicalCacheWarmer
+### ✅ C2. Remove Type Casting in HierarchicalCacheWarmer
 
 **Issue**: Lines 497-545 in `hierarchical-cache-warmer.impl.ts` use `as any` to access private methods, breaking encapsulation.
 
-**Proposed Fix**: Add public methods to HierarchicalCache interface instead of type casting.
+**Fix Applied** (Option 2 - Cache Stats Approach): Add public methods to HierarchicalCache interface instead of type casting.
 
 **Options**:
 
@@ -89,7 +89,34 @@ private async checkL1(pair: string): Promise<any> {
 }
 ```
 
-**Status**: Option 1 preferred - requires adding 3 public methods to HierarchicalCache.
+**Status**: ✅ Applied Option 2 (Cache Stats Approach) - verified and committed.
+
+**Changes Made**:
+
+1. **`checkL1()` method** - Removed type casting, uses cache stats:
+   - Gets L1 size before fetch
+   - Calls `cache.get()` (public API)
+   - Gets L1 size after fetch
+   - If size unchanged and value exists, it was in L1 (return value)
+   - If size changed or no value, it was not in L1 (return null)
+
+2. **`fetchFromL2()` method** - Removed type casting, uses public API:
+   - Calls `cache.get()` which fetches from L2/L3
+   - Since `checkL1()` already confirmed not in L1, this fetches from lower layers
+   - Side effect: May promote to L1 automatically (beneficial)
+
+3. **`promoteToL1()` method** - Removed type casting, uses public API:
+   - Calls `cache.set()` to write value
+   - Writes to all layers (L1/L2/L3) ensuring consistency
+   - Slightly less efficient than L1-only write, but acceptable for background operation
+
+**Trade-offs Documented**:
+- May fetch value twice (once in checkL1, once in fetchFromL2)
+- Acceptable because warming is background (<10ms target, currently 8.7ms)
+- Removes unsafe type casting (much safer for maintenance)
+- Works with public API (no reliance on private methods)
+
+**Impact**: Type-safe, maintainable code that won't break if HierarchicalCache internal methods change.
 
 ---
 
@@ -336,9 +363,9 @@ private defineWarmingMetrics(collector: IMetricsCollector): void {
 
 ### Before Deployment
 
-- [x] Fix C1: Thread safety documented
-- [ ] Fix C2: Remove type casting (add public methods)
-- [ ] Fix C3: Add error logging
+- [x] Fix C1: Thread safety documented ✅
+- [x] Fix C2: Remove type casting (cache stats approach) ✅
+- [x] Fix C3: Add error logging ✅
 - [ ] Add Worker thread integration tests (if using Worker threads)
 - [ ] Deploy with feature flag (gradual rollout)
 - [ ] Configure alert channels (PagerDuty + Slack)
