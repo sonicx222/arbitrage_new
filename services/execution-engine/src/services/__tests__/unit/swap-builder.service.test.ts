@@ -111,4 +111,65 @@ describe('SwapBuilder', () => {
       }).toThrow('[SwapBuilder] Buy router not found');
     });
   });
+
+  describe('caching', () => {
+    it('should cache swap steps', () => {
+      const opportunity = createMockOpportunity();
+      const params = {
+        buyRouter: 'uniswap_v3',
+        sellRouter: 'sushiswap',
+        intermediateToken: USDC_ADDRESS,
+        chain: 'ethereum'
+      };
+
+      // First call - cache miss
+      const steps1 = swapBuilder.buildSwapSteps(opportunity, params);
+
+      // Second call - cache hit (same reference)
+      const steps2 = swapBuilder.buildSwapSteps(opportunity, params);
+
+      expect(steps2).toBe(steps1); // Same reference = cached
+    });
+
+    it('should use different cache keys for different slippage', () => {
+      const opportunity = createMockOpportunity();
+      const baseParams = {
+        buyRouter: 'uniswap_v3',
+        sellRouter: 'sushiswap',
+        intermediateToken: USDC_ADDRESS,
+        chain: 'ethereum'
+      };
+
+      const steps1 = swapBuilder.buildSwapSteps(opportunity, { ...baseParams, slippageBps: 50 });
+      const steps2 = swapBuilder.buildSwapSteps(opportunity, { ...baseParams, slippageBps: 100 });
+
+      // Different slippage = different cache entries
+      expect(steps2).not.toBe(steps1);
+      expect(steps1[0].amountOutMin).not.toBe(steps2[0].amountOutMin);
+    });
+
+    it('should evict stale entries after TTL', async () => {
+      const opportunity = createMockOpportunity();
+      const params = {
+        buyRouter: 'uniswap_v3',
+        sellRouter: 'sushiswap',
+        intermediateToken: USDC_ADDRESS,
+        chain: 'ethereum'
+      };
+
+      // Build and cache
+      const steps1 = swapBuilder.buildSwapSteps(opportunity, params);
+
+      // Manipulate timestamp to simulate TTL expiration
+      const cache = (swapBuilder as any).swapStepsCache;
+      const cacheKey = Array.from(cache.keys())[0];
+      const entry = cache.get(cacheKey);
+      entry.timestamp = Date.now() - 61000; // 61 seconds ago
+
+      // Next call should rebuild (not use stale cache)
+      const steps2 = swapBuilder.buildSwapSteps(opportunity, params);
+
+      expect(steps2).not.toBe(steps1); // Different reference = rebuilt
+    });
+  });
 });
