@@ -518,12 +518,30 @@ contract BalancerV2FlashArbitrage is
         // Gas optimization: Pre-allocate path array once
         address[] memory path = new address[](2);
 
+        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
+        address[] memory visitedTokens = new address[](pathLength + 1);
+        visitedTokens[0] = asset;
+        uint256 visitedCount = 1;
+
         for (uint256 i = 0; i < pathLength;) {
             SwapStep calldata step = swapPath[i];
 
             if (step.tokenIn != currentToken) {
                 return (0, flashLoanFee); // Invalid path
             }
+
+            // Check for cycle: token appears twice before final step
+            if (i < pathLength - 1) {
+                for (uint256 j = 0; j < visitedCount; j++) {
+                    if (visitedTokens[j] == step.tokenOut) {
+                        return (0, flashLoanFee); // Cycle detected
+                    }
+                }
+            }
+
+            // Track visited token
+            visitedTokens[visitedCount] = step.tokenOut;
+            unchecked { ++visitedCount; }
 
             // Reuse pre-allocated path array
             path[0] = step.tokenIn;
