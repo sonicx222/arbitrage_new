@@ -56,4 +56,70 @@ describe('DexLookupService', () => {
       expect(router).toBeUndefined();
     });
   });
+
+  describe('getDexByName', () => {
+    it('should return full DEX config by name', () => {
+      const dex = service.getDexByName('ethereum', 'uniswap_v3');
+      expect(dex).toBeDefined();
+      expect(dex?.name).toBe('uniswap_v3');
+      expect(dex?.chain).toBe('ethereum');
+      expect(dex?.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+    });
+
+    it('should be case-insensitive', () => {
+      const dex1 = service.getDexByName('ethereum', 'UNISWAP_V3');
+      const dex2 = service.getDexByName('ethereum', 'uniswap_v3');
+      expect(dex1).toBe(dex2);
+    });
+
+    it('should return undefined for unknown DEX', () => {
+      const dex = service.getDexByName('ethereum', 'unknown_dex');
+      expect(dex).toBeUndefined();
+    });
+  });
+
+  describe('findDexByRouter', () => {
+    it('should reverse lookup DEX by router address', () => {
+      const dex = service.findDexByRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
+      expect(dex).toBeDefined();
+      expect(dex?.name).toBe('uniswap_v3');
+    });
+
+    it('should be case-insensitive for addresses', () => {
+      const dex1 = service.findDexByRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
+      const dex2 = service.findDexByRouter('ethereum', '0xe592427a0aece92de3edee1f18e0157c05861564');
+      expect(dex1).toBe(dex2);
+    });
+
+    it('should return undefined for unknown router', () => {
+      const dex = service.findDexByRouter('ethereum', '0x0000000000000000000000000000000000000000');
+      expect(dex).toBeUndefined();
+    });
+  });
+
+  describe('getAllDexesForChain', () => {
+    it('should return all DEXes for a chain', () => {
+      const dexes = service.getAllDexesForChain('ethereum');
+      expect(Array.isArray(dexes)).toBe(true);
+      expect(dexes.length).toBeGreaterThan(0);
+    });
+
+    it('should return empty array for unknown chain', () => {
+      const dexes = service.getAllDexesForChain('unknown_chain');
+      expect(Array.isArray(dexes)).toBe(true);
+      expect(dexes.length).toBe(0);
+    });
+  });
+
+  describe('isValidRouter', () => {
+    it('should return true for valid router', () => {
+      const valid = service.isValidRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
+      expect(valid).toBe(true);
+    });
+
+    it('should return false for invalid router', () => {
+      const valid = service.isValidRouter('ethereum', '0x0000000000000000000000000000000000000000');
+      expect(valid).toBe(false);
+    });
+  });
 });

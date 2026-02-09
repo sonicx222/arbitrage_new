@@ -117,4 +117,66 @@ export class DexLookupService {
     const normalizedName = dexName.toLowerCase().trim();
     return chainMap.get(normalizedName);
   }
+
+  /**
+   * Get full DEX configuration by name.
+   * O(1) lookup using Map cache.
+   *
+   * @param chain - Chain identifier
+   * @param dexName - DEX name (case-insensitive)
+   * @returns Full Dex config or undefined if not found
+   */
+  public getDexByName(chain: string, dexName: string): Dex | undefined {
+    const chainDexCache = this.dexCache.get(chain);
+    if (!chainDexCache) {
+      return undefined;
+    }
+
+    const normalized = dexName.toLowerCase().trim();
+    return chainDexCache.get(normalized);
+  }
+
+  /**
+   * Reverse lookup: find DEX by router address.
+   * O(1) lookup using Map cache.
+   *
+   * @param chain - Chain identifier
+   * @param routerAddress - Router address (case-insensitive)
+   * @returns Dex config or undefined if not found
+   */
+  public findDexByRouter(chain: string, routerAddress: string): Dex | undefined {
+    const reverseMap = this.dexByRouterCache.get(chain);
+    if (!reverseMap) {
+      return undefined;
+    }
+
+    const normalized = routerAddress.toLowerCase();
+    return reverseMap.get(normalized);
+  }
+
+  /**
+   * Get all DEXes configured for a chain.
+   * Returns cached array (read-only).
+   *
+   * @param chain - Chain identifier
+   * @returns Array of DEX configs (empty if chain not found)
+   */
+  public getAllDexesForChain(chain: string): readonly Dex[] {
+    const chainDexCache = this.dexCache.get(chain);
+    if (!chainDexCache) {
+      return [];
+    }
+    return Array.from(chainDexCache.values());
+  }
+
+  /**
+   * Check if a router address is valid for a chain.
+   *
+   * @param chain - Chain identifier
+   * @param routerAddress - Router address to validate
+   * @returns True if router exists for this chain
+   */
+  public isValidRouter(chain: string, routerAddress: string): boolean {
+    return this.findDexByRouter(chain, routerAddress) !== undefined;
+  }
 }
