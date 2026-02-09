@@ -18,6 +18,7 @@ module.exports = {
   ...rootConfig,
 
   // Root directories to scan for tests
+  // NOTE: Explicitly list roots to exclude .worktrees directory from Jest's Haste map
   roots: ['<rootDir>/shared', '<rootDir>/services', '<rootDir>/tests'],
 
   // Test file patterns - supports both old and new locations during migration
@@ -37,8 +38,25 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/dist/',
-    '/coverage/'
+    '/coverage/',
+    '/.worktrees/' // Ignore git worktrees to prevent module collisions
   ],
+
+  // Module path ignore patterns - exclude worktrees from Haste map
+  modulePathIgnorePatterns: [
+    '\\.worktrees'
+  ],
+
+  // Watch path ignore patterns - also exclude from watch mode
+  watchPathIgnorePatterns: [
+    '<rootDir>/\\.worktrees/',
+    '\\.worktrees'
+  ],
+
+  // Haste configuration - disable or configure to avoid collisions
+  haste: {
+    forceNodeFilesystemAPI: true // Forces Node.js fs API, may help with collisions
+  },
 
   // Global setup/teardown for Redis test server
   globalSetup: '<rootDir>/jest.globalSetup.ts',

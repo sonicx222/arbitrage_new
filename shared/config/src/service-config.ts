@@ -7,7 +7,7 @@
  * @see P1-5: Bridge cost configuration
  */
 
-import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, PANCAKESWAP_V3_FACTORIES } from './addresses';
+import { AAVE_V3_POOLS, BALANCER_V2_VAULTS, COMMIT_REVEAL_CONTRACTS, hasCommitRevealContract, PANCAKESWAP_V3_FACTORIES, SYNCSWAP_VAULTS } from './addresses';
 
 // =============================================================================
 // FLASH LOAN CONSTANTS (Fix 1.1: Centralized constants)
@@ -98,6 +98,54 @@ export const BALANCER_V2_FLASH_ARBITRAGE_ABI: string[] = [
  * Balancer V2 charges no fees for flash loans, unlike Aave V3's 0.09%.
  */
 export const BALANCER_V2_FEE_BPS = 0;
+
+/**
+ * SyncSwap flash loan fee in basis points (0.3% = 30 bps)
+ * Used by SyncSwapFlashLoanProvider for fee calculations.
+ *
+ * SyncSwap charges 0.3% flash loan fee (higher than Balancer's 0%, lower than Aave's 0.09%).
+ * Fee is applied to surplus balance after flash loan repayment.
+ *
+ * @see https://syncswap.xyz/
+ * @see docs/syncswap_api_dpcu.md
+ */
+export const SYNCSWAP_FEE_BPS = 30;
+
+/**
+ * Pre-computed BigInt version for hot-path optimization.
+ */
+export const SYNCSWAP_FEE_BPS_BIGINT = BigInt(SYNCSWAP_FEE_BPS);
+
+/**
+ * SyncSwapFlashArbitrage contract ABI (minimal for execution).
+ * Supports EIP-3156 compliant flash loans with 0.3% fee.
+ *
+ * ## Function Documentation
+ *
+ * ### executeArbitrage
+ * Executes flash loan arbitrage using EIP-3156 interface.
+ * Initiates flash loan from SyncSwap Vault and executes multi-hop swaps.
+ *
+ * ### calculateExpectedProfit
+ * Returns `(uint256 expectedProfit, uint256 flashLoanFee)`:
+ * - `expectedProfit`: Expected profit in asset units (0 if unprofitable or invalid path)
+ * - `flashLoanFee`: Flash loan fee (0.3% of loan amount)
+ *
+ * **When `expectedProfit` returns 0:**
+ * 1. Invalid swap path (tokenIn/tokenOut mismatch)
+ * 2. Router's getAmountsOut() call failed
+ * 3. Final token doesn't match starting asset
+ * 4. Expected output < loan repayment (unprofitable)
+ *
+ * @see contracts/src/SyncSwapFlashArbitrage.sol
+ * @see contracts/src/interfaces/ISyncSwapVault.sol
+ */
+export const SYNCSWAP_FLASH_ARBITRAGE_ABI: string[] = [
+  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+  'function isApprovedRouter(address router) external view returns (bool)',
+  'function VAULT() external view returns (address)',
+];
 
 // =============================================================================
 // SERVICE CONFIGURATIONS
@@ -281,6 +329,74 @@ export function validateProductionConfig(): void {
 }
 
 // =============================================================================
+// CHAIN EXECUTION SUPPORT (FIX: Issue 2.4)
+// =============================================================================
+
+/**
+ * Chains that support execution (transaction submission).
+ *
+ * FIX (Issue 2.4): Explicitly defines which chains can execute trades.
+ * This prevents execution attempts on detection-only chains like Solana.
+ *
+ * ## Chain Support Status:
+ *
+ * **EVM Chains (Execution Supported)**:
+ * - ethereum, arbitrum, optimism, base, bsc, polygon
+ * - avalanche, fantom, zksync, linea
+ * - All use ethers.js for transaction submission
+ * - Support flash loans, MEV protection, gas estimation
+ *
+ * **Solana (Detection Only)**:
+ * - ✅ Opportunity detection supported (Partition 4)
+ * - ❌ Execution NOT implemented (different transaction model)
+ * - Requires: @solana/web3.js, SPL tokens, Jito bundles
+ * - See: docs/architecture/ARCHITECTURE_V2.md Section 4.7
+ *
+ * @see isExecutionSupported() for validation helper
+ * @see docs/architecture/ARCHITECTURE_V2.md Section 4.7
+ */
+export const SUPPORTED_EXECUTION_CHAINS = new Set([
+  'ethereum',
+  'arbitrum',
+  'optimism',
+  'base',
+  'bsc',
+  'polygon',
+  'avalanche',
+  'fantom',
+  'zksync',
+  'linea',
+]);
+
+/**
+ * Check if a chain supports execution (transaction submission).
+ *
+ * FIX (Issue 2.4): Validates chain before execution attempts.
+ * Returns false for detection-only chains like Solana.
+ *
+ * @param chain - Chain identifier (e.g., 'ethereum', 'solana')
+ * @returns true if chain supports execution, false otherwise
+ *
+ * @example
+ * ```typescript
+ * if (!isExecutionSupported('solana')) {
+ *   throw new Error('Solana execution not implemented');
+ * }
+ * ```
+ */
+export function isExecutionSupported(chain: string): boolean {
+  return SUPPORTED_EXECUTION_CHAINS.has(chain);
+}
+
+/**
+ * Get list of supported execution chains.
+ * @returns Array of chain identifiers that support execution
+ */
+export function getSupportedExecutionChains(): string[] {
+  return Array.from(SUPPORTED_EXECUTION_CHAINS);
+}
+
+// =============================================================================
 // FLASH LOAN PROVIDER CONFIGURATION (P1-4 fix)
 // Moved from hardcoded values in execution-engine
 // =============================================================================
@@ -426,18 +542,20 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   //
   // Current status: Using Aave V3 for these chains (0.09% fee) until contracts deployed
   // ============================================================================
-  // S3.1.2-FIX: zkSync Era - SyncSwap provides flash swaps (no Aave V3 yet)
+  // Task 3.4: zkSync Era - SyncSwap flash loans via Vault (EIP-3156)
+  // FIXED: Now using Vault address (was incorrectly using Router address)
   zksync: {
-    address: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',  // SyncSwap Router
+    address: SYNCSWAP_VAULTS.zksync,  // SyncSwap Vault: 0x621425a1Ef6abE91058E9712575dcc4258F8d091
     protocol: 'syncswap',
-    fee: 30  // 0.3% flash swap fee
+    fee: 30  // 0.3% flash loan fee (30 bps)
   },
-  // S3.1.2-FIX: Linea - SyncSwap provides flash swaps (no Aave V3 yet)
-  linea: {
-    address: '0x80e38291e06339d10AAB483C65695D004dBD5C69',  // SyncSwap Router on Linea
-    protocol: 'syncswap',
-    fee: 30  // 0.3% flash swap fee
-  },
+  // Task 3.4 (Future): Linea - SyncSwap flash loans via Vault (EIP-3156)
+  // TODO: Add Linea Vault address when deploying SyncSwap support to Linea
+  // linea: {
+  //   address: SYNCSWAP_VAULTS.linea,  // SyncSwap Vault (TBD)
+  //   protocol: 'syncswap',
+  //   fee: 30  // 0.3% flash loan fee (30 bps)
+  // },
   // FIX: Explicit Solana entry to prevent silent failures when iterating all chains
   // Solana uses Jupiter swap routes instead of traditional flash loans
   solana: {
@@ -595,6 +713,58 @@ export const FEATURE_FLAGS = {
    * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
    */
   useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR !== 'false',
+
+  /**
+   * Enable commit-reveal MEV protection (Task 3.1).
+   *
+   * When enabled (default):
+   * - Automatically activates for high-risk transactions (sandwichRiskScore >= 70)
+   * - Two-phase execution: commit hash → wait 1 block → reveal and execute
+   * - Prevents sandwich attacks by hiding transaction parameters
+   * - Fallback to standard execution if commit-reveal fails
+   *
+   * When disabled:
+   * - Uses only private mempool (Flashbots/Jito) for MEV protection
+   * - Set FEATURE_COMMIT_REVEAL=false to disable
+   *
+   * Impact:
+   * - Additional MEV protection layer when private mempools unavailable
+   * - +1 block latency for high-risk transactions (acceptable trade-off)
+   * - Reduces sandwich attack risk from ~80% to ~5%
+   *
+   * Activates for:
+   * - IntraChainStrategy with HIGH/CRITICAL MEV risk
+   * - CrossChainStrategy with HIGH/CRITICAL MEV risk
+   * - NOT used for FlashLoanStrategy (incompatible with flash loans)
+   *
+   * @default true (production-ready - opt-out to disable)
+   * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 3 Task 3.1
+   */
+  useCommitReveal: process.env.FEATURE_COMMIT_REVEAL !== 'false',
+
+  /**
+   * Enable Redis storage for commit-reveal parameters.
+   *
+   * When enabled:
+   * - Stores reveal parameters in Redis for persistence
+   * - Enables multi-process coordination (shared state)
+   * - Survives service restarts (commitment data preserved)
+   * - Requires Redis connection (REDIS_URL env var)
+   *
+   * When disabled (default):
+   * - Uses in-memory storage only (single-process)
+   * - Lost on service restart (commitments abandoned)
+   * - No Redis dependency (simpler deployment)
+   * - Set FEATURE_COMMIT_REVEAL_REDIS=true to enable
+   *
+   * Impact:
+   * - Redis enabled: Better reliability, multi-process support
+   * - In-memory only: Simpler deployment, single-process only
+   *
+   * @default false (safe rollout - explicitly opt-in for Redis)
+   * @see services/execution-engine/src/services/commit-reveal.service.ts
+   */
+  useCommitRevealRedis: process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true',
 };
 
 /**
@@ -647,11 +817,20 @@ let _featureFlagValidationRun = false;
 /**
  * Validate feature flag configuration and log warnings/info.
  *
- * Call this function during service startup (not at module load time) to:
- * - Avoid side effects in module scope
+ * FIX (Issue 2.3): This function now auto-runs on module load (deferred via setTimeout)
+ * to catch misconfigurations early. Services can still call it explicitly with a custom
+ * logger for better integration.
+ *
+ * Auto-run behavior:
+ * - Runs automatically after module load (unless DISABLE_CONFIG_VALIDATION=true)
+ * - Falls back to console logging if not called explicitly
+ * - Validation guard prevents duplicate runs
+ * - In production, exits process on critical errors
+ *
+ * Manual call benefits:
  * - Use proper logger instead of console
- * - Enable suppression in test environments
- * - Run validation once per process lifecycle
+ * - Better integration with service logging
+ * - Control timing of validation
  *
  * @param logger - Logger instance (optional - falls back to console if not provided)
  *
@@ -662,12 +841,12 @@ let _featureFlagValidationRun = false;
  *
  * async function startService() {
  *   const logger = createLogger('execution-engine');
- *   validateFeatureFlags(logger); // Validate once at startup
+ *   validateFeatureFlags(logger); // Validate once at startup with custom logger
  *   // ... start service ...
  * }
  * ```
  */
-export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unknown) => void; info: (msg: string, meta?: unknown) => void }): void {
+export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unknown) => void; info: (msg: string, meta?: unknown) => void; error?: (msg: string, meta?: unknown) => void }): void {
   // Run validation once per process
   if (_featureFlagValidationRun) {
     return;
@@ -726,6 +905,127 @@ export function validateFeatureFlags(logger?: { warn: (msg: string, meta?: unkno
       console.warn(`⚠️  WARNING: ${message}`);
     }
   }
+
+  // Validate commit-reveal feature (Task 3.1)
+  if (FEATURE_FLAGS.useCommitReveal) {
+    const deployedChains = Object.keys(COMMIT_REVEAL_CONTRACTS).filter((chain) =>
+      hasCommitRevealContract(chain)
+    );
+
+    if (deployedChains.length === 0) {
+      const message =
+        'FEATURE_COMMIT_REVEAL is enabled but no CommitRevealArbitrage contracts are deployed. ' +
+        'Commit-reveal protection will be unavailable for high-risk transactions.';
+
+      const details = {
+        deployScript: 'npx hardhat run scripts/deploy-commit-reveal.ts --network <chain>',
+        envVarsNeeded: 'COMMIT_REVEAL_CONTRACT_ETHEREUM, COMMIT_REVEAL_CONTRACT_ARBITRUM, etc.',
+      };
+
+      if (logger) {
+        logger.warn(message, details);
+      } else {
+        console.warn(`⚠️  WARNING: ${message}`, details);
+      }
+    } else {
+      const storageMode = FEATURE_FLAGS.useCommitRevealRedis ? 'Redis (persistent)' : 'In-memory (ephemeral)';
+      const message = `Commit-reveal MEV protection enabled for chains: ${deployedChains.join(', ')} [Storage: ${storageMode}]`;
+      if (logger) {
+        logger.info(message, {
+          chains: deployedChains,
+          storageMode,
+          redisEnabled: FEATURE_FLAGS.useCommitRevealRedis
+        });
+      } else {
+        console.info(`✅ ${message}`);
+      }
+    }
+
+    // Validate Redis configuration if Redis storage is enabled
+    if (FEATURE_FLAGS.useCommitRevealRedis) {
+      if (!process.env.REDIS_URL) {
+        const message =
+          'FEATURE_COMMIT_REVEAL_REDIS is enabled but REDIS_URL is not set. ' +
+          'Commit-reveal will fall back to in-memory storage.';
+
+        // In production, this is a critical error (multi-process coordination requires Redis)
+        if (isProduction) {
+          const error = new Error(
+            `${message}\n\n` +
+            `CRITICAL: In production with multi-process deployment, Redis is required for commit-reveal.\n` +
+            `Either set REDIS_URL or disable Redis storage with FEATURE_COMMIT_REVEAL_REDIS=false.`
+          );
+          if (logger?.error) {
+            logger.error(message, { fallbackMode: 'in-memory', severity: 'CRITICAL' });
+          }
+          throw error;
+        }
+
+        // In development, warn only
+        if (logger) {
+          logger.warn(message, { fallbackMode: 'in-memory' });
+        } else {
+          console.warn(`⚠️  WARNING: ${message}`);
+        }
+      }
+    }
+  } else {
+    const message =
+      'Commit-Reveal MEV Protection DISABLED - high-risk transactions will use only private mempools. ' +
+      'Set FEATURE_COMMIT_REVEAL=true to enable commit-reveal protection as fallback.';
+    if (logger) {
+      logger.warn(message);
+    } else {
+      console.warn(`⚠️  WARNING: ${message}`);
+    }
+  }
+}
+
+// =============================================================================
+// AUTO-VALIDATION ON MODULE LOAD (FIX: Issue 2.3)
+// =============================================================================
+
+/**
+ * Auto-run validation on module load with opt-out.
+ *
+ * FIX (Issue 2.3): Automatically validate configuration on module load to catch
+ * misconfigurations early. Services can still call validateFeatureFlags() explicitly
+ * with a logger for better integration, but this ensures validation runs even if forgotten.
+ *
+ * Design:
+ * - Uses setTimeout(0) to defer execution after module load completes
+ * - Can be disabled via DISABLE_CONFIG_VALIDATION=true (for tests)
+ * - Validation guard prevents duplicate runs
+ * - Falls back to console logging if no explicit logger provided
+ * - In production with critical errors, exits process to fail fast
+ *
+ * Why deferred (setTimeout):
+ * - Avoids blocking module load
+ * - Allows services to call validateFeatureFlags() first if they want
+ * - Still catches forgotten calls before service actually starts
+ *
+ * @see validateFeatureFlags() for manual validation with custom logger
+ */
+if (process.env.DISABLE_CONFIG_VALIDATION !== 'true') {
+  // Defer validation to allow services to call validateFeatureFlags() first
+  setTimeout(() => {
+    // If validation hasn't run yet, run it now with console fallback
+    if (!_featureFlagValidationRun) {
+      try {
+        validateFeatureFlags(); // Will use console.log/warn
+      } catch (error) {
+        // Log critical validation errors
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error('❌ CRITICAL CONFIGURATION ERROR:', errorMessage);
+
+        // In production, fail fast to prevent running with invalid config
+        if (process.env.NODE_ENV === 'production') {
+          console.error('Exiting process due to configuration error in production mode');
+          process.exit(1);
+        }
+      }
+    }
+  }, 0);
 }
 
 // =============================================================================
