@@ -35,6 +35,24 @@ export interface PerformanceBaseline {
 }
 
 /**
+ * Load Test Performance Targets (ADR-005)
+ *
+ * Targets for load test metrics (different from cache baseline metrics).
+ * Used to validate LoadTestResult.metrics against ADR-005 requirements.
+ */
+export interface LoadTestTargets {
+  latency: {
+    p99: number; // ms
+  };
+  memory: {
+    growthRateMBPerMin: number; // MB/min
+  };
+  throughput: {
+    minEventsPerSec: number; // events/sec
+  };
+}
+
+/**
  * Performance Fixtures
  */
 export const PerformanceFixtures = {
@@ -204,6 +222,53 @@ export const PerformanceFixtures = {
       memoryUsageMB: 16, // Can increase 16MB (80MB max)
       gcPauseMs: 5, // Can increase 5ms (15ms max)
       evictionRate: 2, // Can increase 2% (3% max)
+    }),
+  },
+
+  /**
+   * Load Test Performance Targets (ADR-005)
+   *
+   * Expected performance targets for load testing (different from cache baselines).
+   * Based on ADR-005 hot-path latency and system requirements.
+   */
+  loadTestTargets: {
+    /**
+     * ADR-005 target performance for load tests
+     */
+    target: (): LoadTestTargets => ({
+      latency: {
+        p99: 50, // <50ms per event (ADR-005 hot-path requirement)
+      },
+      memory: {
+        growthRateMBPerMin: 5, // <5MB/min (acceptable growth rate)
+      },
+      throughput: {
+        minEventsPerSec: 500, // >500 eps (production target)
+      },
+    }),
+
+    /**
+     * Stress test targets (degraded performance acceptable)
+     */
+    stress: (): LoadTestTargets => ({
+      latency: {
+        p99: 100, // <100ms per event (2x normal)
+      },
+      memory: {
+        growthRateMBPerMin: 10, // <10MB/min (higher growth acceptable)
+      },
+      throughput: {
+        minEventsPerSec: 1000, // >1000 eps (stress load)
+      },
+    }),
+
+    /**
+     * Custom targets
+     */
+    custom: (latencyP99: number, memoryGrowthMBPerMin: number, minEventsPerSec: number): LoadTestTargets => ({
+      latency: { p99: latencyP99 },
+      memory: { growthRateMBPerMin: memoryGrowthMBPerMin },
+      throughput: { minEventsPerSec: minEventsPerSec },
     }),
   },
 

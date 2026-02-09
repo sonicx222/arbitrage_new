@@ -49,8 +49,8 @@ const TEST_AMOUNT_100_USDC = ethers.parseUnits('100', 6);
  * Deploy MultiPathQuoter contract to local network
  */
 async function deployMultiPathQuoter(provider: ethers.JsonRpcProvider): Promise<string> {
-  const [deployer] = await provider.listAccounts();
-  const signer = await provider.getSigner(deployer);
+  // Get signer for first account (deployer)
+  const signer = await provider.getSigner(0);
 
   // Read compiled contract (assumes build has been run)
   const MultiPathQuoterFactory = new ethers.ContractFactory(
@@ -325,7 +325,7 @@ describe('Batched Quote Fetching - Performance Benchmark', () => {
         }
 
         // Create BatchQuoterService instance
-        const batchQuoter = createBatchQuoterForChain('ethereum', provider);
+        const batchQuoter = createBatchQuoterForChain(provider, 'ethereum');
 
         if (!batchQuoter.isBatchingEnabled()) {
           console.log('⏭️  Skipping - batching not enabled');
@@ -359,7 +359,12 @@ describe('Batched Quote Fetching - Performance Benchmark', () => {
           const startTime = Date.now();
 
           try {
-            const result = await batchQuoter.simulateArbitragePath(requests);
+            // Flash loan: 10 ETH at 0.09% fee (9 bps, typical for Aave)
+            const result = await batchQuoter.simulateArbitragePath(
+              requests,
+              ethers.parseEther('10'), // flashLoanAmount
+              9 // flashLoanFeeBps (0.09%)
+            );
             const latency = Date.now() - startTime;
             latencies.push(latency);
 

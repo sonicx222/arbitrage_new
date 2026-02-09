@@ -325,7 +325,7 @@ describe('Cache Load Performance (Task #45)', () => {
       const cache = cacheHarness.getCache();
 
       // ADR-005 targets from PerformanceFixtures
-      const targets = PerformanceFixtures.baselines.target();
+      const targets = PerformanceFixtures.loadTestTargets.target();
 
       // Event handler
       let eventIndex = 0;
