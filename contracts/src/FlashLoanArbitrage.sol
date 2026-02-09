@@ -587,12 +587,32 @@ contract FlashLoanArbitrage is
         // (Same pattern as _executeSwaps)
         address[] memory path = new address[](2);
 
+        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
+        // Pre-allocate array for visited tokens (max size = pathLength + 1 for start asset)
+        address[] memory visitedTokens = new address[](pathLength + 1);
+        visitedTokens[0] = asset; // Start asset
+        uint256 visitedCount = 1;
+
         for (uint256 i = 0; i < pathLength;) {
             SwapStep calldata step = swapPath[i];
 
             if (step.tokenIn != currentToken) {
                 return (0, flashLoanFee); // Invalid path
             }
+
+            // Check for cycle: token appears twice before final step
+            // Allow final step to return to start asset (that's the goal)
+            if (i < pathLength - 1) {
+                for (uint256 j = 0; j < visitedCount; j++) {
+                    if (visitedTokens[j] == step.tokenOut) {
+                        return (0, flashLoanFee); // Cycle detected - inefficient path
+                    }
+                }
+            }
+
+            // Track this token as visited
+            visitedTokens[visitedCount] = step.tokenOut;
+            unchecked { ++visitedCount; }
 
             // Reuse pre-allocated path array
             path[0] = step.tokenIn;

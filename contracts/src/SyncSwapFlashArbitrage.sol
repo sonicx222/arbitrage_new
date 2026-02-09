@@ -417,6 +417,11 @@ contract SyncSwapFlashArbitrage is
         address currentToken = asset;
         address[] memory path = new address[](2);
 
+        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
+        address[] memory visitedTokens = new address[](swapPath.length + 1);
+        visitedTokens[0] = asset;
+        uint256 visitedCount = 1;
+
         // Simulate each swap
         for (uint256 i = 0; i < swapPath.length;) {
             SwapStep calldata step = swapPath[i];
@@ -425,6 +430,19 @@ contract SyncSwapFlashArbitrage is
             if (step.tokenIn != currentToken) {
                 return (0, flashLoanFee);
             }
+
+            // Check for cycle: token appears twice before final step
+            if (i < swapPath.length - 1) {
+                for (uint256 j = 0; j < visitedCount; j++) {
+                    if (visitedTokens[j] == step.tokenOut) {
+                        return (0, flashLoanFee); // Cycle detected
+                    }
+                }
+            }
+
+            // Track visited token
+            visitedTokens[visitedCount] = step.tokenOut;
+            unchecked { ++visitedCount; }
 
             path[0] = step.tokenIn;
             path[1] = step.tokenOut;

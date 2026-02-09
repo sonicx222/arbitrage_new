@@ -29,6 +29,7 @@ This guide covers the deployment of `SyncSwapFlashArbitrage.sol` contract on zkS
 - [x] Configuration setup
 - [x] Deployment scripts
 - [x] Interface: `ISyncSwapVault.sol` (EIP-3156)
+- [x] **Code review & verification (2026-02-09)**: Confirmed contract uses `forceApprove()` pattern (USDT/BNB compatible)
 
 ### 🚀 Ready for Deployment
 - [ ] zkSync Era Mainnet - Pending deployment

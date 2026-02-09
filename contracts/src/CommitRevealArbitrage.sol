@@ -524,12 +524,30 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
         // Pre-allocate path array (gas optimization)
         address[] memory path = new address[](2);
 
+        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
+        address[] memory visitedTokens = new address[](pathLength + 1);
+        visitedTokens[0] = asset;
+        uint256 visitedCount = 1;
+
         // Simulate each swap
         for (uint256 i = 0; i < pathLength;) {
             SwapStep calldata step = swapPath[i];
 
             // Validate token continuity
             if (step.tokenIn != currentToken) return 0;
+
+            // Check for cycle: token appears twice before final step
+            if (i < pathLength - 1) {
+                for (uint256 j = 0; j < visitedCount; j++) {
+                    if (visitedTokens[j] == step.tokenOut) {
+                        return 0; // Cycle detected
+                    }
+                }
+            }
+
+            // Track visited token
+            visitedTokens[visitedCount] = step.tokenOut;
+            unchecked { ++visitedCount; }
 
             path[0] = step.tokenIn;
             path[1] = step.tokenOut;

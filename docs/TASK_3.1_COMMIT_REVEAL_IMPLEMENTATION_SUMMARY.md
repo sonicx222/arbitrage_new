@@ -564,6 +564,14 @@ npx hardhat run scripts/deploy-commit-reveal.ts --network linea
 - [x] Deployment instructions
 - [x] Configuration guide
 
+### Critical Bug Fixes ✅ (Completed 2026-02-09)
+- [x] **Race condition in storage** - Implemented fail-fast approach when Redis enabled but unavailable (prevents split-brain)
+- [x] **Zero address validation** - Added validateAddress() function in addresses.ts for fail-fast config validation
+- [x] **Nonce allocation timeout** - Fixed timeout accumulation with deadline-based approach
+- [x] **Minimum profit validation** - Verified contract sets minimumProfit = 0 correctly (owner must configure)
+
+**Reference:** See DEEP_DIVE_ANALYSIS_REPORT.md sections 1.1, 1.2, 1.4 and CONTRACTS_DEEP_DIVE_ANALYSIS.md section 4.2
+
 ### Production Readiness ⏸️ (BLOCKED - Testing required)
 - [ ] External security audit
 - [ ] Mainnet deployment (phased)
@@ -572,7 +580,7 @@ npx hardhat run scripts/deploy-commit-reveal.ts --network linea
 
 ---
 
-**Last Updated:** 2025-02-09
-**Version:** 1.0
-**Status:** Implementation Complete, Testing Required
+**Last Updated:** 2026-02-09
+**Version:** 1.1
+**Status:** Implementation Complete + Critical Bugs Fixed, Testing Required
 

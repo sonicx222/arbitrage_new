@@ -135,9 +135,10 @@ Critical security fixes are covered by regression tests in `shared/core/src/fixe
 ### Immediate (Before Production)
 - [x] Remove exposed `.env` files from git tracking
 - [x] Clean git history of committed secrets
-- [ ] **ROTATE ALL COMPROMISED API KEYS** (see provider list above)
+- [x] **ROTATE ALL COMPROMISED API KEYS** (completed 2026-02-09) ✅
 - [ ] Enable GitHub Secret Scanning and Push Protection
 - [ ] Set up AWS Secrets Manager or HashiCorp Vault
+- [x] **Add zero address validation** (completed 2026-02-09) - Added validateAddress() function in addresses.ts ✅
 
 ### Short-term (Next Sprint)
 - [ ] Implement Hardware Security Module (HSM) for production wallet keys
