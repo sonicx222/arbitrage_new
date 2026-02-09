@@ -24,7 +24,7 @@
  */
 
 import { ethers } from 'ethers';
-import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, MEV_CONFIG, DEXES, isExecutionSupported, getSupportedExecutionChains } from '@arbitrage/config';
 import { getErrorMessage, createPinoLogger, type ILogger } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 // P3-FIX 4.1 / Phase 5.3: Use auto-generated error selectors instead of hardcoded values
@@ -48,6 +48,9 @@ import {
 import {
   BridgeProfitabilityAnalyzer,
 } from '../services/bridge-profitability-analyzer';
+// NEW: Task #13 - Extracted DEX and swap services
+import { DexLookupService } from '../services/dex-lookup.service';
+import { SwapBuilder } from '../services/swap-builder.service';
 
 // Re-export for backward compatibility
 export {
@@ -320,8 +323,16 @@ export abstract class BaseExecutionStrategy {
    */
   private _bridgeProfitabilityAnalyzer?: BridgeProfitabilityAnalyzer;
 
+  // NEW: Task #13 extracted services
+  protected readonly dexLookup: DexLookupService;
+  protected readonly swapBuilder: SwapBuilder;
+
   constructor(logger: Logger) {
     this.logger = logger;
+    // NEW: Task #13 - Initialize extracted services
+    this.dexLookup = new DexLookupService();
+    // Cast Logger to ILogger - Logger interface is a subset of ILogger
+    this.swapBuilder = new SwapBuilder(this.dexLookup, logger as unknown as ILogger);
   }
 
   /**
@@ -379,6 +390,54 @@ export abstract class BaseExecutionStrategy {
     const address = await wallet.getAddress();
     this.walletAddressCache.set(wallet, address);
     return address;
+  }
+
+  // ===========================================================================
+  // FIX (Issue 2.4): Chain Validation
+  // ===========================================================================
+
+  /**
+   * Validate that a chain supports execution.
+   *
+   * FIX (Issue 2.4): Prevents execution attempts on detection-only chains like Solana.
+   * Throws an error with clear message if chain doesn't support execution.
+   *
+   * ## Why This Matters:
+   * - Solana uses different transaction model (@solana/web3.js vs ethers.js)
+   * - Solana requires SPL tokens, program invocations, Jito bundles
+   * - Attempting EVM execution on Solana will fail with cryptic errors
+   * - Better to fail fast with clear error message
+   *
+   * @param chain - Chain identifier to validate
+   * @param opportunityId - Opportunity ID for error logging
+   * @throws Error if chain doesn't support execution
+   *
+   * @see isExecutionSupported() from @arbitrage/config
+   * @see docs/architecture/ARCHITECTURE_V2.md Section 4.7
+   *
+   * @example
+   * ```typescript
+   * // In execute() method:
+   * this.validateChain(opportunity.chain, opportunity.id);
+   * ```
+   */
+  protected validateChain(chain: string, opportunityId: string): void {
+    if (!isExecutionSupported(chain)) {
+      const supportedChains = getSupportedExecutionChains().join(', ');
+      const message = `[ERR_CHAIN_NOT_SUPPORTED] Chain '${chain}' execution not implemented. ` +
+        `Opportunity ${opportunityId} cannot be executed. ` +
+        `Supported chains: ${supportedChains}. ` +
+        `Note: Solana is detection-only (see ARCHITECTURE_V2.md Section 4.7).`;
+
+      this.logger.error(message, {
+        chain,
+        opportunityId,
+        supportedChains: getSupportedExecutionChains(),
+        hint: 'Solana requires separate executor implementation (different transaction model)',
+      });
+
+      throw new Error(message);
+    }
   }
 
   /**
@@ -967,10 +1026,9 @@ export abstract class BaseExecutionStrategy {
       throw new Error(`No wallet for chain: ${chain}`);
     }
 
-    // Refactor 9.5: Use O(1) DEX lookup
-    const targetDex = opportunity.sellDex
-      ? getDexByName(chain, opportunity.sellDex)
-      : getFirstDex(chain);
+    // NEW: Task #14 - Use O(1) DexLookupService instead of O(n) getDexByName
+    const dexName = opportunity.sellDex || 'uniswap_v3';
+    const targetDex = this.dexLookup.getDexByName(chain, dexName);
 
     if (!targetDex) {
       throw new Error(`No DEX configured for chain: ${chain}${opportunity.sellDex ? ` (requested: ${opportunity.sellDex})` : ''}`);
