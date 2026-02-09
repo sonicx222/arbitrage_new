@@ -57,4 +57,58 @@ describe('SwapBuilder', () => {
       expect(swapBuilder).toBeDefined();
     });
   });
+
+  describe('buildSwapSteps', () => {
+    it('should build 2-hop swap steps', () => {
+      const opportunity = createMockOpportunity();
+
+      const steps = swapBuilder.buildSwapSteps(opportunity, {
+        buyRouter: 'uniswap_v3',
+        sellRouter: 'sushiswap',
+        intermediateToken: USDC_ADDRESS,
+        chain: 'ethereum',
+        slippageBps: 50 // 0.5%
+      });
+
+      expect(steps).toHaveLength(2);
+
+      // First hop: WETH -> USDC
+      expect(steps[0].tokenIn).toBe(WETH_ADDRESS);
+      expect(steps[0].tokenOut).toBe(USDC_ADDRESS);
+      expect(steps[0].router).toBeDefined();
+      expect(typeof steps[0].amountOutMin).toBe('bigint');
+
+      // Second hop: USDC -> WETH
+      expect(steps[1].tokenIn).toBe(USDC_ADDRESS);
+      expect(steps[1].tokenOut).toBe(WETH_ADDRESS);
+      expect(steps[1].router).toBeDefined();
+      expect(typeof steps[1].amountOutMin).toBe('bigint');
+    });
+
+    it('should throw on invalid opportunity data', () => {
+      const invalidOpp = createMockOpportunity({ tokenIn: undefined });
+
+      expect(() => {
+        swapBuilder.buildSwapSteps(invalidOpp, {
+          buyRouter: 'uniswap_v3',
+          sellRouter: 'sushiswap',
+          intermediateToken: USDC_ADDRESS,
+          chain: 'ethereum'
+        });
+      }).toThrow('[SwapBuilder] Invalid opportunity');
+    });
+
+    it('should throw on invalid router', () => {
+      const opportunity = createMockOpportunity();
+
+      expect(() => {
+        swapBuilder.buildSwapSteps(opportunity, {
+          buyRouter: 'unknown_router',
+          sellRouter: 'sushiswap',
+          intermediateToken: USDC_ADDRESS,
+          chain: 'ethereum'
+        });
+      }).toThrow('[SwapBuilder] Buy router not found');
+    });
+  });
 });
