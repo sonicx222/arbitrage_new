@@ -98,18 +98,9 @@ describe('SwapBuilder', () => {
       }).toThrow('[SwapBuilder] Invalid opportunity');
     });
 
-    it('should throw on invalid router', () => {
-      const opportunity = createMockOpportunity();
-
-      expect(() => {
-        swapBuilder.buildSwapSteps(opportunity, {
-          buyRouter: 'unknown_router',
-          sellRouter: 'sushiswap',
-          intermediateToken: USDC_ADDRESS,
-          chain: 'ethereum'
-        });
-      }).toThrow('[SwapBuilder] Buy router not found');
-    });
+    // NOTE: Router validation is now handled by DexLookupService,
+    // not by SwapBuilder. SwapBuilder accepts router addresses directly.
+    // For router validation tests, see dex-lookup.service.test.ts
   });
 
   describe('caching', () => {
