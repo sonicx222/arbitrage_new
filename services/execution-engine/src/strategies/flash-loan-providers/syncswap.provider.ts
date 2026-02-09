@@ -1,0 +1,344 @@
+/**
+ * SyncSwap Flash Loan Provider (Task 3.4)
+ *
+ * Fully implemented provider for SyncSwap flash loans on zkSync Era.
+ * Uses SyncSwapFlashArbitrage.sol contract for on-chain execution.
+ *
+ * Key characteristics:
+ * - 0.3% flash loan fee (30 basis points)
+ * - EIP-3156 compliant interface
+ * - Single Vault per chain (no pool discovery needed)
+ * - zkSync Era native (L2-optimized)
+ *
+ * Supported chains: zksync (Linea support planned for future)
+ *
+ * @see contracts/src/SyncSwapFlashArbitrage.sol
+ * @see contracts/src/interfaces/ISyncSwapVault.sol
+ * @see docs/syncswap_api_dpcu.md
+ */
+
+import { ethers } from 'ethers';
+import {
+  SYNCSWAP_FEE_BPS,
+  BPS_DENOMINATOR_BIGINT,
+  SYNCSWAP_FLASH_ARBITRAGE_ABI,
+} from '@arbitrage/config';
+import type {
+  IFlashLoanProvider,
+  FlashLoanProtocol,
+  FlashLoanRequest,
+  FlashLoanFeeInfo,
+  FlashLoanProviderCapabilities,
+} from './types';
+
+// Alias for local readability
+const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+
+/**
+ * Cached ethers.Interface for hot-path optimization.
+ * Creating Interface objects is expensive - cache at module level.
+ */
+const SYNCSWAP_INTERFACE = new ethers.Interface(SYNCSWAP_FLASH_ARBITRAGE_ABI);
+
+/**
+ * Default deadline for flash loan execution (5 minutes from now).
+ * This protects against stale transactions being mined in poor market conditions.
+ */
+const DEFAULT_DEADLINE_SECONDS = 300;
+
+/**
+ * SyncSwap Flash Loan Provider
+ *
+ * Implements the IFlashLoanProvider interface for SyncSwap's Vault-based
+ * flash loan system with EIP-3156 compliance.
+ *
+ * ## Architecture
+ * - **Vault-based**: Single Vault contract per chain (like Balancer V2)
+ * - **EIP-3156**: Standards-compliant flash loan interface
+ * - **Fee**: 0.3% (30 bps) flash loan fee
+ * - **Chains**: zkSync Era (mainnet + testnet)
+ *
+ * ## Integration
+ * ```typescript
+ * const provider = new SyncSwapFlashLoanProvider({
+ *   chain: 'zksync',
+ *   poolAddress: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // Vault
+ *   contractAddress: '<deployed SyncSwapFlashArbitrage address>',
+ *   approvedRouters: ['0x2da...', '0x8B7...'],  // SyncSwap Router, Mute, etc.
+ * });
+ * ```
+ */
+export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
+  readonly protocol: FlashLoanProtocol = 'syncswap';
+  readonly chain: string;
+  readonly poolAddress: string; // Vault address
+
+  private readonly contractAddress: string;
+  private readonly approvedRouters: string[];
+  private readonly feeOverride?: number;
+
+  constructor(config: {
+    chain: string;
+    poolAddress: string; // Vault address
+    contractAddress: string;
+    approvedRouters: string[];
+    feeOverride?: number;
+  }) {
+    this.chain = config.chain;
+    this.poolAddress = config.poolAddress; // SyncSwap Vault address
+    this.contractAddress = config.contractAddress;
+    this.approvedRouters = config.approvedRouters;
+    this.feeOverride = config.feeOverride;
+
+    // Validate configuration
+    if (!ethers.isAddress(config.contractAddress)) {
+      throw new Error(`[ERR_CONFIG] Invalid contract address for SyncSwap provider on ${config.chain}`);
+    }
+    if (!ethers.isAddress(config.poolAddress)) {
+      throw new Error(`[ERR_CONFIG] Invalid vault address for SyncSwap provider on ${config.chain}`);
+    }
+  }
+
+  /**
+   * Check if provider is available for use
+   */
+  isAvailable(): boolean {
+    // Check for zero address which indicates misconfiguration
+    if (this.contractAddress === '0x0000000000000000000000000000000000000000') {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Get provider capabilities
+   */
+  getCapabilities(): FlashLoanProviderCapabilities {
+    return {
+      supportsMultiHop: true,
+      supportsMultiAsset: false, // MVP: Single-asset EIP-3156 flash loans only
+      maxLoanAmount: 0n, // Depends on Vault liquidity
+      supportedTokens: [], // All tokens in SyncSwap pools are supported
+      status: 'fully_supported',
+    };
+  }
+
+  /**
+   * Calculate flash loan fee for an amount
+   *
+   * SyncSwap charges 0.3% (30 basis points) flash loan fee.
+   * Fee is calculated on surplus balance: postLoanBalance - preLoanBalance
+   *
+   * @param amount - Loan amount in wei
+   * @returns Fee information (30 bps = 0.3%)
+   *
+   * @example
+   * ```typescript
+   * const fee = provider.calculateFee(ethers.parseEther('1000'));
+   * // Returns: { feeBps: 30, feeAmount: 3000000000000000000n, protocol: 'syncswap' }
+   * // Fee amount: 3 ETH (0.3% of 1000 ETH)
+   * ```
+   */
+  calculateFee(amount: bigint): FlashLoanFeeInfo {
+    const feeBps = this.feeOverride ?? SYNCSWAP_FEE_BPS; // Default: 30 bps
+    const feeAmount = (amount * BigInt(feeBps)) / BPS_DENOMINATOR; // 0.3% fee
+
+    return {
+      feeBps,
+      feeAmount,
+      protocol: this.protocol,
+    };
+  }
+
+  /**
+   * Build the transaction calldata for flash loan execution
+   *
+   * Encodes a call to `SyncSwapFlashArbitrage.executeArbitrage()` with:
+   * - asset: Token to borrow
+   * - amount: Loan amount
+   * - swapPath: Multi-hop swap steps
+   * - minProfit: Minimum acceptable profit
+   * - deadline: Transaction expiry timestamp
+   *
+   * @param request - Flash loan request parameters
+   * @returns Encoded calldata for the transaction
+   */
+  buildCalldata(request: FlashLoanRequest): string {
+    // Convert SwapStep[] to tuple array format for ABI encoding
+    const swapPathTuples = request.swapPath.map(step => [
+      step.router,
+      step.tokenIn,
+      step.tokenOut,
+      step.amountOutMin,
+    ]);
+
+    // Calculate deadline: current time + 5 minutes
+    const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
+
+    return SYNCSWAP_INTERFACE.encodeFunctionData('executeArbitrage', [
+      request.asset,
+      request.amount,
+      swapPathTuples,
+      request.minProfit,
+      deadline,
+    ]);
+  }
+
+  /**
+   * Build the complete transaction request
+   *
+   * @param request - Flash loan request parameters
+   * @param from - Sender address
+   * @returns Transaction request ready for signing
+   */
+  buildTransaction(
+    request: FlashLoanRequest,
+    from: string
+  ): ethers.TransactionRequest {
+    return {
+      to: this.contractAddress,
+      data: this.buildCalldata(request),
+      from,
+    };
+  }
+
+  /**
+   * Estimate gas for flash loan execution
+   *
+   * **zkSync Era Gas Considerations**:
+   * - zkSync Era is an L2 with different gas model than Ethereum L1
+   * - Flash loan + multi-hop swaps typically use 400k-600k gas
+   * - Default estimate: 520k gas (conservative buffer)
+   *
+   * @param request - Flash loan request parameters
+   * @param provider - JSON-RPC provider for estimation
+   * @returns Estimated gas units
+   */
+  async estimateGas(
+    request: FlashLoanRequest,
+    provider: ethers.JsonRpcProvider
+  ): Promise<bigint> {
+    const tx = this.buildTransaction(request, request.initiator);
+
+    try {
+      return await provider.estimateGas(tx);
+    } catch {
+      // Default gas estimate for flash loan arbitrage on zkSync Era
+      // SyncSwap Vault + EIP-3156 callback + multi-hop swaps
+      return 520000n;
+    }
+  }
+
+  /**
+   * Validate a flash loan request before execution
+   *
+   * Performs comprehensive validation:
+   * 1. Chain match (must be 'zksync' or supported chain)
+   * 2. Valid asset address
+   * 3. Non-zero loan amount
+   * 4. Non-empty swap path
+   * 5. Approved routers only
+   * 6. Valid cycle (starts and ends with same token)
+   * 7. Asset matches first swap token
+   *
+   * @param request - Flash loan request to validate
+   * @returns Validation result with error message if invalid
+   */
+  validate(request: FlashLoanRequest): { valid: boolean; error?: string } {
+    // Check chain matches
+    if (request.chain !== this.chain) {
+      return {
+        valid: false,
+        error: `[ERR_CHAIN_MISMATCH] Request chain '${request.chain}' does not match provider chain '${this.chain}'`,
+      };
+    }
+
+    // Check asset is valid address
+    if (!ethers.isAddress(request.asset)) {
+      return {
+        valid: false,
+        error: '[ERR_INVALID_ASSET] Invalid asset address',
+      };
+    }
+
+    // Check amount is non-zero
+    if (request.amount === 0n) {
+      return {
+        valid: false,
+        error: '[ERR_ZERO_AMOUNT] Flash loan amount cannot be zero',
+      };
+    }
+
+    // Check swap path is not empty
+    if (request.swapPath.length === 0) {
+      return {
+        valid: false,
+        error: '[ERR_EMPTY_PATH] Swap path cannot be empty',
+      };
+    }
+
+    // Check all routers in path are approved
+    for (const step of request.swapPath) {
+      if (!ethers.isAddress(step.router)) {
+        return {
+          valid: false,
+          error: `[ERR_INVALID_ROUTER] Invalid router address: ${step.router}`,
+        };
+      }
+
+      // Only validate against approved routers if the list is non-empty
+      if (this.approvedRouters.length > 0) {
+        const isApproved = this.approvedRouters.some(
+          r => r.toLowerCase() === step.router.toLowerCase()
+        );
+        if (!isApproved) {
+          return {
+            valid: false,
+            error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
+          };
+        }
+      }
+    }
+
+    // Check swap path forms a valid cycle (ends with same token as starts)
+    const firstToken = request.swapPath[0].tokenIn;
+    const lastToken = request.swapPath[request.swapPath.length - 1].tokenOut;
+    if (firstToken.toLowerCase() !== lastToken.toLowerCase()) {
+      return {
+        valid: false,
+        error: '[ERR_INVALID_CYCLE] Swap path must end with the same token it starts with',
+      };
+    }
+
+    // Check first token matches asset
+    if (firstToken.toLowerCase() !== request.asset.toLowerCase()) {
+      return {
+        valid: false,
+        error: '[ERR_ASSET_MISMATCH] First swap token must match flash loan asset',
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Get the contract address for this provider
+   */
+  getContractAddress(): string {
+    return this.contractAddress;
+  }
+
+  /**
+   * Get the list of approved routers
+   */
+  getApprovedRouters(): string[] {
+    return [...this.approvedRouters];
+  }
+
+  /**
+   * Get the Vault address for this provider
+   */
+  getVaultAddress(): string {
+    return this.poolAddress;
+  }
+}

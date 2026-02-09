@@ -42,16 +42,14 @@ const mockRedis = {
   ping: jest.fn<any>(() => Promise.resolve('PONG'))
 };
 
-const mockLogger = {
-  info: jest.fn<any>(),
-  warn: jest.fn<any>(),
-  error: jest.fn<any>(),
-  debug: jest.fn<any>()
-};
-
-// Mock logger
+// Mock logger - Factory function to avoid hoisting issue with jest.mock
 jest.mock('../../src/logger', () => ({
-  createLogger: () => mockLogger,
+  createLogger: () => ({
+    info: jest.fn<any>(),
+    warn: jest.fn<any>(),
+    error: jest.fn<any>(),
+    debug: jest.fn<any>()
+  }),
   getPerformanceLogger: () => ({
     startTimer: jest.fn(),
     endTimer: jest.fn(),

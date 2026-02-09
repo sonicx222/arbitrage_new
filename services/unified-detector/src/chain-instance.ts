@@ -54,6 +54,8 @@ import {
   // PHASE2-TASK36: Hierarchical cache with PriceMatrix L1
   HierarchicalCache,
   createHierarchicalCache,
+  // FIX (Issue 2.1): Import bpsToDecimal for fee conversion (replaces deprecated dexFeeToPercentage)
+  bpsToDecimal,
 } from '@arbitrage/core';
 
 import {
@@ -64,7 +66,8 @@ import {
   TOKEN_METADATA,
   ARBITRAGE_CONFIG,
   getEnabledDexes,
-  dexFeeToPercentage,
+  // FIX (Issue 2.1): Removed deprecated dexFeeToPercentage import
+  // Using bpsToDecimal from @arbitrage/core instead
   isEvmChain,
   // Task 2.1.3: Factory addresses for subscription
   getAllFactoryAddresses
@@ -1096,9 +1099,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
           // Convert fee from basis points to percentage for pair storage
           // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-          // S2.2.3 FIX: Use ?? instead of ternary to correctly handle fee: 0
+          // FIX (Issue 2.1): Migrate from deprecated dex.fee to dex.feeBps
+          // Use bpsToDecimal instead of deprecated dexFeeToPercentage
           // Validate fee at source to catch config errors early
-          const feePercentage = validateFee(dexFeeToPercentage(dex.fee ?? 30));
+          const feePercentage = validateFee(bpsToDecimal(dex.feeBps ?? 30));
 
           // HOT-PATH OPT: Pre-compute pairKey once during initialization
           // This avoids per-event string allocation in emitPriceUpdate()
@@ -1431,7 +1435,8 @@ export class ChainDetectorInstance extends EventEmitter {
     const chainPairKey = `${this.chainId}:${pairAddressLower}`;
 
     // Validate fee at source - downstream consumers trust this value
-    const validatedFee = validateFee(event.fee ? dexFeeToPercentage(event.fee) : undefined);
+    // FIX (Issue 2.1): Use bpsToDecimal instead of deprecated dexFeeToPercentage
+    const validatedFee = validateFee(event.fee ? bpsToDecimal(event.fee) : undefined);
 
     const newPair: ExtendedPair = {
       name: pairName,

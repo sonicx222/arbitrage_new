@@ -11,12 +11,6 @@
  *
  * When updating Aave addresses, update BOTH files to keep them in sync.
  *
- * ## Contract Libraries (Fix 9.1/9.4)
- *
- * The contracts/ directory includes reusable libraries:
- * - src/libraries/Constants.sol - Shared constants
- * - src/libraries/SwapPathValidator.sol - Path validation logic
- *
  * Usage:
  *   import { FLASH_LOAN_CONTRACT_ADDRESSES, AAVE_V3_POOL_ADDRESSES } from '@arbitrage/contracts/deployments';
  *

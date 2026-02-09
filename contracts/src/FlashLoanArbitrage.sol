@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
+import "./libraries/SwapHelpers.sol";
 
 /**
  * @title FlashLoanArbitrage
@@ -98,6 +99,13 @@ contract FlashLoanArbitrage is
     /// @dev Prevents callers from setting amountOutMin = 0 which exposes to sandwich attacks
     uint256 public constant MIN_SLIPPAGE_BPS = 10;
 
+    /// @notice Maximum number of hops in a swap path (prevents DoS via gas exhaustion)
+    /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
+    uint256 public constant MAX_SWAP_HOPS = 5;
+
+    /// @notice Denominator for basis points calculations (10000 bps = 100%)
+    uint256 private constant BPS_DENOMINATOR = 10000;
+
     // ==========================================================================
     // State Variables
     // ==========================================================================
@@ -175,6 +183,7 @@ contract FlashLoanArbitrage is
     error RouterAlreadyApproved();
     error RouterNotApproved();
     error EmptySwapPath();
+    error PathTooLong(uint256 provided, uint256 max);
     error InvalidSwapPath();
     error SwapPathAssetMismatch();
     error InsufficientProfit();
@@ -233,7 +242,11 @@ contract FlashLoanArbitrage is
         // Industry standard: Uniswap, Sushiswap, etc. all use absolute deadlines.
         if (block.timestamp > deadline) revert TransactionTooOld();
 
-        if (swapPath.length == 0) revert EmptySwapPath();
+        uint256 pathLength = swapPath.length;
+        if (pathLength == 0) revert EmptySwapPath();
+
+        // Prevent DoS via excessive gas consumption
+        if (pathLength > MAX_SWAP_HOPS) revert PathTooLong(pathLength, MAX_SWAP_HOPS);
 
         // Fix 4.3: Validate first swap step starts with the flash-loaned asset
         // This prevents silent failures during swap execution
@@ -241,7 +254,6 @@ contract FlashLoanArbitrage is
 
         // Validate all routers in the path are approved (O(1) lookup via EnumerableSet)
         // Fix 10.3: Cache validated routers to avoid redundant checks for repeated routers
-        uint256 pathLength = swapPath.length;
         address lastValidatedRouter = address(0);
 
         for (uint256 i = 0; i < pathLength;) {
@@ -336,10 +348,8 @@ contract FlashLoanArbitrage is
 
     /**
      * @notice Executes multi-hop swaps according to the swap path
-     * @dev Gas optimizations applied:
-     *      - Pre-allocated path array reused across iterations (~200 gas/swap saved)
-     *      - Configurable deadline instead of hardcoded value
-     *      - Defense-in-depth output verification (see note below)
+     * @dev Uses SwapHelpers library for shared swap logic (DRY principle)
+     *      Gas optimizations: pre-allocated path array, cached deadline
      *
      * ## Fix 10.5 Note: Why `memory` instead of `calldata`
      *
@@ -367,7 +377,6 @@ contract FlashLoanArbitrage is
         uint256 pathLength = swapPath.length;
 
         // Gas optimization: Pre-allocate path array once, reuse across iterations
-        // Saves ~200 gas per swap step by avoiding repeated memory allocation
         address[] memory path = new address[](2);
 
         // Cache swapDeadline to avoid repeated SLOAD (~100 gas saved)
@@ -376,38 +385,19 @@ contract FlashLoanArbitrage is
         for (uint256 i = 0; i < pathLength;) {
             SwapStep memory step = swapPath[i];
 
-            // Validate swap step (router already validated in executeArbitrage)
-            if (step.tokenIn != currentToken) revert InvalidSwapPath();
-
-            // Approve router to spend tokens
-            // Fix 9.1: Use forceApprove for safe token approvals
-            IERC20(currentToken).forceApprove(step.router, currentAmount);
-
-            // Reuse pre-allocated path array
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            // Execute swap
-            uint256[] memory amounts = IDexRouter(step.router).swapExactTokensForTokens(
+            // Execute swap using shared library function
+            currentAmount = SwapHelpers.executeSingleSwap(
+                currentToken,
                 currentAmount,
+                step.router,
+                step.tokenIn,
+                step.tokenOut,
                 step.amountOutMin,
                 path,
-                address(this),
                 deadline
             );
 
-            // Defense-in-depth: Verify output matches minimum
-            // NOTE: This check is technically redundant as compliant DEX routers
-            // already revert if output < amountOutMin. However, we keep this as:
-            // 1. Protection against non-compliant or malicious routers
-            // 2. Explicit error message (InsufficientOutputAmount vs generic revert)
-            // 3. Security audit requirement for explicit state validation
-            // Cost: ~200 gas per swap - acceptable for the security guarantee
-            uint256 amountOut = amounts[amounts.length - 1];
-            if (amountOut < step.amountOutMin) revert InsufficientOutputAmount();
-
             // Update for next iteration
-            currentAmount = amountOut;
             currentToken = step.tokenOut;
 
             unchecked { ++i; }
@@ -580,7 +570,7 @@ contract FlashLoanArbitrage is
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
         // Calculate flash loan fee (0.09% for Aave V3)
         uint128 premiumBps = POOL.FLASHLOAN_PREMIUM_TOTAL();
-        flashLoanFee = (amount * premiumBps) / 10000;
+        flashLoanFee = (amount * premiumBps) / BPS_DENOMINATOR;
 
         // Fix 4.3: Early validation - swapPath must start with the flash-loaned asset
         uint256 pathLength = swapPath.length;

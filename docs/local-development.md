@@ -423,6 +423,44 @@ Combine both modes to test the complete system without any blockchain interactio
 npm run dev:simulate:full
 ```
 
+### 4. Hybrid Execution Mode (Advanced)
+
+**Purpose**: Test real strategy selection logic without making real blockchain transactions.
+
+**How it Works**:
+- Real strategy selection (IntraChainStrategy, CrossChainStrategy, FlashLoanStrategy)
+- Real validation and pre-execution logic
+- Real gas price estimation and MEV eligibility checks
+- **Mocked**: Only the final transaction submission is simulated
+
+**Use Cases**:
+- Testing strategy routing logic
+- Validating opportunity scoring
+- Debugging MEV protection logic
+- Integration testing without spending gas
+
+**Configuration** (`.env`):
+```env
+EXECUTION_SIMULATION_MODE=true
+HYBRID_EXECUTION_MODE=true
+```
+
+**Key Difference from Regular Execution Simulation**:
+- Regular: Uses `SimulationStrategy` (bypasses all strategy logic)
+- Hybrid: Uses real strategies, only mocks `wallet.sendTransaction()`
+
+**Example Flow**:
+```
+Opportunity → [REAL] Strategy Selection
+           → [REAL] Gas Price Calculation
+           → [REAL] MEV Protection Check
+           → [REAL] Transaction Building
+           → [MOCK] wallet.sendTransaction()
+           → Returns mock transaction hash
+```
+
+**Location**: Implemented in `services/execution-engine/src/strategies/strategy-factory.ts:103-115`
+
 ---
 
 ## Testing

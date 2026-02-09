@@ -36,6 +36,21 @@ import "./interfaces/IFlashLoanReceiver.sol";
  */
 contract MultiPathQuoter {
     // ==========================================================================
+    // Constants
+    // ==========================================================================
+
+    /// @notice Maximum number of paths that can be compared in one call
+    /// @dev Prevents DOS via excessive gas consumption (20 paths * 5 hops = 100 quotes max)
+    uint256 public constant MAX_PATHS = 20;
+
+    /// @notice Maximum number of hops in a single arbitrage path
+    /// @dev Prevents DOS via excessive gas consumption per path
+    uint256 public constant MAX_PATH_LENGTH = 5;
+
+    /// @notice Denominator for basis points calculations (10000 bps = 100%)
+    uint256 private constant BPS_DENOMINATOR = 10000;
+
+    // ==========================================================================
     // Structs
     // ==========================================================================
 
@@ -75,6 +90,10 @@ contract MultiPathQuoter {
     error ArrayLengthMismatch();
     /// @dev P3 Fix: Thrown when an individual path within pathRequests is empty
     error EmptyPathInArray(uint256 pathIndex);
+    /// @dev Thrown when too many paths provided (DOS prevention)
+    error TooManyPaths(uint256 provided, uint256 max);
+    /// @dev Thrown when an individual path is too long (DOS prevention)
+    error PathTooLong(uint256 pathIndex, uint256 length, uint256 max);
 
     // ==========================================================================
     // View Functions - Batched Quotes
@@ -241,7 +260,7 @@ contract MultiPathQuoter {
         finalAmount = currentAmount;
 
         // Calculate flash loan fee and net profit
-        uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / 10000;
+        uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
         uint256 amountOwed = flashLoanAmount + flashLoanFee;
 
         if (finalAmount > amountOwed) {
@@ -276,6 +295,10 @@ contract MultiPathQuoter {
 
         // P2 Fix: Validate array lengths match
         if (numPaths == 0) revert EmptyQuoteRequests();
+
+        // DOS Prevention: Limit total number of paths
+        if (numPaths > MAX_PATHS) revert TooManyPaths(numPaths, MAX_PATHS);
+
         if (flashLoanAmounts.length != numPaths) revert ArrayLengthMismatch();
 
         profits = new uint256[](numPaths);
@@ -293,6 +316,11 @@ contract MultiPathQuoter {
                 successFlags[p] = false;
                 unchecked { ++p; }
                 continue;
+            }
+
+            // DOS Prevention: Limit individual path length
+            if (pathLength > MAX_PATH_LENGTH) {
+                revert PathTooLong(p, pathLength, MAX_PATH_LENGTH);
             }
 
             uint256 flashLoanAmount = flashLoanAmounts[p];
@@ -319,7 +347,7 @@ contract MultiPathQuoter {
             }
 
             if (pathSuccess) {
-                uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / 10000;
+                uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
                 uint256 amountOwed = flashLoanAmount + flashLoanFee;
                 if (currentAmount > amountOwed) {
                     profits[p] = currentAmount - amountOwed;

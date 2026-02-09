@@ -194,6 +194,129 @@ export function hasBalancerV2(chain: string): boolean {
 }
 
 // =============================================================================
+// SyncSwap Vault Addresses
+// =============================================================================
+
+/**
+ * SyncSwap Vault addresses by chain.
+ * Used for flash loan operations (EIP-3156) with 0.3% fees.
+ *
+ * SyncSwap uses a Vault-based architecture similar to Balancer V2, but with
+ * EIP-3156 compliant flash loan interface and 0.3% flash loan fee.
+ *
+ * @see https://syncswap.xyz/
+ * @see docs/syncswap_api_dpcu.md
+ */
+export const SYNCSWAP_VAULTS: Readonly<Record<string, string>> = {
+  zksync: '0x621425a1Ef6abE91058E9712575dcc4258F8d091',  // zkSync Era Mainnet
+  // linea: TBD - To be added when deploying to Linea
+} as const;
+
+/**
+ * Get SyncSwap Vault address for a chain.
+ * @throws Error if chain not supported by SyncSwap
+ */
+export function getSyncSwapVault(chain: string): string {
+  const address = SYNCSWAP_VAULTS[chain];
+  if (!address) {
+    throw new Error(
+      `SyncSwap Vault not available on chain: ${chain}. ` +
+      `Supported chains: ${Object.keys(SYNCSWAP_VAULTS).join(', ')}`
+    );
+  }
+  return address;
+}
+
+/**
+ * Check if SyncSwap is available on a chain.
+ */
+export function hasSyncSwap(chain: string): boolean {
+  return chain in SYNCSWAP_VAULTS;
+}
+
+// =============================================================================
+// Address Validation Helpers (FIX: Issue 1.2)
+// =============================================================================
+
+/**
+ * Zero address constant (invalid contract address).
+ * Used for validation to prevent misconfiguration.
+ */
+export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
+
+/**
+ * Check if an address is valid (not empty, not zero address).
+ *
+ * FIX (Issue 1.2): Centralized validation to catch misconfigurations early.
+ * Zero address can occur from:
+ * - Unset environment variables defaulting to placeholder
+ * - Copy-paste errors during deployment
+ * - Testing remnants in production configs
+ *
+ * @param address - Contract address to validate
+ * @returns true if address is valid (non-empty and not zero address)
+ */
+export function isValidContractAddress(address: string | undefined): boolean {
+  return !!(address && address !== '' && address !== ZERO_ADDRESS);
+}
+
+// =============================================================================
+// Commit-Reveal Arbitrage Contract Addresses
+// =============================================================================
+
+/**
+ * CommitRevealArbitrage contract addresses by chain.
+ * Used for MEV protection via two-phase commit-reveal pattern.
+ *
+ * Automatically activated for HIGH/CRITICAL risk transactions:
+ * - MEV sandwichRiskScore >= 70
+ * - Strategy: IntraChainStrategy or CrossChainStrategy
+ * - Private mempool unavailable or failed
+ *
+ * Deployment Status:
+ * - Phase 1 (MVP): ethereum, arbitrum, bsc
+ * - Phase 2: polygon, optimism, base, avalanche, fantom, zksync
+ * - Phase 3: linea
+ *
+ * @see contracts/src/CommitRevealArbitrage.sol
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.1
+ */
+export const COMMIT_REVEAL_CONTRACTS: Readonly<Record<string, string>> = {
+  // Phase 1 (Week 1-2) - MVP Deployment
+  ethereum: process.env.COMMIT_REVEAL_CONTRACT_ETHEREUM || '',
+  arbitrum: process.env.COMMIT_REVEAL_CONTRACT_ARBITRUM || '',
+  bsc: process.env.COMMIT_REVEAL_CONTRACT_BSC || '',
+
+  // Phase 2 (Week 3) - Extended Deployment
+  polygon: process.env.COMMIT_REVEAL_CONTRACT_POLYGON || '',
+  optimism: process.env.COMMIT_REVEAL_CONTRACT_OPTIMISM || '',
+  base: process.env.COMMIT_REVEAL_CONTRACT_BASE || '',
+  avalanche: process.env.COMMIT_REVEAL_CONTRACT_AVALANCHE || '',
+  fantom: process.env.COMMIT_REVEAL_CONTRACT_FANTOM || '',
+  zksync: process.env.COMMIT_REVEAL_CONTRACT_ZKSYNC || '',
+
+  // Phase 3 (Week 4) - Final Deployment
+  linea: process.env.COMMIT_REVEAL_CONTRACT_LINEA || '',
+} as const;
+
+/**
+ * Get CommitRevealArbitrage contract address for a chain.
+ * @returns Contract address or empty string if not deployed
+ */
+export function getCommitRevealContract(chain: string): string {
+  return COMMIT_REVEAL_CONTRACTS[chain] || '';
+}
+
+/**
+ * Check if commit-reveal contract is deployed on a chain.
+ * FIX (Issue 1.2): Now validates against zero address, not just empty string.
+ */
+export function hasCommitRevealContract(chain: string): boolean {
+  const address = COMMIT_REVEAL_CONTRACTS[chain];
+  return isValidContractAddress(address);
+}
+
+// =============================================================================
 // Wrapped Native Token Addresses
 // =============================================================================
 

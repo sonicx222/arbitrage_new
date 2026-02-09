@@ -35,42 +35,42 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'arbitrum',
       factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
       routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'camelot_v3',       // [C]
       chain: 'arbitrum',
       factoryAddress: '0x1a3c9B1d2F0529D97f2afC5136Cc23e58f1FD35B',
       routerAddress: '0xc873fEcbd354f5A56E00E710B90EF4201db2448d',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [C]
       chain: 'arbitrum',
       factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
       routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'trader_joe',       // [H]
       chain: 'arbitrum',
       factoryAddress: '0x1886D09C9Ade0c5DB822D85D21678Db67B6c2982',
       routerAddress: '0xBee5C10cF6E4f68f831E11c1d9e59b43560B3571',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'zyberswap',        // [M]
       chain: 'arbitrum',
       factoryAddress: '0xaC2ee06A14c52570Ef3B9812Ed240BCe359772e7',
       routerAddress: '0x16e71B13fE6079B4312063F7E81F76d165Ad32Ad',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'ramses',           // [M]
       chain: 'arbitrum',
       factoryAddress: '0xAAA20D08e59F6561f242b08513D36266C5A29415',
       routerAddress: '0xAAA87963EFeB6f7E0a2711F397663105Acb1805e',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     // === S2.2.1: New DEXs (6 → 9) ===
     // Balancer V2 uses Vault model - uses BalancerV2Adapter for pool discovery
@@ -87,14 +87,14 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'arbitrum',
       factoryAddress: '0xb17b674D9c5CB2e441F8e196a2f048A81355d031', // Curve Factory
       routerAddress: '0xF0d4c12A5768D806021F80a262B4d39d26C58b8D',  // Curve Router
-      feeBps: bps(4)   // 0.04% typical for stablecoin pools
+      feeBps: bps(4),  // 0.04% typical for stablecoin pools
     },
     {
       name: 'chronos',          // [M] - ve(3,3) DEX
       chain: 'arbitrum',
       factoryAddress: '0xCe9240869391928253Ed9cc9Bcb8cb98CB5B0722', // Chronos Factory
       routerAddress: '0xE708aA9E887980750C040a6A2Cb901c37Aa34f3b',  // Chronos Router
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // BSC: 8 DEXs (highest volume) - S2.2.3 expanded from 5 → 8
@@ -104,35 +104,35 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'bsc',
       factoryAddress: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
       routerAddress: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',
-      feeBps: bps(25)
+      feeBps: bps(25),
     },
     {
       name: 'pancakeswap_v2',   // [C]
       chain: 'bsc',
       factoryAddress: '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73',
       routerAddress: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
-      feeBps: bps(25)
+      feeBps: bps(25),
     },
     {
       name: 'biswap',           // [C]
       chain: 'bsc',
       factoryAddress: '0x858E3312ed3A876947EA49d572A7C42DE08af7EE',
       routerAddress: '0x3a6d8cA21D1CF76F653A67577FA0D27453350dD8',
-      feeBps: bps(10)
+      feeBps: bps(10),
     },
     {
       name: 'thena',            // [H]
       chain: 'bsc',
       factoryAddress: '0xAFD89d21BdB66d00817d4153E055830B1c2B3970',
       routerAddress: '0x20a304a7d126758dfe6B243D0fc515F83bCA8431',
-      feeBps: bps(20)
+      feeBps: bps(20),
     },
     {
       name: 'apeswap',          // [H]
       chain: 'bsc',
       factoryAddress: '0x0841BD0B734E4F5853f0dD8d7Ea041c241fb0Da6',
       routerAddress: '0xcF0feBd3f17CEf5b47b0cD257aCf6025c5BFf3b7',
-      feeBps: bps(20)
+      feeBps: bps(20),
     },
     // === S2.2.3: New DEXs (5 → 8) ===
     {
@@ -140,21 +140,21 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'bsc',
       factoryAddress: '0x3CD1C46068dAEa5Ebb0d3f55F6915B10648062B8',
       routerAddress: '0x7DAe51BD3E3376B8c7c4900E9107f12Be3AF1bA8',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'ellipsis',         // [H] - Curve fork for stablecoins (low fees)
       chain: 'bsc',
       factoryAddress: '0xf65BEd27e96a367c61e0E06C54e14B16b84a5870',
       routerAddress: '0x160CAed03795365F3A589f10C379FfA7d75d4E76',
-      feeBps: bps(4)   // 0.04% typical for stablecoin pools
+      feeBps: bps(4),  // 0.04% typical for stablecoin pools
     },
     {
       name: 'nomiswap',         // [M] - Competitive fees
       chain: 'bsc',
       factoryAddress: '0xD6715A8BE3944Ec72738f0bFdc739571659D8010',
       routerAddress: '0xD654953D746f0b114d1F85332Dc43446ac79413d',
-      feeBps: bps(10)  // 0.1% competitive fee
+      feeBps: bps(10),  // 0.1% competitive fee
     }
   ],
   // Base: 7 DEXs (fastest growing) - S2.2.2 expanded from 5 → 7
@@ -164,35 +164,35 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'base',
       factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
       routerAddress: '0x2626664c2603336E57B271c5C0b26F421741e481',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'aerodrome',        // [C]
       chain: 'base',
       factoryAddress: '0x420DD381b31aEf6683db6B902084cB0FFECe40Da',
       routerAddress: '0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'baseswap',         // [C]
       chain: 'base',
       factoryAddress: '0xFDa619b6d20975be80A10332cD39b9a4b0FAa8BB',
       routerAddress: '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [H]
       chain: 'base',
       factoryAddress: '0x71524B4f93c58fcbF659783284E38825f0622859',
       routerAddress: '0x6BDED42c6DA8FBf0d2bA55B2fa120C5e0c8D7891',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'swapbased',        // [M]
       chain: 'base',
       factoryAddress: '0x04C9f118d21e8B767D2e50C946f0cC9F6C367300',
       routerAddress: '0xaaa3b1F1bd7BCc97fD1917c18ADE665C5D31F066',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     // S2.2.2: New DEXs added (5 → 7)
     {
@@ -200,14 +200,14 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'base',
       factoryAddress: '0x0A7e848Aca42d879EF06507Fca0E7b33A0a63c1e',
       routerAddress: '0x32aed3Bce901Da12ca8F29D3e95fC3cc54a85Fd9',
-      feeBps: bps(1)  // 1 bp base fee (dynamic)
+      feeBps: bps(1),  // 1 bp base fee (dynamic)
     },
     {
       name: 'alienbase',        // [M] - Native Base DEX
       chain: 'base',
       factoryAddress: '0x3E84D913803b02A4a7f027165E8cA42C14C0FdE7',
       routerAddress: '0x8c1A3cF8f83074169FE5D7aD50B978e1cD6b37c7',
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // Polygon: 4 DEXs (low gas)
@@ -217,28 +217,28 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'polygon',
       factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
       routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'quickswap_v3',     // [C]
       chain: 'polygon',
       factoryAddress: '0x411b0fAcC3489691f28ad58c47006AF5E3Ab3A28',
       routerAddress: '0xf5b509bB0909a69B1c207E495f687a596C168E12',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [H]
       chain: 'polygon',
       factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
       routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'apeswap',          // [M]
       chain: 'polygon',
       factoryAddress: '0xCf083Be4164828f00cAE704EC15a36D711491284',
       routerAddress: '0xC0788A3aD43d79aa53B09c2EaCc313A787d1d607',
-      feeBps: bps(20)
+      feeBps: bps(20),
     }
   ],
   // Optimism: 3 DEXs (NEW - Phase 1)
@@ -248,21 +248,21 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'optimism',
       factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
       routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'velodrome',        // [C]
       chain: 'optimism',
       factoryAddress: '0x25CbdDb98b35ab1FF77413456B31EC81A6B6B746',
       routerAddress: '0xa062aE8A9c5e11aaA026fc2670B0D65cCc8B2858',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [H]
       chain: 'optimism',
       factoryAddress: '0xFbc12984689e5f15626Bad03Ad60160Fe98B303C',
       routerAddress: '0x4C5D5234f232BD2D76B96aA33F5AE4FCF0E4BFAb',
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // Ethereum: 2 DEXs (selective - large arbs only)
@@ -272,14 +272,14 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'ethereum',
       factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
       routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [C]
       chain: 'ethereum',
       factoryAddress: '0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac',
       routerAddress: '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F',
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // =============================================================================
@@ -293,21 +293,21 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'avalanche',
       factoryAddress: '0x8e42f2F4101563bF679975178e880FD87d3eFd4e',
       routerAddress: '0x60aE616a2155Ee3d9A68541Ba4544862310933d4',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'pangolin',         // [H] - Native Avalanche DEX
       chain: 'avalanche',
       factoryAddress: '0xefa94DE7a4656D787667C749f7E1223D71E9FD88',
       routerAddress: '0xE54Ca86531e17Ef3616d22Ca28b0D458b6C89106',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'sushiswap',        // [H] - Multi-chain presence
       chain: 'avalanche',
       factoryAddress: '0xc35DADB65012eC5796536bD9864eD8773aBc74C4',
       routerAddress: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     // S3.2.1: New DEXs added
     // GMX uses Vault model - uses GmxAdapter for pool discovery
@@ -316,7 +316,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'avalanche',
       factoryAddress: '0x9ab2De34A33fB459b538c43f251eB825645e8595', // GMX Vault (uses adapter)
       routerAddress: '0x5F719c2F1095F7B9fc68a68e35B51194f4b6abe8',  // GMX Router
-      feeBps: bps(30),  // GMX uses dynamic fees 10-80bp, using 30bp average
+      feeBps: bps(30),
       enabled: true  // ENABLED: Uses GmxAdapter from dex-adapters
     },
     // Platypus uses Pool model - uses PlatypusAdapter for pool discovery
@@ -325,7 +325,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'avalanche',
       factoryAddress: '0x66357dCaCe80431aee0A7507e2E361B7e2402370', // Main Pool (uses adapter)
       routerAddress: '0x73256EC7575D999C360c1EeC118ECbEFd8DA7D12',  // Platypus Router
-      feeBps: bps(4),   // Platypus: ~1-4bp for stablecoins
+      feeBps: bps(4),
       enabled: true  // ENABLED: Uses PlatypusAdapter from dex-adapters
     },
     {
@@ -333,7 +333,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'avalanche',
       factoryAddress: '0x5F1dddbf348aC2fbe22a163e30F99F9ECE3DD50a', // KyberSwap Elastic Factory
       routerAddress: '0xC1e7dFE73E1598E3910EF4C7845B68A9Ab6F4c83',  // KyberSwap Router
-      feeBps: bps(10)  // KyberSwap: dynamic fees, typically 8-100bp (V3-style getPool)
+      feeBps: bps(10),
     }
   ],
   // Fantom: 4 DEXs (S3.2.2)
@@ -343,21 +343,21 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'fantom',
       factoryAddress: '0x152eE697f2E276fA89E96742e9bB9aB1F2E61bE3',
       routerAddress: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'spiritswap',       // [H] - Second largest
       chain: 'fantom',
       factoryAddress: '0xEF45d134b73241eDa7703fa787148D9C9F4950b0',
       routerAddress: '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'equalizer',        // [H] - Solidly fork with ve(3,3) model
       chain: 'fantom',
       factoryAddress: '0xc6366EFD0AF1d09171fe0EBF32c7943BB310832a',  // Equalizer V2 Factory
       routerAddress: '0x1A05EB736873485655F29a37DEf8a0AA87F5a447',   // Equalizer Router
-      feeBps: bps(30)  // Default volatile fee (stable pools use 1bp)
+      feeBps: bps(30),
     },
     // Beethoven X uses Balancer V2 Vault model - uses BalancerV2Adapter for pool discovery
     {
@@ -365,7 +365,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'fantom',
       factoryAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',  // Beethoven X Vault (uses adapter)
       routerAddress: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce',   // Vault is also router for swaps
-      feeBps: bps(30),  // Variable per pool, 10-200bp typical
+      feeBps: bps(30),
       enabled: true  // ENABLED: Uses BalancerV2Adapter from dex-adapters
     }
   ],
@@ -376,14 +376,14 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'zksync',
       factoryAddress: '0xf2DAd89f2788a8CD54625C60b55cD3d2D0ACa7Cb',
       routerAddress: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'mute',             // [H] - Native zkSync DEX
       chain: 'zksync',
       factoryAddress: '0x40be1cBa6C5B47cDF9da7f963B6F761F4C60627D',
       routerAddress: '0x8B791913eB07C32779a16750e3868aA8495F5964',
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // Linea: 2 DEXs
@@ -393,14 +393,14 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'linea',
       factoryAddress: '0x37BAc764494c8db4e54BDE72f6965beA9fa0AC2d',
       routerAddress: '0x80e38291e06339d10AAB483C65695D004dBD5C69',
-      feeBps: bps(30)
+      feeBps: bps(30),
     },
     {
       name: 'velocore',         // [H] - Native Linea DEX
       chain: 'linea',
       factoryAddress: '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B',
       routerAddress: '0x1d0188c4B276A09366D05d6Be06aF61a73bC7535', // Velocore Vault on Linea
-      feeBps: bps(30)
+      feeBps: bps(30),
     }
   ],
   // S3.3.2: Solana DEXs (Non-EVM, uses Solana program IDs)
@@ -411,7 +411,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
       routerAddress: 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
-      feeBps: bps(0), // Aggregator - fee comes from underlying DEX
+      feeBps: bps(0),
       type: 'aggregator',
       enabled: false // Disabled for direct pool detection (routes through other DEXs)
     },
@@ -420,7 +420,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // AMM Program
       routerAddress: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-      feeBps: bps(25), // 0.25%
+      feeBps: bps(25),
       type: 'amm',
       enabled: true
     },
@@ -429,7 +429,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // CLMM Program
       routerAddress: 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK',
-      feeBps: bps(25), // Dynamic based on pool
+      feeBps: bps(25),
       type: 'clmm',
       enabled: true
     },
@@ -439,7 +439,7 @@ export const DEXES: Record<string, Dex[]> = {
       // FIX S3.3.2: Corrected Orca Whirlpool program ID (was 9W959... legacy token swap)
       factoryAddress: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Whirlpool Program
       routerAddress: 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc',
-      feeBps: bps(30), // Dynamic based on pool
+      feeBps: bps(30),
       type: 'clmm',
       enabled: true
     },
@@ -448,7 +448,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', // DLMM Program
       routerAddress: 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',
-      feeBps: bps(20), // Dynamic based on bin step
+      feeBps: bps(20),
       type: 'dlmm',
       enabled: true
     },
@@ -457,7 +457,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: 'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',
       routerAddress: 'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',
-      feeBps: bps(10), // 0.1% taker fee
+      feeBps: bps(10),
       type: 'orderbook',
       enabled: true
     },
@@ -466,7 +466,7 @@ export const DEXES: Record<string, Dex[]> = {
       chain: 'solana',
       factoryAddress: '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c',
       routerAddress: '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c',
-      feeBps: bps(20), // 0.2%
+      feeBps: bps(20),
       type: 'pmm',
       enabled: true
     }

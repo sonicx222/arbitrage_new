@@ -20,12 +20,13 @@
  */
 
 import { ethers } from 'ethers';
-import { DEXES } from '@arbitrage/config';
-import { getErrorMessage } from '@arbitrage/core';
+import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, hasCommitRevealContract } from '@arbitrage/config';
+import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
 import { createErrorResult, createSuccessResult, ExecutionErrorCode, formatExecutionError } from '../types';
 import { BaseExecutionStrategy } from './base.strategy';
+import { CommitRevealService, type CommitRevealParams } from '../services/commit-reveal.service';
 
 /**
  * Phase 2 Enhancement: Pre-computed DEX lookup for O(1) router address access.
@@ -56,8 +57,17 @@ function getRouterAddress(chain: string, sellDex?: string): string | undefined {
 }
 
 export class IntraChainStrategy extends BaseExecutionStrategy {
-  constructor(logger: Logger) {
+  private readonly mevRiskAnalyzer: MevRiskAnalyzer;
+  private readonly commitRevealService: CommitRevealService;
+
+  constructor(
+    logger: Logger,
+    mevRiskAnalyzer?: MevRiskAnalyzer,
+    commitRevealService?: CommitRevealService
+  ) {
     super(logger);
+    this.mevRiskAnalyzer = mevRiskAnalyzer ?? new MevRiskAnalyzer();
+    this.commitRevealService = commitRevealService ?? new CommitRevealService(logger, COMMIT_REVEAL_CONTRACTS);
   }
 
   async execute(
@@ -209,6 +219,26 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         );
       }
 
+      // ==========================================================================
+      // Task 3.1: Check if commit-reveal pattern should be used
+      // ==========================================================================
+      const commitRevealCheck = this.shouldUseCommitReveal(opportunity, chain, ctx);
+
+      if (commitRevealCheck.shouldUse) {
+        this.logger.info('Using commit-reveal pattern for high-risk transaction', {
+          opportunityId: opportunity.id,
+          riskScore: commitRevealCheck.riskScore,
+          chain,
+        });
+        return this.executeWithCommitReveal(opportunity, chain, ctx);
+      } else if (commitRevealCheck.riskScore !== undefined) {
+        this.logger.debug('Commit-reveal not used', {
+          opportunityId: opportunity.id,
+          reason: commitRevealCheck.reason,
+          riskScore: commitRevealCheck.riskScore,
+        });
+      }
+
       // Apply MEV protection
       let protectedTx = await this.applyMEVProtection(swapTx, chain, ctx);
 
@@ -287,6 +317,282 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         opportunity.id,
         // Fix 6.1: Use formatExecutionError for consistent error formatting
         formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, errorMessage || 'Unknown error during execution'),
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+  }
+
+  // ==========================================================================
+  // Task 3.1: Commit-Reveal MEV Protection
+  // ==========================================================================
+
+  /**
+   * Check if commit-reveal pattern should be used for this opportunity.
+   *
+   * Commit-reveal is used when ALL of the following conditions are met:
+   * 1. FEATURE_COMMIT_REVEAL is enabled (default: true)
+   * 2. Contract is deployed on the target chain
+   * 3. MEV risk score >= 70 (HIGH or CRITICAL risk)
+   * 4. Private mempool (Flashbots/Jito) is unavailable or not enabled
+   *
+   * @param opportunity - Arbitrage opportunity
+   * @param chain - Target chain
+   * @param ctx - Strategy context
+   * @returns Object with shouldUse flag and risk assessment
+   */
+  private shouldUseCommitReveal(
+    opportunity: ArbitrageOpportunity,
+    chain: string,
+    ctx: StrategyContext
+  ): {
+    shouldUse: boolean;
+    riskScore?: number;
+    reason?: string;
+  } {
+    // Check 1: Feature flag enabled
+    if (!FEATURE_FLAGS.useCommitReveal) {
+      return { shouldUse: false, reason: 'Feature disabled (FEATURE_COMMIT_REVEAL=false)' };
+    }
+
+    // Check 2: Contract deployed on chain
+    if (!hasCommitRevealContract(chain)) {
+      return { shouldUse: false, reason: `Contract not deployed on ${chain}` };
+    }
+
+    // Check 3: Assess MEV risk
+    const txContext: TransactionContext = {
+      chain,
+      // Estimate trade size from profit (MEV attacks target trade size, not profit)
+      // Typical arbitrage: 1% profit margin → multiply by 100 to estimate trade size
+      // Example: $100 profit → ~$10,000 trade size estimate
+      valueUsd: opportunity.expectedProfit
+        ? opportunity.expectedProfit * 100  // Estimate trade size from profit
+        : 1000, // Default to $1000 if profit unknown
+      tokenSymbol: opportunity.tokenIn,
+      dexProtocol: opportunity.buyDex,
+      slippageBps: 50, // Default 0.5% slippage
+      poolLiquidityUsd: opportunity.poolLiquidity,
+      expectedProfitUsd: opportunity.expectedProfit,
+    };
+
+    const riskAssessment = this.mevRiskAnalyzer.analyzeMevRisk(txContext);
+
+    // Risk score threshold: 70 = HIGH or CRITICAL risk
+    if (riskAssessment.sandwichRiskScore < 70) {
+      return {
+        shouldUse: false,
+        riskScore: riskAssessment.sandwichRiskScore,
+        reason: `Low MEV risk (score: ${riskAssessment.sandwichRiskScore})`,
+      };
+    }
+
+    // Check 4: Private mempool availability
+    const eligibility = this.checkMevEligibility(chain, ctx, opportunity.expectedProfit);
+
+    // If private mempool is available and enabled, use it instead of commit-reveal
+    if (eligibility.shouldUseMev && eligibility.mevProvider) {
+      return {
+        shouldUse: false,
+        riskScore: riskAssessment.sandwichRiskScore,
+        reason: `Private mempool available (${eligibility.mevProvider.constructor.name})`,
+      };
+    }
+
+    // All checks passed - use commit-reveal
+    return {
+      shouldUse: true,
+      riskScore: riskAssessment.sandwichRiskScore,
+    };
+  }
+
+  /**
+   * Execute opportunity using commit-reveal pattern.
+   *
+   * Flow:
+   * 1. Commit phase: Submit commitment hash on-chain
+   * 2. Wait phase: Wait for 1 block confirmation
+   * 3. Reveal phase: Reveal parameters and execute swap atomically
+   *
+   * @param opportunity - Arbitrage opportunity
+   * @param chain - Target chain
+   * @param ctx - Strategy context
+   * @returns Execution result
+   */
+  private async executeWithCommitReveal(
+    opportunity: ArbitrageOpportunity,
+    chain: string,
+    ctx: StrategyContext
+  ): Promise<ExecutionResult> {
+    const contractAddress = getCommitRevealContract(chain);
+    if (!contractAddress) {
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Commit-reveal contract address not found'),
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
+    const routerAddress = getRouterAddress(chain, opportunity.sellDex);
+    if (!routerAddress) {
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Router address not found'),
+        chain,
+        opportunity.buyDex || 'unknown'
+      );
+    }
+
+    try {
+      // Prepare commit-reveal parameters
+      // Validate and convert amountIn (should be wei string from opportunity)
+      if (!opportunity.amountIn || opportunity.amountIn === '0') {
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, 'Invalid amountIn: must be non-zero'),
+          chain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
+
+      let amountIn: bigint;
+      try {
+        // Convert string to bigint (amountIn is in wei as string)
+        amountIn = BigInt(opportunity.amountIn);
+      } catch (conversionError) {
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(
+            ExecutionErrorCode.EXECUTION_ERROR,
+            `Invalid amountIn format: ${opportunity.amountIn} - ${getErrorMessage(conversionError)}`
+          ),
+          chain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
+
+      const minProfit = opportunity.expectedProfit
+        ? ethers.parseEther((opportunity.expectedProfit * 0.8).toFixed(18)) // 80% of expected profit (Fix #3)
+        : ethers.parseEther('0.001'); // Minimum 0.001 ETH
+
+      const params: CommitRevealParams = {
+        tokenIn: opportunity.tokenIn,
+        tokenOut: opportunity.tokenOut,
+        amountIn,
+        minProfit,
+        router: routerAddress,
+        deadline: Math.floor(Date.now() / 1000) + 300, // 5 minutes from now
+        salt: ethers.hexlify(ethers.randomBytes(32)), // Random 32-byte salt
+      };
+
+      this.logger.info('Executing with commit-reveal pattern', {
+        opportunityId: opportunity.id,
+        chain,
+        contract: contractAddress,
+        riskScore: opportunity.mevRiskScore,
+      });
+
+      // Phase 1: Commit
+      const commitResult = await this.commitRevealService.commit(
+        params,
+        chain,
+        ctx,
+        opportunity.id,
+        opportunity.expectedProfit
+      );
+
+      if (!commitResult.success) {
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Commit failed: ${commitResult.error}`),
+          chain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
+
+      this.logger.debug('Commitment submitted', {
+        opportunityId: opportunity.id,
+        commitmentHash: commitResult.commitmentHash,
+        txHash: commitResult.txHash,
+        targetBlock: commitResult.revealBlock,
+      });
+
+      // Phase 2: Wait for reveal block
+      const provider = ctx.providers.get(chain);
+      if (provider) {
+        const waitResult = await this.commitRevealService.waitForRevealBlock(
+          commitResult.revealBlock,
+          chain,
+          ctx
+        );
+
+        if (!waitResult.success) {
+          // Cancel commitment for gas refund
+          await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch(() => {
+            // Ignore cancel errors
+          });
+
+          return createErrorResult(
+            opportunity.id,
+            formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Block wait failed: ${waitResult.error}`),
+            chain,
+            opportunity.buyDex || 'unknown'
+          );
+        }
+      }
+
+      // Phase 3: Reveal
+      const revealResult = await this.commitRevealService.reveal(
+        commitResult.commitmentHash,
+        chain,
+        ctx
+      );
+
+      if (!revealResult.success) {
+        // Attempt to cancel commitment for gas refund
+        await this.commitRevealService.cancel(commitResult.commitmentHash, chain, ctx).catch(() => {
+          // Ignore cancel errors
+        });
+
+        return createErrorResult(
+          opportunity.id,
+          formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Reveal failed: ${revealResult.error}`),
+          chain,
+          opportunity.buyDex || 'unknown'
+        );
+      }
+
+      this.logger.info('Commit-reveal execution completed', {
+        opportunityId: opportunity.id,
+        commitTxHash: commitResult.txHash,
+        revealTxHash: revealResult.txHash,
+        profit: revealResult.profit?.toString(),
+        gasUsed: revealResult.gasUsed,
+      });
+
+      return createSuccessResult(
+        opportunity.id,
+        revealResult.txHash || '',
+        chain,
+        opportunity.buyDex || 'unknown',
+        {
+          actualProfit: revealResult.profit ? parseFloat(ethers.formatEther(revealResult.profit)) : undefined,
+          gasUsed: revealResult.gasUsed,
+          commitTxHash: commitResult.txHash,
+        }
+      );
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      this.logger.error('Commit-reveal execution failed', {
+        opportunityId: opportunity.id,
+        chain,
+        error: errorMessage,
+      });
+
+      return createErrorResult(
+        opportunity.id,
+        formatExecutionError(ExecutionErrorCode.EXECUTION_ERROR, `Commit-reveal error: ${errorMessage}`),
         chain,
         opportunity.buyDex || 'unknown'
       );

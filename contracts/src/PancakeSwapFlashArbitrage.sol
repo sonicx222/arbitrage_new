@@ -9,6 +9,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./interfaces/IPancakeV3FlashCallback.sol";
 import "./interfaces/IFlashLoanReceiver.sol"; // For IDexRouter
+import "./libraries/SwapHelpers.sol";
 
 /**
  * @title PancakeSwapFlashArbitrage
@@ -68,6 +69,10 @@ contract PancakeSwapFlashArbitrage is
     /// @notice Minimum slippage protection floor (0.1% = 10 bps)
     /// @dev Prevents callers from setting amountOutMin = 0 which exposes to sandwich attacks
     uint256 public constant MIN_SLIPPAGE_BPS = 10;
+
+    /// @notice Maximum number of hops in a swap path (prevents DoS via gas exhaustion)
+    /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
+    uint256 public constant MAX_SWAP_HOPS = 5;
 
     /// @notice Denominator for basis points calculations (10000 bps = 100%)
     uint256 private constant BPS_DENOMINATOR = 10000;
@@ -182,6 +187,8 @@ contract PancakeSwapFlashArbitrage is
     error PoolAlreadyWhitelisted();
     error PoolNotWhitelisted();
     error EmptySwapPath();
+    error EmptyPoolsArray();
+    error PathTooLong(uint256 provided, uint256 max);
     error InvalidSwapPath();
     error SwapPathAssetMismatch();
     error InsufficientProfit();
@@ -197,6 +204,7 @@ contract PancakeSwapFlashArbitrage is
     error InvalidAmount();
     error TransactionTooOld();
     error PoolNotFound();
+    error PoolNotFromFactory();
     error BatchTooLarge(uint256 requested, uint256 maximum);
 
     // ==========================================================================
@@ -249,13 +257,16 @@ contract PancakeSwapFlashArbitrage is
         // Validate pool is whitelisted (security critical)
         if (!_whitelistedPools.contains(pool)) revert PoolNotWhitelisted();
 
-        if (swapPath.length == 0) revert EmptySwapPath();
+        uint256 pathLength = swapPath.length;
+        if (pathLength == 0) revert EmptySwapPath();
+
+        // Prevent DoS via excessive gas consumption
+        if (pathLength > MAX_SWAP_HOPS) revert PathTooLong(pathLength, MAX_SWAP_HOPS);
 
         // Validate first swap step starts with the flash-loaned asset
         if (swapPath[0].tokenIn != asset) revert SwapPathAssetMismatch();
 
         // Validate all routers in the path are approved (O(1) lookup via EnumerableSet)
-        uint256 pathLength = swapPath.length;
         address lastValidatedRouter = address(0);
 
         for (uint256 i = 0; i < pathLength;) {
@@ -291,6 +302,13 @@ contract PancakeSwapFlashArbitrage is
         IPancakeV3Pool poolContract = IPancakeV3Pool(pool);
         address token0 = poolContract.token0();
         address token1 = poolContract.token1();
+
+        // SECURITY FIX: Verify pool is legitimate PancakeSwap V3 pool (defense in depth)
+        // Whitelist provides first layer of security, factory verification provides second layer
+        // Protects against whitelisting malicious contracts that implement IPancakeV3Pool interface
+        uint24 fee = poolContract.fee();
+        address verifiedPool = FACTORY.getPool(token0, token1, fee);
+        if (verifiedPool != pool) revert PoolNotFromFactory();
 
         uint256 amount0;
         uint256 amount1;
@@ -370,10 +388,8 @@ contract PancakeSwapFlashArbitrage is
 
     /**
      * @notice Executes multi-hop swaps according to the swap path
-     * @dev Gas optimizations applied:
-     *      - Pre-allocated path array reused across iterations (~200 gas/swap saved)
-     *      - Configurable deadline instead of hardcoded value
-     *      - Defense-in-depth output verification
+     * @dev Uses SwapHelpers library for shared swap logic (DRY principle)
+     *      Gas optimizations: pre-allocated path array, cached deadline
      * @param startAsset The starting asset (flash loaned asset)
      * @param startAmount The starting amount
      * @param swapPath Array of swap steps (memory required due to abi.decode)
@@ -397,31 +413,19 @@ contract PancakeSwapFlashArbitrage is
         for (uint256 i = 0; i < pathLength;) {
             SwapStep memory step = swapPath[i];
 
-            // Validate swap step (router already validated in executeArbitrage)
-            if (step.tokenIn != currentToken) revert InvalidSwapPath();
-
-            // Approve router to spend tokens
-            IERC20(currentToken).forceApprove(step.router, currentAmount);
-
-            // Reuse pre-allocated path array
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            // Execute swap
-            uint256[] memory amounts = IDexRouter(step.router).swapExactTokensForTokens(
+            // Execute swap using shared library function
+            currentAmount = SwapHelpers.executeSingleSwap(
+                currentToken,
                 currentAmount,
+                step.router,
+                step.tokenIn,
+                step.tokenOut,
                 step.amountOutMin,
                 path,
-                address(this),
                 deadline
             );
 
-            // Defense-in-depth: Verify output matches minimum
-            uint256 amountOut = amounts[amounts.length - 1];
-            if (amountOut < step.amountOutMin) revert InsufficientOutputAmount();
-
             // Update for next iteration
-            currentAmount = amountOut;
             currentToken = step.tokenOut;
 
             unchecked { ++i; }
@@ -513,7 +517,7 @@ contract PancakeSwapFlashArbitrage is
         returns (uint256 successCount)
     {
         uint256 length = pools.length;
-        if (length == 0) revert("Empty pools array");
+        if (length == 0) revert EmptyPoolsArray();
 
         // I2 Fix: Enforce maximum batch size to prevent potential DoS
         // Defense in depth: Owner is trusted, but explicit limits improve auditability

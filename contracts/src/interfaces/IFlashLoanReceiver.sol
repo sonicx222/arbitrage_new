@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import "./IDexRouter.sol";
+
 /**
  * @title IFlashLoanSimpleReceiver
  * @dev Interface for Aave V3 flash loan simple receiver
@@ -55,21 +57,4 @@ interface IPool {
     function FLASHLOAN_PREMIUM_TOTAL() external view returns (uint128);
 }
 
-/**
- * @title IDexRouter
- * @dev Interface for DEX routers (Uniswap V2 style)
- */
-interface IDexRouter {
-    function swapExactTokensForTokens(
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address[] calldata path,
-        address to,
-        uint256 deadline
-    ) external returns (uint256[] memory amounts);
-
-    function getAmountsOut(uint256 amountIn, address[] calldata path)
-        external
-        view
-        returns (uint256[] memory amounts);
-}
+// IDexRouter interface is now imported from ./IDexRouter.sol

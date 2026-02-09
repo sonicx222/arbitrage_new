@@ -7,41 +7,45 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import "./interfaces/IBalancerV2Vault.sol";
-import "./interfaces/IFlashLoanReceiver.sol";
+import "./interfaces/ISyncSwapVault.sol";
+import "./interfaces/IDexRouter.sol";
 import "./libraries/SwapHelpers.sol";
 
 /**
- * @title BalancerV2FlashArbitrage
+ * @title SyncSwapFlashArbitrage
  * @author Arbitrage System
- * @notice Flash loan arbitrage contract for executing profitable trades using Balancer V2 flash loans
- * @dev Implements IFlashLoanRecipient for Balancer V2 Vault integration
+ * @notice Flash loan arbitrage contract for zkSync Era using SyncSwap's EIP-3156 flash loans
+ * @dev Implements IERC3156FlashBorrower for EIP-3156 compliant flash loan integration
  *
  * Features:
- * - Balancer V2 flash loan integration (0% fee - no flash loan fees!)
+ * - SyncSwap flash loan integration (0.3% fee - competitive on zkSync Era)
+ * - EIP-3156 standard compliance for interoperability
  * - Multi-hop swap execution across multiple DEX routers
  * - Profit verification with minimum profit threshold
  * - Reentrancy protection
  * - Access control for router approval and fund withdrawal
  * - Emergency pause functionality
  *
- * Balancer V2 Flash Loan Advantages:
- * - Zero flash loan fees (unlike Aave V3's 0.09%)
+ * SyncSwap Flash Loan Characteristics:
+ * - 0.3% (30 bps) flash loan fee
+ * - EIP-3156 compliant callback interface
  * - Single Vault contract per chain (no pool discovery needed)
- * - Massive liquidity across all Balancer pools
- * - Simple callback interface with array-based parameters
+ * - Supports native ETH via address(0)
+ * - Fee calculated on surplus balance after repayment
  *
  * Security Model:
- * - Only Balancer Vault can call receiveFlashLoan() callback
- * - No pool whitelist needed (Vault address is trusted)
+ * - Only SyncSwap Vault can call onFlashLoan() callback
  * - Approved router system prevents malicious DEX interactions
+ * - Initiator verification ensures callback initiated by this contract
+ * - Returns correct EIP-3156 success hash
  *
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
- * @custom:implementation-plan Task 2.2 - Balancer V2 Flash Loan Provider
+ * @custom:implementation-plan Task 3.4 - SyncSwap Flash Loan Provider (zkSync Era)
+ * @custom:standard EIP-3156 Flash Loans
  */
-contract BalancerV2FlashArbitrage is
-    IFlashLoanRecipient,
+contract SyncSwapFlashArbitrage is
+    IERC3156FlashBorrower,
     Ownable2Step,
     Pausable,
     ReentrancyGuard
@@ -67,12 +71,24 @@ contract BalancerV2FlashArbitrage is
     /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
     uint256 public constant MAX_SWAP_HOPS = 5;
 
+    /// @notice SyncSwap flash loan fee rate in basis points (0.3% = 30 bps)
+    /// @dev SyncSwap charges 0.3% (30 bps) for flash loans on zkSync Era
+    uint256 private constant SYNCSWAP_FEE_BPS = 30;
+
+    /// @notice Denominator for basis points calculations (10000 bps = 100%)
+    uint256 private constant BPS_DENOMINATOR = 10000;
+
+    /// @notice EIP-3156 success return value
+    /// @dev Must return this exact value from onFlashLoan() to signal success
+    bytes32 private constant ERC3156_CALLBACK_SUCCESS =
+        keccak256("ERC3156FlashBorrower.onFlashLoan");
+
     // ==========================================================================
     // State Variables
     // ==========================================================================
 
-    /// @notice The Balancer V2 Vault address for flash loans
-    IBalancerV2Vault public immutable VAULT;
+    /// @notice The SyncSwap Vault address for flash loans
+    ISyncSwapVault public immutable VAULT;
 
     /// @notice Minimum profit required for arbitrage execution (in token units)
     uint256 public minimumProfit;
@@ -149,6 +165,7 @@ contract BalancerV2FlashArbitrage is
     error SwapPathAssetMismatch();
     error InsufficientProfit();
     error InvalidFlashLoanCaller();
+    error InvalidInitiator();
     error SwapFailed();
     error InsufficientOutputAmount();
     error InsufficientSlippageProtection();
@@ -157,15 +174,15 @@ contract BalancerV2FlashArbitrage is
     error InvalidSwapDeadline();
     error InvalidAmount();
     error TransactionTooOld();
-    error MultiAssetNotSupported();
+    error FlashLoanFailed();
 
     // ==========================================================================
     // Constructor
     // ==========================================================================
 
     /**
-     * @notice Initializes the BalancerV2FlashArbitrage contract
-     * @param _vault The Balancer V2 Vault address
+     * @notice Initializes the SyncSwapFlashArbitrage contract
+     * @param _vault The SyncSwap Vault address
      * @param _owner The contract owner address
      */
     constructor(address _vault, address _owner) {
@@ -175,7 +192,7 @@ contract BalancerV2FlashArbitrage is
         // Protection against typos or EOA addresses during deployment
         if (_vault.code.length == 0) revert InvalidVaultAddress();
 
-        VAULT = IBalancerV2Vault(_vault);
+        VAULT = ISyncSwapVault(_vault);
         swapDeadline = DEFAULT_SWAP_DEADLINE;
         _transferOwnership(_owner);
     }
@@ -185,12 +202,15 @@ contract BalancerV2FlashArbitrage is
     // ==========================================================================
 
     /**
-     * @notice Executes a flash loan arbitrage
+     * @notice Executes a flash loan arbitrage using EIP-3156 interface
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan
      * @param swapPath Array of swap steps defining the arbitrage path
      * @param minProfit Minimum required profit (reverts if not achieved)
      * @param deadline Absolute deadline (block.timestamp) - reverts if current block is after deadline
+     *
+     * @dev Initiates flash loan from SyncSwap Vault, executes swaps, verifies profit.
+     *      The Vault will call onFlashLoan() callback during execution.
      */
     function executeArbitrage(
         address asset,
@@ -236,76 +256,78 @@ contract BalancerV2FlashArbitrage is
         // Encode the swap path and minimum profit for the callback
         bytes memory userData = abi.encode(swapPath, minProfit);
 
-        // Prepare flash loan parameters
-        address[] memory tokens = new address[](1);
-        tokens[0] = asset;
-
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = amount;
-
-        // Initiate flash loan
-        VAULT.flashLoan(
-            IFlashLoanRecipient(this),
-            tokens,
-            amounts,
+        // Initiate EIP-3156 flash loan
+        // SyncSwap will transfer tokens to this contract, call onFlashLoan(), then verify repayment
+        bool success = VAULT.flashLoan(
+            IERC3156FlashBorrower(this),
+            asset,
+            amount,
             userData
         );
+
+        if (!success) revert FlashLoanFailed();
     }
 
     /**
-     * @notice Callback function called by Balancer Vault during flash loan
-     * @dev Must repay borrowed tokens (+ fees, though Balancer V2 fees are 0) before returning
-     * @param tokens Array of tokens that were flash loaned
-     * @param amounts Array of amounts that were flash loaned
-     * @param feeAmounts Array of fee amounts (always 0 for Balancer V2)
-     * @param userData Encoded swap path and minimum profit
+     * @notice EIP-3156 callback function called by SyncSwap Vault during flash loan
+     * @dev Must repay borrowed tokens + fee before returning. Returns ERC3156_CALLBACK_SUCCESS on success.
+     * @param initiator The address that initiated the flash loan (should be this contract)
+     * @param token The token that was flash loaned
+     * @param amount The amount that was flash loaned
+     * @param fee The flash loan fee (0.3% = 30 bps)
+     * @param data Encoded swap path and minimum profit
+     * @return ERC3156_CALLBACK_SUCCESS if successful
      */
-    function receiveFlashLoan(
-        address[] memory tokens,
-        uint256[] memory amounts,
-        uint256[] memory feeAmounts,
-        bytes memory userData
-    ) external override {
-        // Security: Verify caller is the Balancer Vault
+    function onFlashLoan(
+        address initiator,
+        address token,
+        uint256 amount,
+        uint256 fee,
+        bytes calldata data
+    ) external override returns (bytes32) {
+        // Security: Only SyncSwap Vault can call this function
         if (msg.sender != address(VAULT)) revert InvalidFlashLoanCaller();
 
-        // Balancer V2 supports multi-asset flash loans, but we only use single-asset for MVP
-        if (tokens.length != 1 || amounts.length != 1 || feeAmounts.length != 1) {
-            revert MultiAssetNotSupported();
-        }
+        // Security: Verify the flash loan was initiated by this contract
+        // Prevents external actors from triggering callbacks
+        if (initiator != address(this)) revert InvalidInitiator();
 
-        address asset = tokens[0];
-        uint256 amount = amounts[0];
-        uint256 feeAmount = feeAmounts[0]; // Always 0 for Balancer V2
-
-        // Decode parameters
+        // Decode user data
         (SwapStep[] memory swapPath, uint256 minProfit) = abi.decode(
-            userData,
+            data,
             (SwapStep[], uint256)
         );
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(asset, amount, swapPath);
+        uint256 amountReceived = _executeSwaps(token, amount, swapPath);
 
-        // Calculate required repayment and profit
-        uint256 amountOwed = amount + feeAmount; // feeAmount is 0, but kept for clarity
+        // Calculate amount owed (principal + fee)
+        uint256 amountOwed = amount + fee;
+
+        // Verify we received enough to repay loan + fee
         if (amountReceived < amountOwed) revert InsufficientProfit();
 
+        // Calculate actual profit
         uint256 profit = amountReceived - amountOwed;
 
-        // Verify minimum profit threshold
-        uint256 _minimumProfit = minimumProfit;
-        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
+        // Check profit meets minimum threshold
+        // Use max of per-trade minProfit and global minimumProfit
+        uint256 effectiveMinProfit = minProfit > minimumProfit ? minProfit : minimumProfit;
         if (profit < effectiveMinProfit) revert InsufficientProfit();
 
-        // Update profit tracking
+        // Update total profits tracking
         totalProfits += profit;
 
-        // Repay the flash loan by transferring tokens back to Vault
-        // Balancer V2 checks its balance after the callback returns to verify repayment
-        IERC20(asset).safeTransfer(address(VAULT), amountOwed);
+        // Approve Vault to pull repayment (EIP-3156 standard behavior)
+        // Vault will pull amountOwed from this contract after callback returns
+        // Use forceApprove for safe non-zero to non-zero approval handling
+        IERC20(token).forceApprove(address(VAULT), amountOwed);
 
-        emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
+        // Emit success event
+        emit ArbitrageExecuted(token, amount, profit, block.timestamp);
+
+        // Return EIP-3156 success code
+        return ERC3156_CALLBACK_SUCCESS;
     }
 
     // ==========================================================================
@@ -313,14 +335,13 @@ contract BalancerV2FlashArbitrage is
     // ==========================================================================
 
     /**
-     * @notice Executes multi-hop swaps according to the swap path
+     * @notice Executes a multi-hop swap path
      * @dev Uses SwapHelpers library for shared swap logic (DRY principle)
      *      Gas optimizations: pre-allocated path array, cached deadline
-     *
-     * @param startAsset The starting asset (flash loaned asset)
-     * @param startAmount The starting amount
-     * @param swapPath Array of swap steps (memory required due to abi.decode)
-     * @return finalAmount The final amount after all swaps
+     * @param startAsset The initial asset (flash loan asset)
+     * @param startAmount The initial amount (flash loan amount)
+     * @param swapPath Array of swap steps to execute
+     * @return finalAmount The final amount received after all swaps
      */
     function _executeSwaps(
         address startAsset,
@@ -365,189 +386,69 @@ contract BalancerV2FlashArbitrage is
     }
 
     // ==========================================================================
-    // Admin Functions - Router Management
+    // External Functions - View
     // ==========================================================================
 
     /**
-     * @notice Adds a router to the approved list
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to approve
-     */
-    function addApprovedRouter(address router) external onlyOwner {
-        if (router == address(0)) revert InvalidRouterAddress();
-        if (!_approvedRouters.add(router)) revert RouterAlreadyApproved();
-
-        emit RouterAdded(router);
-    }
-
-    /**
-     * @notice Removes a router from the approved list
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to remove
-     */
-    function removeApprovedRouter(address router) external onlyOwner {
-        if (!_approvedRouters.remove(router)) revert RouterNotApproved();
-
-        emit RouterRemoved(router);
-    }
-
-    /**
-     * @notice Checks if a router is approved
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to check
-     * @return True if router is approved
-     */
-    function isApprovedRouter(address router) external view returns (bool) {
-        return _approvedRouters.contains(router);
-    }
-
-    /**
-     * @notice Returns all approved routers
-     * @return Array of approved router addresses
-     */
-    function getApprovedRouters() external view returns (address[] memory) {
-        return _approvedRouters.values();
-    }
-
-    // ==========================================================================
-    // Admin Functions - Configuration
-    // ==========================================================================
-
-    /**
-     * @notice Sets the minimum profit threshold
-     * @param _minimumProfit The new minimum profit value
-     */
-    function setMinimumProfit(uint256 _minimumProfit) external onlyOwner {
-        uint256 oldValue = minimumProfit;
-        minimumProfit = _minimumProfit;
-        emit MinimumProfitUpdated(oldValue, _minimumProfit);
-    }
-
-    /**
-     * @notice Sets the swap deadline for DEX transactions
-     * @dev Deadline must be between 1 second and MAX_SWAP_DEADLINE (1 hour)
-     * @param _swapDeadline The new deadline in seconds (added to block.timestamp)
-     */
-    function setSwapDeadline(uint256 _swapDeadline) external onlyOwner {
-        if (_swapDeadline == 0 || _swapDeadline > MAX_SWAP_DEADLINE) revert InvalidSwapDeadline();
-        uint256 oldValue = swapDeadline;
-        swapDeadline = _swapDeadline;
-        emit SwapDeadlineUpdated(oldValue, _swapDeadline);
-    }
-
-    /**
-     * @notice Pauses the contract (emergency stop)
-     */
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses the contract
-     */
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ==========================================================================
-    // Admin Functions - Fund Recovery
-    // ==========================================================================
-
-    /**
-     * @notice Withdraws ERC20 tokens from the contract
-     * @param token The token address to withdraw
-     * @param to The recipient address
-     * @param amount The amount to withdraw
-     */
-    function withdrawToken(
-        address token,
-        address to,
-        uint256 amount
-    ) external onlyOwner {
-        if (to == address(0)) revert InvalidRecipient();
-        IERC20(token).safeTransfer(to, amount);
-        emit TokenWithdrawn(token, to, amount);
-    }
-
-    /**
-     * @notice Withdraws ETH from the contract
-     * @param to The recipient address
-     * @param amount The amount to withdraw
-     */
-    function withdrawETH(address payable to, uint256 amount) external onlyOwner {
-        if (to == address(0)) revert InvalidRecipient();
-        (bool success, ) = to.call{value: amount}("");
-        if (!success) revert ETHTransferFailed();
-        emit ETHWithdrawn(to, amount);
-    }
-
-    // ==========================================================================
-    // View Functions
-    // ==========================================================================
-
-    /**
-     * @notice Calculates the expected profit for an arbitrage opportunity
-     * @dev This is a simulation that doesn't execute the actual swaps
-     *
-     * Note: Balancer V2 charges 0% flash loan fees, so the only costs are DEX swap fees
-     *
+     * @notice Calculate expected profit for an arbitrage opportunity
      * @param asset The asset to flash loan
-     * @param amount The amount to flash loan (caller should ensure > 0)
-     * @param swapPath Array of swap steps
-     * @return expectedProfit The expected profit after all fees
-     * @return flashLoanFee The flash loan fee (always 0 for Balancer V2)
+     * @param amount The amount to flash loan
+     * @param swapPath Array of swap steps defining the arbitrage path
+     * @return expectedProfit Expected profit after fees (0 if unprofitable or invalid)
+     * @return flashLoanFee Flash loan fee amount (0.3% of amount)
+     *
+     * @dev Simulates swaps using DEX router's getAmountsOut() without executing on-chain.
+     *      Returns 0 for expectedProfit if path is invalid or unprofitable.
      */
     function calculateExpectedProfit(
         address asset,
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // Balancer V2 has 0% flash loan fee
-        flashLoanFee = 0;
+        // Calculate flash loan fee (0.3% = 30 bps)
+        flashLoanFee = (amount * SYNCSWAP_FEE_BPS) / BPS_DENOMINATOR;
 
-        // Early validation - swapPath must start with the flash-loaned asset
-        uint256 pathLength = swapPath.length;
-        if (pathLength == 0 || swapPath[0].tokenIn != asset) {
+        // Validate basic path requirements
+        if (swapPath.length == 0 || swapPath[0].tokenIn != asset) {
             return (0, flashLoanFee);
         }
 
-        // Simulate swaps to get expected output
         uint256 currentAmount = amount;
         address currentToken = asset;
-
-        // Gas optimization: Pre-allocate path array once
         address[] memory path = new address[](2);
 
-        for (uint256 i = 0; i < pathLength;) {
+        // Simulate each swap
+        for (uint256 i = 0; i < swapPath.length;) {
             SwapStep calldata step = swapPath[i];
 
+            // Validate path continuity
             if (step.tokenIn != currentToken) {
-                return (0, flashLoanFee); // Invalid path
+                return (0, flashLoanFee);
             }
 
-            // Reuse pre-allocated path array
             path[0] = step.tokenIn;
             path[1] = step.tokenOut;
 
+            // Try to get amounts out (catches reverts from invalid pairs)
             try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
                 uint256[] memory amounts
             ) {
                 currentAmount = amounts[amounts.length - 1];
                 currentToken = step.tokenOut;
             } catch {
-                return (0, flashLoanFee); // Router call failed
+                return (0, flashLoanFee);
             }
 
             unchecked { ++i; }
         }
 
-        // Check if we end with the correct asset
+        // Validate cycle completed (ends with start asset)
         if (currentToken != asset) {
             return (0, flashLoanFee);
         }
 
-        // Calculate profit (no flash loan fee for Balancer V2!)
-        uint256 amountOwed = amount; // No fees!
+        // Calculate profit (if positive)
+        uint256 amountOwed = amount + flashLoanFee;
         if (currentAmount > amountOwed) {
             expectedProfit = currentAmount - amountOwed;
         } else {
@@ -557,12 +458,132 @@ contract BalancerV2FlashArbitrage is
         return (expectedProfit, flashLoanFee);
     }
 
+    /**
+     * @notice Check if a router is approved
+     * @param router The router address to check
+     * @return True if router is approved
+     */
+    function isApprovedRouter(address router) external view returns (bool) {
+        return _approvedRouters.contains(router);
+    }
+
+    /**
+     * @notice Get all approved routers
+     * @return Array of approved router addresses
+     * @dev Uses EnumerableSet.values() for gas efficiency (avoids manual loop)
+     */
+    function getApprovedRouters() external view returns (address[] memory) {
+        return _approvedRouters.values();
+    }
+
+    /**
+     * @notice Get count of approved routers
+     * @return Number of approved routers
+     */
+    function approvedRouterCount() external view returns (uint256) {
+        return _approvedRouters.length();
+    }
+
     // ==========================================================================
-    // Receive Function
+    // External Functions - Admin (OnlyOwner)
     // ==========================================================================
 
     /**
-     * @notice Allows the contract to receive ETH
+     * @notice Add a router to the approved list
+     * @param router The router address to approve
      */
+    function addApprovedRouter(address router) external onlyOwner {
+        if (router == address(0)) revert InvalidRouterAddress();
+        if (_approvedRouters.contains(router)) revert RouterAlreadyApproved();
+
+        _approvedRouters.add(router);
+        emit RouterAdded(router);
+    }
+
+    /**
+     * @notice Remove a router from the approved list
+     * @param router The router address to remove
+     */
+    function removeApprovedRouter(address router) external onlyOwner {
+        if (!_approvedRouters.contains(router)) revert RouterNotApproved();
+
+        _approvedRouters.remove(router);
+        emit RouterRemoved(router);
+    }
+
+    /**
+     * @notice Set minimum profit threshold
+     * @param _minimumProfit New minimum profit value (in token units)
+     */
+    function setMinimumProfit(uint256 _minimumProfit) external onlyOwner {
+        uint256 oldValue = minimumProfit;
+        minimumProfit = _minimumProfit;
+        emit MinimumProfitUpdated(oldValue, _minimumProfit);
+    }
+
+    /**
+     * @notice Set swap deadline
+     * @param _swapDeadline New swap deadline in seconds
+     */
+    function setSwapDeadline(uint256 _swapDeadline) external onlyOwner {
+        if (_swapDeadline == 0 || _swapDeadline > MAX_SWAP_DEADLINE) {
+            revert InvalidSwapDeadline();
+        }
+
+        uint256 oldValue = swapDeadline;
+        swapDeadline = _swapDeadline;
+        emit SwapDeadlineUpdated(oldValue, _swapDeadline);
+    }
+
+    /**
+     * @notice Pause contract (emergency)
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @notice Unpause contract
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /**
+     * @notice Withdraw ERC20 tokens from contract
+     * @param token Token address
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     */
+    function withdrawToken(
+        address token,
+        address to,
+        uint256 amount
+    ) external onlyOwner {
+        if (to == address(0)) revert InvalidRecipient();
+
+        IERC20(token).safeTransfer(to, amount);
+        emit TokenWithdrawn(token, to, amount);
+    }
+
+    /**
+     * @notice Withdraw ETH from contract
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     */
+    function withdrawETH(address payable to, uint256 amount) external onlyOwner {
+        if (to == address(0)) revert InvalidRecipient();
+
+        (bool success, ) = to.call{value: amount}("");
+        if (!success) revert ETHTransferFailed();
+
+        emit ETHWithdrawn(to, amount);
+    }
+
+    // ==========================================================================
+    // Receive ETH
+    // ==========================================================================
+
+    /// @notice Allow contract to receive ETH (for native token arbitrage)
     receive() external payable {}
 }

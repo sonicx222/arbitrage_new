@@ -11,7 +11,7 @@
  * @see service-config.ts FLASH_LOAN_PROVIDERS
  */
 
-import { FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
+import { FLASH_LOAN_PROVIDERS, isValidContractAddress } from '@arbitrage/config';
 import type { Logger } from '../../types';
 import type {
   IFlashLoanProvider,
@@ -22,6 +22,7 @@ import type {
 import { AaveV3FlashLoanProvider } from './aave-v3.provider';
 import { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
 import { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
+import { SyncSwapFlashLoanProvider } from './syncswap.provider';
 import { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 /**
@@ -49,6 +50,16 @@ const PANCAKESWAP_V3_SUPPORTED_CHAINS = new Set(
 const BALANCER_V2_SUPPORTED_CHAINS = new Set(
   Object.entries(FLASH_LOAN_PROVIDERS)
     .filter(([_, config]) => config.protocol === 'balancer_v2')
+    .map(([chain]) => chain)
+);
+
+/**
+ * Chains that have fully supported SyncSwap flash loans
+ * Task 3.4: SyncSwap flash loan support on zkSync Era (Linea planned)
+ */
+const SYNCSWAP_SUPPORTED_CHAINS = new Set(
+  Object.entries(FLASH_LOAN_PROVIDERS)
+    .filter(([_, config]) => config.protocol === 'syncswap')
     .map(([chain]) => chain)
 );
 
@@ -123,11 +134,15 @@ export class FlashLoanProviderFactory {
       return this.createPancakeSwapV3Provider(chain, flashLoanConfig);
     }
 
+    if (protocol === 'syncswap') {
+      return this.createSyncSwapProvider(chain, flashLoanConfig);
+    }
+
     // Create unsupported provider for other protocols
     this.logger.info('Creating placeholder provider for unsupported protocol', {
       chain,
       protocol,
-      note: 'Only Aave V3, Balancer V2, and PancakeSwap V3 are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
+      note: 'Only Aave V3, Balancer V2, PancakeSwap V3, and SyncSwap are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
     });
 
     return new UnsupportedFlashLoanProvider({
@@ -147,22 +162,20 @@ export class FlashLoanProviderFactory {
   ): AaveV3FlashLoanProvider | undefined {
     const contractAddress = this.config.contractAddresses[chain];
 
-    // Fix 3.1: Validate contract address in production mode
-    if (!contractAddress) {
-      this.logger.warn('No FlashLoanArbitrage contract configured for Aave V3 chain', {
-        chain,
-        poolAddress: flashLoanConfig.address,
-      });
-      return undefined;
-    }
+    // FIX (Issue 1.2): Use centralized validation for both undefined and zero address
+    // Zero address will cause all transactions to fail silently at execution time.
+    // Better to fail fast during provider creation than during a trade attempt.
+    if (!isValidContractAddress(contractAddress)) {
+      const isZero = contractAddress === '0x0000000000000000000000000000000000000000';
+      const level = isZero ? 'error' : 'warn';
+      const message = isZero
+        ? '[ERR_CONFIG] Zero contract address is invalid - FlashLoanArbitrage not deployed'
+        : 'No FlashLoanArbitrage contract configured for Aave V3 chain';
 
-    // Fix 3.1 (Updated): Zero address should fail in ALL environments
-    // Rationale: A zero address will cause all transactions to fail silently at execution time.
-    // It's better to fail fast during provider creation than during a trade attempt.
-    if (contractAddress === '0x0000000000000000000000000000000000000000') {
-      this.logger.error('[ERR_CONFIG] Zero contract address is invalid - FlashLoanArbitrage not deployed', {
+      this.logger[level](message, {
         chain,
         poolAddress: flashLoanConfig.address,
+        contractAddress: contractAddress || 'undefined',
         action: 'Provider not created. Deploy the contract and configure the correct address.',
       });
       return undefined;
@@ -189,20 +202,18 @@ export class FlashLoanProviderFactory {
   ): PancakeSwapV3FlashLoanProvider | undefined {
     const contractAddress = this.config.contractAddresses[chain];
 
-    // Validate contract address
-    if (!contractAddress) {
-      this.logger.warn('No PancakeSwapFlashArbitrage contract configured for PancakeSwap V3 chain', {
-        chain,
-        factoryAddress: flashLoanConfig.address,
-      });
-      return undefined;
-    }
+    // FIX (Issue 1.2): Use centralized validation for both undefined and zero address
+    if (!isValidContractAddress(contractAddress)) {
+      const isZero = contractAddress === '0x0000000000000000000000000000000000000000';
+      const level = isZero ? 'error' : 'warn';
+      const message = isZero
+        ? '[ERR_CONFIG] Zero contract address is invalid - PancakeSwapFlashArbitrage not deployed'
+        : 'No PancakeSwapFlashArbitrage contract configured for PancakeSwap V3 chain';
 
-    // Zero address should fail in ALL environments
-    if (contractAddress === '0x0000000000000000000000000000000000000000') {
-      this.logger.error('[ERR_CONFIG] Zero contract address is invalid - PancakeSwapFlashArbitrage not deployed', {
+      this.logger[level](message, {
         chain,
         factoryAddress: flashLoanConfig.address,
+        contractAddress: contractAddress || 'undefined',
         action: 'Provider not created. Deploy the contract and configure the correct address.',
       });
       return undefined;
@@ -230,20 +241,18 @@ export class FlashLoanProviderFactory {
   ): BalancerV2FlashLoanProvider | undefined {
     const contractAddress = this.config.contractAddresses[chain];
 
-    // Validate contract address
-    if (!contractAddress) {
-      this.logger.warn('No BalancerV2FlashArbitrage contract configured for Balancer V2 chain', {
-        chain,
-        vaultAddress: flashLoanConfig.address,
-      });
-      return undefined;
-    }
+    // FIX (Issue 1.2): Use centralized validation for both undefined and zero address
+    if (!isValidContractAddress(contractAddress)) {
+      const isZero = contractAddress === '0x0000000000000000000000000000000000000000';
+      const level = isZero ? 'error' : 'warn';
+      const message = isZero
+        ? '[ERR_CONFIG] Zero contract address is invalid - BalancerV2FlashArbitrage not deployed'
+        : 'No BalancerV2FlashArbitrage contract configured for Balancer V2 chain';
 
-    // Zero address should fail in ALL environments
-    if (contractAddress === '0x0000000000000000000000000000000000000000') {
-      this.logger.error('[ERR_CONFIG] Zero contract address is invalid - BalancerV2FlashArbitrage not deployed', {
+      this.logger[level](message, {
         chain,
         vaultAddress: flashLoanConfig.address,
+        contractAddress: contractAddress || 'undefined',
         action: 'Provider not created. Deploy the contract and configure the correct address.',
       });
       return undefined;
@@ -255,6 +264,46 @@ export class FlashLoanProviderFactory {
     return new BalancerV2FlashLoanProvider({
       chain,
       poolAddress: flashLoanConfig.address, // Vault address for Balancer V2
+      contractAddress,
+      approvedRouters,
+      feeOverride,
+    });
+  }
+
+  /**
+   * Create SyncSwap provider
+   * Task 3.4: SyncSwap flash loan support on zkSync Era with EIP-3156
+   */
+  private createSyncSwapProvider(
+    chain: string,
+    flashLoanConfig: { address: string; protocol: string; fee: number }
+  ): SyncSwapFlashLoanProvider | undefined {
+    const contractAddress = this.config.contractAddresses[chain];
+
+    // FIX (Issue 1.2): Use centralized validation for both undefined and zero address
+    if (!isValidContractAddress(contractAddress)) {
+      const isZero = contractAddress === '0x0000000000000000000000000000000000000000';
+      const level = isZero ? 'error' : 'warn';
+      const message = isZero
+        ? '[ERR_CONFIG] Zero contract address is invalid - SyncSwapFlashArbitrage not deployed'
+        : 'No SyncSwapFlashArbitrage contract configured for SyncSwap chain';
+
+      this.logger[level](message, {
+        chain,
+        vaultAddress: flashLoanConfig.address,
+        contractAddress: contractAddress || 'undefined',
+        note: 'Deploy SyncSwapFlashArbitrage.sol contract to enable SyncSwap flash loans',
+        action: 'Provider not created. Deploy the contract and configure the correct address.',
+      });
+      return undefined;
+    }
+
+    const approvedRouters = this.config.approvedRouters[chain] || [];
+    const feeOverride = this.config.feeOverrides?.[chain];
+
+    return new SyncSwapFlashLoanProvider({
+      chain,
+      poolAddress: flashLoanConfig.address, // Vault address for SyncSwap
       contractAddress,
       approvedRouters,
       feeOverride,
@@ -304,19 +353,20 @@ export class FlashLoanProviderFactory {
    * @returns Array of chain identifiers
    */
   getFullySupportedChains(): string[] {
+    // FIX (Issue 1.2): Use centralized validation helper
     const aaveChains = Array.from(AAVE_V3_SUPPORTED_CHAINS).filter(chain => {
       const contractAddress = this.config.contractAddresses[chain];
-      return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
+      return isValidContractAddress(contractAddress);
     });
 
     const balancerChains = Array.from(BALANCER_V2_SUPPORTED_CHAINS).filter(chain => {
       const contractAddress = this.config.contractAddresses[chain];
-      return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
+      return isValidContractAddress(contractAddress);
     });
 
     const pancakeSwapChains = Array.from(PANCAKESWAP_V3_SUPPORTED_CHAINS).filter(chain => {
       const contractAddress = this.config.contractAddresses[chain];
-      return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
+      return isValidContractAddress(contractAddress);
     });
 
     return [...aaveChains, ...balancerChains, ...pancakeSwapChains];
@@ -357,12 +407,13 @@ export class FlashLoanProviderFactory {
     for (const chain of Object.keys(FLASH_LOAN_PROVIDERS)) {
       const config = FLASH_LOAN_PROVIDERS[chain];
       const contractAddress = this.config.contractAddresses[chain];
-      const hasContract = !!(contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000');
+      // FIX (Issue 1.2): Use centralized validation helper
+      const hasContract = isValidContractAddress(contractAddress);
 
       let status: ProtocolSupportStatus;
-      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3') && hasContract) {
+      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap') && hasContract) {
         status = 'fully_supported';
-      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3') {
+      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3' || config.protocol === 'syncswap') {
         status = 'partial_support'; // Protocol supported but no contract deployed
       } else {
         status = 'not_implemented';

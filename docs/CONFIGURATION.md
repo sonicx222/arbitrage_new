@@ -80,12 +80,24 @@ Each chain requires HTTP and WebSocket endpoints:
 | Variable | Description | Default | ADR |
 |----------|-------------|---------|-----|
 | `FEATURE_BATCHED_QUOTER` | Enable batched quote fetching | `false` | ADR-029 |
+| `FEATURE_COMMIT_REVEAL` | Enable commit-reveal MEV protection | `true` | Task 3.1 |
+| `FEATURE_COMMIT_REVEAL_REDIS` | Use Redis for commitment storage | `false` | Task 3.1 |
+| `COMMIT_REVEAL_VALIDATE_PROFIT` | Re-validate profit before reveal | `true` | Task 3.1 |
 
 **Batched Quote Fetching** (ADR-029):
 - Reduces quote latency by 75-83% (150ms → 30-50ms)
 - Requires MultiPathQuoter contract deployed on target chains
 - Configure contract addresses per chain (see below)
 - Safe to enable after deployment validation
+
+**Commit-Reveal MEV Protection** (Task 3.1):
+- Two-step commit-reveal pattern prevents front-running and sandwich attacks
+- Step 1: Submit commitment hash on-chain (blocks front-running)
+- Step 2: After block confirmation, reveal and execute transaction
+- Requires CommitRevealArbitrage contract deployed on target chains
+- Configure contract addresses per chain (see below)
+- Redis storage required for multi-instance deployments
+- Safe to enable after contract deployment and testing
 
 **Contract Address Configuration:**
 
@@ -99,6 +111,27 @@ Each chain requires HTTP and WebSocket endpoints:
 | `MULTI_PATH_QUOTER_BSC` | BNB Smart Chain | `0x...` |
 
 See [ADR-029: Batched Quote Fetching](architecture/adr/ADR-029-batched-quote-fetching.md) for implementation details.
+
+**Commit-Reveal Contract Configuration:**
+
+Deploy with: `npx hardhat run scripts/deploy-commit-reveal.ts --network <chain>`
+
+| Variable | Chain | Example |
+|----------|-------|---------|
+| `COMMIT_REVEAL_CONTRACT_ETHEREUM` | Ethereum Mainnet | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_ARBITRUM` | Arbitrum One | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_OPTIMISM` | Optimism | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_BASE` | Base | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_ZKSYNC` | zkSync Era | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_LINEA` | Linea | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_BSC` | BNB Smart Chain | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_POLYGON` | Polygon | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_AVALANCHE` | Avalanche C-Chain | `0x...` |
+| `COMMIT_REVEAL_CONTRACT_FANTOM` | Fantom | `0x...` |
+
+**Important:** Verify that zero addresses (`0x0000...0000`) are not used in production. The system will detect and reject zero addresses at configuration time (Issue 1.2 fix).
+
+See [docs/TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md](TASK_3.1_COMMIT_REVEAL_IMPLEMENTATION_SUMMARY.md) for implementation details.
 
 ### External Services
 

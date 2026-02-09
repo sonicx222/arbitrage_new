@@ -50,6 +50,25 @@ import type { FlashLoanProviderFactory } from './flash-loan-providers/provider-f
 // Fix 7.2: Import FlashLoanStrategy for destination chain flash loan execution
 import { FlashLoanStrategy } from './flash-loan.strategy';
 
+/**
+ * FIX 10.4: Pre-computed bridge polling backoff schedule (performance optimization)
+ *
+ * Eliminates per-iteration calculations for polling interval.
+ * Schedule defines polling intervals based on elapsed time.
+ *
+ * Format: [afterMs, intervalMs]
+ * - afterMs: Apply this interval after X milliseconds have elapsed
+ * - intervalMs: Poll every X milliseconds
+ *
+ * Schedule is checked in order, first match wins.
+ */
+const BRIDGE_POLL_BACKOFF_SCHEDULE = [
+  { afterMs: 120000, intervalMs: 20000 },  // After 2min: poll every 20s
+  { afterMs: 60000, intervalMs: 15000 },   // After 1min: poll every 15s
+  { afterMs: 30000, intervalMs: 10000 },   // After 30s: poll every 10s
+  { afterMs: 0, intervalMs: 5000 },        // First 30s: poll every 5s
+] as const;
+
 export class CrossChainStrategy extends BaseExecutionStrategy {
   // Phase 5.2: Optional flash loan provider factory for destination chain flash loans
   private readonly flashLoanProviderFactory?: FlashLoanProviderFactory;
@@ -1264,23 +1283,16 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         break;
       }
 
-      // Perf 10.3 Fix: More aggressive exponential backoff
-      // Start backoff earlier (30s instead of 60s) and cap at 20s instead of 30s
-      // This reduces API load while maintaining reasonable responsiveness
+      // FIX 10.4: Use pre-computed backoff schedule (eliminates per-iteration calculations)
       const elapsedMs = nowAfterFetch - bridgeStartTime;
-      let dynamicPollInterval: number;
-      if (elapsedMs > 120000) {
-        // After 2 minutes: maximum backoff (20s)
-        dynamicPollInterval = 20000;
-      } else if (elapsedMs > 60000) {
-        // After 1 minute: double the interval (cap at 15s)
-        dynamicPollInterval = Math.min(pollInterval * 2, 15000);
-      } else if (elapsedMs > 30000) {
-        // After 30 seconds: 1.5x the interval
-        dynamicPollInterval = Math.min(Math.floor(pollInterval * 1.5), 10000);
-      } else {
-        // First 30 seconds: use configured interval
-        dynamicPollInterval = pollInterval;
+      let dynamicPollInterval = pollInterval; // Default fallback
+
+      // Find matching schedule entry (pre-computed, no calculations needed)
+      for (const { afterMs, intervalMs } of BRIDGE_POLL_BACKOFF_SCHEDULE) {
+        if (elapsedMs >= afterMs) {
+          dynamicPollInterval = intervalMs;
+          break;
+        }
       }
 
       // Don't wait longer than remaining time

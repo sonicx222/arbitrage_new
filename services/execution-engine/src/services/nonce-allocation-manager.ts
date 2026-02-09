@@ -96,45 +96,84 @@ export class NonceAllocationManager {
     timeoutMs?: number
   ): Promise<void> {
     const timeout = timeoutMs ?? this.defaultLockTimeoutMs;
-    const existingLock = this.chainNonceLocks.get(chain);
 
-    if (existingLock) {
-      this.logger.debug('[NONCE_LOCK] Waiting for existing lock', {
-        chain,
-        opportunityId,
-      });
+    // FIX (Issue 1.4): Use absolute deadline to prevent timeout accumulation across retries
+    // Without this, each retry gets full timeout (3 retries = 30s instead of 10s total)
+    const deadline = Date.now() + timeout;
 
-      // Wait for existing lock with timeout
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`)), timeout);
-      });
+    // FIX 5.1: Retry loop to handle race when multiple waiters are released simultaneously
+    // This prevents TOCTOU bug where multiple callers could create locks after waiting
+    while (true) {
+      const existingLock = this.chainNonceLocks.get(chain);
 
-      try {
-        await Promise.race([existingLock, timeoutPromise]);
-      } catch (error) {
-        // If timeout, log and throw
-        this.logger.warn('[WARN_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock', {
+      if (existingLock) {
+        // FIX (Issue 1.4): Calculate remaining time from absolute deadline
+        const remainingTime = deadline - Date.now();
+        if (remainingTime <= 0) {
+          // Total timeout exceeded across all retries
+          const error = new Error(`[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`);
+          this.logger.warn('[WARN_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock', {
+            chain,
+            opportunityId,
+            totalTimeoutMs: timeout,
+            retriesExhausted: 'Deadline exceeded',
+          });
+          throw error;
+        }
+
+        this.logger.debug('[NONCE_LOCK] Waiting for existing lock', {
           chain,
           opportunityId,
-          timeoutMs: timeout,
+          remainingTimeMs: remainingTime,
         });
-        throw error;
+
+        // Wait for existing lock with remaining time until deadline
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(
+            () => reject(new Error(`[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`)),
+            remainingTime
+          );
+        });
+
+        try {
+          await Promise.race([existingLock, timeoutPromise]);
+        } catch (error) {
+          // If timeout, log and throw
+          const elapsedTime = Date.now() - (deadline - timeout);
+          this.logger.warn('[WARN_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock', {
+            chain,
+            opportunityId,
+            totalTimeoutMs: timeout,
+            elapsedTimeMs: elapsedTime,
+          });
+          throw error;
+        }
+
+        // FIX 5.1: Re-check lock after wait completes
+        // If another waiter already created a lock, wait again
+        // This handles the race where multiple waiters complete simultaneously
+        continue; // Re-check from top of loop (will use remaining time)
       }
+
+      // FIX 5.1: No existing lock - atomically create new lock
+      // Between checking (!existingLock) and creating lock, Node.js event loop
+      // won't interleave other async operations, so this is safe
+      let resolver: () => void;
+      const lockPromise = new Promise<void>((resolve) => {
+        resolver = resolve;
+      });
+
+      this.chainNonceLocks.set(chain, lockPromise);
+      this.chainNonceLockResolvers.set(chain, resolver!);
+
+      this.logger.debug('[NONCE_LOCK] Lock acquired', {
+        chain,
+        opportunityId,
+        totalWaitTime: Date.now() - (deadline - timeout),
+      });
+
+      break; // Lock acquired successfully
     }
-
-    // Create new lock
-    let resolver: () => void;
-    const lockPromise = new Promise<void>((resolve) => {
-      resolver = resolve;
-    });
-
-    this.chainNonceLocks.set(chain, lockPromise);
-    this.chainNonceLockResolvers.set(chain, resolver!);
-
-    this.logger.debug('[NONCE_LOCK] Lock acquired', {
-      chain,
-      opportunityId,
-    });
   }
 
   /**

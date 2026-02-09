@@ -21,7 +21,8 @@ import type {
   PairInitializationResult,
   DiscoveredPairResult,
 } from './types';
-import { dexFeeToPercentage } from '../../../config/src';
+// FIX (Issue 2.1): Use bpsToDecimal instead of deprecated dexFeeToPercentage
+import { bpsToDecimal } from '../utils/fee-utils';
 
 /**
  * Initialize trading pairs for a detector.
@@ -75,7 +76,8 @@ export async function initializePairs(
           if (pairAddress && pairAddress !== ethers.ZeroAddress) {
             // Convert fee from basis points to percentage for pair storage
             // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-            const feePercentage = dexFeeToPercentage(dex.fee ?? 30);
+            // FIX (Issue 2.1): Use dex.feeBps and bpsToDecimal (replaces deprecated dex.fee)
+            const feePercentage = bpsToDecimal(dex.feeBps ?? 30);
 
             const pair: Pair = {
               name: pairName,

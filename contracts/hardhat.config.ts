@@ -71,6 +71,17 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 421614,
     },
+    // zkSync Era Networks (for SyncSwap flash loan integration)
+    zksync: {
+      url: process.env.ZKSYNC_RPC_URL || 'https://mainnet.era.zksync.io',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 324,
+    },
+    'zksync-testnet': {
+      url: process.env.ZKSYNC_TESTNET_RPC_URL || 'https://sepolia.era.zksync.dev',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 300,
+    },
     // Production networks - uncomment after security audit
     // TODO: Track deployment progress - create GitHub issue for mainnet deployment
     // Prerequisites: 1) Security audit, 2) Testnet verification, 3) Deployment runbook
@@ -97,6 +108,9 @@ const config: HardhatUserConfig = {
       sepolia: process.env.ETHERSCAN_API_KEY || '',
       arbitrumOne: process.env.ARBISCAN_API_KEY || '',
       arbitrumSepolia: process.env.ARBISCAN_API_KEY || '',
+      // zkSync Era uses its own explorer
+      zksync: process.env.ZKSYNC_ETHERSCAN_API_KEY || '',
+      'zksync-testnet': process.env.ZKSYNC_ETHERSCAN_API_KEY || '',
     },
   },
   typechain: {

@@ -13,10 +13,12 @@
  * |----------------|-----------------------------------|--------------------||
  * | Aave V3        | ethereum, polygon, arbitrum,      | Fully Supported    |
  * |                | base, optimism, avalanche         |                    |
+ * | Balancer V2    | ethereum, polygon, arbitrum,      | Fully Supported    |
+ * |                | optimism, base, fantom            |                    |
  * | PancakeSwap V3 | bsc, ethereum, arbitrum, zksync,  | Fully Supported    |
  * |                | base, opbnb, linea                |                    |
+ * | SyncSwap       | zksync (linea planned)            | Fully Supported    |
  * | SpookySwap     | fantom                            | Not Implemented    |
- * | SyncSwap       | zksync, linea                     | Not Implemented    |
  *
  * ## Usage
  *
@@ -55,7 +57,9 @@ export type {
 
 // Providers
 export { AaveV3FlashLoanProvider } from './aave-v3.provider';
+export { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
 export { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
+export { SyncSwapFlashLoanProvider } from './syncswap.provider';
 export { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 // Factory

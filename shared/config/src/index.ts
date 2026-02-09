@@ -260,6 +260,10 @@ export {
   // Task 2.2: Balancer V2 flash loan support
   BALANCER_V2_FEE_BPS,
   BALANCER_V2_FLASH_ARBITRAGE_ABI,
+  // Task 3.4: SyncSwap flash loan support
+  SYNCSWAP_FEE_BPS,
+  SYNCSWAP_FEE_BPS_BIGINT,
+  SYNCSWAP_FLASH_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,
   // Tier 2 Enhancement: MultiPathQuoter contract addresses
@@ -271,6 +275,10 @@ export {
   FEATURE_FLAGS,
   FLASH_LOAN_AGGREGATOR_CONFIG,
   validateFeatureFlags,
+  // FIX (Issue 2.4): Chain execution support validation
+  SUPPORTED_EXECUTION_CHAINS,
+  isExecutionSupported,
+  getSupportedExecutionChains,
 } from './service-config';
 
 // =============================================================================
@@ -361,6 +369,10 @@ export {
   BALANCER_V2_VAULTS,
   getBalancerV2Vault,
   hasBalancerV2,
+  // SyncSwap vaults (Task 3.4)
+  SYNCSWAP_VAULTS,
+  getSyncSwapVault,
+  hasSyncSwap,
   // Native tokens
   NATIVE_TOKENS,
   getNativeToken,
@@ -382,6 +394,13 @@ export {
   isValidSolanaAddress,
   normalizeAddress,
   addressesEqual,
+  // Address validation helpers (FIX: Issue 1.2)
+  ZERO_ADDRESS,
+  isValidContractAddress,
+  // Commit-Reveal contracts (Task 3.1)
+  COMMIT_REVEAL_CONTRACTS,
+  getCommitRevealContract,
+  hasCommitRevealContract,
   // Type exports
   EVMChainId,
   ChainId,
