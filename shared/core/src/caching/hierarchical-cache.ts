@@ -690,6 +690,20 @@ export class HierarchicalCache {
   }
 
   /**
+   * Get L1 cache size configuration in MB
+   *
+   * Exposes the configured L1 cache size for external components that need to
+   * calculate capacity or understand cache dimensions.
+   *
+   * @returns L1 cache size in megabytes
+   *
+   * P1-3 fix: Added public getter to avoid type casting in cache warmer
+   */
+  getL1SizeMb(): number {
+    return this.config.l1Size;
+  }
+
+  /**
    * PHASE1-TASK33: Get cache statistics.
    * Includes PriceMatrix stats when enabled.
    */

@@ -52,8 +52,22 @@ import {
   // Task 1.2: Batched quoting imports
   FEATURE_FLAGS,
   hasMultiPathQuoter,
+  // Task 2.1: PancakeSwap V3 integration
+  getPancakeSwapV3Factory,
+  hasPancakeSwapV3,
 } from '@arbitrage/config';
-import { getErrorMessage, isValidPrice } from '@arbitrage/core';
+import {
+  getErrorMessage,
+  isValidPrice,
+  // Clean Architecture: Flash Loan Aggregation (Task 2.3)
+  type IFlashLoanAggregator,
+  type IAggregatorMetrics,
+  type IProviderInfo,
+  createFlashLoanAggregator,
+  createWeightedRankingStrategy,
+  createOnChainLiquidityValidator,
+  createInMemoryAggregatorMetrics,
+} from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
@@ -70,6 +84,9 @@ import {
   type BatchQuoterService,
   type QuoteRequest,
 } from '../services/simulation/batch-quoter.service';
+
+// Task 2.1: Import PancakeSwap V3 provider for pool discovery
+import { PancakeSwapV3FlashLoanProvider } from './flash-loan-providers/pancakeswap-v3.provider';
 
 // =============================================================================
 // Constants
@@ -116,10 +133,13 @@ const DEFAULT_GAS_ESTIMATE = 500000n;
 
 /**
  * Supported flash loan protocols by this strategy.
- * Only Aave V3 is currently implemented. Other protocols require different
- * callback interfaces and contract implementations.
+ *
+ * Task 2.1: Added PancakeSwap V3 support alongside Aave V3.
+ * Each protocol requires different callback interfaces and contract implementations:
+ * - Aave V3: Uses FlashLoanArbitrage.sol with executeOperation callback
+ * - PancakeSwap V3: Uses PancakeSwapFlashArbitrage.sol with pancakeV3FlashCallback
  */
-const SUPPORTED_FLASH_LOAN_PROTOCOLS = new Set(['aave_v3']);
+const SUPPORTED_FLASH_LOAN_PROTOCOLS = new Set(['aave_v3', 'pancakeswap_v3']);
 
 /**
  * Chains that support Aave V3 flash loans (pre-computed for O(1) lookup)
@@ -127,6 +147,15 @@ const SUPPORTED_FLASH_LOAN_PROTOCOLS = new Set(['aave_v3']);
 const AAVE_V3_SUPPORTED_CHAINS = new Set(
   Object.entries(FLASH_LOAN_PROVIDERS)
     .filter(([_, config]) => config.protocol === 'aave_v3')
+    .map(([chain]) => chain)
+);
+
+/**
+ * Task 2.1: Chains that support PancakeSwap V3 flash loans (pre-computed for O(1) lookup)
+ */
+const PANCAKESWAP_V3_SUPPORTED_CHAINS = new Set(
+  Object.entries(FLASH_LOAN_PROVIDERS)
+    .filter(([_, config]) => config.protocol === 'pancakeswap_v3')
     .map(([chain]) => chain)
 );
 
@@ -139,6 +168,10 @@ const AAVE_V3_SUPPORTED_CHAINS = new Set(
  *
  * Note: Aave Pool addresses are read from FLASH_LOAN_PROVIDERS[@arbitrage/config].
  * No need to specify them here - they are auto-discovered per chain.
+ *
+ * Task 2.3: Flash Loan Protocol Aggregation (Clean Architecture)
+ * - Enable dynamic provider selection via aggregator
+ * - Fallback to hardcoded Aave V3 if disabled
  */
 export interface FlashLoanStrategyConfig {
   /** FlashLoanArbitrage contract addresses per chain */
@@ -147,6 +180,50 @@ export interface FlashLoanStrategyConfig {
   approvedRouters: Record<string, string[]>;
   /** Custom flash loan fee overrides (basis points) */
   feeOverrides?: Record<string, number>;
+
+  /**
+   * Task 2.3: Enable flash loan protocol aggregation
+   *
+   * When enabled:
+   * - Dynamically selects best provider via weighted ranking
+   * - Validates liquidity with on-chain checks (5-min cache)
+   * - Tracks provider metrics (success rate, latency)
+   * - Supports fallback on provider failures
+   *
+   * When disabled:
+   * - Uses hardcoded Aave V3 (backward compatible)
+   *
+   * @default false
+   */
+  enableAggregator?: boolean;
+
+  /**
+   * Aggregator weights (Task 2.3)
+   *
+   * @default { fees: 0.5, liquidity: 0.3, reliability: 0.15, latency: 0.05 }
+   */
+  aggregatorWeights?: {
+    fees: number;
+    liquidity: number;
+    reliability: number;
+    latency: number;
+  };
+
+  /**
+   * Maximum providers to rank (Task 2.3)
+   *
+   * @default 3
+   */
+  maxProvidersToRank?: number;
+
+  /**
+   * Enable liquidity validation (Task 2.3)
+   *
+   * When enabled, validates provider liquidity on-chain before execution.
+   *
+   * @default true (if aggregator enabled)
+   */
+  enableLiquidityValidation?: boolean;
 }
 
 /**
@@ -191,12 +268,18 @@ export interface NHopSwapStepsParams {
 
 /**
  * Parameters for executeArbitrage calldata
+ *
+ * Task 2.1: Added optional pool parameter for PancakeSwap V3.
+ * - Aave V3: pool is undefined (uses FlashLoanArbitrage contract)
+ * - PancakeSwap V3: pool is required (uses PancakeSwapFlashArbitrage contract)
  */
 export interface ExecuteArbitrageParams {
   asset: string;
   amount: bigint;
   swapPath: SwapStep[];
   minProfit: bigint;
+  /** Task 2.1: PancakeSwap V3 pool address (required for PancakeSwap V3, unused for Aave V3) */
+  pool?: string;
 }
 
 // P2-8: Import from extracted FlashLoanFeeCalculator
@@ -223,6 +306,21 @@ import {
  */
 const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
 
+/**
+ * Task 2.1: PancakeSwap V3 Flash Arbitrage ABI (cached for hot-path optimization)
+ *
+ * PancakeSwap V3 requires a different contract interface than Aave V3:
+ * - executeArbitrage takes `pool` parameter (first arg)
+ * - Contract uses PancakeSwap V3 flash swap mechanism
+ * - Different callback interface (pancakeV3FlashCallback)
+ *
+ * @see contracts/src/PancakeSwapFlashArbitrage.sol
+ */
+const PANCAKESWAP_FLASH_ARBITRAGE_ABI = [
+  'function executeArbitrage(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+];
+const PANCAKESWAP_FLASH_INTERFACE = new ethers.Interface(PANCAKESWAP_FLASH_ARBITRAGE_ABI);
+
 // =============================================================================
 // FlashLoanStrategy
 // =============================================================================
@@ -242,6 +340,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly feeCalculator: FlashLoanFeeCalculator;
   // Task 1.2: Cache BatchQuoterService instances per chain
   private readonly batchedQuoters: Map<string, BatchQuoterService>;
+  // Task 2.3: Flash Loan Protocol Aggregation (Clean Architecture)
+  private readonly aggregator?: IFlashLoanAggregator;
+  private readonly aggregatorMetrics?: IAggregatorMetrics;
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -296,12 +397,111 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       }
     }
 
+    // I3 Fix: Validate PancakeSwap V3 configuration consistency
+    // For each chain configured with PancakeSwap V3 protocol, ensure factory address exists
+    for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
+      if (providerConfig.protocol === 'pancakeswap_v3') {
+        // Check if factory address is configured
+        if (!hasPancakeSwapV3(chain)) {
+          throw new Error(
+            `[ERR_CONFIG] PancakeSwap V3 protocol configured for chain '${chain}' ` +
+            `but factory address is missing. Add factory address to PANCAKESWAP_V3_FACTORIES ` +
+            `in shared/config/src/addresses.ts`
+          );
+        }
+
+        // Validate factory address is not zero
+        const factoryAddress = getPancakeSwapV3Factory(chain);
+        if (factoryAddress === '0x0000000000000000000000000000000000000000') {
+          throw new Error(
+            `[ERR_ZERO_ADDRESS] PancakeSwap V3 factory address for chain '${chain}' is zero address. ` +
+            `This is a misconfiguration in PANCAKESWAP_V3_FACTORIES.`
+          );
+        }
+
+        // Validate factory address format
+        if (!ethers.isAddress(factoryAddress)) {
+          throw new Error(
+            `[ERR_CONFIG] Invalid PancakeSwap V3 factory address for chain '${chain}': ${factoryAddress}`
+          );
+        }
+      }
+    }
+
     this.config = config;
 
     // P2-8: Initialize fee calculator with config's fee overrides
     this.feeCalculator = new FlashLoanFeeCalculator({
       feeOverrides: config.feeOverrides,
     });
+
+    // Task 2.3: Initialize flash loan aggregator (Clean Architecture)
+    if (config.enableAggregator) {
+      this.logger.info('Initializing Flash Loan Protocol Aggregator (Clean Architecture)');
+
+      // Create metrics tracker
+      this.aggregatorMetrics = createInMemoryAggregatorMetrics({
+        maxLatencySamples: 100,
+        minSamplesForScore: 10,
+      });
+
+      // Create aggregator config from strategy config
+      const aggregatorConfig = {
+        liquidityCheckThresholdUsd: 100000, // $100K
+        rankingCacheTtlMs: 30000, // 30s
+        liquidityCacheTtlMs: 300000, // 5min
+        weights: config.aggregatorWeights ?? {
+          fees: 0.5,
+          liquidity: 0.3,
+          reliability: 0.15,
+          latency: 0.05,
+        },
+        maxProvidersToRank: config.maxProvidersToRank ?? 3,
+      };
+
+      // Create ranking strategy
+      const ranker = createWeightedRankingStrategy(aggregatorConfig);
+
+      // Create liquidity validator (only if enabled)
+      const validator = config.enableLiquidityValidation !== false
+        ? createOnChainLiquidityValidator({
+            cacheTtlMs: 300000, // 5 minutes
+            safetyMargin: 1.1, // 10% buffer
+            rpcTimeoutMs: 5000,
+            maxCacheSize: 500,
+          })
+        : null;
+
+      // Build available providers map from FLASH_LOAN_PROVIDERS config
+      const availableProviders = new Map<string, IProviderInfo[]>();
+      for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
+        const providers: IProviderInfo[] = [{
+          protocol: providerConfig.protocol as any,
+          chain,
+          poolAddress: providerConfig.address,
+          feeBps: providerConfig.fee,
+          isAvailable: true,
+        }];
+        availableProviders.set(chain, providers);
+      }
+
+      // Create aggregator
+      this.aggregator = createFlashLoanAggregator(
+        aggregatorConfig,
+        ranker,
+        validator,
+        this.aggregatorMetrics,
+        availableProviders
+      );
+
+      this.logger.info('Flash Loan Aggregator initialized', {
+        weights: aggregatorConfig.weights,
+        maxProvidersToRank: aggregatorConfig.maxProvidersToRank,
+        enableLiquidityValidation: validator !== null,
+      });
+    } else {
+      this.logger.info('Flash Loan Aggregator disabled - using hardcoded Aave V3 provider');
+    }
   }
 
   // ===========================================================================
@@ -438,6 +638,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       );
     }
 
+    // Task 2.3: Declare selectedProvider at function scope for metrics tracking
+    let selectedProvider: IProviderInfo | null = null;
+
     try {
       // Finding 10.3 Fix: Parallelize independent operations for latency reduction
       // getOptimalGasPrice and verifyOpportunityPrices don't depend on each other
@@ -458,6 +661,95 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
           chain,
           opportunity.buyDex || 'unknown'
         );
+      }
+
+      // Task 2.3: Dynamic flash loan provider selection via aggregator
+      if (this.aggregator && opportunity.tokenIn) {
+        const selectionStartTime = Date.now();
+        try {
+          const providerSelection = await this.aggregator.selectProvider(opportunity, {
+            chain,
+            rpcProviders: ctx.providers,
+            estimatedValueUsd: opportunity.expectedProfit ?? 0,
+          });
+
+          // Check if selection was successful (protocol !== null)
+          if (!providerSelection.isSuccess) {
+            this.logger.warn('Aggregator rejected all providers, aborting execution', {
+              opportunityId: opportunity.id,
+              reason: providerSelection.selectionReason,
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(
+                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+                `No suitable flash loan provider: ${providerSelection.selectionReason}`
+              ),
+              chain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+
+          // Extract selected protocol
+          const selectedProtocol = providerSelection.protocol!;
+
+          // Store provider info (mock IProviderInfo for metrics)
+          selectedProvider = {
+            protocol: selectedProtocol,
+            chain,
+            poolAddress: FLASH_LOAN_PROVIDERS[chain]?.address || '',
+            feeBps: FLASH_LOAN_PROVIDERS[chain]?.fee || 0,
+            isAvailable: true,
+          };
+
+          this.logger.info('Flash loan provider selected via aggregator', {
+            opportunityId: opportunity.id,
+            protocol: selectedProtocol,
+            score: providerSelection.score?.totalScore.toFixed(3),
+            reason: providerSelection.selectionReason,
+            latencyMs: providerSelection.selectionLatencyMs,
+          });
+
+          // Validate selected protocol is supported by this strategy
+          if (!SUPPORTED_FLASH_LOAN_PROTOCOLS.has(selectedProtocol)) {
+            this.logger.warn('Aggregator selected unsupported protocol', {
+              opportunityId: opportunity.id,
+              selectedProtocol,
+              supportedProtocols: Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS),
+            });
+
+            return createErrorResult(
+              opportunity.id,
+              formatExecutionError(
+                ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
+                `Selected protocol '${selectedProtocol}' not supported by this strategy`
+              ),
+              chain,
+              opportunity.buyDex || 'unknown'
+            );
+          }
+        } catch (error) {
+          this.logger.error('Flash loan provider selection failed', {
+            opportunityId: opportunity.id,
+            error: getErrorMessage(error),
+          });
+
+          return createErrorResult(
+            opportunity.id,
+            formatExecutionError(
+              ExecutionErrorCode.FLASH_LOAN_ERROR,
+              `Provider selection failed: ${getErrorMessage(error)}`
+            ),
+            chain,
+            opportunity.buyDex || 'unknown'
+          );
+        }
+      } else {
+        // Aggregator disabled - use hardcoded Aave V3 (backward compatible)
+        this.logger.debug('Using hardcoded Aave V3 provider (aggregator disabled)', {
+          opportunityId: opportunity.id,
+        });
       }
 
       // Fix 10.3: Parallelize independent operations for latency reduction
@@ -625,6 +917,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       // This ensures consistent pattern per Doc 4.1 in index.ts:
       // execute() methods should return ExecutionResult, not throw
       if (!submitResult.success) {
+        // Task 2.3: Record failed execution in aggregator metrics
+        if (this.aggregatorMetrics && selectedProvider) {
+          this.aggregatorMetrics.recordOutcome({
+            protocol: selectedProvider.protocol,
+            success: false,
+            executionLatencyMs: 0,
+            error: submitResult.error || 'Transaction submission failed',
+          });
+        }
+
         // submitTransaction handles nonce management internally
         return createErrorResult(
           opportunity.id,
@@ -651,6 +953,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         usedMevProtection: submitResult.usedMevProtection,
       });
 
+      // Task 2.3: Record successful execution in aggregator metrics
+      if (this.aggregatorMetrics && selectedProvider) {
+        this.aggregatorMetrics.recordOutcome({
+          protocol: selectedProvider.protocol,
+          success: true,
+          executionLatencyMs: 0, // Not tracking execution time here
+        });
+      }
+
       return createSuccessResult(
         opportunity.id,
         submitResult.txHash || submitResult.receipt?.hash || '',
@@ -674,6 +985,16 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         chain,
         error: errorMessage,
       });
+
+      // Task 2.3: Record failed execution in aggregator metrics
+      if (this.aggregatorMetrics && selectedProvider) {
+        this.aggregatorMetrics.recordOutcome({
+          protocol: selectedProvider.protocol,
+          success: false,
+          executionLatencyMs: 0,
+          error: errorMessage || 'Unknown error during flash loan execution',
+        });
+      }
 
       return createErrorResult(
         opportunity.id,
@@ -958,11 +1279,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   /**
    * Build calldata for executeArbitrage function.
    *
+   * Task 2.1: Updated to support both Aave V3 and PancakeSwap V3 contracts.
+   * - Aave V3: FlashLoanArbitrage.executeArbitrage(asset, amount, swapPath, minProfit)
+   * - PancakeSwap V3: PancakeSwapFlashArbitrage.executeArbitrage(pool, asset, amount, swapPath, minProfit, deadline)
+   *
    * @param params - Execute arbitrage parameters
    * @returns Encoded calldata
    */
   buildExecuteArbitrageCalldata(params: ExecuteArbitrageParams): string {
-    const { asset, amount, swapPath, minProfit } = params;
+    const { asset, amount, swapPath, minProfit, pool } = params;
 
     // Issue 10.2 Fix: Use cached interface instead of creating new one
     // Convert SwapStep[] to tuple array format for ABI encoding
@@ -973,12 +1298,28 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       step.amountOutMin,
     ]);
 
-    return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
-      asset,
-      amount,
-      swapPathTuples,
-      minProfit,
-    ]);
+    // Task 2.1: Use different interface based on protocol
+    if (pool) {
+      // PancakeSwap V3: Requires pool address and deadline
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+
+      return PANCAKESWAP_FLASH_INTERFACE.encodeFunctionData('executeArbitrage', [
+        pool,
+        asset,
+        amount,
+        swapPathTuples,
+        minProfit,
+        deadline,
+      ]);
+    } else {
+      // Aave V3: Standard flash loan
+      return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
+        asset,
+        amount,
+        swapPathTuples,
+        minProfit,
+      ]);
+    }
   }
 
   // ===========================================================================
@@ -1086,12 +1427,45 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       tokenDecimals
     );
 
+    // Task 2.1: Discover PancakeSwap V3 pool if needed
+    let poolAddress: string | undefined;
+    const protocol = FLASH_LOAN_PROVIDERS[chain]?.protocol;
+    if (protocol === 'pancakeswap_v3') {
+      // Get provider for pool discovery
+      const provider = ctx.providers.get(chain);
+      if (!provider) {
+        throw new Error(`No provider available for chain: ${chain}`);
+      }
+
+      // Discover pool for token pair
+      const poolInfo = await this.discoverPancakeSwapV3Pool(
+        opportunity.tokenIn,
+        swapSteps[0]?.tokenOut || opportunity.tokenOut!, // First swap's output token
+        chain,
+        provider as ethers.JsonRpcProvider
+      );
+
+      if (!poolInfo) {
+        throw new Error(
+          `[ERR_NO_POOL] No PancakeSwap V3 pool found for token pair: ${opportunity.tokenIn} <-> ${opportunity.tokenOut}`
+        );
+      }
+
+      poolAddress = poolInfo.pool;
+      this.logger.debug('Using PancakeSwap V3 pool for flash loan', {
+        opportunityId: opportunity.id,
+        pool: poolAddress,
+        feeTier: poolInfo.feeTier,
+      });
+    }
+
     // Build calldata
     const calldata = this.buildExecuteArbitrageCalldata({
       asset: opportunity.tokenIn,
       amount: BigInt(opportunity.amountIn),
       swapPath: swapSteps,
       minProfit: minProfitWei,
+      pool: poolAddress, // Task 2.1: Include pool for PancakeSwap V3
     });
 
     // Prepare transaction
@@ -1167,6 +1541,76 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   }
 
   // ===========================================================================
+  // PancakeSwap V3 Pool Discovery (Task 2.1)
+  // ===========================================================================
+
+  /**
+   * Discover the best PancakeSwap V3 pool for a token pair.
+   *
+   * Task 2.1: Pool discovery for PancakeSwap V3 flash loans.
+   * PancakeSwap V3 has multiple pools per token pair (different fee tiers).
+   * This method queries the factory to find the best available pool.
+   *
+   * Fee tier preference order: 2500 (0.25%), 500 (0.05%), 10000 (1%), 100 (0.01%)
+   *
+   * @param tokenA - First token address
+   * @param tokenB - Second token address
+   * @param chain - Chain identifier
+   * @param provider - RPC provider for on-chain queries
+   * @returns Pool address and fee tier, or null if no pool found
+   */
+  private async discoverPancakeSwapV3Pool(
+    tokenA: string,
+    tokenB: string,
+    chain: string,
+    provider: ethers.JsonRpcProvider
+  ): Promise<{ pool: string; feeTier: number } | null> {
+    try {
+      // Get factory address for chain
+      const factoryAddress = getPancakeSwapV3Factory(chain);
+
+      // Create temporary provider instance for pool discovery
+      // Note: We don't need the full contract address or approved routers for discovery
+      const tempProvider = new PancakeSwapV3FlashLoanProvider({
+        chain,
+        poolAddress: factoryAddress, // Factory address
+        contractAddress: '0x0000000000000000000000000000000000000000', // Not needed for discovery
+        approvedRouters: [], // Not needed for discovery
+      });
+
+      // Discover best pool
+      const poolInfo = await tempProvider.findBestPool(tokenA, tokenB, provider);
+
+      if (!poolInfo) {
+        this.logger.warn('No PancakeSwap V3 pool found for token pair', {
+          tokenA,
+          tokenB,
+          chain,
+        });
+        return null;
+      }
+
+      this.logger.info('Discovered PancakeSwap V3 pool', {
+        tokenA,
+        tokenB,
+        chain,
+        pool: poolInfo.pool,
+        feeTier: poolInfo.feeTier,
+      });
+
+      return poolInfo;
+    } catch (error) {
+      this.logger.error('Failed to discover PancakeSwap V3 pool', {
+        tokenA,
+        tokenB,
+        chain,
+        error: getErrorMessage(error),
+      });
+      return null;
+    }
+  }
+
+  // ===========================================================================
   // Gas Estimation
   // ===========================================================================
   // ===========================================================================
@@ -1218,15 +1662,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   /**
    * Check if the flash loan protocol on a chain is supported by this strategy.
    *
-   * Currently only Aave V3 is supported. Other protocols (PancakeSwap, SpookySwap,
-   * SyncSwap) require different callback interfaces and contract implementations.
+   * Task 2.1: Updated to support both Aave V3 and PancakeSwap V3.
+   * Each protocol requires different callback interfaces and contract implementations.
    *
    * @param chain - Chain identifier
    * @returns True if the protocol is supported
    */
   isProtocolSupported(chain: string): boolean {
-    // Use pre-computed set for O(1) lookup
-    return AAVE_V3_SUPPORTED_CHAINS.has(chain);
+    // Use pre-computed sets for O(1) lookup
+    return AAVE_V3_SUPPORTED_CHAINS.has(chain) || PANCAKESWAP_V3_SUPPORTED_CHAINS.has(chain);
   }
 
   /**
@@ -1242,10 +1686,65 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   /**
    * Get list of chains with supported flash loan protocols.
    *
-   * @returns Array of chain identifiers that support Aave V3
+   * Task 2.1: Returns chains that support either Aave V3 or PancakeSwap V3.
+   *
+   * @returns Array of chain identifiers that support any implemented protocol
    */
   getSupportedProtocolChains(): string[] {
-    return Array.from(AAVE_V3_SUPPORTED_CHAINS);
+    return Array.from(new Set([...AAVE_V3_SUPPORTED_CHAINS, ...PANCAKESWAP_V3_SUPPORTED_CHAINS]));
+  }
+
+  // ===========================================================================
+  // Task 2.3: Flash Loan Aggregator Metrics
+  // ===========================================================================
+
+  /**
+   * Check if flash loan aggregator is enabled.
+   *
+   * @returns True if aggregator is enabled and initialized
+   */
+  isAggregatorEnabled(): boolean {
+    return !!this.aggregator;
+  }
+
+  /**
+   * Get flash loan aggregator metrics.
+   *
+   * Returns metrics summary if aggregator is enabled, null otherwise.
+   *
+   * @returns Aggregator metrics or null
+   */
+  getAggregatorMetrics(): string | null {
+    if (!this.aggregatorMetrics) {
+      return null;
+    }
+
+    return this.aggregatorMetrics.getMetricsSummary();
+  }
+
+  /**
+   * Get aggregated metrics as structured data.
+   *
+   * @returns Aggregated metrics or null if aggregator disabled
+   */
+  getAggregatedMetricsData(): ReturnType<IAggregatorMetrics['getAggregatedMetrics']> | null {
+    if (!this.aggregatorMetrics) {
+      return null;
+    }
+
+    return this.aggregatorMetrics.getAggregatedMetrics();
+  }
+
+  /**
+   * Clear aggregator caches (rankings and liquidity).
+   *
+   * Useful for testing or when market conditions change dramatically.
+   */
+  clearAggregatorCaches(): void {
+    if (this.aggregator) {
+      this.aggregator.clearCaches();
+      this.logger.info('Aggregator caches cleared');
+    }
   }
 
   // ===========================================================================
@@ -1617,17 +2116,17 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       );
     }
 
-    // Build 2-hop path: tokenIn → tokenIntermediate → tokenIn
+    // Build 2-hop path: tokenIn → tokenOut → tokenIn
     return [
       {
         router: buyRouter,
         tokenIn: opportunity.tokenIn!,
-        tokenOut: opportunity.tokenIntermediate || opportunity.tokenOut!,
+        tokenOut: opportunity.tokenOut!,
         amountIn: BigInt(opportunity.amountIn!),
       },
       {
         router: sellRouter,
-        tokenIn: opportunity.tokenIntermediate || opportunity.tokenOut!,
+        tokenIn: opportunity.tokenOut!,
         tokenOut: opportunity.tokenIn!,
         amountIn: 0n, // Chain from previous output
       },

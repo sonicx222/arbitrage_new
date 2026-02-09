@@ -38,6 +38,13 @@ const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
 
 /**
+ * Default deadline for flash loan execution (5 minutes from now).
+ * This protects against stale transactions being mined in poor market conditions.
+ * Matches industry standard used by Uniswap, Sushiswap, etc.
+ */
+const DEFAULT_DEADLINE_SECONDS = 300;
+
+/**
  * Aave V3 Flash Loan Provider
  *
  * Fully implemented provider that integrates with the FlashLoanArbitrage
@@ -130,11 +137,16 @@ export class AaveV3FlashLoanProvider implements IFlashLoanProvider {
       step.amountOutMin,
     ]);
 
+    // Calculate deadline: current time + 5 minutes
+    // This protects against stale transactions (FlashLoanArbitrage.sol v1.2.0)
+    const deadline = Math.floor(Date.now() / 1000) + DEFAULT_DEADLINE_SECONDS;
+
     return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
       request.asset,
       request.amount,
       swapPathTuples,
       request.minProfit,
+      deadline,
     ]);
   }
 

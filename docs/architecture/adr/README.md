@@ -42,6 +42,8 @@ An Architecture Decision Record captures an important architectural decision mad
 | [ADR-026](./ADR-026-integration-test-consolidation.md) | Integration Test Consolidation | Accepted | 2026-02-04 | 95% |
 | [ADR-027](./ADR-027-nonce-preallocation-pool.md) | Nonce Pre-allocation Pool | Accepted | 2026-02-04 | 90% |
 | [ADR-028](./ADR-028-mev-share-integration.md) | MEV-Share Integration | Accepted | 2026-02-06 | 90% |
+| [ADR-029](./ADR-029-batched-quote-fetching.md) | Batched Quote Fetching via MultiPathQuoter | Accepted | 2026-02-06 | 92% |
+| [ADR-030](./ADR-030-pancakeswap-v3-flash-loans.md) | PancakeSwap V3 Flash Loan Integration & Multi-Protocol Architecture | Accepted | 2026-02-08 | 90% |
 
 ## Decision Summary
 

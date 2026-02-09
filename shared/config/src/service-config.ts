@@ -7,7 +7,7 @@
  * @see P1-5: Bridge cost configuration
  */
 
-import { AAVE_V3_POOLS } from './addresses';
+import { AAVE_V3_POOLS, BALANCER_V2_VAULTS } from './addresses';
 
 // =============================================================================
 // FLASH LOAN CONSTANTS (Fix 1.1: Centralized constants)
@@ -63,11 +63,41 @@ export const BPS_DENOMINATOR_BIGINT = BigInt(BPS_DENOMINATOR);
  * @see contracts/src/FlashLoanArbitrage.sol
  */
 export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
-  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit) external',
+  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
   'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
   'function isApprovedRouter(address router) external view returns (bool)',
   'function POOL() external view returns (address)',
 ];
+
+/**
+ * ABI for BalancerV2FlashArbitrage contract.
+ * Minimal ABI containing only the functions needed for flash loan execution.
+ *
+ * **Function signatures:**
+ * - `executeArbitrage(asset, amount, swapPath, minProfit, deadline)`: Execute flash loan arbitrage
+ * - `calculateExpectedProfit(asset, amount, swapPath)`: Simulate arbitrage and calculate profit
+ * - `isApprovedRouter(router)`: Check if router is approved for swaps
+ * - `VAULT()`: Get the Balancer V2 Vault address
+ *
+ * **Key differences from Aave V3:**
+ * - Uses VAULT() instead of POOL()
+ * - Flash loan fee is always 0 (Balancer V2 doesn't charge flash loan fees)
+ * - Same swap execution logic and validation
+ *
+ * @see contracts/src/BalancerV2FlashArbitrage.sol
+ */
+export const BALANCER_V2_FLASH_ARBITRAGE_ABI: string[] = [
+  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+  'function isApprovedRouter(address router) external view returns (bool)',
+  'function VAULT() external view returns (address)',
+];
+
+/**
+ * Balancer V2 flash loan fee (0 basis points = 0%)
+ * Balancer V2 charges no fees for flash loans, unlike Aave V3's 0.09%.
+ */
+export const BALANCER_V2_FEE_BPS = 0;
 
 // =============================================================================
 // SERVICE CONFIGURATIONS
@@ -317,12 +347,64 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
     protocol: 'aave_v3',
     fee: 9  // 0.09% flash loan fee
   },
-  // S3.2.2-FIX: Fantom uses SpookySwap flash swaps (Aave V3 not deployed on Fantom)
+  // Task 2.2: Fantom uses Beethoven X (Balancer V2 fork) for flash loans
+  // Beethoven X provides 0% flash loan fees, much better than SpookySwap's 0.3%
   fantom: {
-    address: '0xF491e7B69E4244ad4002BC14e878a34207E38c29',  // SpookySwap Router
-    protocol: 'spookyswap',
-    fee: 30  // 0.3% flash swap fee
+    address: BALANCER_V2_VAULTS.fantom,  // Beethoven X Vault (Balancer V2 fork)
+    protocol: 'balancer_v2',
+    fee: 0  // 0% flash loan fee (Balancer V2 advantage)
   },
+
+  // ============================================================================
+  // Task 2.2 TODO: Balancer V2 Configuration for Additional Chains
+  // ============================================================================
+  //
+  // Balancer V2 is available on 5 additional chains with 0% flash loan fees
+  // (vs Aave V3's 0.09% fee). To enable, uncomment the entries below AFTER:
+  //
+  // 1. Deploying BalancerV2FlashArbitrage.sol contract to each chain
+  // 2. Updating contractAddresses config in execution-engine initialization
+  // 3. Verifying contracts on block explorers
+  // 4. Adding contract addresses to deployment tracking
+  //
+  // Vault addresses are confirmed from Balancer V2 documentation:
+  // https://docs.balancer.fi/reference/contracts/deployment-addresses/mainnet.html
+  //
+  // When deploying, REPLACE the corresponding Aave V3 entries above with these
+  // Balancer V2 entries to take advantage of 0% fees.
+  //
+  // Example deployment order: Ethereum → Polygon → Arbitrum → Optimism → Base
+  //
+  // /*
+  // ethereum: {
+  //   address: BALANCER_V2_VAULTS.ethereum,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+  //   protocol: 'balancer_v2',
+  //   fee: 0  // 0% flash loan fee (saves 0.09% vs Aave V3)
+  // },
+  // polygon: {
+  //   address: BALANCER_V2_VAULTS.polygon,   // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+  //   protocol: 'balancer_v2',
+  //   fee: 0
+  // },
+  // arbitrum: {
+  //   address: BALANCER_V2_VAULTS.arbitrum,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+  //   protocol: 'balancer_v2',
+  //   fee: 0
+  // },
+  // optimism: {
+  //   address: BALANCER_V2_VAULTS.optimism,  // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+  //   protocol: 'balancer_v2',
+  //   fee: 0
+  // },
+  // base: {
+  //   address: BALANCER_V2_VAULTS.base,      // 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+  //   protocol: 'balancer_v2',
+  //   fee: 0
+  // },
+  // */
+  //
+  // Current status: Using Aave V3 for these chains (0.09% fee) until contracts deployed
+  // ============================================================================
   // S3.1.2-FIX: zkSync Era - SyncSwap provides flash swaps (no Aave V3 yet)
   zksync: {
     address: '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295',  // SyncSwap Router
@@ -469,6 +551,68 @@ export const FEATURE_FLAGS = {
    * @default false (safe rollout - explicitly opt-in)
    */
   useBatchedQuoter: process.env.FEATURE_BATCHED_QUOTER === 'true',
+
+  /**
+   * Enable flash loan protocol aggregator (Task 2.3).
+   *
+   * When enabled:
+   * - Dynamically selects best flash loan provider via weighted ranking
+   * - Validates liquidity with on-chain checks (5-min cache)
+   * - Tracks provider metrics (success rate, latency)
+   * - Supports automatic fallback on provider failures
+   *
+   * When disabled (default):
+   * - Uses hardcoded Aave V3 provider (backward compatible)
+   *
+   * Impact:
+   * - Better fee optimization (select lowest-fee provider)
+   * - Prevents insufficient liquidity failures
+   * - Improves reliability via fallback mechanisms
+   *
+   * @default false (safe rollout - explicitly opt-in)
+   * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
+   */
+  useFlashLoanAggregator: process.env.FEATURE_FLASH_LOAN_AGGREGATOR === 'true',
+};
+
+/**
+ * Flash Loan Aggregator Configuration (Task 2.3)
+ *
+ * Configuration for intelligent flash loan provider selection.
+ * Read from environment variables with safe defaults.
+ */
+export const FLASH_LOAN_AGGREGATOR_CONFIG = {
+  /**
+   * Weighted scoring weights (must sum to 1.0)
+   * Controls how providers are ranked
+   */
+  weights: {
+    fees: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_FEES ?? '0.5'),
+    liquidity: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LIQUIDITY ?? '0.3'),
+    reliability: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_RELIABILITY ?? '0.15'),
+    latency: parseFloat(process.env.FLASH_LOAN_AGGREGATOR_WEIGHT_LATENCY ?? '0.05'),
+  },
+
+  /**
+   * Maximum providers to rank per selection
+   * Higher = more options but slower selection
+   * @default 3
+   */
+  maxProvidersToRank: parseInt(process.env.FLASH_LOAN_AGGREGATOR_MAX_PROVIDERS ?? '3', 10),
+
+  /**
+   * Enable on-chain liquidity validation
+   * When true, validates pool liquidity before execution
+   * @default true (if aggregator enabled)
+   */
+  enableLiquidityValidation: process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_VALIDATION !== 'false',
+
+  /**
+   * Liquidity check threshold in USD
+   * Only check liquidity for opportunities above this value
+   * @default 100000 ($100K)
+   */
+  liquidityCheckThresholdUsd: parseInt(process.env.FLASH_LOAN_AGGREGATOR_LIQUIDITY_THRESHOLD_USD ?? '100000', 10),
 };
 
 /**

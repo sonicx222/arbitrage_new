@@ -1,7 +1,23 @@
-// Base Detector Class
+/**
+ * Base Detector Class
+ *
+ * @deprecated BaseDetector is legacy. Prefer composition with extracted services:
+ * - initializeDetectorConnections() for Redis/Streams setup
+ * - initializePairs() for pair discovery
+ * - decodeSyncEventData(), buildPriceUpdate() for event processing (pure functions)
+ * - createDetectorHealthMonitor() for health monitoring
+ * - createFactoryIntegrationService() for factory subscriptions
+ *
+ * See UnifiedChainDetector and ChainDetectorInstance for composition pattern examples.
+ * Will be removed in v2.0 after test suite migration.
+ *
+ * @see shared/core/src/detector/ for extracted components
+ * @see services/unified-detector/ for composition pattern example
+ */
 // Provides common functionality for all blockchain detectors
 // Updated 2025-01-10: Migrated from Pub/Sub to Redis Streams (ADR-002, S1.1.4)
 // Updated 2025-01-10: Consolidated with ServiceStateManager and template method pattern
+// Updated 2025-02-08: DEPRECATED - Use composition with extracted components instead
 
 import { ethers } from 'ethers';
 
@@ -98,6 +114,16 @@ import {
 // P1-1 Refactor: Moved to detector/event-processor.ts for pure function extraction.
 // Constants are now used internally by decodeSyncEventData() and decodeSwapEventData().
 
+/**
+ * Detector configuration interface.
+ *
+ * @deprecated Part of legacy BaseDetector. For new code, use:
+ * - DetectorConnectionConfig from './detector/types' for connection setup
+ * - PairInitializationConfig from './detector/types' for pair discovery
+ * - HealthMonitorConfig from './detector/health-monitor' for health monitoring
+ *
+ * Will be removed in v2.0.
+ */
 export interface DetectorConfig {
   chain: string;
   enabled: boolean;
@@ -111,6 +137,9 @@ export interface DetectorConfig {
 /**
  * Extended pair interface with reserve data.
  * P1-1 Refactor: Re-export from event-processor for backwards compatibility.
+ *
+ * @deprecated Import ExtendedPair from './detector/event-processor' directly.
+ * This re-export will be removed in v2.0.
  */
 export type ExtendedPair = EventProcessorExtendedPair;
 
@@ -118,6 +147,12 @@ export type ExtendedPair = EventProcessorExtendedPair;
  * Snapshot of pair data for thread-safe arbitrage detection.
  * Captures reserve values at a point in time to avoid race conditions
  * when reserves are updated by concurrent processSyncEvent calls.
+ *
+ * @deprecated Part of legacy BaseDetector. For new code, use:
+ * - ExtendedPair from './detector/event-processor' for pair data with reserves
+ * - Immutable object construction pattern (buildExtendedPair) ensures thread safety
+ *
+ * Will be removed in v2.0.
  */
 export interface PairSnapshot {
   address: string;
@@ -143,6 +178,10 @@ export type BaseDetectorLogger = ServiceLogger;
 /**
  * Dependencies that can be injected into BaseDetector.
  * This enables proper testing without Jest mock hoisting issues.
+ *
+ * @deprecated Part of legacy BaseDetector. For new code, use direct dependency
+ * injection in extracted component factories (createDetectorHealthMonitor, etc.).
+ * Will be removed in v2.0.
  */
 export interface BaseDetectorDeps {
   /** Logger instance - if provided, used instead of createLogger() */
@@ -151,6 +190,59 @@ export interface BaseDetectorDeps {
   perfLogger?: PerformanceLogger;
 }
 
+/**
+ * Base Detector for blockchain event monitoring and arbitrage detection.
+ *
+ * @deprecated BaseDetector is legacy infrastructure. Production code has migrated to composition patterns.
+ *
+ * **Migration Guide:**
+ * Instead of extending BaseDetector, use extracted single-responsibility components:
+ *
+ * 1. **Connection Setup:**
+ *    ```typescript
+ *    import { initializeDetectorConnections } from '@arbitrage/core';
+ *    const resources = await initializeDetectorConnections(config, handlers);
+ *    ```
+ *
+ * 2. **Pair Discovery:**
+ *    ```typescript
+ *    import { initializePairs } from '@arbitrage/core';
+ *    const pairResult = await initializePairs({ chain, dexes, tokens, logger });
+ *    ```
+ *
+ * 3. **Event Processing (Hot-Path):**
+ *    ```typescript
+ *    import { decodeSyncEventData, buildExtendedPair, buildPriceUpdate } from '@arbitrage/core';
+ *    const decoded = decodeSyncEventData(log.data);  // Pure function
+ *    const updatedPair = buildExtendedPair(pair, decoded, blockNumber);  // Immutable
+ *    ```
+ *
+ * 4. **Health Monitoring:**
+ *    ```typescript
+ *    import { createDetectorHealthMonitor } from '@arbitrage/core';
+ *    const monitor = createDetectorHealthMonitor(config, deps);
+ *    monitor.start();
+ *    ```
+ *
+ * 5. **Factory Integration:**
+ *    ```typescript
+ *    import { createFactoryIntegrationService } from '@arbitrage/core';
+ *    const factory = createFactoryIntegrationService(config, deps);
+ *    await factory.initialize();
+ *    ```
+ *
+ * **Examples:**
+ * - See `UnifiedChainDetector` for composition pattern
+ * - See `ChainDetectorInstance` for lightweight chain monitoring
+ * - See `shared/core/src/detector/` for all extracted components
+ *
+ * **Removal Timeline:**
+ * Will be removed in v2.0 after test suite migration.
+ *
+ * @see services/unified-detector/src/unified-detector.ts
+ * @see services/unified-detector/src/chain-instance.ts
+ * @see shared/core/src/detector/
+ */
 export abstract class BaseDetector {
   protected provider: ethers.JsonRpcProvider;
   protected wsManager: WebSocketManager | null = null;

@@ -174,6 +174,39 @@ Follow ADR-022 patterns for hot-path changes.
 - Always await disconnect() in cleanup
 - Distinguish "not found" from "unavailable" by throwing on errors
 
+**Testing Patterns:**
+- Use constructor pattern for DI-based classes, not factory functions
+  - ✅ `new ServiceClass(config, deps)` - allows proper mock injection
+  - ❌ `createService(config, deps)` - may cache module imports
+- Set up mocks in `beforeEach()`, override in individual tests
+  - Cast to `jest.Mock`: `(mockedFunction as jest.Mock).mockReturnValue(value)`
+  - Don't use `jest.spyOn()` for module-level functions - doesn't work with cached imports
+- Import directly from source files, not barrel exports (index.ts)
+  - ✅ `from '../../../src/detector/service'` - direct file import
+  - ❌ `from '../../../src/detector'` - barrel export can cause mock issues
+- Create local `createMockDeps()` helper for consistent dependency injection
+- Always import mocked functions after jest.mock() to get typed mock
+- Example pattern (from factory-integration.test.ts):
+  ```typescript
+  // Import class + mocked functions
+  import { ServiceClass } from '../../../src/path/to/service';
+  import { mockedFunction } from '@arbitrage/config';
+
+  // Set up in beforeEach
+  beforeEach(() => {
+    (mockedFunction as jest.Mock).mockReturnValue(defaultValue);
+  });
+
+  // Override in test
+  it('test name', async () => {
+    (mockedFunction as jest.Mock).mockReturnValue(testValue);
+    const service = new ServiceClass(config, createMockDeps());
+    const result = await service.method();
+    expect(result).toBeDefined();
+  });
+  ```
+- See `shared/core/__tests__/unit/detector/factory-integration.test.ts` for reference
+
 **Performance:**
 - Hot-path code must complete in <50ms
 - Files in shared/core/src/price-matrix.ts and partitioned-detector.ts are critical

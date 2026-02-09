@@ -1,0 +1,275 @@
+# Grafana Alert Rules for Warming Infrastructure (Day 13)
+#
+# Alert rules based on Day 12 performance validation results
+#
+# Alert Severity Levels:
+# - Critical: Page immediately (P1)
+# - Warning: Investigate during business hours (P2)
+# - Info: Monitor trends (P3)
+
+groups:
+  - name: warming_infrastructure_critical
+    interval: 1m
+    rules:
+      # Critical: Correlation tracking exceeding 2x target
+      - alert: CorrelationTrackingSlow
+        expr: |
+          histogram_quantile(0.95,
+            rate(arbitrage_correlation_tracking_duration_us_bucket[5m])
+          ) > 100
+        for: 5m
+        labels:
+          severity: critical
+          component: warming
+          layer: hot-path
+        annotations:
+          summary: "Correlation tracking p95 latency exceeding 100μs (2x target)"
+          description: "Correlation tracking p95 latency is {{ $value | humanize }}μs (target: <50μs). This impacts hot-path performance."
+          runbook_url: "https://docs.arbitrage.com/runbooks/warming-tracking-slow"
+          dashboard_url: "https://grafana.arbitrage.com/d/warming-infrastructure"
+
+      # Critical: Warming operations exceeding 2x target
+      - alert: WarmingOperationsSlow
+        expr: |
+          histogram_quantile(0.95,
+            rate(arbitrage_warming_duration_ms_bucket[5m])
+          ) > 20
+        for: 5m
+        labels:
+          severity: critical
+          component: warming
+          layer: background
+        annotations:
+          summary: "Warming operations p95 latency exceeding 20ms (2x target)"
+          description: "Warming operations p95 latency is {{ $value | humanize }}ms (target: <10ms). Check L2 cache latency."
+          runbook_url: "https://docs.arbitrage.com/runbooks/warming-operations-slow"
+
+      # Critical: High error rate
+      - alert: WarmingErrorRateHigh
+        expr: |
+          rate(arbitrage_warming_operations_total{status="error"}[5m]) /
+            rate(arbitrage_warming_operations_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: warming
+        annotations:
+          summary: "Warming error rate above 5%"
+          description: "Warming error rate is {{ $value | humanizePercentage }} (target: <1%). Chain: {{ $labels.chain }}"
+          runbook_url: "https://docs.arbitrage.com/runbooks/warming-errors"
+
+      # Critical: Cache hit rate dropped significantly
+      - alert: CacheHitRateDropped
+        expr: |
+          rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) /
+            (rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) +
+             rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.85
+        for: 10m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "L1 cache hit rate below 85%"
+          description: "L1 cache hit rate is {{ $value | humanizePercentage }} (target: >90%). Chain: {{ $labels.chain }}"
+          runbook_url: "https://docs.arbitrage.com/runbooks/cache-hit-rate-low"
+
+  - name: warming_infrastructure_warning
+    interval: 1m
+    rules:
+      # Warning: Correlation tracking exceeding 1.5x target
+      - alert: CorrelationTrackingDegraded
+        expr: |
+          histogram_quantile(0.95,
+            rate(arbitrage_correlation_tracking_duration_us_bucket[5m])
+          ) > 75
+        for: 10m
+        labels:
+          severity: warning
+          component: warming
+          layer: hot-path
+        annotations:
+          summary: "Correlation tracking p95 latency exceeding 75μs (1.5x target)"
+          description: "Correlation tracking p95 latency is {{ $value | humanize }}μs (target: <50μs). Monitor for further degradation."
+
+      # Warning: Warming operations exceeding 1.5x target
+      - alert: WarmingOperationsDegraded
+        expr: |
+          histogram_quantile(0.95,
+            rate(arbitrage_warming_duration_ms_bucket[5m])
+          ) > 15
+        for: 10m
+        labels:
+          severity: warning
+          component: warming
+          layer: background
+        annotations:
+          summary: "Warming operations p95 latency exceeding 15ms (1.5x target)"
+          description: "Warming operations p95 latency is {{ $value | humanize }}ms (target: <10ms). Monitor for further degradation."
+
+      # Warning: Elevated error rate
+      - alert: WarmingErrorRateElevated
+        expr: |
+          rate(arbitrage_warming_operations_total{status="error"}[5m]) /
+            rate(arbitrage_warming_operations_total[5m]) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: warming
+        annotations:
+          summary: "Warming error rate above 1%"
+          description: "Warming error rate is {{ $value | humanizePercentage }} (target: <0.1%). Chain: {{ $labels.chain }}"
+
+      # Warning: Memory growth rate high
+      - alert: MemoryGrowthHigh
+        expr: |
+          rate(process_resident_memory_bytes[1h]) > 100000000
+        for: 30m
+        labels:
+          severity: warning
+          component: warming
+        annotations:
+          summary: "Memory growing > 100MB/hour"
+          description: "Process memory growing at {{ $value | humanize }}B/sec. Check for memory leaks."
+          runbook_url: "https://docs.arbitrage.com/runbooks/memory-leak"
+
+      # Warning: Too many pairs being tracked
+      - alert: TooManyPairsTracked
+        expr: |
+          arbitrage_correlation_pairs_tracked > 8000
+        for: 15m
+        labels:
+          severity: warning
+          component: warming
+        annotations:
+          summary: "Tracking more than 8000 pairs"
+          description: "Currently tracking {{ $value }} pairs (recommended: <5000). May impact performance."
+
+  - name: warming_infrastructure_info
+    interval: 5m
+    rules:
+      # Info: Cache hit rate could be improved
+      - alert: CacheHitRateSuboptimal
+        expr: |
+          rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) /
+            (rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) +
+             rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.90
+        for: 30m
+        labels:
+          severity: info
+          component: cache
+        annotations:
+          summary: "L1 cache hit rate below 90%"
+          description: "L1 cache hit rate is {{ $value | humanizePercentage }}. Consider tuning warming strategy."
+
+      # Info: Low warming throughput
+      - alert: WarmingThroughputLow
+        expr: |
+          sum(rate(arbitrage_warming_operations_total[5m])) < 50
+        for: 15m
+        labels:
+          severity: info
+          component: warming
+        annotations:
+          summary: "Warming throughput below 50 ops/sec"
+          description: "Current warming throughput is {{ $value | humanize }} ops/sec (target: >100)."
+
+      # Info: Correlation tracking throughput low
+      - alert: TrackingThroughputLow
+        expr: |
+          sum(rate(arbitrage_correlation_pairs_tracked[5m])) < 15000
+        for: 15m
+        labels:
+          severity: info
+          component: warming
+        annotations:
+          summary: "Tracking throughput below 15k ops/sec"
+          description: "Current tracking throughput is {{ $value | humanize }} ops/sec (target: >20k)."
+
+      # Info: Few pairs being warmed per operation
+      - alert: LowPairsPerWarming
+        expr: |
+          rate(arbitrage_warming_pairs_warmed_total[5m]) /
+            rate(arbitrage_warming_operations_total[5m]) < 2
+        for: 30m
+        labels:
+          severity: info
+          component: warming
+        annotations:
+          summary: "Averaging less than 2 pairs warmed per operation"
+          description: "Currently warming {{ $value | humanize }} pairs/operation. May indicate weak correlations."
+
+  - name: warming_infrastructure_capacity
+    interval: 5m
+    rules:
+      # Capacity: Predict when cache will be full
+      - alert: CacheCapacityWarning
+        expr: |
+          predict_linear(arbitrage_cache_size_bytes{cache_level="L1"}[1h], 3600 * 4) >
+            (arbitrage_cache_size_bytes{cache_level="L1"} * 0.8)
+        for: 15m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "L1 cache predicted to reach 80% capacity in 4 hours"
+          description: "L1 cache on {{ $labels.chain }} will reach capacity based on current growth rate."
+
+      # Capacity: High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          (process_resident_memory_bytes / node_memory_MemTotal_bytes) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Process using > 80% of system memory"
+          description: "Memory usage is {{ $value | humanizePercentage }}. May need to scale up."
+
+# Alert notification channels configuration
+# Configure these in Grafana UI or via provisioning
+notification_policies:
+  - receiver: pagerduty-critical
+    group_by: ['alertname', 'chain']
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h
+    matchers:
+      - severity = critical
+
+  - receiver: slack-warnings
+    group_by: ['alertname']
+    group_wait: 1m
+    group_interval: 10m
+    repeat_interval: 12h
+    matchers:
+      - severity = warning
+
+  - receiver: slack-info
+    group_by: ['alertname']
+    group_wait: 5m
+    group_interval: 30m
+    repeat_interval: 24h
+    matchers:
+      - severity = info
+
+receivers:
+  - name: pagerduty-critical
+    pagerduty_configs:
+      - service_key: ${PAGERDUTY_SERVICE_KEY}
+        severity: critical
+        description: '{{ .GroupLabels.alertname }} on {{ .GroupLabels.chain }}'
+
+  - name: slack-warnings
+    slack_configs:
+      - api_url: ${SLACK_WEBHOOK_URL}
+        channel: '#warming-alerts'
+        title: 'Warning: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+  - name: slack-info
+    slack_configs:
+      - api_url: ${SLACK_WEBHOOK_URL}
+        channel: '#warming-info'
+        title: 'Info: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'

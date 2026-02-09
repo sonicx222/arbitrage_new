@@ -257,6 +257,9 @@ export {
   BPS_DENOMINATOR_BIGINT,
   // Fix 9.2: Consolidated ABI
   FLASH_LOAN_ARBITRAGE_ABI,
+  // Task 2.2: Balancer V2 flash loan support
+  BALANCER_V2_FEE_BPS,
+  BALANCER_V2_FLASH_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,
   // Tier 2 Enhancement: MultiPathQuoter contract addresses
@@ -264,6 +267,10 @@ export {
   MULTI_PATH_QUOTER_ADDRESSES,
   hasMultiPathQuoter,
   getMultiPathQuoterAddress,
+  // Task 2.3: Flash Loan Protocol Aggregator feature flag
+  FEATURE_FLAGS,
+  FLASH_LOAN_AGGREGATOR_CONFIG,
+  validateFeatureFlags,
 } from './service-config';
 
 // =============================================================================
@@ -346,6 +353,14 @@ export {
   AAVE_V3_POOLS,
   getAaveV3Pool,
   hasAaveV3,
+  // PancakeSwap V3 factories
+  PANCAKESWAP_V3_FACTORIES,
+  getPancakeSwapV3Factory,
+  hasPancakeSwapV3,
+  // Balancer V2 vaults (Task 2.2)
+  BALANCER_V2_VAULTS,
+  getBalancerV2Vault,
+  hasBalancerV2,
   // Native tokens
   NATIVE_TOKENS,
   getNativeToken,

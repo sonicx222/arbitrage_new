@@ -98,7 +98,8 @@ export * from './generators';
 
 // Cache & Worker Testing Infrastructure (Phase 1: Foundation)
 // Fixtures for test data generation
-export * from './fixtures/cache-fixtures';
+// Note: Selective export to avoid PriceUpdate conflict with factories
+export { CacheStateConfig, CacheFixtures } from './fixtures/cache-fixtures';
 export * from './fixtures/worker-fixtures';
 export * from './fixtures/performance-fixtures';
 

@@ -23,11 +23,11 @@ import { createFactorySubscriptionService } from '../factory-subscription';
 import {
   getAllFactoryAddresses,
   validateFactoryRegistry,
-  dexFeeToPercentage,
   EVENT_CONFIG,
   EVENT_SIGNATURES,
-} from '../../../../shared/config/src';
-import type { Dex, Pair } from '../../../../shared/types/src';
+} from '@arbitrage/config';
+import type { Dex, Pair } from '@arbitrage/types';
+import { bpsToDecimal } from '../utils/fee-utils';
 
 /**
  * Configuration for factory integration
@@ -251,7 +251,9 @@ export class FactoryIntegrationService {
 
       // Look up DEX configuration to get fee (O(1) lookup via dexesByName map)
       const dexConfig = this.deps.dexesByName.get(event.dexName.toLowerCase());
-      const fee = dexConfig ? dexFeeToPercentage(dexConfig.fee ?? 30) : 0.003;
+      // Use feeBps (new) with fallback to fee (deprecated) for backward compatibility
+      const feeBps = dexConfig?.feeBps ?? dexConfig?.fee ?? 30;
+      const fee = bpsToDecimal(feeBps);
 
       // Create pair object
       const pair: Pair = {

@@ -20,6 +20,8 @@ import type {
   ProtocolSupportStatus,
 } from './types';
 import { AaveV3FlashLoanProvider } from './aave-v3.provider';
+import { BalancerV2FlashLoanProvider } from './balancer-v2.provider';
+import { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
 import { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 /**
@@ -28,6 +30,25 @@ import { UnsupportedFlashLoanProvider } from './unsupported.provider';
 const AAVE_V3_SUPPORTED_CHAINS = new Set(
   Object.entries(FLASH_LOAN_PROVIDERS)
     .filter(([_, config]) => config.protocol === 'aave_v3')
+    .map(([chain]) => chain)
+);
+
+/**
+ * Chains that have fully supported PancakeSwap V3 flash loans
+ */
+const PANCAKESWAP_V3_SUPPORTED_CHAINS = new Set(
+  Object.entries(FLASH_LOAN_PROVIDERS)
+    .filter(([_, config]) => config.protocol === 'pancakeswap_v3')
+    .map(([chain]) => chain)
+);
+
+/**
+ * Chains that have fully supported Balancer V2 flash loans
+ * Task 2.2: Balancer V2 flash loan support across 6 chains
+ */
+const BALANCER_V2_SUPPORTED_CHAINS = new Set(
+  Object.entries(FLASH_LOAN_PROVIDERS)
+    .filter(([_, config]) => config.protocol === 'balancer_v2')
     .map(([chain]) => chain)
 );
 
@@ -94,11 +115,19 @@ export class FlashLoanProviderFactory {
       return this.createAaveV3Provider(chain, flashLoanConfig);
     }
 
+    if (protocol === 'balancer_v2') {
+      return this.createBalancerV2Provider(chain, flashLoanConfig);
+    }
+
+    if (protocol === 'pancakeswap_v3') {
+      return this.createPancakeSwapV3Provider(chain, flashLoanConfig);
+    }
+
     // Create unsupported provider for other protocols
     this.logger.info('Creating placeholder provider for unsupported protocol', {
       chain,
       protocol,
-      note: 'Only Aave V3 is currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
+      note: 'Only Aave V3, Balancer V2, and PancakeSwap V3 are currently implemented. See flash-loan-providers/unsupported.provider.ts for implementation roadmap.',
     });
 
     return new UnsupportedFlashLoanProvider({
@@ -152,6 +181,87 @@ export class FlashLoanProviderFactory {
   }
 
   /**
+   * Create PancakeSwap V3 provider
+   */
+  private createPancakeSwapV3Provider(
+    chain: string,
+    flashLoanConfig: { address: string; protocol: string; fee: number }
+  ): PancakeSwapV3FlashLoanProvider | undefined {
+    const contractAddress = this.config.contractAddresses[chain];
+
+    // Validate contract address
+    if (!contractAddress) {
+      this.logger.warn('No PancakeSwapFlashArbitrage contract configured for PancakeSwap V3 chain', {
+        chain,
+        factoryAddress: flashLoanConfig.address,
+      });
+      return undefined;
+    }
+
+    // Zero address should fail in ALL environments
+    if (contractAddress === '0x0000000000000000000000000000000000000000') {
+      this.logger.error('[ERR_CONFIG] Zero contract address is invalid - PancakeSwapFlashArbitrage not deployed', {
+        chain,
+        factoryAddress: flashLoanConfig.address,
+        action: 'Provider not created. Deploy the contract and configure the correct address.',
+      });
+      return undefined;
+    }
+
+    const approvedRouters = this.config.approvedRouters[chain] || [];
+    const feeOverride = this.config.feeOverrides?.[chain] as 100 | 500 | 2500 | 10000 | undefined;
+
+    return new PancakeSwapV3FlashLoanProvider({
+      chain,
+      poolAddress: flashLoanConfig.address, // Factory address for PancakeSwap V3
+      contractAddress,
+      approvedRouters,
+      feeOverride,
+    });
+  }
+
+  /**
+   * Create Balancer V2 provider
+   * Task 2.2: Balancer V2 flash loan support with 0% fees
+   */
+  private createBalancerV2Provider(
+    chain: string,
+    flashLoanConfig: { address: string; protocol: string; fee: number }
+  ): BalancerV2FlashLoanProvider | undefined {
+    const contractAddress = this.config.contractAddresses[chain];
+
+    // Validate contract address
+    if (!contractAddress) {
+      this.logger.warn('No BalancerV2FlashArbitrage contract configured for Balancer V2 chain', {
+        chain,
+        vaultAddress: flashLoanConfig.address,
+      });
+      return undefined;
+    }
+
+    // Zero address should fail in ALL environments
+    if (contractAddress === '0x0000000000000000000000000000000000000000') {
+      this.logger.error('[ERR_CONFIG] Zero contract address is invalid - BalancerV2FlashArbitrage not deployed', {
+        chain,
+        vaultAddress: flashLoanConfig.address,
+        action: 'Provider not created. Deploy the contract and configure the correct address.',
+      });
+      return undefined;
+    }
+
+    const approvedRouters = this.config.approvedRouters[chain] || [];
+    const feeOverride = this.config.feeOverrides?.[chain];
+
+    return new BalancerV2FlashLoanProvider({
+      chain,
+      poolAddress: flashLoanConfig.address, // Vault address for Balancer V2
+      contractAddress,
+      approvedRouters,
+      feeOverride,
+    });
+  }
+
+  /**
    * Check if a chain has a fully supported flash loan provider
    *
    * @param chain - Chain identifier
@@ -194,10 +304,22 @@ export class FlashLoanProviderFactory {
    * @returns Array of chain identifiers
    */
   getFullySupportedChains(): string[] {
-    return Array.from(AAVE_V3_SUPPORTED_CHAINS).filter(chain => {
+    const aaveChains = Array.from(AAVE_V3_SUPPORTED_CHAINS).filter(chain => {
       const contractAddress = this.config.contractAddresses[chain];
       return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
     });
+
+    const balancerChains = Array.from(BALANCER_V2_SUPPORTED_CHAINS).filter(chain => {
+      const contractAddress = this.config.contractAddresses[chain];
+      return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
+    });
+
+    const pancakeSwapChains = Array.from(PANCAKESWAP_V3_SUPPORTED_CHAINS).filter(chain => {
+      const contractAddress = this.config.contractAddresses[chain];
+      return contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000';
+    });
+
+    return [...aaveChains, ...balancerChains, ...pancakeSwapChains];
   }
 
   /**
@@ -238,10 +360,10 @@ export class FlashLoanProviderFactory {
       const hasContract = !!(contractAddress && contractAddress !== '0x0000000000000000000000000000000000000000');
 
       let status: ProtocolSupportStatus;
-      if (config.protocol === 'aave_v3' && hasContract) {
+      if ((config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3') && hasContract) {
         status = 'fully_supported';
-      } else if (config.protocol === 'aave_v3') {
-        status = 'partial_support'; // Aave V3 but no contract deployed
+      } else if (config.protocol === 'aave_v3' || config.protocol === 'balancer_v2' || config.protocol === 'pancakeswap_v3') {
+        status = 'partial_support'; // Protocol supported but no contract deployed
       } else {
         status = 'not_implemented';
       }

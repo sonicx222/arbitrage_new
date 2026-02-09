@@ -9,13 +9,14 @@
  *
  * ## Supported Protocols
  *
- * | Protocol      | Chains                           | Status             |
- * |---------------|----------------------------------|--------------------||
- * | Aave V3       | ethereum, polygon, arbitrum,     | Fully Supported    |
- * |               | base, optimism, avalanche        |                    |
- * | PancakeSwap   | bsc                              | Not Implemented    |
- * | SpookySwap    | fantom                           | Not Implemented    |
- * | SyncSwap      | zksync, linea                    | Not Implemented    |
+ * | Protocol       | Chains                            | Status             |
+ * |----------------|-----------------------------------|--------------------||
+ * | Aave V3        | ethereum, polygon, arbitrum,      | Fully Supported    |
+ * |                | base, optimism, avalanche         |                    |
+ * | PancakeSwap V3 | bsc, ethereum, arbitrum, zksync,  | Fully Supported    |
+ * |                | base, opbnb, linea                |                    |
+ * | SpookySwap     | fantom                            | Not Implemented    |
+ * | SyncSwap       | zksync, linea                     | Not Implemented    |
  *
  * ## Usage
  *
@@ -36,6 +37,7 @@
  *
  * @see service-config.ts FLASH_LOAN_PROVIDERS
  * @see contracts/src/FlashLoanArbitrage.sol
+ * @see contracts/src/PancakeSwapFlashArbitrage.sol
  */
 
 // Types
@@ -53,6 +55,7 @@ export type {
 
 // Providers
 export { AaveV3FlashLoanProvider } from './aave-v3.provider';
+export { PancakeSwapV3FlashLoanProvider } from './pancakeswap-v3.provider';
 export { UnsupportedFlashLoanProvider } from './unsupported.provider';
 
 // Factory

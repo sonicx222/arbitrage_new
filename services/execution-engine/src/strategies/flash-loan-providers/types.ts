@@ -19,6 +19,7 @@ import { ethers } from 'ethers';
  */
 export type FlashLoanProtocol =
   | 'aave_v3'
+  | 'balancer_v2'
   | 'pancakeswap_v3'
   | 'spookyswap'
   | 'syncswap';
@@ -47,6 +48,12 @@ export interface FlashLoanRequest {
   minProfit: bigint;
   /** Caller address (for validation) */
   initiator: string;
+  /**
+   * Optional pool address for protocols that require runtime pool selection
+   * (e.g., PancakeSwap V3 with multiple fee tiers)
+   * @optional
+   */
+  poolAddress?: string;
 }
 
 /**

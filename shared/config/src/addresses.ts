@@ -108,6 +108,92 @@ export function hasAaveV3(chain: string): boolean {
 }
 
 // =============================================================================
+// PancakeSwap V3 Factory Addresses
+// =============================================================================
+
+/**
+ * PancakeSwap V3 Factory addresses by chain.
+ * Used for pool discovery and flash swap operations.
+ *
+ * @see https://docs.pancakeswap.finance/developers/smart-contracts/pancakeswap-exchange/v3-contracts
+ */
+export const PANCAKESWAP_V3_FACTORIES: Readonly<Record<string, string>> = {
+  bsc: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  ethereum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  arbitrum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
+  base: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  opbnb: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+  linea: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
+} as const;
+
+/**
+ * Get PancakeSwap V3 Factory address for a chain.
+ * @throws Error if chain not supported by PancakeSwap V3
+ */
+export function getPancakeSwapV3Factory(chain: string): string {
+  const address = PANCAKESWAP_V3_FACTORIES[chain];
+  if (!address) {
+    throw new Error(
+      `PancakeSwap V3 Factory not available on chain: ${chain}. ` +
+      `Supported chains: ${Object.keys(PANCAKESWAP_V3_FACTORIES).join(', ')}`
+    );
+  }
+  return address;
+}
+
+/**
+ * Check if PancakeSwap V3 is available on a chain.
+ */
+export function hasPancakeSwapV3(chain: string): boolean {
+  return chain in PANCAKESWAP_V3_FACTORIES;
+}
+
+// =============================================================================
+// Balancer V2 Vault Addresses
+// =============================================================================
+
+/**
+ * Balancer V2 Vault addresses by chain.
+ * Used for flash loan operations with 0% fees.
+ *
+ * Note: Balancer V2 uses a single Vault contract per chain for all pools.
+ * Fantom uses Beethoven X (Balancer V2 fork) with a different Vault address.
+ *
+ * @see https://docs.balancer.fi/reference/contracts/deployment-addresses/mainnet.html
+ */
+export const BALANCER_V2_VAULTS: Readonly<Record<string, string>> = {
+  ethereum: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  polygon: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  arbitrum: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  optimism: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  base: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
+  fantom: '0x20dd72Ed959b6147912C2e529F0a0C651c33c9ce', // Beethoven X
+} as const;
+
+/**
+ * Get Balancer V2 Vault address for a chain.
+ * @throws Error if chain not supported by Balancer V2
+ */
+export function getBalancerV2Vault(chain: string): string {
+  const address = BALANCER_V2_VAULTS[chain];
+  if (!address) {
+    throw new Error(
+      `Balancer V2 Vault not available on chain: ${chain}. ` +
+      `Supported chains: ${Object.keys(BALANCER_V2_VAULTS).join(', ')}`
+    );
+  }
+  return address;
+}
+
+/**
+ * Check if Balancer V2 is available on a chain.
+ */
+export function hasBalancerV2(chain: string): boolean {
+  return chain in BALANCER_V2_VAULTS;
+}
+
+// =============================================================================
 // Wrapped Native Token Addresses
 // =============================================================================
 

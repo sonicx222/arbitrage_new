@@ -371,6 +371,93 @@ export type { Result } from './resilience/error-handling';
 
 // #############################################################################
 // #                                                                           #
+// #                   SECTION 2A: FLASH LOAN AGGREGATION                      #
+// #                        (Clean Architecture)                               #
+// #                                                                           #
+// #############################################################################
+
+// =============================================================================
+// 2A.1 Flash Loan Aggregation - Domain Layer
+// =============================================================================
+
+export type {
+  // Core interfaces
+  IFlashLoanAggregator,
+  IProviderRanker,
+  ILiquidityValidator,
+  IAggregatorMetrics,
+
+  // Value Objects
+  ProviderScore,
+  LiquidityCheck,
+  ProviderSelection,
+  AggregatorConfig,
+  ProviderOutcome,
+
+  // Context interfaces
+  IProviderInfo,
+  IOpportunityContext,
+  IRankingContext,
+  ILiquidityContext,
+  IRankedProvider,
+  IAggregatedMetrics,
+} from './flash-loan-aggregation/domain';
+
+// =============================================================================
+// 2A.2 Flash Loan Aggregation - Application Layer
+// =============================================================================
+
+export {
+  // Use Cases
+  SelectProviderUseCase,
+  createSelectProviderUseCase,
+
+  // DTOs
+  toSelectProviderResponse,
+  toValidateLiquidityResponse,
+} from './flash-loan-aggregation/application';
+
+export type {
+  SelectProviderRequest,
+  SelectProviderResponse,
+  ValidateLiquidityRequest,
+  ValidateLiquidityResponse,
+  TrackProviderMetricsRequest,
+  TrackProviderMetricsResponse,
+  GetAggregatedMetricsRequest,
+  GetAggregatedMetricsResponse,
+  SelectProviderUseCaseDependencies,
+} from './flash-loan-aggregation/application';
+
+// =============================================================================
+// 2A.3 Flash Loan Aggregation - Infrastructure Layer
+// =============================================================================
+
+export {
+  // Strategy implementations
+  WeightedRankingStrategy,
+  createWeightedRankingStrategy,
+
+  // Validator implementations
+  OnChainLiquidityValidator,
+  createOnChainLiquidityValidator,
+
+  // Metrics implementations
+  InMemoryAggregatorMetrics,
+  createInMemoryAggregatorMetrics,
+
+  // Aggregator implementation
+  FlashLoanAggregatorImpl,
+  createFlashLoanAggregator,
+} from './flash-loan-aggregation/infrastructure';
+
+export type {
+  OnChainLiquidityValidatorConfig,
+  InMemoryAggregatorMetricsConfig,
+} from './flash-loan-aggregation/infrastructure';
+
+// #############################################################################
+// #                                                                           #
 // #                         SECTION 3: CACHING                                #
 // #                                                                           #
 // #############################################################################
@@ -404,6 +491,158 @@ export type { CacheConfig, CacheEntry, PredictiveWarmingConfig } from './caching
 export { SharedMemoryCache, createSharedMemoryCache, getSharedMemoryCache } from './caching/shared-memory-cache';
 
 export { CacheCoherencyManager, createCacheCoherencyManager, getCacheCoherencyManager, resetCacheCoherencyManager } from './caching/cache-coherency-manager';
+
+// Correlation Analyzer for predictive warming
+export { CorrelationAnalyzer, getCorrelationAnalyzer } from './caching/correlation-analyzer';
+export type { PairCorrelation as AnalyzerPairCorrelation, CorrelationStats as AnalyzerCorrelationStats } from './caching/correlation-analyzer';
+
+// =============================================================================
+// 3.1.1 Cache Optimization - Registration Strategies (Enhancement #4)
+// =============================================================================
+
+// Strategy Pattern for SharedKeyRegistry CAS optimization
+export type {
+  IRegistrationStrategy,
+  RegistrationResult,
+  RegistryStats,
+  RegistryFullError,
+  InvalidKeyError
+} from './caching/strategies';
+
+// Strategy Implementations
+export {
+  MainThreadStrategy,
+  WorkerThreadStrategy,
+  RegistryStrategyFactory
+} from './caching/strategies';
+
+export type { StrategyFactoryConfig } from './caching/strategies';
+
+// =============================================================================
+// 3.1.2 Cache Optimization - Predictive Warming (Enhancement #2)
+// =============================================================================
+
+// Domain Layer: Interfaces
+export type {
+  ICorrelationTracker,
+  PairCorrelation,
+  TrackingResult,
+  CorrelationStats,
+  ICacheWarmer,
+  WarmingResult,
+  WarmingConfig,
+  WarmingStats,
+  IWarmingStrategy,
+  WarmingCandidate,
+  WarmingContext,
+  SelectionResult,
+  TopNStrategyConfig,
+  ThresholdStrategyConfig,
+  AdaptiveStrategyConfig,
+  TimeBasedStrategyConfig
+} from './warming/domain';
+
+// Domain Models
+export {
+  WarmingTrigger,
+  WarmingEvent,
+  CorrelationPair
+} from './warming/domain';
+
+// Application Layer: Use Cases
+export {
+  WarmCacheUseCase,
+  TrackCorrelationUseCase
+} from './warming/application';
+
+// Application Layer: DTOs
+export {
+  WarmCacheRequest,
+  WarmCacheResponse,
+  TrackCorrelationRequest,
+  TrackCorrelationResponse,
+  GetCorrelatedPairsRequest,
+  GetCorrelatedPairsResponse
+} from './warming/application';
+
+// Application Layer: Warming Strategies
+export {
+  TopNStrategy,
+  ThresholdStrategy,
+  AdaptiveStrategy,
+  TimeBasedStrategy
+} from './warming/application/strategies';
+
+// Infrastructure Layer: Implementations
+export {
+  CorrelationTrackerImpl,
+  HierarchicalCacheWarmer
+} from './warming/infrastructure';
+
+// Dependency Injection: Container
+export {
+  WarmingContainer,
+  createTopNWarming,
+  createAdaptiveWarming,
+  createTestWarming
+} from './warming/container';
+export type {
+  WarmingStrategyType,
+  WarmingContainerConfig,
+  WarmingComponents
+} from './warming/container';
+
+// =============================================================================
+// 3.1.3 Cache Optimization - Metrics & Monitoring (Enhancement #3)
+// =============================================================================
+
+// Domain Layer: Interfaces
+export type {
+  IMetricsCollector,
+  IMetricsExporter,
+  MetricDefinition,
+  MetricLabels,
+  MetricSnapshot,
+  CollectorStats,
+  ExportConfig,
+  ExportResult,
+  ExporterStats,
+  GrafanaDashboardConfig,
+  GrafanaPanelDefinition
+} from './metrics/domain';
+
+// Domain Models
+export {
+  MetricType,
+  ExportFormat,
+  MetricValue,
+  MetricTimestamp,
+  MetricThreshold
+} from './metrics/domain';
+
+// Prometheus Helpers
+export type { IPrometheusHelpers } from './metrics/domain';
+
+// Application Layer: Use Cases
+export {
+  ExportMetricsUseCase,
+  CollectMetricsUseCase
+} from './metrics/application';
+
+// Application Layer: DTOs
+export {
+  ExportMetricsRequest,
+  ExportMetricsResponse,
+  RecordMetricRequest,
+  RecordMetricResponse
+} from './metrics/application';
+
+// Infrastructure Layer: Implementations
+export {
+  PrometheusMetricsCollector,
+  PrometheusExporter,
+  PrometheusHelpers
+} from './metrics/infrastructure';
 
 // =============================================================================
 // 3.2 Pair Caching (S2.2.5)
@@ -706,7 +945,18 @@ export {
 // 6.1 Base Detectors
 // =============================================================================
 
-// Base detector for chain-specific implementations
+/**
+ * @deprecated BaseDetector and related types are legacy.
+ * Use composition with extracted components instead:
+ * - initializeDetectorConnections() for Redis/Streams setup
+ * - initializePairs() for pair discovery
+ * - decodeSyncEventData(), buildPriceUpdate() for event processing
+ * - createDetectorHealthMonitor() for health monitoring
+ * - createFactoryIntegrationService() for factory subscriptions
+ *
+ * See services/unified-detector/ for composition pattern examples.
+ * Will be removed in v2.0.
+ */
 export { BaseDetector } from './base-detector';
 export type {
   DetectorConfig as BaseDetectorConfig,
@@ -716,22 +966,11 @@ export type {
   BaseDetectorLogger
 } from './base-detector';
 
-// Partitioned detector for multi-chain management (ADR-003, S3.1)
-export { PartitionedDetector } from './partitioned-detector';
-export type {
-  PartitionedDetectorConfig,
-  PartitionedDetectorDeps,
-  PartitionedDetectorLogger,
-  TokenNormalizeFn,
-  ChainHealth as PartitionChainHealth,
-  ChainHealth,
-  PartitionHealth,
-  ChainStats as PartitionChainStats,
-  PricePoint,
-  CrossChainDiscrepancy
-} from './partitioned-detector';
+// NOTE: PartitionedDetector removed - use UnifiedChainDetector instead
+// See: services/unified-detector/ for current multi-chain detection implementation
+// Migration: ADR-003 architecture evolved from inheritance to composition pattern
 
-// P2-14: Cross-chain price tracking (extracted from partitioned-detector)
+// P2-14: Cross-chain price tracking for arbitrage detection
 export {
   CrossChainPriceTracker,
   createCrossChainPriceTracker,
