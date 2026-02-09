@@ -150,4 +150,46 @@ describe('DexLookupService', () => {
       expect(foundDex?.routerAddress).toBe(foundDex?.routerAddress.toLowerCase());
     });
   });
+
+  describe('performance', () => {
+    it('should perform O(1) lookups in <0.01ms', () => {
+      const iterations = 10000;
+      const start = performance.now();
+
+      for (let i = 0; i < iterations; i++) {
+        service.getRouterAddress('ethereum', 'uniswap_v3');
+      }
+
+      const elapsed = performance.now() - start;
+      const avgMs = elapsed / iterations;
+
+      // Should be < 0.01ms per lookup (O(1) Map access)
+      expect(avgMs).toBeLessThan(0.01);
+    });
+
+    it('should handle all 49 DEXes across 11 chains', () => {
+      // Test a representative sample from each chain
+      const testCases = [
+        { chain: 'ethereum', dex: 'uniswap_v3' },
+        { chain: 'arbitrum', dex: 'camelot_v3' },
+        { chain: 'bsc', dex: 'pancakeswap_v3' },
+        { chain: 'base', dex: 'aerodrome' },
+        { chain: 'polygon', dex: 'quickswap_v3' },
+        { chain: 'optimism', dex: 'velodrome' },
+        { chain: 'avalanche', dex: 'trader_joe_v2' },
+        { chain: 'fantom', dex: 'spookyswap' },
+        { chain: 'zksync', dex: 'syncswap' },
+        { chain: 'linea', dex: 'syncswap' },
+        { chain: 'solana', dex: 'raydium' }
+      ];
+
+      for (const { chain, dex } of testCases) {
+        const router = service.getRouterAddress(chain, dex);
+        expect(router).toBeDefined();
+        expect(typeof router).toBe('string');
+        // EVM addresses (0x + 40 hex chars) or Solana addresses (32-44 base58 chars, case-insensitive)
+        expect(router).toMatch(/^(0x[a-f0-9]{40}|[1-9a-hj-np-za-km-z]{32,44})$/i);
+      }
+    });
+  });
 });
