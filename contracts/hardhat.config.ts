@@ -46,13 +46,15 @@ const config: HardhatUserConfig = {
     hardhat: {
       forking: {
         url: process.env.ETHEREUM_RPC_URL || 'https://eth.llamarpc.com',
-        // Fix 3.2: Block number is now configurable via environment variable
-        // Default to a fixed block for reproducible tests when not specified
-        // Set FORK_BLOCK_NUMBER to 'latest' for current block or a specific number
-        // Example: FORK_BLOCK_NUMBER=21500000 or FORK_BLOCK_NUMBER=latest
-        blockNumber: process.env.FORK_BLOCK_NUMBER === 'latest'
-          ? undefined  // undefined = latest block
-          : parseInt(process.env.FORK_BLOCK_NUMBER || '21500000'),
+        // Fork block configuration:
+        // - Default: undefined (latest block) for CI/CD and development
+        // - Override: Set FORK_BLOCK_NUMBER=21500000 for reproducible tests
+        // - Fixed block useful for debugging specific historical state
+        blockNumber: process.env.FORK_BLOCK_NUMBER
+          ? (process.env.FORK_BLOCK_NUMBER === 'latest'
+             ? undefined
+             : parseInt(process.env.FORK_BLOCK_NUMBER))
+          : undefined, // Default to latest
         enabled: process.env.FORK_ENABLED === 'true',
       },
       chainId: 31337,

@@ -59,6 +59,28 @@ import "./libraries/SwapHelpers.sol";
  * @custom:version 2.0.0
  * @custom:implementation-plan Task 3.1: Commit-Reveal Smart Contract (Pragmatic Balance)
  * @custom:breaking-change v2.0.0 - Changed RevealParams to support multi-router arbitrage
+ *
+ * @custom:warning UNSUPPORTED TOKEN TYPES
+ * This contract does NOT support:
+ * - Fee-on-transfer tokens: Tokens that deduct fees during transfer will cause
+ *   InsufficientProfit errors because received amounts don't match expected amounts.
+ * - Rebasing tokens: Tokens that change balance over time may cause profit calculation
+ *   errors or insufficient funds for repayment.
+ * Using these token types will result in failed transactions and wasted gas.
+ *
+ * ## Known Limitations
+ *
+ * **Front-Running Griefing**: An attacker can observe a commit transaction in the
+ * mempool and front-run it with the same commitment hash. This causes the original
+ * committer's transaction to revert. However, the attacker cannot steal profits
+ * because only the original committer (tracked in `committers` mapping) can reveal.
+ *
+ * **Mitigation**: This is a griefing attack (DoS) not a theft attack. Consider using
+ * private mempools (Flashbots, Eden, etc.) for high-value commits to avoid front-running.
+ *
+ * **Why Not Fixed**: Including msg.sender in the commitment hash would prevent this,
+ * but adds complexity and gas cost. Current design prioritizes simplicity for the
+ * common case (no attackers), with private mempool as escape hatch.
  */
 contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -590,6 +612,11 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
      */
     function approveRouter(address router) external onlyOwner {
         if (router == address(0)) revert InvalidRouterAddress();
+
+        // Verify router is a contract (has code deployed)
+        // Protection against typos or EOA addresses
+        if (router.code.length == 0) revert InvalidRouterAddress();
+
         approvedRouters[router] = true;
         emit RouterApproved(router);
     }

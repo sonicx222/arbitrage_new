@@ -27,6 +27,14 @@ import "./libraries/SwapHelpers.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.2.0
  *
+ * @custom:warning UNSUPPORTED TOKEN TYPES
+ * This contract does NOT support:
+ * - Fee-on-transfer tokens: Tokens that deduct fees during transfer will cause
+ *   InsufficientProfit errors because received amounts don't match expected amounts.
+ * - Rebasing tokens: Tokens that change balance over time may cause repayment failures
+ *   if balance decreases mid-transaction.
+ * Using these token types will result in failed transactions and wasted gas.
+ *
  * ## Changelog v1.2.0 (Bug Hunt Fixes)
  * - Fix P2-1: Added amount validation (amount > 0) to prevent gas waste and ensure slippage protection
  * - Fix P2-2: Added deadline parameter for transaction staleness protection (industry standard)
@@ -38,43 +46,17 @@ import "./libraries/SwapHelpers.sol";
  * - Fix 7.2: Upgraded from Ownable to Ownable2Step for safer ownership transfers
  * - Fix 10.3: Optimized router validation with caching for repeated routers
  *
- * ## Performance Optimization Roadmap (Fix 10.4 & 10.2.3)
+ * ## Performance Optimization for Competitive MEV
  *
- * ### Current Limitation
- * calculateExpectedProfit() makes sequential getAmountsOut() calls to DEX routers.
- * For an N-hop path, this requires N external calls, adding latency in competitive
- * MEV environments where every millisecond counts.
- *
- * ### Proposed Solution: MultiPathQuoter Contract
- * Deploy a separate quoter contract that batches getAmountsOut() calls:
- *
- * ```solidity
- * contract MultiPathQuoter {
- *     struct QuoteRequest {
- *         address router;
- *         address tokenIn;
- *         address tokenOut;
- *         uint256 amountIn;
- *     }
- *
- *     function getBatchedQuotes(QuoteRequest[] calldata requests)
- *         external view returns (uint256[] memory amountsOut);
- * }
- * ```
+ * For batched quote operations (reducing RPC latency), use MultiPathQuoter.sol
+ * instead of calling calculateExpectedProfit() for each opportunity.
  *
  * Benefits:
- * - Single RPC call instead of N calls (reduces network latency)
- * - Atomic state snapshot (quotes are from the same block)
- * - Can be combined with multicall for maximum efficiency
+ * - Single RPC call for multiple paths (50-200ms latency reduction)
+ * - Atomic price snapshot (all quotes from same block)
+ * - Better suited for MEV-competitive environments
  *
- * Implementation Notes:
- * 1. Deploy MultiPathQuoter on each supported chain
- * 2. Update flash-loan.strategy.ts to use batched quotes for profitability checks
- * 3. Keep calculateExpectedProfit() as fallback for on-chain verification
- *
- * Estimated Impact: 50-200ms latency reduction for 3-hop paths
- *
- * See implementation_plan_v2.md Task 3.1.1
+ * See: contracts/src/MultiPathQuoter.sol
  */
 contract FlashLoanArbitrage is
     IFlashLoanSimpleReceiver,
@@ -209,6 +191,11 @@ contract FlashLoanArbitrage is
      */
     constructor(address _pool, address _owner) {
         if (_pool == address(0)) revert InvalidPoolAddress();
+
+        // Verify pool is a contract (has code deployed)
+        // Protection against typos or EOA addresses during deployment
+        if (_pool.code.length == 0) revert InvalidPoolAddress();
+
         POOL = IPool(_pool);
         swapDeadline = DEFAULT_SWAP_DEADLINE;
         _transferOwnership(_owner);
@@ -602,6 +589,9 @@ contract FlashLoanArbitrage is
 
             // Check for cycle: token appears twice before final step
             // Allow final step to return to start asset (that's the goal)
+            // Cycle detection: O(n²) complexity for path validation
+            // Acceptable for MAX_SWAP_HOPS=5 (max 15 comparisons)
+            // Alternative would be mapping (not possible in view functions)
             if (i < pathLength - 1) {
                 for (uint256 j = 0; j < visitedCount; j++) {
                     if (visitedTokens[j] == step.tokenOut) {

@@ -39,6 +39,14 @@ import "./libraries/SwapHelpers.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
  * @custom:implementation-plan Task 2.2 - Balancer V2 Flash Loan Provider
+ *
+ * @custom:warning UNSUPPORTED TOKEN TYPES
+ * This contract does NOT support:
+ * - Fee-on-transfer tokens: Tokens that deduct fees during transfer will cause
+ *   InsufficientProfit errors because received amounts don't match expected amounts.
+ * - Rebasing tokens: Tokens that change balance over time may cause repayment failures
+ *   if balance decreases mid-transaction.
+ * Using these token types will result in failed transactions and wasted gas.
  */
 contract BalancerV2FlashArbitrage is
     IFlashLoanRecipient,

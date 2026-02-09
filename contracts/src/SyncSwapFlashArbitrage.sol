@@ -43,6 +43,14 @@ import "./libraries/SwapHelpers.sol";
  * @custom:version 1.0.0
  * @custom:implementation-plan Task 3.4 - SyncSwap Flash Loan Provider (zkSync Era)
  * @custom:standard EIP-3156 Flash Loans
+ *
+ * @custom:warning UNSUPPORTED TOKEN TYPES
+ * This contract does NOT support:
+ * - Fee-on-transfer tokens: Tokens that deduct fees during transfer will cause
+ *   InsufficientProfit errors because received amounts don't match expected amounts.
+ * - Rebasing tokens: Tokens that change balance over time may cause repayment failures
+ *   if balance decreases mid-transaction.
+ * Using these token types will result in failed transactions and wasted gas.
  */
 contract SyncSwapFlashArbitrage is
     IERC3156FlashBorrower,
@@ -512,9 +520,11 @@ contract SyncSwapFlashArbitrage is
      */
     function addApprovedRouter(address router) external onlyOwner {
         if (router == address(0)) revert InvalidRouterAddress();
-        if (_approvedRouters.contains(router)) revert RouterAlreadyApproved();
 
-        _approvedRouters.add(router);
+        // EnumerableSet.add() returns false if element already exists
+        // More gas-efficient than separate contains() call (~2,100 gas saved)
+        if (!_approvedRouters.add(router)) revert RouterAlreadyApproved();
+
         emit RouterAdded(router);
     }
 

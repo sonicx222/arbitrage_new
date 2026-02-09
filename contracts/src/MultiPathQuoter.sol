@@ -260,6 +260,11 @@ contract MultiPathQuoter {
         finalAmount = currentAmount;
 
         // Calculate flash loan fee and net profit
+        // Protection against overflow: check multiplication won't overflow
+        if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
+            // Flashloan amount impossibly large - return 0 profit
+            return (0, 0, false);
+        }
         uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
         uint256 amountOwed = flashLoanAmount + flashLoanFee;
 
@@ -347,10 +352,15 @@ contract MultiPathQuoter {
             }
 
             if (pathSuccess) {
-                uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
-                uint256 amountOwed = flashLoanAmount + flashLoanFee;
-                if (currentAmount > amountOwed) {
-                    profits[p] = currentAmount - amountOwed;
+                // Protection against overflow: check multiplication won't overflow
+                if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
+                    pathSuccess = false;
+                } else {
+                    uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
+                    uint256 amountOwed = flashLoanAmount + flashLoanFee;
+                    if (currentAmount > amountOwed) {
+                        profits[p] = currentAmount - amountOwed;
+                    }
                 }
             }
 

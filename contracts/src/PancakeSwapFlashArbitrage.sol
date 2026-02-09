@@ -29,6 +29,14 @@ import "./libraries/SwapHelpers.sol";
  * @custom:security-contact security@arbitrage.system
  * @custom:version 1.0.0
  *
+ * @custom:warning UNSUPPORTED TOKEN TYPES
+ * This contract does NOT support:
+ * - Fee-on-transfer tokens: Tokens that deduct fees during transfer will cause
+ *   InsufficientProfit errors because received amounts don't match expected amounts.
+ * - Rebasing tokens: Tokens that change balance over time may cause repayment failures
+ *   if balance decreases mid-transaction.
+ * Using these token types will result in failed transactions and wasted gas.
+ *
  * ## Supported Chains
  * - BSC (Binance Smart Chain)
  * - Ethereum
@@ -218,6 +226,11 @@ contract PancakeSwapFlashArbitrage is
      */
     constructor(address _factory, address _owner) {
         if (_factory == address(0)) revert InvalidFactoryAddress();
+
+        // Verify factory is a contract (has code deployed)
+        // Protection against typos or EOA addresses during deployment
+        if (_factory.code.length == 0) revert InvalidFactoryAddress();
+
         FACTORY = IPancakeV3Factory(_factory);
         swapDeadline = DEFAULT_SWAP_DEADLINE;
         _transferOwnership(_owner);
