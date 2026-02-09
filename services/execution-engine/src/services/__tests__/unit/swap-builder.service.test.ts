@@ -17,6 +17,7 @@ const mockLogger: ILogger = {
   error: jest.fn(),
   debug: jest.fn(),
   fatal: jest.fn(),
+  trace: jest.fn(),
   child: jest.fn(() => mockLogger)
 };
 

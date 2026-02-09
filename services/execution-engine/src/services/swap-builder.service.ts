@@ -30,10 +30,15 @@ export interface SwapStep {
  * Parameters for building swap steps
  */
 export interface SwapStepsParams {
+  /** Router contract address for buy DEX (not DEX name) */
   buyRouter: string;
+  /** Router contract address for sell DEX (not DEX name) */
   sellRouter: string;
+  /** Intermediate token address for the swap path */
   intermediateToken: string;
+  /** Slippage tolerance in basis points (e.g., 50 = 0.5%) */
   slippageBps?: number;
+  /** Chain identifier (e.g., 'ethereum', 'arbitrum') */
   chain: string;
 }
 
@@ -115,7 +120,8 @@ export class SwapBuilder {
     const step1AmountOutMin = (intermediateAmount * slippageFactor) / BPS_DENOMINATOR;
 
     // Step 2: intermediateToken -> tokenIn (sell) - circular for flash loans
-    // Flash loan arbitrage is circular: tokenIn -> intermediate -> tokenIn
+    // Flash loan arbitrage requires circular paths: tokenIn -> intermediate -> tokenIn
+    // The final token must match the input token to repay the flash loan
     const finalToken = opportunity.tokenIn;
     const finalAmount = this.estimateIntermediateAmount(
       intermediateAmount,
