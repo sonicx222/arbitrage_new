@@ -96,16 +96,8 @@ export class SwapBuilder {
       return cached.steps;
     }
 
-    // Resolve routers
-    const buyRouter = this.dexLookup.getDexByName(params.chain, params.buyRouter);
-    if (!buyRouter) {
-      throw new Error(`[SwapBuilder] Buy router not found: ${params.buyRouter}`);
-    }
-
-    const sellRouter = this.dexLookup.getDexByName(params.chain, params.sellRouter);
-    if (!sellRouter) {
-      throw new Error(`[SwapBuilder] Sell router not found: ${params.sellRouter}`);
-    }
+    // params.buyRouter and params.sellRouter are already router addresses
+    // No need to look them up - use them directly
 
     // Build 2-hop path: tokenIn -> intermediateToken -> tokenOut
     const amountIn = BigInt(opportunity.amountIn);
@@ -122,27 +114,29 @@ export class SwapBuilder {
     // Step 1: tokenIn -> intermediateToken (buy)
     const step1AmountOutMin = (intermediateAmount * slippageFactor) / BPS_DENOMINATOR;
 
-    // Step 2: intermediateToken -> tokenOut (sell)
+    // Step 2: intermediateToken -> tokenIn (sell) - circular for flash loans
+    // Flash loan arbitrage is circular: tokenIn -> intermediate -> tokenIn
+    const finalToken = opportunity.tokenIn;
     const finalAmount = this.estimateIntermediateAmount(
       intermediateAmount,
       opportunity.sellPrice,
       params.intermediateToken,
-      opportunity.tokenOut,
+      finalToken,
       params.chain
     );
     const step2AmountOutMin = (finalAmount * slippageFactor) / BPS_DENOMINATOR;
 
     const steps: SwapStep[] = [
       {
-        router: buyRouter.routerAddress,
+        router: params.buyRouter,
         tokenIn: opportunity.tokenIn,
         tokenOut: params.intermediateToken,
         amountOutMin: step1AmountOutMin
       },
       {
-        router: sellRouter.routerAddress,
+        router: params.sellRouter,
         tokenIn: params.intermediateToken,
-        tokenOut: opportunity.tokenOut,
+        tokenOut: finalToken,
         amountOutMin: step2AmountOutMin
       }
     ];

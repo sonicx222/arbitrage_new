@@ -344,6 +344,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly aggregator?: IFlashLoanAggregator;
   private readonly aggregatorMetrics?: IAggregatorMetrics;
 
+
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
     this.batchedQuoters = new Map();
@@ -382,7 +383,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Issue 3.1 Fix: Warn if contract exists for a chain but no approved routers
-    // This will cause getRouterForDex() to fall back to DEXES config, which may
+    // This will cause router lookup to fall back to DEXES config, which may
     // not have the router approved in the FlashLoanArbitrage contract
     //
     // C3 Fix Enhancement: CRITICAL SYNCHRONIZATION REQUIREMENT
@@ -404,7 +405,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         // This is a startup-time validation, not a runtime log
         console.warn(
           `[CRITICAL] FlashLoanStrategy: Chain '${chain}' has contract address but no approved routers. ` +
-          `getRouterForDex() will fall back to DEXES config. ` +
+          `Router lookup will fall back to DEXES config. ` +
           `MUST ensure those routers are approved in FlashLoanArbitrage contract via addApprovedRouter(), ` +
           `otherwise ALL transactions will fail with ERR_UNAPPROVED_ROUTER. ` +
           `Verify with: scripts/verify-router-approval.ts`
@@ -1093,122 +1094,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     opportunity: ArbitrageOpportunity,
     params: SwapStepsParams
   ): SwapStep[] {
-    const { buyRouter, sellRouter, intermediateToken, slippageBps, chain } = params;
-    // Inconsistency 6.3 Fix: Use base class slippageBps instead of duplicate constant
-    const slippage = slippageBps !== undefined ? BigInt(slippageBps) : this.slippageBps;
-
-    const amountIn = BigInt(opportunity.amountIn!);
-    // P3-2 FIX: Use ?? to preserve 0 as a valid profit value
-    const expectedProfitUsd = opportunity.expectedProfit ?? 0;
-
-    // Fix 7.1: Get actual token decimals for both tokens
-    const tokenInDecimals = getTokenDecimals(chain, opportunity.tokenIn!);
-    const intermediateDecimals = getTokenDecimals(chain, intermediateToken);
-
-    // Calculate expected amounts with slippage
-    // For first swap: estimate intermediate amount based on prices
-    const expectedIntermediateAmount = this.estimateIntermediateAmount(
-      opportunity,
-      tokenInDecimals,
-      intermediateDecimals
-    );
-    const minIntermediateOut = expectedIntermediateAmount - (expectedIntermediateAmount * slippage / BPS_DENOMINATOR);
-
-    // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
-    // This method may be called from execute() which now validates buyPrice,
-    // but also from tests or other code paths. Defensive programming requires validation here.
-    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
-    if (!isValidPrice(opportunity.buyPrice)) {
-      throw new Error(
-        `[ERR_INVALID_PRICE] Cannot build swap steps with invalid buyPrice: ${opportunity.buyPrice}. ` +
-        `This would cause incorrect profit calculations.`
-      );
-    }
-
-    // TypeScript now knows buyPrice is valid, but still needs assertion for type narrowing
-    const tokenPriceUsd: number = opportunity.buyPrice!;
-    const profitInTokenUnits = expectedProfitUsd / tokenPriceUsd;
-
-    // Fix 7.1: Use actual token decimals for profit calculation
-    // Cap the precision at the token's actual decimals to avoid precision issues
-    const profitPrecision = Math.min(tokenInDecimals, 18);
-    const profitWei = ethers.parseUnits(
-      Math.max(0, profitInTokenUnits).toFixed(profitPrecision),
-      tokenInDecimals
-    );
-
-    // For second swap: we expect to get back amountIn + profit (both in token units)
-    const expectedFinalAmount = amountIn + profitWei;
-    const minFinalOut = expectedFinalAmount - (expectedFinalAmount * slippage / BPS_DENOMINATOR);
-
-    return [
-      {
-        router: buyRouter,
-        tokenIn: opportunity.tokenIn!,
-        tokenOut: intermediateToken,
-        amountOutMin: minIntermediateOut,
-      },
-      {
-        router: sellRouter,
-        tokenIn: intermediateToken,
-        tokenOut: opportunity.tokenIn!,
-        amountOutMin: minFinalOut,
-      },
-    ];
+    return this.swapBuilder.buildSwapSteps(opportunity, params);
   }
 
-  /**
-   * Estimate intermediate token amount based on opportunity prices.
-   *
-   * Fix 4.1: Uses 1e18 precision to avoid loss for very small prices.
-   * Fix 7.1: Now handles decimal conversion between tokens.
-   *
-   * @param opportunity - Arbitrage opportunity with price and amount data
-   * @param tokenInDecimals - Decimals of the input token
-   * @param intermediateDecimals - Decimals of the intermediate token
-   * @returns Estimated intermediate amount in intermediate token units
-   */
-  private estimateIntermediateAmount(
-    opportunity: ArbitrageOpportunity,
-    tokenInDecimals: number,
-    intermediateDecimals: number
-  ): bigint {
-    const amountIn = BigInt(opportunity.amountIn!);
-
-    // Bug 4.1 Fix: Validate buyPrice strictly - throw if invalid
-    // Using a fallback of 1 would produce wildly incorrect intermediate amounts
-    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
-    if (!isValidPrice(opportunity.buyPrice)) {
-      throw new Error(
-        `[ERR_INVALID_PRICE] Cannot estimate intermediate amount with invalid buyPrice: ${opportunity.buyPrice}`
-      );
-    }
-
-    // TypeScript now knows buyPrice is valid
-    const buyPrice: number = opportunity.buyPrice!;
-
-    // Fix 4.1: Use 1e18 precision to handle very small prices
-    const PRECISION = 1e18;
-    const priceScaled = BigInt(Math.round(buyPrice * PRECISION));
-
-    // Calculate the decimal adjustment factor
-    // If tokenIn has 18 decimals and intermediate has 6, we need to divide by 10^12
-    const decimalDiff = tokenInDecimals - intermediateDecimals;
-    const decimalAdjustment = BigInt(10) ** BigInt(Math.abs(decimalDiff));
-
-    // amountIn * priceScaled / PRECISION, then adjust for decimals
-    let intermediateAmount = (amountIn * priceScaled) / BigInt(PRECISION);
-
-    if (decimalDiff > 0) {
-      // tokenIn has more decimals, divide to get intermediate amount
-      intermediateAmount = intermediateAmount / decimalAdjustment;
-    } else if (decimalDiff < 0) {
-      // intermediate has more decimals, multiply
-      intermediateAmount = intermediateAmount * decimalAdjustment;
-    }
-
-    return intermediateAmount;
-  }
 
   /**
    * Fix 1.2: Build N-hop swap steps for complex arbitrage paths.
@@ -1398,7 +1286,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       const nhopParams: NHopSwapStepsParams = {
         hops: opportunity.hops.map(hop => {
           // Resolve router from dex name if not provided directly
-          const router = hop.router || this.getRouterForDex(chain, hop.dex);
+          const router = hop.router || (hop.dex ? this.dexLookup.getRouterAddress(chain, hop.dex) : undefined);
           if (!router) {
             throw new Error(`No router found for hop DEX '${hop.dex}' on chain: ${chain}`);
           }
@@ -1416,8 +1304,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     } else {
       // Default 2-hop path (standard arbitrage)
       // Get router addresses
-      const buyRouter = this.getRouterForDex(chain, opportunity.buyDex);
-      const sellRouter = this.getRouterForDex(chain, opportunity.sellDex || opportunity.buyDex);
+      const dexForSell = opportunity.sellDex || opportunity.buyDex;
+      const buyRouter = opportunity.buyDex ? this.dexLookup.getRouterAddress(chain, opportunity.buyDex) : undefined;
+      const sellRouter = dexForSell ? this.dexLookup.getRouterAddress(chain, dexForSell) : undefined;
 
       if (!buyRouter || !sellRouter) {
         throw new Error(`No router found for DEX on chain: ${chain}`);
@@ -1439,14 +1328,15 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     const expectedProfitUsd = opportunity.expectedProfit ?? 0;
 
     // Validate buyPrice strictly - throw if invalid
-    // Refactor 9.2: Use centralized isValidPrice type guard from @arbitrage/core
-    if (!isValidPrice(opportunity.buyPrice)) {
+    // FIX 4.2: Extract to local variable for proper type narrowing
+    const buyPrice = opportunity.buyPrice;
+    if (!isValidPrice(buyPrice)) {
       throw new Error(
-        `[ERR_INVALID_PRICE] Cannot prepare flash loan transaction with invalid buyPrice: ${opportunity.buyPrice}`
+        `[ERR_INVALID_PRICE] Cannot prepare flash loan transaction with invalid buyPrice: ${buyPrice}`
       );
     }
 
-    const tokenPriceUsd = opportunity.buyPrice!;
+    const tokenPriceUsd = buyPrice; // TypeScript properly narrows to number
 
     // Finding 7.1 Fix: Get actual token decimals from config instead of assuming 18
     // This is critical for tokens like USDC (6), USDT (6), WBTC (8)
@@ -1513,65 +1403,6 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     };
   }
 
-  /**
-   * Find router address for a DEX by name (case-insensitive, partial match).
-   * Finding 9.2: Extracted to avoid code duplication.
-   *
-   * @param chainDexes - Array of DEXes for the chain
-   * @param dexName - DEX name to search for
-   * @returns Router address or undefined if not found
-   */
-  private findRouterByDexName(chainDexes: typeof DEXES[string], dexName: string): string | undefined {
-    const normalizedName = dexName.toLowerCase();
-    const dex = chainDexes.find(d => {
-      const dexNameLower = d.name.toLowerCase();
-      return dexNameLower === normalizedName || dexNameLower.includes(normalizedName);
-    });
-    return dex?.routerAddress;
-  }
-
-  /**
-   * Get router address for a DEX on a specific chain.
-   * Finding 9.2: Simplified using extracted helper method.
-   *
-   * Resolution order:
-   * 1. If dexName provided and matches approved router -> use that router
-   * 2. If approved routers configured -> use first approved router
-   * 3. If dexName provided and matches DEXES config -> use that router
-   * 4. Fallback to first DEX router from DEXES config
-   *
-   * @param chain - Chain identifier
-   * @param dexName - Optional DEX name to match
-   * @returns Router address or undefined
-   */
-  private getRouterForDex(chain: string, dexName?: string): string | undefined {
-    const chainDexes = DEXES[chain];
-    const approvedRouters = this.config.approvedRouters[chain];
-
-    // Try to find router by DEX name if provided
-    if (dexName && chainDexes) {
-      const matchedRouter = this.findRouterByDexName(chainDexes, dexName);
-
-      // If we have approved routers, only return if it's approved
-      if (approvedRouters?.length) {
-        if (matchedRouter && approvedRouters.includes(matchedRouter)) {
-          return matchedRouter;
-        }
-        // Fall through to return first approved router
-      } else if (matchedRouter) {
-        // No approved routers configured, return matched router
-        return matchedRouter;
-      }
-    }
-
-    // Return first approved router if configured
-    if (approvedRouters?.length) {
-      return approvedRouters[0];
-    }
-
-    // Fallback to first DEX router
-    return chainDexes?.[0]?.routerAddress;
-  }
 
   // ===========================================================================
   // PancakeSwap V3 Pool Discovery (Task 2.1)
@@ -1820,8 +1651,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     try {
       // Get router addresses
-      const buyRouter = this.getRouterForDex(chain, opportunity.buyDex);
-      const sellRouter = this.getRouterForDex(chain, opportunity.sellDex || opportunity.buyDex);
+      const dexForSell = opportunity.sellDex || opportunity.buyDex;
+      const buyRouter = opportunity.buyDex ? this.dexLookup.getRouterAddress(chain, opportunity.buyDex) : undefined;
+      const sellRouter = dexForSell ? this.dexLookup.getRouterAddress(chain, dexForSell) : undefined;
 
       if (!buyRouter || !sellRouter) {
         this.logger.warn('Cannot calculate on-chain profit: no router found', { chain });
@@ -2099,7 +1931,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         if (hop.router) {
           router = hop.router;
         } else if (hop.dex) {
-          router = this.getRouterForDex(chain, hop.dex);
+          router = this.dexLookup.getRouterAddress(chain, hop.dex);
         }
 
         if (!router) {
@@ -2134,8 +1966,9 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Standard 2-hop path (buy → sell)
-    const buyRouter = this.getRouterForDex(chain, opportunity.buyDex);
-    const sellRouter = this.getRouterForDex(chain, opportunity.sellDex || opportunity.buyDex);
+    const dexForSell = opportunity.sellDex || opportunity.buyDex;
+    const buyRouter = opportunity.buyDex ? this.dexLookup.getRouterAddress(chain, opportunity.buyDex) : undefined;
+    const sellRouter = dexForSell ? this.dexLookup.getRouterAddress(chain, dexForSell) : undefined;
 
     if (!buyRouter) {
       throw new Error(
@@ -2145,7 +1978,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     if (!sellRouter) {
       throw new Error(
-        `No router found for sellDex '${opportunity.sellDex || opportunity.buyDex}' on chain: ${chain}`
+        `No router found for sellDex '${dexForSell}' on chain: ${chain}`
       );
     }
 
