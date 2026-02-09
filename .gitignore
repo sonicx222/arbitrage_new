@@ -160,3 +160,6 @@ deployments/localhost/
 slow-tests.json
 slow-tests.previous.json
 full_codebase.txt
+
+# Git worktrees
+.worktrees/
