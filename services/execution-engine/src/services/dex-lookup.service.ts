@@ -63,18 +63,26 @@ export class DexLookupService {
           continue;
         }
 
-        // Normalize DEX name for case-insensitive lookups
+        // Validate DEX entry
+        if (!dex.name || !dex.routerAddress) {
+          throw new Error(`[DexLookupService] Invalid DEX config in chain ${chain}: missing name or routerAddress`);
+        }
+
+        // Normalize DEX name and router address for case-insensitive lookups
         const normalizedName = dex.name.toLowerCase().trim();
         const normalizedRouter = dex.routerAddress.toLowerCase().trim();
 
-        // Populate router cache
+        // Create normalized Dex copy with lowercase router address
+        // This ensures consistent casing across all lookup methods
+        const normalizedDex: Dex = {
+          ...dex,
+          routerAddress: normalizedRouter
+        };
+
+        // Populate all caches with normalized data
         chainRouterMap.set(normalizedName, normalizedRouter);
-
-        // Populate reverse router→dex cache
-        chainDexByRouterMap.set(normalizedRouter, dex);
-
-        // Populate dex cache
-        chainDexMap.set(normalizedName, dex);
+        chainDexByRouterMap.set(normalizedRouter, normalizedDex);
+        chainDexMap.set(normalizedName, normalizedDex);
       }
 
       this.routerCache.set(chain, chainRouterMap);

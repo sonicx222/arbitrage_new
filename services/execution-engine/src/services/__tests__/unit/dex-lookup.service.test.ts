@@ -63,7 +63,7 @@ describe('DexLookupService', () => {
       expect(dex).toBeDefined();
       expect(dex?.name).toBe('uniswap_v3');
       expect(dex?.chain).toBe('ethereum');
-      expect(dex?.routerAddress).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+      expect(dex?.routerAddress).toBe('0xe592427a0aece92de3edee1f18e0157c05861564');
     });
 
     it('should be case-insensitive', () => {
@@ -83,6 +83,7 @@ describe('DexLookupService', () => {
       const dex = service.findDexByRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
       expect(dex).toBeDefined();
       expect(dex?.name).toBe('uniswap_v3');
+      expect(dex?.routerAddress).toBe('0xe592427a0aece92de3edee1f18e0157c05861564');
     });
 
     it('should be case-insensitive for addresses', () => {
@@ -120,6 +121,33 @@ describe('DexLookupService', () => {
     it('should return false for invalid router', () => {
       const valid = service.isValidRouter('ethereum', '0x0000000000000000000000000000000000000000');
       expect(valid).toBe(false);
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle whitespace in DEX names', () => {
+      const dex1 = service.getDexByName('ethereum', '  uniswap_v3  ');
+      const dex2 = service.getDexByName('ethereum', 'uniswap_v3');
+      expect(dex1).toBe(dex2);
+      expect(dex1).toBeDefined();
+    });
+
+    it('should return only enabled DEXes in getAllDexesForChain', () => {
+      const dexes = service.getAllDexesForChain('solana');
+      // Jupiter is disabled (enabled: false) - should not appear
+      const jupiterDex = dexes.find(d => d.name === 'jupiter');
+      expect(jupiterDex).toBeUndefined();
+    });
+
+    it('should return consistent address casing across all methods', () => {
+      const router = service.getRouterAddress('ethereum', 'uniswap_v3');
+      const dex = service.getDexByName('ethereum', 'uniswap_v3');
+      const foundDex = service.findDexByRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
+
+      // All router addresses should be consistently lowercase
+      expect(router).toBe(router?.toLowerCase());
+      expect(dex?.routerAddress).toBe(dex?.routerAddress.toLowerCase());
+      expect(foundDex?.routerAddress).toBe(foundDex?.routerAddress.toLowerCase());
     });
   });
 });
