@@ -26,7 +26,7 @@ describe('DexLookupService', () => {
   describe('getRouterAddress', () => {
     it('should return router address for valid DEX', () => {
       const router = service.getRouterAddress('ethereum', 'uniswap_v3');
-      expect(router).toBe('0xE592427A0AEce92De3Edee1F18E0157C05861564');
+      expect(router).toBe('0xe592427a0aece92de3edee1f18e0157c05861564');
     });
 
     it('should be case-insensitive', () => {
@@ -34,6 +34,16 @@ describe('DexLookupService', () => {
       const router2 = service.getRouterAddress('ethereum', 'uniswap_v3');
       expect(router1).toBe(router2);
       expect(router1).toBeDefined();
+    });
+
+    it('should return consistently lowercase addresses', () => {
+      const router1 = service.getRouterAddress('ethereum', 'uniswap_v3');
+      const router2 = service.getRouterAddress('ethereum', 'UNISWAP_V3');
+
+      // Addresses should be consistently lowercase
+      expect(router1).toBe(router1?.toLowerCase());
+      expect(router2).toBe(router2?.toLowerCase());
+      expect(router1).toBe(router2);
     });
 
     it('should return undefined for unknown DEX', () => {

@@ -68,7 +68,7 @@ export class DexLookupService {
         const normalizedRouter = dex.routerAddress.toLowerCase().trim();
 
         // Populate router cache
-        chainRouterMap.set(normalizedName, dex.routerAddress);
+        chainRouterMap.set(normalizedName, normalizedRouter);
 
         // Populate reverse router→dex cache
         chainDexByRouterMap.set(normalizedRouter, dex);
