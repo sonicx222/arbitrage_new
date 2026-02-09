@@ -6,15 +6,14 @@
  *
  * Performance:
  * - O(1) getRouterAddress() - Map-based chain+dex lookup
- * - O(1) getDexByRouter() - Map-based reverse router→dex lookup
  * - O(1) hasChain() - Map.has() check
  *
  * Cache Structure:
  * - routerCache: Map<chain, Map<dexName, routerAddress>>
- * - dexByRouterCache: Map<chain, Map<routerAddress, Dex>>
- * - dexCache: Map<chain, Map<dexName, Dex>>
+ * - dexByRouterCache: Map<chain, Map<routerAddress, Dex>> (for future use)
+ * - dexCache: Map<chain, Map<dexName, Dex>> (for future use)
  *
- * Refs: Task #4, Finding 9.1
+ * Refs: Task #7, Finding 9.1
  * @see services/execution-engine/src/strategies/flash-loan.strategy.ts - getDexRouter()
  */
 
@@ -117,97 +116,5 @@ export class DexLookupService {
 
     const normalizedName = dexName.toLowerCase().trim();
     return chainMap.get(normalizedName);
-  }
-
-  /**
-   * Get full Dex object by router address (reverse lookup).
-   * O(1) Map-based lookup.
-   *
-   * @param chain - Chain identifier
-   * @param routerAddress - Router contract address
-   * @returns Full Dex object or undefined if not found
-   *
-   * @example
-   * ```typescript
-   * const dex = service.getDexByRouter('ethereum', '0xE592427A0AEce92De3Edee1F18E0157C05861564');
-   * // { name: 'uniswap_v3', chain: 'ethereum', ... }
-   * ```
-   */
-  public getDexByRouter(chain: string, routerAddress: string): Dex | undefined {
-    const chainMap = this.dexByRouterCache.get(chain);
-    if (!chainMap) {
-      return undefined;
-    }
-
-    const normalizedRouter = routerAddress.toLowerCase().trim();
-    return chainMap.get(normalizedRouter);
-  }
-
-  /**
-   * Get full Dex object by DEX name.
-   * O(1) Map-based lookup. Case-insensitive DEX name matching.
-   *
-   * @param chain - Chain identifier
-   * @param dexName - DEX name (case-insensitive)
-   * @returns Full Dex object or undefined if not found
-   *
-   * @example
-   * ```typescript
-   * const dex = service.getDex('ethereum', 'uniswap_v3');
-   * // { name: 'uniswap_v3', chain: 'ethereum', routerAddress: '0x...', ... }
-   * ```
-   */
-  public getDex(chain: string, dexName: string): Dex | undefined {
-    const chainMap = this.dexCache.get(chain);
-    if (!chainMap) {
-      return undefined;
-    }
-
-    const normalizedName = dexName.toLowerCase().trim();
-    return chainMap.get(normalizedName);
-  }
-
-  /**
-   * Get all enabled DEX names for a chain.
-   * O(n) where n = DEXes on chain (typically 2-9).
-   *
-   * @param chain - Chain identifier
-   * @returns Array of DEX names (original casing from config)
-   */
-  public getDexNames(chain: string): string[] {
-    const chainMap = this.dexCache.get(chain);
-    if (!chainMap) {
-      return [];
-    }
-
-    return Array.from(chainMap.values()).map((dex) => dex.name);
-  }
-
-  /**
-   * Get all enabled DEXes for a chain.
-   * O(n) where n = DEXes on chain (typically 2-9).
-   *
-   * @param chain - Chain identifier
-   * @returns Array of Dex objects
-   */
-  public getDexes(chain: string): Dex[] {
-    const chainMap = this.dexCache.get(chain);
-    if (!chainMap) {
-      return [];
-    }
-
-    return Array.from(chainMap.values());
-  }
-
-  /**
-   * Get count of enabled DEXes on a chain.
-   * O(1) Map.size property.
-   *
-   * @param chain - Chain identifier
-   * @returns Count of enabled DEXes
-   */
-  public getDexCount(chain: string): number {
-    const chainMap = this.dexCache.get(chain);
-    return chainMap ? chainMap.size : 0;
   }
 }
