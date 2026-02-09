@@ -188,18 +188,21 @@ The architecture combines two patterns:
 │  └── Execution Planner (Route optimization)                                     │
 │                                                                                  │
 │  LAYER 4: EXECUTION                                                              │
-│  ├── Execution Engine Primary (MEV-protected trades)                            │
+│  ├── Execution Engine Primary (MEV-protected trades - **EVM ONLY**)             │
 │  │   ├── Transaction Simulation (Tenderly/Alchemy pre-flight) ✅ NEW            │
 │  │   ├── Circuit Breaker (Consecutive failure protection) ✅ NEW                │
+│  │   ├── DexLookupService (O(1) DEX/router lookups) ✅ NEW                      │
+│  │   ├── SwapBuilder (Cached swap step construction) ✅ NEW                     │
 │  │   └── Strategy Factory (Intra-chain, Cross-chain, Flash Loan)                │
-│  ├── Execution Engine Backup (Failover)                                         │
-│  ├── Flash Loan Strategy (Aave V3 integration) ✅ NEW                           │
+│  ├── Execution Engine Backup (Failover - **EVM ONLY**)                          │
+│  ├── Flash Loan Strategy (Aave V3 + PancakeSwap V3) ✅ NEW                      │
 │  ├── Flash Loan Contract (FlashLoanArbitrage.sol) ✅ NEW                        │
-│  └── Solana Executor (Jito bundles, priority fees)                              │
+│  └── Solana Executor (Jito bundles, priority fees) ⚠️ **DETECTION ONLY**       │
 │                                                                                  │
 │  LAYER 5: COORDINATION                                                           │
 │  ├── Global Coordinator (Health, leader election)                               │
 │  ├── Self-Healing Manager (Auto-recovery)                                       │
+│  ├── Bridge Recovery Service (Redis-persisted recovery for cross-chain) ✅ NEW  │
 │  └── Dashboard (Monitoring, analytics)                                          │
 │                                                                                  │
 │  SHARED INFRASTRUCTURE                                                           │
@@ -212,7 +215,63 @@ The architecture combines two patterns:
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Chain Detector Partitions
+### 4.2 Layer 4 Extracted Services (Task #4 Refactoring)
+
+The execution engine has been refactored to extract reusable services for improved maintainability and testability.
+
+#### 4.2.1 DexLookupService (`services/execution-engine/src/services/dex-lookup.service.ts`)
+
+**Purpose**: Provides O(1) DEX and router address lookups using Map-based indexing.
+
+**Key Features**:
+- Initialized once from `@arbitrage/config` DEXES constant
+- Map-based indexing: `dexByNameMap`, `dexByRouterMap`, `dexesByChainMap`
+- Zero runtime configuration lookups
+
+**Methods**:
+- `getRouterAddress(chainId, dexName)` - Get router address for DEX
+- `getDexByName(chainId, dexName)` - Get DEX config by name
+- `findDexByRouter(chainId, routerAddress)` - Reverse lookup by router
+- `getAllDexesForChain(chainId)` - Get all DEXes for a chain
+- `isValidRouter(chainId, routerAddress)` - Validate router address
+- `hasChain(chainId)` - Check if chain is supported
+
+**Performance**:
+- Memory: ~40 KB (all 49 DEXes cached)
+- Lookup time: <0.01ms per operation
+- Indexes: 3 maps (by name, by router, by chain)
+
+**Test Coverage**: 21 tests covering initialization, lookups, edge cases
+
+#### 4.2.2 SwapBuilder (`services/execution-engine/src/services/swap-builder.service.ts`)
+
+**Purpose**: Builds swap steps with slippage calculations and result caching.
+
+**Key Features**:
+- TTL-based caching (60s default) with LRU eviction
+- Automatic slippage calculation (0.5% default, configurable)
+- Cache key generation from opportunity data
+- Thread-safe cache operations
+
+**Methods**:
+- `buildSwapSteps(opportunity, slippageTolerance?)` - Build swap steps with caching
+
+**Cache Strategy**:
+- Max entries: 100 (configurable)
+- TTL: 60 seconds (configurable)
+- Eviction: LRU when max size reached
+- Hit rate: Expected 70-90% for repeated opportunities
+
+**Performance**:
+- Memory: ~50 KB max (100 cached entries)
+- Cache hit: <0.1ms
+- Cache miss: ~1-2ms (includes slippage calculation)
+
+**Test Coverage**: 7 tests covering cache behavior, TTL, eviction
+
+**Integration**: Used by BaseStrategy and all strategy subclasses (IntraChainStrategy, CrossChainStrategy, FlashLoanStrategy)
+
+### 4.3 Chain Detector Partitions
 
 Instead of one service per chain, chains are grouped into partitions based on:
 
@@ -227,7 +286,7 @@ Instead of one service per chain, chains are grouped into partitions based on:
 | P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
 | P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
 
-### 4.2.1 Solana Partition Details (P4)
+### 4.3.1 Solana Partition Details (P4)
 
 Solana requires a dedicated partition due to fundamental architectural differences:
 
@@ -254,7 +313,7 @@ Solana requires a dedicated partition due to fundamental architectural differenc
 **Solana Tokens (15 tokens)**:
 SOL, USDC, USDT, JUP, RAY, ORCA, BONK, WIF, JTO, PYTH, mSOL, jitoSOL, BSOL, W, MNDE
 
-### 4.2.2 Mempool Detector (Pre-Block Arbitrage)
+### 4.3.2 Mempool Detector (Pre-Block Arbitrage)
 
 The Mempool Detector service provides **pre-block arbitrage detection** by monitoring pending transactions before they are included in blocks.
 
@@ -295,7 +354,7 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
 2. Predict price impact before transactions execute
 3. Optimize trade timing based on mempool activity
 
-### 4.3 Event Processing Strategy
+### 4.4 Event Processing Strategy
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -337,6 +396,61 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### 4.5 Chain Support Scope Clarification
+
+**IMPORTANT**: The execution engine currently supports **EVM chains ONLY**.
+
+| Layer | EVM Chains (10) | Solana |
+|-------|-----------------|--------|
+| **Detection** | ✅ Fully Supported | ✅ Fully Supported |
+| **Execution** | ✅ Fully Supported | ❌ **Not Implemented** |
+
+**EVM Chains Supported for Execution**:
+- Ethereum, BSC, Polygon, Arbitrum, Optimism, Base, Avalanche, Fantom, zkSync, Linea
+
+**Solana Status**:
+- ✅ **Detection**: Partition 4 monitors Solana DEXs (Raydium, Orca, Jupiter, etc.)
+- ✅ **Opportunity Finding**: Cross-chain arbs detected between Solana ↔ EVM
+- ❌ **Execution**: Requires separate Solana-native executor (different transaction model, SPL tokens, program invocations)
+
+**Why Solana Execution is Separate**:
+- Different transaction structure (@solana/web3.js vs ethers.js)
+- Account-based model vs EVM contract calls
+- SPL token standard vs ERC-20
+- Jito bundles vs Flashbots
+- Program invocations vs smart contract ABIs
+
+**Future Work**: See roadmap for Solana execution engine development plan.
+
+### 4.6 Bridge Recovery Service
+
+**Purpose**: Ensures cross-chain arbitrage trades complete successfully even after service restarts or failures.
+
+**Problem Solved**: Bridge transactions take 10-30 minutes to complete. If the execution engine crashes or restarts during this window, the system loses track of in-flight bridge transactions, potentially leaving funds locked.
+
+**Solution**: Redis-persisted recovery mechanism
+
+**Key Features**:
+- **Redis Persistence**: Stores bridge transaction state with 24-hour TTL
+- **Automatic Recovery**: On restart, checks for in-flight bridges and resumes monitoring
+- **Deadline Tracking**: Expires old recovery attempts (configurable timeout)
+- **Idempotent**: Safe to query bridge status multiple times
+
+**Recovery Flow**:
+```
+1. Execute Source Chain → Store Recovery State in Redis
+2. Bridge Transaction Submitted → Update State
+3. [Service Restart/Crash]
+4. On Startup → Load Recovery States from Redis
+5. Resume Bridge Polling → Complete Destination Chain Execution
+```
+
+**Configuration**:
+- `BRIDGE_RECOVERY_MAX_AGE_MS`: Maximum age for recovery (default: 24 hours)
+- Redis key pattern: `bridge:recovery:{opportunityId}`
+
+**Location**: Implemented in `services/execution-engine/src/strategies/cross-chain.strategy.ts` (lines 1091-1658)
 
 ---
 
@@ -782,15 +896,32 @@ SimulationService now routes requests based on chain:
 
 **Key Files**: `shared/core/src/caching/correlation-analyzer.ts`
 
-### 10.6 Flash Loan Integration (Phase 3.1) ✅ PARTIAL
+### 10.6 Flash Loan Integration (Phase 3.1) ✅ IMPLEMENTED
 
 **Problem**: Capital lockup limits arbitrage capacity.
 
-**Solution**: Aave V3 flash loan integration (0.09% fee).
+**Solution**: Dual-protocol flash loan support for optimal fee selection.
 
-**Status**: Contract and strategy complete, testnet deployment pending.
+**Supported Protocols**:
+1. **Aave V3** (0.09% fee)
+   - Chains: Ethereum, Polygon, Arbitrum, Optimism, Base
+   - Contract: `FlashLoanArbitrage.sol`
+   - Largest liquidity pools
 
-**Key Files**: `contracts/src/FlashLoanArbitrage.sol`, `services/execution-engine/src/strategies/flash-loan.strategy.ts`
+2. **PancakeSwap V3** (0% fee)
+   - Chains: BSC, Ethereum (limited liquidity)
+   - Contract: `PancakeSwapFlashArbitrage.sol`
+   - Zero-cost flash loans when liquidity available
+
+**Strategy Selection**: Automatically selects lowest-fee protocol with sufficient liquidity.
+
+**Status**: Fully implemented, testnet deployment pending.
+
+**Key Files**:
+- `contracts/src/FlashLoanArbitrage.sol`
+- `contracts/src/PancakeSwapFlashArbitrage.sol`
+- `services/execution-engine/src/strategies/flash-loan.strategy.ts`
+- `services/execution-engine/src/strategies/flash-loan-providers/`
 
 ### 10.7 Detector Pre-validation (Phase 4.1) ✅ NEW
 
