@@ -31,7 +31,10 @@ const config: HardhatUserConfig = {
             // Trade-off: ~50% higher deployment cost, ~10-20% cheaper execution
             runs: 10000,
           },
-          viaIR: true,
+          // viaIR provides advanced optimizations for standard EVM chains
+          // Disabled for zkSync Era which uses custom zksolc compiler
+          // Set DISABLE_VIA_IR=true for zkSync deployments
+          viaIR: process.env.DISABLE_VIA_IR !== 'true',
         },
       },
     ],
@@ -86,7 +89,13 @@ const config: HardhatUserConfig = {
     },
     // Production networks - uncomment after security audit
     // TODO: Track deployment progress - create GitHub issue for mainnet deployment
-    // Prerequisites: 1) Security audit, 2) Testnet verification, 3) Deployment runbook
+    // Prerequisites before enabling:
+    // 1) Security audit completed (contracts/docs/SECURITY_REVIEW.md checklist)
+    // 2) Testnet verification (Sepolia, Arbitrum Sepolia, BSC Testnet)
+    // 3) Deployment runbook (contracts/docs/DEPLOYMENT.md)
+    // 4) Multi-sig wallet configured for contract ownership
+    // 5) Router/pool whitelists populated and verified
+    // 6) Minimum profit thresholds configured appropriately
     // ethereum: {
     //   url: process.env.ETHEREUM_RPC_URL || '',
     //   accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],

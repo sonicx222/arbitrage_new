@@ -213,6 +213,7 @@ contract PancakeSwapFlashArbitrage is
     error TransactionTooOld();
     error PoolNotFound();
     error PoolNotFromFactory();
+    error InsufficientPoolLiquidity();
     error BatchTooLarge(uint256 requested, uint256 maximum);
 
     // ==========================================================================
@@ -322,6 +323,12 @@ contract PancakeSwapFlashArbitrage is
         uint24 fee = poolContract.fee();
         address verifiedPool = FACTORY.getPool(token0, token1, fee);
         if (verifiedPool != pool) revert PoolNotFromFactory();
+
+        // Check pool has active liquidity (fail-fast optimization)
+        // Zero liquidity indicates inactive/newly created pool
+        // Flash loan would revert anyway, but this provides clearer error
+        uint128 poolLiquidity = poolContract.liquidity();
+        if (poolLiquidity == 0) revert InsufficientPoolLiquidity();
 
         uint256 amount0;
         uint256 amount1;

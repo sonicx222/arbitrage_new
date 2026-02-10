@@ -79,13 +79,6 @@ contract SyncSwapFlashArbitrage is
     /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
     uint256 public constant MAX_SWAP_HOPS = 5;
 
-    /// @notice SyncSwap flash loan fee rate in basis points (0.3% = 30 bps)
-    /// @dev SyncSwap charges 0.3% (30 bps) for flash loans on zkSync Era
-    uint256 private constant SYNCSWAP_FEE_BPS = 30;
-
-    /// @notice Denominator for basis points calculations (10000 bps = 100%)
-    uint256 private constant BPS_DENOMINATOR = 10000;
-
     /// @notice EIP-3156 success return value
     /// @dev Must return this exact value from onFlashLoan() to signal success
     bytes32 private constant ERC3156_CALLBACK_SUCCESS =
@@ -413,8 +406,10 @@ contract SyncSwapFlashArbitrage is
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // Calculate flash loan fee (0.3% = 30 bps)
-        flashLoanFee = (amount * SYNCSWAP_FEE_BPS) / BPS_DENOMINATOR;
+        // Query dynamic flash loan fee from vault (EIP-3156 standard)
+        // SyncSwap fee is configurable and can vary by token/market conditions
+        // Typical fee: 0.3% (30 bps), but always query to ensure accuracy
+        flashLoanFee = VAULT.flashFee(asset, amount);
 
         // Validate basic path requirements
         if (swapPath.length == 0 || swapPath[0].tokenIn != asset) {

@@ -45,6 +45,13 @@ interface IPancakeV3Pool {
     function fee() external view returns (uint24);
 
     /**
+     * @notice The currently in-range liquidity available to the pool
+     * @dev This value has no relationship to the total liquidity across all ticks
+     * @return The liquidity at the current price of the pool
+     */
+    function liquidity() external view returns (uint128);
+
+    /**
      * @notice Receive token0 and/or token1 and pay it back, plus a fee, in the callback
      * @dev The caller of this method receives a callback in the form of IPancakeV3FlashCallback#pancakeV3FlashCallback
      * @param recipient The address which will receive the token0 and token1 amounts

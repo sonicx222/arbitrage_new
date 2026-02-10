@@ -18,12 +18,25 @@ import "./libraries/SwapHelpers.sol";
  * @dev Implements IFlashLoanRecipient for Balancer V2 Vault integration
  *
  * Features:
- * - Balancer V2 flash loan integration (0% fee - no flash loan fees!)
+ * - Balancer V2 flash loan integration (0% fee permanently - see below)
  * - Multi-hop swap execution across multiple DEX routers
  * - Profit verification with minimum profit threshold
  * - Reentrancy protection
  * - Access control for router approval and fund withdrawal
  * - Emergency pause functionality
+ *
+ * ## Balancer V2 Flash Loan Fees
+ *
+ * Balancer V2 flash loans are **permanently fee-free** (0%) per governance decision.
+ * This is a competitive advantage over other flash loan providers:
+ * - Aave V3: 0.09% (9 basis points)
+ * - PancakeSwap V3: 0.01-1% (pool-dependent)
+ * - SyncSwap: ~0.3% (configurable)
+ *
+ * Fee-free status is hardcoded in Balancer V2 Vault and cannot be changed without
+ * a full protocol upgrade, making it a reliable long-term advantage.
+ *
+ * @see https://docs.balancer.fi/reference/contracts/flash-loans.html
  *
  * Balancer V2 Flash Loan Advantages:
  * - Zero flash loan fees (unlike Aave V3's 0.09%)

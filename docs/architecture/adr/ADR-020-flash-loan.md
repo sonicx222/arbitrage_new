@@ -69,19 +69,21 @@ contract FlashLoanArbitrage is
     Pausable
 {
     // Execute multi-hop arbitrage with flash loan
+    // v1.2.0+: Added deadline parameter for staleness protection
     function executeArbitrage(
-        address token,
+        address asset,
         uint256 amount,
         SwapStep[] calldata swapPath,
-        uint256 minProfit
+        uint256 minProfit,
+        uint256 deadline  // Added in v1.2.0
     ) external;
 
     // Calculate expected profit before execution
     function calculateExpectedProfit(
-        address token,
+        address asset,
         uint256 amount,
         SwapStep[] calldata swapPath
-    ) external view returns (uint256);
+    ) external view returns (uint256 expectedProfit, uint256 flashLoanFee);
 }
 ```
 

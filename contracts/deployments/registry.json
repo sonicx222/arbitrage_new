@@ -1,4 +1,63 @@
 {
-  "_comment": "FlashLoanArbitrage contract deployment registry - auto-updated by deploy.ts",
-  "_lastUpdated": "2026-01-24T00:00:00.000Z"
+  "_comment": "Flash Loan Arbitrage contract deployment registry - auto-updated by deploy scripts",
+  "_lastUpdated": "2026-02-10T00:00:00.000Z",
+  "_version": "2.0.0",
+  "_schema": {
+    "description": "Each network contains deployed contract addresses and deployment metadata",
+    "networkStructure": {
+      "FlashLoanArbitrage": "Aave V3 flash loan contract address",
+      "PancakeSwapFlashArbitrage": "PancakeSwap V3 flash loan contract address",
+      "BalancerV2FlashArbitrage": "Balancer V2 flash loan contract address",
+      "SyncSwapFlashArbitrage": "SyncSwap flash loan contract address (zkSync)",
+      "CommitRevealArbitrage": "Commit-reveal MEV protection contract",
+      "MultiPathQuoter": "Batched quote fetcher contract",
+      "deployedAt": "ISO 8601 timestamp of deployment",
+      "deployedBy": "Deployer address",
+      "verified": "Whether contract is verified on block explorer"
+    }
+  },
+  "localhost": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "sepolia": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "arbitrumSepolia": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
+  "zksync-testnet": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  }
 }
