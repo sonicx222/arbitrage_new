@@ -16,6 +16,9 @@ const path = require('path');
 // Task P2-2: Use shared constants
 const { LOCK_TIMEOUT_MS, LOCK_RETRY_INTERVAL_MS } = require('./constants');
 
+// Import process utilities (moved from inline require to prevent potential circular deps)
+const { processExists } = require('./process-manager');
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -47,8 +50,7 @@ async function acquirePidLock() {
         try {
           const lockPid = parseInt(fs.readFileSync(PID_LOCK_FILE, 'utf8'), 10);
           if (lockPid && !isNaN(lockPid)) {
-            // FIX P2-1: Use processExists() for Windows compatibility
-            const { processExists } = require('./process-manager');
+            // Check if lock holder process still exists
             const lockHolderExists = await processExists(lockPid);
             if (lockHolderExists) {
               // Process exists, wait and retry

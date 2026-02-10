@@ -176,6 +176,49 @@ The `.env.local` includes:
 - Local Redis configuration
 - Sensible defaults for development
 
+#### Environment File Priority
+
+The system loads environment variables in this order (highest to lowest priority):
+
+1. **`.env.local`** (gitignored) - Your local overrides
+   - Never committed to git
+   - Put sensitive values here (private keys, API tokens)
+   - Overrides everything else
+
+2. **`.env`** - Base configuration
+   - Created by `npm run dev:setup` from `.env.local`
+   - Can be committed (if no sensitive data)
+   - Team-shared defaults
+
+3. **Environment variables** - System-level
+   - Set via shell: `export VAR=value`
+   - Highest priority if set
+
+4. **Code defaults** - Fallback values in code
+
+**Example**:
+```bash
+# .env (base config)
+REDIS_PORT=6379
+MIN_PROFIT_PERCENTAGE=0.003
+
+# .env.local (your overrides - gitignored)
+REDIS_PORT=6380  # ← This value WINS
+PRIVATE_KEY=0x...  # ← Only in .env.local, never in .env
+```
+
+**How Loading Works** (technical detail):
+```javascript
+// scripts/lib/services-config.js
+dotenv.config({ path: '.env' });              // Load base
+dotenv.config({ path: '.env.local', override: true });  // Override with local
+```
+
+**Why This Design**:
+- Allows team defaults in `.env` (committed)
+- Allows personal overrides in `.env.local` (gitignored)
+- Sensitive values never accidentally committed
+
 ### Step 3: Start Redis
 
 Choose one of the following options:

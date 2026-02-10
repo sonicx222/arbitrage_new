@@ -136,6 +136,59 @@ describe('ServicesConfig', () => {
     });
   });
 
+  describe('Port Configuration Validation (P1 Fix)', () => {
+    it('should throw error on invalid port environment variable', () => {
+      // Set invalid port
+      process.env.REDIS_PORT = 'not-a-number';
+
+      // Should throw when module loads and tries to parse port
+      expect(() => {
+        jest.resetModules();
+        require('../services-config');
+      }).toThrow(/Invalid port configuration for REDIS_PORT/);
+    });
+
+    it('should throw error on out-of-range port', () => {
+      process.env.COORDINATOR_PORT = '99999'; // > 65535
+
+      expect(() => {
+        jest.resetModules();
+        require('../services-config');
+      }).toThrow(/Invalid port 99999 for COORDINATOR_PORT/);
+    });
+
+    it('should throw error on negative port', () => {
+      process.env.P1_ASIA_FAST_PORT = '-1';
+
+      expect(() => {
+        jest.resetModules();
+        require('../services-config');
+      }).toThrow(/Invalid port -1 for P1_ASIA_FAST_PORT/);
+    });
+
+    it('should accept valid port from environment', () => {
+      process.env.EXECUTION_ENGINE_PORT = '3999';
+
+      expect(() => {
+        jest.resetModules();
+        const config = require('../services-config');
+        expect(config.PORTS.EXECUTION_ENGINE).toBe(3999);
+      }).not.toThrow();
+    });
+
+    it('should use default port when env var not set', () => {
+      delete process.env.COORDINATOR_PORT;
+
+      jest.resetModules();
+      const config = require('../services-config');
+
+      // Should have a valid port number from config
+      expect(typeof config.PORTS.COORDINATOR).toBe('number');
+      expect(config.PORTS.COORDINATOR).toBeGreaterThan(0);
+      expect(config.PORTS.COORDINATOR).toBeLessThanOrEqual(65535);
+    });
+  });
+
   describe('Service Configuration', () => {
     it('should load services from constants file', () => {
       const config = require('../services-config');

@@ -17,6 +17,9 @@ const path = require('path');
 // Use shared logger (Task #2: consolidate duplicate logging)
 const { log, colors } = require('./lib/logger');
 
+// P3-3: Use shared constants
+const { LARGE_NODE_MODULES_THRESHOLD_BYTES } = require('./lib/constants');
+
 const ROOT_DIR = path.resolve(__dirname, '..');
 
 /**
@@ -182,7 +185,8 @@ function checkNestedNodeModules() {
       if (fs.existsSync(nodeModulesPath)) {
         // Check if it's unexpectedly large (hoisted deps shouldn't be duplicated)
         const size = getDirectorySize(nodeModulesPath);
-        if (size > 10 * 1024 * 1024) { // > 10MB is suspicious
+        // P3-3: Use constant instead of hardcoded threshold
+        if (size > LARGE_NODE_MODULES_THRESHOLD_BYTES) { // > 10MB is suspicious
           issues.push({
             type: 'nested-node-modules',
             path: path.relative(ROOT_DIR, nodeModulesPath),

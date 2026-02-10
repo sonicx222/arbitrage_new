@@ -47,6 +47,18 @@ function main() {
     fs.copyFileSync(SOURCE, TARGET);
     console.log('Done! Environment configured successfully.');
     console.log('');
+    console.log('📝 IMPORTANT: Environment File Priority');
+    console.log('   Priority Order (highest to lowest):');
+    console.log('   1. .env.local (gitignored) - Your local overrides');
+    console.log('   2. .env (created by this script) - Base config');
+    console.log('   3. Defaults in code');
+    console.log('');
+    console.log('   How it works:');
+    console.log('   - Scripts load .env first, then .env.local with override: true');
+    console.log('   - Values in .env.local ALWAYS win over .env');
+    console.log('   - Keep sensitive values ONLY in .env.local (never committed)');
+    console.log('   - Use .env for team-shared defaults (can be committed)');
+    console.log('');
     console.log('Next steps:');
     console.log('  1. npm run dev:redis         # Start Redis (Docker)');
     console.log('     npm run dev:redis:memory  # ...or in-memory (no Docker)');

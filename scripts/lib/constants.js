@@ -20,6 +20,13 @@
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
 
 /**
+ * Timeout for status check health queries (milliseconds).
+ * Shorter than HEALTH_CHECK_TIMEOUT_MS for faster status display.
+ * @type {number}
+ */
+const STATUS_CHECK_TIMEOUT_MS = 3000;
+
+/**
  * Default timeout for TCP connection checks (milliseconds).
  * Used for low-level port connectivity tests.
  * @type {number}
@@ -34,11 +41,19 @@ const TCP_CONNECTION_TIMEOUT_MS = 1000;
 const REDIS_STARTUP_TIMEOUT_SEC = 30;
 
 /**
- * Maximum time to wait for a service to start (seconds).
- * Converted to attempts: SERVICE_STARTUP_TIMEOUT_SEC / retry interval.
+ * Maximum number of health check attempts during service startup.
+ * With HEALTH_CHECK_INTERVAL_MS = 1000ms, this gives 30 seconds total timeout.
+ * Actual timeout = SERVICE_STARTUP_MAX_ATTEMPTS × HEALTH_CHECK_INTERVAL_MS
  * @type {number}
  */
-const SERVICE_STARTUP_TIMEOUT_SEC = 30;
+const SERVICE_STARTUP_MAX_ATTEMPTS = 30;
+
+/**
+ * @deprecated Use SERVICE_STARTUP_MAX_ATTEMPTS instead
+ * Kept for backward compatibility during migration
+ * @type {number}
+ */
+const SERVICE_STARTUP_TIMEOUT_SEC = SERVICE_STARTUP_MAX_ATTEMPTS;
 
 /**
  * Timeout for unit test execution (milliseconds).
@@ -152,15 +167,29 @@ const UNIFIED_DETECTOR_STARTUP_DELAY_MS = 4500;
 const P4_STARTUP_DELAY_MS = 5000;
 
 // =============================================================================
+// Validation Thresholds (P3-3)
+// =============================================================================
+
+/**
+ * Threshold for flagging large nested node_modules directories (bytes).
+ * Directories larger than this are likely incorrectly hoisted and should be cleaned.
+ * 10MB = 10 * 1024 * 1024 bytes
+ * @type {number}
+ */
+const LARGE_NODE_MODULES_THRESHOLD_BYTES = 10 * 1024 * 1024;
+
+// =============================================================================
 // Exports
 // =============================================================================
 
 module.exports = {
   // Timeouts
   HEALTH_CHECK_TIMEOUT_MS,
+  STATUS_CHECK_TIMEOUT_MS,
   TCP_CONNECTION_TIMEOUT_MS,
   REDIS_STARTUP_TIMEOUT_SEC,
-  SERVICE_STARTUP_TIMEOUT_SEC,
+  SERVICE_STARTUP_MAX_ATTEMPTS,
+  SERVICE_STARTUP_TIMEOUT_SEC, // @deprecated - use SERVICE_STARTUP_MAX_ATTEMPTS
   UNIT_TEST_TIMEOUT_MS,
   INTEGRATION_TEST_TIMEOUT_MS,
   PERFORMANCE_TEST_TIMEOUT_MS,
@@ -182,5 +211,8 @@ module.exports = {
   CROSS_CHAIN_STARTUP_DELAY_MS,
   EXECUTION_ENGINE_STARTUP_DELAY_MS,
   UNIFIED_DETECTOR_STARTUP_DELAY_MS,
-  P4_STARTUP_DELAY_MS
+  P4_STARTUP_DELAY_MS,
+
+  // Validation thresholds
+  LARGE_NODE_MODULES_THRESHOLD_BYTES
 };

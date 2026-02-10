@@ -27,6 +27,9 @@ const {
 
 const { getStatusServices, PORTS, checkAndPrintDeprecations } = require('./lib/services-config');
 
+// P3-3: Use shared constants
+const { STATUS_CHECK_TIMEOUT_MS } = require('./lib/constants');
+
 // Check for deprecated environment variables
 checkAndPrintDeprecations();
 
@@ -69,7 +72,8 @@ async function getServiceStatus(service) {
   } else if (service.type === 'docker') {
     return await checkDockerContainer(service.container);
   } else if (service.type === 'node') {
-    return await checkHealth(service.port, service.healthEndpoint, 3000);
+    // P3-3: Use constant instead of hardcoded timeout
+    return await checkHealth(service.port, service.healthEndpoint, STATUS_CHECK_TIMEOUT_MS);
   }
   return { running: false };
 }

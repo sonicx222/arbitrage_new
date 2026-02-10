@@ -52,7 +52,8 @@ function checkDockerContainer(containerName) {
  */
 async function checkDockerRedis() {
   const status = await checkDockerContainer('arbitrage-redis');
-  return status.running && (status.status?.includes('Up') ?? false);
+  // FIX P1-3: Type-safe check - ensure status.status is string before calling .includes()
+  return status.running && typeof status.status === 'string' && status.status.includes('Up');
 }
 
 /**
@@ -66,8 +67,8 @@ async function checkMemoryRedis() {
 
   try {
     const config = JSON.parse(fs.readFileSync(REDIS_MEMORY_CONFIG_FILE, 'utf8'));
-    // Use checkTcpConnection from health-checker
-    const { checkTcpConnection } = require('./health-checker');
+    // P3-2: Use checkTcpConnection from network-utils (avoids circular dependency with health-checker)
+    const { checkTcpConnection } = require('./network-utils');
     return await checkTcpConnection(config.host, config.port);
   } catch {
     return false;

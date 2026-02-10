@@ -10,7 +10,8 @@
  */
 
 const {
-  log,
+  logger,      // P3-4: Modern logger interface
+  log,         // Legacy - kept for dim/detailed output
   killProcess,
   processExists,
   findProcessesByPort,
@@ -27,12 +28,11 @@ const { getCleanupPorts } = require('./lib/services-config');
 // =============================================================================
 
 async function cleanup() {
-  log('\n' + '='.repeat(60), 'cyan');
-  log('  Local Services Cleanup Utility', 'cyan');
-  log('='.repeat(60) + '\n', 'cyan');
+  // P3-4: Migrated to modern logger
+  logger.header('Local Services Cleanup Utility');
 
   // 1. Cleanup Redis specifically (config file + process)
-  log('--- Cleaning up Redis ---', 'yellow');
+  logger.warning('--- Cleaning up Redis ---');
   const redisConfig = getRedisMemoryConfig();
   if (redisConfig) {
     log(`Found stale Redis config for PID ${redisConfig.pid}`, 'dim');
@@ -42,38 +42,38 @@ async function cleanup() {
       log(`Killing Redis process ${redisConfig.pid}...`, 'dim');
       const killed = await killProcess(redisConfig.pid);
       if (killed) {
-        log('Redis process killed.', 'green');
+        logger.success('Redis process killed.');
       } else {
-        log('Could not kill Redis process (may already be stopped).', 'yellow');
+        logger.warning('Could not kill Redis process (may already be stopped).');
       }
     } else {
       log('Redis process not running.', 'dim');
     }
     deleteRedisMemoryConfig();
-    log('Deleted Redis config file.', 'green');
+    logger.success('Deleted Redis config file.');
   } else {
     log('No Redis memory config found.', 'dim');
   }
 
   // 2. Kill any node/redis processes by port
-  log('\n--- Cleaning up ports ---', 'yellow');
+  logger.warning('\n--- Cleaning up ports ---');
   const ports = getCleanupPorts();
 
   for (const svc of ports) {
     try {
       const pids = await findProcessesByPort(svc.port);
       if (pids.length > 0) {
-        log(`${svc.name} (port ${svc.port}) is occupied by PIDs: ${pids.join(', ')}`, 'yellow');
+        logger.warning(`${svc.name} (port ${svc.port}) is occupied by PIDs: ${pids.join(', ')}`);
         for (const pid of pids) {
           log(`  Killing PID ${pid}...`, 'dim');
           const killed = await killProcess(pid);
           if (killed) {
-            log(`  PID ${pid} killed.`, 'green');
+            logger.success(`  PID ${pid} killed.`);
           } else {
-            log(`  Failed to kill PID ${pid}.`, 'red');
+            logger.error(`  Failed to kill PID ${pid}.`);
           }
         }
-        log(`  Port ${svc.port} released.`, 'green');
+        logger.success(`  Port ${svc.port} released.`);
       } else {
         log(`${svc.name} (port ${svc.port}) is already free.`, 'dim');
       }
@@ -89,18 +89,18 @@ async function cleanup() {
   }
 
   // 3. Cleanup any other ghost node processes related to the project
-  log('\n--- Cleaning up ghost node processes ---', 'yellow');
+  logger.warning('\n--- Cleaning up ghost node processes ---');
   try {
     const ghostProcesses = await findGhostNodeProcesses();
     if (ghostProcesses.length > 0) {
-      log(`Found ${ghostProcesses.length} ghost processes.`, 'yellow');
+      logger.warning(`Found ${ghostProcesses.length} ghost processes.`);
       for (const proc of ghostProcesses) {
         log(`  Killing ghost process ${proc.pid}: ${proc.cmd}...`, 'dim');
         await killProcess(proc.pid);
       }
-      log('Ghost processes cleaned up.', 'green');
+      logger.success('Ghost processes cleaned up.');
     } else {
-      log('No ghost node processes found.', 'green');
+      logger.success('No ghost node processes found.');
     }
   } catch (e) {
     // Task P2-3: Enhanced error message with actionable context
@@ -117,16 +117,16 @@ async function cleanup() {
   }
 
   // 4. Cleanup PID file
-  log('\n--- Cleaning up PID file ---', 'yellow');
+  logger.warning('\n--- Cleaning up PID file ---');
   try {
     deletePidFile();
-    log('PID file cleaned up.', 'green');
+    logger.success('PID file cleaned up.');
   } catch {
     log('No PID file to clean up.', 'dim');
   }
 
-  log('\nCleanup complete! Your local environment is now clean.', 'cyan');
-  log('You can now start services using:', 'cyan');
+  logger.success('\nCleanup complete! Your local environment is now clean.');
+  logger.info('You can now start services using:');
   log('  npm run dev:start         # Start all services', 'dim');
   log('  npm run dev:coordinator   # Start only coordinator', 'dim');
   log('  npm run dev:redis:memory  # Start only Redis', 'dim');
@@ -138,6 +138,6 @@ async function cleanup() {
 // =============================================================================
 
 cleanup().catch((error) => {
-  log(`Cleanup failed: ${error.message}`, 'red');
+  logger.error(`Cleanup failed: ${error.message}`);
   process.exit(1);
 });

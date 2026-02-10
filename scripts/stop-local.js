@@ -10,7 +10,8 @@
  */
 
 const {
-  log,
+  logger,      // P3-4: Modern logger interface
+  log,         // Legacy - kept for dim output
   killProcess,
   killTsNodeProcesses,
   loadPids,
@@ -22,37 +23,36 @@ const {
 // =============================================================================
 
 async function main() {
-  console.log('\n' + '='.repeat(50));
-  log('  Stopping Arbitrage System Services', 'cyan');
-  console.log('='.repeat(50) + '\n');
+  // P3-4: Migrated to modern logger
+  logger.header('Stopping Arbitrage System Services');
 
   // Load PIDs
   const pids = loadPids();
 
   if (Object.keys(pids).length === 0) {
-    log('No PID file found or no services registered.', 'yellow');
+    logger.warning('No PID file found or no services registered.');
   } else {
     // Stop each service
     for (const [name, pid] of Object.entries(pids)) {
-      log(`Stopping ${name} (PID: ${pid})...`, 'yellow');
+      logger.info(`Stopping ${name} (PID: ${pid})...`);
       const killed = await killProcess(pid);
       if (killed) {
-        log(`  ${name} stopped`, 'green');
+        logger.success(`  ${name} stopped`);
       } else {
-        log(`  ${name} was not running`, 'dim');
+        log(`  ${name} was not running`, 'dim');  // Keep dim for subtle info
       }
     }
   }
 
   // Also kill any ts-node processes running our services
-  log('\nCleaning up any remaining processes...', 'yellow');
+  logger.info('\nCleaning up any remaining processes...');
   await killTsNodeProcesses();
 
   // Clean up PID file
   deletePidFile();
 
-  log('\nAll services stopped.', 'green');
-  log('\nTo also stop Redis:', 'cyan');
+  logger.success('\nAll services stopped.');
+  logger.info('\nTo also stop Redis:');
   log('  npm run dev:redis:down', 'dim');
   console.log('');
 }
@@ -62,6 +62,6 @@ async function main() {
 // =============================================================================
 
 main().catch(error => {
-  log(`Error: ${error.message}`, 'red');
+  logger.error(`Error: ${error.message}`);
   process.exit(1);
 });

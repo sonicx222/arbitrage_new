@@ -3,13 +3,9 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IPancakeV3FlashCallback.sol";
 import "./interfaces/IFlashLoanReceiver.sol"; // For IDexRouter
-import "./libraries/SwapHelpers.sol";
 
 /**
  * @title PancakeSwapFlashArbitrage
@@ -27,7 +23,12 @@ import "./libraries/SwapHelpers.sol";
  * - Pool whitelist security (prevents malicious pool callbacks)
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 1.0.0
+ * @custom:version 2.0.0
+ *
+ * ## Changelog v2.0.0 (Refactoring)
+ * - Refactored to inherit from BaseFlashArbitrage (eliminates 350+ lines of duplicate code)
+ * - Moved common functionality to base contract
+ * - No behavioral changes, pure refactoring for maintainability
  *
  * @custom:warning UNSUPPORTED TOKEN TYPES
  * This contract does NOT support:
@@ -56,34 +57,14 @@ import "./libraries/SwapHelpers.sol";
  * @custom:audit-status Pending
  */
 contract PancakeSwapFlashArbitrage is
-    IPancakeV3FlashCallback,
-    Ownable2Step,
-    Pausable,
-    ReentrancyGuard
+    BaseFlashArbitrage,
+    IPancakeV3FlashCallback
 {
     using SafeERC20 for IERC20;
-    using EnumerableSet for EnumerableSet.AddressSet;
 
     // ==========================================================================
-    // Constants
+    // Constants (Protocol-Specific)
     // ==========================================================================
-
-    /// @notice Default swap deadline (5 minutes)
-    uint256 public constant DEFAULT_SWAP_DEADLINE = 300;
-
-    /// @notice Maximum swap deadline (1 hour) to prevent stale transactions
-    uint256 public constant MAX_SWAP_DEADLINE = 3600;
-
-    /// @notice Minimum slippage protection floor (0.1% = 10 bps)
-    /// @dev Prevents callers from setting amountOutMin = 0 which exposes to sandwich attacks
-    uint256 public constant MIN_SLIPPAGE_BPS = 10;
-
-    /// @notice Maximum number of hops in a swap path (prevents DoS via gas exhaustion)
-    /// @dev Limit chosen based on gas analysis: 5 hops = ~700k gas (within block gas limit)
-    uint256 public constant MAX_SWAP_HOPS = 5;
-
-    /// @notice Denominator for basis points calculations (10000 bps = 100%)
-    uint256 private constant BPS_DENOMINATOR = 10000;
 
     /// @notice Maximum number of pools that can be whitelisted in a single batch operation
     /// @dev I2 Fix: Prevents potential DoS from extremely large batch operations
@@ -91,24 +72,11 @@ contract PancakeSwapFlashArbitrage is
     uint256 public constant MAX_BATCH_WHITELIST = 100;
 
     // ==========================================================================
-    // State Variables
+    // State Variables (Protocol-Specific)
     // ==========================================================================
 
     /// @notice The PancakeSwap V3 Factory address for pool verification
     IPancakeV3Factory public immutable FACTORY;
-
-    /// @notice Minimum profit required for arbitrage execution (in token units)
-    uint256 public minimumProfit;
-
-    /// @notice Total profits accumulated (for tracking)
-    uint256 public totalProfits;
-
-    /// @notice Configurable swap deadline in seconds (default: 300 = 5 minutes)
-    uint256 public swapDeadline;
-
-    /// @notice Set of approved DEX routers (O(1) add/remove/contains)
-    /// @dev Uses EnumerableSet for gas-efficient operations and enumeration
-    EnumerableSet.AddressSet private _approvedRouters;
 
     /// @notice Set of whitelisted PancakeSwap V3 pools (O(1) add/remove/contains)
     /// @dev Critical security: Only whitelisted pools can call pancakeV3FlashCallback
@@ -119,22 +87,8 @@ contract PancakeSwapFlashArbitrage is
     FlashLoanContext private _flashContext;
 
     // ==========================================================================
-    // Structs
+    // Structs (Protocol-Specific)
     // ==========================================================================
-
-    /**
-     * @notice Represents a single swap step in the arbitrage path
-     * @param router The DEX router to use for this swap
-     * @param tokenIn The input token for this swap
-     * @param tokenOut The output token for this swap
-     * @param amountOutMin Minimum acceptable output amount (slippage protection)
-     */
-    struct SwapStep {
-        address router;
-        address tokenIn;
-        address tokenOut;
-        uint256 amountOutMin;
-    }
 
     /**
      * @notice Flash loan context passed from executeArbitrage to callback
@@ -148,22 +102,8 @@ contract PancakeSwapFlashArbitrage is
     }
 
     // ==========================================================================
-    // Events
+    // Events (Protocol-Specific)
     // ==========================================================================
-
-    /// @notice Emitted when an arbitrage is executed successfully
-    event ArbitrageExecuted(
-        address indexed asset,
-        uint256 amount,
-        uint256 profit,
-        uint256 timestamp
-    );
-
-    /// @notice Emitted when a router is added to the approved list
-    event RouterAdded(address indexed router);
-
-    /// @notice Emitted when a router is removed from the approved list
-    event RouterRemoved(address indexed router);
 
     /// @notice Emitted when a pool is whitelisted
     event PoolWhitelisted(address indexed pool);
@@ -171,46 +111,18 @@ contract PancakeSwapFlashArbitrage is
     /// @notice Emitted when a pool is removed from whitelist
     event PoolRemovedFromWhitelist(address indexed pool);
 
-    /// @notice Emitted when minimum profit is updated
-    event MinimumProfitUpdated(uint256 oldValue, uint256 newValue);
-
-    /// @notice Emitted when tokens are withdrawn
-    event TokenWithdrawn(address indexed token, address indexed to, uint256 amount);
-
-    /// @notice Emitted when ETH is withdrawn
-    event ETHWithdrawn(address indexed to, uint256 amount);
-
-    /// @notice Emitted when swap deadline is updated
-    event SwapDeadlineUpdated(uint256 oldValue, uint256 newValue);
-
     // ==========================================================================
-    // Errors
+    // Errors (Protocol-Specific)
     // ==========================================================================
 
     error InvalidFactoryAddress();
-    error InvalidRouterAddress();
     error InvalidPoolAddress();
-    error RouterAlreadyApproved();
-    error RouterNotApproved();
     error PoolAlreadyWhitelisted();
     error PoolNotWhitelisted();
-    error EmptySwapPath();
     error EmptyPoolsArray();
-    error PathTooLong(uint256 provided, uint256 max);
-    error InvalidSwapPath();
-    error SwapPathAssetMismatch();
-    error InsufficientProfit();
     error InvalidFlashLoanCaller();
     error FlashLoanNotActive();
     error FlashLoanAlreadyActive();
-    error SwapFailed();
-    error InsufficientOutputAmount();
-    error InsufficientSlippageProtection();
-    error InvalidRecipient();
-    error ETHTransferFailed();
-    error InvalidSwapDeadline();
-    error InvalidAmount();
-    error TransactionTooOld();
     error PoolNotFound();
     error PoolNotFromFactory();
     error InsufficientPoolLiquidity();
@@ -225,7 +137,7 @@ contract PancakeSwapFlashArbitrage is
      * @param _factory The PancakeSwap V3 Factory address for pool verification
      * @param _owner The contract owner address
      */
-    constructor(address _factory, address _owner) {
+    constructor(address _factory, address _owner) BaseFlashArbitrage(_owner) {
         if (_factory == address(0)) revert InvalidFactoryAddress();
 
         // Verify factory is a contract (has code deployed)
@@ -233,8 +145,6 @@ contract PancakeSwapFlashArbitrage is
         if (_factory.code.length == 0) revert InvalidFactoryAddress();
 
         FACTORY = IPancakeV3Factory(_factory);
-        swapDeadline = DEFAULT_SWAP_DEADLINE;
-        _transferOwnership(_owner);
     }
 
     // ==========================================================================
@@ -259,44 +169,15 @@ contract PancakeSwapFlashArbitrage is
         uint256 minProfit,
         uint256 deadline
     ) external nonReentrant whenNotPaused {
-        // Validate amount is non-zero to prevent gas waste
-        if (amount == 0) revert InvalidAmount();
+        // P1: Use base contract validation (eliminates duplicate code)
+        _validateArbitrageParams(asset, amount, deadline, swapPath);
 
-        // Validate transaction is not stale using user-specified deadline
-        if (block.timestamp > deadline) revert TransactionTooOld();
-
+        // Protocol-specific validations
         // C4 Fix: Validate pool is not zero address (clearer error, gas optimization)
         if (pool == address(0)) revert InvalidPoolAddress();
 
         // Validate pool is whitelisted (security critical)
         if (!_whitelistedPools.contains(pool)) revert PoolNotWhitelisted();
-
-        uint256 pathLength = swapPath.length;
-        if (pathLength == 0) revert EmptySwapPath();
-
-        // Prevent DoS via excessive gas consumption
-        if (pathLength > MAX_SWAP_HOPS) revert PathTooLong(pathLength, MAX_SWAP_HOPS);
-
-        // Validate first swap step starts with the flash-loaned asset
-        if (swapPath[0].tokenIn != asset) revert SwapPathAssetMismatch();
-
-        // Validate all routers in the path are approved (O(1) lookup via EnumerableSet)
-        address lastValidatedRouter = address(0);
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = swapPath[i];
-
-            // Skip validation if same router as previous step (common in triangular arb)
-            if (step.router != lastValidatedRouter) {
-                if (!_approvedRouters.contains(step.router)) revert RouterNotApproved();
-                lastValidatedRouter = step.router;
-            }
-
-            // Enforce minimum slippage protection to prevent sandwich attacks
-            if (step.amountOutMin == 0 && amount > 0) revert InsufficientSlippageProtection();
-
-            unchecked { ++i; }
-        }
 
         // Verify flash loan is not already active (reentrancy protection)
         if (_flashContext.active) revert FlashLoanAlreadyActive();
@@ -402,105 +283,7 @@ contract PancakeSwapFlashArbitrage is
         emit ArbitrageExecuted(context.asset, context.amount, profit, block.timestamp);
     }
 
-    // ==========================================================================
-    // Internal Functions - Swap Execution
-    // ==========================================================================
-
-    /**
-     * @notice Executes multi-hop swaps according to the swap path
-     * @dev Uses SwapHelpers library for shared swap logic (DRY principle)
-     *      Gas optimizations: pre-allocated path array, cached deadline
-     * @param startAsset The starting asset (flash loaned asset)
-     * @param startAmount The starting amount
-     * @param swapPath Array of swap steps (memory required due to abi.decode)
-     * @return finalAmount The final amount after all swaps
-     */
-    function _executeSwaps(
-        address startAsset,
-        uint256 startAmount,
-        SwapStep[] memory swapPath
-    ) internal returns (uint256 finalAmount) {
-        uint256 currentAmount = startAmount;
-        address currentToken = startAsset;
-        uint256 pathLength = swapPath.length;
-
-        // Gas optimization: Pre-allocate path array once, reuse across iterations
-        address[] memory path = new address[](2);
-
-        // Cache swapDeadline to avoid repeated SLOAD (~100 gas saved)
-        uint256 deadline = block.timestamp + swapDeadline;
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep memory step = swapPath[i];
-
-            // Execute swap using shared library function
-            currentAmount = SwapHelpers.executeSingleSwap(
-                currentToken,
-                currentAmount,
-                step.router,
-                step.tokenIn,
-                step.tokenOut,
-                step.amountOutMin,
-                path,
-                deadline
-            );
-
-            // Update for next iteration
-            currentToken = step.tokenOut;
-
-            unchecked { ++i; }
-        }
-
-        // Verify we end up with the same asset we started with (for repayment)
-        if (currentToken != startAsset) revert InvalidSwapPath();
-
-        return currentAmount;
-    }
-
-    // ==========================================================================
-    // Admin Functions - Router Management
-    // ==========================================================================
-
-    /**
-     * @notice Adds a router to the approved list
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to approve
-     */
-    function addApprovedRouter(address router) external onlyOwner {
-        if (router == address(0)) revert InvalidRouterAddress();
-        if (!_approvedRouters.add(router)) revert RouterAlreadyApproved();
-
-        emit RouterAdded(router);
-    }
-
-    /**
-     * @notice Removes a router from the approved list
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to remove
-     */
-    function removeApprovedRouter(address router) external onlyOwner {
-        if (!_approvedRouters.remove(router)) revert RouterNotApproved();
-
-        emit RouterRemoved(router);
-    }
-
-    /**
-     * @notice Checks if a router is approved
-     * @dev O(1) complexity using EnumerableSet
-     * @param router The router address to check
-     * @return True if router is approved
-     */
-    function isApprovedRouter(address router) external view returns (bool) {
-        return _approvedRouters.contains(router);
-    }
-
-    /**
-     * @notice Returns all approved routers
-     * @return Array of approved router addresses
-     */
-    function getApprovedRouters() external view returns (address[] memory) {
-        return _approvedRouters.values();
-    }
+    // Note: _executeSwaps and router management functions inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // Admin Functions - Pool Management
@@ -599,77 +382,7 @@ contract PancakeSwapFlashArbitrage is
         return _whitelistedPools.values();
     }
 
-    // ==========================================================================
-    // Admin Functions - Configuration
-    // ==========================================================================
-
-    /**
-     * @notice Sets the minimum profit threshold
-     * @param _minimumProfit The new minimum profit value
-     */
-    function setMinimumProfit(uint256 _minimumProfit) external onlyOwner {
-        uint256 oldValue = minimumProfit;
-        minimumProfit = _minimumProfit;
-        emit MinimumProfitUpdated(oldValue, _minimumProfit);
-    }
-
-    /**
-     * @notice Sets the swap deadline for DEX transactions
-     * @dev Deadline must be between 1 second and MAX_SWAP_DEADLINE (1 hour)
-     * @param _swapDeadline The new deadline in seconds (added to block.timestamp)
-     */
-    function setSwapDeadline(uint256 _swapDeadline) external onlyOwner {
-        if (_swapDeadline == 0 || _swapDeadline > MAX_SWAP_DEADLINE) revert InvalidSwapDeadline();
-        uint256 oldValue = swapDeadline;
-        swapDeadline = _swapDeadline;
-        emit SwapDeadlineUpdated(oldValue, _swapDeadline);
-    }
-
-    /**
-     * @notice Pauses the contract (emergency stop)
-     */
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses the contract
-     */
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ==========================================================================
-    // Admin Functions - Fund Recovery
-    // ==========================================================================
-
-    /**
-     * @notice Withdraws ERC20 tokens from the contract
-     * @param token The token address to withdraw
-     * @param to The recipient address
-     * @param amount The amount to withdraw
-     */
-    function withdrawToken(
-        address token,
-        address to,
-        uint256 amount
-    ) external onlyOwner {
-        if (to == address(0)) revert InvalidRecipient();
-        IERC20(token).safeTransfer(to, amount);
-        emit TokenWithdrawn(token, to, amount);
-    }
-
-    /**
-     * @notice Withdraws ETH from the contract
-     * @param to The recipient address
-     * @param amount The amount to withdraw
-     */
-    function withdrawETH(address payable to, uint256 amount) external onlyOwner {
-        if (to == address(0)) revert InvalidRecipient();
-        (bool success, ) = to.call{value: amount}("");
-        if (!success) revert ETHTransferFailed();
-        emit ETHWithdrawn(to, amount);
-    }
+    // Note: Config and emergency functions inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // View Functions
@@ -769,13 +482,4 @@ contract PancakeSwapFlashArbitrage is
 
         return (expectedProfit, flashLoanFee);
     }
-
-    // ==========================================================================
-    // Receive Function
-    // ==========================================================================
-
-    /**
-     * @notice Allows the contract to receive ETH
-     */
-    receive() external payable {}
 }

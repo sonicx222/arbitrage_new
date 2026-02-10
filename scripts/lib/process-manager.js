@@ -62,8 +62,11 @@ function processExists(pid) {
           resolve(false);
           return;
         }
-        // Check if PID appears in output (tasklist returns the process row if exists)
-        resolve(stdout.includes(String(pid)));
+        // Check if PID appears in output as a complete column value
+        // Use word boundary regex to avoid false positives (e.g., PID 123 matching 1234)
+        // Format: "image.exe    PID   Console    1    Memory K"
+        const pidPattern = new RegExp(`\\b${pid}\\b`);
+        resolve(pidPattern.test(stdout));
       });
     } else {
       // Unix: signal 0 is reliable (doesn't actually send signal, just checks existence)
@@ -132,8 +135,13 @@ function findGhostNodeProcesses() {
         }
         const processes = [];
         stdout.trim().split('\n').forEach(line => {
-          // FIX: Added explicit parentheses for clarity (operator precedence)
-          if (line.includes('ts-node') || (line.includes('services') && line.includes('index.ts'))) {
+          // FIX P3-1: Tighten matching to prevent killing unrelated projects
+          // Must contain "arbitrage" AND either "ts-node" or "services/*/index.ts"
+          const hasArbitrage = line.includes('arbitrage');
+          const hasTsNode = line.includes('ts-node');
+          const hasServices = line.includes('services') && line.includes('index.ts');
+
+          if (hasArbitrage && (hasTsNode || hasServices)) {
             const parts = line.split(',');
             if (parts.length >= 3) {
               const pid = parseInt(parts[parts.length - 1], 10);
@@ -148,7 +156,8 @@ function findGhostNodeProcesses() {
       });
     } else {
       // Unix: use ps
-      exec('ps aux 2>/dev/null | grep -E "ts-node|services/.*/src/index.ts" | grep -v grep || true', (error, stdout) => {
+      // FIX P3-1: Require "arbitrage" in command line to avoid matching unrelated projects
+      exec('ps aux 2>/dev/null | grep arbitrage | grep -E "ts-node|services/.*/src/index.ts" | grep -v grep || true', (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve([]);
           return;
@@ -171,19 +180,21 @@ function findGhostNodeProcesses() {
 }
 
 /**
- * Kill ts-node processes (cross-platform).
+ * Kill ts-node processes related to arbitrage project (cross-platform).
+ * FIX P3-1: Tightened matching to avoid killing unrelated projects.
  * @returns {Promise<void>}
  */
 function killTsNodeProcesses() {
   return new Promise((resolve) => {
     if (isWindows()) {
-      // Windows: kill node processes running ts-node
-      exec('wmic process where "commandline like \'%ts-node%\' and name=\'node.exe\'" call terminate 2>nul', () => {
+      // Windows: kill node processes running arbitrage ts-node
+      // Must contain both "ts-node" AND "arbitrage" to avoid unrelated projects
+      exec('wmic process where "commandline like \'%ts-node%\' and commandline like \'%arbitrage%\' and name=\'node.exe\'" call terminate 2>nul', () => {
         resolve();
       });
     } else {
-      // Unix: use pkill
-      exec('pkill -f "ts-node.*services" 2>/dev/null', () => {
+      // Unix: use pkill with pattern matching both ts-node and arbitrage
+      exec('pkill -f "ts-node.*arbitrage" 2>/dev/null', () => {
         resolve();
       });
     }

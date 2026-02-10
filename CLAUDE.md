@@ -20,6 +20,19 @@ See `.env.example` for all required variables. Key ones:
 - `PARTITION_ID` - Which partition this service belongs to
 - RPC API keys for chains you want to monitor
 
+**Environment File Priority:**
+- `.env.local` (gitignored) - Highest priority, local overrides
+- `.env` - Base configuration, can be committed
+- Environment variables - System-level overrides
+- Defaults in code - Lowest priority
+
+**Example**: If `.env` has `REDIS_PORT=6379` and `.env.local` has `REDIS_PORT=6380`, the system uses `6380`.
+
+**Best Practice**:
+- Put sensitive values (private keys, auth tokens) ONLY in `.env.local`
+- Put shared defaults in `.env`
+- Never commit `.env.local` (already in `.gitignore`)
+
 # Architecture Quick Reference
 
 **Monorepo Structure:**
@@ -110,6 +123,25 @@ npm run dev:simulate:full          # Full simulation (no Redis, no blockchain)
 npm run dev:simulate:full:memory   # With in-memory Redis
 npm run dev:simulate               # Just blockchain simulation
 npm run dev:simulate:execution     # Just execution simulation
+```
+
+## Validation & Code Generation
+Validate configurations and generate code from contracts:
+```bash
+# Contract code generation
+npm run generate:error-selectors   # Generate error selectors from contract ABI
+                                     # Output: services/execution-engine/src/strategies/error-selectors.generated.ts
+                                     # Prevents drift between contracts and TypeScript error mappings
+
+# Configuration validation
+npm run validate:mev-setup          # Validate MEV protection configuration for all chains
+                                     # Checks: Flashbots auth keys, BloXroute headers, relay URLs
+                                     # Run before deployment to catch config issues early
+
+npm run verify:router-approval      # Verify on-chain router approvals match config
+                                     # Usage: npx tsx scripts/verify-router-approval.ts --chain ethereum
+                                     #    or: npx tsx scripts/verify-router-approval.ts --all
+                                     # Prevents [ERR_UNAPPROVED_ROUTER] failures that waste gas
 ```
 
 # Code style

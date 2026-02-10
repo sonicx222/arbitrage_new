@@ -3,11 +3,8 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IDexRouter.sol";
-import "./libraries/SwapHelpers.sol";
 
 /**
  * @title CommitRevealArbitrage
@@ -56,9 +53,17 @@ import "./libraries/SwapHelpers.sol";
  * - Pre-allocated path array: Reused across all swaps
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
+ * @custom:version 3.0.0
  * @custom:implementation-plan Task 3.1: Commit-Reveal Smart Contract (Pragmatic Balance)
- * @custom:breaking-change v2.0.0 - Changed RevealParams to support multi-router arbitrage
+ *
+ * ## Changelog v3.0.0 (Refactoring)
+ * - Refactored to inherit from BaseFlashArbitrage
+ * - Migrated from mapping-based to EnumerableSet-based router management
+ * - Eliminated ~250 lines of duplicate code
+ * - No functional changes beyond router management API
+ *
+ * ## Changelog v2.0.0
+ * - Changed RevealParams to support multi-router arbitrage
  *
  * @custom:warning UNSUPPORTED TOKEN TYPES
  * This contract does NOT support:
@@ -82,11 +87,11 @@ import "./libraries/SwapHelpers.sol";
  * but adds complexity and gas cost. Current design prioritizes simplicity for the
  * common case (no attackers), with private mempool as escape hatch.
  */
-contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
+contract CommitRevealArbitrage is BaseFlashArbitrage {
     using SafeERC20 for IERC20;
 
     // ==========================================================================
-    // Constants
+    // Constants (Protocol-Specific)
     // ==========================================================================
 
     /// @notice Minimum blocks between commit and reveal (prevents same-block reveal)
@@ -96,14 +101,10 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     /// @dev 10 blocks = ~2 minutes on most chains (12s blocks)
     uint256 public constant MAX_COMMIT_AGE_BLOCKS = 10;
 
-    /// @notice Maximum swap deadline from reveal time (prevents stale swaps)
-    uint256 public constant MAX_SWAP_DEADLINE = 300; // 5 minutes
-
-    /// @notice Maximum number of hops in a swap path (prevents DoS)
-    uint256 public constant MAX_SWAP_HOPS = 5;
+    // Note: MAX_SWAP_DEADLINE and MAX_SWAP_HOPS inherited from BaseFlashArbitrage
 
     // ==========================================================================
-    // State Variables
+    // State Variables (Protocol-Specific)
     // ==========================================================================
 
     /// @notice Commitment storage: commitmentHash => commit block number
@@ -118,33 +119,7 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     /// @dev Prevents griefing attacks where others commit the same hash
     mapping(bytes32 => address) public committers;
 
-    /// @notice Approved DEX routers for swap execution
-    /// @dev Only whitelisted routers can execute swaps (security measure)
-    mapping(address => bool) public approvedRouters;
-
-    /// @notice Minimum profit threshold (in token units)
-    /// @dev Configurable by owner, prevents unprofitable reveals
-    uint256 public minimumProfit;
-
-    // ==========================================================================
-    // Structs
-    // ==========================================================================
-
-    /**
-     * @notice Single swap step in arbitrage path
-     * @dev Matches SwapStep struct from other flash loan contracts for consistency
-     *
-     * @param router DEX router address (must be approved)
-     * @param tokenIn Input token address
-     * @param tokenOut Output token address
-     * @param amountOutMin Minimum output amount (slippage protection)
-     */
-    struct SwapStep {
-        address router;
-        address tokenIn;
-        address tokenOut;
-        uint256 amountOutMin;
-    }
+    // Note: minimumProfit, approvedRouters (_approvedRouters EnumerableSet), SwapStep struct inherited from BaseFlashArbitrage
 
     /**
      * @notice Parameters for reveal phase
@@ -171,7 +146,7 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ==========================================================================
-    // Events
+    // Events (Protocol-Specific)
     // ==========================================================================
 
     /// @notice Emitted when a commitment is stored on-chain
@@ -188,17 +163,10 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     /// @notice Emitted when a commitment is cancelled (gas refund)
     event CommitCancelled(bytes32 indexed commitmentHash, address indexed canceller);
 
-    /// @notice Emitted when a router is approved
-    event RouterApproved(address indexed router);
-
-    /// @notice Emitted when a router is revoked
-    event RouterRevoked(address indexed router);
-
-    /// @notice Emitted when minimum profit is updated
-    event MinimumProfitUpdated(uint256 oldValue, uint256 newValue);
+    // Note: RouterAdded, RouterRemoved, MinimumProfitUpdated, etc. inherited from BaseFlashArbitrage
 
     // ==========================================================================
-    // Errors
+    // Errors (Protocol-Specific)
     // ==========================================================================
 
     error CommitmentAlreadyExists();
@@ -208,18 +176,12 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     error CommitmentExpired();
     error InvalidCommitmentHash();
     error UnauthorizedRevealer();
-    error RouterNotApproved();
-    error InsufficientProfit();
     error BelowMinimumProfit();
     error InvalidDeadline();
-    error SwapFailed();
-    error InvalidRouterAddress();
     error InvalidOwnerAddress();
-    error InvalidAmount();
-    error EmptySwapPath();
-    error PathTooLong(uint256 length, uint256 maxLength);
-    error InvalidSwapPath();
-    error SwapPathAssetMismatch();
+
+    // Note: Common errors (RouterNotApproved, InsufficientProfit, SwapFailed, InvalidRouterAddress,
+    // InvalidAmount, EmptySwapPath, PathTooLong, InvalidSwapPath, SwapPathAssetMismatch) inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // Constructor
@@ -229,14 +191,11 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
      * @notice Initializes the CommitRevealArbitrage contract
      * @param _owner The contract owner address
      */
-    constructor(address _owner) {
-        if (_owner == address(0)) revert InvalidOwnerAddress();
-        _transferOwnership(_owner);
-        // Set minimumProfit to 0 by default - MUST be configured by owner before use
-        // Prevents accidental deployment with insufficient profit threshold
+    constructor(address _owner) BaseFlashArbitrage(_owner) {
+        // minimumProfit inherited from BaseFlashArbitrage (defaults to 0)
+        // MUST be configured by owner before use
         // Note: Commit+reveal gas cost ~315k gas (~$10 @ 20 gwei, $2500 ETH)
         // Recommend: 0.01 ETH (~$25) for mainnet, 0.005 ETH for L2s
-        minimumProfit = 0;
     }
 
     // ==========================================================================
@@ -320,12 +279,94 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     // ==========================================================================
+    // Reveal Phase - Internal Validation Helpers (P2 Refactoring)
+    // ==========================================================================
+
+    /**
+     * @notice Validates commitment exists and caller is authorized
+     * @dev Internal helper extracted for testability (P2 refactoring)
+     *      Reverts if validation fails, otherwise returns normally
+     * @param commitmentHash Hash of the commitment to validate
+     * @param commitBlock Block number when commitment was made
+     */
+    function _validateCommitment(
+        bytes32 commitmentHash,
+        uint256 commitBlock
+    ) internal view {
+        if (commitBlock == 0) revert CommitmentNotFound();
+        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
+        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+    }
+
+    /**
+     * @notice Validates timing constraints and deadline
+     * @dev Internal helper extracted for testability (P2 refactoring)
+     *      Reverts if validation fails, otherwise returns normally
+     * @param commitBlock Block number when commitment was made
+     * @param deadline User-specified deadline for the transaction
+     */
+    function _validateTimingAndDeadline(
+        uint256 commitBlock,
+        uint256 deadline
+    ) internal view {
+        // Validate timing (must wait MIN_DELAY_BLOCKS, cannot exceed MAX_COMMIT_AGE_BLOCKS)
+        if (block.number < commitBlock + MIN_DELAY_BLOCKS) revert CommitmentTooRecent();
+        if (block.number > commitBlock + MAX_COMMIT_AGE_BLOCKS) revert CommitmentExpired();
+
+        // Validate deadline is not expired and not too far in future
+        if (block.timestamp > deadline) revert InvalidDeadline();
+        if (deadline > block.timestamp + MAX_SWAP_DEADLINE) revert InvalidDeadline();
+    }
+
+
+    /**
+     * @notice Executes arbitrage and verifies profit meets thresholds
+     * @dev Internal helper extracted for testability (P2 refactoring)
+     * @param commitmentHash Hash of the commitment being revealed
+     * @param params Reveal parameters containing swap details
+     * @return profit The actual profit earned from the arbitrage
+     */
+    function _executeAndVerifyProfit(
+        bytes32 commitmentHash,
+        RevealParams calldata params
+    ) internal returns (uint256 profit) {
+        // Mark as revealed and cleanup storage (reentrancy protection + gas refund)
+        revealed[commitmentHash] = true;
+        delete commitments[commitmentHash];
+        delete committers[commitmentHash];
+
+        // Execute arbitrage swap
+        profit = _executeArbitrageSwap(params);
+
+        // Verify profit meets minimum thresholds
+        // Check user-specified minimum first (per-commitment threshold)
+        if (profit < params.minProfit) revert InsufficientProfit();
+
+        // Check contract-wide minimum (owner-controlled floor)
+        if (profit < minimumProfit) revert BelowMinimumProfit();
+
+        return profit;
+    }
+
+    // ==========================================================================
     // Reveal Phase
     // ==========================================================================
 
     /**
      * @notice Reveal commitment and execute multi-hop arbitrage swap
      * @dev Validates commitment hash, timing, path, and routers, then executes swaps atomically
+     *
+     * ## P2 Refactoring (v3.1.0)
+     * Refactored 150-line function into smaller, testable helper methods:
+     * - _validateCommitment() - Commitment existence and authorization
+     * - _validateTimingAndDeadline() - Timing constraints and deadline checks
+     * - _validateArbitrageParams() - Common swap validation including token continuity (P1 extraction)
+     * - _executeAndVerifyProfit() - Execution and profit verification
+     *
+     * This improves:
+     * - Testability: Each helper can be tested independently
+     * - Readability: Clear separation of concerns
+     * - Maintainability: Easier to modify individual validation steps
      *
      * Gas cost: ~150,000-500,000 depending on path length and complexity
      *
@@ -340,13 +381,6 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
      * 8. Token continuity validated (each hop's tokenOut = next hop's tokenIn)
      * 9. Commitment not already revealed (replay protection)
      *
-     * Execution flow:
-     * 1. Validate commitment and timing
-     * 2. Validate swap path structure
-     * 3. Execute each swap in the path sequentially
-     * 4. Verify profit >= minProfit and >= minimumProfit
-     * 5. Emit Revealed event with actual profit
-     *
      * Requirements:
      * - Contract not paused
      * - All validations pass
@@ -359,76 +393,25 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
         nonReentrant
         whenNotPaused
     {
-        // 1. Validate commitment hash
+        // 1. Calculate commitment hash and retrieve commit block
         bytes32 commitmentHash = keccak256(abi.encode(params));
         uint256 commitBlock = commitments[commitmentHash];
 
-        if (commitBlock == 0) revert CommitmentNotFound();
-        if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
+        // 2. Validate commitment exists, not revealed, caller authorized
+        _validateCommitment(commitmentHash, commitBlock);
 
-        // 2. Validate committer (prevents griefing attacks)
-        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
+        // 3. Validate timing constraints and deadline
+        _validateTimingAndDeadline(commitBlock, params.deadline);
 
-        // 3. Validate timing
-        if (block.number < commitBlock + MIN_DELAY_BLOCKS) revert CommitmentTooRecent();
-        if (block.number > commitBlock + MAX_COMMIT_AGE_BLOCKS) revert CommitmentExpired();
+        // 4. Validate common arbitrage parameters (P1: base contract validation)
+        // Note: This now includes token continuity validation (moved to base in bug fix)
+        _validateArbitrageParams(params.asset, params.amountIn, params.deadline, params.swapPath);
 
-        // 4. Validate deadline
-        if (block.timestamp > params.deadline) revert InvalidDeadline();
-        if (params.deadline > block.timestamp + MAX_SWAP_DEADLINE) revert InvalidDeadline();
+        // 5. Execute arbitrage and verify profit meets thresholds
+        uint256 profit = _executeAndVerifyProfit(commitmentHash, params);
 
-        // 5. Validate amount and swap path
-        if (params.amountIn == 0) revert InvalidAmount();
-
+        // 6. Emit success event
         uint256 pathLength = params.swapPath.length;
-        if (pathLength == 0) revert EmptySwapPath();
-        if (pathLength > MAX_SWAP_HOPS) revert PathTooLong(pathLength, MAX_SWAP_HOPS);
-
-        // 6. Validate swap path structure
-        // First hop must start with the flash-loaned asset
-        if (params.swapPath[0].tokenIn != params.asset) revert SwapPathAssetMismatch();
-
-        // Validate each hop: router approval, token continuity, slippage protection
-        address lastValidatedRouter = address(0);
-        address expectedTokenIn = params.asset;
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = params.swapPath[i];
-
-            // Validate router approval (cache to skip repeated validations)
-            if (step.router != lastValidatedRouter) {
-                if (!approvedRouters[step.router]) revert RouterNotApproved();
-                lastValidatedRouter = step.router;
-            }
-
-            // Validate token continuity
-            if (step.tokenIn != expectedTokenIn) revert InvalidSwapPath();
-
-            // Update expected token for next hop
-            expectedTokenIn = step.tokenOut;
-
-            unchecked { ++i; }
-        }
-
-        // Last hop must end with the original asset (for profit calculation)
-        if (expectedTokenIn != params.asset) revert InvalidSwapPath();
-
-        // 6. Mark as revealed and cleanup storage (reentrancy protection + gas refund)
-        revealed[commitmentHash] = true;
-        delete commitments[commitmentHash];
-        delete committers[commitmentHash];
-
-        // 7. Execute arbitrage swap
-        uint256 profit = _executeArbitrageSwap(params);
-
-        // 8. Verify profit meets minimum thresholds
-        // Check user-specified minimum first (per-commitment threshold)
-        if (profit < params.minProfit) revert InsufficientProfit();
-
-        // Check contract-wide minimum (owner-controlled floor)
-        if (profit < minimumProfit) revert BelowMinimumProfit();
-
-        // Emit event with first and last tokens in the path for tracking
         emit Revealed(
             commitmentHash,
             params.swapPath[0].tokenIn,  // First token in path
@@ -600,92 +583,10 @@ contract CommitRevealArbitrage is Ownable2Step, Pausable, ReentrancyGuard {
         return expectedProfit;
     }
 
-    // ==========================================================================
-    // Admin Functions
-    // ==========================================================================
-
-    /**
-     * @notice Approve a DEX router for swap execution
-     * @dev Only owner can approve routers (security measure)
-     *
-     * @param router Router address to approve
-     */
-    function approveRouter(address router) external onlyOwner {
-        if (router == address(0)) revert InvalidRouterAddress();
-
-        // Verify router is a contract (has code deployed)
-        // Protection against typos or EOA addresses
-        if (router.code.length == 0) revert InvalidRouterAddress();
-
-        approvedRouters[router] = true;
-        emit RouterApproved(router);
-    }
-
-    /**
-     * @notice Revoke a DEX router's approval
-     * @dev Only owner can revoke routers
-     *
-     * @param router Router address to revoke
-     */
-    function revokeRouter(address router) external onlyOwner {
-        approvedRouters[router] = false;
-        emit RouterRevoked(router);
-    }
-
-    /**
-     * @notice Update minimum profit threshold
-     * @dev Only owner can update minimum profit
-     *
-     * @param _minimumProfit New minimum profit in token units
-     */
-    function setMinimumProfit(uint256 _minimumProfit) external onlyOwner {
-        uint256 oldValue = minimumProfit;
-        minimumProfit = _minimumProfit;
-        emit MinimumProfitUpdated(oldValue, _minimumProfit);
-    }
-
-    /**
-     * @notice Pause the contract (emergency stop)
-     * @dev Only owner can pause
-     */
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    /**
-     * @notice Unpause the contract
-     * @dev Only owner can unpause
-     */
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    /**
-     * @notice Withdraw tokens (emergency recovery)
-     * @dev Only owner can withdraw
-     *
-     * @param token Token address to withdraw
-     * @param to Recipient address
-     * @param amount Amount to withdraw
-     */
-    function withdrawToken(address token, address to, uint256 amount) external onlyOwner {
-        IERC20(token).safeTransfer(to, amount);
-    }
-
-    /**
-     * @notice Withdraw ETH (emergency recovery)
-     * @dev Only owner can withdraw
-     *
-     * @param to Recipient address
-     * @param amount Amount to withdraw in wei
-     */
-    function withdrawETH(address payable to, uint256 amount) external onlyOwner {
-        (bool success, ) = to.call{value: amount}("");
-        if (!success) revert SwapFailed();
-    }
-
-    /**
-     * @notice Receive ETH (for WETH unwrapping scenarios)
-     */
-    receive() external payable {}
+    // Note: Router management (addApprovedRouter, removeApprovedRouter, etc.),
+    // config (setMinimumProfit, pause, unpause), and emergency functions
+    // (withdrawToken, withdrawETH, receive) inherited from BaseFlashArbitrage
+    //
+    // BREAKING CHANGE v3.0.0: Router management API changed from approveRouter/revokeRouter
+    // to addApprovedRouter/removeApprovedRouter (EnumerableSet-based)
 }

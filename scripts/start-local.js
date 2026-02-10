@@ -13,8 +13,9 @@
 const { spawn } = require('child_process');
 
 const {
-  log,
-  logService,
+  logger,      // P3-4: Modern logger interface (preferred)
+  log,         // Legacy - kept for formatting/dim output
+  logService,  // Service-specific logging (keep for now)
   isWindows,
   checkRedis,
   checkHealth,
@@ -31,7 +32,7 @@ const { getStartupServices, PORTS, checkAndPrintDeprecations } = require('./lib/
 const {
   REDIS_STARTUP_TIMEOUT_SEC,
   REDIS_CHECK_INTERVAL_MS,
-  SERVICE_STARTUP_TIMEOUT_SEC,
+  SERVICE_STARTUP_MAX_ATTEMPTS,
   HEALTH_CHECK_INTERVAL_MS,
   SERVICE_START_DELAY_MS
 } = require('./lib/constants');
@@ -50,15 +51,16 @@ const SERVICES = getStartupServices();
 // =============================================================================
 
 async function waitForRedis(maxAttempts = REDIS_STARTUP_TIMEOUT_SEC) {
-  log('\nChecking Redis connection...', 'yellow');
+  // P3-4: Migrated to modern logger
+  logger.info('\nChecking Redis connection...');
 
   for (let i = 0; i < maxAttempts; i++) {
     const status = await checkRedis();
     if (status.running) {
       if (status.type === 'docker') {
-        log('Redis is ready! (Docker container)', 'green');
+        logger.success('Redis is ready! (Docker container)');
       } else if (status.type === 'memory') {
-        log('Redis is ready! (In-memory server)', 'green');
+        logger.success('Redis is ready! (In-memory server)');
       }
       return true;
     }
@@ -66,9 +68,9 @@ async function waitForRedis(maxAttempts = REDIS_STARTUP_TIMEOUT_SEC) {
     process.stdout.write('.');
   }
 
-  log('\nRedis is not running. Start it with one of these commands:', 'red');
-  log('  npm run dev:redis         # Docker (requires Docker Hub access)', 'yellow');
-  log('  npm run dev:redis:memory  # In-memory (no Docker required)', 'yellow');
+  logger.error('\nRedis is not running. Start it with one of these commands:');
+  logger.warning('  npm run dev:redis         # Docker (requires Docker Hub access)');
+  logger.warning('  npm run dev:redis:memory  # In-memory (no Docker required)');
   return false;
 }
 
@@ -113,9 +115,28 @@ async function startService(service) {
     }
 
     // Store PID for later cleanup using atomic update (prevents race conditions)
-    updatePid(service.name, child.pid).catch(err => {
-      logService(service.name, `Warning: Failed to save PID: ${err.message}`, 'yellow');
-    });
+    // FIX P1-2: Await PID save and kill process if it fails (prevent ghost processes)
+    try {
+      await updatePid(service.name, child.pid);
+    } catch (err) {
+      logService(service.name, `CRITICAL: Failed to save PID - killing process to prevent ghost`, 'red');
+      await killProcess(child.pid);
+      reject(new Error(
+        `Cannot track ${service.name} process (PID ${child.pid}).\n` +
+        `PID file update failed: ${err.message}\n\n` +
+        `This prevents proper cleanup via "npm run dev:stop".\n` +
+        `Possible causes:\n` +
+        `  - Disk full\n` +
+        `  - Permission denied writing to ${ROOT_DIR}/.local-services.pid\n` +
+        `  - Lock timeout (another script holding lock)\n\n` +
+        `To fix:\n` +
+        `  1. Check disk space: df -h (Unix) or dir (Windows)\n` +
+        `  2. Check file permissions on .local-services.pid\n` +
+        `  3. Run: npm run dev:cleanup (to clear stale locks)\n` +
+        `  4. Retry: npm run dev:start`
+      ));
+      return; // Exit early, don't set up event handlers
+    }
 
     // Log output
     child.stdout.on('data', (data) => {
@@ -148,7 +169,7 @@ async function startService(service) {
     // Wait for health check after startup delay
     setTimeout(async () => {
       let attempts = 0;
-      const maxAttempts = SERVICE_STARTUP_TIMEOUT_SEC;
+      const maxAttempts = SERVICE_STARTUP_MAX_ATTEMPTS;
 
       while (attempts < maxAttempts) {
         const healthResult = await checkHealth(service.port, service.healthEndpoint);
@@ -196,8 +217,9 @@ async function startService(service) {
         // Ignore cleanup errors (PID may not have been saved yet)
       });
       // Task P2-3: Enhanced error message with actionable context
+      const actualTimeoutSec = (maxAttempts * HEALTH_CHECK_INTERVAL_MS) / 1000;
       reject(new Error(
-        `${service.name} health check timeout after ${maxAttempts} seconds.\n\n` +
+        `${service.name} health check timeout after ${actualTimeoutSec}s (${maxAttempts} attempts).\n\n` +
         `The service started but failed to respond on ${service.healthEndpoint}.\n\n` +
         `Possible causes:\n` +
         `  - Service is still initializing (normal for first start)\n` +
@@ -207,7 +229,7 @@ async function startService(service) {
         `To debug:\n` +
         `  1. Check if service is listening:\n` +
         `     curl http://localhost:${service.port}${service.healthEndpoint}\n` +
-        `  2. Increase timeout (currently ${SERVICE_STARTUP_TIMEOUT_SEC}s) in scripts/lib/constants.js\n` +
+        `  2. Increase timeout (currently ${maxAttempts} attempts × ${HEALTH_CHECK_INTERVAL_MS}ms) in scripts/lib/constants.js\n` +
         `  3. Check service logs for startup errors\n` +
         `  4. Try starting service directly to see full output:\n` +
         `     npx ts-node ${service.script}`
@@ -221,16 +243,15 @@ async function startService(service) {
 // =============================================================================
 
 async function main() {
-  console.log('\n' + '='.repeat(60));
-  log('  Arbitrage System - Local Development Startup', 'cyan');
-  console.log('='.repeat(60) + '\n');
+  // P3-4: Use modern logger.header() for section headers
+  logger.header('Arbitrage System - Local Development Startup');
 
   // Check simulation modes
   if (process.env.SIMULATION_MODE === 'true') {
-    log('Running in PRICE SIMULATION MODE - No real blockchain connections', 'yellow');
+    logger.warning('Running in PRICE SIMULATION MODE - No real blockchain connections');
   }
   if (process.env.EXECUTION_SIMULATION_MODE === 'true') {
-    log('Running in EXECUTION SIMULATION MODE - No real transactions', 'yellow');
+    logger.warning('Running in EXECUTION SIMULATION MODE - No real transactions');
   }
 
   // Check Redis
@@ -240,7 +261,7 @@ async function main() {
   }
 
   // Start services
-  log('\nStarting services...\n', 'cyan');
+  logger.info('\nStarting services...\n');
 
   const failedServices = [];
   for (const service of SERVICES) {
@@ -249,7 +270,7 @@ async function main() {
       // Small delay between services
       await new Promise(r => setTimeout(r, SERVICE_START_DELAY_MS));
     } catch (error) {
-      log(`Failed to start ${service.name}: ${error.message}`, 'red');
+      logger.error(`Failed to start ${service.name}: ${error.message}`);
       // FIX P1-2: Track failed services for summary
       failedServices.push({ name: service.name, error: error.message });
     }
@@ -257,25 +278,25 @@ async function main() {
 
   // FIX P1-2: Show failed services summary
   if (failedServices.length > 0) {
-    log('\n⚠️  Some services failed to start:', 'yellow');
+    logger.warning('\n⚠️  Some services failed to start:');
     failedServices.forEach(({ name, error }) => {
-      log(`  • ${name}: ${error}`, 'yellow');
+      logger.warning(`  • ${name}: ${error}`);
     });
-    log('\nTo cleanup and retry:', 'cyan');
-    log('  npm run dev:cleanup', 'dim');
+    logger.info('\nTo cleanup and retry:');
+    log('  npm run dev:cleanup', 'dim');  // Keep log() for dim formatting
     log('  npm run dev:start', 'dim');
   }
 
   // Print summary
   console.log('\n' + '='.repeat(60));
-  log('  Services Started!', 'green');
+  logger.success('  Services Started!');
   console.log('='.repeat(60));
-  log('\nAccess points:', 'cyan');
+  logger.info('\nAccess points:');
   SERVICES.forEach(service => {
-    log(`  ${service.name.padEnd(22)} http://localhost:${service.port}${service.healthEndpoint}`, 'green');
+    logger.success(`  ${service.name.padEnd(22)} http://localhost:${service.port}${service.healthEndpoint}`);
   });
   log(`  Redis Commander (debug) http://localhost:${PORTS.REDIS_UI}`, 'dim');
-  log('\nCommands:', 'cyan');
+  logger.info('\nCommands:');
   log('  npm run dev:status      Check service status', 'dim');
   log('  npm run dev:stop        Stop all services', 'dim');
   log('  npm run dev:redis:logs  View Redis logs', 'dim');
@@ -283,6 +304,6 @@ async function main() {
 }
 
 main().catch(error => {
-  log(`\nStartup failed: ${error.message}`, 'red');
+  logger.error(`\nStartup failed: ${error.message}`);
   process.exit(1);
 });

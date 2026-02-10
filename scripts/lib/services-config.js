@@ -39,6 +39,11 @@ const ROOT_DIR = path.join(__dirname, '..', '..');
 const portConfig = require('../../shared/constants/service-ports.json');
 const deprecationConfig = require('../../shared/constants/deprecation-patterns.json');
 
+// IMPORTANT: Load order matters!
+// .env.local is loaded AFTER .env with override: true
+// This means .env.local values ALWAYS win over .env values
+// See docs/local-development.md for full explanation
+
 // Load base .env first
 dotenv.config({ path: path.join(ROOT_DIR, '.env') });
 
@@ -73,10 +78,11 @@ const {
 } = require('./constants');
 
 // =============================================================================
-// Service Config Validation (Task P2-1)
+// Service Config Validation (Task P2-1, P2-3 Refactoring)
 // =============================================================================
 
 const fs = require('fs');
+const { validatePort, validateEnum, validateString, validateOptionalString } = require('./validators');
 
 /**
  * Validates and creates a service configuration.
@@ -98,44 +104,39 @@ class ServiceConfig {
 
   /**
    * Validate the service configuration.
+   * Uses reusable validators from lib/validators.js (P2-3 refactoring).
    * @throws {Error} If validation fails with actionable message
    */
   validate() {
     const { name, port, type, script, healthEndpoint } = this.config;
 
-    // Validate required fields
-    if (!name || typeof name !== 'string') {
-      throw new Error('Service configuration error: "name" is required and must be a string');
+    // Validate name (required, non-empty string)
+    try {
+      validateString(name, 'Service name');
+    } catch (error) {
+      throw new Error(`Service configuration error: ${error.message}`);
     }
 
-    if (type === undefined || typeof type !== 'string') {
-      throw new Error(`Service "${name}": "type" is required and must be a string ('node', 'docker', 'redis')`);
+    // Validate type (required enum)
+    try {
+      validateEnum(type, ['node', 'docker', 'redis'], `Service "${name}" type`);
+    } catch (error) {
+      throw new Error(error.message);
     }
 
-    // Validate type enum
-    const validTypes = ['node', 'docker', 'redis'];
-    if (!validTypes.includes(type)) {
-      throw new Error(
-        `Service "${name}": Invalid type "${type}". ` +
-        `Must be one of: ${validTypes.join(', ')}`
-      );
-    }
-
-    // Validate port
-    if (port === undefined || typeof port !== 'number') {
-      throw new Error(`Service "${name}": "port" is required and must be a number`);
-    }
-    if (port < 1 || port > 65535) {
-      throw new Error(
-        `Service "${name}": Invalid port ${port}. ` +
-        `Port must be between 1 and 65535`
-      );
+    // Validate port (required, valid port number)
+    try {
+      validatePort(port, `Service "${name}"`);
+    } catch (error) {
+      throw new Error(error.message);
     }
 
     // Validate script path for node services
     if (type === 'node') {
-      if (!script || typeof script !== 'string') {
-        throw new Error(`Service "${name}": "script" is required for type="node"`);
+      try {
+        validateString(script, `Service "${name}" script`);
+      } catch (error) {
+        throw new Error(error.message);
       }
 
       const scriptPath = path.join(ROOT_DIR, script);
@@ -148,16 +149,18 @@ class ServiceConfig {
       }
     }
 
-    // Validate healthEndpoint format (should start with /)
-    if (type === 'node' && healthEndpoint !== undefined) {
-      if (typeof healthEndpoint !== 'string') {
-        throw new Error(`Service "${name}": "healthEndpoint" must be a string`);
-      }
-      if (!healthEndpoint.startsWith('/')) {
-        throw new Error(
-          `Service "${name}": Invalid healthEndpoint "${healthEndpoint}". ` +
-          `Must start with "/" (e.g., "/health", "/api/health")`
-        );
+    // Validate healthEndpoint format (optional, must start with /)
+    if (type === 'node') {
+      try {
+        const validated = validateOptionalString(healthEndpoint, `Service "${name}" healthEndpoint`);
+        if (validated && !validated.startsWith('/')) {
+          throw new Error(
+            `Service "${name}": Invalid healthEndpoint "${healthEndpoint}". ` +
+            `Must start with "/" (e.g., "/health", "/api/health")`
+          );
+        }
+      } catch (error) {
+        throw new Error(error.message);
       }
     }
 
@@ -178,21 +181,57 @@ class ServiceConfig {
 // Port Configuration (from environment with defaults)
 // =============================================================================
 
+/**
+ * Parse and validate a port number from environment variable or default value.
+ * Fails fast with actionable error message if invalid.
+ *
+ * @param {string | undefined} envValue - Environment variable value
+ * @param {number} defaultValue - Default port from config
+ * @param {string} envVarName - Name of environment variable (for error messages)
+ * @returns {number} Validated port number
+ * @throws {Error} If port is NaN or out of range
+ */
+function parsePort(envValue, defaultValue, envVarName) {
+  const rawValue = envValue || String(defaultValue);
+  const port = parseInt(rawValue, 10);
+
+  // Check for NaN (parseInt returns NaN for invalid strings)
+  if (isNaN(port)) {
+    throw new Error(
+      `Invalid port configuration for ${envVarName}.\n` +
+      `  Value: "${rawValue}"\n` +
+      `  Expected: A number between 1-65535\n` +
+      `  Fix: Check your .env file or environment variables`
+    );
+  }
+
+  // Check port range
+  if (port < 1 || port > 65535) {
+    throw new Error(
+      `Invalid port ${port} for ${envVarName}.\n` +
+      `  Port must be between 1 and 65535\n` +
+      `  Fix: Update ${envVarName} in your .env file`
+    );
+  }
+
+  return port;
+}
+
 const PORTS = {
   // Infrastructure (from shared config)
-  REDIS: parseInt(process.env.REDIS_PORT || String(portConfig.infrastructure.redis), 10),
+  REDIS: parsePort(process.env.REDIS_PORT, portConfig.infrastructure.redis, 'REDIS_PORT'),
   REDIS_UI: portConfig.infrastructure['redis-ui'],
   // Core services (from shared config)
-  COORDINATOR: parseInt(process.env.COORDINATOR_PORT || String(portConfig.services.coordinator), 10),
+  COORDINATOR: parsePort(process.env.COORDINATOR_PORT, portConfig.services.coordinator, 'COORDINATOR_PORT'),
   // Partition detectors (from shared config)
-  P1_ASIA_FAST: parseInt(process.env.P1_ASIA_FAST_PORT || String(portConfig.services['partition-asia-fast']), 10),
-  P2_L2_TURBO: parseInt(process.env.P2_L2_TURBO_PORT || String(portConfig.services['partition-l2-turbo']), 10),
-  P3_HIGH_VALUE: parseInt(process.env.P3_HIGH_VALUE_PORT || String(portConfig.services['partition-high-value']), 10),
-  P4_SOLANA: parseInt(process.env.P4_SOLANA_PORT || String(portConfig.services['partition-solana']), 10),
+  P1_ASIA_FAST: parsePort(process.env.P1_ASIA_FAST_PORT, portConfig.services['partition-asia-fast'], 'P1_ASIA_FAST_PORT'),
+  P2_L2_TURBO: parsePort(process.env.P2_L2_TURBO_PORT, portConfig.services['partition-l2-turbo'], 'P2_L2_TURBO_PORT'),
+  P3_HIGH_VALUE: parsePort(process.env.P3_HIGH_VALUE_PORT, portConfig.services['partition-high-value'], 'P3_HIGH_VALUE_PORT'),
+  P4_SOLANA: parsePort(process.env.P4_SOLANA_PORT, portConfig.services['partition-solana'], 'P4_SOLANA_PORT'),
   // Other services (from shared config)
-  EXECUTION_ENGINE: parseInt(process.env.EXECUTION_ENGINE_PORT || String(portConfig.services['execution-engine']), 10),
-  CROSS_CHAIN: parseInt(process.env.CROSS_CHAIN_DETECTOR_PORT || String(portConfig.services['cross-chain-detector']), 10),
-  UNIFIED_DETECTOR: parseInt(process.env.UNIFIED_DETECTOR_PORT || String(portConfig.services['unified-detector']), 10)
+  EXECUTION_ENGINE: parsePort(process.env.EXECUTION_ENGINE_PORT, portConfig.services['execution-engine'], 'EXECUTION_ENGINE_PORT'),
+  CROSS_CHAIN: parsePort(process.env.CROSS_CHAIN_DETECTOR_PORT, portConfig.services['cross-chain-detector'], 'CROSS_CHAIN_DETECTOR_PORT'),
+  UNIFIED_DETECTOR: parsePort(process.env.UNIFIED_DETECTOR_PORT, portConfig.services['unified-detector'], 'UNIFIED_DETECTOR_PORT')
 };
 
 // =============================================================================
