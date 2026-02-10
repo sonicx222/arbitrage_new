@@ -20,7 +20,7 @@
 import { ethers } from 'ethers';
 import {
   SYNCSWAP_FEE_BPS,
-  BPS_DENOMINATOR_BIGINT,
+  getBpsDenominatorBigInt,
   SYNCSWAP_FLASH_ARBITRAGE_ABI,
 } from '@arbitrage/config';
 import type {
@@ -30,9 +30,6 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
-
-// Alias for local readability
-const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
 
 /**
  * Cached ethers.Interface for hot-path optimization.
@@ -141,7 +138,7 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
    */
   calculateFee(amount: bigint): FlashLoanFeeInfo {
     const feeBps = this.feeOverride ?? SYNCSWAP_FEE_BPS; // Default: 30 bps
-    const feeAmount = (amount * BigInt(feeBps)) / BPS_DENOMINATOR; // 0.3% fee
+    const feeAmount = (amount * BigInt(feeBps)) / getBpsDenominatorBigInt(); // 0.3% fee
 
     return {
       feeBps,

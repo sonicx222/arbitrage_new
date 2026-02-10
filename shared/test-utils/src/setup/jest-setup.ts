@@ -7,6 +7,18 @@
  * @see docs/TEST_ARCHITECTURE.md
  */
 
+// Polyfill for BigInt serialization in Jest workers
+// This allows Jest to serialize BigInt values during inter-worker communication
+// NOTE: Also in jest.globalSetup.ts - duplication is intentional because:
+//   - globalSetup runs in parent process (for Redis setup)
+//   - setupFilesAfterEnv runs in each test worker process (for test code)
+//   - Both need the polyfill in their respective process contexts
+if (typeof (BigInt.prototype as any).toJSON === 'undefined') {
+  (BigInt.prototype as any).toJSON = function (this: bigint) {
+    return this.toString();
+  };
+}
+
 import '@jest/globals';
 import { setupTestEnv, restoreEnv } from './env-setup';
 import { resetAllSingletons, initializeSingletonResets } from './singleton-reset';

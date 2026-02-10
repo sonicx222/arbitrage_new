@@ -11,6 +11,18 @@ import * as path from 'path';
 
 const REDIS_CONFIG_FILE = path.join(__dirname, '.redis-test-config.json');
 
+// Polyfill for BigInt serialization in Jest workers
+// This allows Jest to serialize BigInt values during inter-worker communication
+// NOTE: Also in shared/test-utils/src/setup/jest-setup.ts - duplication is intentional because:
+//   - globalSetup runs in parent process (for Redis setup)
+//   - setupFilesAfterEnv runs in each test worker process (for test code)
+//   - Both need the polyfill in their respective process contexts
+if (typeof (BigInt.prototype as any).toJSON === 'undefined') {
+  (BigInt.prototype as any).toJSON = function (this: bigint) {
+    return this.toString();
+  };
+}
+
 export default async function globalSetup(): Promise<void> {
   console.log('\n[Jest Global Setup] Starting Redis test server...');
 
