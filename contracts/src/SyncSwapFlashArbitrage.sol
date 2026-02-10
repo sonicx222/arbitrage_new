@@ -18,7 +18,7 @@ import "./libraries/SwapHelpers.sol";
  * @dev Implements IERC3156FlashBorrower for EIP-3156 compliant flash loan integration
  *
  * Features:
- * - SyncSwap flash loan integration (0.3% fee - competitive on zkSync Era)
+ * - SyncSwap flash loan integration (dynamic fee query via EIP-3156)
  * - EIP-3156 standard compliance for interoperability
  * - Multi-hop swap execution across multiple DEX routers
  * - Profit verification with minimum profit threshold
@@ -27,11 +27,12 @@ import "./libraries/SwapHelpers.sol";
  * - Emergency pause functionality
  *
  * SyncSwap Flash Loan Characteristics:
- * - 0.3% (30 bps) flash loan fee
+ * - Dynamic flash loan fee (~0.3% typical, queried via VAULT.flashFee())
  * - EIP-3156 compliant callback interface
  * - Single Vault contract per chain (no pool discovery needed)
  * - Supports native ETH via address(0)
  * - Fee calculated on surplus balance after repayment
+ * - Fee is configurable by governance and may vary over time
  *
  * Security Model:
  * - Only SyncSwap Vault can call onFlashLoan() callback
