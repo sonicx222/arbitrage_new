@@ -113,18 +113,49 @@ async function deployMultiPathQuoter(): Promise<DeploymentResult> {
     30000 // initial delay (30s)
   );
 
-  // Smoke test: verify contract interface is accessible
+  // Smoke test: verify contract is deployed and functional
   console.log('\nRunning smoke test...');
   try {
-    // Check that the contract interface is accessible (doesn't actually call with empty array)
+    // 1. Check interface exists
     const contractInterface = multiPathQuoter.interface;
     const hasBatchedQuotesFunction = contractInterface.hasFunction('getBatchedQuotes');
 
-    if (hasBatchedQuotesFunction) {
-      console.log('✅ Smoke test passed: getBatchedQuotes function is available');
-    } else {
-      console.log('⚠️  Smoke test failed: getBatchedQuotes function not found');
+    if (!hasBatchedQuotesFunction) {
+      console.log('⚠️  Smoke test failed: getBatchedQuotes function not found in ABI');
+      return {
+        network: networkName,
+        chainId,
+        contractAddress,
+        deployerAddress: deployer.address,
+        transactionHash: deployTx?.hash || '',
+        blockNumber,
+        timestamp,
+        gasUsed,
+        verified: false,
+      };
     }
+
+    // 2. Verify contract bytecode exists at address (catches deployment failures)
+    const code = await ethers.provider.getCode(contractAddress);
+    if (code === '0x') {
+      console.log('⚠️  Smoke test failed: No bytecode at contract address');
+      return {
+        network: networkName,
+        chainId,
+        contractAddress,
+        deployerAddress: deployer.address,
+        transactionHash: deployTx?.hash || '',
+        blockNumber,
+        timestamp,
+        gasUsed,
+        verified: false,
+      };
+    }
+
+    console.log('✅ Smoke test passed:');
+    console.log('   - getBatchedQuotes function available in ABI');
+    console.log(`   - Contract deployed at ${contractAddress}`);
+    console.log(`   - Bytecode size: ${(code.length - 2) / 2} bytes`);
   } catch (error) {
     console.log('⚠️  Smoke test failed:', error);
   }

@@ -12,6 +12,7 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import { isMainnet, isTestnet } from '../../deployments/addresses';
 import * as fs from 'fs';
 import * as path from 'path';
+// @ts-expect-error - proper-lockfile has no type declarations, but works correctly at runtime
 import * as lockfile from 'proper-lockfile';
 
 // =============================================================================
@@ -518,13 +519,19 @@ export function saveDeploymentResult(
  * by another process.
  *
  * @param registryFile - Absolute path to registry JSON file
- * @param result - Deployment result to add/update in registry
+ * @param result - Deployment result to add/update in registry (accepts any deployment result type)
  * @throws Error if lock cannot be acquired after 3 retries (total ~7s wait)
  * @throws Error if registry JSON is corrupted and cannot be parsed
  */
 function updateRegistryWithLock(
   registryFile: string,
-  result: DeploymentResult
+  result:
+    | DeploymentResult
+    | BalancerDeploymentResult
+    | PancakeSwapDeploymentResult
+    | SyncSwapDeploymentResult
+    | CommitRevealDeploymentResult
+    | MultiPathQuoterDeploymentResult
 ): void {
   const maxRetries = 3;
   const baseDelay = 1000; // 1 second
@@ -542,7 +549,15 @@ function updateRegistryWithLock(
         : undefined; // No lock needed if file doesn't exist (first deployment)
 
       // CRITICAL SECTION: Read-Modify-Write must be atomic
-      let registry: Record<string, DeploymentResult> = {};
+      let registry: Record<
+        string,
+        | DeploymentResult
+        | BalancerDeploymentResult
+        | PancakeSwapDeploymentResult
+        | SyncSwapDeploymentResult
+        | CommitRevealDeploymentResult
+        | MultiPathQuoterDeploymentResult
+      > = {};
 
       if (fs.existsSync(registryFile)) {
         try {

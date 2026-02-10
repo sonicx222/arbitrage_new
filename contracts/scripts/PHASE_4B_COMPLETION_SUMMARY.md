@@ -26,8 +26,8 @@ Phase 4B successfully refactored the remaining 2 utility deployment scripts to u
 - ✅ Pre-deployment gas estimation via `estimateDeploymentCost()`
 - ✅ Verification retry with exponential backoff via `verifyContractWithRetry()`
 - ✅ Standardized deployment result saving via `saveDeploymentResult()`
-- ✅ Removed mainnet guard (script now safe for production)
 - ✅ Created `saveCommitRevealDeployment()` wrapper for backward compatibility
+- 📝 Note: This script never had a mainnet guard (unlike flash loan scripts in Phase 4A)
 
 **Key Differences from Flash Loan Scripts:**
 - No router approval (commit-reveal contract doesn't need DEX router permissions)
@@ -48,9 +48,9 @@ Phase 4B successfully refactored the remaining 2 utility deployment scripts to u
 - ✅ Pre-deployment gas estimation via `estimateDeploymentCost()`
 - ✅ Verification retry with exponential backoff via `verifyContractWithRetry()`
 - ✅ Standardized deployment result saving via `saveDeploymentResult()`
-- ✅ Removed mainnet guard (script now safe for production)
 - ✅ Created `saveMultiPathQuoterDeployment()` wrapper for backward compatibility
 - ✅ Fixed confusing smoke test (now checks interface availability instead of calling with empty array)
+- 📝 Note: This script never had a mainnet guard (unlike flash loan scripts in Phase 4A)
 
 **Key Differences from Flash Loan Scripts:**
 - No constructor arguments (stateless utility contract)
@@ -237,15 +237,14 @@ deploy-commit-reveal.ts:140:  const verified = await verifyContractWithRetry(
 ## Deployment Safety Checklist
 
 ### Before Phase 4B ❌
-- ❌ deploy-commit-reveal.ts had mainnet guard (blocked production deployments)
-- ❌ deploy-multi-path-quoter.ts had mainnet guard (blocked production deployments)
-- ❌ Inline balance checks with basic error messages
+- ❌ Inline balance checks with basic error messages (no deployer balance validation)
 - ❌ No gas estimation error handling (crashes on RPC failures)
 - ❌ Basic verification with no retry logic (silent failures)
 - ❌ Duplicate code in both scripts (~100 lines)
+- 📝 Note: Unlike flash loan scripts, utility scripts never had mainnet guards
 
 ### After Phase 4B ✅
-- ✅ **Both scripts production-ready** (mainnet guards removed)
+- ✅ **Both scripts production-ready** (robust error handling, retry logic)
 - ✅ Helpful balance error messages via `checkDeployerBalance()`
 - ✅ Pre-deployment gas estimation with error handling
 - ✅ Verification retry with exponential backoff (3 retries, 30s initial)
