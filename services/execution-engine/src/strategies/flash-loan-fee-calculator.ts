@@ -17,8 +17,8 @@
 import { ethers } from 'ethers';
 import {
   FLASH_LOAN_PROVIDERS,
-  AAVE_V3_FEE_BPS_BIGINT,
-  BPS_DENOMINATOR_BIGINT,
+  getAaveV3FeeBpsBigInt,
+  getBpsDenominatorBigInt,
 } from '@arbitrage/config';
 
 // =============================================================================
@@ -98,6 +98,10 @@ export interface FlashLoanFeeCalculatorConfig {
 export class FlashLoanFeeCalculator {
   private readonly config: FlashLoanFeeCalculatorConfig;
 
+  // Cache BigInt values at instantiation for hot-path performance
+  private readonly BPS_DENOMINATOR_BIGINT = getBpsDenominatorBigInt();
+  private readonly AAVE_V3_FEE_BPS_BIGINT = getAaveV3FeeBpsBigInt();
+
   constructor(config: FlashLoanFeeCalculatorConfig = {}) {
     this.config = config;
   }
@@ -118,17 +122,17 @@ export class FlashLoanFeeCalculator {
     // Check for custom fee override
     const feeOverride = this.config.feeOverrides?.[chain];
     if (feeOverride !== undefined) {
-      return (amount * BigInt(feeOverride)) / BPS_DENOMINATOR_BIGINT;
+      return (amount * BigInt(feeOverride)) / this.BPS_DENOMINATOR_BIGINT;
     }
 
     // Use chain-specific fee from FLASH_LOAN_PROVIDERS config
     const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
     if (flashLoanConfig) {
-      return (amount * BigInt(flashLoanConfig.fee)) / BPS_DENOMINATOR_BIGINT;
+      return (amount * BigInt(flashLoanConfig.fee)) / this.BPS_DENOMINATOR_BIGINT;
     }
 
     // Default to Aave V3 fee (0.09%)
-    return (amount * AAVE_V3_FEE_BPS_BIGINT) / BPS_DENOMINATOR_BIGINT;
+    return (amount * this.AAVE_V3_FEE_BPS_BIGINT) / this.BPS_DENOMINATOR_BIGINT;
   }
 
   /**
