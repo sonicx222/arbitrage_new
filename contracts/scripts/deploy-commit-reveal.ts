@@ -54,27 +54,39 @@
 import { ethers, network, run } from 'hardhat';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  normalizeNetworkName,
+  checkDeployerBalance,
+  estimateDeploymentCost,
+  verifyContractWithRetry,
+  saveDeploymentResult,
+  type CommitRevealDeploymentResult
+} from './lib/deployment-utils';
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface DeploymentResult {
-  network: string;
-  chainId: number;
-  contractAddress: string;
-  ownerAddress: string;
-  deployerAddress: string;
-  transactionHash: string;
-  blockNumber: number;
-  timestamp: number;
-  gasUsed: string;
-  verified: boolean;
-}
+// Use standardized CommitRevealDeploymentResult from deployment-utils
+// This ensures type consistency across all deployment scripts
+type DeploymentResult = CommitRevealDeploymentResult;
 
 // =============================================================================
 // Configuration
 // =============================================================================
+
+/**
+ * NOTE: This contract does NOT define DEFAULT_MINIMUM_PROFIT like other
+ * deployment scripts (deploy.ts, deploy-balancer.ts, deploy-pancakeswap.ts).
+ *
+ * Reason: CommitRevealArbitrage performs profit validation off-chain in the
+ * execution-engine service before calling executeArbitrage(). The two-phase
+ * commit-reveal pattern already requires off-chain coordination, so profit
+ * checks naturally occur at that stage rather than wasting gas on-chain.
+ *
+ * @see services/execution-engine/src/strategies/commit-reveal-strategy.ts
+ * @see contracts/src/CommitRevealArbitrage.sol (no minimumProfit state variable)
+ */
 
 /**
  * Get contract owner address from environment or use deployer
@@ -92,7 +104,7 @@ function getOwnerAddress(deployerAddress: string): string {
  */
 async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -101,13 +113,8 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
   console.log(`Network: ${networkName} (chainId: ${chainId})`);
   console.log(`Deployer: ${deployer.address}`);
 
-  // Check deployer balance
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`Deployer Balance: ${ethers.formatEther(balance)} ETH`);
-
-  if (balance === 0n) {
-    throw new Error('Deployer has no balance. Please fund the deployer account.');
-  }
+  // Phase 1 Fix: Proper balance checking with helpful error messages
+  await checkDeployerBalance(deployer);
 
   // Determine owner address
   const ownerAddress = getOwnerAddress(deployer.address);
@@ -117,24 +124,9 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
     console.log('⚠️  Owner is different from deployer. Remember to accept ownership from owner account.');
   }
 
-  // Estimate deployment cost
+  // Phase 1 Fix: Estimate gas with error handling
   const CommitRevealArbitrageFactory = await ethers.getContractFactory('CommitRevealArbitrage');
-  const deployTxData = CommitRevealArbitrageFactory.getDeployTransaction(ownerAddress);
-  const estimatedGas = await ethers.provider.estimateGas({
-    data: deployTxData.data,
-  });
-  const feeData = await ethers.provider.getFeeData();
-  const estimatedCost = estimatedGas * (feeData.gasPrice || 0n);
-
-  console.log(`Estimated Gas: ${estimatedGas.toString()}`);
-  console.log(`Estimated Cost: ${ethers.formatEther(estimatedCost)} ETH`);
-
-  if (balance < estimatedCost) {
-    throw new Error(
-      `Insufficient balance for deployment. ` +
-      `Need ${ethers.formatEther(estimatedCost)} ETH, have ${ethers.formatEther(balance)} ETH`
-    );
-  }
+  await estimateDeploymentCost(CommitRevealArbitrageFactory, ownerAddress);
 
   // Deploy contract
   console.log('\nDeploying CommitRevealArbitrage...');
@@ -157,32 +149,13 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
   console.log(`   Block: ${blockNumber}`);
   console.log(`   Gas Used: ${gasUsed}`);
 
-  // Verify contract on block explorer
-  let verified = false;
-  if (networkName !== 'localhost' && networkName !== 'hardhat') {
-    console.log('\nWaiting 30 seconds before verification...');
-    await new Promise(resolve => setTimeout(resolve, 30000));
-
-    console.log('Verifying contract on block explorer...');
-    try {
-      await run('verify:verify', {
-        address: contractAddress,
-        constructorArguments: [ownerAddress],
-      });
-      verified = true;
-      console.log('✅ Contract verified');
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('Already Verified')) {
-        verified = true;
-        console.log('✅ Contract already verified');
-      } else {
-        console.warn('⚠️  Verification failed:', errorMessage);
-        console.log('   You can verify manually later with:');
-        console.log(`   npx hardhat verify --network ${networkName} ${contractAddress} ${ownerAddress}`);
-      }
-    }
-  }
+  // Phase 1 Fix: Verification with retry logic
+  const verified = await verifyContractWithRetry(
+    contractAddress,
+    [ownerAddress],
+    3, // max retries
+    30000 // initial delay (30s)
+  );
 
   // Smoke test: check contract state
   console.log('\nRunning smoke tests...');
@@ -216,28 +189,11 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
 }
 
 /**
- * Save deployment result to file
+ * Save deployment result to file (now using utility function)
+ * Kept as wrapper for backward compatibility
  */
-function saveDeploymentResult(result: DeploymentResult): void {
-  const deploymentsDir = path.join(__dirname, '..', 'deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save network-specific deployment
-  const networkFile = path.join(deploymentsDir, `commit-reveal-${result.network}.json`);
-  fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
-  console.log(`\n📝 Deployment saved to: ${networkFile}`);
-
-  // Update master registry
-  const registryFile = path.join(deploymentsDir, 'commit-reveal-registry.json');
-  let registry: Record<string, DeploymentResult> = {};
-  if (fs.existsSync(registryFile)) {
-    registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
-  }
-  registry[result.network] = result;
-  fs.writeFileSync(registryFile, JSON.stringify(registry, null, 2));
-  console.log(`📝 Registry updated: ${registryFile}`);
+function saveCommitRevealDeployment(result: DeploymentResult): void {
+  saveDeploymentResult(result, 'commit-reveal-registry.json');
 }
 
 /**
@@ -323,7 +279,7 @@ function printDeploymentSummary(result: DeploymentResult): void {
 // =============================================================================
 
 async function main(): Promise<void> {
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
 
   console.log(`\nStarting CommitRevealArbitrage deployment to ${networkName}...`);
 
@@ -343,7 +299,7 @@ async function main(): Promise<void> {
   const result = await deployCommitRevealArbitrage();
 
   // Save and print summary
-  saveDeploymentResult(result);
+  saveCommitRevealDeployment(result);
   printDeploymentSummary(result);
 
   console.log('🎉 Deployment complete!');
