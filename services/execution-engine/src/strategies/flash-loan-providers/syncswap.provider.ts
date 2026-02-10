@@ -124,7 +124,10 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
    * Calculate flash loan fee for an amount
    *
    * SyncSwap charges 0.3% (30 basis points) flash loan fee.
-   * Fee is calculated on surplus balance: postLoanBalance - preLoanBalance
+   * Fee is calculated as: (amount * 0.003) or (amount * feeBps) / 10000
+   *
+   * The vault verifies after the loan that its balance increased by at least the fee amount.
+   * This balance increase (the "surplus") is the vault's profit verification step, not the fee calculation base.
    *
    * @param amount - Loan amount in wei
    * @returns Fee information (30 bps = 0.3%)
@@ -134,6 +137,7 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
    * const fee = provider.calculateFee(ethers.parseEther('1000'));
    * // Returns: { feeBps: 30, feeAmount: 3000000000000000000n, protocol: 'syncswap' }
    * // Fee amount: 3 ETH (0.3% of 1000 ETH)
+   * // Borrower must repay: 1000 ETH + 3 ETH = 1003 ETH
    * ```
    */
   calculateFee(amount: bigint): FlashLoanFeeInfo {

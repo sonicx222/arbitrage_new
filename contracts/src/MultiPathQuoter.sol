@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "./interfaces/IFlashLoanReceiver.sol";
+import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage (lines 140, 193, 249, 342)
 
 /**
  * @title MultiPathQuoter

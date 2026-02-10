@@ -1,5 +1,9 @@
 /**
- * Coordinator Service Entry Point
+ * Coordinator Service Entry Point & Public API
+ *
+ * This file serves dual purposes:
+ * 1. Entry point: Bootstraps and runs the coordinator service
+ * 2. Public API: Exports reusable utilities for other services
  *
  * Reads standby configuration from environment variables and initializes
  * the coordinator service with proper failover settings (ADR-007).
@@ -15,6 +19,13 @@
  *
  * @see ADR-007: Cross-Region Failover Strategy
  */
+
+// P2-004 FIX: Export reusable utilities for other services
+export { CoordinatorService } from './coordinator';
+export { IntervalManager } from './interval-manager';
+export type { IntervalOptions, IntervalStats } from './interval-manager';
+
+// Internal imports for bootstrapping
 import { CoordinatorService } from './coordinator';
 import {
   createLogger,

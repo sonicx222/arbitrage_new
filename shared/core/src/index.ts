@@ -1535,7 +1535,12 @@ export {
   isL2SequencerChain,
   getL2ChainConfig,
   CHAIN_MEV_STRATEGIES,
-  MEV_DEFAULTS
+  MEV_DEFAULTS,
+  // MEV Risk Analyzer (Phase 1.2.3)
+  MevRiskAnalyzer,
+  createMevRiskAnalyzer,
+  SandwichRiskLevel,
+  MempoolRecommendation
 } from './mev-protection';
 export type {
   IMevProvider,
@@ -1546,7 +1551,11 @@ export type {
   BundleSimulationResult,
   MevMetrics,
   MevGlobalConfig,
-  ChainWalletConfig
+  ChainWalletConfig,
+  // MEV Risk Analyzer types
+  TransactionContext,
+  MevRiskAssessment,
+  MevRiskAnalyzerConfig
 } from './mev-protection';
 
 // =============================================================================

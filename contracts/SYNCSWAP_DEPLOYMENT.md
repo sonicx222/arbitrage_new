@@ -320,7 +320,10 @@ If issues arise after deployment:
 
 ```bash
 # Pause the contract (stops all arbitrage)
-npx hardhat run scripts/pause-syncswap.ts --network zksync-mainnet
+npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync-mainnet
+
+# When ready to resume
+npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network zksync-mainnet
 ```
 
 This stops all flash loan execution while you investigate issues.

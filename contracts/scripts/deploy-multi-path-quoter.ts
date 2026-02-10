@@ -22,6 +22,15 @@
  *   ARBISCAN_API_KEY - For contract verification on Arbitrum
  *   BASESCAN_API_KEY - For contract verification on Base
  *
+ * Phase 4A Improvements:
+ *   ✅ Uses deployment-utils.ts for consistency
+ *   ✅ Gas estimation error handling
+ *   ✅ Verification retry with exponential backoff
+ *   ✅ Network name normalization
+ *   ✅ Improved smoke tests (bytecode validation)
+ *   ✅ Standardized output format
+ *   ✅ No config needed (stateless utility contract)
+ *
  * @see ADR-029: Batched Quote Fetching
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 1 Task 1.2
  */
@@ -35,6 +44,8 @@ import {
   estimateDeploymentCost,
   verifyContractWithRetry,
   saveDeploymentResult,
+  DEFAULT_VERIFICATION_RETRIES,
+  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type MultiPathQuoterDeploymentResult
 } from './lib/deployment-utils';
 
@@ -42,8 +53,16 @@ import {
 // Types
 // =============================================================================
 
-// Use standardized MultiPathQuoterDeploymentResult from deployment-utils
-// This ensures type consistency across all deployment scripts
+/**
+ * Type alias for MultiPathQuoter contract deployment results
+ *
+ * Maps to MultiPathQuoterDeploymentResult from deployment-utils.ts for type safety.
+ * This alias maintains backward compatibility with existing function signatures
+ * (e.g., deployMultiPathQuoter() return type) while ensuring consistency
+ * with the standardized deployment result types used internally.
+ *
+ * @see MultiPathQuoterDeploymentResult in deployment-utils.ts
+ */
 type DeploymentResult = MultiPathQuoterDeploymentResult;
 
 // =============================================================================
@@ -69,6 +88,7 @@ type DeploymentResult = MultiPathQuoterDeploymentResult;
 async function deployMultiPathQuoter(): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
   const networkName = normalizeNetworkName(network.name);
+  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -109,8 +129,8 @@ async function deployMultiPathQuoter(): Promise<DeploymentResult> {
   const verified = await verifyContractWithRetry(
     contractAddress,
     [], // no constructor arguments
-    3, // max retries
-    30000 // initial delay (30s)
+    DEFAULT_VERIFICATION_RETRIES,
+    DEFAULT_VERIFICATION_INITIAL_DELAY_MS
   );
 
   // Smoke test: verify contract is deployed and functional
@@ -177,8 +197,8 @@ async function deployMultiPathQuoter(): Promise<DeploymentResult> {
  * Save deployment result to file (now using utility function)
  * Kept as wrapper for backward compatibility
  */
-function saveMultiPathQuoterDeployment(result: DeploymentResult): void {
-  saveDeploymentResult(result, 'multi-path-quoter-registry.json');
+async function saveMultiPathQuoterDeployment(result: DeploymentResult): Promise<void> {
+  await saveDeploymentResult(result, 'multi-path-quoter-registry.json');
 }
 
 /**
@@ -200,20 +220,32 @@ function printDeploymentSummary(result: DeploymentResult): void {
 
   console.log('📋 NEXT STEPS:');
   console.log('');
-  console.log('1. Update contract addresses in configuration:');
-  console.log(`   File: shared/config/src/service-config.ts`);
-  console.log(`   Add: MULTI_PATH_QUOTER_ADDRESSES.${result.network} = '${result.contractAddress}';`);
+  console.log('1. Update contract addresses in TWO configuration files:');
   console.log('');
-  console.log('2. Test the deployment:');
+  console.log('   a) shared/config/src/service-config.ts');
+  console.log(`      UPDATE: MULTI_PATH_QUOTER_ADDRESSES['${result.network}'] = '${result.contractAddress}';`);
+  console.log('');
+  console.log('   b) contracts/deployments/addresses.ts');
+  console.log(`      UPDATE: MULTI_PATH_QUOTER_ADDRESSES['${result.network}'] = '${result.contractAddress}';`);
+  console.log('');
+  console.log('   NOTE: Update BOTH files to keep them in sync. In the future, this will be');
+  console.log('   auto-generated. See contracts/deployments/README.md for details.');
+  console.log('');
+  console.log('2. Validate the updates:');
+  console.log(`   npm run typecheck`);
+  console.log(`   npm test contracts/deployments`);
+  console.log('');
+  console.log('3. Test the deployment on-chain:');
   console.log(`   npx hardhat console --network ${result.network}`);
   console.log(`   > const quoter = await ethers.getContractAt('MultiPathQuoter', '${result.contractAddress}');`);
   console.log(`   > await quoter.getBatchedQuotes([...]); // Test with real quote requests`);
   console.log('');
-  console.log('3. Enable feature flag in environment:');
-  console.log(`   export FEATURE_BATCHED_QUOTER=true`);
-  console.log(`   export MULTI_PATH_QUOTER_${result.network.toUpperCase()}=${result.contractAddress}`);
+  console.log('4. Enable feature flag in environment (.env.local):');
+  console.log(`   FEATURE_BATCHED_QUOTER=true`);
+  console.log(`   MULTI_PATH_QUOTER_${result.network.toUpperCase()}=${result.contractAddress}`);
   console.log('');
-  console.log('4. Restart services to pick up new configuration');
+  console.log('5. Restart services to pick up new configuration:');
+  console.log(`   npm run dev:stop && npm run dev:all`);
   console.log('');
 
   if (!result.verified) {
@@ -236,7 +268,7 @@ async function main(): Promise<void> {
   const result = await deployMultiPathQuoter();
 
   // Save and print summary
-  saveMultiPathQuoterDeployment(result);
+  await saveMultiPathQuoterDeployment(result);
   printDeploymentSummary(result);
 
   console.log('🎉 Deployment complete!');

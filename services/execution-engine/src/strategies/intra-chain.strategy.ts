@@ -222,7 +222,7 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       // ==========================================================================
       // Task 3.1: Check if commit-reveal pattern should be used
       // ==========================================================================
-      const commitRevealCheck = this.shouldUseCommitReveal(opportunity, chain, ctx);
+      const commitRevealCheck = await this.shouldUseCommitReveal(opportunity, chain, ctx);
 
       if (commitRevealCheck.shouldUse) {
         this.logger.info('Using commit-reveal pattern for high-risk transaction', {
@@ -341,15 +341,15 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
    * @param ctx - Strategy context
    * @returns Object with shouldUse flag and risk assessment
    */
-  private shouldUseCommitReveal(
+  private async shouldUseCommitReveal(
     opportunity: ArbitrageOpportunity,
     chain: string,
     ctx: StrategyContext
-  ): {
+  ): Promise<{
     shouldUse: boolean;
     riskScore?: number;
     reason?: string;
-  } {
+  }> {
     // Check 1: Feature flag enabled
     if (!FEATURE_FLAGS.useCommitReveal) {
       return { shouldUse: false, reason: 'Feature disabled (FEATURE_COMMIT_REVEAL=false)' };
@@ -372,11 +372,10 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
       tokenSymbol: opportunity.tokenIn,
       dexProtocol: opportunity.buyDex,
       slippageBps: 50, // Default 0.5% slippage
-      poolLiquidityUsd: opportunity.poolLiquidity,
       expectedProfitUsd: opportunity.expectedProfit,
     };
 
-    const riskAssessment = this.mevRiskAnalyzer.analyzeMevRisk(txContext);
+    const riskAssessment = await this.mevRiskAnalyzer.assessRisk(txContext);
 
     // Risk score threshold: 70 = HIGH or CRITICAL risk
     if (riskAssessment.sandwichRiskScore < 70) {
@@ -476,12 +475,19 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         ? ethers.parseEther((opportunity.expectedProfit * 0.8).toFixed(18)) // 80% of expected profit (Fix #3)
         : ethers.parseEther('0.001'); // Minimum 0.001 ETH
 
-      const params: CommitRevealParams = {
-        tokenIn: opportunity.tokenIn,
-        tokenOut: opportunity.tokenOut,
-        amountIn,
-        minProfit,
+      // Build swap path for commit-reveal v2.0.0 interface
+      const swapPath = [{
         router: routerAddress,
+        tokenIn: opportunity.tokenIn || opportunity.token0 || '',
+        tokenOut: opportunity.tokenOut || opportunity.token1 || '',
+        amountOutMin: 0n, // Will be calculated by contract
+      }];
+
+      const params: CommitRevealParams = {
+        asset: opportunity.tokenIn || opportunity.token0 || '',
+        amountIn,
+        swapPath,
+        minProfit,
         deadline: Math.floor(Date.now() / 1000) + 300, // 5 minutes from now
         salt: ethers.hexlify(ethers.randomBytes(32)), // Random 32-byte salt
       };
@@ -490,7 +496,6 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         opportunityId: opportunity.id,
         chain,
         contract: contractAddress,
-        riskScore: opportunity.mevRiskScore,
       });
 
       // Phase 1: Commit
@@ -568,7 +573,6 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         commitTxHash: commitResult.txHash,
         revealTxHash: revealResult.txHash,
         profit: revealResult.profit?.toString(),
-        gasUsed: revealResult.gasUsed,
       });
 
       return createSuccessResult(
@@ -578,8 +582,6 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         opportunity.buyDex || 'unknown',
         {
           actualProfit: revealResult.profit ? parseFloat(ethers.formatEther(revealResult.profit)) : undefined,
-          gasUsed: revealResult.gasUsed,
-          commitTxHash: commitResult.txHash,
         }
       );
     } catch (error) {

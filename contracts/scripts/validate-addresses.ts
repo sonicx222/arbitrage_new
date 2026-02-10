@@ -5,7 +5,10 @@
  * 1. contracts/deployments/addresses.ts (used by Hardhat deployment)
  * 2. shared/config/src/service-config.ts (used by TypeScript backend)
  *
- * Run: npx ts-node scripts/validate-addresses.ts
+ * Usage:
+ *   npx tsx contracts/scripts/validate-addresses.ts
+ *
+ * Note: Use tsx (not ts-node) to handle ESM imports correctly.
  *
  * @see Issue 3.1 - Address synchronization risk
  */

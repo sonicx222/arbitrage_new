@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IBalancerV2Vault.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
+import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at line 269
 
 /**
  * @title BalancerV2FlashArbitrage

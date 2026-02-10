@@ -1233,12 +1233,14 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         deadline,
       ]);
     } else {
-      // Aave V3: Standard flash loan
+      // Aave V3: Standard flash loan (also needs deadline parameter)
+      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
       return FLASH_LOAN_INTERFACE.encodeFunctionData('executeArbitrage', [
         asset,
         amount,
         swapPathTuples,
         minProfit,
+        deadline,
       ]);
     }
   }

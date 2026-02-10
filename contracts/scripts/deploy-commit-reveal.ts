@@ -42,6 +42,15 @@
  *   ZKSYNC_ETHERSCAN_API_KEY - For verification on zkSync
  *   LINEASCAN_API_KEY - For contract verification on Linea
  *
+ * Phase 4A Improvements:
+ *   ✅ Uses deployment-utils.ts for consistency
+ *   ✅ Gas estimation error handling
+ *   ✅ Verification retry with exponential backoff
+ *   ✅ Network name normalization
+ *   ✅ Smoke tests with constraint validation
+ *   ✅ No minimumProfit (off-chain validation)
+ *   ✅ No router approval (configured manually post-deployment)
+ *
  * Post-Deployment Steps:
  *   1. Approve DEX routers via approveRouter(address)
  *   2. Set minimum profit threshold via setMinimumProfit(uint256)
@@ -59,7 +68,10 @@ import {
   checkDeployerBalance,
   estimateDeploymentCost,
   verifyContractWithRetry,
+  smokeTestCommitRevealContract,
   saveDeploymentResult,
+  DEFAULT_VERIFICATION_RETRIES,
+  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type CommitRevealDeploymentResult
 } from './lib/deployment-utils';
 
@@ -67,8 +79,16 @@ import {
 // Types
 // =============================================================================
 
-// Use standardized CommitRevealDeploymentResult from deployment-utils
-// This ensures type consistency across all deployment scripts
+/**
+ * Type alias for commit-reveal contract deployment results
+ *
+ * Maps to CommitRevealDeploymentResult from deployment-utils.ts for type safety.
+ * This alias maintains backward compatibility with existing function signatures
+ * (e.g., deployCommitRevealArbitrage() return type) while ensuring consistency
+ * with the standardized deployment result types used internally.
+ *
+ * @see CommitRevealDeploymentResult in deployment-utils.ts
+ */
 type DeploymentResult = CommitRevealDeploymentResult;
 
 // =============================================================================
@@ -105,6 +125,7 @@ function getOwnerAddress(deployerAddress: string): string {
 async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
   const networkName = normalizeNetworkName(network.name);
+  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -149,30 +170,16 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
   console.log(`   Block: ${blockNumber}`);
   console.log(`   Gas Used: ${gasUsed}`);
 
-  // Phase 1 Fix: Verification with retry logic
+  // Phase 4A: Verification with retry logic
   const verified = await verifyContractWithRetry(
     contractAddress,
     [ownerAddress],
-    3, // max retries
-    30000 // initial delay (30s)
+    DEFAULT_VERIFICATION_RETRIES,
+    DEFAULT_VERIFICATION_INITIAL_DELAY_MS
   );
 
-  // Smoke test: check contract state
-  console.log('\nRunning smoke tests...');
-  try {
-    const minDelayBlocks = await commitRevealArbitrage.MIN_DELAY_BLOCKS();
-    const maxCommitAgeBlocks = await commitRevealArbitrage.MAX_COMMIT_AGE_BLOCKS();
-    const minimumProfit = await commitRevealArbitrage.minimumProfit();
-    const paused = await commitRevealArbitrage.paused();
-
-    console.log('✅ Smoke tests passed:');
-    console.log(`   MIN_DELAY_BLOCKS: ${minDelayBlocks}`);
-    console.log(`   MAX_COMMIT_AGE_BLOCKS: ${maxCommitAgeBlocks}`);
-    console.log(`   minimumProfit: ${ethers.formatEther(minimumProfit)} ETH`);
-    console.log(`   paused: ${paused}`);
-  } catch (error) {
-    console.log('⚠️  Smoke test failed:', error);
-  }
+  // Phase 4A: Smoke tests with constraint validation
+  await smokeTestCommitRevealContract(commitRevealArbitrage, ownerAddress);
 
   return {
     network: networkName,
@@ -192,8 +199,8 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
  * Save deployment result to file (now using utility function)
  * Kept as wrapper for backward compatibility
  */
-function saveCommitRevealDeployment(result: DeploymentResult): void {
-  saveDeploymentResult(result, 'commit-reveal-registry.json');
+async function saveCommitRevealDeployment(result: DeploymentResult): Promise<void> {
+  await saveDeploymentResult(result, 'commit-reveal-registry.json');
 }
 
 /**
@@ -299,7 +306,7 @@ async function main(): Promise<void> {
   const result = await deployCommitRevealArbitrage();
 
   // Save and print summary
-  saveCommitRevealDeployment(result);
+  await saveCommitRevealDeployment(result);
   printDeploymentSummary(result);
 
   console.log('🎉 Deployment complete!');

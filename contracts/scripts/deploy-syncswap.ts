@@ -21,13 +21,37 @@
  *   DEPLOYER_PRIVATE_KEY - Private key for deployment
  *   ZKSYNC_ETHERSCAN_API_KEY - For contract verification (optional)
  *
+ * Phase 4A Improvements:
+ *   ✅ Uses deployment-utils.ts for consistency
+ *   ✅ Production config guards (prevents 0n profit on mainnet)
+ *   ✅ Gas estimation error handling
+ *   ✅ Verification retry with exponential backoff
+ *   ✅ Router approval error handling
+ *   ✅ Network name normalization
+ *   ✅ Smoke tests added
+ *   ✅ Standardized output format
+ *
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.4
  * @see contracts/src/SyncSwapFlashArbitrage.sol
  */
 
-import { ethers, network, run } from 'hardhat';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ethers, network } from 'hardhat';
+import { SYNCSWAP_VAULTS } from '@arbitrage/config';
+import { APPROVED_ROUTERS } from '../deployments/addresses';
+import {
+  normalizeNetworkName,
+  checkDeployerBalance,
+  estimateDeploymentCost,
+  validateMinimumProfit,
+  approveRouters,
+  verifyContractWithRetry,
+  smokeTestFlashLoanContract,
+  saveDeploymentResult,
+  printDeploymentSummary,
+  DEFAULT_VERIFICATION_RETRIES,
+  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
+  type SyncSwapDeploymentResult,
+} from './lib/deployment-utils';
 
 // =============================================================================
 // Network Configuration
@@ -35,55 +59,32 @@ import * as path from 'path';
 
 /**
  * SyncSwap Vault addresses by network
- * Single Vault per network handles all flash loans (no pool discovery needed)
- * @see https://syncswap.xyz/
- * @see docs/syncswap_api_dpcu.md
+ * Imported from @arbitrage/config (single source of truth)
  */
-const SYNCSWAP_VAULT_ADDRESSES: Record<string, string> = {
-  // zkSync Era Mainnet
-  'zksync-mainnet': '0x621425a1Ef6abE91058E9712575dcc4258F8d091',
-  'zksync': '0x621425a1Ef6abE91058E9712575dcc4258F8d091',
-
-  // zkSync Era Sepolia Testnet (Staging)
-  'zksync-testnet': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',
-  'zksync-sepolia': '0x4Ff94F499E1E69D687f3C3cE2CE93E717a0769F8',
-};
+const SYNCSWAP_VAULT_ADDRESSES = SYNCSWAP_VAULTS;
 
 /**
  * Default approved DEX routers for zkSync Era
- * These routers are commonly used for arbitrage swaps
+ * Imported from deployments/addresses.ts (single source of truth)
  */
-const DEFAULT_APPROVED_ROUTERS: Record<string, string[]> = {
-  // zkSync Era Mainnet
-  'zksync-mainnet': [
-    '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', // SyncSwap Router
-    '0x8B791913eB07C32779a16750e3868aA8495F5964', // Mute.io Router
-    '0x39E098A153Ad69834a9Dac32f0FCa92066aD03f4', // Velocore Router
-  ],
-  'zksync': [
-    '0x2da10A1e27bF85cEdD8FFb1AbBe97e53391C0295', // SyncSwap Router
-    '0x8B791913eB07C32779a16750e3868aA8495F5964', // Mute.io Router
-    '0x39E098A153Ad69834a9Dac32f0FCa92066aD03f4', // Velocore Router
-  ],
-
-  // zkSync Era Sepolia Testnet
-  'zksync-testnet': [
-    '0xB3b7fCbb8Db37bC6f572634299A58f51622A847e', // SyncSwap Router (Testnet)
-    '0x8B791913eB07C32779a16750e3868aA8495F5964', // Mute.io Router (if available)
-  ],
-  'zksync-sepolia': [
-    '0xB3b7fCbb8Db37bC6f572634299A58f51622A847e', // SyncSwap Router (Testnet)
-    '0x8B791913eB07C32779a16750e3868aA8495F5964', // Mute.io Router (if available)
-  ],
-};
+const DEFAULT_APPROVED_ROUTERS = APPROVED_ROUTERS;
 
 /**
  * Default minimum profit settings by network (in native token wei)
  * SyncSwap charges 0.3% fees, so profit threshold should account for this
+ *
+ * MAINNET: Must be defined with positive values to prevent unprofitable trades
+ * TESTNET: Low thresholds for testing
+ *
+ * Phase 4A: Now enforced by validateMinimumProfit() - mainnet deployments
+ * without proper thresholds will fail with clear error messages
  */
 const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
+  // Mainnets
   'zksync-mainnet': ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  'zksync': ethers.parseEther('0.001'),
+  'zksync': ethers.parseEther('0.001'), // Alias for mainnet
+
+  // Testnets
   'zksync-testnet': ethers.parseEther('0.0001'), // Lower for testnet
   'zksync-sepolia': ethers.parseEther('0.0001'),
 };
@@ -92,21 +93,9 @@ const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
 // Types
 // =============================================================================
 
-interface DeploymentResult {
-  network: string;
-  chainId: number;
-  contractAddress: string;
-  vaultAddress: string;
-  ownerAddress: string;
-  deployerAddress: string;
-  transactionHash: string;
-  blockNumber: number;
-  timestamp: number;
-  minimumProfit: string;
-  approvedRouters: string[];
-  flashLoanFee: string;
-  verified: boolean;
-}
+// Use standardized SyncSwapDeploymentResult from deployment-utils
+// This ensures type consistency across all deployment scripts
+type DeploymentResult = SyncSwapDeploymentResult;
 
 interface DeploymentConfig {
   vaultAddress: string;
@@ -122,12 +111,16 @@ interface DeploymentConfig {
 
 /**
  * Deploy SyncSwapFlashArbitrage contract
+ * Phase 4A: Refactored to use deployment-utils.ts
  */
 async function deploySyncSwapFlashArbitrage(
   config: DeploymentConfig
 ): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
-  const networkName = network.name;
+
+  // Phase 4A: Network name normalization
+  const networkName = normalizeNetworkName(network.name);
+  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -138,23 +131,21 @@ async function deploySyncSwapFlashArbitrage(
   console.log(`Vault: ${config.vaultAddress}`);
   console.log('Flash Loan Fee: 0.3% (30 bps) - SyncSwap standard');
 
-  // Check deployer balance
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`Deployer Balance: ${ethers.formatEther(balance)} ETH`);
-
-  if (balance === 0n) {
-    throw new Error('Deployer has no balance. Please fund the deployer account.');
-  }
+  // Phase 4A: Proper balance checking with helpful error messages
+  await checkDeployerBalance(deployer);
 
   // Determine owner address
   const ownerAddress = config.ownerAddress || deployer.address;
   console.log(`Owner: ${ownerAddress}`);
 
-  // Deploy contract
-  console.log('\nDeploying SyncSwapFlashArbitrage...');
+  // Phase 4A: Estimate gas with error handling
   const SyncSwapFlashArbitrageFactory = await ethers.getContractFactory(
     'SyncSwapFlashArbitrage'
   );
+  await estimateDeploymentCost(SyncSwapFlashArbitrageFactory, config.vaultAddress, ownerAddress);
+
+  // Deploy contract
+  console.log('\nDeploying SyncSwapFlashArbitrage...');
   const syncSwapFlashArbitrage = await SyncSwapFlashArbitrageFactory.deploy(
     config.vaultAddress,
     ownerAddress
@@ -176,8 +167,10 @@ async function deploySyncSwapFlashArbitrage(
   // Post-deployment configuration
   console.log('\nConfiguring contract...');
 
-  // Set minimum profit if specified
-  const minimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName] || 0n;
+  // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
+  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
+
   if (minimumProfit > 0n) {
     console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} ETH`);
     const tx = await syncSwapFlashArbitrage.setMinimumProfit(minimumProfit);
@@ -185,45 +178,38 @@ async function deploySyncSwapFlashArbitrage(
     console.log('  ✅ Minimum profit set');
   }
 
-  // Add approved routers
-  const approvedRouters = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
-  if (approvedRouters.length > 0) {
-    console.log(`\nAdding ${approvedRouters.length} approved routers...`);
-    for (const router of approvedRouters) {
-      console.log(`  Adding router: ${router}`);
-      const tx = await syncSwapFlashArbitrage.addApprovedRouter(router);
-      await tx.wait();
-      console.log('  ✅ Router approved');
+  // Phase 4A: Router approval with error handling
+  const routers = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
+  let approvedRoutersList: string[] = [];
+
+  if (routers.length > 0) {
+    const approvalResult = await approveRouters(syncSwapFlashArbitrage, routers, true);
+    approvedRoutersList = approvalResult.succeeded;
+
+    // If any router failed and we're on mainnet, warn loudly
+    if (approvalResult.failed.length > 0) {
+      console.warn('\n⚠️  WARNING: Some routers failed to approve');
+      console.warn('   Contract is partially configured');
+      console.warn('   Manually approve failed routers before executing arbitrage trades');
     }
   } else {
-    console.log('\n⚠️ No routers configured (add manually before use)');
+    console.warn('\n⚠️  No routers configured for this network');
+    console.warn('   You must approve routers manually before the contract can execute swaps');
   }
 
-  // Verify contract on block explorer
+  // Phase 4A: Verification with retry logic
   let verified = false;
-  if (!config.skipVerification && networkName !== 'localhost' && networkName !== 'hardhat') {
-    console.log('\nVerifying contract on block explorer...');
-    try {
-      await run('verify:verify', {
-        address: contractAddress,
-        constructorArguments: [config.vaultAddress, ownerAddress],
-      });
-      verified = true;
-      console.log('✅ Contract verified');
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('Already Verified')) {
-        verified = true;
-        console.log('✅ Contract already verified');
-      } else {
-        console.warn('⚠️ Verification failed:', errorMessage);
-        console.log('   You can verify manually later with:');
-        console.log(
-          `   npx hardhat verify --network ${networkName} ${contractAddress} ${config.vaultAddress} ${ownerAddress}`
-        );
-      }
-    }
+  if (!config.skipVerification) {
+    verified = await verifyContractWithRetry(
+      contractAddress,
+      [config.vaultAddress, ownerAddress],
+      DEFAULT_VERIFICATION_RETRIES,
+      DEFAULT_VERIFICATION_INITIAL_DELAY_MS
+    );
   }
+
+  // Phase 4A: Smoke test - verify contract is callable
+  await smokeTestFlashLoanContract(syncSwapFlashArbitrage, ownerAddress);
 
   return {
     network: networkName,
@@ -236,95 +222,18 @@ async function deploySyncSwapFlashArbitrage(
     blockNumber,
     timestamp,
     minimumProfit: minimumProfit.toString(),
-    approvedRouters,
+    approvedRouters: approvedRoutersList,
     flashLoanFee: '30', // 0.3% = 30 bps
     verified,
   };
 }
 
 /**
- * Save deployment result to file
+ * Save deployment result to file (now using utility function)
+ * Kept as wrapper for backward compatibility
  */
-function saveDeploymentResult(result: DeploymentResult): void {
-  const deploymentsDir = path.join(__dirname, '..', 'deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save network-specific deployment
-  const networkFile = path.join(deploymentsDir, `syncswap-${result.network}.json`);
-  fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
-  console.log(`\n📝 Deployment saved to: ${networkFile}`);
-
-  // Update master registry
-  const registryFile = path.join(deploymentsDir, 'syncswap-registry.json');
-  let registry: Record<string, DeploymentResult> = {};
-  if (fs.existsSync(registryFile)) {
-    registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
-  }
-  registry[result.network] = result;
-  fs.writeFileSync(registryFile, JSON.stringify(registry, null, 2));
-  console.log(`📝 Registry updated: ${registryFile}`);
-}
-
-/**
- * Print deployment summary
- */
-function printDeploymentSummary(result: DeploymentResult): void {
-  console.log('\n========================================');
-  console.log('Deployment Summary');
-  console.log('========================================');
-  console.log(`Network:           ${result.network} (${result.chainId})`);
-  console.log(`Contract:          ${result.contractAddress}`);
-  console.log(`Vault:             ${result.vaultAddress}`);
-  console.log(`Owner:             ${result.ownerAddress}`);
-  console.log(`Deployer:          ${result.deployerAddress}`);
-  console.log(`Transaction:       ${result.transactionHash}`);
-  console.log(`Block:             ${result.blockNumber}`);
-  console.log(`Timestamp:         ${new Date(result.timestamp * 1000).toISOString()}`);
-  console.log(`Minimum Profit:    ${ethers.formatEther(result.minimumProfit)} ETH`);
-  console.log(`Flash Loan Fee:    ${result.flashLoanFee} bps (0.3%)`);
-  console.log(`Approved Routers:  ${result.approvedRouters.length}`);
-  console.log(`Verified:          ${result.verified ? '✅ Yes' : '❌ No'}`);
-  console.log('========================================\n');
-
-  // Print cost comparison vs other protocols
-  console.log('💰 Flash Loan Fee Comparison:');
-  console.log('   SyncSwap:   0.3% (30 bps) - This deployment');
-  console.log('   Aave V3:    0.09% (9 bps) - Cheaper but not on zkSync Era');
-  console.log('   Balancer:   0% - Cheapest but not on zkSync Era');
-  console.log('   Note: SyncSwap is currently the best option for zkSync Era flash loans');
-  console.log('========================================\n');
-}
-
-/**
- * Print post-deployment instructions
- */
-function printPostDeploymentInstructions(result: DeploymentResult): void {
-  console.log('📋 Next Steps:');
-  console.log('========================================');
-  console.log('1. Update .env file:');
-  console.log(`   ZKSYNC_FLASH_LOAN_CONTRACT=${result.contractAddress}`);
-  console.log(`   ZKSYNC_APPROVED_ROUTERS=${result.approvedRouters.join(',')}`);
-  console.log('');
-  console.log('2. Update execution-engine config:');
-  console.log(`   contractAddresses: {`);
-  console.log(`     zksync: '${result.contractAddress}',`);
-  console.log(`   }`);
-  console.log(`   approvedRouters: {`);
-  console.log(`     zksync: ${JSON.stringify(result.approvedRouters, null, 6)},`);
-  console.log(`   }`);
-  console.log('');
-  console.log('3. Test deployment:');
-  console.log(`   - Restart execution engine: npm run dev:execution:fast`);
-  console.log(`   - Check logs for: "Created SyncSwap provider for zksync"`);
-  console.log(`   - Run integration tests (if available)`);
-  console.log('');
-  console.log('4. Monitor metrics:');
-  console.log('   - Track flash loan success rate');
-  console.log('   - Compare profit margins vs other protocols');
-  console.log('   - Monitor gas costs on zkSync Era');
-  console.log('========================================\n');
+async function saveSyncSwapDeployment(result: DeploymentResult): Promise<void> {
+  await saveDeploymentResult(result, 'syncswap-registry.json');
 }
 
 // =============================================================================
@@ -332,21 +241,27 @@ function printPostDeploymentInstructions(result: DeploymentResult): void {
 // =============================================================================
 
 async function main(): Promise<void> {
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
 
   // Get Vault address for the network
   const vaultAddress = SYNCSWAP_VAULT_ADDRESSES[networkName];
   if (!vaultAddress) {
     throw new Error(
-      `SyncSwap Vault address not configured for network: ${networkName}\n` +
-      `Supported networks: ${Object.keys(SYNCSWAP_VAULT_ADDRESSES).join(', ')}\n` +
-      `\nAvailable networks:\n` +
-      `  - zksync-mainnet (or zksync): zkSync Era Mainnet\n` +
-      `  - zksync-testnet (or zksync-sepolia): zkSync Era Sepolia Testnet`
+      `[ERR_NO_VAULT] SyncSwap Vault address not configured for network: ${networkName}\n` +
+        `Supported networks: ${Object.keys(SYNCSWAP_VAULT_ADDRESSES).join(', ')}\n\n` +
+        `Available networks:\n` +
+        `  - zksync-mainnet (or zksync): zkSync Era Mainnet\n` +
+        `  - zksync-testnet (or zksync-sepolia): zkSync Era Sepolia Testnet\n\n` +
+        `To add support for ${networkName}:\n` +
+        `1. Find the SyncSwap Vault address from: https://syncswap.xyz/\n` +
+        `2. Add to shared/config/src/addresses.ts: SYNCSWAP_VAULTS\n` +
+        `3. Re-export in contracts/deployments/addresses.ts`
     );
   }
 
-  // Deploy
+  console.log(`\nStarting SyncSwapFlashArbitrage deployment to ${networkName}...`);
+
+  // Deploy with Phase 4A improvements
   const result = await deploySyncSwapFlashArbitrage({
     vaultAddress,
     approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
@@ -354,18 +269,50 @@ async function main(): Promise<void> {
   });
 
   // Save and print summary
-  saveDeploymentResult(result);
+  await saveSyncSwapDeployment(result);
   printDeploymentSummary(result);
-  printPostDeploymentInstructions(result);
+
+  // Print cost comparison vs other protocols (preserved messaging)
+  console.log('\n💰 Flash Loan Fee Comparison:');
+  console.log('   SyncSwap:   0.3% (30 bps) - This deployment');
+  console.log('   Aave V3:    0.09% (9 bps) - Cheaper but not on zkSync Era');
+  console.log('   Balancer:   0% - Cheapest but not on zkSync Era');
+  console.log('   Note: SyncSwap is currently the best option for zkSync Era flash loans');
+  console.log('========================================\n');
 
   console.log('🎉 Deployment complete!');
-  console.log('\n💡 Tip: SyncSwap charges 0.3% flash loan fee (30 bps)');
+  console.log('\n📋 NEXT STEPS:\n');
+
+  if (!result.verified) {
+    console.log('1. ⚠️  Verify contract manually:');
+    console.log(`   npx hardhat verify --network ${networkName} ${result.contractAddress} ${result.vaultAddress} ${result.ownerAddress}\n`);
+  }
+
+  console.log(`${!result.verified ? '2' : '1'}. Update .env file:`);
+  console.log(`   ZKSYNC_FLASH_LOAN_CONTRACT=${result.contractAddress}`);
+  console.log(`   ZKSYNC_APPROVED_ROUTERS=${result.approvedRouters.join(',')}\n`);
+
+  console.log(`${!result.verified ? '3' : '2'}. Update execution-engine config:`);
+  console.log(`   contractAddresses: { zksync: '${result.contractAddress}' }`);
+  console.log(`   approvedRouters: { zksync: ${JSON.stringify(result.approvedRouters)} }\n`);
+
+  console.log(`${!result.verified ? '4' : '3'}. Test deployment:`);
+  console.log(`   - Restart execution engine: npm run dev:execution:fast`);
+  console.log(`   - Check logs for: "Created SyncSwap provider for zksync"`);
+  console.log(`   - Run integration tests (if available)\n`);
+
+  console.log(`${!result.verified ? '5' : '4'}. Monitor metrics:`);
+  console.log('   - Track flash loan success rate');
+  console.log('   - Compare profit margins vs other protocols');
+  console.log('   - Monitor gas costs on zkSync Era\n');
+
+  console.log('💡 Tip: SyncSwap charges 0.3% flash loan fee (30 bps)');
   console.log('   This is competitive on zkSync Era where Aave V3 and Balancer V2');
   console.log('   are not yet deployed. Factor this into profit calculations!');
 }
 
 // Run the deployment
 main().catch((error) => {
-  console.error('Deployment failed:', error);
+  console.error('\n❌ Deployment failed:', error);
   process.exit(1);
 });

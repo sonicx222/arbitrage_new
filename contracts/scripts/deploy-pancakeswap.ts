@@ -13,12 +13,35 @@
  *   BSCSCAN_API_KEY - For contract verification on BSC
  *   ARBISCAN_API_KEY - For contract verification on Arbitrum
  *
- * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 2.1
+ * Phase 4A Improvements:
+ *   ✅ Uses deployment-utils.ts for consistency
+ *   ✅ Production config guards (prevents 0n profit on mainnet)
+ *   ✅ Gas estimation error handling
+ *   ✅ Verification retry with exponential backoff
+ *   ✅ Router approval error handling
+ *   ✅ Network name normalization
+ *   ✅ Preserves pool discovery optimization (Phase 3)
+ *
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.1
  */
 
-import { ethers, network, run } from 'hardhat';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ethers, network } from 'hardhat';
+import { PANCAKESWAP_V3_FACTORIES } from '@arbitrage/config';
+import { APPROVED_ROUTERS } from '../deployments/addresses';
+import {
+  normalizeNetworkName,
+  checkDeployerBalance,
+  estimateDeploymentCost,
+  validateMinimumProfit,
+  approveRouters,
+  verifyContractWithRetry,
+  smokeTestFlashLoanContract,
+  saveDeploymentResult,
+  printDeploymentSummary,
+  DEFAULT_VERIFICATION_RETRIES,
+  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
+  type PancakeSwapDeploymentResult,
+} from './lib/deployment-utils';
 
 // =============================================================================
 // Network Configuration
@@ -26,38 +49,15 @@ import * as path from 'path';
 
 /**
  * PancakeSwap V3 Factory addresses by chain
- * @see https://docs.pancakeswap.finance/developers/smart-contracts/pancakeswap-exchange/v3-contracts
+ * Imported from @arbitrage/config (single source of truth)
  */
-const PANCAKESWAP_V3_FACTORY_ADDRESSES: Record<string, string> = {
-  bsc: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  ethereum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  arbitrum: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  zksync: '0x1BB72E0CbbEA93c08f535fc7856E0338D7F7a8aB',
-  base: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-  linea: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',
-};
+const PANCAKESWAP_V3_FACTORY_ADDRESSES = PANCAKESWAP_V3_FACTORIES;
 
 /**
  * Default approved DEX routers by chain
+ * Imported from deployments/addresses.ts (single source of truth)
  */
-const DEFAULT_APPROVED_ROUTERS: Record<string, string[]> = {
-  bsc: [
-    '0x10ED43C718714eb63d5aA57B78B54704E256024E', // PancakeSwap V2 Router
-    '0x3a6d8cA21D1CF76F653A67577FA0D27453350dD8', // Biswap
-  ],
-  ethereum: [
-    '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D', // Uniswap V2 Router
-    '0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F', // SushiSwap
-  ],
-  arbitrum: [
-    '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap
-    '0xc873fEcbd354f5A56E00E710B90EF4201db2448d', // Camelot
-  ],
-  base: [
-    '0x327Df1E6de05895d2ab08513aaDD9313Fe505d86', // BaseSwap
-    '0x8cFe327CEc66d1C090Dd72bd0FF11d690C33a2Eb', // Aerodrome
-  ],
-};
+const DEFAULT_APPROVED_ROUTERS = APPROVED_ROUTERS;
 
 /**
  * Common token pairs for pool whitelisting (by chain)
@@ -137,8 +137,15 @@ const FEE_TIERS = [100, 500, 2500, 10000] as const;
 
 /**
  * Default minimum profit settings (in wei)
+ *
+ * MAINNET: Must be defined with positive values to prevent unprofitable trades
+ * TESTNET: Low thresholds for testing
+ *
+ * Phase 4A: Now enforced by validateMinimumProfit() - mainnet deployments
+ * without proper thresholds will fail with clear error messages
  */
 const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
+  // Mainnets - set conservative thresholds to prevent unprofitable trades
   bsc: ethers.parseEther('0.001'), // 0.001 BNB (~$0.30 at $300/BNB)
   ethereum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
   arbitrum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
@@ -149,21 +156,9 @@ const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
 // Types
 // =============================================================================
 
-interface DeploymentResult {
-  network: string;
-  chainId: number;
-  contractAddress: string;
-  factoryAddress: string;
-  ownerAddress: string;
-  deployerAddress: string;
-  transactionHash: string;
-  blockNumber: number;
-  timestamp: number;
-  minimumProfit: string;
-  approvedRouters: string[];
-  whitelistedPools: string[];
-  verified: boolean;
-}
+// Use standardized PancakeSwapDeploymentResult from deployment-utils
+// This ensures type consistency across all deployment scripts
+type DeploymentResult = PancakeSwapDeploymentResult;
 
 interface DeploymentConfig {
   factoryAddress: string;
@@ -180,6 +175,7 @@ interface DeploymentConfig {
 
 /**
  * Discover pools from factory for given token pairs
+ * Phase 3 Optimization: Preserved as-is (already optimized)
  */
 async function discoverPools(
   factoryAddress: string,
@@ -224,12 +220,16 @@ async function discoverPools(
 
 /**
  * Deploy PancakeSwapFlashArbitrage contract
+ * Phase 4A: Refactored to use deployment-utils.ts
  */
 async function deployPancakeSwapFlashArbitrage(
   config: DeploymentConfig
 ): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
-  const networkName = network.name;
+
+  // Phase 4A: Network name normalization
+  const networkName = normalizeNetworkName(network.name);
+  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -239,23 +239,21 @@ async function deployPancakeSwapFlashArbitrage(
   console.log(`Deployer: ${deployer.address}`);
   console.log(`Factory: ${config.factoryAddress}`);
 
-  // Check deployer balance
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`Deployer Balance: ${ethers.formatEther(balance)} ETH/Native`);
-
-  if (balance === 0n) {
-    throw new Error('Deployer has no balance. Please fund the deployer account.');
-  }
+  // Phase 4A: Proper balance checking with helpful error messages
+  await checkDeployerBalance(deployer);
 
   // Determine owner address
   const ownerAddress = config.ownerAddress || deployer.address;
   console.log(`Owner: ${ownerAddress}`);
 
-  // Deploy contract
-  console.log('\nDeploying PancakeSwapFlashArbitrage...');
+  // Phase 4A: Estimate gas with error handling
   const PancakeSwapFlashArbitrageFactory = await ethers.getContractFactory(
     'PancakeSwapFlashArbitrage'
   );
+  await estimateDeploymentCost(PancakeSwapFlashArbitrageFactory, config.factoryAddress, ownerAddress);
+
+  // Deploy contract
+  console.log('\nDeploying PancakeSwapFlashArbitrage...');
   const pancakeSwapFlashArbitrage = await PancakeSwapFlashArbitrageFactory.deploy(
     config.factoryAddress,
     ownerAddress
@@ -277,8 +275,10 @@ async function deployPancakeSwapFlashArbitrage(
   // Post-deployment configuration
   console.log('\nConfiguring contract...');
 
-  // Set minimum profit if specified
-  const minimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName] || 0n;
+  // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
+  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
+
   if (minimumProfit > 0n) {
     console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} Native Token`);
     const tx = await pancakeSwapFlashArbitrage.setMinimumProfit(minimumProfit);
@@ -286,16 +286,27 @@ async function deployPancakeSwapFlashArbitrage(
     console.log('  ✅ Minimum profit set');
   }
 
-  // Add approved routers
-  const approvedRouters = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
-  for (const router of approvedRouters) {
-    console.log(`  Adding approved router: ${router}`);
-    const tx = await pancakeSwapFlashArbitrage.addApprovedRouter(router);
-    await tx.wait();
-    console.log('  ✅ Router approved');
+  // Phase 4A: Router approval with error handling
+  const routers = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
+  let approvedRoutersList: string[] = [];
+
+  if (routers.length > 0) {
+    const approvalResult = await approveRouters(pancakeSwapFlashArbitrage, routers, true);
+    approvedRoutersList = approvalResult.succeeded;
+
+    // If any router failed and we're on mainnet, warn loudly
+    if (approvalResult.failed.length > 0) {
+      console.warn('\n⚠️  WARNING: Some routers failed to approve');
+      console.warn('   Contract is partially configured');
+      console.warn('   Manually approve failed routers before executing arbitrage trades');
+    }
+  } else {
+    console.warn('\n⚠️  No routers configured for this network');
+    console.warn('   You must approve routers manually before the contract can execute swaps');
   }
 
   // Task 2.1 (C4): Batch whitelist common pools during deployment
+  // Phase 3 Optimization: Preserved pool discovery and whitelisting
   let whitelistedPools: string[] = [];
   if (config.whitelistPools !== false) {
     console.log('\nWhitelisting common pools...');
@@ -329,31 +340,19 @@ async function deployPancakeSwapFlashArbitrage(
     }
   }
 
-  // Verify contract on block explorer
+  // Phase 4A: Verification with retry logic
   let verified = false;
-  if (!config.skipVerification && networkName !== 'localhost' && networkName !== 'hardhat') {
-    console.log('\nVerifying contract on block explorer...');
-    try {
-      await run('verify:verify', {
-        address: contractAddress,
-        constructorArguments: [config.factoryAddress, ownerAddress],
-      });
-      verified = true;
-      console.log('✅ Contract verified');
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('Already Verified')) {
-        verified = true;
-        console.log('✅ Contract already verified');
-      } else {
-        console.warn('⚠️ Verification failed:', errorMessage);
-        console.log('   You can verify manually later with:');
-        console.log(
-          `   npx hardhat verify --network ${networkName} ${contractAddress} ${config.factoryAddress} ${ownerAddress}`
-        );
-      }
-    }
+  if (!config.skipVerification) {
+    verified = await verifyContractWithRetry(
+      contractAddress,
+      [config.factoryAddress, ownerAddress],
+      DEFAULT_VERIFICATION_RETRIES,
+      DEFAULT_VERIFICATION_INITIAL_DELAY_MS
+    );
   }
+
+  // Phase 4A: Smoke test - verify contract is callable
+  await smokeTestFlashLoanContract(pancakeSwapFlashArbitrage, ownerAddress);
 
   return {
     network: networkName,
@@ -366,57 +365,18 @@ async function deployPancakeSwapFlashArbitrage(
     blockNumber,
     timestamp,
     minimumProfit: minimumProfit.toString(),
-    approvedRouters,
+    approvedRouters: approvedRoutersList,
     whitelistedPools,
     verified,
   };
 }
 
 /**
- * Save deployment result to file
+ * Save deployment result to file (now using utility function)
+ * Kept as wrapper for backward compatibility
  */
-function saveDeploymentResult(result: DeploymentResult): void {
-  const deploymentsDir = path.join(__dirname, '..', 'deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save network-specific deployment
-  const networkFile = path.join(deploymentsDir, `pancakeswap-${result.network}.json`);
-  fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
-  console.log(`\n📝 Deployment saved to: ${networkFile}`);
-
-  // Update master registry
-  const registryFile = path.join(deploymentsDir, 'pancakeswap-registry.json');
-  let registry: Record<string, DeploymentResult> = {};
-  if (fs.existsSync(registryFile)) {
-    registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
-  }
-  registry[result.network] = result;
-  fs.writeFileSync(registryFile, JSON.stringify(registry, null, 2));
-  console.log(`📝 Registry updated: ${registryFile}`);
-}
-
-/**
- * Print deployment summary
- */
-function printDeploymentSummary(result: DeploymentResult): void {
-  console.log('\n========================================');
-  console.log('Deployment Summary');
-  console.log('========================================');
-  console.log(`Network:           ${result.network} (${result.chainId})`);
-  console.log(`Contract:          ${result.contractAddress}`);
-  console.log(`Factory:           ${result.factoryAddress}`);
-  console.log(`Owner:             ${result.ownerAddress}`);
-  console.log(`Deployer:          ${result.deployerAddress}`);
-  console.log(`Transaction:       ${result.transactionHash}`);
-  console.log(`Block:             ${result.blockNumber}`);
-  console.log(`Timestamp:         ${new Date(result.timestamp * 1000).toISOString()}`);
-  console.log(`Minimum Profit:    ${ethers.formatEther(result.minimumProfit)} Native Token`);
-  console.log(`Approved Routers:  ${result.approvedRouters.length}`);
-  console.log(`Whitelisted Pools: ${result.whitelistedPools.length}`);
-  console.log(`Verified:          ${result.verified ? '✅ Yes' : '❌ No'}`);
-  console.log('========================================\n');
+async function savePancakeSwapDeployment(result: DeploymentResult): Promise<void> {
+  await saveDeploymentResult(result, 'pancakeswap-registry.json');
 }
 
 // =============================================================================
@@ -424,18 +384,24 @@ function printDeploymentSummary(result: DeploymentResult): void {
 // =============================================================================
 
 async function main(): Promise<void> {
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
 
   // Get Factory address for the network
   const factoryAddress = PANCAKESWAP_V3_FACTORY_ADDRESSES[networkName];
   if (!factoryAddress) {
     throw new Error(
-      `PancakeSwap V3 Factory address not configured for network: ${networkName}\n` +
-        `Supported networks: ${Object.keys(PANCAKESWAP_V3_FACTORY_ADDRESSES).join(', ')}`
+      `[ERR_NO_FACTORY] PancakeSwap V3 Factory address not configured for network: ${networkName}\n` +
+        `Supported networks: ${Object.keys(PANCAKESWAP_V3_FACTORY_ADDRESSES).join(', ')}\n\n` +
+        `To add support for ${networkName}:\n` +
+        `1. Find the PancakeSwap V3 Factory address from: https://docs.pancakeswap.finance/developers/smart-contracts/pancakeswap-exchange/v3-contracts\n` +
+        `2. Add to shared/config/src/addresses.ts: PANCAKESWAP_V3_FACTORIES\n` +
+        `3. Re-export in contracts/deployments/addresses.ts`
     );
   }
 
-  // Deploy
+  console.log(`\nStarting PancakeSwapFlashArbitrage deployment to ${networkName}...`);
+
+  // Deploy with Phase 4A improvements
   const result = await deployPancakeSwapFlashArbitrage({
     factoryAddress,
     approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
@@ -444,14 +410,31 @@ async function main(): Promise<void> {
   });
 
   // Save and print summary
-  saveDeploymentResult(result);
+  await savePancakeSwapDeployment(result);
   printDeploymentSummary(result);
 
   console.log('🎉 Deployment complete!');
+  console.log('\n📋 NEXT STEPS:\n');
+
+  if (!result.verified) {
+    console.log('1. ⚠️  Verify contract manually:');
+    console.log(`   npx hardhat verify --network ${networkName} ${result.contractAddress} ${result.factoryAddress} ${result.ownerAddress}\n`);
+  }
+
+  console.log(`${!result.verified ? '2' : '1'}. Update contract address in configuration:`);
+  console.log(`   File: contracts/deployments/addresses.ts`);
+  console.log(`   Update: PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES.${networkName} = '${result.contractAddress}';\n`);
+
+  console.log(`${!result.verified ? '3' : '2'}. Test the deployment:`);
+  console.log(`   - Verify router approvals: ${result.approvedRouters.length} routers`);
+  console.log(`   - Verify pool whitelisting: ${result.whitelistedPools.length} pools`);
+  console.log(`   - Execute a small test arbitrage\n`);
+
+  console.log(`${!result.verified ? '4' : '3'}. Restart services to pick up new configuration\n`);
 }
 
 // Run the deployment
 main().catch((error) => {
-  console.error('Deployment failed:', error);
+  console.error('\n❌ Deployment failed:', error);
   process.exit(1);
 });

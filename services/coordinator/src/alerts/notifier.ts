@@ -435,8 +435,9 @@ export class AlertNotifier {
       }
     }
 
-    // Already in descending order (newest first), but sort to be safe
-    return alerts.sort((a, b) => b.timestamp - a.timestamp);
+    // P2-003 FIX: Return as-is - already in descending order by construction
+    // Tests verify this invariant (notifier.test.ts:240-256)
+    return alerts;
   }
 
   /**

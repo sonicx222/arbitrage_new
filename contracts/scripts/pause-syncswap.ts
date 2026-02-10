@@ -1,4 +1,17 @@
 /**
+ * ⚠️ DEPRECATED: Use toggle-syncswap-pause.ts instead
+ *
+ * This script is deprecated in favor of the unified toggle-syncswap-pause.ts script.
+ *
+ * New usage:
+ *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync
+ *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync-testnet
+ *
+ * @deprecated Use toggle-syncswap-pause.ts instead
+ * @see scripts/toggle-syncswap-pause.ts
+ *
+ * ---
+ *
  * Emergency Pause Script for SyncSwapFlashArbitrage Contract
  *
  * Pauses the SyncSwapFlashArbitrage contract to halt all arbitrage execution.
@@ -18,6 +31,12 @@
 import { ethers } from 'hardhat';
 
 async function main() {
+  console.warn('\n⚠️  DEPRECATION WARNING ⚠️');
+  console.warn('This script (pause-syncswap.ts) is deprecated.');
+  console.warn('Please use: npx hardhat run scripts/toggle-syncswap-pause.ts pause --network <network>');
+  console.warn('Continuing in 3 seconds...\n');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+
   const [signer] = await ethers.getSigners();
   const contractAddress = process.env.SYNCSWAP_CONTRACT_ADDRESS;
 

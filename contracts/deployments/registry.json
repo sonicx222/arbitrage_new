@@ -1,20 +1,24 @@
 {
-  "_comment": "Flash Loan Arbitrage contract deployment registry - auto-updated by deploy scripts",
+  "_comment": "FlashLoanArbitrage (Aave V3) deployment registry - MANUALLY updated after deployment",
   "_lastUpdated": "2026-02-10T00:00:00.000Z",
   "_version": "2.0.0",
   "_schema": {
-    "description": "Each network contains deployed contract addresses and deployment metadata",
+    "description": "Each network key contains a DeploymentResult object with contract deployment details",
     "networkStructure": {
-      "FlashLoanArbitrage": "Aave V3 flash loan contract address",
-      "PancakeSwapFlashArbitrage": "PancakeSwap V3 flash loan contract address",
-      "BalancerV2FlashArbitrage": "Balancer V2 flash loan contract address",
-      "SyncSwapFlashArbitrage": "SyncSwap flash loan contract address (zkSync)",
-      "CommitRevealArbitrage": "Commit-reveal MEV protection contract",
-      "MultiPathQuoter": "Batched quote fetcher contract",
-      "deployedAt": "ISO 8601 timestamp of deployment",
-      "deployedBy": "Deployer address",
+      "network": "Chain identifier (e.g., 'ethereum', 'arbitrum')",
+      "chainId": "Numeric chain ID",
+      "contractAddress": "Deployed FlashLoanArbitrage contract address",
+      "aavePoolAddress": "Aave V3 Pool address for flash loans",
+      "ownerAddress": "Contract owner address",
+      "deployerAddress": "Address that deployed the contract",
+      "transactionHash": "Deployment transaction hash",
+      "blockNumber": "Block number of deployment",
+      "timestamp": "Unix timestamp of deployment",
+      "minimumProfit": "Minimum profit threshold (in wei, as string)",
+      "approvedRouters": "Array of approved DEX router addresses",
       "verified": "Whether contract is verified on block explorer"
-    }
+    },
+    "note": "Other contract types (PancakeSwap, Balancer, SyncSwap, etc.) use separate registry files: balancer-registry.json, pancakeswap-registry.json, etc."
   },
   "localhost": {
     "FlashLoanArbitrage": null,

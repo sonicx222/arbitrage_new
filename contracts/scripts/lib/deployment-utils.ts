@@ -102,6 +102,19 @@ export interface RouterApprovalResult {
 }
 
 // =============================================================================
+// Configuration Constants
+// =============================================================================
+
+/**
+ * Default verification retry configuration
+ *
+ * Used across all deployment scripts for consistent verification behavior.
+ * Exponential backoff: 30s → 60s → 120s (total ~3.5 min max wait)
+ */
+export const DEFAULT_VERIFICATION_RETRIES = 3;
+export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds
+
+// =============================================================================
 // Network Normalization (Phase 2 Fix)
 // =============================================================================
 
@@ -476,11 +489,14 @@ export async function verifyContractWithRetry(
  * **Retry Logic**: Retries with exponential backoff if lock cannot be acquired
  * (e.g., another deployment is in progress).
  *
+ * **Performance**: Async implementation avoids blocking the event loop during
+ * lock acquisition retries.
+ *
  * @param result - Deployment result to save (any deployment result type)
  * @param registryName - Name of registry file (default: 'registry.json')
  * @throws Error if lock cannot be acquired after max retries or if file I/O fails
  */
-export function saveDeploymentResult(
+export async function saveDeploymentResult(
   result:
     | DeploymentResult
     | BalancerDeploymentResult
@@ -489,7 +505,7 @@ export function saveDeploymentResult(
     | CommitRevealDeploymentResult
     | MultiPathQuoterDeploymentResult,
   registryName = 'registry.json'
-): void {
+): Promise<void> {
   const deploymentsDir = path.join(__dirname, '..', '..', 'deployments');
 
   // Ensure deployments directory exists
@@ -505,8 +521,18 @@ export function saveDeploymentResult(
   // Update master registry with file locking to prevent concurrent corruption
   const registryFile = path.join(deploymentsDir, registryName);
 
-  updateRegistryWithLock(registryFile, result);
+  await updateRegistryWithLock(registryFile, result);
   console.log(`📝 Registry updated: ${registryFile}`);
+}
+
+/**
+ * Sleep helper for async delays (replaces synchronous busy-wait)
+ *
+ * @param ms - Milliseconds to sleep
+ * @returns Promise that resolves after the delay
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -518,12 +544,15 @@ export function saveDeploymentResult(
  * **Retry Logic**: Retries with exponential backoff (1s, 2s, 4s) if lock is held
  * by another process.
  *
+ * **Performance**: Uses async sleep instead of synchronous busy-wait to avoid
+ * blocking the Node.js event loop during retry delays.
+ *
  * @param registryFile - Absolute path to registry JSON file
  * @param result - Deployment result to add/update in registry (accepts any deployment result type)
  * @throws Error if lock cannot be acquired after 3 retries (total ~7s wait)
  * @throws Error if registry JSON is corrupted and cannot be parsed
  */
-function updateRegistryWithLock(
+async function updateRegistryWithLock(
   registryFile: string,
   result:
     | DeploymentResult
@@ -532,7 +561,7 @@ function updateRegistryWithLock(
     | SyncSwapDeploymentResult
     | CommitRevealDeploymentResult
     | MultiPathQuoterDeploymentResult
-): void {
+): Promise<void> {
   const maxRetries = 3;
   const baseDelay = 1000; // 1 second
 
@@ -610,11 +639,8 @@ function updateRegistryWithLock(
           `   Retrying in ${delay}ms...`
         );
 
-        // Sleep synchronously (deployment scripts are not performance-critical)
-        const start = Date.now();
-        while (Date.now() - start < delay) {
-          // Busy wait (acceptable for rare deployment operations)
-        }
+        // Sleep asynchronously (non-blocking, doesn't waste CPU cycles)
+        await sleep(delay);
         continue;
       }
 
@@ -637,6 +663,61 @@ function updateRegistryWithLock(
 // =============================================================================
 
 /**
+ * Internal helper: Execute smoke test checks and report results
+ *
+ * This is a shared test runner used by all smoke test functions to eliminate duplication.
+ * Runs an array of checks, logs results, and returns overall pass/fail status.
+ *
+ * @param checks - Array of test checks to execute
+ * @param testName - Human-readable name for the test suite (used in console output)
+ * @param errorContext - Context message for failed tests (e.g., "Contract may not be properly configured")
+ * @returns true if all critical checks passed
+ */
+async function runSmokeTestChecks(
+  checks: Array<{
+    name: string;
+    fn: () => Promise<boolean>;
+    critical: boolean;
+  }>,
+  testName: string,
+  errorContext = 'Contract may not be properly configured'
+): Promise<boolean> {
+  console.log(`\n🧪 Running ${testName}...`);
+
+  let allPassed = true;
+
+  // Execute all checks and track failures
+  for (const check of checks) {
+    try {
+      const passed = await check.fn();
+      if (passed) {
+        console.log(`  ✅ ${check.name}`);
+      } else {
+        console.error(`  ❌ ${check.name}`);
+        if (check.critical) {
+          allPassed = false;
+        }
+      }
+    } catch (error) {
+      console.error(`  ❌ ${check.name} - Error: ${error}`);
+      if (check.critical) {
+        allPassed = false;
+      }
+    }
+  }
+
+  // Print summary
+  if (allPassed) {
+    console.log('\n✅ All smoke tests passed');
+  } else {
+    console.error('\n❌ Some critical smoke tests failed');
+    console.error(`   ${errorContext}`);
+  }
+
+  return allPassed;
+}
+
+/**
  * Run basic smoke tests on deployed contract
  *
  * Verifies:
@@ -652,8 +733,6 @@ export async function smokeTestFlashLoanContract(
   contract: any,
   expectedOwner: string
 ): Promise<boolean> {
-  console.log('\n🧪 Running smoke tests...');
-
   const checks: Array<{
     name: string;
     fn: () => Promise<boolean>;
@@ -676,35 +755,7 @@ export async function smokeTestFlashLoanContract(
     },
   ];
 
-  let allPassed = true;
-
-  for (const check of checks) {
-    try {
-      const passed = await check.fn();
-      if (passed) {
-        console.log(`  ✅ ${check.name}`);
-      } else {
-        console.error(`  ❌ ${check.name}`);
-        if (check.critical) {
-          allPassed = false;
-        }
-      }
-    } catch (error) {
-      console.error(`  ❌ ${check.name} - Error: ${error}`);
-      if (check.critical) {
-        allPassed = false;
-      }
-    }
-  }
-
-  if (allPassed) {
-    console.log('\n✅ All smoke tests passed');
-  } else {
-    console.error('\n❌ Some critical smoke tests failed');
-    console.error('   Contract may not be properly configured');
-  }
-
-  return allPassed;
+  return runSmokeTestChecks(checks, 'smoke tests');
 }
 
 /**
@@ -725,8 +776,6 @@ export async function smokeTestCommitRevealContract(
   contract: any,
   expectedOwner: string
 ): Promise<boolean> {
-  console.log('\n🧪 Running commit-reveal contract smoke tests...');
-
   const checks: Array<{
     name: string;
     fn: () => Promise<boolean>;
@@ -763,32 +812,31 @@ export async function smokeTestCommitRevealContract(
     },
   ];
 
-  let allPassed = true;
+  // Run standard smoke test checks
+  const allPassed = await runSmokeTestChecks(checks, 'commit-reveal contract smoke tests');
 
-  for (const check of checks) {
-    try {
-      const passed = await check.fn();
-      if (passed) {
-        console.log(`  ✅ ${check.name}`);
-      } else {
-        console.error(`  ❌ ${check.name}`);
-        if (check.critical) {
-          allPassed = false;
-        }
-      }
-    } catch (error) {
-      console.error(`  ❌ ${check.name} - Error: ${error}`);
-      if (check.critical) {
-        allPassed = false;
-      }
+  // Additional validation warnings for edge cases (Code Review Finding #7)
+  try {
+    const minDelayBlocks = await contract.MIN_DELAY_BLOCKS();
+    const maxCommitAgeBlocks = await contract.MAX_COMMIT_AGE_BLOCKS();
+    const paused = await contract.paused();
+
+    if (minDelayBlocks === 0n) {
+      console.warn('\n⚠️  Warning: MIN_DELAY_BLOCKS is 0 (no MEV protection)');
+      console.warn('   Commits can be revealed in the same block, vulnerable to frontrunning');
     }
-  }
 
-  if (allPassed) {
-    console.log('\n✅ All smoke tests passed');
-  } else {
-    console.error('\n❌ Some critical smoke tests failed');
-    console.error('   Contract may not be properly configured');
+    if (maxCommitAgeBlocks < minDelayBlocks) {
+      console.warn('\n⚠️  Warning: MAX_COMMIT_AGE_BLOCKS < MIN_DELAY_BLOCKS');
+      console.warn('   Commits will expire immediately after the minimum delay');
+    }
+
+    if (paused) {
+      console.warn('\n⚠️  Warning: Contract deployed in PAUSED state');
+      console.warn('   Contract must be unpaused before accepting transactions');
+    }
+  } catch (error) {
+    console.warn('\n⚠️  Warning: Could not validate edge cases:', error);
   }
 
   return allPassed;
@@ -806,8 +854,6 @@ export async function smokeTestCommitRevealContract(
 export async function smokeTestMultiPathQuoter(
   contract: any
 ): Promise<boolean> {
-  console.log('\n🧪 Running multi-path quoter smoke tests...');
-
   const checks: Array<{
     name: string;
     fn: () => Promise<boolean>;
@@ -830,35 +876,7 @@ export async function smokeTestMultiPathQuoter(
     },
   ];
 
-  let allPassed = true;
-
-  for (const check of checks) {
-    try {
-      const passed = await check.fn();
-      if (passed) {
-        console.log(`  ✅ ${check.name}`);
-      } else {
-        console.error(`  ❌ ${check.name}`);
-        if (check.critical) {
-          allPassed = false;
-        }
-      }
-    } catch (error) {
-      console.error(`  ❌ ${check.name} - Error: ${error}`);
-      if (check.critical) {
-        allPassed = false;
-      }
-    }
-  }
-
-  if (allPassed) {
-    console.log('\n✅ All smoke tests passed');
-  } else {
-    console.error('\n❌ Some critical smoke tests failed');
-    console.error('   Contract may not be deployed correctly');
-  }
-
-  return allPassed;
+  return runSmokeTestChecks(checks, 'multi-path quoter smoke tests', 'Contract may not be deployed correctly');
 }
 
 // =============================================================================

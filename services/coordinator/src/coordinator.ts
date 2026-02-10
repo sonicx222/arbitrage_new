@@ -172,6 +172,7 @@ interface CoordinatorConfig {
   opportunityTtlMs?: number;       // Opportunity expiry time (default: 60000)
   opportunityCleanupIntervalMs?: number; // Cleanup interval (default: 10000)
   pairTtlMs?: number;              // Active pair expiry time (default: 300000)
+  maxActivePairs?: number;         // P3-005: Max active pairs in memory (default: 10000)
   alertCooldownMs?: number;        // Alert cooldown duration (default: 300000)
   // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
 }
@@ -315,6 +316,11 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Generate unique instance ID for leader election
     const instanceId = `coordinator-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
 
+    // P3-001 STANDARD: Nullish Coalescing Usage Convention
+    // - Use `??` for numbers/booleans where 0/false are valid (e.g., config values, counters)
+    // - Use `||` for strings where empty string is invalid (e.g., hostnames, service names)
+    // - Use `||` for ports/IDs where 0 is semantically invalid
+    // See: docs/agent/code_conventions.md for full guidelines
     this.config = {
       port: config?.port || parseInt(process.env.PORT || '3000'),
       leaderElection: {
@@ -335,6 +341,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       opportunityTtlMs: config?.opportunityTtlMs ?? parseInt(process.env.OPPORTUNITY_TTL_MS || '60000'),
       opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? parseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS || '10000'),
       pairTtlMs: config?.pairTtlMs ?? parseInt(process.env.PAIR_TTL_MS || '300000'),
+      // P3-005 FIX: Add configurable max active pairs limit
+      maxActivePairs: config?.maxActivePairs ?? parseInt(process.env.MAX_ACTIVE_PAIRS || '10000'),
       // FIX Config 3.2: Environment-aware alert cooldown
       // Development: 30 seconds (faster feedback cycle)
       // Production: 5 minutes (prevent alert spam)
@@ -350,9 +358,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.OPPORTUNITY_TTL_MS = this.config.opportunityTtlMs!;
     this.OPPORTUNITY_CLEANUP_INTERVAL_MS = this.config.opportunityCleanupIntervalMs!;
     this.PAIR_TTL_MS = this.config.pairTtlMs!;
+    // P3-005 FIX: Initialize max active pairs limit
+    this.MAX_ACTIVE_PAIRS = this.config.maxActivePairs!;
 
     // FIX: Initialize alert notifier for sending alerts to external channels
-    this.alertNotifier = new AlertNotifier(this.logger);
+    // P0-002 FIX: Add defensive initialization with fallback
+    try {
+      this.alertNotifier = new AlertNotifier(this.logger);
+    } catch (error) {
+      this.logger.error('Failed to initialize AlertNotifier, alerts will be logged only', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      // Keep alertNotifier as null - alerts will still be logged via sendAlert()
+      // but won't be sent to external channels (Discord/Slack)
+    }
 
     // R2: Initialize extracted subsystem modules
     // Note: streamConsumerManager and opportunityRouter are initialized in start()
@@ -437,6 +457,24 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Lifecycle Methods
   // ===========================================================================
 
+  /**
+   * Start the Coordinator Service.
+   *
+   * Initializes all subsystems:
+   * - Redis clients (Streams and standard)
+   * - Stream consumers for health/opportunities/events
+   * - HTTP API server with authentication and rate limiting
+   * - Leader election (if not standby)
+   * - Periodic health reporting and cleanup tasks
+   *
+   * Uses ServiceStateManager to prevent concurrent starts.
+   * Automatically attempts leadership acquisition if canBecomeLeader is true.
+   *
+   * @param port - Optional port override (defaults to config.port)
+   * @throws Error if service is already starting/started or initialization fails
+   * @see ADR-007 for standby and failover behavior
+   * @see ADR-002 for Redis Streams architecture
+   */
   async start(port?: number): Promise<void> {
     const serverPort = port ?? this.config.port;
 
@@ -585,6 +623,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
     }
   }
 
+  /**
+   * Stop the Coordinator Service gracefully.
+   *
+   * Performs orderly shutdown of all subsystems:
+   * - Releases leadership lock (if leader)
+   * - Stops all periodic intervals (health reporting, cleanup)
+   * - Disconnects stream consumers
+   * - Closes HTTP server
+   * - Disconnects Redis clients
+   *
+   * Uses ServiceStateManager to prevent concurrent stops.
+   * Idempotent - safe to call multiple times.
+   *
+   * @throws Error if shutdown fails (logged but not re-thrown)
+   */
   async stop(): Promise<void> {
     // Use state manager to prevent concurrent stops (P0 fix)
     const result = await this.stateManager.executeStop(async () => {
@@ -836,59 +889,69 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // ===========================================================================
   // Stream Message Handlers
   // ===========================================================================
+  //
+  // P2-001 FIX: Handlers should NOT catch errors internally.
+  // StreamConsumerManager.withDeferredAck() wraps all handlers with:
+  // - Error catching
+  // - DLQ forwarding on failure
+  // - Message ACK
+  //
+  // Handlers should throw errors to signal failure, which will:
+  // 1. Log error (by wrapper)
+  // 2. Move message to DLQ (for manual review)
+  // 3. ACK message (prevent infinite retries)
+  //
+  // This pattern ensures failed messages are captured for debugging
+  // rather than being silently swallowed.
+  // ===========================================================================
 
   // P2 FIX: Use StreamMessage type instead of any
   private async handleHealthMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data;
-      // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
-      const serviceName = getString(data as Record<string, unknown>, 'name', '') ||
-                          getString(data as Record<string, unknown>, 'service', '');
-      if (!serviceName) {
-        // FIX: Log debug warning for invalid messages instead of silent skip
-        this.logger.debug('Skipping health message - missing service name', {
-          messageId: message.id,
-          hasName: 'name' in (data || {}),
-          hasService: 'service' in (data || {})
-        });
-        return;
-      }
-
-      // P3-2 FIX: Validate status includes new 'starting' and 'stopping' states
-      const typedData = data as Record<string, unknown>;
-      const statusValue = getString(typedData, 'status', '');
-      const validStatus: ServiceHealth['status'] =
-        statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
-          statusValue === 'starting' || statusValue === 'stopping'
-          ? statusValue
-          : 'unhealthy'; // Default to unhealthy for unknown status
-
-      // FIX: Use type guard utilities for cleaner extraction
-      const health: ServiceHealth = {
-        name: serviceName,
-        status: validStatus,
-        uptime: getNonNegativeNumber(typedData, 'uptime', 0),
-        memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
-        cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
-        lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),
-        // P3-2: Include optional recovery tracking fields if present
-        consecutiveFailures: getOptionalNumber(typedData, 'consecutiveFailures'),
-        restartCount: getOptionalNumber(typedData, 'restartCount')
-      };
-
-      this.serviceHealth.set(serviceName, health);
-
-      this.logger.debug('Health update received', {
-        name: serviceName,
-        status: health.status
+    const data = message.data;
+    // P3-2 FIX: Support both 'name' (new) and 'service' (legacy) field names
+    const serviceName = getString(data as Record<string, unknown>, 'name', '') ||
+                        getString(data as Record<string, unknown>, 'service', '');
+    if (!serviceName) {
+      // FIX: Log debug warning for invalid messages instead of silent skip
+      this.logger.debug('Skipping health message - missing service name', {
+        messageId: message.id,
+        hasName: 'name' in (data || {}),
+        hasService: 'service' in (data || {})
       });
-
-      // FIX: Reset stream errors on successful processing
-      this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle health message', { error, message });
+      return;
     }
+
+    // P3-2 FIX: Validate status includes new 'starting' and 'stopping' states
+    const typedData = data as Record<string, unknown>;
+    const statusValue = getString(typedData, 'status', '');
+    const validStatus: ServiceHealth['status'] =
+      statusValue === 'healthy' || statusValue === 'degraded' || statusValue === 'unhealthy' ||
+        statusValue === 'starting' || statusValue === 'stopping'
+        ? statusValue
+        : 'unhealthy'; // Default to unhealthy for unknown status
+
+    // FIX: Use type guard utilities for cleaner extraction
+    const health: ServiceHealth = {
+      name: serviceName,
+      status: validStatus,
+      uptime: getNonNegativeNumber(typedData, 'uptime', 0),
+      memoryUsage: getNonNegativeNumber(typedData, 'memoryUsage', 0),
+      cpuUsage: getNonNegativeNumber(typedData, 'cpuUsage', 0),
+      lastHeartbeat: getNumber(typedData, 'timestamp', Date.now()),
+      // P3-2: Include optional recovery tracking fields if present
+      consecutiveFailures: getOptionalNumber(typedData, 'consecutiveFailures'),
+      restartCount: getOptionalNumber(typedData, 'restartCount')
+    };
+
+    this.serviceHealth.set(serviceName, health);
+
+    this.logger.debug('Health update received', {
+      name: serviceName,
+      status: health.status
+    });
+
+    // FIX: Reset stream errors on successful processing
+    this.streamConsumerManager?.resetErrors();
   }
 
   // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
@@ -900,92 +963,87 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // P2 FIX: Use StreamMessage type instead of any
   // R2: Delegates to OpportunityRouter for processing
   private async handleOpportunityMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data as Record<string, unknown>;
+    const data = message.data as Record<string, unknown>;
 
-      // R2: Delegate to opportunity router
-      if (this.opportunityRouter) {
-        const processed = await this.opportunityRouter.processOpportunity(data, this.isLeader);
-        if (processed) {
-          // Update local metrics from router
-          this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
-          this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
-          this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
-        }
-        // P1-7 FIX: Always sync dropped opportunities (not just when processed)
-        this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-        this.streamConsumerManager?.resetErrors();
-        return;
+    // R2: Delegate to opportunity router
+    if (this.opportunityRouter) {
+      const processed = await this.opportunityRouter.processOpportunity(data, this.isLeader);
+      if (processed) {
+        // Update local metrics from router
+        this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
+        this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
+        this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
       }
-
-      // Fallback for tests without opportunity router
-      if (!hasRequiredString(data, 'id')) {
-        this.logger.debug('Skipping opportunity message - missing or invalid id', {
-          messageId: message.id
-        });
-        return;
-      }
-
-      const opportunityId = getString(data, 'id');
-      const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
-
-      const existing = this.opportunities.get(opportunityId);
-      if (existing && Math.abs((existing.timestamp || 0) - opportunityTimestamp) < 5000) {
-        this.logger.debug('Duplicate opportunity detected, skipping', {
-          id: opportunityId,
-          existingTimestamp: existing.timestamp,
-          newTimestamp: opportunityTimestamp
-        });
-        this.streamConsumerManager?.resetErrors();
-        return;
-      }
-
-      const profitPercentage = getOptionalNumber(data, 'profitPercentage');
-      if (profitPercentage !== undefined) {
-        if (profitPercentage < -100 || profitPercentage > 10000) {
-          this.logger.warn('Invalid profit percentage, rejecting opportunity', {
-            id: opportunityId,
-            profitPercentage,
-            reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
-          });
-          this.streamConsumerManager?.resetErrors();
-          return;
-        }
-      }
-
-      const opportunity: ArbitrageOpportunity = {
-        id: opportunityId,
-        confidence: getNumber(data, 'confidence', 0),
-        timestamp: opportunityTimestamp,
-        chain: getOptionalString(data, 'chain'),
-        buyDex: getOptionalString(data, 'buyDex'),
-        sellDex: getOptionalString(data, 'sellDex'),
-        profitPercentage,
-        expiresAt: getOptionalNumber(data, 'expiresAt'),
-        status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
-      };
-
-      this.opportunities.set(opportunity.id, opportunity);
-      this.systemMetrics.totalOpportunities++;
-      this.systemMetrics.pendingOpportunities = this.opportunities.size;
-
-      this.logger.info('Opportunity detected', {
-        id: opportunity.id,
-        chain: opportunity.chain,
-        profitPercentage: opportunity.profitPercentage,
-        buyDex: opportunity.buyDex,
-        sellDex: opportunity.sellDex
-      });
-
-      if (this.isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
-        await this.forwardToExecutionEngine(opportunity);
-      }
-
+      // P1-7 FIX: Always sync dropped opportunities (not just when processed)
+      this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
       this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle opportunity message', { error, message });
+      return;
     }
+
+    // Fallback for tests without opportunity router
+    if (!hasRequiredString(data, 'id')) {
+      this.logger.debug('Skipping opportunity message - missing or invalid id', {
+        messageId: message.id
+      });
+      return;
+    }
+
+    const opportunityId = getString(data, 'id');
+    const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
+
+    const existing = this.opportunities.get(opportunityId);
+    if (existing && Math.abs((existing.timestamp || 0) - opportunityTimestamp) < 5000) {
+      this.logger.debug('Duplicate opportunity detected, skipping', {
+        id: opportunityId,
+        existingTimestamp: existing.timestamp,
+        newTimestamp: opportunityTimestamp
+      });
+      this.streamConsumerManager?.resetErrors();
+      return;
+    }
+
+    const profitPercentage = getOptionalNumber(data, 'profitPercentage');
+    if (profitPercentage !== undefined) {
+      if (profitPercentage < -100 || profitPercentage > 10000) {
+        this.logger.warn('Invalid profit percentage, rejecting opportunity', {
+          id: opportunityId,
+          profitPercentage,
+          reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
+        });
+        this.streamConsumerManager?.resetErrors();
+        return;
+      }
+    }
+
+    const opportunity: ArbitrageOpportunity = {
+      id: opportunityId,
+      confidence: getNumber(data, 'confidence', 0),
+      timestamp: opportunityTimestamp,
+      chain: getOptionalString(data, 'chain'),
+      buyDex: getOptionalString(data, 'buyDex'),
+      sellDex: getOptionalString(data, 'sellDex'),
+      profitPercentage,
+      expiresAt: getOptionalNumber(data, 'expiresAt'),
+      status: getOptionalString(data, 'status') as ArbitrageOpportunity['status'] | undefined
+    };
+
+    this.opportunities.set(opportunity.id, opportunity);
+    this.systemMetrics.totalOpportunities++;
+    this.systemMetrics.pendingOpportunities = this.opportunities.size;
+
+    this.logger.info('Opportunity detected', {
+      id: opportunity.id,
+      chain: opportunity.chain,
+      profitPercentage: opportunity.profitPercentage,
+      buyDex: opportunity.buyDex,
+      sellDex: opportunity.sellDex
+    });
+
+    if (this.isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
+      await this.forwardToExecutionEngine(opportunity);
+    }
+
+    this.streamConsumerManager?.resetErrors();
   }
 
   /**
@@ -1072,51 +1130,48 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
   // P2 FIX: Use StreamMessage type instead of any
   private async handleWhaleAlertMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data as Record<string, unknown>;
-      if (!data) return;
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
 
-      this.systemMetrics.whaleAlerts++;
+    this.systemMetrics.whaleAlerts++;
 
-      // FIX: Use type guard utilities for consistency with other handlers
-      const rawAlert = unwrapMessageData(data);
-      const usdValue = getNonNegativeNumber(rawAlert, 'usdValue', 0);
-      const direction = getString(rawAlert, 'direction', 'unknown');
-      const chain = getString(rawAlert, 'chain', 'unknown');
-      const address = getOptionalString(rawAlert, 'address');
-      const dex = getOptionalString(rawAlert, 'dex');
-      const impact = getOptionalString(rawAlert, 'impact');
+    // FIX: Use type guard utilities for consistency with other handlers
+    const rawAlert = unwrapMessageData(data);
+    const usdValue = getNonNegativeNumber(rawAlert, 'usdValue', 0);
+    const direction = getString(rawAlert, 'direction', 'unknown');
+    const chain = getString(rawAlert, 'chain', 'unknown');
+    const address = getOptionalString(rawAlert, 'address');
+    const dex = getOptionalString(rawAlert, 'dex');
+    const impact = getOptionalString(rawAlert, 'impact');
 
-      this.logger.warn('Whale alert received', {
-        address,
-        usdValue,
-        direction,
-        chain,
-        dex,
-        impact
-      });
+    this.logger.warn('Whale alert received', {
+      address,
+      usdValue,
+      direction,
+      chain,
+      dex,
+      impact
+    });
 
-      // Send alert notification
-      this.sendAlert({
-        type: 'WHALE_TRANSACTION',
-        message: `Whale ${direction} detected: $${usdValue.toLocaleString()} on ${chain}`,
-        severity: usdValue > 100000 ? 'critical' : 'high',
-        data: rawAlert,
-        timestamp: Date.now()
-      });
+    // Send alert notification
+    this.sendAlert({
+      type: 'WHALE_TRANSACTION',
+      message: `Whale ${direction} detected: $${usdValue.toLocaleString()} on ${chain}`,
+      severity: usdValue > 100000 ? 'critical' : 'high',
+      data: rawAlert,
+      timestamp: Date.now()
+    });
 
-      // FIX: Reset stream errors on successful processing
-      this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle whale alert message', { error, message });
-    }
+    // FIX: Reset stream errors on successful processing
+    this.streamConsumerManager?.resetErrors();
   }
 
   // Track active pairs for volume monitoring (rolling window)
   private activePairs: Map<string, { lastSeen: number; chain: string; dex: string }> = new Map();
   // FIX: Now configurable via CoordinatorConfig (previously static)
   private readonly PAIR_TTL_MS: number;
+  // P3-005 FIX: Add size limit to prevent unbounded memory growth
+  private readonly MAX_ACTIVE_PAIRS: number;
 
   /**
    * Handle swap event messages from stream:swap-events.
@@ -1126,52 +1181,42 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * Only significant swaps (>$10 USD, deduplicated) reach this handler.
    */
   private async handleSwapEventMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data as Record<string, unknown>;
-      if (!data) return;
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
 
-      // FIX: Use unwrapMessageData utility for wrapped MessageEvent handling
-      const rawEvent = unwrapMessageData(data);
-      const pairAddress = getString(rawEvent, 'pairAddress', '');
-      const chain = getString(rawEvent, 'chain', 'unknown');
-      const dex = getString(rawEvent, 'dex', 'unknown');
-      // FIX: Use getNonNegativeNumber to guard against malformed negative values
-      const usdValue = getNonNegativeNumber(rawEvent, 'usdValue', 0);
+    // FIX: Use unwrapMessageData utility for wrapped MessageEvent handling
+    const rawEvent = unwrapMessageData(data);
+    const pairAddress = getString(rawEvent, 'pairAddress', '');
+    const chain = getString(rawEvent, 'chain', 'unknown');
+    const dex = getString(rawEvent, 'dex', 'unknown');
+    // FIX: Use getNonNegativeNumber to guard against malformed negative values
+    const usdValue = getNonNegativeNumber(rawEvent, 'usdValue', 0);
 
-      if (!pairAddress) {
-        this.logger.debug('Skipping swap event - missing pairAddress', { messageId: message.id });
-        return;
-      }
-
-      // Update metrics
-      this.systemMetrics.totalSwapEvents++;
-      this.systemMetrics.totalVolumeUsd += usdValue;
-
-      // Track active pairs
-      this.activePairs.set(pairAddress, {
-        lastSeen: Date.now(),
-        chain,
-        dex
-      });
-      this.systemMetrics.activePairsTracked = this.activePairs.size;
-
-      // Log significant swaps (whales are handled separately, this is for analytics)
-      if (usdValue >= 10000) {
-        this.logger.debug('Large swap event received', {
-          pairAddress,
-          chain,
-          dex,
-          usdValue,
-          txHash: rawEvent.transactionHash
-        });
-      }
-
-      // FIX: Reset stream errors on successful processing
-      this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle swap event message', { error, message });
+    if (!pairAddress) {
+      this.logger.debug('Skipping swap event - missing pairAddress', { messageId: message.id });
+      return;
     }
+
+    // Update metrics
+    this.systemMetrics.totalSwapEvents++;
+    this.systemMetrics.totalVolumeUsd += usdValue;
+
+    // P3-005 FIX: Track active pairs with size limit enforcement
+    this.trackActivePair(pairAddress, chain, dex);
+
+    // Log significant swaps (whales are handled separately, this is for analytics)
+    if (usdValue >= 10000) {
+      this.logger.debug('Large swap event received', {
+        pairAddress,
+        chain,
+        dex,
+        usdValue,
+        txHash: rawEvent.transactionHash
+      });
+    }
+
+    // FIX: Reset stream errors on successful processing
+    this.streamConsumerManager?.resetErrors();
   }
 
   /**
@@ -1185,59 +1230,49 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * - windowStartMs, windowEndMs: Time window boundaries
    */
   private async handleVolumeAggregateMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data as Record<string, unknown>;
-      if (!data) return;
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
 
-      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
-      const rawAggregate = unwrapMessageData(data);
-      const pairAddress = getString(rawAggregate, 'pairAddress', '');
-      const chain = getString(rawAggregate, 'chain', 'unknown');
-      const dex = getString(rawAggregate, 'dex', 'unknown');
-      const swapCount = getNonNegativeNumber(rawAggregate, 'swapCount', 0);
-      const totalUsdVolume = getNonNegativeNumber(rawAggregate, 'totalUsdVolume', 0);
+    // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
+    const rawAggregate = unwrapMessageData(data);
+    const pairAddress = getString(rawAggregate, 'pairAddress', '');
+    const chain = getString(rawAggregate, 'chain', 'unknown');
+    const dex = getString(rawAggregate, 'dex', 'unknown');
+    const swapCount = getNonNegativeNumber(rawAggregate, 'swapCount', 0);
+    const totalUsdVolume = getNonNegativeNumber(rawAggregate, 'totalUsdVolume', 0);
 
-      if (!pairAddress) {
-        this.logger.debug('Skipping volume aggregate - missing pairAddress', { messageId: message.id });
-        return;
-      }
-
-      // Update metrics - always track aggregates, even if swapCount is 0
-      // (swapCount=0 aggregates indicate monitored but quiet pairs)
-      this.systemMetrics.volumeAggregatesProcessed++;
-
-      // Track active pairs - any pair producing aggregates is active
-      this.activePairs.set(pairAddress, {
-        lastSeen: Date.now(),
-        chain,
-        dex
-      });
-      this.systemMetrics.activePairsTracked = this.activePairs.size;
-
-      // Skip detailed logging for empty windows (no swaps in this 5s period)
-      if (swapCount === 0) {
-        this.streamConsumerManager?.resetErrors();
-        return;
-      }
-
-      // Log high-volume periods (potential trading opportunities)
-      if (totalUsdVolume >= 50000) {
-        this.logger.info('High volume aggregate detected', {
-          pairAddress,
-          chain,
-          dex,
-          swapCount,
-          totalUsdVolume,
-          avgPrice: rawAggregate.avgPrice
-        });
-      }
-
-      // FIX: Reset stream errors on successful processing
-      this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle volume aggregate message', { error, message });
+    if (!pairAddress) {
+      this.logger.debug('Skipping volume aggregate - missing pairAddress', { messageId: message.id });
+      return;
     }
+
+    // Update metrics - always track aggregates, even if swapCount is 0
+    // (swapCount=0 aggregates indicate monitored but quiet pairs)
+    this.systemMetrics.volumeAggregatesProcessed++;
+
+    // P3-005 FIX: Track active pairs with size limit enforcement
+    this.trackActivePair(pairAddress, chain, dex);
+
+    // Skip detailed logging for empty windows (no swaps in this 5s period)
+    if (swapCount === 0) {
+      this.streamConsumerManager?.resetErrors();
+      return;
+    }
+
+    // Log high-volume periods (potential trading opportunities)
+    if (totalUsdVolume >= 50000) {
+      this.logger.info('High volume aggregate detected', {
+        pairAddress,
+        chain,
+        dex,
+        swapCount,
+        totalUsdVolume,
+        avgPrice: rawAggregate.avgPrice
+      });
+    }
+
+    // FIX: Reset stream errors on successful processing
+    this.streamConsumerManager?.resetErrors();
   }
 
   /**
@@ -1252,38 +1287,28 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * - timestamp: Update timestamp
    */
   private async handlePriceUpdateMessage(message: StreamMessage): Promise<void> {
-    try {
-      const data = message.data as Record<string, unknown>;
-      if (!data) return;
+    const data = message.data as Record<string, unknown>;
+    if (!data) return;
 
-      // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
-      const rawUpdate = unwrapMessageData(data);
-      const chain = getString(rawUpdate, 'chain', 'unknown');
-      const dex = getString(rawUpdate, 'dex', 'unknown');
-      const pairKey = getString(rawUpdate, 'pairKey', '');
+    // FIX: Use unwrapMessageData for cleaner wrapped/direct handling
+    const rawUpdate = unwrapMessageData(data);
+    const chain = getString(rawUpdate, 'chain', 'unknown');
+    const dex = getString(rawUpdate, 'dex', 'unknown');
+    const pairKey = getString(rawUpdate, 'pairKey', '');
 
-      if (!pairKey) {
-        this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
-        return;
-      }
-
-      // Update metrics
-      this.systemMetrics.priceUpdatesReceived++;
-
-      // Track active pairs - any pair producing price updates is active
-      this.activePairs.set(pairKey, {
-        lastSeen: Date.now(),
-        chain,
-        dex
-      });
-      this.systemMetrics.activePairsTracked = this.activePairs.size;
-
-      // FIX: Reset stream errors on successful processing
-      this.streamConsumerManager?.resetErrors();
-
-    } catch (error) {
-      this.logger.error('Failed to handle price update message', { error, message });
+    if (!pairKey) {
+      this.logger.debug('Skipping price update - missing pairKey', { messageId: message.id });
+      return;
     }
+
+    // Update metrics
+    this.systemMetrics.priceUpdatesReceived++;
+
+    // P3-005 FIX: Track active pairs with size limit enforcement
+    this.trackActivePair(pairKey, chain, dex);
+
+    // FIX: Reset stream errors on successful processing
+    this.streamConsumerManager?.resetErrors();
   }
 
   /**
@@ -1312,6 +1337,42 @@ export class CoordinatorService implements CoordinatorStateProvider {
         remaining: this.activePairs.size
       });
     }
+  }
+
+  /**
+   * P3-005 FIX: Track active trading pair with size limit enforcement.
+   * Adds emergency cleanup if map exceeds MAX_ACTIVE_PAIRS to prevent unbounded memory growth.
+   *
+   * @param pairKey - Unique identifier for the trading pair
+   * @param chain - Blockchain the pair is on
+   * @param dex - DEX where the pair trades
+   */
+  private trackActivePair(pairKey: string, chain: string, dex: string): void {
+    this.activePairs.set(pairKey, {
+      lastSeen: Date.now(),
+      chain,
+      dex
+    });
+
+    // Emergency cleanup if over limit (removes oldest 10%)
+    if (this.activePairs.size > this.MAX_ACTIVE_PAIRS) {
+      const toRemove = Math.floor(this.MAX_ACTIVE_PAIRS * 0.1);
+      const sorted = Array.from(this.activePairs.entries())
+        .sort(([, a], [, b]) => a.lastSeen - b.lastSeen)
+        .slice(0, toRemove);
+
+      for (const [key] of sorted) {
+        this.activePairs.delete(key);
+      }
+
+      this.logger.debug('Emergency activePairs cleanup triggered', {
+        removed: toRemove,
+        remaining: this.activePairs.size,
+        limit: this.MAX_ACTIVE_PAIRS
+      });
+    }
+
+    this.systemMetrics.activePairsTracked = this.activePairs.size;
   }
 
   /**
@@ -1540,6 +1601,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     if (!this.streamsClient || !this.stateManager.isRunning()) return;
 
     try {
+      // P2-002 FIX: Include AlertNotifier health status in health report
+      const notificationHealth = this.alertNotifier ? {
+        hasConfiguredChannels: this.alertNotifier.hasConfiguredChannels(),
+        circuitStatus: this.alertNotifier.getCircuitStatus(),
+        droppedAlerts: this.alertNotifier.getDroppedAlerts()
+      } : null;
+
       const health = {
         // P3-2 FIX: Use 'name' as primary field for consistency with handleHealthMessage
         name: 'coordinator',
@@ -1555,7 +1623,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
           activeServices: this.systemMetrics.activeServices,
           totalOpportunities: this.systemMetrics.totalOpportunities,
           pendingOpportunities: this.systemMetrics.pendingOpportunities
-        }
+        },
+        // P2-002 FIX: Add notification health to health report
+        ...(notificationHealth && { notificationHealth })
       };
 
       await this.streamsClient.xadd(RedisStreamsClient.STREAMS.HEALTH, health);
@@ -1666,52 +1736,146 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   // ===========================================================================
+  // ===========================================================================
   // CoordinatorStateProvider Interface Implementation
   // ===========================================================================
+  // P3-002 FIX: Added comprehensive JSDoc to all public methods
 
+  /**
+   * Check if this coordinator instance is currently the leader.
+   *
+   * Leadership is required for:
+   * - Forwarding opportunities to execution engine
+   * - Triggering cross-region failovers
+   * - Coordinating system-wide operations
+   *
+   * @returns true if this instance holds the distributed leader lock
+   * @see LeadershipElectionService for leadership election mechanism
+   * @see ADR-007 for failover strategy
+   */
   getIsLeader(): boolean {
     // P1-8 FIX: Delegate to LeadershipElectionService if available
     // Falls back to local field for backward compatibility
     return this.leadershipElection?.isLeader ?? this.isLeader;
   }
 
+  /**
+   * Get the unique identifier for this coordinator instance.
+   *
+   * The instance ID is used for leader election and distributed locking.
+   * Format: `coordinator-{region}-{hostname}-{timestamp}`
+   *
+   * @returns Unique instance identifier
+   */
   getInstanceId(): string {
     return this.config.leaderElection.instanceId;
   }
 
+  /**
+   * Get the Redis key used for the distributed leader lock.
+   *
+   * @returns Redis key for leader lock (default: 'coordinator:leader:lock')
+   */
   getLockKey(): string {
     return this.config.leaderElection.lockKey;
   }
 
+  /**
+   * Check if the coordinator service is currently running.
+   *
+   * Uses ServiceStateManager as the single source of truth for lifecycle state.
+   * Safe to call at any time, including during initialization or shutdown.
+   *
+   * @returns true if service is running, false otherwise
+   */
   getIsRunning(): boolean {
     // REFACTOR: stateManager is now the single source of truth for running state
     // Returns false if stateManager is not initialized (shouldn't happen in production)
     return this.stateManager?.isRunning() ?? false;
   }
 
+  /**
+   * Get a snapshot of all service health statuses.
+   *
+   * Returns a copy to prevent external mutation of internal state.
+   * Health statuses are updated via Redis Streams (ADR-002) from
+   * each service's periodic health reports.
+   *
+   * @returns Map of service name to health status
+   * @see handleHealthMessage for how health is updated
+   * @see ADR-002 for health reporting architecture
+   */
   getServiceHealthMap(): Map<string, ServiceHealth> {
     return new Map(this.serviceHealth);
   }
 
+  /**
+   * Get current system-wide metrics.
+   *
+   * Includes:
+   * - Total opportunities detected
+   * - Pending opportunities count
+   * - Total executions and success rate
+   * - Total profit accumulated
+   * - Active services count
+   * - System health score (0-100)
+   * - Various event counters (swaps, alerts, etc.)
+   *
+   * @returns Copy of current system metrics
+   */
   getSystemMetrics(): SystemMetrics {
     return { ...this.systemMetrics };
   }
 
+  /**
+   * Get all tracked arbitrage opportunities.
+   *
+   * Delegates to OpportunityRouter if available (R2 refactoring).
+   * Opportunities are automatically cleaned up based on TTL and max count limits.
+   *
+   * @returns Map of opportunity ID to opportunity data
+   * @see OpportunityRouter for opportunity management logic
+   */
   getOpportunities(): Map<string, ArbitrageOpportunity> {
     // R2: Delegate to opportunity router if available
     return this.opportunityRouter?.getOpportunities() ?? new Map(this.opportunities);
   }
 
+  /**
+   * Get all active alert cooldowns.
+   *
+   * Alert cooldowns prevent duplicate alerts from being sent too frequently.
+   * Delegates to AlertCooldownManager (which in turn delegates to HealthMonitor).
+   *
+   * @returns Map of alert key to last alert timestamp
+   * @see HealthMonitor for cooldown logic
+   */
   getAlertCooldowns(): Map<string, number> {
     // R2: Delegate to AlertCooldownManager (which delegates to HealthMonitor)
     return this.alertCooldownManager?.getCooldowns() ?? new Map();
   }
 
+  /**
+   * Delete a specific alert cooldown entry.
+   *
+   * Useful for testing or forcing an alert to be sent immediately.
+   * Delegates to HealthMonitor for deletion.
+   *
+   * @param key - Alert cooldown key to delete
+   * @returns true if deleted, false if not found
+   */
   deleteAlertCooldown(key: string): boolean {
     // R2: Delegate to health monitor for deletion (manager doesn't expose delete)
     return this.healthMonitor?.deleteAlertCooldown(key) ?? false;
   }
 
+  /**
+   * Get the logger instance for route handlers.
+   *
+   * Provides minimal logging interface for HTTP route handlers.
+   *
+   * @returns Logger instance
+   */
   getLogger(): RouteLogger {
     return this.logger;
   }
@@ -1757,33 +1921,44 @@ export class CoordinatorService implements CoordinatorStateProvider {
    * FIX: Refactored to use Promise-based mutex pattern.
    * Previously used a boolean flag which had a race window between check and set.
    * Now uses activationPromise to ensure only one activation runs at a time.
+   *
+   * P1-002 FIX: Moved promise creation to be atomic with mutex check to eliminate
+   * race window where two concurrent calls could both pass the checks and create
+   * separate promises before either sets activationPromise.
    */
   async activateStandby(): Promise<boolean> {
-    // Check if already leader
-    if (this.isLeader) {
-      this.logger.warn('Coordinator already leader, skipping activation');
-      return true;
-    }
-
-    // FIX: Promise-based mutex - if activation is in progress, wait for it
+    // P1-002 FIX: Atomic check-and-set pattern
+    // Check activationPromise FIRST before any other checks to acquire mutex immediately
     if (this.activationPromise) {
       this.logger.warn('Activation already in progress, waiting for result');
       return this.activationPromise;
     }
 
-    if (!this.config.isStandby) {
-      this.logger.warn('activateStandby called on non-standby instance');
-      return false;
-    }
+    // Create promise immediately to claim the mutex before any async checks
+    // This prevents race condition where two threads both pass the check above
+    const activationLogic = async (): Promise<boolean> => {
+      // Now that we have the mutex, perform all validation checks
+      if (this.isLeader) {
+        this.logger.warn('Coordinator already leader, skipping activation');
+        return true;
+      }
 
-    if (!this.config.canBecomeLeader) {
-      this.logger.error('Cannot activate - canBecomeLeader is false');
-      return false;
-    }
+      if (!this.config.isStandby) {
+        this.logger.warn('activateStandby called on non-standby instance');
+        return false;
+      }
 
-    // FIX: Create and store the activation promise BEFORE any await
-    // This ensures concurrent calls get the same promise
-    this.activationPromise = this.doActivateStandby();
+      if (!this.config.canBecomeLeader) {
+        this.logger.error('Cannot activate - canBecomeLeader is false');
+        return false;
+      }
+
+      // Perform the actual activation
+      return this.doActivateStandby();
+    };
+
+    // Set activationPromise synchronously before any await
+    this.activationPromise = activationLogic();
 
     try {
       return await this.activationPromise;

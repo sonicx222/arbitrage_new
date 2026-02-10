@@ -13,6 +13,24 @@ interface IBalancerV2Vault {
      * @param tokens Array of token addresses to flash loan
      * @param amounts Array of amounts to flash loan (matching tokens array)
      * @param userData Arbitrary data to pass to the recipient
+     *
+     * @custom:requirements Array Validation
+     * - `tokens.length` MUST equal `amounts.length`
+     * - Arrays MUST NOT be empty (minimum 1 token)
+     * - All `amounts[i]` MUST be greater than 0
+     * - `recipient` MUST be a contract (not EOA)
+     * - `recipient` MUST implement IFlashLoanRecipient correctly
+     *
+     * @custom:reverts
+     * - "Array length mismatch" if array lengths don't match
+     * - "Empty arrays" if arrays are empty
+     * - "Zero amount" if any amount is 0
+     * - Reverts if recipient callback reverts
+     * - "Flash loan not repaid" if repayment insufficient
+     *
+     * @custom:note Maximum Array Length
+     * While technically unlimited, practical gas limits restrict multi-asset
+     * flash loans to ~100 tokens maximum. Single-asset flash loans are most common.
      */
     function flashLoan(
         IFlashLoanRecipient recipient,

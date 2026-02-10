@@ -17,6 +17,7 @@
     "clean": "hardhat clean",
     "typecheck": "tsc --noEmit",
     "validate:addresses": "npx ts-node scripts/validate-addresses.ts",
+    "verify:interface-docs": "npx tsx scripts/verify-interface-docs.ts",
     "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
     "deploy:arbitrum-sepolia": "hardhat run scripts/deploy.ts --network arbitrumSepolia",
     "verify": "hardhat verify"
@@ -41,6 +42,7 @@
     "typescript": "^5.6.2"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^4.9.6"
+    "@openzeppelin/contracts": "^4.9.6",
+    "proper-lockfile": "^4.1.2"
   }
 }

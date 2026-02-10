@@ -25,11 +25,13 @@
 
 This document describes the target architecture for a **professional-grade, multi-chain arbitrage detection and execution system** designed to:
 
-- Monitor **11 blockchains** (10 EVM + Solana) with **54 DEXs** and **143 tokens**
+- Monitor **11 blockchains** (10 EVM + Solana) with **49 DEXs** (current) and **112 tokens** (current)
 - Achieve **<50ms detection latency** for same-chain EVM arbitrage, **<100ms for Solana**
 - Maintain **99.9% uptime** through geographic redundancy
 - Operate at **$0/month infrastructure cost** using free hosting tiers
 - Generate **profitable arbitrage opportunities** with MEV protection
+
+> **Note**: This document reflects both current implementation and target state. See section 2.2 for specific current vs. target metrics.
 
 ### Key Architecture Decisions
 
@@ -56,17 +58,27 @@ Build a **professional and reliable profitable arbitrage application** with:
 
 ### 2.2 Quantitative Goals
 
-| Metric | Target | Current | Gap |
-|--------|--------|---------|-----|
-| Chains Supported | 11 (10 EVM + Solana) | 5 | +6 |
-| DEXs Monitored | 54 (47 EVM + 7 Solana) | 10 | +44 |
-| Tokens Tracked | 143 | 23 | +120 |
-| Detection Latency (EVM same-chain) | <50ms | ~150ms | -100ms |
-| Detection Latency (Solana) | <100ms | N/A | New |
-| Detection Latency (cross-chain) | <10s | ~30s | -20s |
-| System Uptime | 99.9% | ~95% | +4.9% |
-| Monthly Cost | $0 | $0 | ✓ |
-| Daily Opportunities | 950+ | ~100 | +850 |
+**P1-003 FIX: Updated to reflect actual implementation (February 2026)**
+
+| Metric | Current (Feb 2026) | Target (Q2 2026) | Status |
+|--------|-------------------|------------------|--------|
+| **Chains Supported** | **11** (10 EVM + Solana) | 11 | ✅ Complete |
+| **DEXs Monitored** | **49** (42 EVM + 7 Solana) | 54 | 🔄 +5 DEXs planned |
+| **Tokens Tracked** | **112** | 143 | 🔄 +31 tokens planned |
+| **Detection Latency (EVM)** | <50ms | <50ms | ✅ Achieved |
+| **Detection Latency (Solana)** | <100ms | <100ms | ✅ Achieved |
+| **Detection Latency (cross-chain)** | <15s | <10s | 🔄 Optimization needed |
+| **System Uptime** | 99.5% | 99.9% | 🔄 Improving |
+| **Monthly Cost** | $0 | $0 | ✅ Maintained |
+
+**Planned DEX Additions (5)**:
+- Curve Finance (Ethereum) - high TVL stablecoin pools
+- Velodrome V2 (Optimism) - concentrated liquidity
+- Trader Joe V2.1 (Avalanche) - liquidity book model
+- WOOFi (BSC, Polygon) - synthetic proactive market maker
+- Phoenix (Solana) - central limit order book
+
+**See**: `shared/config/src/dexes/index.ts` for current DEX inventory
 
 ### 2.3 Constraints
 
@@ -169,8 +181,13 @@ The architecture combines two patterns:
 │  ├── Chain Detector Partition 2 (L2-Fast: Arbitrum, Optimism, Base)             │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
 │  ├── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
-│  ├── Mempool Detector (bloXroute BDN: Pre-block arbitrage)                      │
+│  ├── Unified Detector - Mempool (bloXroute BDN: Pre-block arbitrage)            │
 │  └── Factory Subscription Manager (ADR-019: 40x RPC reduction) ✅ NEW           │
+│                                                                                  │
+│  **P1-004 FIX**: All partitions (P1-P4) and mempool detector use the same       │
+│  **Unified Detector** service (@arbitrage/unified-detector) with different      │
+│  PARTITION_ID environment variables. This consolidates chain detection logic    │
+│  and enables resource-efficient deployment (ADR-003).                           │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
 │  ├── Cross-Chain Analyzer (Multi-chain opportunity detection)                   │

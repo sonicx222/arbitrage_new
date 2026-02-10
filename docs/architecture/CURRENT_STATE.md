@@ -21,13 +21,15 @@ This document provides a snapshot of the current arbitrage trading system archit
 | Service | Port | Type | Description |
 |---------|------|------|-------------|
 | **Coordinator** | 3000 | Core | Orchestrates all services, manages leader election |
-| **Partition Asia-Fast** | 3001 | Detector | P1: BSC, Polygon, Avalanche, Fantom |
-| **Partition L2-Turbo** | 3002 | Detector | P2: Arbitrum, Optimism, Base |
-| **Partition High-Value** | 3003 | Detector | P3: Ethereum, zkSync, Linea |
-| **Partition Solana** | 3004 | Detector | P4: Solana (non-EVM) |
+| **Partition Asia-Fast** | 3001 | Detector | P1: BSC, Polygon, Avalanche, Fantom (Unified Detector) |
+| **Partition L2-Turbo** | 3002 | Detector | P2: Arbitrum, Optimism, Base (Unified Detector) |
+| **Partition High-Value** | 3003 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
+| **Partition Solana** | 3004 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3005 | Core | Trade execution and MEV protection |
 | **Cross-Chain Detector** | 3006 | Detector | Cross-chain arbitrage opportunities |
-| **Mempool Detector** | 3007 | Detector | Pre-block arbitrage via bloXroute BDN |
+| **Unified Detector (Mempool)** | 3007 | Detector | **P1-004 FIX**: Multi-chain detector running mempool partition (pre-block arbitrage via bloXroute BDN). Implements ADR-003 partitioned architecture. |
+
+**Note**: Ports 3001-3004 and 3007 all run the Unified Detector service (`@arbitrage/unified-detector`) with different `PARTITION_ID` configurations. The service consolidates multiple chain detectors into configurable partitions for resource efficiency.
 
 ---
 

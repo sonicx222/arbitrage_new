@@ -12,77 +12,63 @@
  *   ETHERSCAN_API_KEY - For contract verification on Ethereum
  *   ARBISCAN_API_KEY - For contract verification on Arbitrum
  *
- * @see implementation_plan_v2.md Task 3.1.3
+ * Phase 1 & 2 Improvements:
+ *   ✅ Production config guards (prevents 0n profit on mainnet)
+ *   ✅ Gas estimation error handling
+ *   ✅ Verification retry with exponential backoff
+ *   ✅ Router approval error handling
+ *   ✅ Smoke tests after deployment
+ *   ✅ Network name normalization
+ *
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 3 (Flash Loan Arbitrage)
  */
 
-import { ethers, network, run } from 'hardhat';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ethers, network } from 'hardhat';
+import { AAVE_V3_POOL_ADDRESSES, APPROVED_ROUTERS } from '../deployments/addresses';
+import {
+  checkDeployerBalance,
+  estimateDeploymentCost,
+  validateMinimumProfit,
+  approveRouters,
+  verifyContractWithRetry,
+  smokeTestFlashLoanContract,
+  saveDeploymentResult as saveResult,
+  printDeploymentSummary,
+  normalizeNetworkName,
+  DEFAULT_VERIFICATION_RETRIES,
+  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
+  type DeploymentResult,
+} from './lib/deployment-utils';
 
 // =============================================================================
 // Network Configuration
 // =============================================================================
 
 /**
- * Aave V3 Pool addresses by chain
- * @see https://docs.aave.com/developers/deployed-contracts/v3-mainnet
- */
-const AAVE_V3_POOL_ADDRESSES: Record<string, string> = {
-  // Testnets
-  sepolia: '0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951', // Aave V3 Sepolia Pool
-  arbitrumSepolia: '0xBfC91D59fdAA134A4ED45f7B584cAf96D7792Eff', // Aave V3 Arbitrum Sepolia Pool
-
-  // Mainnets (for reference - uncomment when ready)
-  // ethereum: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
-  // arbitrum: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
-  // optimism: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
-  // polygon: '0x794a61358D6845594F94dc1DB02A252b5b4814aD',
-  // base: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
-};
-
-/**
- * Default approved DEX routers by chain
- */
-const DEFAULT_APPROVED_ROUTERS: Record<string, string[]> = {
-  sepolia: [
-    '0xC532a74256D3Db42D0Bf7a0400fEFDbad7694008', // Uniswap V2 Router (Sepolia)
-  ],
-  arbitrumSepolia: [
-    '0x101F443B4d1b059569D643917553c771E1b9663E', // Uniswap V2 Router (Arbitrum Sepolia)
-  ],
-  // Production routers - add when ready
-  // ethereum: ['0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'], // Uniswap V2
-  // arbitrum: ['0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506'], // SushiSwap
-};
-
-/**
  * Default minimum profit settings (in wei)
+ *
+ * MAINNET: Must be defined with positive values to prevent unprofitable trades
+ * TESTNET: Low thresholds for testing
+ *
+ * Phase 1 Fix: Now enforced by validateMinimumProfit() - mainnet deployments
+ * without proper thresholds will fail with clear error messages
  */
 const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
-  sepolia: ethers.parseEther('0.001'), // Low threshold for testing
+  // Testnets - low thresholds for testing
+  sepolia: ethers.parseEther('0.001'),
   arbitrumSepolia: ethers.parseEther('0.001'),
-  // Production - set higher thresholds
-  // ethereum: ethers.parseEther('0.01'),
-  // arbitrum: ethers.parseEther('0.005'),
+
+  // Mainnets - set conservative thresholds to prevent unprofitable trades
+  ethereum: ethers.parseEther('0.01'), // 0.01 ETH ≈ $30 at $3000/ETH
+  arbitrum: ethers.parseEther('0.005'), // 0.005 ETH ≈ $15
 };
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface DeploymentResult {
-  network: string;
-  chainId: number;
-  contractAddress: string;
+interface FlashLoanDeploymentResult extends DeploymentResult {
   aavePoolAddress: string;
-  ownerAddress: string;
-  deployerAddress: string;
-  transactionHash: string;
-  blockNumber: number;
-  timestamp: number;
-  minimumProfit: string;
-  approvedRouters: string[];
-  verified: boolean;
 }
 
 interface DeploymentConfig {
@@ -94,15 +80,18 @@ interface DeploymentConfig {
 }
 
 // =============================================================================
-// Deployment Functions
+// Deployment Function
 // =============================================================================
 
 /**
- * Deploy FlashLoanArbitrage contract
+ * Deploy FlashLoanArbitrage contract with Phase 1 & 2 improvements
  */
-async function deployFlashLoanArbitrage(config: DeploymentConfig): Promise<DeploymentResult> {
+async function deployFlashLoanArbitrage(
+  config: DeploymentConfig
+): Promise<FlashLoanDeploymentResult> {
   const [deployer] = await ethers.getSigners();
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
+  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
   const chainId = Number((await ethers.provider.getNetwork()).chainId);
 
   console.log('\n========================================');
@@ -112,21 +101,24 @@ async function deployFlashLoanArbitrage(config: DeploymentConfig): Promise<Deplo
   console.log(`Deployer: ${deployer.address}`);
   console.log(`Aave Pool: ${config.aavePoolAddress}`);
 
-  // Check deployer balance
-  const balance = await ethers.provider.getBalance(deployer.address);
-  console.log(`Deployer Balance: ${ethers.formatEther(balance)} ETH`);
-
-  if (balance === 0n) {
-    throw new Error('Deployer has no balance. Please fund the deployer account.');
-  }
+  // Phase 1 Fix: Proper balance checking with helpful error messages
+  await checkDeployerBalance(deployer);
 
   // Determine owner address
   const ownerAddress = config.ownerAddress || deployer.address;
   console.log(`Owner: ${ownerAddress}`);
 
+  if (ownerAddress !== deployer.address) {
+    console.log('⚠️  Owner is different from deployer.');
+    console.log('   Remember to call acceptOwnership() from owner account after deployment.');
+  }
+
+  // Phase 1 Fix: Estimate gas with error handling
+  const FlashLoanArbitrageFactory = await ethers.getContractFactory('FlashLoanArbitrage');
+  await estimateDeploymentCost(FlashLoanArbitrageFactory, config.aavePoolAddress, ownerAddress);
+
   // Deploy contract
   console.log('\nDeploying FlashLoanArbitrage...');
-  const FlashLoanArbitrageFactory = await ethers.getContractFactory('FlashLoanArbitrage');
   const flashLoanArbitrage = await FlashLoanArbitrageFactory.deploy(
     config.aavePoolAddress,
     ownerAddress
@@ -148,8 +140,10 @@ async function deployFlashLoanArbitrage(config: DeploymentConfig): Promise<Deplo
   // Post-deployment configuration
   console.log('\nConfiguring contract...');
 
-  // Set minimum profit if specified
-  const minimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName] || 0n;
+  // Phase 1 Fix: Validate minimum profit (throws on mainnet if zero/undefined)
+  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
+
   if (minimumProfit > 0n) {
     console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} ETH`);
     const tx = await flashLoanArbitrage.setMinimumProfit(minimumProfit);
@@ -157,38 +151,38 @@ async function deployFlashLoanArbitrage(config: DeploymentConfig): Promise<Deplo
     console.log('  ✅ Minimum profit set');
   }
 
-  // Add approved routers
-  const approvedRouters = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
-  for (const router of approvedRouters) {
-    console.log(`  Adding approved router: ${router}`);
-    const tx = await flashLoanArbitrage.addApprovedRouter(router);
-    await tx.wait();
-    console.log('  ✅ Router approved');
+  // Phase 1 Fix: Router approval with error handling
+  const routers = config.approvedRouters || APPROVED_ROUTERS[networkName] || [];
+  let approvedRoutersList: string[] = [];
+
+  if (routers.length > 0) {
+    const approvalResult = await approveRouters(flashLoanArbitrage, routers, true);
+    approvedRoutersList = approvalResult.succeeded;
+
+    // If any router failed and we're on mainnet, warn loudly
+    if (approvalResult.failed.length > 0) {
+      console.warn('\n⚠️  WARNING: Some routers failed to approve');
+      console.warn('   Contract is partially configured');
+      console.warn('   Manually approve failed routers before executing arbitrage trades');
+    }
+  } else {
+    console.warn('\n⚠️  No routers configured for this network');
+    console.warn('   You must approve routers manually before the contract can execute swaps');
   }
 
-  // Verify contract on Etherscan
+  // Phase 1 Fix: Verification with retry logic
   let verified = false;
-  if (!config.skipVerification && networkName !== 'localhost' && networkName !== 'hardhat') {
-    console.log('\nVerifying contract on block explorer...');
-    try {
-      await run('verify:verify', {
-        address: contractAddress,
-        constructorArguments: [config.aavePoolAddress, ownerAddress],
-      });
-      verified = true;
-      console.log('✅ Contract verified');
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes('Already Verified')) {
-        verified = true;
-        console.log('✅ Contract already verified');
-      } else {
-        console.warn('⚠️ Verification failed:', errorMessage);
-        console.log('   You can verify manually later with:');
-        console.log(`   npx hardhat verify --network ${networkName} ${contractAddress} ${config.aavePoolAddress} ${ownerAddress}`);
-      }
-    }
+  if (!config.skipVerification) {
+    verified = await verifyContractWithRetry(
+      contractAddress,
+      [config.aavePoolAddress, ownerAddress],
+      DEFAULT_VERIFICATION_RETRIES,
+      DEFAULT_VERIFICATION_INITIAL_DELAY_MS
+    );
   }
+
+  // Phase 2 Addition: Smoke tests
+  await smokeTestFlashLoanContract(flashLoanArbitrage, ownerAddress);
 
   return {
     network: networkName,
@@ -201,55 +195,9 @@ async function deployFlashLoanArbitrage(config: DeploymentConfig): Promise<Deplo
     blockNumber,
     timestamp,
     minimumProfit: minimumProfit.toString(),
-    approvedRouters,
+    approvedRouters: approvedRoutersList,
     verified,
   };
-}
-
-/**
- * Save deployment result to file
- */
-function saveDeploymentResult(result: DeploymentResult): void {
-  const deploymentsDir = path.join(__dirname, '..', 'deployments');
-  if (!fs.existsSync(deploymentsDir)) {
-    fs.mkdirSync(deploymentsDir, { recursive: true });
-  }
-
-  // Save network-specific deployment
-  const networkFile = path.join(deploymentsDir, `${result.network}.json`);
-  fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
-  console.log(`\n📝 Deployment saved to: ${networkFile}`);
-
-  // Update master registry
-  const registryFile = path.join(deploymentsDir, 'registry.json');
-  let registry: Record<string, DeploymentResult> = {};
-  if (fs.existsSync(registryFile)) {
-    registry = JSON.parse(fs.readFileSync(registryFile, 'utf8'));
-  }
-  registry[result.network] = result;
-  fs.writeFileSync(registryFile, JSON.stringify(registry, null, 2));
-  console.log(`📝 Registry updated: ${registryFile}`);
-}
-
-/**
- * Print deployment summary
- */
-function printDeploymentSummary(result: DeploymentResult): void {
-  console.log('\n========================================');
-  console.log('Deployment Summary');
-  console.log('========================================');
-  console.log(`Network:          ${result.network} (${result.chainId})`);
-  console.log(`Contract:         ${result.contractAddress}`);
-  console.log(`Aave Pool:        ${result.aavePoolAddress}`);
-  console.log(`Owner:            ${result.ownerAddress}`);
-  console.log(`Deployer:         ${result.deployerAddress}`);
-  console.log(`Transaction:      ${result.transactionHash}`);
-  console.log(`Block:            ${result.blockNumber}`);
-  console.log(`Timestamp:        ${new Date(result.timestamp * 1000).toISOString()}`);
-  console.log(`Minimum Profit:   ${ethers.formatEther(result.minimumProfit)} ETH`);
-  console.log(`Approved Routers: ${result.approvedRouters.length}`);
-  console.log(`Verified:         ${result.verified ? '✅ Yes' : '❌ No'}`);
-  console.log('========================================\n');
 }
 
 // =============================================================================
@@ -257,33 +205,73 @@ function printDeploymentSummary(result: DeploymentResult): void {
 // =============================================================================
 
 async function main(): Promise<void> {
-  const networkName = network.name;
+  const networkName = normalizeNetworkName(network.name);
 
   // Get Aave Pool address for the network
   const aavePoolAddress = AAVE_V3_POOL_ADDRESSES[networkName];
   if (!aavePoolAddress) {
     throw new Error(
-      `Aave V3 Pool address not configured for network: ${networkName}\n` +
-      `Supported networks: ${Object.keys(AAVE_V3_POOL_ADDRESSES).join(', ')}`
+      `[ERR_NO_AAVE_POOL] Aave V3 Pool address not configured for network: ${networkName}\n` +
+      `Supported networks: ${Object.keys(AAVE_V3_POOL_ADDRESSES).join(', ')}\n\n` +
+      `To add support for ${networkName}:\n` +
+      `1. Find the Aave V3 Pool address from: https://docs.aave.com/developers/deployed-contracts/v3-mainnet\n` +
+      `2. Add to shared/config/src/addresses.ts: AAVE_V3_POOLS\n` +
+      `3. Add to contracts/deployments/addresses.ts re-export`
     );
   }
 
-  // Deploy
+  console.log(`\nStarting FlashLoanArbitrage deployment to ${networkName}...`);
+
+  // Deploy with Phase 1 & 2 improvements
   const result = await deployFlashLoanArbitrage({
     aavePoolAddress,
-    approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
+    approvedRouters: APPROVED_ROUTERS[networkName],
     minimumProfit: DEFAULT_MINIMUM_PROFIT[networkName],
   });
 
-  // Save and print summary
-  saveDeploymentResult(result);
+  // Save deployment result
+  await saveResult(result, 'registry.json');
+
+  // Print summary
   printDeploymentSummary(result);
 
-  console.log('🎉 Deployment complete!');
+  // Print next steps
+  console.log('📋 NEXT STEPS:\n');
+
+  let stepNumber = 1;
+
+  if (!result.verified) {
+    console.log(`${stepNumber}. ⚠️  Verify contract manually:`);
+    console.log(`   npx hardhat verify --network ${networkName} ${result.contractAddress} ${result.aavePoolAddress} ${result.ownerAddress}\n`);
+    stepNumber++;
+  }
+
+  if (result.ownerAddress !== result.deployerAddress) {
+    console.log(`${stepNumber}. Transfer ownership to multisig (if needed):`);
+    console.log(`   From owner account: await contract.acceptOwnership();\n`);
+    stepNumber++;
+  }
+
+  console.log(`${stepNumber}. Update contract address in configuration:`);
+  console.log(`   File: contracts/deployments/addresses.ts`);
+  console.log(`   UPDATE: FLASH_LOAN_CONTRACT_ADDRESSES['${networkName}'] = '${result.contractAddress}';`);
+  console.log(`   (Uncomment the line and replace placeholder address)\n`);
+  stepNumber++;
+
+  console.log(`${stepNumber}. Validate the update:`);
+  console.log(`   npm run typecheck`);
+  console.log(`   npm test contracts/deployments\n`);
+  stepNumber++;
+
+  console.log(`${stepNumber}. Restart services to pick up new configuration:`);
+  console.log(`   npm run dev:stop && npm run dev:all\n`);
+
+  console.log('📖 For detailed deployment workflow, see: contracts/deployments/README.md\n');
+  console.log('🎉 Deployment complete!\n');
 }
 
 // Run the deployment
 main().catch((error) => {
-  console.error('Deployment failed:', error);
+  console.error('\n❌ Deployment failed:', error);
   process.exit(1);
 });

@@ -12,8 +12,12 @@ pragma solidity ^0.8.19;
  *
  * ## Flash Loan Fee
  * - 0.3% (30 basis points)
- * - Fee is calculated on surplus balance: `postLoanBalance - preLoanBalance`
+ * - Fee is calculated as: `(amount * 0.003)` or `(amount * flashLoanFeePercentage()) / 1e18`
  * - Fee percentage stored with 18 decimals: `flashLoanFeePercentage()` returns 3e15 (0.3%)
+ *
+ * **Repayment**: Borrower must repay `amount + fee`
+ * **Vault Verification**: After the loan, vault verifies that its balance increased by at least `fee`
+ *   (this is the "surplus" - the net profit after lending `amount` and receiving `amount + fee`)
  *
  * ## Callback Interfaces
  * SyncSwap supports two callback interfaces:
@@ -80,10 +84,17 @@ interface ISyncSwapVault {
      * @param amount The loan amount
      * @return The fee amount (0.3% of amount)
      *
-     * **Implementation**:
+     * **Calculation**:
      * ```solidity
      * fee = (amount * flashLoanFeePercentage()) / 1e18
+     * // Example: amount = 1000 ETH, fee = (1000 * 3e15) / 1e18 = 3 ETH (0.3%)
      * ```
+     *
+     * **Important**: The fee is calculated on the LOAN AMOUNT, not on any surplus.
+     * Borrower must repay: `amount + fee`
+     *
+     * **EIP-3156 Compliance**: This follows the EIP-3156 standard where fee
+     * is a function of the loan amount, known upfront before execution.
      */
     function flashFee(address token, uint256 amount) external view returns (uint256);
 

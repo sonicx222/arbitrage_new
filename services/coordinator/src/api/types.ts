@@ -113,28 +113,51 @@ export interface CoordinatorStateProvider {
   getAlertHistory(limit?: number): Alert[];
 }
 
+// ===========================================================================
+// P3-004 FIX: Consolidated Logger Interfaces with Clear Naming
+// ===========================================================================
+
 /**
- * Logger interface for route handlers and coordinator internals.
- * FIX 6.1: Consolidated Logger interface using `object` type for consistency
- * with unified-detector's Logger interface.
+ * Minimal logger interface for route handlers and external-facing code.
  *
- * Use `object` instead of `unknown` because:
+ * The debug method is optional because HTTP routes typically only need
+ * info/warn/error for user-facing operations. Use this for:
+ * - Express route handlers
+ * - Middleware functions
+ * - External API integrations
+ *
+ * Use `object` instead of `unknown` for meta because:
  * - Meta should always be a key-value structure (not primitives)
  * - Provides better type safety for structured logging
  * - Consistent with winston/pino logger signatures
  */
-export interface RouteLogger {
+export interface MinimalLogger {
   info: (message: string, meta?: object) => void;
   error: (message: string, meta?: object) => void;
   warn: (message: string, meta?: object) => void;
-  debug?: (message: string, meta?: object) => void; // Optional for routes, required for coordinator
+  debug?: (message: string, meta?: object) => void;
 }
 
 /**
- * FIX 6.1: Full logger interface with required debug method.
- * Used by CoordinatorService for internal logging.
+ * Full logger interface for internal service operations.
+ *
+ * Requires debug method for detailed operational logging. Use this for:
+ * - CoordinatorService internal logic
+ * - Stream message handlers
+ * - Background tasks and monitoring
+ * - Any code requiring detailed debug logging
+ *
  * Matches unified-detector's Logger interface signature.
  */
-export interface Logger extends RouteLogger {
+export interface Logger {
+  info: (message: string, meta?: object) => void;
+  error: (message: string, meta?: object) => void;
+  warn: (message: string, meta?: object) => void;
   debug: (message: string, meta?: object) => void;
 }
+
+/**
+ * @deprecated Use MinimalLogger instead for better clarity
+ * Backward compatibility alias for existing route handlers
+ */
+export type RouteLogger = MinimalLogger;

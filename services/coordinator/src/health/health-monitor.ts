@@ -82,6 +82,11 @@ export interface HealthMonitorConfig {
   minServicesForGracePeriodAlert?: number;
   /** Service name patterns for degradation evaluation */
   servicePatterns?: Partial<ServiceNamePatterns>;
+  // P2-005 FIX: Make hardcoded values configurable
+  /** Threshold for triggering cooldown cleanup (default: 1000 entries) */
+  cooldownCleanupThreshold?: number;
+  /** Maximum age for cooldown entries before cleanup (default: 3600000 ms = 1 hour) */
+  cooldownMaxAgeMs?: number;
 }
 
 /**
@@ -92,6 +97,9 @@ const DEFAULT_CONFIG: Required<Omit<HealthMonitorConfig, 'servicePatterns'>> & {
   alertCooldownMs: 300000,
   minServicesForGracePeriodAlert: 3,
   servicePatterns: DEFAULT_SERVICE_PATTERNS,
+  // P2-005 FIX: Default values for cooldown cleanup
+  cooldownCleanupThreshold: 1000,
+  cooldownMaxAgeMs: 3600000, // 1 hour
 };
 
 /**
@@ -305,8 +313,9 @@ export class HealthMonitor {
       this.alertCooldowns.set(alertKey, now);
       this.onAlert(alert);
 
-      // Periodic cleanup of stale cooldowns (every 100 alerts or 1000+ entries)
-      if (this.alertCooldowns.size > 1000) {
+      // P2-005 FIX: Use configurable threshold for cleanup
+      // Periodic cleanup of stale cooldowns when threshold is exceeded
+      if (this.alertCooldowns.size > this.config.cooldownCleanupThreshold) {
         this.cleanupAlertCooldowns(now);
       }
     }
@@ -318,7 +327,8 @@ export class HealthMonitor {
    * @param now - Current timestamp
    */
   cleanupAlertCooldowns(now: number): void {
-    const maxAge = 3600000; // 1 hour - remove cooldowns older than this
+    // P2-005 FIX: Use configurable max age for cleanup
+    const maxAge = this.config.cooldownMaxAgeMs;
     const toDelete: string[] = [];
 
     for (const [key, timestamp] of this.alertCooldowns) {
