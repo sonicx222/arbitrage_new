@@ -133,6 +133,18 @@ export type {
   ConfigMismatch,
 } from './mev-risk-analyzer';
 
+// Adaptive Threshold Service (Task 3.2)
+export {
+  AdaptiveThresholdService,
+  createAdaptiveThresholdService,
+  ADAPTIVE_THRESHOLD_DEFAULTS,
+} from './adaptive-threshold.service';
+export type {
+  SandwichAttackEvent,
+  ThresholdAdjustment,
+  AdaptiveThresholdConfig,
+} from './adaptive-threshold.service';
+
 // Types
 export {
   // EVM types

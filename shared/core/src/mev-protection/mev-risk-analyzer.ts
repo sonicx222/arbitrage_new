@@ -12,6 +12,8 @@
  */
 
 import { CHAIN_MEV_STRATEGIES, MevStrategy } from './types';
+import type { AdaptiveThresholdService } from './adaptive-threshold.service';
+import { createAdaptiveThresholdService } from './adaptive-threshold.service';
 
 // =============================================================================
 // Types
@@ -177,8 +179,12 @@ export const MEV_RISK_DEFAULTS = {
  */
 export class MevRiskAnalyzer {
   private readonly config: Required<MevRiskAnalyzerConfig>;
+  private readonly adaptiveService?: AdaptiveThresholdService;
 
-  constructor(config?: MevRiskAnalyzerConfig) {
+  constructor(
+    config?: MevRiskAnalyzerConfig,
+    adaptiveService?: AdaptiveThresholdService
+  ) {
     this.config = {
       highValueThresholdUsd: config?.highValueThresholdUsd ?? MEV_RISK_DEFAULTS.highValueThresholdUsd,
       sandwichRiskThresholdBps: config?.sandwichRiskThresholdBps ?? MEV_RISK_DEFAULTS.sandwichRiskThresholdBps,
@@ -186,19 +192,37 @@ export class MevRiskAnalyzer {
       basePriorityFeeEthereumGwei: config?.basePriorityFeeEthereumGwei ?? MEV_RISK_DEFAULTS.basePriorityFeeEthereumGwei,
       baseTipSolanaLamports: config?.baseTipSolanaLamports ?? MEV_RISK_DEFAULTS.baseTipSolanaLamports,
     };
+    this.adaptiveService = adaptiveService;
   }
 
   /**
    * Assess MEV risk for a transaction
    *
+   * Task 3.2: Now supports adaptive threshold adjustments based on historical attacks
+   *
    * @param context - Transaction context for analysis
    * @returns MEV risk assessment with recommendations
    */
-  assessRisk(context: TransactionContext): MevRiskAssessment {
+  async assessRisk(context: TransactionContext): Promise<MevRiskAssessment> {
     // Handle edge case of zero value
     if (context.valueUsd === 0) {
       return this.createLowRiskAssessment(context);
     }
+
+    // Task 3.2: Get adaptive adjustments if enabled
+    let adjustment;
+    if (this.adaptiveService && context.dexProtocol) {
+      adjustment = await this.adaptiveService.getAdjustment(context.chain, context.dexProtocol);
+    }
+
+    // Apply adaptive multipliers to thresholds
+    const effectiveSlippageThreshold = adjustment
+      ? this.config.sandwichRiskThresholdBps * adjustment.slippageMultiplier
+      : this.config.sandwichRiskThresholdBps;
+
+    const effectiveHighValueThreshold = adjustment
+      ? this.config.highValueThresholdUsd * adjustment.profitMultiplier
+      : this.config.highValueThresholdUsd;
 
     // Calculate risk factors
     const riskFactors: string[] = [];
@@ -209,12 +233,20 @@ export class MevRiskAnalyzer {
     const liquidityRiskScore = this.scoreLiquidityRatio(liquidityRatio, riskFactors);
     riskScore += liquidityRiskScore;
 
-    // 2. Slippage tolerance factor
-    const slippageRiskScore = this.scoreSlippage(context.slippageBps, riskFactors);
+    // 2. Slippage tolerance factor (with adaptive threshold)
+    const slippageRiskScore = this.scoreSlippage(
+      context.slippageBps,
+      riskFactors,
+      effectiveSlippageThreshold
+    );
     riskScore += slippageRiskScore;
 
-    // 3. Absolute value factor
-    const valueRiskScore = this.scoreAbsoluteValue(context.valueUsd, riskFactors);
+    // 3. Absolute value factor (with adaptive threshold)
+    const valueRiskScore = this.scoreAbsoluteValue(
+      context.valueUsd,
+      riskFactors,
+      effectiveHighValueThreshold
+    );
     riskScore += valueRiskScore;
 
     // 4. Stable pair discount
@@ -253,6 +285,43 @@ export class MevRiskAnalyzer {
       riskFactors,
       estimatedMevExposureUsd,
     };
+  }
+
+  /**
+   * Record a sandwich attack event for adaptive threshold learning
+   *
+   * Task 3.2: Public API for recording confirmed sandwich attacks.
+   * This data is used by the adaptive threshold service to dynamically
+   * adjust risk thresholds based on historical attack patterns.
+   *
+   * @param event - Sandwich attack details
+   * @throws {Error} If adaptive service is not configured
+   *
+   * @example
+   * ```typescript
+   * await analyzer.recordSandwichAttack({
+   *   chain: 'ethereum',
+   *   dex: 'uniswap_v2',
+   *   ourTxHash: '0xabc...',
+   *   frontRunTxHash: '0xdef...',
+   *   backRunTxHash: '0x123...',
+   *   mevExtractedUsd: 150
+   * });
+   * ```
+   */
+  async recordSandwichAttack(event: {
+    chain: string;
+    dex: string;
+    ourTxHash: string;
+    frontRunTxHash: string;
+    backRunTxHash: string;
+    mevExtractedUsd: number;
+  }): Promise<void> {
+    if (!this.adaptiveService) {
+      throw new Error('Adaptive threshold service not configured');
+    }
+
+    await this.adaptiveService.recordAttack(event);
   }
 
   // ===========================================================================
@@ -299,10 +368,20 @@ export class MevRiskAnalyzer {
    *
    * Uses configurable threshold (sandwichRiskThresholdBps) to determine
    * what constitutes "high" slippage. Default threshold is 100 bps (1%).
+   *
+   * Task 3.2: Accepts effective threshold parameter for adaptive adjustments
+   *
+   * @param slippageBps - Slippage tolerance in basis points
+   * @param riskFactors - Array to append risk factors to
+   * @param effectiveThreshold - Effective threshold after adaptive adjustments (optional)
    */
-  private scoreSlippage(slippageBps: number, riskFactors: string[]): number {
-    // High threshold from config (default 100 bps = 1%)
-    const highThreshold = this.config.sandwichRiskThresholdBps;
+  private scoreSlippage(
+    slippageBps: number,
+    riskFactors: string[],
+    effectiveThreshold?: number
+  ): number {
+    // High threshold (adaptive or default)
+    const highThreshold = effectiveThreshold ?? this.config.sandwichRiskThresholdBps;
     // Critical threshold is 2x high threshold
     const criticalThreshold = highThreshold * 2;
 
@@ -325,12 +404,24 @@ export class MevRiskAnalyzer {
 
   /**
    * Score absolute value factor (0-25 points)
+   *
+   * Task 3.2: Accepts effective threshold parameter for adaptive adjustments
+   *
+   * @param valueUsd - Transaction value in USD
+   * @param riskFactors - Array to append risk factors to
+   * @param effectiveThreshold - Effective high value threshold after adaptive adjustments (optional)
    */
-  private scoreAbsoluteValue(valueUsd: number, riskFactors: string[]): number {
+  private scoreAbsoluteValue(
+    valueUsd: number,
+    riskFactors: string[],
+    effectiveThreshold?: number
+  ): number {
+    const highValueThreshold = effectiveThreshold ?? this.config.highValueThresholdUsd;
+
     if (valueUsd >= 100_000) {
       riskFactors.push('very_high_value');
       return 25;
-    } else if (valueUsd >= this.config.highValueThresholdUsd) {
+    } else if (valueUsd >= highValueThreshold) {
       riskFactors.push('high_value');
       return 15;
     } else if (valueUsd >= 1000) {
@@ -535,8 +626,22 @@ export class MevRiskAnalyzer {
 /**
  * Create a MEV risk analyzer with optional configuration
  */
+/**
+ * Create MEV Risk Analyzer with optional adaptive threshold service
+ *
+ * Task 3.2: Automatically creates AdaptiveThresholdService if feature flag enabled
+ *
+ * @param config - Optional MEV risk analyzer configuration
+ * @returns Configured MevRiskAnalyzer instance
+ */
 export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAnalyzer {
-  return new MevRiskAnalyzer(config);
+  // Task 3.2: Create adaptive threshold service if enabled
+  const adaptiveEnabled = process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true';
+  const adaptiveService = adaptiveEnabled
+    ? createAdaptiveThresholdService({ enabled: true })
+    : undefined;
+
+  return new MevRiskAnalyzer(config, adaptiveService);
 }
 
 // =============================================================================

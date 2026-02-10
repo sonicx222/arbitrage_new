@@ -132,6 +132,42 @@ export const MEV_CONFIG = {
     priorityFeeGwei: number;
     minProfitForProtection: number;
   }>,
+
+  /**
+   * Adaptive Risk Scoring Configuration (Task 3.2)
+   *
+   * Tracks sandwich attacks and dynamically adjusts MEV risk thresholds
+   * based on historical attack patterns per chain + DEX.
+   *
+   * When enabled, the system:
+   * - Records confirmed sandwich attacks to Redis
+   * - Reduces thresholds by 30% after 5+ attacks in 24h
+   * - Gradually decays back to defaults (10% per day)
+   *
+   * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.2
+   */
+  adaptiveRiskScoring: {
+    /** Enable adaptive threshold adjustments (feature flag) */
+    enabled: process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true',
+
+    /** Attack count threshold to trigger adaptation (default: 5) */
+    attackThreshold: parseInt(process.env.ADAPTIVE_ATTACK_THRESHOLD || '5'),
+
+    /** Active window for counting attacks in hours (default: 24h) */
+    activeWindowHours: parseInt(process.env.ADAPTIVE_ACTIVE_WINDOW_HOURS || '24'),
+
+    /** Threshold reduction percentage when attacks detected (default: 30%) */
+    reductionPercent: parseFloat(process.env.ADAPTIVE_REDUCTION_PERCENT || '0.30'),
+
+    /** Decay rate per day when no attacks (default: 10% per day) */
+    decayRatePerDay: parseFloat(process.env.ADAPTIVE_DECAY_RATE_PER_DAY || '0.10'),
+
+    /** Maximum events to store (FIFO pruning, default: 10000) */
+    maxEvents: parseInt(process.env.ADAPTIVE_MAX_EVENTS || '10000'),
+
+    /** Event retention period in days (default: 7 days) */
+    retentionDays: parseInt(process.env.ADAPTIVE_RETENTION_DAYS || '7'),
+  },
 };
 
 // =============================================================================
