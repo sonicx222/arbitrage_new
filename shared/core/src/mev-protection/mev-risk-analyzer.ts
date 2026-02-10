@@ -629,17 +629,40 @@ export class MevRiskAnalyzer {
 /**
  * Create MEV Risk Analyzer with optional adaptive threshold service
  *
- * Task 3.2: Automatically creates AdaptiveThresholdService if feature flag enabled
+ * Task 3.2: Automatically creates AdaptiveThresholdService if feature flag enabled.
+ * Imports MEV_CONFIG from @arbitrage/config to avoid configuration duplication.
  *
  * @param config - Optional MEV risk analyzer configuration
  * @returns Configured MevRiskAnalyzer instance
  */
 export function createMevRiskAnalyzer(config?: MevRiskAnalyzerConfig): MevRiskAnalyzer {
-  // Task 3.2: Create adaptive threshold service if enabled
-  const adaptiveEnabled = process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true';
-  const adaptiveService = adaptiveEnabled
-    ? createAdaptiveThresholdService({ enabled: true })
-    : undefined;
+  // Task 3.2: Import MEV_CONFIG to get centralized configuration
+  // Import dynamically to avoid circular dependency
+  let adaptiveService: AdaptiveThresholdService | undefined;
+
+  try {
+    // Import MEV_CONFIG synchronously (shared package, always available at runtime)
+    const { MEV_CONFIG } = require('@arbitrage/config');
+
+    if (MEV_CONFIG.adaptiveRiskScoring.enabled) {
+      // Convert config from MEV_CONFIG format to AdaptiveThresholdConfig format
+      adaptiveService = createAdaptiveThresholdService({
+        enabled: true,
+        attackThreshold: MEV_CONFIG.adaptiveRiskScoring.attackThreshold,
+        activeWindowMs: MEV_CONFIG.adaptiveRiskScoring.activeWindowHours * 60 * 60 * 1000,
+        reductionPercent: MEV_CONFIG.adaptiveRiskScoring.reductionPercent,
+        decayRatePerDay: MEV_CONFIG.adaptiveRiskScoring.decayRatePerDay,
+        maxEvents: MEV_CONFIG.adaptiveRiskScoring.maxEvents,
+        retentionMs: MEV_CONFIG.adaptiveRiskScoring.retentionDays * 24 * 60 * 60 * 1000,
+      });
+    }
+  } catch (error) {
+    // Config not available (test environment) - fallback to env vars
+    const adaptiveEnabled = process.env.FEATURE_ADAPTIVE_RISK_SCORING === 'true';
+    if (adaptiveEnabled) {
+      adaptiveService = createAdaptiveThresholdService({ enabled: true });
+    }
+  }
 
   return new MevRiskAnalyzer(config, adaptiveService);
 }
