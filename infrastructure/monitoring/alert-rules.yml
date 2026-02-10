@@ -1,0 +1,359 @@
+# Prometheus Alert Rules for Arbitrage System
+#
+# Alert Severity Levels:
+# - critical: Page immediately (P1) - System down, data loss, revenue impact
+# - warning: Investigate during business hours (P2) - Degraded performance
+# - info: Monitor trends (P3) - Potential issues, capacity planning
+#
+# Thresholds based on operational documentation:
+# - RPC calls: 5000/min critical threshold (per ADR-024)
+# - Redis Streams: 1000 pending messages critical (per ADR-002)
+# - DLQ growth: 10 messages/min critical (per operational docs)
+# - Cache hit rate: 80% critical, 90% warning (per optimization docs)
+#
+
+groups:
+  # ============================================================================
+  # CRITICAL ALERTS - Page immediately
+  # ============================================================================
+  - name: arbitrage_critical_alerts
+    interval: 30s
+    rules:
+      # Service Health
+      - alert: ServiceDown
+        expr: up{job=~"arbitrage.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Arbitrage service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 2 minutes. Immediate attention required."
+          runbook_url: "https://docs.arbitrage.com/runbooks/service-down"
+          dashboard_url: "https://grafana.arbitrage.com/d/arbitrage-production-dashboard"
+
+      # RPC Rate Limiting (ADR-024: Critical at 5000/min)
+      - alert: RPCRateLimitCritical
+        expr: |
+          sum(rate(arbitrage_rpc_calls_total[1m])) by (provider) * 60 > 5000
+        for: 5m
+        labels:
+          severity: critical
+          component: rpc
+        annotations:
+          summary: "RPC call rate exceeding 5000/min on {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} is receiving {{ $value | humanize }} calls/min (threshold: 5000). Risk of rate limiting and 429 errors."
+          runbook_url: "https://docs.arbitrage.com/runbooks/rpc-rate-limit"
+
+      # Cache Performance (Critical below 80%)
+      - alert: CacheHitRateCritical
+        expr: |
+          rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) /
+          (rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) +
+           rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.8
+        for: 10m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "L1 cache hit rate critically low: {{ $value | humanizePercentage }}"
+          description: "L1 cache hit rate is {{ $value | humanizePercentage }} (threshold: 80%). RPC costs will spike significantly."
+          runbook_url: "https://docs.arbitrage.com/runbooks/cache-hit-rate-low"
+
+      # Redis Streams Backpressure (ADR-002: Critical at 1000 pending)
+      - alert: RedisStreamsBackpressureCritical
+        expr: |
+          redis_stream_messages_pending{stream=~"stream:.*"} > 1000
+        for: 5m
+        labels:
+          severity: critical
+          component: redis-streams
+        annotations:
+          summary: "Redis stream {{ $labels.stream }} has critical backpressure"
+          description: "Stream {{ $labels.stream }} has {{ $value }} pending messages (threshold: 1000). Risk of message loss and system overload."
+          runbook_url: "https://docs.arbitrage.com/runbooks/redis-backpressure"
+
+      # Dead Letter Queue Growth (Critical at 10/min)
+      - alert: DLQGrowthRateCritical
+        expr: |
+          rate(redis_stream_messages_added_total{stream="stream:dead-letter-queue"}[1m]) * 60 > 10
+        for: 5m
+        labels:
+          severity: critical
+          component: redis-streams
+        annotations:
+          summary: "Dead letter queue growing rapidly"
+          description: "DLQ is growing at {{ $value | humanize }} messages/min (threshold: 10). Indicates systematic message processing failures."
+          runbook_url: "https://docs.arbitrage.com/runbooks/dlq-growth"
+
+      # Circuit Breakers
+      - alert: CircuitBreakerOpen
+        expr: |
+          arbitrage_circuit_breaker_open == 1
+        for: 2m
+        labels:
+          severity: critical
+          component: execution
+        annotations:
+          summary: "Circuit breaker open on {{ $labels.service }}"
+          description: "Circuit breaker for {{ $labels.service }} ({{ $labels.chain }}) has been open for 2+ minutes. Service is failing repeatedly."
+          runbook_url: "https://docs.arbitrage.com/runbooks/circuit-breaker"
+
+      # Execution Performance
+      - alert: ExecutionWinRateCritical
+        expr: |
+          sum(rate(arbitrage_execution_success_total[10m])) /
+          sum(rate(arbitrage_execution_attempts_total[10m])) < 0.5
+        for: 10m
+        labels:
+          severity: critical
+          component: execution
+        annotations:
+          summary: "Execution win rate critically low: {{ $value | humanizePercentage }}"
+          description: "Win rate is {{ $value | humanizePercentage }} over 10 minutes (threshold: 50%). Revenue generation severely impacted."
+          runbook_url: "https://docs.arbitrage.com/runbooks/low-win-rate"
+
+      # Gas Prices
+      - alert: GasPriceCritical
+        expr: |
+          arbitrage_gas_price_gwei > 200
+        for: 5m
+        labels:
+          severity: critical
+          component: execution
+        annotations:
+          summary: "Gas price critically high on {{ $labels.chain }}"
+          description: "Gas price on {{ $labels.chain }} is {{ $value }} gwei (threshold: 200). Profitability severely impacted."
+          runbook_url: "https://docs.arbitrage.com/runbooks/high-gas-price"
+
+      # Memory and Resource Exhaustion
+      - alert: HighMemoryUsage
+        expr: |
+          (process_resident_memory_bytes / node_memory_MemTotal_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Process memory usage > 90%"
+          description: "Memory usage is {{ $value | humanizePercentage }}. Risk of OOM crashes."
+          runbook_url: "https://docs.arbitrage.com/runbooks/high-memory"
+
+  # ============================================================================
+  # WARNING ALERTS - Investigate during business hours
+  # ============================================================================
+  - name: arbitrage_warning_alerts
+    interval: 1m
+    rules:
+      # RPC Rate Warning (4000/min = 80% of critical)
+      - alert: RPCRateLimitWarning
+        expr: |
+          sum(rate(arbitrage_rpc_calls_total[1m])) by (provider) * 60 > 4000
+        for: 10m
+        labels:
+          severity: warning
+          component: rpc
+        annotations:
+          summary: "RPC call rate high on {{ $labels.provider }}: {{ $value | humanize }}/min"
+          description: "Provider {{ $labels.provider }} is at {{ $value | humanize }} calls/min (warning: 4000, critical: 5000)."
+
+      # Cache Performance Warning (80-90%)
+      - alert: CacheHitRateWarning
+        expr: |
+          rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) /
+          (rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) +
+           rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.9
+        for: 15m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "L1 cache hit rate below optimal: {{ $value | humanizePercentage }}"
+          description: "L1 cache hit rate is {{ $value | humanizePercentage }} (optimal: 90%+). RPC costs are elevated."
+
+      # Redis Streams Backpressure Warning (500-1000 pending)
+      - alert: RedisStreamsBackpressureWarning
+        expr: |
+          redis_stream_messages_pending{stream=~"stream:.*"} > 500
+        for: 10m
+        labels:
+          severity: warning
+          component: redis-streams
+        annotations:
+          summary: "Redis stream {{ $labels.stream }} has elevated backpressure"
+          description: "Stream {{ $labels.stream }} has {{ $value }} pending messages (warning: 500, critical: 1000)."
+
+      # DLQ Growth Warning (5-10/min)
+      - alert: DLQGrowthRateWarning
+        expr: |
+          rate(redis_stream_messages_added_total{stream="stream:dead-letter-queue"}[1m]) * 60 > 5
+        for: 10m
+        labels:
+          severity: warning
+          component: redis-streams
+        annotations:
+          summary: "Dead letter queue growing: {{ $value | humanize }}/min"
+          description: "DLQ is growing at {{ $value | humanize }} messages/min (warning: 5, critical: 10)."
+
+      # Execution Win Rate Warning (50-70%)
+      - alert: ExecutionWinRateWarning
+        expr: |
+          sum(rate(arbitrage_execution_success_total[10m])) /
+          sum(rate(arbitrage_execution_attempts_total[10m])) < 0.7
+        for: 15m
+        labels:
+          severity: warning
+          component: execution
+        annotations:
+          summary: "Execution win rate below target: {{ $value | humanizePercentage }}"
+          description: "Win rate is {{ $value | humanizePercentage }} (target: 70%+). Consider adjusting strategy parameters."
+
+      # Error Rate Warning (1-5%)
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(arbitrage_errors_total[5m])) by (service) /
+          sum(rate(arbitrage_requests_total[5m])) by (service) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: reliability
+        annotations:
+          summary: "Error rate elevated on {{ $labels.service }}: {{ $value | humanizePercentage }}"
+          description: "Service {{ $labels.service }} has {{ $value | humanizePercentage }} error rate (threshold: 1%)."
+
+      # Gas Price Warning (100-200 gwei)
+      - alert: GasPriceWarning
+        expr: |
+          arbitrage_gas_price_gwei > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: execution
+        annotations:
+          summary: "Gas price elevated on {{ $labels.chain }}: {{ $value }} gwei"
+          description: "Gas price on {{ $labels.chain }} is {{ $value }} gwei (warning: 100, critical: 200)."
+
+      # Memory Usage Warning (80-90%)
+      - alert: HighMemoryUsageWarning
+        expr: |
+          (process_resident_memory_bytes / node_memory_MemTotal_bytes) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Process memory usage > 80%"
+          description: "Memory usage is {{ $value | humanizePercentage }}. Monitor for potential memory leak."
+
+      # Opportunity Detection Rate
+      - alert: LowOpportunityDetectionRate
+        expr: |
+          sum(rate(arbitrage_opportunities_detected_total[10m])) * 3600 < 10
+        for: 15m
+        labels:
+          severity: warning
+          component: detection
+        annotations:
+          summary: "Low opportunity detection rate: {{ $value | humanize }}/hour"
+          description: "Detecting only {{ $value | humanize }} opportunities/hour (expected: 10+). Check market conditions or detector health."
+
+  # ============================================================================
+  # INFO ALERTS - Monitor trends and capacity
+  # ============================================================================
+  - name: arbitrage_info_alerts
+    interval: 5m
+    rules:
+      # Capacity Planning
+      - alert: CacheCapacityGrowing
+        expr: |
+          predict_linear(arbitrage_cache_size_bytes{cache_level="L1"}[1h], 3600 * 4) >
+          (arbitrage_cache_size_bytes{cache_level="L1"} * 0.8)
+        for: 30m
+        labels:
+          severity: info
+          component: cache
+        annotations:
+          summary: "L1 cache predicted to reach 80% capacity in 4 hours"
+          description: "Cache on {{ $labels.chain }} growing linearly. May need capacity increase."
+
+      # Performance Trends
+      - alert: DetectionLatencyIncreasing
+        expr: |
+          histogram_quantile(0.95,
+            rate(arbitrage_detection_duration_ms_bucket[10m])
+          ) > 100
+        for: 30m
+        labels:
+          severity: info
+          component: detection
+        annotations:
+          summary: "Detection latency P95 elevated: {{ $value | humanize }}ms"
+          description: "Detection latency P95 is {{ $value | humanize }}ms (target: <50ms). Performance degrading."
+
+      # Volume Metrics
+      - alert: LowTradingVolume
+        expr: |
+          sum(rate(arbitrage_volume_usd_total[1h])) < 10000
+        for: 2h
+        labels:
+          severity: info
+          component: business
+        annotations:
+          summary: "Low trading volume: ${{ $value | humanize }}/hour"
+          description: "Trading volume is ${{ $value | humanize }}/hour. May indicate market conditions or system issues."
+
+      # RPC Provider Health
+      - alert: RPCProviderDegraded
+        expr: |
+          rate(arbitrage_rpc_errors_total[5m]) by (provider) /
+          rate(arbitrage_rpc_calls_total[5m]) by (provider) > 0.05
+        for: 20m
+        labels:
+          severity: info
+          component: rpc
+        annotations:
+          summary: "RPC provider {{ $labels.provider }} error rate: {{ $value | humanizePercentage }}"
+          description: "Provider {{ $labels.provider }} has {{ $value | humanizePercentage }} error rate. Consider switching provider."
+
+# ============================================================================
+# NOTIFICATION ROUTING
+# ============================================================================
+# Configure in Prometheus Alertmanager config.yml or Grafana notification channels
+
+# Example Alertmanager routing:
+# route:
+#   receiver: 'default'
+#   group_by: ['alertname', 'service']
+#   group_wait: 30s
+#   group_interval: 5m
+#   repeat_interval: 4h
+#   routes:
+#     - match:
+#         severity: critical
+#       receiver: 'pagerduty'
+#       group_wait: 10s
+#       repeat_interval: 1h
+#     - match:
+#         severity: warning
+#       receiver: 'slack-warnings'
+#       repeat_interval: 12h
+#     - match:
+#         severity: info
+#       receiver: 'slack-info'
+#       repeat_interval: 24h
+#
+# receivers:
+#   - name: 'pagerduty'
+#     pagerduty_configs:
+#       - service_key: <pagerduty_service_key>
+#         severity: '{{ .GroupLabels.severity }}'
+#   - name: 'slack-warnings'
+#     slack_configs:
+#       - api_url: <slack_webhook_url>
+#         channel: '#arbitrage-alerts'
+#         title: 'Warning: {{ .GroupLabels.alertname }}'
+#   - name: 'slack-info'
+#     slack_configs:
+#       - api_url: <slack_webhook_url>
+#         channel: '#arbitrage-monitoring'
+#         title: 'Info: {{ .GroupLabels.alertname }}'

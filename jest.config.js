@@ -17,6 +17,9 @@ module.exports = {
   // Extend base configuration (excluding projectConfig property)
   ...rootConfig,
 
+  // Setup files that run BEFORE module resolution (for polyfills)
+  setupFiles: ['<rootDir>/jest.setup.js'],
+
   // Root directories to scan for tests
   // NOTE: Explicitly list roots to exclude .worktrees directory from Jest's Haste map
   roots: ['<rootDir>/shared', '<rootDir>/services', '<rootDir>/tests'],

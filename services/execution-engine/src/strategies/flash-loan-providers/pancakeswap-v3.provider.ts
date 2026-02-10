@@ -13,7 +13,7 @@
 
 import { ethers } from 'ethers';
 import {
-  BPS_DENOMINATOR_BIGINT,
+  getBpsDenominatorBigInt,
 } from '@arbitrage/config';
 import type {
   IFlashLoanProvider,
@@ -75,7 +75,7 @@ const POOL_INTERFACE = new ethers.Interface(PANCAKESWAP_V3_POOL_ABI);
 const ARBITRAGE_INTERFACE = new ethers.Interface(PANCAKESWAP_FLASH_ARBITRAGE_ABI);
 
 // Use centralized constant, alias for local readability
-const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+const BPS_DENOMINATOR = getBpsDenominatorBigInt();
 
 /**
  * Pool cache entry for fee tier lookups

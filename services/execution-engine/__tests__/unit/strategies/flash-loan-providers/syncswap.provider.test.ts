@@ -22,17 +22,16 @@ import type {
   FlashLoanSwapStep,
 } from '../../../../src/strategies/flash-loan-providers/types';
 
-// Mock the config module
-jest.mock('@arbitrage/config', () => ({
-  SYNCSWAP_FEE_BPS: 30, // 0.3%
-  BPS_DENOMINATOR_BIGINT: BigInt(10000),
-  SYNCSWAP_FLASH_ARBITRAGE_ABI: [
-    'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-    'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
-    'function isApprovedRouter(address router) external view returns (bool)',
-    'function VAULT() external view returns (address)',
-  ],
-}));
+// Mock the config module to avoid BigInt serialization issues
+// Use jest.requireActual to get real implementations (lazy evaluation via functions)
+jest.mock('@arbitrage/config', () => {
+  const actual = jest.requireActual('@arbitrage/config');
+  return {
+    SYNCSWAP_FEE_BPS: 30, // 0.3%
+    getBpsDenominatorBigInt: actual.getBpsDenominatorBigInt, // Use actual implementation directly
+    SYNCSWAP_FLASH_ARBITRAGE_ABI: actual.SYNCSWAP_FLASH_ARBITRAGE_ABI,
+  };
+});
 
 // =============================================================================
 // Test Utilities

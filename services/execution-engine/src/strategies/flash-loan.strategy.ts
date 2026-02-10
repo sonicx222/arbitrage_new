@@ -46,8 +46,8 @@ import {
   getNativeTokenPrice,
   getTokenDecimals,
   // Fix 1.1 & 9.2: Import centralized constants and ABI
-  AAVE_V3_FEE_BPS_BIGINT,
-  BPS_DENOMINATOR_BIGINT,
+  getAaveV3FeeBpsBigInt,
+  getBpsDenominatorBigInt,
   FLASH_LOAN_ARBITRAGE_ABI,
   // Task 1.2: Batched quoting imports
   FEATURE_FLAGS,
@@ -94,8 +94,8 @@ import { PancakeSwapV3FlashLoanProvider } from './flash-loan-providers/pancakesw
 
 // Fix 1.1: Use centralized constants from @arbitrage/config
 // These are aliased here for backward compatibility with existing code
-const AAVE_V3_FEE_BPS = AAVE_V3_FEE_BPS_BIGINT;
-const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+const AAVE_V3_FEE_BPS = getAaveV3FeeBpsBigInt();
+const BPS_DENOMINATOR = getBpsDenominatorBigInt();
 
 /**
  * Fix 2.1: Static assertion to ensure Aave V3 fee matches official documentation.
@@ -114,7 +114,7 @@ const EXPECTED_AAVE_V3_FEE_BPS = 9n;
 if (AAVE_V3_FEE_BPS !== EXPECTED_AAVE_V3_FEE_BPS) {
   throw new Error(
     `[ERR_CONFIG] Aave V3 fee mismatch: expected ${EXPECTED_AAVE_V3_FEE_BPS} bps (0.09%), ` +
-    `got ${AAVE_V3_FEE_BPS} bps. Check @arbitrage/config AAVE_V3_FEE_BPS constant.`
+    `got ${AAVE_V3_FEE_BPS} bps. Check @arbitrage/config getAaveV3FeeBpsBigInt() function.`
   );
 }
 
@@ -1795,7 +1795,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       const result = await batchQuoter.simulateArbitragePath(
         requests,
         BigInt(opportunity.amountIn!),
-        Number(AAVE_V3_FEE_BPS_BIGINT) // Convert bigint to number for service
+        Number(getAaveV3FeeBpsBigInt()) // Convert bigint to number for service
       );
 
       if (!result.allSuccess) {

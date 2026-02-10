@@ -47,7 +47,8 @@ jest.mock('@arbitrage/config', () => ({
   ],
   // Fix: Add other required constants
   AAVE_V3_FEE_BPS: 9,
-  BPS_DENOMINATOR_BIGINT: BigInt(10000),
+  getBpsDenominatorBigInt: () => BigInt(10000),
+  getAaveV3FeeBpsBigInt: () => BigInt(9),
 }));
 
 // =============================================================================

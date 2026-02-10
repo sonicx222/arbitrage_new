@@ -1107,7 +1107,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000')
+        BigInt('505000000000000000000000000') // 0.000505 ETH per USDC = 10.1 ETH from 20000 USDC
       );
 
       const amountIn = ethers.parseEther('10');
@@ -1155,7 +1155,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000')
+        BigInt('505000000000000000000000000')
       );
 
       const initialTotalProfits = await syncSwapArbitrage.totalProfits();
@@ -1509,7 +1509,7 @@ describe('SyncSwapFlashArbitrage', () => {
         );
 
         expect(result.expectedProfit).to.be.gt(0);
-        expect(result.flashLoanFee).to.equal(ethers.parseEther('10') * 3n / 10000n);
+        expect(result.flashLoanFee).to.equal(ethers.parseEther('10') * 30n / 10000n); // 0.3% = 30 bps
       });
 
       it('should return 0 for empty path', async () => {
@@ -1733,7 +1733,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000')
+        BigInt('505000000000000000000000000') // 0.000505 ETH per USDC
       );
 
       const amountIn = ethers.parseEther('5');

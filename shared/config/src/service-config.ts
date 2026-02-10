@@ -30,9 +30,13 @@ export const BPS_DENOMINATOR = 10000;
 /**
  * Pre-computed BigInt versions for hot-path optimization
  * Avoids repeated BigInt conversion in performance-critical code
+ *
+ * FIX: Converted to lazy-loaded functions to avoid Jest BigInt serialization errors.
+ * Jest workers serialize modules for communication, and JSON.stringify cannot serialize BigInt.
+ * Functions are not serialized by Jest, so this avoids the "Do not know how to serialize a BigInt" error.
  */
-export const AAVE_V3_FEE_BPS_BIGINT = BigInt(AAVE_V3_FEE_BPS);
-export const BPS_DENOMINATOR_BIGINT = BigInt(BPS_DENOMINATOR);
+export const getAaveV3FeeBpsBigInt = (): bigint => BigInt(AAVE_V3_FEE_BPS);
+export const getBpsDenominatorBigInt = (): bigint => BigInt(BPS_DENOMINATOR);
 
 /**
  * FlashLoanArbitrage contract ABI (minimal for execution)
@@ -113,8 +117,12 @@ export const SYNCSWAP_FEE_BPS = 30;
 
 /**
  * Pre-computed BigInt version for hot-path optimization.
+ *
+ * FIX: Converted to lazy-loaded function to avoid Jest BigInt serialization errors.
+ * Jest workers serialize modules for communication, and JSON.stringify cannot serialize BigInt.
+ * Functions are not serialized by Jest, so this avoids the "Do not know how to serialize a BigInt" error.
  */
-export const SYNCSWAP_FEE_BPS_BIGINT = BigInt(SYNCSWAP_FEE_BPS);
+export const getSyncSwapFeeBpsBigInt = (): bigint => BigInt(SYNCSWAP_FEE_BPS);
 
 /**
  * SyncSwapFlashArbitrage contract ABI (minimal for execution).

@@ -80,7 +80,7 @@ import {
   resetPairCacheService,
   type CachedPairData
 } from '@arbitrage/core';
-import { Dex, Token } from '../../shared/types';
+import { Dex, Token, FeeBasisPoints } from '../../shared/types';
 import { createResetHook } from '@arbitrage/test-utils';
 
 // =============================================================================
@@ -106,7 +106,7 @@ const testDex: Dex = {
   chain: 'ethereum',
   factoryAddress: '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
   routerAddress: '0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D',
-  fee: 30,
+  feeBps: 30 as FeeBasisPoints,
   enabled: true
 };
 
@@ -115,7 +115,7 @@ const testV3Dex: Dex = {
   chain: 'ethereum',
   factoryAddress: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
   routerAddress: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
-  fee: 30,
+  feeBps: 30 as FeeBasisPoints,
   enabled: true
 };
 
@@ -1017,7 +1017,7 @@ describe('S2.2.5 Error Handling', () => {
         chain: 'ethereum',
         factoryAddress: '0x1234567890123456789012345678901234567890',
         routerAddress: '0x1234567890123456789012345678901234567890',
-        fee: 30,
+        feeBps: 30 as FeeBasisPoints,
         enabled: true
       };
 

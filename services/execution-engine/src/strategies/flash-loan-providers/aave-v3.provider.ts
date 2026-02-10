@@ -14,7 +14,7 @@ import { ethers } from 'ethers';
 // Fix 1.1 & 9.2: Import centralized constants and ABI
 import {
   AAVE_V3_FEE_BPS,
-  BPS_DENOMINATOR_BIGINT,
+  getBpsDenominatorBigInt,
   FLASH_LOAN_ARBITRAGE_ABI,
 } from '@arbitrage/config';
 import type {
@@ -26,7 +26,7 @@ import type {
 } from './types';
 
 // Fix 1.1: Use centralized constant, alias for local readability
-const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+const BPS_DENOMINATOR = getBpsDenominatorBigInt();
 
 /**
  * Cached ethers.Interface for hot-path optimization.

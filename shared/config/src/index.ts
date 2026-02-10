@@ -253,8 +253,8 @@ export {
   // Fix 1.1: Centralized flash loan constants
   AAVE_V3_FEE_BPS,
   BPS_DENOMINATOR,
-  AAVE_V3_FEE_BPS_BIGINT,
-  BPS_DENOMINATOR_BIGINT,
+  getAaveV3FeeBpsBigInt,
+  getBpsDenominatorBigInt,
   // Fix 9.2: Consolidated ABI
   FLASH_LOAN_ARBITRAGE_ABI,
   // Task 2.2: Balancer V2 flash loan support
@@ -262,7 +262,7 @@ export {
   BALANCER_V2_FLASH_ARBITRAGE_ABI,
   // Task 3.4: SyncSwap flash loan support
   SYNCSWAP_FEE_BPS,
-  SYNCSWAP_FEE_BPS_BIGINT,
+  getSyncSwapFeeBpsBigInt,
   SYNCSWAP_FLASH_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,

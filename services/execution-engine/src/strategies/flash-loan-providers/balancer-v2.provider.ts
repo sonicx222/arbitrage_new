@@ -18,7 +18,7 @@
 import { ethers } from 'ethers';
 import {
   BALANCER_V2_FEE_BPS,
-  BPS_DENOMINATOR_BIGINT,
+  getBpsDenominatorBigInt,
   BALANCER_V2_FLASH_ARBITRAGE_ABI,
 } from '@arbitrage/config';
 import type {
@@ -30,7 +30,7 @@ import type {
 } from './types';
 
 // Alias for local readability
-const BPS_DENOMINATOR = BPS_DENOMINATOR_BIGINT;
+const BPS_DENOMINATOR = getBpsDenominatorBigInt();
 
 /**
  * Cached ethers.Interface for hot-path optimization.

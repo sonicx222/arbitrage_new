@@ -68,6 +68,23 @@ const RETRY_GAS_BUMP_PERCENT = 10;
 // =============================================================================
 
 /**
+ * Factory interface for creating contract instances
+ * Allows dependency injection for better testability
+ */
+export interface ContractFactory {
+  createContract(address: string, abi: any, signerOrProvider: any): any;
+}
+
+/**
+ * Default contract factory implementation using ethers.Contract
+ */
+export const defaultContractFactory: ContractFactory = {
+  createContract: (address: string, abi: any, signerOrProvider: any) => {
+    return new ethers.Contract(address, abi, signerOrProvider);
+  }
+};
+
+/**
  * Single swap step in arbitrage path
  * Must match CommitRevealArbitrage.sol SwapStep struct
  */
@@ -156,15 +173,18 @@ export class CommitRevealService {
   private readonly inMemoryCache = new Map<string, string>();
   private readonly logger: Logger;
   private readonly redisClient?: Redis; // Optional Redis client (dependency injection)
+  private readonly contractFactory: ContractFactory; // Contract factory for dependency injection
 
   constructor(
     logger: Logger,
     contractAddresses: Record<string, string>,
-    redisClient?: Redis // Optional: pass Redis client for better testability
+    redisClient?: Redis, // Optional: pass Redis client for better testability
+    contractFactory: ContractFactory = defaultContractFactory // Optional: inject custom factory for testing
   ) {
     this.logger = logger;
     this.contractAddresses = contractAddresses;
     this.redisClient = redisClient;
+    this.contractFactory = contractFactory;
 
     // Validate that at least one contract address is configured
     const deployedChains = Object.entries(contractAddresses)
@@ -241,7 +261,7 @@ export class CommitRevealService {
         };
       }
 
-      const contract = new ethers.Contract(contractAddress, COMMIT_REVEAL_ABI, wallet);
+      const contract = this.contractFactory.createContract(contractAddress, COMMIT_REVEAL_ABI, wallet);
 
       // 4. Submit commit transaction
       this.logger.info('Submitting commit transaction', {
@@ -366,7 +386,7 @@ export class CommitRevealService {
         return { success: false, error: `No wallet for chain: ${chain}` };
       }
 
-      const contract = new ethers.Contract(
+      const contract = this.contractFactory.createContract(
         this.contractAddresses[chain],
         COMMIT_REVEAL_ABI,
         wallet
@@ -532,7 +552,7 @@ export class CommitRevealService {
       const wallet = ctx.wallets.get(chain);
       if (!wallet) return false;
 
-      const contract = new ethers.Contract(
+      const contract = this.contractFactory.createContract(
         this.contractAddresses[chain],
         COMMIT_REVEAL_ABI,
         wallet
@@ -799,7 +819,7 @@ export class CommitRevealService {
         return { success: false, error: 'No wallet for retry' };
       }
 
-      const contract = new ethers.Contract(
+      const contract = this.contractFactory.createContract(
         this.contractAddresses[chain],
         COMMIT_REVEAL_ABI,
         wallet
