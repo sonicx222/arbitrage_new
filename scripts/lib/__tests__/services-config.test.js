@@ -21,6 +21,8 @@ describe('ServicesConfig', () => {
     jest.resetModules();
     // Reset env vars
     process.env = { ...originalEnv };
+    // Skip service validation during tests to avoid script existence checks
+    process.env.SKIP_SERVICE_VALIDATION = 'true';
     // Spy on console.warn to detect deprecation warnings
     consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -150,6 +152,299 @@ describe('ServicesConfig', () => {
       const config = require('../services-config');
 
       expect(config.PORTS.COORDINATOR).toBe(9999);
+    });
+  });
+
+  describe('ServiceConfig Validation (Task P2-1)', () => {
+    let ServiceConfig;
+
+    beforeEach(() => {
+      // Import ServiceConfig class
+      const config = require('../services-config');
+      ServiceConfig = config.ServiceConfig;
+    });
+
+    describe('Name validation', () => {
+      it('should throw error for missing name', () => {
+        expect(() => new ServiceConfig({
+          type: 'node',
+          port: 3000,
+          script: 'test.js'
+        })).toThrow('name" is required');
+      });
+
+      it('should throw error for non-string name', () => {
+        expect(() => new ServiceConfig({
+          name: 123,
+          type: 'node',
+          port: 3000,
+          script: 'test.js'
+        })).toThrow('name" is required and must be a string');
+      });
+    });
+
+    describe('Type validation', () => {
+      it('should throw error for missing type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          port: 3000,
+          script: 'test.js'
+        })).toThrow('"type" is required');
+      });
+
+      it('should throw error for invalid type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'invalid',
+          port: 3000,
+          script: 'test.js'
+        })).toThrow('Invalid type "invalid"');
+      });
+
+      it('should accept valid node type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts' // Known to exist
+        })).not.toThrow();
+      });
+
+      it('should accept valid docker type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'docker',
+          port: 3000,
+          script: '' // Docker services don't need script
+        })).not.toThrow();
+      });
+
+      it('should accept valid redis type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'redis',
+          port: 6379,
+          script: '' // Redis services don't need script
+        })).not.toThrow();
+      });
+    });
+
+    describe('Port validation', () => {
+      it('should throw error for missing port', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          script: 'test.js'
+        })).toThrow('"port" is required');
+      });
+
+      it('should throw error for non-number port', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: '3000',
+          script: 'test.js'
+        })).toThrow('"port" is required and must be a number');
+      });
+
+      it('should throw error for port below valid range', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 0,
+          script: 'test.js'
+        })).toThrow('Invalid port 0');
+      });
+
+      it('should throw error for port above valid range', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 70000,
+          script: 'test.js'
+        })).toThrow('Invalid port 70000');
+      });
+
+      it('should accept valid port in range', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts'
+        })).not.toThrow();
+      });
+    });
+
+    describe('Script validation (node type)', () => {
+      it('should throw error for missing script on node type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000
+        })).toThrow('"script" is required for type="node"');
+      });
+
+      it('should throw error for non-string script', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 123
+        })).toThrow('"script" is required for type="node"');
+      });
+
+      it('should throw error for non-existent script file', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/nonexistent/index.ts'
+        })).toThrow('Script not found');
+      });
+
+      it('should accept existing script file', () => {
+        // Use a known existing script
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts'
+        })).not.toThrow();
+      });
+
+      it('should not require script for docker type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'docker',
+          port: 3000,
+          script: ''
+        })).not.toThrow();
+      });
+
+      it('should not require script for redis type', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'redis',
+          port: 6379,
+          script: ''
+        })).not.toThrow();
+      });
+    });
+
+    describe('Health endpoint validation', () => {
+      it('should throw error for healthEndpoint not starting with /', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: 'health'
+        })).toThrow('Must start with "/"');
+      });
+
+      it('should throw error for non-string healthEndpoint', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: 123
+        })).toThrow('"healthEndpoint" must be a string');
+      });
+
+      it('should accept valid healthEndpoint starting with /', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: '/health'
+        })).not.toThrow();
+      });
+
+      it('should accept valid healthEndpoint with nested path', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: '/api/health'
+        })).not.toThrow();
+      });
+
+      it('should allow undefined healthEndpoint', () => {
+        expect(() => new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts'
+        })).not.toThrow();
+      });
+    });
+
+    describe('Complete valid configuration', () => {
+      it('should accept fully valid node service configuration', () => {
+        const config = new ServiceConfig({
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: '/health',
+          delay: 1000,
+          env: { TEST: 'value' },
+          enabled: true
+        });
+
+        expect(config.name).toBe('Test Service');
+        expect(config.type).toBe('node');
+        expect(config.port).toBe(3000);
+      });
+
+      it('should accept fully valid docker service configuration', () => {
+        const config = new ServiceConfig({
+          name: 'Docker Service',
+          type: 'docker',
+          port: 8080,
+          script: '',
+          container: 'test-container',
+          enabled: true
+        });
+
+        expect(config.name).toBe('Docker Service');
+        expect(config.type).toBe('docker');
+        expect(config.container).toBe('test-container');
+      });
+
+      it('should accept fully valid redis service configuration', () => {
+        const config = new ServiceConfig({
+          name: 'Redis Service',
+          type: 'redis',
+          port: 6379,
+          script: '',
+          enabled: true
+        });
+
+        expect(config.name).toBe('Redis Service');
+        expect(config.type).toBe('redis');
+        expect(config.port).toBe(6379);
+      });
+    });
+
+    describe('toObject method', () => {
+      it('should return plain object with original config', () => {
+        const originalConfig = {
+          name: 'Test Service',
+          type: 'node',
+          port: 3000,
+          script: 'services/coordinator/src/index.ts',
+          healthEndpoint: '/health'
+        };
+
+        const serviceConfig = new ServiceConfig(originalConfig);
+        const obj = serviceConfig.toObject();
+
+        expect(obj).toEqual(originalConfig);
+      });
     });
   });
 });

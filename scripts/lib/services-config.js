@@ -19,6 +19,9 @@
  * - CROSS_CHAIN_DETECTOR_PORT: Cross-chain detector port (default: 3006)
  * - UNIFIED_DETECTOR_PORT: Unified detector port (default: 3007, deprecated)
  * - REDIS_PORT: Redis port (default: 6379)
+ * - SKIP_SERVICE_VALIDATION: Skip module-load validation (default: false)
+ *   Set to "true" to disable service config validation at module load.
+ *   Useful for: tests, development, CI/CD that imports before services exist.
  *
  * @see ADR-003: Partitioned Chain Detectors
  */
@@ -54,6 +57,20 @@ if (localEnvResult.error && localEnvResult.error.code !== 'ENOENT') {
 // Deprecation Checker (Task 1.1)
 // =============================================================================
 const { checkForDeprecatedEnvVars, printWarnings } = require('./deprecation-checker');
+
+// =============================================================================
+// Service Startup Constants (Task P2-2)
+// =============================================================================
+const {
+  COORDINATOR_STARTUP_DELAY_MS,
+  P1_STARTUP_DELAY_MS,
+  P2_STARTUP_DELAY_MS,
+  P3_STARTUP_DELAY_MS,
+  CROSS_CHAIN_STARTUP_DELAY_MS,
+  EXECUTION_ENGINE_STARTUP_DELAY_MS,
+  UNIFIED_DETECTOR_STARTUP_DELAY_MS,
+  P4_STARTUP_DELAY_MS
+} = require('./constants');
 
 // =============================================================================
 // Service Config Validation (Task P2-1)
@@ -207,7 +224,7 @@ const CORE_SERVICES = [
     script: 'services/coordinator/src/index.ts',
     port: PORTS.COORDINATOR,
     healthEndpoint: '/api/health',
-    delay: 0,
+    delay: COORDINATOR_STARTUP_DELAY_MS, // Use constant from constants.js
     type: 'node',
     enabled: true
   },
@@ -216,7 +233,7 @@ const CORE_SERVICES = [
     script: 'services/partition-asia-fast/src/index.ts',
     port: PORTS.P1_ASIA_FAST,
     healthEndpoint: '/health',
-    delay: 2000,
+    delay: P1_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.P1_ASIA_FAST },
     type: 'node',
     enabled: true
@@ -226,7 +243,7 @@ const CORE_SERVICES = [
     script: 'services/partition-l2-turbo/src/index.ts',
     port: PORTS.P2_L2_TURBO,
     healthEndpoint: '/health',
-    delay: 2500,
+    delay: P2_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.P2_L2_TURBO },
     type: 'node',
     enabled: true
@@ -236,7 +253,7 @@ const CORE_SERVICES = [
     script: 'services/partition-high-value/src/index.ts',
     port: PORTS.P3_HIGH_VALUE,
     healthEndpoint: '/health',
-    delay: 3000,
+    delay: P3_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE },
     type: 'node',
     enabled: true
@@ -246,7 +263,7 @@ const CORE_SERVICES = [
     script: 'services/cross-chain-detector/src/index.ts',
     port: PORTS.CROSS_CHAIN,
     healthEndpoint: '/health',
-    delay: 3500,
+    delay: CROSS_CHAIN_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.CROSS_CHAIN },
     type: 'node',
     enabled: true
@@ -256,7 +273,7 @@ const CORE_SERVICES = [
     script: 'services/execution-engine/src/index.ts',
     port: PORTS.EXECUTION_ENGINE,
     healthEndpoint: '/health',
-    delay: 4000,
+    delay: EXECUTION_ENGINE_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.EXECUTION_ENGINE },
     type: 'node',
     enabled: true
@@ -274,7 +291,7 @@ const OPTIONAL_SERVICES = [
     script: 'services/unified-detector/src/index.ts',
     port: PORTS.UNIFIED_DETECTOR,
     healthEndpoint: '/health',
-    delay: 4500,
+    delay: UNIFIED_DETECTOR_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.UNIFIED_DETECTOR },
     type: 'node',
     enabled: false,
@@ -285,7 +302,7 @@ const OPTIONAL_SERVICES = [
     script: 'services/partition-solana/src/index.ts',
     port: PORTS.P4_SOLANA,
     healthEndpoint: '/health',
-    delay: 5000,
+    delay: P4_STARTUP_DELAY_MS, // Use constant from constants.js
     env: { HEALTH_CHECK_PORT: PORTS.P4_SOLANA },
     type: 'node',
     enabled: false,
@@ -435,7 +452,10 @@ function validateAllServices() {
 }
 
 // Run validation at module load (fail fast)
-validateAllServices();
+// Can be skipped via SKIP_SERVICE_VALIDATION=true for testing/development
+if (process.env.SKIP_SERVICE_VALIDATION !== 'true') {
+  validateAllServices();
+}
 
 // =============================================================================
 // Exports
