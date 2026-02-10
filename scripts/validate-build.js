@@ -14,20 +14,10 @@
 const fs = require('fs');
 const path = require('path');
 
+// Use shared logger (Task #2: consolidate duplicate logging)
+const { log, colors } = require('./lib/logger');
+
 const ROOT_DIR = path.resolve(__dirname, '..');
-
-// ANSI colors for console output
-const colors = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
-  reset: '\x1b[0m'
-};
-
-function log(message, color = 'reset') {
-  console.log(`${colors[color]}${message}${colors.reset}`);
-}
 
 /**
  * Find files matching a pattern recursively

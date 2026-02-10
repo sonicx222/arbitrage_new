@@ -25,11 +25,23 @@ const {
   ROOT_DIR
 } = require('./lib/utils');
 
-const { getStartupServices, PORTS } = require('./lib/services-config');
+const { getStartupServices, PORTS, checkAndPrintDeprecations } = require('./lib/services-config');
+
+// Task P2-2: Use shared constants
+const {
+  REDIS_STARTUP_TIMEOUT_SEC,
+  REDIS_CHECK_INTERVAL_MS,
+  SERVICE_STARTUP_TIMEOUT_SEC,
+  HEALTH_CHECK_INTERVAL_MS,
+  SERVICE_START_DELAY_MS
+} = require('./lib/constants');
 
 // =============================================================================
 // Configuration
 // =============================================================================
+
+// Check for deprecated environment variables
+checkAndPrintDeprecations();
 
 const SERVICES = getStartupServices();
 
@@ -37,7 +49,7 @@ const SERVICES = getStartupServices();
 // Redis Check
 // =============================================================================
 
-async function waitForRedis(maxAttempts = 30) {
+async function waitForRedis(maxAttempts = REDIS_STARTUP_TIMEOUT_SEC) {
   log('\nChecking Redis connection...', 'yellow');
 
   for (let i = 0; i < maxAttempts; i++) {
@@ -50,7 +62,7 @@ async function waitForRedis(maxAttempts = 30) {
       }
       return true;
     }
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, REDIS_CHECK_INTERVAL_MS));
     process.stdout.write('.');
   }
 
@@ -136,7 +148,7 @@ async function startService(service) {
     // Wait for health check after startup delay
     setTimeout(async () => {
       let attempts = 0;
-      const maxAttempts = 30;
+      const maxAttempts = SERVICE_STARTUP_TIMEOUT_SEC;
 
       while (attempts < maxAttempts) {
         const healthResult = await checkHealth(service.port, service.healthEndpoint);
@@ -155,11 +167,25 @@ async function startService(service) {
           await removePid(service.name).catch(() => {
             // Ignore cleanup errors (PID may not have been saved yet)
           });
-          reject(new Error(`${service.name} process died during startup`));
+          // Task P2-3: Enhanced error message with actionable context
+          reject(new Error(
+            `${service.name} process died during startup.\n\n` +
+            `Possible causes:\n` +
+            `  - Missing dependencies (run: npm install)\n` +
+            `  - Configuration error in .env file\n` +
+            `  - Port ${service.port} already in use\n` +
+            `  - TypeScript compilation error\n\n` +
+            `To debug:\n` +
+            `  1. Check the error output above for details\n` +
+            `  2. Try starting the service directly:\n` +
+            `     npx ts-node ${service.script}\n` +
+            `  3. Check if port ${service.port} is available:\n` +
+            `     npx kill-port ${service.port}`
+          ));
           return;
         }
 
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, HEALTH_CHECK_INTERVAL_MS));
         attempts++;
       }
 
@@ -169,7 +195,23 @@ async function startService(service) {
       await removePid(service.name).catch(() => {
         // Ignore cleanup errors (PID may not have been saved yet)
       });
-      reject(new Error(`${service.name} health check timeout after ${maxAttempts} seconds`));
+      // Task P2-3: Enhanced error message with actionable context
+      reject(new Error(
+        `${service.name} health check timeout after ${maxAttempts} seconds.\n\n` +
+        `The service started but failed to respond on ${service.healthEndpoint}.\n\n` +
+        `Possible causes:\n` +
+        `  - Service is still initializing (normal for first start)\n` +
+        `  - Health check endpoint incorrect or not implemented\n` +
+        `  - Service crashed after starting\n` +
+        `  - Firewall blocking port ${service.port}\n\n` +
+        `To debug:\n` +
+        `  1. Check if service is listening:\n` +
+        `     curl http://localhost:${service.port}${service.healthEndpoint}\n` +
+        `  2. Increase timeout (currently ${SERVICE_STARTUP_TIMEOUT_SEC}s) in scripts/lib/constants.js\n` +
+        `  3. Check service logs for startup errors\n` +
+        `  4. Try starting service directly to see full output:\n` +
+        `     npx ts-node ${service.script}`
+      ));
     }, service.delay);
   });
 }
@@ -205,7 +247,7 @@ async function main() {
     try {
       await startService(service);
       // Small delay between services
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, SERVICE_START_DELAY_MS));
     } catch (error) {
       log(`Failed to start ${service.name}: ${error.message}`, 'red');
       // FIX P1-2: Track failed services for summary

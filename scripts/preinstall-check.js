@@ -9,14 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 
-// ANSI color codes
-const colors = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-};
+// Use shared colors (Task #2: consolidate duplicate logging)
+// Note: preinstall-check.js has custom log() function that concatenates colors
+const { colors } = require('./lib/logger');
 
 // Known malicious package names (add to this list as needed)
 // Source: Various npm security advisories and security research

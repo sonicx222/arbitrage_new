@@ -78,7 +78,13 @@ async function cleanup() {
         log(`${svc.name} (port ${svc.port}) is already free.`, 'dim');
       }
     } catch (e) {
-      log(`Error checking port ${svc.port}: ${e.message}`, 'red');
+      // Task P2-3: Enhanced error message with actionable context
+      log(
+        `Error checking port ${svc.port}: ${e.message}\n` +
+        `  This may indicate permission issues or network problems.\n` +
+        `  Try running with elevated privileges if on Windows.`,
+        'red'
+      );
     }
   }
 
@@ -97,7 +103,17 @@ async function cleanup() {
       log('No ghost node processes found.', 'green');
     }
   } catch (e) {
-    log(`Error finding ghost processes: ${e.message}`, 'red');
+    // Task P2-3: Enhanced error message with actionable context
+    log(
+      `Error finding ghost processes: ${e.message}\n` +
+      `  This may occur if:\n` +
+      `    - Process listing commands (ps/wmic) are unavailable\n` +
+      `    - Permission denied to list processes\n` +
+      `  Some ghost processes may remain. Check manually with:\n` +
+      `    Windows: tasklist | findstr node\n` +
+      `    Unix: ps aux | grep node`,
+      'red'
+    );
   }
 
   // 4. Cleanup PID file

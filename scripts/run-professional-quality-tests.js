@@ -6,6 +6,14 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { renderTemplate } = require('./lib/template-renderer');
+
+// Task P2-2: Use shared constants
+const {
+  UNIT_TEST_TIMEOUT_MS,
+  INTEGRATION_TEST_TIMEOUT_MS,
+  PERFORMANCE_TEST_TIMEOUT_MS
+} = require('./lib/constants');
 
 class ProfessionalQualityTestRunner {
   constructor() {
@@ -103,7 +111,7 @@ class ProfessionalQualityTestRunner {
     try {
       const output = execSync('npm test -- --testPathPattern="professional-quality-monitor.test.ts"', {
         encoding: 'utf8',
-        timeout: 120000
+        timeout: UNIT_TEST_TIMEOUT_MS
       });
 
       this.parseTestOutput(output, 'unit');
@@ -122,7 +130,7 @@ class ProfessionalQualityTestRunner {
     try {
       const output = execSync('npm run test:integration -- --testPathPattern="professional-quality.integration.test.ts"', {
         encoding: 'utf8',
-        timeout: 180000
+        timeout: INTEGRATION_TEST_TIMEOUT_MS
       });
 
       this.parseTestOutput(output, 'integration');
@@ -141,7 +149,7 @@ class ProfessionalQualityTestRunner {
     try {
       const output = execSync('npm run test:performance -- --testPathPattern="professional-quality.performance.test.ts"', {
         encoding: 'utf8',
-        timeout: 240000
+        timeout: PERFORMANCE_TEST_TIMEOUT_MS
       });
 
       this.parseTestOutput(output, 'performance');
@@ -278,83 +286,34 @@ class ProfessionalQualityTestRunner {
 
   generateHtmlReport() {
     const r = this.results;
-    const passedPercent = r.summary.totalTests > 0 ?
-      ((r.summary.passedTests / r.summary.totalTests) * 100).toFixed(1) : '0.0';
+    const template = fs.readFileSync(
+      path.join(__dirname, 'templates', 'quality-report.html'),
+      'utf8'
+    );
 
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Professional Quality Test Report</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { background: #f0f0f0; padding: 20px; border-radius: 5px; }
-        .summary { display: flex; gap: 20px; margin: 20px 0; }
-        .metric { background: white; padding: 15px; border: 1px solid #ddd; border-radius: 5px; flex: 1; }
-        .passed { color: #28a745; }
-        .failed { color: #dc3545; }
-        .warning { color: #ffc107; }
-        .recommendations { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
-        .recommendation { margin: 5px 0; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>🚀 Professional Quality Test Report</h1>
-        <p><strong>Test Suite:</strong> ${r.testSuite}</p>
-        <p><strong>Timestamp:</strong> ${r.timestamp}</p>
-        <p><strong>Overall Result:</strong>
-            <span class="${r.overallResult === 'PASSED' ? 'passed' : 'failed'}">
-                ${r.overallResult}
-            </span>
-        </p>
-    </div>
-
-    <div class="summary">
-        <div class="metric">
-            <h3>Test Results</h3>
-            <p><strong>Total Tests:</strong> ${r.summary.totalTests}</p>
-            <p class="passed"><strong>Passed:</strong> ${r.summary.passedTests}</p>
-            <p class="${r.summary.failedTests > 0 ? 'failed' : ''}"><strong>Failed:</strong> ${r.summary.failedTests}</p>
-            <p><strong>Skipped:</strong> ${r.summary.skippedTests}</p>
-            <p><strong>Pass Rate:</strong> ${passedPercent}%</p>
-        </div>
-
-        <div class="metric">
-            <h3>Quality Metrics</h3>
-            <p><strong>Baseline Score:</strong> ${r.qualityMetrics.baselineScore || 'N/A'}</p>
-            <p><strong>Final Score:</strong> ${r.qualityMetrics.finalScore}</p>
-            <p class="${r.qualityMetrics.scoreChange >= 0 ? 'passed' : 'failed'}">
-                <strong>Score Change:</strong> ${r.qualityMetrics.scoreChange > 0 ? '+' : ''}${r.qualityMetrics.scoreChange}
-            </p>
-            <p><strong>Impact:</strong>
-                <span class="${this.getImpactClass(r.qualityMetrics.impact)}">${r.qualityMetrics.impact}</span>
-            </p>
-            <p><strong>Risk Level:</strong> ${r.qualityMetrics.riskLevel}</p>
-        </div>
-
-        <div class="metric">
-            <h3>Performance</h3>
-            <p><strong>Execution Time:</strong> ${(r.summary.executionTime / 1000).toFixed(2)}s</p>
-            <p><strong>Tests/Second:</strong> ${(r.summary.totalTests / (r.summary.executionTime / 1000)).toFixed(1)}</p>
-        </div>
-    </div>
-
-    <div class="recommendations">
-        <h3>📋 Recommendations</h3>
-        ${r.recommendations.map(rec => `<div class="recommendation">${rec}</div>`).join('')}
-    </div>
-
-    <h3>📊 Detailed Test Results</h3>
-    <table border="1" style="width: 100%; border-collapse: collapse;">
-        <tr>
-            <th>Test Suite</th>
-            <th>Result</th>
-            <th>Passed</th>
-            <th>Failed</th>
-            <th>Skipped</th>
-        </tr>
-        ${r.testResults.map(tr => `
+    const data = {
+      testSuite: r.testSuite,
+      timestamp: r.timestamp,
+      overallResult: r.overallResult,
+      overallResultClass: r.overallResult === 'PASSED' ? 'passed' : 'failed',
+      summary: r.summary,
+      passedPercent: r.summary.totalTests > 0 ?
+        ((r.summary.passedTests / r.summary.totalTests) * 100).toFixed(1) : '0.0',
+      failedTestsClass: r.summary.failedTests > 0 ? 'failed' : '',
+      qualityMetrics: {
+        baselineScore: r.qualityMetrics.baselineScore || 'N/A',
+        finalScore: r.qualityMetrics.finalScore,
+        scoreChange: r.qualityMetrics.scoreChange,
+        impact: r.qualityMetrics.impact,
+        riskLevel: r.qualityMetrics.riskLevel
+      },
+      scoreChangeClass: r.qualityMetrics.scoreChange >= 0 ? 'passed' : 'failed',
+      scoreChangeFormatted: (r.qualityMetrics.scoreChange > 0 ? '+' : '') + r.qualityMetrics.scoreChange,
+      impactClass: this.getImpactClass(r.qualityMetrics.impact),
+      executionTimeSeconds: (r.summary.executionTime / 1000).toFixed(2),
+      testsPerSecond: (r.summary.totalTests / (r.summary.executionTime / 1000)).toFixed(1),
+      recommendationsList: r.recommendations.map(rec => `<div class="recommendation">${rec}</div>`).join(''),
+      testResultsRows: r.testResults.map(tr => `
             <tr>
                 <td>${tr.suite}</td>
                 <td class="${tr.result === 'PASSED' ? 'passed' : 'failed'}">${tr.result}</td>
@@ -362,10 +321,10 @@ class ProfessionalQualityTestRunner {
                 <td>${tr.failed || 0}</td>
                 <td>${tr.skipped || 0}</td>
             </tr>
-        `).join('')}
-    </table>
-</body>
-</html>`;
+        `).join('')
+    };
+
+    return renderTemplate(template, data);
   }
 
   getImpactClass(impact) {

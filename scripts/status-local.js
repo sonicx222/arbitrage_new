@@ -12,7 +12,8 @@
 const fs = require('fs');
 
 const {
-  log,
+  logger,  // Task #5: Use modern logger interface
+  log,     // Keep for backward compatibility where needed
   colors,
   checkHealth,
   checkRedis,
@@ -24,7 +25,10 @@ const {
   PID_FILE
 } = require('./lib/utils');
 
-const { getStatusServices, PORTS } = require('./lib/services-config');
+const { getStatusServices, PORTS, checkAndPrintDeprecations } = require('./lib/services-config');
+
+// Check for deprecated environment variables
+checkAndPrintDeprecations();
 
 // =============================================================================
 // Service Status Checking
@@ -93,9 +97,8 @@ function formatStatus(status, optional = false) {
 // =============================================================================
 
 async function main() {
-  console.log('\n' + '='.repeat(60));
-  log('  Arbitrage System - Service Status', 'cyan');
-  console.log('='.repeat(60) + '\n');
+  // Task #5: Use modern logger.header() instead of manual separator
+  logger.header('Arbitrage System - Service Status');
 
   // Check environment
   const envFile = fs.existsSync(require('path').join(ROOT_DIR, '.env'));
@@ -147,18 +150,18 @@ async function main() {
 
   console.log('-'.repeat(60));
 
-  // Summary
+  // Summary (Task #5: Use semantic logger methods)
   console.log('');
   if (allRunning) {
-    log('All services are running!', 'green');
-    log(`\nDashboard: http://localhost:${PORTS.COORDINATOR}`, 'cyan');
+    logger.success('All services are running!');
+    logger.info(`Dashboard: http://localhost:${PORTS.COORDINATOR}`);
   } else if (criticalDown) {
-    log('Redis is not running. Start it with one of:', 'red');
-    log('  npm run dev:redis         # Docker (requires Docker Hub access)', 'yellow');
-    log('  npm run dev:redis:memory  # In-memory (no Docker required)', 'yellow');
+    logger.error('Redis is not running. Start it with one of:');
+    logger.warning('  npm run dev:redis         # Docker (requires Docker Hub access)');
+    logger.warning('  npm run dev:redis:memory  # In-memory (no Docker required)');
   } else {
-    log('Some services are not running. Start all with:', 'yellow');
-    log('  npm run dev:start', 'cyan');
+    logger.warning('Some services are not running. Start all with:');
+    logger.info('  npm run dev:start');
   }
 
   // Load PIDs if available

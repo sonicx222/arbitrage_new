@@ -10,16 +10,9 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// ANSI color codes
-const colors = {
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m',
-  reset: '\x1b[0m',
-  bold: '\x1b[1m',
-};
+// Use shared colors (Task #2: consolidate duplicate logging)
+// Note: security-audit.js has custom log() function that concatenates colors
+const { colors } = require('./lib/logger');
 
 // Known unfixable vulnerabilities (dev dependencies with no upstream fix)
 const KNOWN_UNFIXABLE = new Set([

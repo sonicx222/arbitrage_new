@@ -55,10 +55,106 @@ if (localEnvResult.error && localEnvResult.error.code !== 'ENOENT') {
 // =============================================================================
 const { checkForDeprecatedEnvVars, printWarnings } = require('./deprecation-checker');
 
-// Check for deprecated environment variables at module load time
-const envWarnings = checkForDeprecatedEnvVars();
-if (envWarnings.length > 0) {
-  printWarnings(envWarnings);
+// =============================================================================
+// Service Config Validation (Task P2-1)
+// =============================================================================
+
+const fs = require('fs');
+
+/**
+ * Validates and creates a service configuration.
+ * Catches configuration errors at module load time instead of runtime.
+ *
+ * @class ServiceConfig
+ */
+class ServiceConfig {
+  /**
+   * Create and validate a service configuration.
+   * @param {Object} config - Service configuration object
+   * @throws {Error} If validation fails
+   */
+  constructor(config) {
+    this.config = config;
+    this.validate();
+    Object.assign(this, config);
+  }
+
+  /**
+   * Validate the service configuration.
+   * @throws {Error} If validation fails with actionable message
+   */
+  validate() {
+    const { name, port, type, script, healthEndpoint } = this.config;
+
+    // Validate required fields
+    if (!name || typeof name !== 'string') {
+      throw new Error('Service configuration error: "name" is required and must be a string');
+    }
+
+    if (type === undefined || typeof type !== 'string') {
+      throw new Error(`Service "${name}": "type" is required and must be a string ('node', 'docker', 'redis')`);
+    }
+
+    // Validate type enum
+    const validTypes = ['node', 'docker', 'redis'];
+    if (!validTypes.includes(type)) {
+      throw new Error(
+        `Service "${name}": Invalid type "${type}". ` +
+        `Must be one of: ${validTypes.join(', ')}`
+      );
+    }
+
+    // Validate port
+    if (port === undefined || typeof port !== 'number') {
+      throw new Error(`Service "${name}": "port" is required and must be a number`);
+    }
+    if (port < 1 || port > 65535) {
+      throw new Error(
+        `Service "${name}": Invalid port ${port}. ` +
+        `Port must be between 1 and 65535`
+      );
+    }
+
+    // Validate script path for node services
+    if (type === 'node') {
+      if (!script || typeof script !== 'string') {
+        throw new Error(`Service "${name}": "script" is required for type="node"`);
+      }
+
+      const scriptPath = path.join(ROOT_DIR, script);
+      if (!fs.existsSync(scriptPath)) {
+        throw new Error(
+          `Service "${name}": Script not found at ${script}\n` +
+          `  Full path: ${scriptPath}\n` +
+          `  Make sure the service exists and the path is correct.`
+        );
+      }
+    }
+
+    // Validate healthEndpoint format (should start with /)
+    if (type === 'node' && healthEndpoint !== undefined) {
+      if (typeof healthEndpoint !== 'string') {
+        throw new Error(`Service "${name}": "healthEndpoint" must be a string`);
+      }
+      if (!healthEndpoint.startsWith('/')) {
+        throw new Error(
+          `Service "${name}": Invalid healthEndpoint "${healthEndpoint}". ` +
+          `Must start with "/" (e.g., "/health", "/api/health")`
+        );
+      }
+    }
+
+    // All validations passed
+    return true;
+  }
+
+  /**
+   * Convert to plain object (for backward compatibility).
+   * @returns {Object}
+   */
+  toObject() {
+    return this.config;
+  }
 }
 
 // =============================================================================
@@ -300,6 +396,47 @@ function getCleanupPorts() {
   return ALL_PORTS;
 }
 
+/**
+ * Check for deprecated environment variables and print warnings.
+ * Call this explicitly in startup scripts that should show warnings.
+ *
+ * @returns {boolean} - True if any deprecations were found
+ */
+function checkAndPrintDeprecations() {
+  const envWarnings = checkForDeprecatedEnvVars();
+  if (envWarnings.length > 0) {
+    printWarnings(envWarnings);
+  }
+  return envWarnings.length > 0;
+}
+
+// =============================================================================
+// Validation at Module Load (Task P2-1)
+// =============================================================================
+
+/**
+ * Validate all service configurations at module load.
+ * Catches configuration errors early, before services are started.
+ */
+function validateAllServices() {
+  const servicesToValidate = [...CORE_SERVICES, ...OPTIONAL_SERVICES, ...INFRASTRUCTURE_SERVICES];
+
+  for (const service of servicesToValidate) {
+    try {
+      new ServiceConfig(service);
+    } catch (error) {
+      // Fail fast with clear error message
+      console.error('\n❌ SERVICE CONFIGURATION ERROR:');
+      console.error(error.message);
+      console.error('\nFix the configuration in scripts/lib/services-config.js and try again.\n');
+      process.exit(1);
+    }
+  }
+}
+
+// Run validation at module load (fail fast)
+validateAllServices();
+
 // =============================================================================
 // Exports
 // =============================================================================
@@ -322,5 +459,9 @@ module.exports = {
   getServiceByPort,
   getStatusServices,
   getStartupServices,
-  getCleanupPorts
+  getCleanupPorts,
+  checkAndPrintDeprecations,
+
+  // Service config validation (Task P2-1)
+  ServiceConfig
 };
