@@ -3,11 +3,13 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "../interfaces/IDexRouter.sol";
 
 /**
  * @title MockDexRouter
  * @dev Mock DEX router for testing swaps
  * @notice Simulates Uniswap V2 style router with configurable exchange rates
+ * @dev Implements IDexRouter for full interface compliance
  *
  * ## Exchange Rate Calculation (Fix 4.2 Documentation)
  *
@@ -21,7 +23,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - Set rates that ensure non-zero output for your test amounts
  * - The contract now emits a warning event when output truncates to zero
  */
-contract MockDexRouter {
+contract MockDexRouter is IDexRouter {
     using SafeERC20 for IERC20;
 
     string public name;
@@ -76,7 +78,7 @@ contract MockDexRouter {
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external returns (uint256[] memory amounts) {
+    ) external override returns (uint256[] memory amounts) {
         // Silence unused variable warning
         deadline;
 
@@ -129,6 +131,7 @@ contract MockDexRouter {
     function getAmountsOut(uint256 amountIn, address[] calldata path)
         external
         view
+        override
         returns (uint256[] memory amounts)
     {
         require(path.length >= 2, "Invalid path");
@@ -147,6 +150,96 @@ contract MockDexRouter {
         }
 
         return amounts;
+    }
+
+    /**
+     * @dev Simulates swapTokensForExactTokens from Uniswap V2 Router
+     * @notice Stub implementation — uses forward rates. For precise reverse routing,
+     *         set exchange rates accordingly in your test setup.
+     */
+    function swapTokensForExactTokens(
+        uint256 amountOut,
+        uint256 amountInMax,
+        address[] calldata path,
+        address to,
+        uint256 deadline
+    ) external override returns (uint256[] memory amounts) {
+        // Silence unused variable warning
+        deadline;
+
+        require(path.length >= 2, "Invalid path");
+
+        amounts = new uint256[](path.length);
+        amounts[amounts.length - 1] = amountOut;
+
+        // Calculate required input using reverse rates
+        uint256 currentAmount = amountOut;
+        for (uint256 i = path.length - 1; i > 0; i--) {
+            uint256 rate = exchangeRates[path[i - 1]][path[i]];
+            require(rate > 0, "Exchange rate not set");
+
+            // Reverse: amountIn = (amountOut * 1e18) / rate (round up)
+            uint256 amountIn = (currentAmount * 1e18 + rate - 1) / rate;
+            amounts[i - 1] = amountIn;
+            currentAmount = amountIn;
+        }
+
+        uint256 requiredInput = amounts[0];
+        require(requiredInput <= amountInMax, "Excessive input amount");
+
+        // Transfer input tokens from sender
+        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), requiredInput);
+
+        // Transfer output tokens to recipient
+        IERC20(path[path.length - 1]).safeTransfer(to, amountOut);
+
+        emit Swap(path[0], path[path.length - 1], requiredInput, amountOut);
+
+        return amounts;
+    }
+
+    /**
+     * @dev Get required input amounts for a desired output
+     * @param amountOut Desired output amount
+     * @param path Token swap path
+     */
+    function getAmountsIn(uint256 amountOut, address[] calldata path)
+        external
+        view
+        override
+        returns (uint256[] memory amounts)
+    {
+        require(path.length >= 2, "Invalid path");
+
+        amounts = new uint256[](path.length);
+        amounts[amounts.length - 1] = amountOut;
+
+        uint256 currentAmount = amountOut;
+        for (uint256 i = path.length - 1; i > 0; i--) {
+            uint256 rate = exchangeRates[path[i - 1]][path[i]];
+            require(rate > 0, "Exchange rate not set");
+
+            // Reverse: amountIn = (amountOut * 1e18) / rate (round up)
+            uint256 amountIn = (currentAmount * 1e18 + rate - 1) / rate;
+            amounts[i - 1] = amountIn;
+            currentAmount = amountIn;
+        }
+
+        return amounts;
+    }
+
+    /**
+     * @dev Returns a mock factory address (zero address — no real factory in mock)
+     */
+    function factory() external pure override returns (address) {
+        return address(0);
+    }
+
+    /**
+     * @dev Returns a mock WETH address (zero address — no real WETH in mock)
+     */
+    function WETH() external pure override returns (address) {
+        return address(0);
     }
 
     /**

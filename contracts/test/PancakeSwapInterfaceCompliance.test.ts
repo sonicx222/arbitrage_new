@@ -44,10 +44,11 @@ describe('PancakeSwap V3 Interface Compliance', () => {
     const pool = await MockPancakeV3PoolFactory.deploy(
       await token0.getAddress(),
       await token1.getAddress(),
-      2500 // 0.25% fee (valid PancakeSwap V3 tier)
+      2500, // 0.25% fee (valid PancakeSwap V3 tier)
+      await factory.getAddress()
     );
 
-    // Register pool in factory
+    // Register externally-deployed pool in factory for getPool() lookups
     await factory.registerPool(
       await token0.getAddress(),
       await token1.getAddress(),
@@ -76,7 +77,8 @@ describe('PancakeSwap V3 Interface Compliance', () => {
       const pool = await MockPancakeV3PoolFactory.deploy(
         await token0.getAddress(),
         await token1.getAddress(),
-        100 // 0.01% fee
+        100, // 0.01% fee
+        await factory.getAddress()
       );
 
       const fee = await pool.fee();
@@ -92,7 +94,8 @@ describe('PancakeSwap V3 Interface Compliance', () => {
       const pool = await MockPancakeV3PoolFactory.deploy(
         await token0.getAddress(),
         await token1.getAddress(),
-        500 // 0.05% fee
+        500, // 0.05% fee
+        await factory.getAddress()
       );
 
       const fee = await pool.fee();
@@ -108,7 +111,8 @@ describe('PancakeSwap V3 Interface Compliance', () => {
       const pool = await MockPancakeV3PoolFactory.deploy(
         await token0.getAddress(),
         await token1.getAddress(),
-        2500 // 0.25% fee
+        2500, // 0.25% fee
+        await factory.getAddress()
       );
 
       const fee = await pool.fee();
@@ -124,7 +128,8 @@ describe('PancakeSwap V3 Interface Compliance', () => {
       const pool = await MockPancakeV3PoolFactory.deploy(
         await token0.getAddress(),
         await token1.getAddress(),
-        10000 // 1% fee
+        10000, // 1% fee
+        await factory.getAddress()
       );
 
       const fee = await pool.fee();
@@ -496,7 +501,7 @@ describe('PancakeSwap V3 Interface Compliance', () => {
       const documentedTiers = [100, 500, 2500, 10000];
 
       for (const tier of documentedTiers) {
-        const { token0, token1 } = await loadFixture(deployPancakeV3Fixture);
+        const { factory, token0, token1 } = await loadFixture(deployPancakeV3Fixture);
 
         const MockPancakeV3PoolFactory = await ethers.getContractFactory(
           'MockPancakeV3Pool'
@@ -504,7 +509,8 @@ describe('PancakeSwap V3 Interface Compliance', () => {
         const pool = await MockPancakeV3PoolFactory.deploy(
           await token0.getAddress(),
           await token1.getAddress(),
-          tier
+          tier,
+          await factory.getAddress()
         );
 
         const fee = await pool.fee();

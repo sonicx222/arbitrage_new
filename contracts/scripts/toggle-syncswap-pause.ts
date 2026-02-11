@@ -4,16 +4,15 @@
  * Unified script to pause or unpause the SyncSwapFlashArbitrage contract.
  * Replaces the separate pause-syncswap.ts and unpause-syncswap.ts scripts.
  *
- * Usage:
- *   # Pause (emergency stop)
- *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync
- *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync-testnet
+ * Usage (environment variable — recommended, works reliably with Hardhat):
+ *   SYNCSWAP_ACTION=pause npx hardhat run scripts/toggle-syncswap-pause.ts --network zksync
+ *   SYNCSWAP_ACTION=unpause npx hardhat run scripts/toggle-syncswap-pause.ts --network zksync
  *
- *   # Unpause (resume operations)
- *   npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network zksync
- *   npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network zksync-testnet
+ * Usage (positional argument — may not work with all Hardhat versions):
+ *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync
  *
  * Environment Variables:
+ *   SYNCSWAP_ACTION - Action to perform: 'pause' or 'unpause' (recommended)
  *   SYNCSWAP_CONTRACT_ADDRESS - Address of deployed SyncSwapFlashArbitrage contract
  *   DEPLOYER_PRIVATE_KEY - Private key of contract owner (required for pause/unpause)
  *
@@ -25,46 +24,68 @@ import { ethers, network } from 'hardhat';
 type Action = 'pause' | 'unpause';
 
 /**
- * P2-007 FIX: Parse command line arguments properly
- * Handles both positional and flag-style arguments:
- *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync
- *   npx hardhat run scripts/toggle-syncswap-pause.ts --action=pause --network zksync
+ * Parse action from environment variable or CLI arguments.
+ *
+ * Priority order:
+ * 1. SYNCSWAP_ACTION env var (most reliable — Hardhat always passes env vars)
+ * 2. --action=<value> CLI flag (fallback for non-Hardhat invocation)
+ * 3. Positional argument (may not work with all Hardhat versions)
+ *
+ * Hardhat's `run` task intercepts unknown CLI flags and positional arguments,
+ * which can cause them to be stripped or trigger argument parsing errors.
+ * Environment variables bypass this entirely.
  */
 function parseAction(): Action {
-  // Check for --action=<value> flag
+  // 1. Environment variable (recommended — always works with Hardhat)
+  const envAction = process.env.SYNCSWAP_ACTION;
+  if (envAction) {
+    if (envAction === 'pause' || envAction === 'unpause') {
+      return envAction;
+    }
+    throw new Error(
+      `[ERR_INVALID_ACTION] Invalid SYNCSWAP_ACTION env var: '${envAction}'\n` +
+      `Valid values: pause, unpause`
+    );
+  }
+
+  // 2. --action=<value> flag (fallback)
   const actionFlagMatch = process.argv.find(arg => arg.startsWith('--action='));
   if (actionFlagMatch) {
     const action = actionFlagMatch.split('=')[1];
     if (action === 'pause' || action === 'unpause') {
       return action;
     }
-    console.error(`\n❌ [ERR_INVALID_ACTION] Invalid action flag: ${action}`);
-    console.error('Valid values: pause, unpause');
-    process.exit(1);
+    throw new Error(
+      `[ERR_INVALID_ACTION] Invalid action flag: '${action}'\n` +
+      `Valid values: pause, unpause`
+    );
   }
 
-  // Check for positional argument (after script name, before --network)
+  // 3. Positional argument (may not work with Hardhat — kept for backward compat)
   const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
   if (args.length > 0) {
     const action = args[0];
     if (action === 'pause' || action === 'unpause') {
       return action;
     }
-    console.error(`\n❌ [ERR_INVALID_ACTION] Invalid positional argument: ${action}`);
-    console.error('Valid values: pause, unpause');
-    process.exit(1);
+    throw new Error(
+      `[ERR_INVALID_ACTION] Invalid positional argument: '${action}'\n` +
+      `Valid values: pause, unpause`
+    );
   }
 
-  // No action provided - show usage
-  console.error('\n❌ [ERR_INVALID_ACTION] Invalid or missing action argument');
-  console.error('\nUsage:');
-  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts pause --network <network>');
-  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network <network>');
-  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts --action=pause --network <network>');
-  console.error('\nActions:');
-  console.error('  pause   - Emergency stop (halt all arbitrage execution)');
-  console.error('  unpause - Resume operations (enable arbitrage execution)');
-  process.exit(1);
+  // No action provided - throw with usage instructions
+  throw new Error(
+    `[ERR_INVALID_ACTION] Missing action argument.\n\n` +
+    `Usage (recommended):\n` +
+    `  SYNCSWAP_ACTION=pause npx hardhat run scripts/toggle-syncswap-pause.ts --network <network>\n` +
+    `  SYNCSWAP_ACTION=unpause npx hardhat run scripts/toggle-syncswap-pause.ts --network <network>\n\n` +
+    `Alternative (may not work with all Hardhat versions):\n` +
+    `  npx hardhat run scripts/toggle-syncswap-pause.ts pause --network <network>\n\n` +
+    `Actions:\n` +
+    `  pause   - Emergency stop (halt all arbitrage execution)\n` +
+    `  unpause - Resume operations (enable arbitrage execution)`
+  );
 }
 
 async function main() {
@@ -164,7 +185,7 @@ async function main() {
       console.log('2. Deploy fix if needed');
       console.log('3. Test thoroughly on testnet');
       console.log('4. Unpause the contract when ready:');
-      console.log(`   npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network ${network.name}`);
+      console.log(`   SYNCSWAP_ACTION=unpause npx hardhat run scripts/toggle-syncswap-pause.ts --network ${network.name}`);
     } else {
       console.log(`   Pause status: ${isPaused ? 'PAUSED ❌' : 'ACTIVE ✅'}`);
 

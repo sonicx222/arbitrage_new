@@ -7,7 +7,6 @@ import {
   MockERC20,
   MockSyncSwapVault,
 } from '../typechain-types';
-import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 
 /**
  * SyncSwapFlashArbitrage Contract Tests
@@ -103,15 +102,15 @@ describe('SyncSwapFlashArbitrage', () => {
       expect(await syncSwapArbitrage.totalProfits()).to.equal(0);
     });
 
-    it('should initialize with default swap deadline (300 seconds)', async () => {
+    it('should initialize with default swap deadline (60 seconds)', async () => {
       const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await syncSwapArbitrage.swapDeadline()).to.equal(300);
+      expect(await syncSwapArbitrage.swapDeadline()).to.equal(60);
     });
 
     it('should verify constants are set correctly', async () => {
       const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await syncSwapArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(300);
-      expect(await syncSwapArbitrage.MAX_SWAP_DEADLINE()).to.equal(3600);
+      expect(await syncSwapArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(60);
+      expect(await syncSwapArbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
       expect(await syncSwapArbitrage.MIN_SLIPPAGE_BPS()).to.equal(10);
       expect(await syncSwapArbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
@@ -125,7 +124,7 @@ describe('SyncSwapFlashArbitrage', () => {
         SyncSwapFlashArbitrageFactory.deploy(ethers.ZeroAddress, owner.address)
       ).to.be.revertedWithCustomError(
         { interface: SyncSwapFlashArbitrageFactory.interface },
-        'InvalidVaultAddress'
+        'InvalidProtocolAddress'
       );
     });
 
@@ -138,13 +137,13 @@ describe('SyncSwapFlashArbitrage', () => {
         SyncSwapFlashArbitrageFactory.deploy(user.address, owner.address)
       ).to.be.revertedWithCustomError(
         { interface: SyncSwapFlashArbitrageFactory.interface },
-        'InvalidVaultAddress'
+        'InvalidProtocolAddress'
       );
     });
 
     it('should initialize with empty approved router list', async () => {
       const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(0);
+      expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(0);
     });
 
     it('should start in unpaused state', async () => {
@@ -187,11 +186,11 @@ describe('SyncSwapFlashArbitrage', () => {
           deployContractsFixture
         );
 
-        expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(0);
+        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(0);
 
         await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
-        expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(1);
+        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(1);
       });
 
       it('should allow multiple routers to be added', async () => {
@@ -202,7 +201,7 @@ describe('SyncSwapFlashArbitrage', () => {
         await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
         await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter2.getAddress());
 
-        expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(2);
+        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(2);
         expect(
           await syncSwapArbitrage.isApprovedRouter(await dexRouter1.getAddress())
         ).to.be.true;
@@ -282,13 +281,13 @@ describe('SyncSwapFlashArbitrage', () => {
         );
 
         await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
-        expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(1);
+        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(1);
 
         await syncSwapArbitrage
           .connect(owner)
           .removeApprovedRouter(await dexRouter1.getAddress());
 
-        expect(await syncSwapArbitrage.approvedRouterCount()).to.equal(0);
+        expect((await syncSwapArbitrage.getApprovedRouters()).length).to.equal(0);
       });
 
       it('should revert on non-existent router', async () => {
@@ -641,12 +640,30 @@ describe('SyncSwapFlashArbitrage', () => {
         // Set vault to fail flash loans
         await vault.setShouldFailFlashLoan(true);
 
+        // Set exchange rates for a valid circular path
+        await dexRouter1.setExchangeRate(
+          await weth.getAddress(),
+          await usdc.getAddress(),
+          ethers.parseUnits('2000', 6)
+        );
+        await dexRouter1.setExchangeRate(
+          await usdc.getAddress(),
+          await weth.getAddress(),
+          BigInt('505000000000000000000000000')
+        );
+
         const amountIn = ethers.parseEther('1');
         const swapPath = [
           {
             router: await dexRouter1.getAddress(),
             tokenIn: await weth.getAddress(),
             tokenOut: await usdc.getAddress(),
+            amountOutMin: 1n,
+          },
+          {
+            router: await dexRouter1.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
             amountOutMin: 1n,
           },
         ];
@@ -657,6 +674,30 @@ describe('SyncSwapFlashArbitrage', () => {
             .connect(user)
             .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
         ).to.be.revertedWithCustomError(syncSwapArbitrage, 'FlashLoanFailed');
+      });
+
+      it('should revert when vault reports insufficient balance', async () => {
+        const {
+          syncSwapArbitrage,
+          vault,
+          dexRouter1,
+          weth,
+          usdc,
+          owner,
+          user,
+        } = await loadFixture(deployContractsFixture);
+
+        await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+        // Simulate insufficient vault balance (maxFlashLoan returns 0)
+        await vault.setShouldSimulateInsufficientBalance(true);
+
+        // Verify maxFlashLoan returns 0 when flag is set
+        expect(await vault.maxFlashLoan(await weth.getAddress())).to.equal(0);
+
+        // Reset and verify it returns normal balance
+        await vault.setShouldSimulateInsufficientBalance(false);
+        expect(await vault.maxFlashLoan(await weth.getAddress())).to.be.gt(0);
       });
     });
 
@@ -918,12 +959,12 @@ describe('SyncSwapFlashArbitrage', () => {
 
       const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
 
-      // This will fail during callback execution (InvalidSwapPath)
+      // Cycle completeness check: last tokenOut (USDC) != asset (WETH)
       await expect(
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidSwapPath');
     });
 
     it('should revert on token continuity error in path', async () => {
@@ -962,11 +1003,12 @@ describe('SyncSwapFlashArbitrage', () => {
 
       const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
 
+      // Token continuity check: step[1].tokenIn (DAI) != step[0].tokenOut (USDC)
       await expect(
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline)
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidSwapPath');
     });
 
     it('should handle repeated router in path (triangular arb optimization)', async () => {
@@ -1245,7 +1287,7 @@ describe('SyncSwapFlashArbitrage', () => {
         const newDeadline = 600;
         await expect(syncSwapArbitrage.connect(owner).setSwapDeadline(newDeadline))
           .to.emit(syncSwapArbitrage, 'SwapDeadlineUpdated')
-          .withArgs(300, newDeadline);
+          .withArgs(60, newDeadline);
       });
 
       it('should revert on zero deadline', async () => {
@@ -1260,7 +1302,7 @@ describe('SyncSwapFlashArbitrage', () => {
         const { syncSwapArbitrage, owner } = await loadFixture(deployContractsFixture);
 
         await expect(
-          syncSwapArbitrage.connect(owner).setSwapDeadline(3601)
+          syncSwapArbitrage.connect(owner).setSwapDeadline(601)
         ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidSwapDeadline');
       });
 
@@ -1611,11 +1653,65 @@ describe('SyncSwapFlashArbitrage', () => {
   // 8. Security and Access Control Tests
   // ===========================================================================
   describe('8. Security and Access Control', () => {
-    it('should enforce ReentrancyGuard on executeArbitrage', async () => {
-      // This is implicitly tested by the contract using nonReentrant modifier
-      // Actual reentrancy would require a malicious contract
-      const { syncSwapArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await syncSwapArbitrage.paused()).to.be.false; // Sanity check
+    it('should enforce ReentrancyGuard on executeArbitrage via malicious router', async () => {
+      const { syncSwapArbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
+
+      // Deploy malicious router targeting this contract
+      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
+      const maliciousRouter = await MaliciousRouterFactory.deploy(
+        await syncSwapArbitrage.getAddress()
+      );
+
+      await syncSwapArbitrage.connect(owner).addApprovedRouter(await maliciousRouter.getAddress());
+      await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Fund the malicious router with enough tokens (1:1 passthrough uses raw amounts)
+      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+      await usdc.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+
+      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
+      // The malicious router does 1:1 passthrough (amountOut = amountIn), which yields
+      // zero profit. Using a normal router for the 2nd hop with a 1% premium ensures
+      // the trade is profitable (covers SyncSwap's 0.3% fee), so the tx succeeds and
+      // attackAttempted state persists instead of being rolled back.
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1.01')
+      );
+
+      // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
+      const swapPath = [
+        {
+          router: await maliciousRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      // The malicious router attempts reentrancy during the first swap.
+      // ReentrancyGuard blocks it (attackSucceeded=false), but the swap itself
+      // continues. The tx succeeds because the 2nd hop generates enough profit.
+      await syncSwapArbitrage.executeArbitrage(
+        await weth.getAddress(),
+        ethers.parseEther('1'),
+        swapPath,
+        0,
+        deadline
+      );
+
+      // Verify the attack was actually attempted and blocked
+      expect(await maliciousRouter.attackAttempted()).to.be.true;
+      expect(await maliciousRouter.attackSucceeded()).to.be.false;
     });
 
     it('should allow contract to receive ETH', async () => {
@@ -1770,6 +1866,56 @@ describe('SyncSwapFlashArbitrage', () => {
 
       // Verify profits accumulated
       expect(profitsAfterSecond).to.be.gt(profitsAfterFirst);
+    });
+  });
+
+  // ===========================================================================
+  // 10. Gas Benchmark Tests
+  // ===========================================================================
+  describe('10. Gas Benchmarks', () => {
+    it('should execute 2-hop arbitrage within gas budget', async () => {
+      const { syncSwapArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(
+        deployContractsFixture
+      );
+
+      await syncSwapArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('505000000000000000000000000')
+      );
+
+      const amountIn = ethers.parseEther('10');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      const tx = await syncSwapArbitrage
+        .connect(user)
+        .executeArbitrage(await weth.getAddress(), amountIn, swapPath, 0n, deadline);
+      const receipt = await tx.wait();
+
+      // SyncSwap EIP-3156 flash loan (0.3% fee) + 2 swaps should be < 500,000 gas
+      expect(receipt!.gasUsed).to.be.lt(500_000);
     });
   });
 });

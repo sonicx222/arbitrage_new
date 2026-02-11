@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "./MockPancakeV3Pool.sol";
+import "../interfaces/IPancakeV3FlashCallback.sol";
 
 /**
  * @title MockPancakeV3Factory
@@ -21,7 +22,7 @@ import "./MockPancakeV3Pool.sol";
  * - Calling pancakeV3FlashCallback() directly with fake fee amounts
  * - Draining funds by pretending to be a flash loan
  */
-contract MockPancakeV3Factory {
+contract MockPancakeV3Factory is IPancakeV3Factory {
     // Mapping: tokenA => tokenB => fee => pool
     // Note: Order doesn't matter (tokenA < tokenB normalized internally)
     mapping(address => mapping(address => mapping(uint24 => address))) private pools;
@@ -80,6 +81,35 @@ contract MockPancakeV3Factory {
     }
 
     /**
+     * @notice Register an externally-deployed pool in the factory registry
+     * @dev Test helper for registering pools deployed outside createPool().
+     *      Useful when tests need direct control over pool constructor parameters.
+     * @param tokenA One of the two tokens
+     * @param tokenB The other token
+     * @param fee The pool's fee tier
+     * @param pool The deployed pool address to register
+     */
+    function registerPool(
+        address tokenA,
+        address tokenB,
+        uint24 fee,
+        address pool
+    ) external {
+        require(pool != address(0), "Zero pool address");
+
+        // Normalize token order (token0 < token1)
+        (address token0, address token1) = tokenA < tokenB
+            ? (tokenA, tokenB)
+            : (tokenB, tokenA);
+
+        // Register pool in both directions for easy lookup
+        pools[token0][token1][fee] = pool;
+        pools[token1][token0][fee] = pool;
+
+        emit PoolCreated(token0, token1, fee, pool);
+    }
+
+    /**
      * @notice Returns the pool address for a given pair of tokens and fee tier
      * @param tokenA One of the two tokens
      * @param tokenB The other token
@@ -90,7 +120,7 @@ contract MockPancakeV3Factory {
         address tokenA,
         address tokenB,
         uint24 fee
-    ) external view returns (address pool) {
+    ) external view override returns (address pool) {
         // Normalize token order
         (address token0, address token1) = tokenA < tokenB
             ? (tokenA, tokenB)

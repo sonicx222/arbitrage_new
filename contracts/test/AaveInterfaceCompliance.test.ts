@@ -251,8 +251,9 @@ describe('Aave V3 Interface Compliance', () => {
 
       const loanAmount = ethers.parseEther('100');
 
-      // Fund receiver but NOT enough for repayment + fee
-      await token.mint(await receiver.getAddress(), ethers.parseEther('99'));
+      // Don't pre-fund receiver: it only receives the flash-loaned 100 ETH,
+      // but must repay 100 + 0.09 (premium) = 100.09 ETH via safeTransferFrom.
+      // Since 100 < 100.09, the ERC20 transfer will revert.
       await receiver.approveToken(
         await token.getAddress(),
         await pool.getAddress(),
@@ -267,7 +268,7 @@ describe('Aave V3 Interface Compliance', () => {
           '0x',
           0
         )
-      ).to.be.revertedWith('Insufficient balance to repay');
+      ).to.be.reverted;
     });
 
     it('should succeed if repayment is exact (amount + fee)', async () => {

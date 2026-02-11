@@ -77,11 +77,20 @@ contract BalancerV2FlashArbitrage is
     IBalancerV2Vault public immutable VAULT;
 
     // ==========================================================================
+    // State Variables (Flash Loan Security)
+    // ==========================================================================
+
+    /// @notice Guard flag to prevent direct callback invocation (defense in depth)
+    /// @dev Set in executeArbitrage(), checked in receiveFlashLoan(), cleared after callback
+    bool private _flashLoanActive;
+
+    // ==========================================================================
     // Errors (Protocol-Specific)
     // ==========================================================================
 
     // InvalidProtocolAddress, InvalidFlashLoanCaller inherited from IFlashLoanErrors
     error MultiAssetNotSupported();
+    error FlashLoanNotActive();
 
     // ==========================================================================
     // Constructor
@@ -134,6 +143,9 @@ contract BalancerV2FlashArbitrage is
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
 
+        // Set flash loan active guard (defense in depth — prevents direct callback calls)
+        _flashLoanActive = true;
+
         // Initiate flash loan
         VAULT.flashLoan(
             IFlashLoanRecipient(this),
@@ -141,6 +153,9 @@ contract BalancerV2FlashArbitrage is
             amounts,
             userData
         );
+
+        // Clear flash loan guard after successful execution
+        _flashLoanActive = false;
     }
 
     /**
@@ -160,6 +175,9 @@ contract BalancerV2FlashArbitrage is
         // Security: Verify caller is the Balancer Vault
         if (msg.sender != address(VAULT)) revert InvalidFlashLoanCaller();
 
+        // Security: Verify flash loan was initiated by this contract (defense in depth)
+        if (!_flashLoanActive) revert FlashLoanNotActive();
+
         // Balancer V2 supports multi-asset flash loans, but we only use single-asset for MVP
         if (tokens.length != 1 || amounts.length != 1 || feeAmounts.length != 1) {
             revert MultiAssetNotSupported();
@@ -176,7 +194,7 @@ contract BalancerV2FlashArbitrage is
         );
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(asset, amount, swapPath);
+        uint256 amountReceived = _executeSwaps(asset, amount, swapPath, _getSwapDeadline());
 
         // Calculate required repayment and profit
         uint256 amountOwed = amount + feeAmount; // feeAmount is 0, but kept for clarity
@@ -184,13 +202,8 @@ contract BalancerV2FlashArbitrage is
 
         uint256 profit = amountReceived - amountOwed;
 
-        // Verify minimum profit threshold
-        uint256 _minimumProfit = minimumProfit;
-        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
-        if (profit < effectiveMinProfit) revert InsufficientProfit();
-
-        // Update profit tracking
-        totalProfits += profit;
+        // Verify profit meets thresholds and update tracking (base contract)
+        _verifyAndTrackProfit(profit, minProfit, asset);
 
         // Repayment: PUSH pattern - we transfer tokens directly to Vault
         // Balancer V2 checks its balance after callback returns to verify repayment

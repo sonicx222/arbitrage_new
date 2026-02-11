@@ -6,28 +6,50 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title MockMaliciousRouter
- * @dev Malicious router that attempts reentrancy attack
- * @notice Used for testing reentrancy protection in FlashLoanArbitrage
+ * @dev Malicious router that attempts reentrancy attack during swap execution
+ * @notice Used for testing ReentrancyGuard protection in flash arbitrage contracts
  *
- * ## Fix 6.3: Attack Behavior
+ * ## Attack Mechanism
  *
- * The attack is now ENABLED BY DEFAULT in the constructor. This ensures
- * reentrancy tests actually trigger the attack attempt. Use disableAttack()
- * if you need to test normal swap behavior with this router.
+ * When a flash arbitrage contract calls swapExactTokensForTokens() on this router,
+ * the router re-enters the arbitrage contract by calling executeArbitrage() again.
+ * This triggers the ReentrancyGuard modifier, which reverts with "ReentrancyGuard:
+ * reentrant call". The attack attempt is recorded via attackCount for test assertions.
  *
- * The reentrancy attack attempts to call executeArbitrage() during a swap.
- * This should fail due to the ReentrancyGuard modifier on executeArbitrage().
+ * Attack is ENABLED BY DEFAULT. Use disableAttack() for normal swap behavior.
+ *
+ * ## Why abi.encodeWithSelector instead of abi.encodeWithSignature
+ *
+ * We use abi.encodeWithSelector with a pre-computed selector to ensure the calldata
+ * is well-formed. Using abi.encodeWithSignature with tuple types can produce malformed
+ * calldata if the signature string doesn't exactly match Solidity's ABI encoding rules.
+ * A well-formed call ensures the revert comes from ReentrancyGuard, not from ABI
+ * decoding failure.
  */
 contract MockMaliciousRouter {
     using SafeERC20 for IERC20;
+
+    /// @dev Local struct matching BaseFlashArbitrage.SwapStep for proper ABI encoding
+    /// Must match exactly: (address router, address tokenIn, address tokenOut, uint256 amountOutMin)
+    struct SwapStep {
+        address router;
+        address tokenIn;
+        address tokenOut;
+        uint256 amountOutMin;
+    }
 
     address public attackTarget;
     bool public attackEnabled;
     uint256 public attackCount;
 
+    /// @dev Records whether the reentrancy attack was attempted (for test assertions)
+    bool public attackAttempted;
+
+    /// @dev Records whether the reentrancy call succeeded (should always be false)
+    bool public attackSucceeded;
+
     constructor(address _attackTarget) {
         attackTarget = _attackTarget;
-        // Fix 6.3: Enable attack by default so tests actually trigger it
         attackEnabled = true;
     }
 
@@ -42,7 +64,12 @@ contract MockMaliciousRouter {
     }
 
     /**
-     * @dev Malicious swap that attempts reentrancy
+     * @dev Malicious swap that attempts reentrancy via executeArbitrage()
+     *
+     * The attack constructs a valid executeArbitrage() call with an empty SwapStep[]
+     * array. This ensures the revert is caused by ReentrancyGuard (not by calldata
+     * decoding errors). The empty swap path would fail validation anyway, but the
+     * ReentrancyGuard check runs first.
      */
     function swapExactTokensForTokens(
         uint256 amountIn,
@@ -64,22 +91,33 @@ contract MockMaliciousRouter {
 
         if (attackEnabled && attackCount == 0) {
             attackCount++;
+            attackAttempted = true;
 
-            // Attempt reentrancy attack by calling executeArbitrage again
-            // Fix P1: Updated signature to match v1.2.0 which added deadline parameter
-            // The 5th parameter is deadline (uint256) - use block.timestamp + 300
-            bytes memory attackData = abi.encodeWithSignature(
-                "executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)",
-                path[0],
-                amountIn,
-                new bytes(0), // Empty swap path
-                0,            // minProfit
-                block.timestamp + 300  // deadline
+            // Build a properly ABI-encoded call to executeArbitrage().
+            // selector: executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)
+            // We use abi.encodeWithSelector to guarantee well-formed calldata.
+            // The empty SwapStep[] is valid ABI encoding — the revert MUST come from ReentrancyGuard.
+            bytes4 selector = bytes4(keccak256("executeArbitrage(address,uint256,(address,address,address,uint256)[],uint256,uint256)"));
+
+            // Properly typed empty SwapStep array for correct ABI encoding.
+            // This would fail EmptySwapPath validation if ReentrancyGuard didn't catch it first.
+            SwapStep[] memory emptyPath = new SwapStep[](0);
+
+            bytes memory attackData = abi.encodeWithSelector(
+                selector,
+                path[0],                    // asset
+                amountIn,                   // amount
+                emptyPath,                  // empty swap path (properly typed)
+                uint256(0),                 // minProfit
+                block.timestamp + 300       // deadline
             );
 
-            // This should fail due to reentrancy guard (not due to malformed calldata)
+            // Attempt reentrancy — this MUST fail due to ReentrancyGuard
             (bool success, ) = attackTarget.call(attackData);
-            require(!success, "Reentrancy attack should have failed");
+            attackSucceeded = success;
+
+            // Don't require(!success) here — let the test assert the outcome
+            // This allows the test to verify both the attack attempt and the result
         }
 
         // Transfer output tokens

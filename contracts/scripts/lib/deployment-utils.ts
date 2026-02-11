@@ -9,7 +9,7 @@
 
 import { ethers, run, network } from 'hardhat';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
-import { isMainnet, isTestnet } from '../../deployments/addresses';
+import { isMainnet, isTestnet, normalizeChainName } from '../../deployments/addresses';
 import * as fs from 'fs';
 import * as path from 'path';
 // @ts-expect-error - proper-lockfile has no type declarations, but works correctly at runtime
@@ -109,10 +109,37 @@ export interface RouterApprovalResult {
  * Default verification retry configuration
  *
  * Used across all deployment scripts for consistent verification behavior.
- * Exponential backoff: 30s → 60s → 120s (total ~3.5 min max wait)
+ * Initial wait: 30s (for block explorer indexing), then retries at 10s, 20s intervals.
+ * Total max wait: ~60s across all attempts.
  */
 export const DEFAULT_VERIFICATION_RETRIES = 3;
-export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds
+export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds (L1 default)
+
+/**
+ * Network-adaptive verification delays.
+ *
+ * L2 block explorers index transactions faster than Ethereum mainnet.
+ * Using a 30s delay on Arbitrum/Base wastes time since they index in <5s.
+ * Networks not listed here fall back to DEFAULT_VERIFICATION_INITIAL_DELAY_MS.
+ */
+const VERIFICATION_DELAY_BY_NETWORK: Record<string, number> = {
+  // L2s - fast indexing (~5-10s)
+  arbitrum: 10000,
+  arbitrumSepolia: 10000,
+  base: 10000,
+  baseSepolia: 10000,
+  optimism: 10000,
+  // zkSync - moderate indexing (~15s)
+  zksync: 15000,
+  'zksync-testnet': 15000,
+  'zksync-mainnet': 15000,
+  linea: 15000,
+  // BSC - fast block times (~3s)
+  bsc: 10000,
+  // Ethereum L1 - slow indexing (~30s)
+  ethereum: 30000,
+  sepolia: 20000,
+};
 
 /**
  * Centralized minimum profit policy for all flash loan protocols
@@ -145,6 +172,10 @@ export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds
  * to apply a 30% discount to the base threshold.
  */
 export const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
+  // Local development - zero thresholds for local testing
+  localhost: 0n,                                   // Local Hardhat node
+  hardhat: 0n,                                     // Hardhat in-process network
+
   // Testnets - low thresholds for testing (use canonical camelCase names)
   sepolia: ethers.parseEther('0.001'),            // 0.001 ETH
   arbitrumSepolia: ethers.parseEther('0.001'),    // 0.001 ETH
@@ -213,24 +244,14 @@ export function getMinimumProfitForProtocol(
 /**
  * Normalize network names to canonical form
  *
- * Handles zkSync network name aliases:
- * - zksync-mainnet → zksync (Hardhat config name → canonical name)
- * - zksync-sepolia → zksync-testnet (explorer name → canonical name)
- *
- * NOTE: Testnet names like 'arbitrumSepolia' and 'baseSepolia' are already
- * in canonical camelCase form, matching APPROVED_ROUTERS, AAVE_V3_POOLS,
- * TOKEN_ADDRESSES, and all other address lookup maps. Do NOT normalize
- * them to kebab-case - that would break address lookups.
+ * Delegates to normalizeChainName() from addresses.ts (single source of truth).
  *
  * @param name - Raw network name from hardhat config
  * @returns Canonical network name
+ * @see contracts/deployments/addresses.ts normalizeChainName
  */
 export function normalizeNetworkName(name: string): string {
-  const aliases: Record<string, string> = {
-    'zksync-mainnet': 'zksync',
-    'zksync-sepolia': 'zksync-testnet',
-  };
-  return aliases[name] || name;
+  return normalizeChainName(name);
 }
 
 /**
@@ -478,17 +499,49 @@ export async function approveRouters(
 
   console.log(`\nApproving ${routers.length} DEX routers...`);
 
+  // Send all transactions first, then wait for receipts in parallel.
+  // This reduces total wall-clock time from N * txTime to ~1 * txTime for
+  // non-dependent transactions (each router approval is independent).
+  const pendingTxs: Array<{ router: string; txPromise: Promise<any> }> = [];
+
   for (const router of routers) {
     try {
-      console.log(`  Approving: ${router}`);
+      console.log(`  Sending approval: ${router}`);
       const tx = await contract.addApprovedRouter(router);
-      await tx.wait();
-      succeeded.push(router);
-      console.log(`  ✅ Success`);
+      pendingTxs.push({ router, txPromise: tx.wait() });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       failed.push({ router, error: errorMsg });
+      console.error(`  ❌ Failed to send: ${router}`);
+      console.error(`     Error: ${errorMsg}`);
 
+      if (!continueOnError) {
+        throw new Error(
+          `[ERR_ROUTER_APPROVAL] Failed to approve router ${router}.\n` +
+          `Error: ${errorMsg}\n` +
+          `Contract may be partially configured.`
+        );
+      }
+    }
+  }
+
+  // Wait for all pending transactions in parallel
+  const results = await Promise.allSettled(
+    pendingTxs.map(async ({ router, txPromise }) => {
+      await txPromise;
+      return router;
+    })
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const { router } = pendingTxs[i];
+    if (result.status === 'fulfilled') {
+      succeeded.push(router);
+      console.log(`  ✅ Confirmed: ${router}`);
+    } else {
+      const errorMsg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      failed.push({ router, error: errorMsg });
       console.error(`  ❌ Failed: ${router}`);
       console.error(`     Error: ${errorMsg}`);
 
@@ -550,9 +603,11 @@ export async function verifyContractWithRetry(
   console.log(`Network: ${networkName}`);
   console.log(`Address: ${address}`);
 
-  // Initial delay to allow block explorer indexing
-  console.log(`Waiting ${initialDelay / 1000}s for block explorer to index transaction...`);
-  await new Promise(resolve => setTimeout(resolve, initialDelay));
+  // Use network-adaptive delay: L2s index faster than L1, so we don't
+  // need to wait 30s on Arbitrum/Base when they typically index in <5s.
+  const adaptiveDelay = VERIFICATION_DELAY_BY_NETWORK[normalizeChainName(networkName)] ?? initialDelay;
+  console.log(`Waiting ${adaptiveDelay / 1000}s for block explorer to index transaction...`);
+  await new Promise(resolve => setTimeout(resolve, adaptiveDelay));
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -611,7 +666,7 @@ export async function verifyContractWithRetry(
  * Save deployment result to JSON files with atomic file locking
  *
  * Saves both:
- * 1. Network-specific file (e.g., ethereum.json)
+ * 1. Network+contract-specific file (e.g., ethereum-FlashLoanArbitrage.json)
  * 2. Master registry file (registry.json)
  *
  * **Concurrency Safe**: Uses file locking to prevent race conditions when
@@ -647,8 +702,8 @@ export async function saveDeploymentResult(
     fs.mkdirSync(deploymentsDir, { recursive: true });
   }
 
-  // Save network-specific deployment (no locking needed - unique per network)
-  const networkFile = path.join(deploymentsDir, `${result.network}.json`);
+  // Save network+contract-specific deployment (no locking needed - unique per combination)
+  const networkFile = path.join(deploymentsDir, `${result.network}-${contractType}.json`);
   fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
   console.log(`\n📝 Deployment saved to: ${networkFile}`);
 
@@ -676,7 +731,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Update registry file with exclusive file locking
+ * Execute a mutator function under an exclusive file lock with retry logic.
+ *
+ * Consolidates the lock-acquire → read → parse → mutate → atomic-write → unlock
+ * pattern that was previously duplicated in updateRegistryWithLock and
+ * mergeIntoCentralRegistry.
  *
  * **Race Condition Prevention**: Acquires exclusive lock before read-modify-write
  * to prevent concurrent deployments from overwriting each other's changes.
@@ -688,19 +747,15 @@ function sleep(ms: number): Promise<void> {
  * blocking the Node.js event loop during retry delays.
  *
  * @param registryFile - Absolute path to registry JSON file
- * @param result - Deployment result to add/update in registry (accepts any deployment result type)
+ * @param mutator - Function that receives the parsed registry and returns the updated registry
+ * @param context - Human-readable context for error messages (e.g., 'per-contract registry', 'central registry')
  * @throws Error if lock cannot be acquired after 3 retries (total ~7s wait)
  * @throws Error if registry JSON is corrupted and cannot be parsed
  */
-async function updateRegistryWithLock(
+async function withRegistryLock(
   registryFile: string,
-  result:
-    | DeploymentResult
-    | BalancerDeploymentResult
-    | PancakeSwapDeploymentResult
-    | SyncSwapDeploymentResult
-    | CommitRevealDeploymentResult
-    | MultiPathQuoterDeploymentResult
+  mutator: (registry: Record<string, any>) => Record<string, any>,
+  context: string
 ): Promise<void> {
   const maxRetries = 3;
   const baseDelay = 1000; // 1 second
@@ -709,26 +764,23 @@ async function updateRegistryWithLock(
     let lockAcquired = false;
 
     try {
-      // Acquire exclusive lock. Create an empty file first if it doesn't
-      // exist so proper-lockfile has something to lock on. This prevents
-      // a race condition where two concurrent first-deployments both skip
-      // locking because the file doesn't exist yet.
-      if (!fs.existsSync(registryFile)) {
-        fs.writeFileSync(registryFile, '{}', 'utf8');
+      // Atomically create file if it doesn't exist. The 'wx' flag (write-exclusive)
+      // is an OS-level atomic operation that succeeds only if the file does not exist.
+      // This prevents the TOCTOU race where two concurrent processes both see the file
+      // missing, both create it with '{}', and one overwrites the other's committed data.
+      try {
+        fs.writeFileSync(registryFile, '{}', { flag: 'wx' });
+      } catch (e: unknown) {
+        // EEXIST means another process already created it — expected, not an error
+        if (!(e instanceof Error) || !('code' in e) || (e as NodeJS.ErrnoException).code !== 'EEXIST') {
+          throw e;
+        }
       }
       await lockfile.lock(registryFile, { stale: 300000, retries: 0 });
       lockAcquired = true;
 
       // CRITICAL SECTION: Read-Modify-Write must be atomic
-      let registry: Record<
-        string,
-        | DeploymentResult
-        | BalancerDeploymentResult
-        | PancakeSwapDeploymentResult
-        | SyncSwapDeploymentResult
-        | CommitRevealDeploymentResult
-        | MultiPathQuoterDeploymentResult
-      > = {};
+      let registry: Record<string, any> = {};
 
       if (fs.existsSync(registryFile)) {
         try {
@@ -737,7 +789,7 @@ async function updateRegistryWithLock(
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
 
-          // CRITICAL FIX (P0-003): Release lock before throwing to prevent lock file orphaning
+          // Release lock before throwing to prevent lock file orphaning
           if (lockAcquired) {
             try {
               await lockfile.unlock(registryFile);
@@ -747,9 +799,8 @@ async function updateRegistryWithLock(
             }
           }
 
-          // Don't silently create new registry - this might indicate corruption
           throw new Error(
-            `[ERR_REGISTRY_CORRUPT] Failed to read/parse deployment registry.\n` +
+            `[ERR_REGISTRY_CORRUPT] Failed to read/parse ${context}.\n` +
             `File: ${registryFile}\n` +
             `Error: ${errorMsg}\n` +
             `This may indicate registry corruption. Check the file manually.`
@@ -757,8 +808,8 @@ async function updateRegistryWithLock(
         }
       }
 
-      // Add/update deployment record
-      registry[result.network] = result;
+      // Apply mutation
+      registry = mutator(registry);
 
       // Write atomically: write to temp file, then rename
       const tempFile = `${registryFile}.tmp`;
@@ -779,11 +830,10 @@ async function updateRegistryWithLock(
           await lockfile.unlock(registryFile);
           lockAcquired = false;
         } catch (unlockError) {
-          // P1-008 FIX: Don't silently ignore - log warning
-          console.error('⚠️  WARNING: Failed to release deployment lock');
+          console.error(`⚠️  WARNING: Failed to release ${context} lock`);
           console.error(`   Lock file: ${registryFile}.lock`);
           console.error(`   Error: ${unlockError}`);
-          console.error('   Subsequent deployments may be delayed by stale lock timeout (30s)');
+          console.error('   Subsequent deployments may be delayed by stale lock timeout (5 min)');
         }
       }
 
@@ -791,14 +841,11 @@ async function updateRegistryWithLock(
       const isLockError = error instanceof Error && error.message.includes('ELOCKED');
 
       if (isLockError && attempt < maxRetries) {
-        // Exponential backoff: 1s, 2s, 4s
         const delay = baseDelay * Math.pow(2, attempt - 1);
         console.warn(
-          `⚠️  Registry locked by another deployment (attempt ${attempt}/${maxRetries})\n` +
+          `⚠️  ${context} locked by another deployment (attempt ${attempt}/${maxRetries})\n` +
           `   Retrying in ${delay}ms...`
         );
-
-        // Sleep asynchronously (non-blocking, doesn't waste CPU cycles)
         await sleep(delay);
         continue;
       }
@@ -806,7 +853,7 @@ async function updateRegistryWithLock(
       // Non-retryable error or max retries exceeded
       const errorMsg = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `[ERR_REGISTRY_UPDATE] Failed to update deployment registry after ${attempt} attempt(s).\n` +
+        `[ERR_REGISTRY_UPDATE] Failed to update ${context} after ${attempt} attempt(s).\n` +
         `File: ${registryFile}\n` +
         `Error: ${errorMsg}\n` +
         (isLockError
@@ -818,7 +865,35 @@ async function updateRegistryWithLock(
 }
 
 /**
- * Merge a deployment into the central registry.json with per-contract-type granularity
+ * Update per-contract registry file (flat overwrite per network).
+ *
+ * Writes the full deployment result keyed by network name.
+ *
+ * @param registryFile - Absolute path to per-contract registry JSON file
+ * @param result - Deployment result to add/update
+ */
+async function updateRegistryWithLock(
+  registryFile: string,
+  result:
+    | DeploymentResult
+    | BalancerDeploymentResult
+    | PancakeSwapDeploymentResult
+    | SyncSwapDeploymentResult
+    | CommitRevealDeploymentResult
+    | MultiPathQuoterDeploymentResult
+): Promise<void> {
+  await withRegistryLock(
+    registryFile,
+    (registry) => {
+      registry[result.network] = result;
+      return registry;
+    },
+    'per-contract registry'
+  );
+}
+
+/**
+ * Merge a deployment into the central registry.json with per-contract-type granularity.
  *
  * Unlike updateRegistryWithLock (which overwrites the entire network entry),
  * this function merges only the specific contract type address into the network
@@ -830,7 +905,6 @@ async function updateRegistryWithLock(
  * @param registryFile - Absolute path to registry.json
  * @param result - Deployment result (any type)
  * @param contractType - Contract type key (e.g., 'FlashLoanArbitrage')
- * @throws Error if lock cannot be acquired after 3 retries or if file I/O fails
  */
 async function mergeIntoCentralRegistry(
   registryFile: string,
@@ -843,105 +917,26 @@ async function mergeIntoCentralRegistry(
     | MultiPathQuoterDeploymentResult,
   contractType: string
 ): Promise<void> {
-  const maxRetries = 3;
-  const baseDelay = 1000; // 1 second
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    let lockAcquired = false;
-
-    try {
-      // Ensure file exists for locking
-      if (!fs.existsSync(registryFile)) {
-        fs.writeFileSync(registryFile, '{}', 'utf8');
+  await withRegistryLock(
+    registryFile,
+    (registry) => {
+      const networkKey = result.network;
+      if (!registry[networkKey] || typeof registry[networkKey] !== 'object') {
+        registry[networkKey] = {};
       }
-      await lockfile.lock(registryFile, { stale: 300000, retries: 0 });
-      lockAcquired = true;
-
-      // CRITICAL SECTION: Read-Modify-Write must be atomic
-      let registry: Record<string, any> = {};
-
-      if (fs.existsSync(registryFile)) {
-        try {
-          const content = fs.readFileSync(registryFile, 'utf8');
-          registry = JSON.parse(content);
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-
-          if (lockAcquired) {
-            try {
-              await lockfile.unlock(registryFile);
-              lockAcquired = false;
-            } catch (unlockError) {
-              console.error('⚠️  Failed to release lock after parse error:', unlockError);
-            }
-          }
-
-          throw new Error(
-            `[ERR_REGISTRY_CORRUPT] Failed to read/parse central registry.\n` +
-            `File: ${registryFile}\n` +
-            `Error: ${errorMsg}\n` +
-            `This may indicate registry corruption. Check the file manually.`
-          );
-        }
-      }
-
-      // Merge: set only the specific contract type address, preserving other entries
-      const network = result.network;
-      if (!registry[network] || typeof registry[network] !== 'object') {
-        registry[network] = {};
-      }
-      registry[network][contractType] = result.contractAddress;
-      registry[network].deployedAt = result.timestamp;
-      registry[network].deployedBy = result.deployerAddress;
-      registry[network].verified = result.verified;
-
-      // Write atomically
-      const tempFile = `${registryFile}.tmp`;
-      fs.writeFileSync(tempFile, JSON.stringify(registry, null, 2), 'utf8');
-      fs.renameSync(tempFile, registryFile);
-
-      // Release lock and return
-      if (lockAcquired) {
-        await lockfile.unlock(registryFile);
-        lockAcquired = false;
-      }
-      return;
-
-    } catch (error) {
-      if (lockAcquired) {
-        try {
-          await lockfile.unlock(registryFile);
-          lockAcquired = false;
-        } catch (unlockError) {
-          console.error('⚠️  WARNING: Failed to release central registry lock');
-          console.error(`   Lock file: ${registryFile}.lock`);
-          console.error(`   Error: ${unlockError}`);
-        }
-      }
-
-      const isLockError = error instanceof Error && error.message.includes('ELOCKED');
-
-      if (isLockError && attempt < maxRetries) {
-        const delay = baseDelay * Math.pow(2, attempt - 1);
-        console.warn(
-          `⚠️  Central registry locked by another deployment (attempt ${attempt}/${maxRetries})\n` +
-          `   Retrying in ${delay}ms...`
-        );
-        await sleep(delay);
-        continue;
-      }
-
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `[ERR_REGISTRY_UPDATE] Failed to merge into central registry after ${attempt} attempt(s).\n` +
-        `File: ${registryFile}\n` +
-        `Error: ${errorMsg}\n` +
-        (isLockError
-          ? `Registry is locked by another deployment. Wait for it to complete and try again.`
-          : `This may indicate file system issues or registry corruption.`)
-      );
-    }
-  }
+      // Store contract address (flat key for backward compat with generate-addresses.ts)
+      registry[networkKey][contractType] = result.contractAddress;
+      // Store per-contract metadata to avoid overwriting other contracts' data
+      registry[networkKey][`${contractType}_deployedAt`] = result.timestamp;
+      registry[networkKey][`${contractType}_deployedBy`] = result.deployerAddress;
+      registry[networkKey][`${contractType}_verified`] = result.verified;
+      // Update shared last-deployed metadata (informational — see per-contract keys for accuracy)
+      registry[networkKey].deployedAt = result.timestamp;
+      registry[networkKey].deployedBy = result.deployerAddress;
+      return registry;
+    },
+    'central registry'
+  );
 }
 
 // =============================================================================
@@ -1057,9 +1052,19 @@ export async function smokeTestFlashLoanContract(
       critical: false,
     },
     {
-      name: 'Minimum profit ≥ 0',
-      fn: async () => (await contract.minimumProfit()) >= 0n,
-      critical: true,
+      name: 'Minimum profit is configured (> 0)',
+      fn: async () => {
+        const profit = await contract.minimumProfit();
+        if (profit === 0n) {
+          // uint256 is always >= 0, so checking > 0 detects the case where
+          // setMinimumProfit() silently reverted or was never called.
+          console.error('   minimumProfit is 0 — contract may execute trades at a loss');
+          return false;
+        }
+        console.log(`   minimumProfit: ${ethers.formatEther(profit)} ETH`);
+        return true;
+      },
+      critical: false, // Non-critical: testnets may intentionally use 0
     }
   );
 
@@ -1072,9 +1077,12 @@ export async function smokeTestFlashLoanContract(
  * Verifies:
  * - Owner is correct
  * - Contract is not paused
- * - Minimum profit is set
  * - MIN_DELAY_BLOCKS is configured
  * - MAX_COMMIT_AGE_BLOCKS is configured
+ *
+ * NOTE: minimumProfit is intentionally NOT checked. CommitRevealArbitrage
+ * validates profit off-chain before committing. The on-chain minimumProfit
+ * is a secondary safety net that may legitimately be 0 during deployment.
  *
  * @param contract - Deployed CommitRevealArbitrage contract instance
  * @param expectedOwner - Expected owner address
@@ -1098,11 +1106,6 @@ export async function smokeTestCommitRevealContract(
       name: 'Contract is not paused',
       fn: async () => !(await contract.paused()),
       critical: false,
-    },
-    {
-      name: 'Minimum profit ≥ 0',
-      fn: async () => (await contract.minimumProfit()) >= 0n,
-      critical: true,
     },
     {
       name: 'MIN_DELAY_BLOCKS > 0',

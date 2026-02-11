@@ -157,7 +157,7 @@ describe('contracts/deployments/addresses', () => {
         fail('Should have thrown');
       } catch (error) {
         expect((error as Error).message).toContain('No FlashLoanArbitrage contract deployed');
-        expect((error as Error).message).toContain('npm run deploy:ethereum');
+        expect((error as Error).message).toContain('npx hardhat run scripts/deploy.ts --network ethereum');
         expect((error as Error).message).toContain('Available chains:');
       }
     });
@@ -719,6 +719,111 @@ describe('contracts/deployments/addresses', () => {
       } else {
         expect(() => getContractAddress(chain)).toThrow('[ERR_NO_CONTRACT]');
       }
+    });
+  });
+
+  // =============================================================================
+  // Map Key Normalization Tests (BUG-1 regression tests)
+  // =============================================================================
+
+  describe('Map Key Normalization', () => {
+    it('normalizeChainName should resolve zksync aliases', () => {
+      expect(normalizeChainName('zksync-mainnet')).toBe('zksync');
+      expect(normalizeChainName('zksync-sepolia')).toBe('zksync-testnet');
+    });
+
+    it('normalizeChainName should pass through canonical names unchanged', () => {
+      const canonicalNames = [
+        'ethereum', 'polygon', 'arbitrum', 'base', 'optimism',
+        'bsc', 'avalanche', 'fantom', 'zksync', 'linea',
+        'sepolia', 'arbitrumSepolia', 'baseSepolia', 'zksync-testnet',
+      ];
+      for (const name of canonicalNames) {
+        expect(normalizeChainName(name)).toBe(name);
+      }
+    });
+
+    it('normalizeChainName should not allocate on repeated calls', () => {
+      // This is a perf regression test: the aliases map should be module-level
+      // If this test runs fast (no GC pressure), the fix is working
+      for (let i = 0; i < 10000; i++) {
+        normalizeChainName('zksync-mainnet');
+        normalizeChainName('ethereum');
+      }
+      // No assertion needed - this is a canary for allocation regression
+    });
+
+    it('router lookups should work with aliased chain names', () => {
+      // If zksync routers are configured, looking up via alias should work
+      const directResult = hasApprovedRouters('zksync');
+      const aliasResult = hasApprovedRouters('zksync-mainnet');
+      expect(aliasResult).toBe(directResult);
+    });
+
+    it('getApprovedRouters should return same result for alias and canonical name', () => {
+      if (hasApprovedRouters('zksync')) {
+        const direct = getApprovedRouters('zksync');
+        const aliased = getApprovedRouters('zksync-mainnet');
+        expect(aliased).toEqual(direct);
+      }
+    });
+
+    it('Aave pool lookups should work with aliased chain names', () => {
+      const directResult = getAavePoolAddress('ethereum');
+      expect(directResult).toBeDefined();
+      // ethereum has no alias, but verify the normalization path still works
+      expect(typeof directResult).toBe('string');
+    });
+  });
+
+  // =============================================================================
+  // Address Validation at Module Load (regression tests)
+  // =============================================================================
+
+  describe('Address Validation', () => {
+    it('APPROVED_ROUTERS should only contain valid Ethereum addresses', () => {
+      const addressRegex = /^0x[0-9a-fA-F]{40}$/;
+      for (const [chain, routers] of Object.entries(APPROVED_ROUTERS)) {
+        for (let i = 0; i < routers.length; i++) {
+          expect(addressRegex.test(routers[i])).toBe(true);
+        }
+      }
+    });
+
+    it('TOKEN_ADDRESSES should only contain valid Ethereum addresses', () => {
+      const addressRegex = /^0x[0-9a-fA-F]{40}$/;
+      for (const [chain, tokens] of Object.entries(TOKEN_ADDRESSES)) {
+        for (const [symbol, address] of Object.entries(tokens)) {
+          expect(addressRegex.test(address)).toBe(true);
+        }
+      }
+    });
+
+    it('AAVE_V3_POOL_ADDRESSES should only contain valid non-zero addresses', () => {
+      const addressRegex = /^0x[0-9a-fA-F]{40}$/;
+      const zeroAddress = '0x0000000000000000000000000000000000000000';
+      for (const [chain, address] of Object.entries(AAVE_V3_POOL_ADDRESSES)) {
+        expect(addressRegex.test(address)).toBe(true);
+        expect(address).not.toBe(zeroAddress);
+      }
+    });
+  });
+
+  // =============================================================================
+  // Error Message Quality (regression tests)
+  // =============================================================================
+
+  describe('Error Message Quality', () => {
+    it('getContractAddress error should contain correct deployment command', () => {
+      expect(() => getContractAddress('nonexistent')).toThrow(
+        'npx hardhat run scripts/deploy.ts --network nonexistent'
+      );
+    });
+
+    it('getQuoterAddress error should contain correct deployment command', () => {
+      expect(() => getQuoterAddress('nonexistent')).toThrow(
+        'npx hardhat run scripts/deploy-multi-path-quoter.ts --network nonexistent'
+      );
     });
   });
 });

@@ -589,12 +589,10 @@ describe('saveDeploymentResult — Central Registry Merge', () => {
   let originalRegistryContent: string | null = null;
   let registryPath: string;
   let balancerRegistryPath: string;
-  let networkFilePath: string;
 
   beforeEach(() => {
     registryPath = path.join(deploymentsDir, 'registry.json');
     balancerRegistryPath = path.join(deploymentsDir, 'balancer-registry.json');
-    networkFilePath = path.join(deploymentsDir, 'testnetwork.json');
 
     // Save original registry content
     if (fs.existsSync(registryPath)) {
@@ -608,8 +606,16 @@ describe('saveDeploymentResult — Central Registry Merge', () => {
       fs.writeFileSync(registryPath, originalRegistryContent, 'utf8');
     }
 
-    // Clean up temp files
-    for (const f of [balancerRegistryPath, networkFilePath]) {
+    // Clean up temp files (per-contract registries + network-contract files)
+    const cleanupFiles = [
+      balancerRegistryPath,
+      path.join(deploymentsDir, 'commit-reveal-registry.json'),
+      // Network+contract-specific files created by saveDeploymentResult
+      path.join(deploymentsDir, 'testnetwork-FlashLoanArbitrage.json'),
+      path.join(deploymentsDir, 'testnetwork-BalancerV2FlashArbitrage.json'),
+      path.join(deploymentsDir, 'testnetwork-CommitRevealArbitrage.json'),
+    ];
+    for (const f of cleanupFiles) {
       if (fs.existsSync(f)) {
         try { fs.unlinkSync(f); } catch { /* ignore */ }
       }
@@ -670,10 +676,14 @@ describe('saveDeploymentResult — Central Registry Merge', () => {
     // Existing FlashLoan entry should be preserved
     expect(registry.testnetwork.FlashLoanArbitrage).toBe('0x1111111111111111111111111111111111111111');
 
-    // Metadata should be updated
+    // Shared last-deployed metadata should be updated
     expect(registry.testnetwork.deployedAt).toBe(1700000000);
     expect(registry.testnetwork.deployedBy).toBe('0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC');
-    expect(registry.testnetwork.verified).toBe(true);
+
+    // Per-contract metadata should be stored
+    expect(registry.testnetwork.BalancerV2FlashArbitrage_deployedAt).toBe(1700000000);
+    expect(registry.testnetwork.BalancerV2FlashArbitrage_deployedBy).toBe('0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC');
+    expect(registry.testnetwork.BalancerV2FlashArbitrage_verified).toBe(true);
   });
 
   it('should also write per-contract registry for non-registry.json registryName', async () => {

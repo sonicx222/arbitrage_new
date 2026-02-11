@@ -18,27 +18,10 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { normalizeNetworkName } from './lib/deployment-utils'; // P1-004 FIX: Import normalization
+import { normalizeNetworkName, BalancerDeploymentResult } from './lib/deployment-utils'; // P1-004 FIX: Import normalization
 
-// =============================================================================
-// Types
-// =============================================================================
-
-interface DeploymentResult {
-  network: string;
-  chainId: number;
-  contractAddress: string;
-  vaultAddress: string;
-  ownerAddress: string;
-  deployerAddress: string;
-  transactionHash: string;
-  blockNumber: number;
-  timestamp: number;
-  minimumProfit: string;
-  approvedRouters: string[];
-  flashLoanFee: string;
-  verified: boolean;
-}
+// Use the shared type from deployment-utils to prevent drift
+type DeploymentResult = BalancerDeploymentResult;
 
 // =============================================================================
 // Helper Functions
@@ -238,6 +221,11 @@ function autoUpdateAddressesFile(deployments: Record<string, DeploymentResult>):
   }
 
   if (modified) {
+    // Create backup before overwriting (protects against regex replacement errors)
+    const backupPath = `${addressesPath}.bak`;
+    fs.copyFileSync(addressesPath, backupPath);
+    console.log(`   Backup: ${path.relative(process.cwd(), backupPath)}`);
+
     // Write updated content back to file
     fs.writeFileSync(addressesPath, content, 'utf8');
     console.log(`✅ Updated: contracts/deployments/addresses.ts`);

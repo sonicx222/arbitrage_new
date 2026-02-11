@@ -76,6 +76,11 @@ const config: HardhatUserConfig = {
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
       chainId: 421614,
     },
+    baseSepolia: {
+      url: process.env.BASE_SEPOLIA_RPC_URL || 'https://sepolia.base.org',
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+      chainId: 84532,
+    },
     // zkSync Era Networks (for SyncSwap flash loan integration)
     zksync: {
       url: process.env.ZKSYNC_RPC_URL || 'https://mainnet.era.zksync.io',
@@ -119,6 +124,7 @@ const config: HardhatUserConfig = {
       sepolia: process.env.ETHERSCAN_API_KEY || '',
       arbitrumOne: process.env.ARBISCAN_API_KEY || '',
       arbitrumSepolia: process.env.ARBISCAN_API_KEY || '',
+      baseSepolia: process.env.BASESCAN_API_KEY || '',
       // zkSync Era uses its own explorer
       zksync: process.env.ZKSYNC_ETHERSCAN_API_KEY || '',
       'zksync-testnet': process.env.ZKSYNC_ETHERSCAN_API_KEY || '',

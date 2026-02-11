@@ -8,7 +8,6 @@ import {
   MockDexRouter,
   MockERC20,
 } from '../typechain-types';
-import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 
 /**
  * PancakeSwapFlashArbitrage Contract Tests
@@ -116,7 +115,7 @@ describe('PancakeSwapFlashArbitrage', () => {
 
     it('should initialize with default swap deadline', async () => {
       const { flashArbitrage } = await loadFixture(deployContractsFixture);
-      expect(await flashArbitrage.swapDeadline()).to.equal(300); // DEFAULT_SWAP_DEADLINE
+      expect(await flashArbitrage.swapDeadline()).to.equal(60); // DEFAULT_SWAP_DEADLINE
     });
 
     it('should revert on zero factory address', async () => {
@@ -128,7 +127,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         PancakeSwapFlashArbitrageFactory.deploy(ethers.ZeroAddress, owner.address)
       ).to.be.revertedWithCustomError(
         { interface: PancakeSwapFlashArbitrageFactory.interface },
-        'InvalidFactoryAddress'
+        'InvalidProtocolAddress'
       );
     });
   });
@@ -324,7 +323,7 @@ describe('PancakeSwapFlashArbitrage', () => {
 
       await expect(
         flashArbitrage.whitelistPool(ethers.ZeroAddress)
-      ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidPoolAddress');
+      ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidProtocolAddress');
     });
   });
 
@@ -354,7 +353,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       const newDeadline = 600; // 10 minutes
       await expect(flashArbitrage.setSwapDeadline(newDeadline))
         .to.emit(flashArbitrage, 'SwapDeadlineUpdated')
-        .withArgs(300, newDeadline);
+        .withArgs(60, newDeadline);
 
       expect(await flashArbitrage.swapDeadline()).to.equal(newDeadline);
     });
@@ -371,10 +370,172 @@ describe('PancakeSwapFlashArbitrage', () => {
     it('should revert when setting deadline > MAX_SWAP_DEADLINE', async () => {
       const { flashArbitrage } = await loadFixture(deployContractsFixture);
 
-      await expect(flashArbitrage.setSwapDeadline(3601)).to.be.revertedWithCustomError(
+      await expect(flashArbitrage.setSwapDeadline(601)).to.be.revertedWithCustomError(
         flashArbitrage,
         'InvalidSwapDeadline'
       );
+    });
+  });
+
+  // ===========================================================================
+  // Flash Loan Execution Tests
+  // ===========================================================================
+  describe('Flash Loan Execution', () => {
+    it('should execute a profitable flash loan arbitrage (happy path)', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc, owner } =
+        await loadFixture(deployContractsFixture);
+
+      // Setup: approve routers and whitelist pool
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Configure exchange rates for a profitable arbitrage:
+      // Router1: 1 WETH -> 2000 USDC
+      // Router2: 2000 USDC -> 1.02 WETH (slightly more than 1 WETH = ~2% profit)
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)  // rate: 2000 USDC per WETH
+      );
+      await dexRouter2.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('510000000000000000000000000')  // ~1.02 WETH per 2000 USDC (0.00051 WETH per USDC)
+      );
+
+      const flashAmount = ethers.parseEther('10');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: ethers.parseUnits('19000', 6),
+        },
+        {
+          router: await dexRouter2.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: ethers.parseEther('9.5'),
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      // Record pool balance before to verify flash loan repayment
+      const poolBalanceBefore = await weth.balanceOf(await wethUsdcPool.getAddress());
+
+      // Execute the arbitrage
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          flashAmount,
+          swapPath,
+          0, // minProfit
+          deadline
+        )
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+
+      // Verify pool was repaid (balance >= before, since pool gets back amount + fee)
+      const poolBalanceAfter = await weth.balanceOf(await wethUsdcPool.getAddress());
+      expect(poolBalanceAfter).to.be.gte(poolBalanceBefore);
+
+      // Verify profit was tracked
+      const totalProfits = await flashArbitrage.totalProfits();
+      expect(totalProfits).to.be.gt(0);
+
+      // Verify contract received the profit
+      const contractBalance = await weth.balanceOf(await flashArbitrage.getAddress());
+      expect(contractBalance).to.be.gt(0);
+    });
+
+    it('should revert when flash loan profit is insufficient', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc, owner } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Configure exchange rates for unprofitable arbitrage (1:1 swap, no profit)
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('500000000000000')  // 1 USDC -> 0.0005 WETH (exact 1:1, no profit to cover fee)
+      );
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      // Should revert because profit doesn't cover the 0.25% flash loan fee
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.be.revertedWithCustomError(flashArbitrage, 'InsufficientProfit');
+    });
+
+    it('should revert when pool has zero liquidity', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, weth, usdc } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Set pool liquidity to zero
+      await wethUsdcPool.setLiquidity(0);
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('1'),
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.be.revertedWithCustomError(flashArbitrage, 'InsufficientPoolLiquidity');
     });
   });
 
@@ -746,7 +907,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       // Withdraw
       const tx = await flashArbitrage.withdrawETH(owner.address, amount);
       const receipt = await tx.wait();
-      const gasUsed = receipt!.gasUsed * receipt!.gasPrice;
+      const gasUsed = receipt!.gasUsed * BigInt(receipt!.gasPrice ?? 0);
 
       const balanceAfter = await ethers.provider.getBalance(owner.address);
 
@@ -760,6 +921,347 @@ describe('PancakeSwapFlashArbitrage', () => {
       await expect(
         flashArbitrage.withdrawToken(await weth.getAddress(), ethers.ZeroAddress, 100)
       ).to.be.revertedWithCustomError(flashArbitrage, 'InvalidRecipient');
+    });
+  });
+
+  // ===========================================================================
+  // Batch Pool Whitelisting Tests (whitelistMultiplePools)
+  // ===========================================================================
+  describe('Batch Pool Whitelisting', () => {
+    it('should revert on empty pools array', async () => {
+      const { flashArbitrage } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        flashArbitrage.whitelistMultiplePools([])
+      ).to.be.revertedWithCustomError(flashArbitrage, 'EmptyPoolsArray');
+    });
+
+    it('should revert when batch exceeds MAX_BATCH_WHITELIST', async () => {
+      const { flashArbitrage } = await loadFixture(deployContractsFixture);
+
+      // Create array of 101 random addresses (MAX_BATCH_WHITELIST = 100)
+      const pools = Array.from({ length: 101 }, () => ethers.Wallet.createRandom().address);
+
+      await expect(
+        flashArbitrage.whitelistMultiplePools(pools)
+      ).to.be.revertedWithCustomError(flashArbitrage, 'BatchTooLarge')
+        .withArgs(101, 100);
+    });
+
+    it('should whitelist multiple pools and return success count', async () => {
+      const { flashArbitrage, wethUsdcPool, usdcDaiPool } = await loadFixture(
+        deployContractsFixture
+      );
+
+      const pools = [await wethUsdcPool.getAddress(), await usdcDaiPool.getAddress()];
+
+      const tx = await flashArbitrage.whitelistMultiplePools(pools);
+      const receipt = await tx.wait();
+
+      // Both pools should be whitelisted
+      expect(await flashArbitrage.isPoolWhitelisted(pools[0])).to.be.true;
+      expect(await flashArbitrage.isPoolWhitelisted(pools[1])).to.be.true;
+
+      // Should emit PoolWhitelisted for each
+      await expect(tx)
+        .to.emit(flashArbitrage, 'PoolWhitelisted')
+        .withArgs(pools[0]);
+      await expect(tx)
+        .to.emit(flashArbitrage, 'PoolWhitelisted')
+        .withArgs(pools[1]);
+    });
+
+    it('should skip zero addresses without reverting', async () => {
+      const { flashArbitrage, wethUsdcPool } = await loadFixture(deployContractsFixture);
+
+      const poolAddress = await wethUsdcPool.getAddress();
+      const pools = [ethers.ZeroAddress, poolAddress, ethers.ZeroAddress];
+
+      await flashArbitrage.whitelistMultiplePools(pools);
+
+      // Only non-zero pool should be whitelisted
+      expect(await flashArbitrage.isPoolWhitelisted(poolAddress)).to.be.true;
+    });
+
+    it('should skip duplicate pools without reverting', async () => {
+      const { flashArbitrage, wethUsdcPool } = await loadFixture(deployContractsFixture);
+
+      const poolAddress = await wethUsdcPool.getAddress();
+      const pools = [poolAddress, poolAddress, poolAddress];
+
+      // Should not revert — duplicates silently skipped
+      await flashArbitrage.whitelistMultiplePools(pools);
+
+      expect(await flashArbitrage.isPoolWhitelisted(poolAddress)).to.be.true;
+
+      // Only 1 pool in the whitelist despite 3 inputs
+      const whitelisted = await flashArbitrage.getWhitelistedPools();
+      expect(whitelisted.length).to.equal(1);
+    });
+
+    it('should only allow owner to batch whitelist', async () => {
+      const { flashArbitrage, wethUsdcPool, user } = await loadFixture(deployContractsFixture);
+
+      await expect(
+        flashArbitrage.connect(user).whitelistMultiplePools([await wethUsdcPool.getAddress()])
+      ).to.be.revertedWith('Ownable: caller is not the owner');
+    });
+
+    it('should accept exactly MAX_BATCH_WHITELIST pools', async () => {
+      const { flashArbitrage } = await loadFixture(deployContractsFixture);
+
+      // Create array of exactly 100 random addresses
+      const pools = Array.from({ length: 100 }, () => ethers.Wallet.createRandom().address);
+
+      // Should not revert at the limit
+      await flashArbitrage.whitelistMultiplePools(pools);
+
+      // Verify all 100 are whitelisted
+      expect(await flashArbitrage.isPoolWhitelisted(pools[0])).to.be.true;
+      expect(await flashArbitrage.isPoolWhitelisted(pools[99])).to.be.true;
+    });
+  });
+
+  // ===========================================================================
+  // PoolNotFromFactory Security Test
+  // ===========================================================================
+  describe('Pool Factory Verification', () => {
+    it('should revert when whitelisted pool is not registered in factory', async () => {
+      const { flashArbitrage, pancakeFactory, dexRouter1, weth, usdc } = await loadFixture(
+        deployContractsFixture
+      );
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+
+      // Deploy a standalone MockPancakeV3Pool that is NOT registered in the factory
+      const MockPancakeV3PoolFactory = await ethers.getContractFactory('MockPancakeV3Pool');
+      const wethAddr = await weth.getAddress();
+      const usdcAddr = await usdc.getAddress();
+      const [token0, token1] = wethAddr.toLowerCase() < usdcAddr.toLowerCase()
+        ? [wethAddr, usdcAddr]
+        : [usdcAddr, wethAddr];
+
+      const fakePool = await MockPancakeV3PoolFactory.deploy(
+        token0,
+        token1,
+        2500,
+        await pancakeFactory.getAddress()
+      );
+
+      // Whitelist the fake pool (passes whitelist check)
+      await flashArbitrage.whitelistPool(await fakePool.getAddress());
+
+      // Fund the fake pool with tokens for the flash loan
+      await weth.mint(await fakePool.getAddress(), ethers.parseEther('100'));
+      await usdc.mint(await fakePool.getAddress(), ethers.parseUnits('200000', 6));
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      // Should revert because factory.getPool() won't return this pool's address
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await fakePool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('1'),
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.be.revertedWithCustomError(flashArbitrage, 'PoolNotFromFactory');
+    });
+  });
+
+  // ===========================================================================
+  // FlashLoanNotActive Security Test
+  // ===========================================================================
+  describe('Flash Loan Context Guard', () => {
+    it('should revert when callback called without active flash loan context', async () => {
+      const { flashArbitrage, wethUsdcPool, owner } = await loadFixture(
+        deployContractsFixture
+      );
+
+      // Whitelist the pool so it passes the whitelist check
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // Impersonate the pool to call pancakeV3FlashCallback directly
+      const poolAddress = await wethUsdcPool.getAddress();
+      await ethers.provider.send('hardhat_impersonateAccount', [poolAddress]);
+      await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
+      const poolSigner = await ethers.getSigner(poolAddress);
+
+      // Call callback directly — _flashContext.active is false
+      await expect(
+        flashArbitrage.connect(poolSigner).pancakeV3FlashCallback(100, 0, '0x')
+      ).to.be.revertedWithCustomError(flashArbitrage, 'FlashLoanNotActive');
+
+      await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
+    });
+  });
+
+  // ===========================================================================
+  // Multi-Hop Execution Tests
+  // ===========================================================================
+  describe('Multi-Hop Execution', () => {
+    it('should execute 3-hop triangular arbitrage', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc, dai } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      // WETH -> USDC -> DAI -> WETH (triangular arbitrage)
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await dai.getAddress(),
+        BigInt('1010000000000000000000000000000')
+      );
+      await dexRouter2.setExchangeRate(
+        await dai.getAddress(),
+        await weth.getAddress(),
+        BigInt('510000000000000')
+      );
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: ethers.parseUnits('19000', 6),
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await dai.getAddress(),
+          amountOutMin: ethers.parseEther('19000'),
+        },
+        {
+          router: await dexRouter2.getAddress(),
+          tokenIn: await dai.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: ethers.parseEther('9'),
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      await expect(
+        flashArbitrage.executeArbitrage(
+          await wethUsdcPool.getAddress(),
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          swapPath,
+          0,
+          deadline
+        )
+      ).to.emit(flashArbitrage, 'ArbitrageExecuted');
+
+      // Verify profit
+      const contractBalance = await weth.balanceOf(await flashArbitrage.getAddress());
+      expect(contractBalance).to.be.gt(0);
+    });
+  });
+
+  // ===========================================================================
+  // Ownable2Step Tests
+  // ===========================================================================
+  describe('Ownable2Step', () => {
+    it('should support two-step ownership transfer', async () => {
+      const { flashArbitrage, owner, user } = await loadFixture(deployContractsFixture);
+
+      // Step 1: Initiate transfer
+      await flashArbitrage.connect(owner).transferOwnership(user.address);
+      expect(await flashArbitrage.owner()).to.equal(owner.address);
+      expect(await flashArbitrage.pendingOwner()).to.equal(user.address);
+
+      // Step 2: Accept ownership
+      await flashArbitrage.connect(user).acceptOwnership();
+      expect(await flashArbitrage.owner()).to.equal(user.address);
+    });
+
+    it('should not allow non-pending owner to accept', async () => {
+      const { flashArbitrage, owner, user, attacker } = await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.connect(owner).transferOwnership(user.address);
+
+      await expect(
+        flashArbitrage.connect(attacker).acceptOwnership()
+      ).to.be.revertedWith('Ownable2Step: caller is not the new owner');
+    });
+  });
+
+  // ===========================================================================
+  // Gas Benchmark Tests
+  // ===========================================================================
+  describe('Gas Benchmarks', () => {
+    it('should execute 2-hop arbitrage within gas budget', async () => {
+      const { flashArbitrage, wethUsdcPool, dexRouter1, dexRouter2, weth, usdc } =
+        await loadFixture(deployContractsFixture);
+
+      await flashArbitrage.addApprovedRouter(await dexRouter1.getAddress());
+      await flashArbitrage.addApprovedRouter(await dexRouter2.getAddress());
+      await flashArbitrage.whitelistPool(await wethUsdcPool.getAddress());
+
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter2.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('510000000000000000000000000')
+      );
+
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter2.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+
+      const tx = await flashArbitrage.executeArbitrage(
+        await wethUsdcPool.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('10'),
+        swapPath,
+        0,
+        deadline
+      );
+      const receipt = await tx.wait();
+
+      // PancakeSwap V3 flash loan + 2 swaps should be < 500,000 gas
+      expect(receipt!.gasUsed).to.be.lt(500_000);
     });
   });
 });

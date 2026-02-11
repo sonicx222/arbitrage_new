@@ -170,7 +170,9 @@ interface DeploymentConfig {
 
 /**
  * Discover pools from factory for given token pairs
- * Phase 3 Optimization: Preserved as-is (already optimized)
+ *
+ * Uses parallel RPC calls (Promise.all) for 2-3x speedup over sequential
+ * discovery, consistent with discover-pancakeswap-pools.ts standalone script.
  */
 async function discoverPools(
   factoryAddress: string,
@@ -181,31 +183,42 @@ async function discoverPools(
   ];
   const factory = await ethers.getContractAt(factoryAbi, factoryAddress);
 
-  const discoveredPools: Array<{ pool: string; pair: string; feeTier: number }> = [];
+  console.log(`\nDiscovering PancakeSwap V3 pools (${tokenPairs.length} pairs × ${FEE_TIERS.length} fee tiers)...`);
 
-  console.log('\nDiscovering PancakeSwap V3 pools...');
-  for (const pair of tokenPairs) {
-    console.log(`  Checking ${pair.name}...`);
-
-    for (const feeTier of FEE_TIERS) {
+  // Create all discovery promises upfront for parallel execution
+  const discoveryPromises = tokenPairs.flatMap((pair) =>
+    FEE_TIERS.map(async (feeTier): Promise<{ pool: string; pair: string; feeTier: number } | null> => {
       try {
         const poolAddress = await factory.getPool(pair.tokenA, pair.tokenB, feeTier);
         if (poolAddress && poolAddress !== ethers.ZeroAddress) {
-          console.log(`    ✅ Found pool at ${poolAddress} (fee: ${feeTier / 10000}%)`);
-          discoveredPools.push({
-            pool: poolAddress,
-            pair: pair.name,
-            feeTier,
-          });
+          return { pool: poolAddress, pair: pair.name, feeTier };
         }
-      } catch (error) {
-        // Pool doesn't exist for this fee tier, continue
-        continue;
+      } catch {
+        // Pool doesn't exist for this fee tier — expected
+      }
+      return null;
+    })
+  );
+
+  const startTime = Date.now();
+  const results = await Promise.all(discoveryPromises);
+  const elapsedMs = Date.now() - startTime;
+
+  const discoveredPools = results.filter(
+    (pool): pool is { pool: string; pair: string; feeTier: number } => pool !== null
+  );
+
+  // Log discovered pools grouped by pair
+  for (const pair of tokenPairs) {
+    const pools = discoveredPools.filter(p => p.pair === pair.name);
+    if (pools.length > 0) {
+      for (const pool of pools) {
+        console.log(`  ✅ ${pair.name}: ${pool.pool} (fee: ${pool.feeTier / 10000}%)`);
       }
     }
   }
 
-  console.log(`\nDiscovered ${discoveredPools.length} pools`);
+  console.log(`\nDiscovered ${discoveredPools.length} pools in ${elapsedMs}ms (parallel RPC)`);
   return discoveredPools;
 }
 

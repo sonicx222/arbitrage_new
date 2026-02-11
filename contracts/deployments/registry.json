@@ -3,22 +3,18 @@
   "_lastUpdated": "2026-02-10T00:00:00.000Z",
   "_version": "2.0.0",
   "_schema": {
-    "description": "Each network key contains a DeploymentResult object with contract deployment details",
+    "description": "Central deployment registry. Each network key maps contract types to addresses.",
+    "metadataKeys": "Top-level keys prefixed with '_' are metadata, not network entries. generate-addresses.ts filters these out.",
+    "contractTypes": ["FlashLoanArbitrage", "PancakeSwapFlashArbitrage", "BalancerV2FlashArbitrage", "SyncSwapFlashArbitrage", "CommitRevealArbitrage", "MultiPathQuoter"],
     "networkStructure": {
-      "network": "Chain identifier (e.g., 'ethereum', 'arbitrum')",
-      "chainId": "Numeric chain ID",
-      "contractAddress": "Deployed FlashLoanArbitrage contract address",
-      "aavePoolAddress": "Aave V3 Pool address for flash loans",
-      "ownerAddress": "Contract owner address",
-      "deployerAddress": "Address that deployed the contract",
-      "transactionHash": "Deployment transaction hash",
-      "blockNumber": "Block number of deployment",
-      "timestamp": "Unix timestamp of deployment",
-      "minimumProfit": "Minimum profit threshold (in wei, as string)",
-      "approvedRouters": "Array of approved DEX router addresses",
-      "verified": "Whether contract is verified on block explorer"
+      "<ContractType>": "Contract address string (e.g., '0x...') or null if not deployed",
+      "<ContractType>_deployedAt": "Unix timestamp of this specific contract's deployment",
+      "<ContractType>_deployedBy": "Address that deployed this specific contract",
+      "<ContractType>_verified": "Whether this specific contract is verified on block explorer",
+      "deployedAt": "Timestamp of last deployment to this network (informational, may differ from per-contract timestamps)",
+      "deployedBy": "Last deployer address for this network (informational)"
     },
-    "note": "Other contract types (PancakeSwap, Balancer, SyncSwap, etc.) use separate registry files: balancer-registry.json, pancakeswap-registry.json, etc."
+    "note": "Per-contract registries (balancer-registry.json, etc.) contain full deployment results including constructor args."
   },
   "localhost": {
     "FlashLoanArbitrage": null,

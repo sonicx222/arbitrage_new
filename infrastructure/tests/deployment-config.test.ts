@@ -27,13 +27,13 @@ const SCRIPTS_DIR = path.join(INFRA_ROOT, 'scripts');
 // Partition configuration (should match partitions.ts)
 const PARTITIONS = {
   'asia-fast': {
-    chains: ['bsc', 'polygon'],
+    chains: ['bsc', 'polygon', 'avalanche', 'fantom'],
     region: 'asia-southeast1',
     provider: 'oracle',
-    memory: 512,
+    memory: 768,
     port: 3011
   },
-  'l2-fast': {
+  'l2-turbo': {
     chains: ['arbitrum', 'optimism', 'base'],
     region: 'asia-southeast1',
     provider: 'fly',
@@ -41,10 +41,10 @@ const PARTITIONS = {
     port: 3012
   },
   'high-value': {
-    chains: ['ethereum'],
+    chains: ['ethereum', 'zksync', 'linea'],
     region: 'us-east1',
     provider: 'oracle',
-    memory: 512,
+    memory: 768,
     port: 3013
   }
 };
@@ -101,7 +101,7 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
     });
 
     it('should set partition environment variables', () => {
-      expect(config.env.PARTITION_ID).toBe('l2-fast');
+      expect(config.env.PARTITION_ID).toBe('l2-turbo');
       expect(config.env.REGION_ID).toBe('asia-southeast1');
       expect(config.env.NODE_ENV).toBe('production');
     });

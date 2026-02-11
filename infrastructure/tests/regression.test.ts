@@ -502,8 +502,8 @@ describe('REGRESSION: Shared Health Utilities Library', () => {
     const content = readFile(healthUtilsPath);
     expect(content).toContain('acquire_lock_safe()');
     expect(content).toContain('release_lock_safe()');
-    // Should handle stale locks
-    expect(content).toContain('/proc/');
+    // Should handle stale locks via process existence check
+    expect(content).toContain('process_exists');
   });
 });
 

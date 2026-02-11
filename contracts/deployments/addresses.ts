@@ -9,7 +9,7 @@
  * to maintain a single source of truth. This file only defines deployed contract addresses.
  *
  * Usage:
- *   import { FLASH_LOAN_CONTRACT_ADDRESSES, AAVE_V3_POOL_ADDRESSES } from '@arbitrage/contracts/deployments';
+ *   import { FLASH_LOAN_CONTRACT_ADDRESSES, AAVE_V3_POOL_ADDRESSES } from '../deployments/addresses';
  *
  * @see implementation_plan_v2.md Task 3.1.3
  */
@@ -92,9 +92,9 @@ export const TESTNET_CHAINS: readonly TestnetChain[] = [
 ] as const;
 
 /**
- * Normalize chain name to canonical form.
+ * Chain name alias map (module-level constant to avoid allocation on every call).
  *
- * Handles various chain name aliases:
+ * Maps non-canonical names to their canonical form:
  * - 'zksync-mainnet' → 'zksync'
  * - 'zksync-sepolia' → 'zksync-testnet'
  *
@@ -102,18 +102,25 @@ export const TESTNET_CHAINS: readonly TestnetChain[] = [
  * - Hardhat config: 'zksync-mainnet'
  * - Block explorers: 'zksync'
  * - Internal config: 'zksync'
+ */
+const CHAIN_ALIASES: Readonly<Record<string, string>> = {
+  'zksync-mainnet': 'zksync',
+  'zksync-sepolia': 'zksync-testnet',
+};
+
+/**
+ * Normalize chain name to canonical form.
  *
- * This ensures consistent address lookups regardless of input format.
+ * Chain name matching is **case-sensitive**, consistent with all other lookups
+ * in this module (Map keys, Record keys, etc.). Only known aliases are resolved:
+ * - 'zksync-mainnet' → 'zksync'
+ * - 'zksync-sepolia' → 'zksync-testnet'
  *
- * @param chain - Chain name (any variant)
+ * @param chain - Chain name (exact case required)
  * @returns Canonical chain name
  */
 export function normalizeChainName(chain: string): string {
-  const aliases: Record<string, string> = {
-    'zksync-mainnet': 'zksync',
-    'zksync-sepolia': 'zksync-testnet',
-  };
-  return aliases[chain] || chain;
+  return CHAIN_ALIASES[chain] || chain;
 }
 
 /**
@@ -320,7 +327,8 @@ export const APPROVED_ROUTERS: Record<string, string[]> = {
     '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap Router
   ],
   fantom: [
-    '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52', // SpookySwap Router
+    '0xF491e7B69E4244ad4002BC14e878a34207E38c29', // SpookySwap Router (V2-compatible)
+    '0x16327E3FbDaCA3bcF7E38F5Af2599D2DDc33aE52', // SpiritSwap Router (V2-compatible)
     '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506', // SushiSwap Router
   ],
   zksync: [
@@ -381,7 +389,8 @@ export const TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
   },
   polygon: {
     WMATIC: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Wrapped MATIC
-    USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // USDC (bridged)
+    USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', // Native USDC (canonical)
+    'USDC.e': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', // Bridged USDC (deprecated)
     USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
     DAI: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063',
     WETH: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
@@ -393,7 +402,8 @@ export const TOKEN_ADDRESSES: Record<string, Record<string, string>> = {
   },
   optimism: {
     WETH: '0x4200000000000000000000000000000000000006',
-    USDC: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607', // USDC (bridged)
+    USDC: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', // Native USDC (canonical)
+    'USDC.e': '0x7F5c764cBc14f9669B88837ca1490cCa17c31607', // Bridged USDC (deprecated)
     USDT: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
     DAI: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',
   },
@@ -516,8 +526,34 @@ function isValidDeployedAddress(addr: string | null | undefined): addr is string
 }
 
 /**
+ * Build a Map from a Record, normalizing keys to canonical chain names.
+ *
+ * **Why normalize at build time**: Lookup functions normalize the input chain name
+ * (e.g., 'zksync-mainnet' → 'zksync'), so Map keys must also be normalized.
+ * Without this, adding 'zksync-mainnet' to a Record would create a key that
+ * the normalized lookup ('zksync') would never find.
+ *
+ * @param entries - Record entries to build from
+ * @param filter - Predicate to include/exclude entries
+ * @returns Map with normalized chain name keys
+ */
+function buildNormalizedMap<V>(
+  entries: [string, V][],
+  filter: (value: V) => boolean
+): Map<string, V> {
+  return new Map(
+    entries
+      .filter(([_, value]) => filter(value))
+      .map(([chain, value]) => [normalizeChainName(chain), value])
+  );
+}
+
+/**
  * Pre-validated Maps for O(1) lookups (optimization)
  * These are built at module load time for performance.
+ *
+ * **Key normalization**: All keys are normalized to canonical chain names at build
+ * time so that alias lookups (e.g., 'zksync-mainnet' → 'zksync') work correctly.
  *
  * Filter criteria:
  * - Excludes null, undefined, empty string
@@ -529,30 +565,33 @@ function isValidDeployedAddress(addr: string | null | undefined): addr is string
  * - No prototype chain traversal
  * - Better for frequent lookups (price updates, opportunity detection)
  */
-const DEPLOYED_CONTRACTS_MAP = new Map(
-  Object.entries(FLASH_LOAN_CONTRACT_ADDRESSES).filter(([_, addr]) => isValidDeployedAddress(addr))
+const DEPLOYED_CONTRACTS_MAP = buildNormalizedMap(
+  Object.entries(FLASH_LOAN_CONTRACT_ADDRESSES),
+  isValidDeployedAddress
 );
 
-const DEPLOYED_QUOTERS_MAP = new Map(
-  Object.entries(MULTI_PATH_QUOTER_ADDRESSES).filter(([_, addr]) => isValidDeployedAddress(addr))
+const DEPLOYED_QUOTERS_MAP = buildNormalizedMap(
+  Object.entries(MULTI_PATH_QUOTER_ADDRESSES),
+  isValidDeployedAddress
 );
 
 /**
  * Approved routers Map with frozen arrays for hot-path safety.
- * Arrays are frozen to prevent mutation, enabling safe return of references.
+ * Keys are normalized. Arrays are frozen to prevent mutation, enabling safe return of references.
  */
 const APPROVED_ROUTERS_MAP = new Map(
   Object.entries(APPROVED_ROUTERS)
     .filter(([_, routers]) => routers && routers.length > 0)
-    .map(([chain, routers]) => [chain, Object.freeze([...routers])] as const)
+    .map(([chain, routers]) => [normalizeChainName(chain), Object.freeze([...routers])] as const)
 );
 
 /**
  * Aave V3 Pool addresses Map for consistent O(1) lookups.
- * Built from AAVE_V3_POOL_ADDRESSES object for performance consistency.
+ * Keys are normalized to canonical chain names.
  */
-const AAVE_POOL_MAP = new Map(
-  Object.entries(AAVE_V3_POOL_ADDRESSES).filter(([_, addr]) => !!addr)
+const AAVE_POOL_MAP = buildNormalizedMap(
+  Object.entries(AAVE_V3_POOL_ADDRESSES),
+  (addr): addr is string => !!addr
 );
 
 // =============================================================================
@@ -585,7 +624,7 @@ export function getContractAddress(chain: string): string {
   if (!address) {
     throw new Error(
       `[ERR_NO_CONTRACT] No FlashLoanArbitrage contract deployed for chain: ${chain} (normalized: ${normalized}). ` +
-      `Run deployment script first: npm run deploy:${normalized}. ` +
+      `Run deployment script first: npx hardhat run scripts/deploy.ts --network ${normalized}. ` +
       `Available chains: ${Array.from(DEPLOYED_CONTRACTS_MAP.keys()).join(', ') || 'none'}`
     );
   }
@@ -680,7 +719,7 @@ export function getQuoterAddress(chain: string): string {
   if (!address) {
     throw new Error(
       `[ERR_NO_QUOTER] MultiPathQuoter contract not deployed for chain: ${chain} (normalized: ${normalized}). ` +
-      `Run deployment script first: npm run deploy:multi-path-quoter --network ${normalized}. ` +
+      `Run deployment script first: npx hardhat run scripts/deploy-multi-path-quoter.ts --network ${normalized}. ` +
       `Available chains: ${Array.from(DEPLOYED_QUOTERS_MAP.keys()).join(', ') || 'none'}`
     );
   }
@@ -729,11 +768,11 @@ if (process.env.NODE_ENV !== 'test') {
     validateRouterAddresses(APPROVED_ROUTERS, 'APPROVED_ROUTERS');
 
     // Validate token addresses
-    Object.entries(TOKEN_ADDRESSES).forEach(([chain, tokens]) => {
-      Object.entries(tokens).forEach(([symbol, address]) => {
+    for (const [chain, tokens] of Object.entries(TOKEN_ADDRESSES)) {
+      for (const [symbol, address] of Object.entries(tokens)) {
         validateAddressFormat(address, `TOKEN_ADDRESSES.${chain}.${symbol}`);
-      });
-    });
+      }
+    }
 
     // Success: All addresses valid
     // Note: We don't log success to avoid noise, but validation has run

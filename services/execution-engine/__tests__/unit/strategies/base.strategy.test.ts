@@ -21,11 +21,12 @@ import { ethers } from 'ethers';
  * All errors are parameterless in the current contract implementation.
  */
 const FLASH_LOAN_ERRORS = [
-  'InvalidPoolAddress()',
+  'InvalidProtocolAddress()',
   'InvalidRouterAddress()',
   'RouterAlreadyApproved()',
   'RouterNotApproved()',
   'EmptySwapPath()',
+  'PathTooLong(uint256,uint256)',
   'InvalidSwapPath()',
   'InsufficientProfit()',
   'InvalidFlashLoanInitiator()',
@@ -43,11 +44,12 @@ const FLASH_LOAN_ERRORS = [
  * Verified using: ethers.id('<ErrorName>()').slice(0, 10)
  */
 const EXPECTED_SELECTORS: Record<string, string> = {
-  'InvalidPoolAddress()': '0xda6a56c3',
+  'InvalidProtocolAddress()': '0x1fedb84a',
   'InvalidRouterAddress()': '0x14203b4b',
   'RouterAlreadyApproved()': '0x0d35b41e',
   'RouterNotApproved()': '0x233d278a',
   'EmptySwapPath()': '0x86a559ea',
+  'PathTooLong(uint256,uint256)': '0xddd77f0d',
   'InvalidSwapPath()': '0x33782793',
   'InsufficientProfit()': '0x4e47f8ea',
   'InvalidFlashLoanInitiator()': '0xef7cc6b6',

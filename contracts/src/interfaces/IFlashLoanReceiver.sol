@@ -47,7 +47,7 @@ interface IPool {
      * - Callback execution: Variable (depends on arbitrage complexity)
      * - Single-asset flash loan: ~350,000-600,000 gas total
      * - **Recommendation**: Budget 600,000 gas for single-asset arbitrage
-     * - **Note**: Aave V3's 0.09% fee is lower than alternatives, but base gas cost is slightly higher
+     * - **Note**: Aave V3's 0.09% fee is relatively low (Balancer V2 is 0%), but base gas cost is slightly higher
      */
     function flashLoanSimple(
         address receiverAddress,

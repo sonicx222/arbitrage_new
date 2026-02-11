@@ -42,6 +42,17 @@ import "../interfaces/IDexRouter.sol";
  * - Flash loan callback - Protocol-specific callback handler
  * - calculateExpectedProfit() - Protocol-specific profit simulation
  *
+ * ## Access Control Design Decision
+ *
+ * executeArbitrage() access control varies by protocol:
+ * - onlyOwner: FlashLoanArbitrage (Aave), PancakeSwapFlashArbitrage — restricts who can trigger trades
+ * - open access: BalancerV2FlashArbitrage, SyncSwapFlashArbitrage — safe because flash loans are
+ *   atomic (caller can't extract funds; unprofitable trades revert via InsufficientProfit)
+ * - CommitRevealArbitrage: open access with commit-reveal pattern for MEV protection
+ *
+ * This is intentional: open-access contracts allow keeper bots to execute without owner keys,
+ * reducing operational risk. The profit check ensures only profitable trades succeed.
+ *
  * Base contract provides:
  * - Common structs (SwapStep)
  * - Common state variables (minimumProfit, swapDeadline, _approvedRouters)
@@ -51,8 +62,7 @@ import "../interfaces/IDexRouter.sol";
  * - Swap execution (_executeSwaps)
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
- * @custom:refactoring-priority P0 (Critical)
+ * @custom:version 2.1.0
  */
 abstract contract BaseFlashArbitrage is
     Ownable2Step,
@@ -66,14 +76,19 @@ abstract contract BaseFlashArbitrage is
     // Constants
     // ==========================================================================
 
-    /// @notice Default swap deadline (5 minutes)
-    uint256 public constant DEFAULT_SWAP_DEADLINE = 300;
+    /// @notice Default swap deadline (60 seconds)
+    /// @dev Tuned for competitive arbitrage on L2 chains (2-12s block times).
+    ///      Shorter deadlines reduce MEV exposure. Increase for congested L1.
+    uint256 public constant DEFAULT_SWAP_DEADLINE = 60;
 
-    /// @notice Maximum swap deadline (1 hour) to prevent stale transactions
-    uint256 public constant MAX_SWAP_DEADLINE = 3600;
+    /// @notice Maximum swap deadline (10 minutes) to prevent stale transactions
+    /// @dev Arbitrage opportunities vanish within seconds; 10 minutes is generous.
+    uint256 public constant MAX_SWAP_DEADLINE = 600;
 
-    /// @notice Minimum slippage protection floor (0.1% = 10 bps)
-    /// @dev Prevents callers from setting amountOutMin = 0 which exposes to sandwich attacks
+    /// @notice Recommended minimum slippage protection floor (0.1% = 10 bps)
+    /// @dev Informational constant for off-chain integrations. On-chain validation
+    ///      enforces amountOutMin > 0 (see _validateArbitrageParams). Off-chain callers
+    ///      SHOULD use at least MIN_SLIPPAGE_BPS to calculate amountOutMin for MEV protection.
     uint256 public constant MIN_SLIPPAGE_BPS = 10;
 
     /// @notice Maximum number of hops in a swap path (prevents DoS via gas exhaustion)
@@ -87,10 +102,15 @@ abstract contract BaseFlashArbitrage is
     /// @notice Minimum profit required for arbitrage execution (in token units)
     uint256 public minimumProfit;
 
-    /// @notice Total profits accumulated (for tracking)
+    /// @notice Total profits accumulated (aggregate counter, may mix denominations)
+    /// @dev Kept for backward compatibility. Use tokenProfits(asset) for accurate per-token tracking.
     uint256 public totalProfits;
 
-    /// @notice Configurable swap deadline in seconds (default: 300 = 5 minutes)
+    /// @notice Per-token profit tracking (token address => accumulated profit in token units)
+    /// @dev Provides accurate per-token profit tracking without mixing denominations
+    mapping(address => uint256) public tokenProfits;
+
+    /// @notice Configurable swap deadline in seconds (default: DEFAULT_SWAP_DEADLINE)
     uint256 public swapDeadline;
 
     /// @notice Set of approved DEX routers (O(1) add/remove/contains)
@@ -157,8 +177,6 @@ abstract contract BaseFlashArbitrage is
     error InvalidSwapPath();
     error SwapPathAssetMismatch();
     error InsufficientProfit();
-    error SwapFailed();
-    error InsufficientOutputAmount();
     error InsufficientSlippageProtection();
     error InvalidRecipient();
     error ETHTransferFailed();
@@ -202,12 +220,15 @@ abstract contract BaseFlashArbitrage is
      * @param startAsset The starting asset (flash loaned asset)
      * @param startAmount The starting amount
      * @param swapPath Array of swap steps (memory required due to abi.decode)
+     * @param deadline Absolute deadline timestamp for swaps (block.timestamp + swapDeadline for flash loans,
+     *                 or user-specified deadline for commit-reveal)
      * @return finalAmount The final amount after all swaps
      */
     function _executeSwaps(
         address startAsset,
         uint256 startAmount,
-        SwapStep[] memory swapPath
+        SwapStep[] memory swapPath,
+        uint256 deadline
     ) internal returns (uint256 finalAmount) {
         uint256 currentAmount = startAmount;
         address currentToken = startAsset;
@@ -216,26 +237,21 @@ abstract contract BaseFlashArbitrage is
         // Gas optimization: Pre-allocate path array once, reuse across iterations
         address[] memory path = new address[](2);
 
-        // Cache swapDeadline to avoid repeated SLOAD (~100 gas saved)
-        uint256 deadline = block.timestamp + swapDeadline;
-
         for (uint256 i = 0; i < pathLength;) {
-            SwapStep memory step = swapPath[i];
-
-            // Execute swap using shared library function
+            // Access fields directly to avoid memory-to-memory struct copy (~200 gas/hop)
             currentAmount = SwapHelpers.executeSingleSwap(
                 currentToken,
                 currentAmount,
-                step.router,
-                step.tokenIn,
-                step.tokenOut,
-                step.amountOutMin,
+                swapPath[i].router,
+                swapPath[i].tokenIn,
+                swapPath[i].tokenOut,
+                swapPath[i].amountOutMin,
                 path,
                 deadline
             );
 
             // Update for next iteration
-            currentToken = step.tokenOut;
+            currentToken = swapPath[i].tokenOut;
 
             unchecked { ++i; }
         }
@@ -357,6 +373,30 @@ abstract contract BaseFlashArbitrage is
         return 0;
     }
 
+    /**
+     * @notice Verifies profit meets minimum thresholds and updates tracking
+     * @dev Consolidates profit verification logic used across all protocol callbacks.
+     *      Uses max(minProfit, minimumProfit) to enforce both per-trade and contract-wide thresholds.
+     *
+     * @param profit The actual profit earned from the arbitrage
+     * @param minProfit The per-trade minimum profit specified by the caller
+     * @param asset The token address used for per-token profit tracking
+     */
+    function _verifyAndTrackProfit(uint256 profit, uint256 minProfit, address asset) internal {
+        // Zero-profit flash loans are never desirable — always revert
+        if (profit == 0) revert InsufficientProfit();
+
+        // Cache storage read to save ~100 gas on SLOAD
+        uint256 _minimumProfit = minimumProfit;
+        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
+        if (profit < effectiveMinProfit) revert InsufficientProfit();
+
+        // Track profits per-token (avoids mixing denominations)
+        tokenProfits[asset] += profit;
+        // Maintain legacy aggregate counter for backward compatibility
+        totalProfits += profit;
+    }
+
     // ==========================================================================
     // Admin Functions - Router Management
     // ==========================================================================
@@ -418,7 +458,7 @@ abstract contract BaseFlashArbitrage is
 
     /**
      * @notice Sets the swap deadline for DEX transactions
-     * @dev Deadline must be between 1 second and MAX_SWAP_DEADLINE (1 hour)
+     * @dev Deadline must be between 1 second and MAX_SWAP_DEADLINE (10 minutes)
      *      Shorter deadlines provide better MEV protection but may cause failures
      *      on congested networks. Longer deadlines are more reliable but expose
      *      transactions to price movements.
@@ -472,7 +512,8 @@ abstract contract BaseFlashArbitrage is
      */
     function withdrawETH(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert InvalidRecipient();
-        (bool success, ) = to.call{value: amount}("");
+        // Gas-limited call prevents recipient from executing arbitrary logic
+        (bool success, ) = to.call{value: amount, gas: 10000}("");
         if (!success) revert ETHTransferFailed();
         emit ETHWithdrawn(to, amount);
     }
@@ -491,9 +532,18 @@ abstract contract BaseFlashArbitrage is
     // ==========================================================================
 
     /**
+     * @notice Returns absolute swap deadline (block.timestamp + swapDeadline)
+     * @dev Used by flash loan callbacks to compute the deadline for DEX swaps.
+     *      Centralizes the computation to avoid repeated inline calculation across children.
+     * @return Absolute deadline timestamp
+     */
+    function _getSwapDeadline() internal view returns (uint256) {
+        return block.timestamp + swapDeadline;
+    }
+
+    /**
      * @notice Validates common arbitrage parameters
      * @dev Internal function for use by derived contracts in their executeArbitrage() implementations
-     *      Extracts 143+ lines of duplicate validation code (P1 refactoring priority)
      *
      * Validates:
      * - Amount is non-zero (prevents gas waste and ensures slippage protection works)
@@ -548,7 +598,8 @@ abstract contract BaseFlashArbitrage is
             }
 
             // Enforce minimum slippage protection to prevent sandwich attacks
-            if (step.amountOutMin == 0 && amount > 0) revert InsufficientSlippageProtection();
+            // Note: amount > 0 is guaranteed by InvalidAmount check above
+            if (step.amountOutMin == 0) revert InsufficientSlippageProtection();
 
             // Update expected token for next iteration
             expectedTokenIn = step.tokenOut;
@@ -561,13 +612,4 @@ abstract contract BaseFlashArbitrage is
         if (expectedTokenIn != asset) revert InvalidSwapPath();
     }
 
-    /**
-     * @notice Checks if a router is in the approved set (internal helper)
-     * @dev Use this for internal validation in derived contracts
-     * @param router The router address to check
-     * @return True if router is approved
-     */
-    function _isRouterApproved(address router) internal view returns (bool) {
-        return _approvedRouters.contains(router);
-    }
 }

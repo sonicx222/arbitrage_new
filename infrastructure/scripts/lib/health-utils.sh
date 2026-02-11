@@ -52,20 +52,32 @@ build_health_url() {
     fi
 }
 
-# Extract host from URL
-# Args: $1 = url (e.g., redis://localhost:6379 or http://example.com:8080)
+# Extract host from URL (handles auth: redis://user:pass@host:port)
+# Args: $1 = url (e.g., redis://localhost:6379 or redis://user:pass@host:6379)
 extract_url_host() {
     local url="$1"
-    echo "$url" | sed -E 's|^[a-z]+://||' | cut -d: -f1 | cut -d/ -f1
+    local stripped
+    stripped=$(echo "$url" | sed -E 's|^[a-z]+://||')
+    # Strip credentials if present (everything before @)
+    if echo "$stripped" | grep -q '@'; then
+        stripped=$(echo "$stripped" | sed 's|.*@||')
+    fi
+    echo "$stripped" | cut -d: -f1 | cut -d/ -f1
 }
 
-# Extract port from URL
+# Extract port from URL (handles auth: redis://user:pass@host:port)
 # Args: $1 = url, $2 = default_port
 extract_url_port() {
     local url="$1"
     local default_port="${2:-80}"
+    local stripped
+    stripped=$(echo "$url" | sed -E 's|^[a-z]+://||')
+    # Strip credentials if present (everything before @)
+    if echo "$stripped" | grep -q '@'; then
+        stripped=$(echo "$stripped" | sed 's|.*@||')
+    fi
     local port
-    port=$(echo "$url" | sed -E 's|^[a-z]+://||' | grep -oE ':[0-9]+' | tr -d ':')
+    port=$(echo "$stripped" | grep -oE ':[0-9]+' | tr -d ':')
     echo "${port:-$default_port}"
 }
 

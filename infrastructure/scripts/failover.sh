@@ -366,7 +366,7 @@ usage() {
     echo "  status         Show current service status"
     echo ""
     echo "Environment Variables:"
-    echo "  HEALTH_CHECK_INTERVAL  Check interval in seconds (default: 10)"
+    echo "  HEALTH_CHECK_INTERVAL  Check interval in seconds (default: 15)"
     echo "  FAILOVER_THRESHOLD     Failures before failover (default: 3)"
     echo "  ALERT_WEBHOOK          Webhook URL for alerts"
     echo "  DEBUG                  Enable debug logging (true/false)"

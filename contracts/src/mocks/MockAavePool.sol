@@ -3,11 +3,12 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "../interfaces/IFlashLoanReceiver.sol";
 
 /**
  * @title MockAavePool
  * @dev Mock Aave V3 Pool for testing flash loans
- * @notice Implements IPool.flashLoanSimple() interface
+ * @notice Implements IPool interface for Aave V3 flash loan simulation
  *
  * ## Initiator Parameter Behavior (Fix 1.1 Documentation)
  *
@@ -25,7 +26,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - `initiator == address(this)` ensures only self-initiated flash loans are processed
  * - This prevents attackers from triggering the callback directly
  */
-contract MockAavePool {
+contract MockAavePool is IPool {
     using SafeERC20 for IERC20;
 
     // Aave V3 flash loan premium: 0.09% = 9 basis points
@@ -53,11 +54,9 @@ contract MockAavePool {
         uint256 amount,
         bytes calldata params,
         uint16 referralCode
-    ) external {
+    ) external override {
         // Silence unused variable warning
         referralCode;
-
-        require(amount > 0, "Amount must be greater than 0");
 
         uint256 premium = (amount * FLASH_LOAN_PREMIUM) / PREMIUM_DENOMINATOR;
 
@@ -92,6 +91,11 @@ contract MockAavePool {
             }
         }
 
+        // Decode and verify return value (matches real Aave V3 Pool behavior)
+        // executeOperation must return true to indicate successful execution
+        bool returnValue = abi.decode(result, (bool));
+        require(returnValue, "Flash loan execution failed");
+
         // Verify that the amount + premium was returned
         uint256 amountOwed = amount + premium;
 
@@ -104,7 +108,7 @@ contract MockAavePool {
     /**
      * @dev Returns the flash loan premium
      */
-    function FLASHLOAN_PREMIUM_TOTAL() external pure returns (uint128) {
+    function FLASHLOAN_PREMIUM_TOTAL() external pure override returns (uint128) {
         return uint128(FLASH_LOAN_PREMIUM);
     }
 

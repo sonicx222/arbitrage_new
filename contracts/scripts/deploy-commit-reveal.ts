@@ -248,11 +248,23 @@ function printCommitRevealNextSteps(result: DeploymentResult): void {
   console.log('');
 
   console.log('7. Test the deployment:');
-  console.log(`   # Create a test commitment`);
-  console.log(`   > const params = { tokenIn: '0x...', tokenOut: '0x...', amountIn: 1000, minProfit: 100, router: '0x...', deadline: Math.floor(Date.now()/1000) + 300, salt: ethers.hexlify(ethers.randomBytes(32)) };`);
-  console.log(`   > const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['address','address','uint256','uint256','address','uint256','bytes32'], [params.tokenIn, params.tokenOut, params.amountIn, params.minProfit, params.router, params.deadline, params.salt]));`);
+  console.log(`   # Create a test commitment using RevealParams struct`);
+  console.log(`   > const salt = ethers.hexlify(ethers.randomBytes(32));`);
+  console.log(`   > const params = {`);
+  console.log(`   >   asset: '0xWETH...',`);
+  console.log(`   >   amountIn: ethers.parseEther('0.1'),`);
+  console.log(`   >   swapPath: [{ router: '0xROUTER', tokenIn: '0xWETH', tokenOut: '0xUSDC', amountOutMin: 0 }],`);
+  console.log(`   >   minProfit: ethers.parseEther('0.001'),`);
+  console.log(`   >   deadline: Math.floor(Date.now()/1000) + 300,`);
+  console.log(`   >   salt: salt`);
+  console.log(`   > };`);
+  console.log(`   > const encoded = ethers.AbiCoder.defaultAbiCoder().encode(`);
+  console.log(`   >   ['address','uint256','(address,address,address,uint256)[]','uint256','uint256','bytes32'],`);
+  console.log(`   >   [params.asset, params.amountIn, params.swapPath.map(s => [s.router, s.tokenIn, s.tokenOut, s.amountOutMin]), params.minProfit, params.deadline, params.salt]`);
+  console.log(`   > );`);
+  console.log(`   > const hash = ethers.keccak256(encoded);`);
   console.log(`   > await contract.commit(hash);`);
-  console.log(`   # Wait 1 block, then reveal`);
+  console.log(`   # Wait MIN_DELAY_BLOCKS (1 block), then reveal`);
   console.log(`   > await contract.reveal(params);`);
   console.log('');
 

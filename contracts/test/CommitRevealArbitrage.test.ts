@@ -113,7 +113,7 @@ describe('CommitRevealArbitrage', () => {
       const { commitRevealArbitrage } = await loadFixture(deployContractsFixture);
       expect(await commitRevealArbitrage.MIN_DELAY_BLOCKS()).to.equal(1);
       expect(await commitRevealArbitrage.MAX_COMMIT_AGE_BLOCKS()).to.equal(10);
-      expect(await commitRevealArbitrage.MAX_SWAP_DEADLINE()).to.equal(300);
+      expect(await commitRevealArbitrage.MAX_SWAP_DEADLINE()).to.equal(600);
       expect(await commitRevealArbitrage.MAX_SWAP_HOPS()).to.equal(5);
     });
   });
@@ -302,7 +302,7 @@ describe('CommitRevealArbitrage', () => {
         const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
         // Setup routers and rates
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
         await dexRouter1.setExchangeRate(
           await weth.getAddress(),
           await usdc.getAddress(),
@@ -369,16 +369,34 @@ describe('CommitRevealArbitrage', () => {
         ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
       });
 
-      it('should allow anyone to cancel (no auth check)', async () => {
+      it('should revert when non-committer tries to cancel', async () => {
         const { commitRevealArbitrage, user, attacker } = await loadFixture(deployContractsFixture);
 
         const commitmentHash = ethers.randomBytes(32);
         await commitRevealArbitrage.connect(user).commit(commitmentHash);
 
-        // Attacker can cancel any commitment
-        await commitRevealArbitrage.connect(attacker).cancelCommit(commitmentHash);
+        // Attacker cannot cancel someone else's commitment
+        await expect(
+          commitRevealArbitrage.connect(attacker).cancelCommit(commitmentHash)
+        ).to.be.revertedWithCustomError(commitRevealArbitrage, 'UnauthorizedRevealer');
 
+        // Commitment still exists
+        expect(await commitRevealArbitrage.commitments(commitmentHash)).to.be.gt(0);
+      });
+
+      it('should clean up committers mapping on cancel', async () => {
+        const { commitRevealArbitrage, user } = await loadFixture(deployContractsFixture);
+
+        const commitmentHash = ethers.randomBytes(32);
+        await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+        expect(await commitRevealArbitrage.committers(commitmentHash)).to.equal(user.address);
+
+        await commitRevealArbitrage.connect(user).cancelCommit(commitmentHash);
+
+        // Both commitments and committers should be cleaned up
         expect(await commitRevealArbitrage.commitments(commitmentHash)).to.equal(0);
+        expect(await commitRevealArbitrage.committers(commitmentHash)).to.equal(ethers.ZeroAddress);
       });
     });
   });
@@ -393,7 +411,7 @@ describe('CommitRevealArbitrage', () => {
       // Verify MIN_DELAY_BLOCKS constant
       expect(await commitRevealArbitrage.MIN_DELAY_BLOCKS()).to.equal(1);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -459,7 +477,7 @@ describe('CommitRevealArbitrage', () => {
     it('should succeed at exactly MIN_DELAY_BLOCKS', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -523,7 +541,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert if expired (> MAX_COMMIT_AGE_BLOCKS)', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -569,7 +587,7 @@ describe('CommitRevealArbitrage', () => {
     it('should succeed just before expiry (< MAX_COMMIT_AGE_BLOCKS)', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -597,7 +615,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      // Calculate deadline within MAX_SWAP_DEADLINE (300 seconds)
+      // Calculate deadline within MAX_SWAP_DEADLINE (600 seconds)
       const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 250;
       const salt = ethers.randomBytes(32);
 
@@ -640,7 +658,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on wrong commitment hash', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -686,7 +704,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on unauthorized revealer', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user, attacker } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -732,7 +750,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on already revealed commitment', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -798,7 +816,7 @@ describe('CommitRevealArbitrage', () => {
     it('should prevent replay attacks', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -864,7 +882,7 @@ describe('CommitRevealArbitrage', () => {
     it('should validate deadline correctly', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -909,7 +927,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on deadline exceeding MAX_SWAP_DEADLINE', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -922,7 +940,7 @@ describe('CommitRevealArbitrage', () => {
       ];
 
       const currentTime = (await ethers.provider.getBlock('latest'))!.timestamp;
-      const farFutureDeadline = currentTime + 400; // > MAX_SWAP_DEADLINE (300)
+      const farFutureDeadline = currentTime + 700; // > MAX_SWAP_DEADLINE (600)
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1003,7 +1021,7 @@ describe('CommitRevealArbitrage', () => {
     it('should execute single-hop swap successfully', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -1071,8 +1089,8 @@ describe('CommitRevealArbitrage', () => {
     it('should execute multi-hop swap (3 hops)', async () => {
       const { commitRevealArbitrage, dexRouter1, dexRouter2, weth, usdc, dai, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter2.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter2.getAddress());
 
       // Configure rates for triangular arbitrage: WETH -> USDC -> DAI -> WETH
       await dexRouter1.setExchangeRate(
@@ -1154,7 +1172,7 @@ describe('CommitRevealArbitrage', () => {
       await usdt.mint(await dexRouter1.getAddress(), ethers.parseUnits('1000000', 6));
       await busd.mint(await dexRouter1.getAddress(), ethers.parseEther('1000000'));
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       // Configure rates for 5-hop path: WETH -> USDC -> DAI -> USDT -> BUSD -> WETH
       await dexRouter1.setExchangeRate(await weth.getAddress(), await usdc.getAddress(), ethers.parseUnits('2000', 6));
@@ -1211,7 +1229,7 @@ describe('CommitRevealArbitrage', () => {
       const busd = await MockERC20Factory.deploy('BUSD', 'BUSD', 18);
       const tusd = await MockERC20Factory.deploy('TUSD', 'TUSD', 18);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -1290,7 +1308,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on asset mismatch (does not start with asset)', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -1334,7 +1352,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on asset mismatch (does not end with asset)', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -1378,7 +1396,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert on token continuity error', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, dai, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       const amountIn = ethers.parseEther('1');
       const swapPath = [
@@ -1433,7 +1451,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert if profit < params.minProfit', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -1496,7 +1514,7 @@ describe('CommitRevealArbitrage', () => {
     it('should revert if profit < contract minimumProfit', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       // Set global minimum profit
       await commitRevealArbitrage.connect(owner).setMinimumProfit(ethers.parseEther('0.1'));
@@ -1556,13 +1574,13 @@ describe('CommitRevealArbitrage', () => {
 
       await expect(
         commitRevealArbitrage.connect(user).reveal(revealParams)
-      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'BelowMinimumProfit');
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InsufficientProfit');
     });
 
     it('should use max of params.minProfit and minimumProfit', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
       // Set global minimum profit to 0.01
       await commitRevealArbitrage.connect(owner).setMinimumProfit(ethers.parseEther('0.01'));
@@ -1629,7 +1647,7 @@ describe('CommitRevealArbitrage', () => {
     it('should emit Revealed event with correct profit', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
-      await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
@@ -1710,20 +1728,20 @@ describe('CommitRevealArbitrage', () => {
   // 7. Admin Function Tests
   // ===========================================================================
   describe('7. Admin Functions', () => {
-    describe('approveRouter()', () => {
+    describe('addApprovedRouter()', () => {
       it('should allow owner to approve router', async () => {
         const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
 
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
-        expect(await commitRevealArbitrage.approvedRouters(await dexRouter1.getAddress())).to.be.true;
+        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
       });
 
-      it('should emit RouterApproved event', async () => {
+      it('should emit RouterAdded event', async () => {
         const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
 
-        await expect(commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress()))
-          .to.emit(commitRevealArbitrage, 'RouterApproved')
+        await expect(commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress()))
+          .to.emit(commitRevealArbitrage, 'RouterAdded')
           .withArgs(await dexRouter1.getAddress());
       });
 
@@ -1731,7 +1749,7 @@ describe('CommitRevealArbitrage', () => {
         const { commitRevealArbitrage, dexRouter1, owner, user } = await loadFixture(deployContractsFixture);
 
         await expect(
-          commitRevealArbitrage.connect(user).approveRouter(await dexRouter1.getAddress())
+          commitRevealArbitrage.connect(user).addApprovedRouter(await dexRouter1.getAddress())
         ).to.be.revertedWith('Ownable: caller is not the owner');
       });
 
@@ -1739,39 +1757,39 @@ describe('CommitRevealArbitrage', () => {
         const { commitRevealArbitrage, owner } = await loadFixture(deployContractsFixture);
 
         await expect(
-          commitRevealArbitrage.connect(owner).approveRouter(ethers.ZeroAddress)
+          commitRevealArbitrage.connect(owner).addApprovedRouter(ethers.ZeroAddress)
         ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InvalidRouterAddress');
       });
     });
 
-    describe('revokeRouter()', () => {
-      it('should allow owner to revoke router', async () => {
+    describe('removeApprovedRouter()', () => {
+      it('should allow owner to remove router', async () => {
         const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
 
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
-        expect(await commitRevealArbitrage.approvedRouters(await dexRouter1.getAddress())).to.be.true;
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.true;
 
-        await commitRevealArbitrage.connect(owner).revokeRouter(await dexRouter1.getAddress());
-        expect(await commitRevealArbitrage.approvedRouters(await dexRouter1.getAddress())).to.be.false;
+        await commitRevealArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress());
+        expect(await commitRevealArbitrage.isApprovedRouter(await dexRouter1.getAddress())).to.be.false;
       });
 
-      it('should emit RouterRevoked event', async () => {
+      it('should emit RouterRemoved event', async () => {
         const { commitRevealArbitrage, dexRouter1, owner } = await loadFixture(deployContractsFixture);
 
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
-        await expect(commitRevealArbitrage.connect(owner).revokeRouter(await dexRouter1.getAddress()))
-          .to.emit(commitRevealArbitrage, 'RouterRevoked')
+        await expect(commitRevealArbitrage.connect(owner).removeApprovedRouter(await dexRouter1.getAddress()))
+          .to.emit(commitRevealArbitrage, 'RouterRemoved')
           .withArgs(await dexRouter1.getAddress());
       });
 
-      it('should revert if non-owner tries to revoke', async () => {
+      it('should revert if non-owner tries to remove', async () => {
         const { commitRevealArbitrage, dexRouter1, owner, user } = await loadFixture(deployContractsFixture);
 
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
 
         await expect(
-          commitRevealArbitrage.connect(user).revokeRouter(await dexRouter1.getAddress())
+          commitRevealArbitrage.connect(user).removeApprovedRouter(await dexRouter1.getAddress())
         ).to.be.revertedWith('Ownable: caller is not the owner');
       });
     });
@@ -1953,7 +1971,7 @@ describe('CommitRevealArbitrage', () => {
       it('should calculate expected profit correctly', async () => {
         const { commitRevealArbitrage, dexRouter1, weth, usdc, owner } = await loadFixture(deployContractsFixture);
 
-        await commitRevealArbitrage.connect(owner).approveRouter(await dexRouter1.getAddress());
+        await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
         await dexRouter1.setExchangeRate(
           await weth.getAddress(),
           await usdc.getAddress(),

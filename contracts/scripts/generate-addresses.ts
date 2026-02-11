@@ -9,22 +9,19 @@
  *   # Or add to package.json:
  *   npm run generate:addresses
  *
- * **Status**: PARTIAL - Core pipeline works (load → extract → generate → write)
- * but lacks production safeguards (see TODOs below).
+ * **Status**: Core pipeline implemented (load → validate → extract → generate → atomic write).
  *
- * **Limitations**:
- * - No address format validation (accepts any string)
- * - No atomic writes (crash during write corrupts file)
+ * **What it does**:
+ * - Loads registry.json and filters out metadata keys (_comment, _version, etc.)
+ * - Validates address format (0x + 40 hex chars) and rejects zero addresses
+ * - Generates TypeScript constants with explicit naming map
+ * - Writes atomically (temp file + rename) to prevent corruption
+ *
+ * **Known Limitations**:
  * - Generated code does not preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
  * - No helper functions generated (hasDeployed*, get*, etc.)
  * - Only reads from registry.json; contract-specific registries (balancer-registry.json, etc.) are ignored
- *
- * **Recommended Next Steps**:
- * 1. Test the script: npx tsx contracts/scripts/generate-addresses.ts
- * 2. Add address format validation (0x + 40 hex chars)
- * 3. Merge all contract-specific registries before extraction
- * 4. Add npm script: "generate:addresses": "tsx contracts/scripts/generate-addresses.ts"
- * 5. Add atomic file writes (temp + rename)
+ * - Output is addresses.generated.ts, NOT addresses.ts (manual integration required)
  *
  * @see contracts/deployments/README.md - Auto-Generation Plan section
  */
@@ -86,61 +83,89 @@ const CONTRACT_TYPES = [
 ] as const;
 
 // =============================================================================
-// Registry Parsing (TODO: Implement)
+// Registry Parsing
 // =============================================================================
 
 /**
  * Load and parse registry.json
  *
- * **TODO**: Implement error handling for:
- * - File not found
- * - Invalid JSON
- * - Schema validation
+ * Handles:
+ * - File not found (throws [ERR_NO_REGISTRY])
+ * - Invalid JSON (throws [ERR_REGISTRY_CORRUPT])
+ * - Metadata key filtering (skips keys prefixed with '_')
  *
  * @returns Parsed registry
  */
+/**
+ * Keys in registry.json that are metadata, not network entries.
+ * These are prefixed with '_' by convention.
+ */
+function isMetadataKey(key: string): boolean {
+  return key.startsWith('_');
+}
+
+/**
+ * Get only network entries from registry (excluding metadata keys).
+ */
+function getNetworkEntries(registry: DeploymentRegistry): [string, NetworkDeployment][] {
+  return Object.entries(registry).filter(([key]) => !isMetadataKey(key));
+}
+
 function loadRegistry(): DeploymentRegistry {
-  // TODO: Implement
   console.log('📖 Loading registry from:', REGISTRY_PATH);
 
   if (!fs.existsSync(REGISTRY_PATH)) {
     throw new Error(
       `[ERR_NO_REGISTRY] Registry file not found: ${REGISTRY_PATH}\n` +
-      `Run a deployment script first to create the registry.`
+      `Run a deployment script first to create the registry:\n` +
+      `  npx hardhat run scripts/deploy.ts --network sepolia`
     );
   }
 
   const content = fs.readFileSync(REGISTRY_PATH, 'utf8');
-  const registry = JSON.parse(content) as DeploymentRegistry;
 
-  console.log(`  ✅ Loaded ${Object.keys(registry).length} networks`);
+  let registry: DeploymentRegistry;
+  try {
+    registry = JSON.parse(content) as DeploymentRegistry;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `[ERR_REGISTRY_CORRUPT] Failed to parse registry.json.\n` +
+      `File: ${REGISTRY_PATH}\n` +
+      `Error: ${msg}\n` +
+      `Check the file for syntax errors.`
+    );
+  }
+
+  const networkCount = getNetworkEntries(registry).length;
+  console.log(`  ✅ Loaded ${networkCount} network(s)`);
   return registry;
 }
 
 /**
- * Extract addresses by contract type
+ * Extract addresses by contract type from registry
  *
- * **TODO**: Implement extraction logic
- * - Filter out null/undefined addresses
- * - Validate address format
- * - Handle zero addresses
+ * Filters out:
+ * - null/undefined addresses
+ * - Zero addresses (0x000...000)
+ * - Metadata keys (prefixed with '_')
  *
  * @param registry - Deployment registry
  * @returns Addresses grouped by contract type
  */
 function extractAddressesByType(registry: DeploymentRegistry): AddressesByType {
-  // TODO: Implement
   console.log('🔍 Extracting addresses by contract type...');
 
   const result: AddressesByType = {};
+  const networkEntries = getNetworkEntries(registry);
 
   for (const contractType of CONTRACT_TYPES) {
     result[contractType] = {};
 
-    for (const [network, deployment] of Object.entries(registry)) {
+    for (const [network, deployment] of networkEntries) {
       const address = deployment[contractType];
 
-      // Filter valid addresses
+      // Filter valid addresses (non-null, string, non-zero)
       if (
         address &&
         typeof address === 'string' &&
@@ -158,22 +183,23 @@ function extractAddressesByType(registry: DeploymentRegistry): AddressesByType {
 }
 
 // =============================================================================
-// Code Generation (TODO: Implement)
+// Code Generation
 // =============================================================================
 
 /**
- * Generate TypeScript constant declaration
+ * Generate TypeScript constant declarations from extracted addresses
  *
- * **TODO**: Improve formatting
- * - Add JSDoc comments
- * - Preserve manual sections
- * - Add warning banner
+ * Generates export const declarations with JSDoc comments and a warning banner.
+ *
+ * **Limitations**:
+ * - Does not preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
+ * - Does not generate helper functions (hasDeployed*, get*, etc.)
+ * - Output file is separate from addresses.ts (addresses.generated.ts)
  *
  * @param addresses - Addresses by type
  * @returns Generated TypeScript code
  */
 function generateTypeScriptCode(addresses: AddressesByType): string {
-  // TODO: Implement proper code generation
   console.log('📝 Generating TypeScript code...');
 
   const timestamp = new Date().toISOString();
@@ -201,12 +227,20 @@ function generateTypeScriptCode(addresses: AddressesByType): string {
 
 `;
 
+  // Explicit mapping to match existing codebase constant names
+  const CONSTANT_NAME_MAP: Record<string, string> = {
+    FlashLoanArbitrage: 'FLASH_LOAN_CONTRACT_ADDRESSES',
+    MultiPathQuoter: 'MULTI_PATH_QUOTER_ADDRESSES',
+    PancakeSwapFlashArbitrage: 'PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES',
+    BalancerV2FlashArbitrage: 'BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES',
+    SyncSwapFlashArbitrage: 'SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES',
+    CommitRevealArbitrage: 'COMMIT_REVEAL_ARBITRAGE_ADDRESSES',
+  };
+
   // Generate constants for each contract type
   for (const [contractType, networkAddresses] of Object.entries(addresses)) {
-    const constantName = `${contractType.replace(/([A-Z])/g, '_$1').toUpperCase()}_ADDRESSES`.replace(
-      /^_/,
-      ''
-    );
+    const constantName = CONSTANT_NAME_MAP[contractType]
+      || `${contractType.replace(/([A-Z])/g, '_$1').toUpperCase()}_ADDRESSES`.replace(/^_/, '');
 
     code += `/**
  * ${contractType} contract addresses by chain.
@@ -235,38 +269,34 @@ export const ${constantName}: Record<string, string> = ${JSON.stringify(
 }
 
 /**
- * Write generated code to file
- *
- * **TODO**: Add safeguards
- * - Backup existing file
- * - Atomic write (temp + rename)
- * - Validate generated code syntax
+ * Write generated code to file using atomic write (temp + rename).
  *
  * @param code - Generated TypeScript code
  */
 function writeGeneratedFile(code: string): void {
-  // TODO: Implement safeguards
   console.log('💾 Writing generated file to:', OUTPUT_PATH);
 
-  fs.writeFileSync(OUTPUT_PATH, code, 'utf8');
+  // Atomic write: write to temp file, then rename to prevent corruption on crash
+  const tempFile = `${OUTPUT_PATH}.tmp`;
+  fs.writeFileSync(tempFile, code, 'utf8');
+  fs.renameSync(tempFile, OUTPUT_PATH);
 
   console.log('  ✅ File written successfully');
 }
 
 // =============================================================================
-// Validation (TODO: Implement)
+// Validation
 // =============================================================================
 
 /**
- * Validate generated addresses
+ * Validate extracted addresses before code generation
  *
- * **TODO**: Implement validation
- * - Address format (0x + 40 hex)
- * - No zero addresses
- * - No duplicates
- * - TypeScript compiles
+ * Checks:
+ * - Address format (0x + 40 hex characters)
+ * - No zero addresses (0x000...000)
  *
  * @param addresses - Addresses to validate
+ * @throws Error if any addresses are invalid
  */
 function validateAddresses(addresses: AddressesByType): void {
   console.log('✓ Validating generated addresses...');
@@ -305,18 +335,17 @@ function validateAddresses(addresses: AddressesByType): void {
 // =============================================================================
 
 /**
- * Generate addresses.ts from registry.json
+ * Generate addresses.generated.ts from registry.json
  *
- * **Current Status**: Core pipeline functional, missing production safeguards
- * **Next Steps**: Address validation, atomic writes, multi-registry merge
+ * Pipeline: load registry → extract by type → validate → generate TS → atomic write
  */
 async function main(): Promise<void> {
   console.log('\n========================================');
   console.log('Generate addresses.ts from registry.json');
   console.log('========================================\n');
 
-  console.log('⚠️  NOTE: Core pipeline works but lacks production safeguards');
-  console.log('   See TODOs in script for remaining work\n');
+  console.log('ℹ️  NOTE: Generates addresses.generated.ts (separate from addresses.ts)');
+  console.log('   Does not overwrite manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)\n');
 
   try {
     // Step 1: Load registry

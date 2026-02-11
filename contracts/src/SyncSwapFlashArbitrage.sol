@@ -175,7 +175,7 @@ contract SyncSwapFlashArbitrage is
         );
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(token, amount, swapPath);
+        uint256 amountReceived = _executeSwaps(token, amount, swapPath, _getSwapDeadline());
 
         // Calculate amount owed (principal + fee)
         uint256 amountOwed = amount + fee;
@@ -186,13 +186,8 @@ contract SyncSwapFlashArbitrage is
         // Calculate actual profit
         uint256 profit = amountReceived - amountOwed;
 
-        // Check profit meets minimum threshold (cache storage read to save ~100 gas)
-        uint256 _minimumProfit = minimumProfit;
-        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
-        if (profit < effectiveMinProfit) revert InsufficientProfit();
-
-        // Update total profits tracking
-        totalProfits += profit;
+        // Verify profit meets thresholds and update tracking (base contract)
+        _verifyAndTrackProfit(profit, minProfit, token);
 
         // Repayment: PULL pattern - SyncSwap Vault pulls tokens via transferFrom
         // after callback returns (EIP-3156 standard behavior).

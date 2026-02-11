@@ -111,13 +111,13 @@ output "deployment_summary" {
       region     = "ap-singapore-1"
       public_ip  = oci_core_instance.asia_fast_partition.public_ip
       health_url = "http://${oci_core_instance.asia_fast_partition.public_ip}:3011/health"
-      chains     = ["bsc", "polygon"]
+      chains     = var.partition_asia_fast.chains
     }
     high_value_partition = {
       region     = "us-ashburn-1"
       public_ip  = oci_core_instance.high_value_partition.public_ip
       health_url = "http://${oci_core_instance.high_value_partition.public_ip}:3013/health"
-      chains     = ["ethereum"]
+      chains     = var.partition_high_value.chains
     }
     cross_chain_detector = {
       region     = "us-ashburn-1"

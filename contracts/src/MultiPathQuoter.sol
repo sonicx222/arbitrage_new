@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "./interfaces/IFlashLoanReceiver.sol";
-import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage (lines 140, 193, 249, 342)
+import "./interfaces/IDexRouter.sol"; // Used for getAmountsOut() calls (lines 140, 193, 249, 342)
 
 /**
  * @title MultiPathQuoter
@@ -261,12 +260,15 @@ contract MultiPathQuoter {
         finalAmount = currentAmount;
 
         // Calculate flash loan fee and net profit
-        // Protection against overflow: check multiplication won't overflow
-        if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
-            // Flashloan amount impossibly large - return 0 profit
-            return (0, 0, false);
+        uint256 flashLoanFee;
+        if (flashLoanFeeBps > 0) {
+            // Protection against overflow: check multiplication won't overflow
+            if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
+                // Flashloan amount impossibly large - return 0 profit
+                return (0, 0, false);
+            }
+            flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
         }
-        uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
         uint256 amountOwed = flashLoanAmount + flashLoanFee;
 
         if (finalAmount > amountOwed) {
@@ -353,11 +355,16 @@ contract MultiPathQuoter {
             }
 
             if (pathSuccess) {
-                // Protection against overflow: check multiplication won't overflow
-                if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
-                    pathSuccess = false;
-                } else {
-                    uint256 flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
+                uint256 flashLoanFee;
+                if (flashLoanFeeBps > 0) {
+                    // Protection against overflow: check multiplication won't overflow
+                    if (flashLoanAmount > type(uint256).max / flashLoanFeeBps) {
+                        pathSuccess = false;
+                    } else {
+                        flashLoanFee = (flashLoanAmount * flashLoanFeeBps) / BPS_DENOMINATOR;
+                    }
+                }
+                if (pathSuccess) {
                     uint256 amountOwed = flashLoanAmount + flashLoanFee;
                     if (currentAmount > amountOwed) {
                         profits[p] = currentAmount - amountOwed;

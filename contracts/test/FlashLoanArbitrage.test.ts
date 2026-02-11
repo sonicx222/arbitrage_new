@@ -95,7 +95,7 @@ describe('FlashLoanArbitrage', () => {
         FlashLoanArbitrageFactory.deploy(ethers.ZeroAddress, owner.address)
       ).to.be.revertedWithCustomError(
         { interface: FlashLoanArbitrageFactory.interface },
-        'InvalidPoolAddress'
+        'InvalidProtocolAddress'
       );
     });
   });
@@ -721,24 +721,35 @@ describe('FlashLoanArbitrage', () => {
 
       await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
 
-      // Set a low exchange rate
+      // Set exchange rates for a circular path
       await dexRouter1.setExchangeRate(
         await weth.getAddress(),
         await usdc.getAddress(),
-        ethers.parseUnits('100', 6) // Only 100 USDC per WETH
+        ethers.parseUnits('100', 6) // Only 100 USDC per WETH (low rate)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        BigInt('505000000000000000000000000') // USDC→WETH rate
       );
 
+      // Circular path WETH→USDC→WETH with impossibly high amountOutMin on first hop
       const swapPath = [
         {
           router: await dexRouter1.getAddress(),
           tokenIn: await weth.getAddress(),
           tokenOut: await usdc.getAddress(),
-          amountOutMin: ethers.parseUnits('2000', 6), // Expect 2000, but will get 100
+          amountOutMin: ethers.parseUnits('2000', 6), // Expect 2000, but will only get 100
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 0,
         },
       ];
 
-      // Note: The revert comes from MockDexRouter's internal check, not our contract
-      // In production with real DEXes, this would also revert but from the router
+      // The revert comes from MockDexRouter's internal check (output < amountOutMin)
       const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
       await expect(
         flashLoanArbitrage.executeArbitrage(
@@ -1027,38 +1038,62 @@ describe('FlashLoanArbitrage', () => {
       const { flashLoanArbitrage, dexRouter1, weth, usdc } =
         await loadFixture(deployContractsFixture);
 
-      // Deploy malicious router that tries reentrancy
+      // Deploy malicious router that tries reentrancy during swap execution
       const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
       const maliciousRouter = await MaliciousRouterFactory.deploy(
         await flashLoanArbitrage.getAddress()
       );
 
       await flashLoanArbitrage.addApprovedRouter(await maliciousRouter.getAddress());
+      await flashLoanArbitrage.addApprovedRouter(await dexRouter1.getAddress());
 
-      // Fund the malicious router
+      // Fund the malicious router with enough tokens (1:1 passthrough uses raw amounts)
       await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
-      await usdc.mint(await maliciousRouter.getAddress(), ethers.parseUnits('100000', 6));
+      await usdc.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
 
+      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit.
+      // The malicious router does 1:1 passthrough (amountOut = amountIn), which yields
+      // zero profit. Using a normal router for the 2nd hop with a 1% premium ensures
+      // the trade is profitable (covers Aave's 0.09% fee), so the tx succeeds and
+      // attackAttempted state persists instead of being rolled back.
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1.01')
+      );
+
+      // Path: WETH→USDC (malicious, 1:1 + reentrancy) → USDC→WETH (normal, 1% profit)
       const swapPath = [
         {
           router: await maliciousRouter.getAddress(),
           tokenIn: await weth.getAddress(),
           tokenOut: await usdc.getAddress(),
-          amountOutMin: 0,
+          amountOutMin: 1,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1,
         },
       ];
 
-      // Reentrancy attempt should fail
+      // The reentrancy attack in the first swap triggers a re-entrant call to
+      // executeArbitrage() which is blocked by the nonReentrant modifier.
+      // The malicious router records this failed attempt but continues the swap.
+      // The tx succeeds because the 2nd hop generates enough profit.
       const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
-      await expect(
-        flashLoanArbitrage.executeArbitrage(
-          await weth.getAddress(),
-          ethers.parseEther('1'),
-          swapPath,
-          0,
-          deadline
-        )
-      ).to.be.reverted;
+      await flashLoanArbitrage.executeArbitrage(
+        await weth.getAddress(),
+        ethers.parseEther('1'),
+        swapPath,
+        0,
+        deadline
+      );
+
+      // Verify the attack was actually attempted (not just failing for other reasons)
+      expect(await maliciousRouter.attackAttempted()).to.be.true;
+      expect(await maliciousRouter.attackSucceeded()).to.be.false;
     });
 
     it('should reject direct executeOperation calls (caller check)', async () => {
@@ -1158,7 +1193,7 @@ describe('FlashLoanArbitrage', () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
 
         const deadline = await flashLoanArbitrage.swapDeadline();
-        expect(deadline).to.equal(300n); // DEFAULT_SWAP_DEADLINE
+        expect(deadline).to.equal(60n); // DEFAULT_SWAP_DEADLINE
       });
 
       it('should allow owner to update swap deadline', async () => {
@@ -1179,9 +1214,9 @@ describe('FlashLoanArbitrage', () => {
       it('should reject deadline exceeding maximum', async () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
 
-        // MAX_SWAP_DEADLINE is 3600 (1 hour)
+        // MAX_SWAP_DEADLINE is 600 (10 minutes)
         await expect(
-          flashLoanArbitrage.setSwapDeadline(3601)
+          flashLoanArbitrage.setSwapDeadline(601)
         ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidSwapDeadline');
       });
 
@@ -1190,7 +1225,7 @@ describe('FlashLoanArbitrage', () => {
 
         await expect(flashLoanArbitrage.setSwapDeadline(120))
           .to.emit(flashLoanArbitrage, 'SwapDeadlineUpdated')
-          .withArgs(300, 120); // old value, new value
+          .withArgs(60, 120); // old value, new value
       });
     });
 
@@ -1242,12 +1277,12 @@ describe('FlashLoanArbitrage', () => {
     describe('Constants Verification', () => {
       it('should have correct DEFAULT_SWAP_DEADLINE constant', async () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-        expect(await flashLoanArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(300n);
+        expect(await flashLoanArbitrage.DEFAULT_SWAP_DEADLINE()).to.equal(60n);
       });
 
       it('should have correct MAX_SWAP_DEADLINE constant', async () => {
         const { flashLoanArbitrage } = await loadFixture(deployContractsFixture);
-        expect(await flashLoanArbitrage.MAX_SWAP_DEADLINE()).to.equal(3600n);
+        expect(await flashLoanArbitrage.MAX_SWAP_DEADLINE()).to.equal(600n);
       });
 
       it('should have correct MIN_SLIPPAGE_BPS constant (Fix 6.1)', async () => {

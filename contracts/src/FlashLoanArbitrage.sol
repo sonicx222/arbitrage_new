@@ -169,7 +169,7 @@ contract FlashLoanArbitrage is
         );
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(asset, amount, swapPath);
+        uint256 amountReceived = _executeSwaps(asset, amount, swapPath, _getSwapDeadline());
 
         // Calculate required repayment and profit
         uint256 amountOwed = amount + premium;
@@ -177,13 +177,8 @@ contract FlashLoanArbitrage is
 
         uint256 profit = amountReceived - amountOwed;
 
-        // Verify minimum profit threshold (cache storage read)
-        uint256 _minimumProfit = minimumProfit;
-        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
-        if (profit < effectiveMinProfit) revert InsufficientProfit();
-
-        // Update profit tracking
-        totalProfits += profit;
+        // Verify profit meets thresholds and update tracking (base contract)
+        _verifyAndTrackProfit(profit, minProfit, asset);
 
         // Repayment: PULL pattern - Aave Pool pulls tokens via transferFrom after callback
         // Use forceApprove (not safeIncreaseAllowance) to prevent allowance accumulation

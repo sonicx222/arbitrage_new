@@ -207,9 +207,16 @@ check_redis_health() {
     local service=$1
     local url=$2
 
-    # Extract host and port from URL
-    local host=$(echo "$url" | sed 's|redis://||' | cut -d: -f1)
-    local port=$(echo "$url" | sed 's|redis://||' | cut -d: -f2)
+    # Extract host and port from URL (handles auth: redis://user:pass@host:port)
+    local stripped=$(echo "$url" | sed -E 's|^redis[s]?://||')
+    # Strip credentials if present (everything before @)
+    if echo "$stripped" | grep -q '@'; then
+        stripped=$(echo "$stripped" | sed 's|.*@||')
+    fi
+    local host=$(echo "$stripped" | cut -d: -f1 | cut -d/ -f1)
+    local port=$(echo "$stripped" | cut -d: -f2 | cut -d/ -f1)
+    # If port is same as host, no port was specified
+    [ "$port" = "$host" ] && port=6379
     [ -z "$port" ] && port=6379
 
     local start_time=$(get_timestamp_ms)

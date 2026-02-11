@@ -264,7 +264,7 @@ contract PancakeSwapFlashArbitrage is
         uint256 feeAmount = (context.asset == token0) ? fee0 : fee1;
 
         // Execute multi-hop swaps
-        uint256 amountReceived = _executeSwaps(context.asset, context.amount, swapPath);
+        uint256 amountReceived = _executeSwaps(context.asset, context.amount, swapPath, _getSwapDeadline());
 
         // Calculate required repayment and profit
         uint256 amountOwed = context.amount + feeAmount;
@@ -272,13 +272,8 @@ contract PancakeSwapFlashArbitrage is
 
         uint256 profit = amountReceived - amountOwed;
 
-        // Verify minimum profit threshold (cache storage read)
-        uint256 _minimumProfit = minimumProfit;
-        uint256 effectiveMinProfit = context.minProfit > _minimumProfit ? context.minProfit : _minimumProfit;
-        if (profit < effectiveMinProfit) revert InsufficientProfit();
-
-        // Update profit tracking
-        totalProfits += profit;
+        // Verify profit meets thresholds and update tracking (base contract)
+        _verifyAndTrackProfit(profit, context.minProfit, context.asset);
 
         // Repayment: PUSH pattern - we transfer tokens directly to pool
         // PancakeSwap V3 checks pool balance after callback to verify repayment

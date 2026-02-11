@@ -3,11 +3,12 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "../interfaces/IPancakeV3FlashCallback.sol";
 
 /**
  * @title MockPancakeV3Pool
  * @dev Mock PancakeSwap V3 Pool for testing flash loans
- * @notice Implements IPancakeV3Pool.flash() interface
+ * @notice Implements IPancakeV3Pool interface for PancakeSwap V3 flash loan simulation
  *
  * ## PancakeSwap V3 Flash Loan Mechanism
  *
@@ -26,13 +27,16 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - Factory contract maintains registry of valid pools
  * - Flash loan recipient must repay amount + fee before transaction ends
  */
-contract MockPancakeV3Pool {
+contract MockPancakeV3Pool is IPancakeV3Pool {
     using SafeERC20 for IERC20;
 
-    address public immutable token0;
-    address public immutable token1;
-    uint24 public immutable fee;
+    address public immutable override token0;
+    address public immutable override token1;
+    uint24 public immutable override fee;
     address public immutable factory;
+
+    /// @dev Configurable liquidity for testing (default: max = active pool)
+    uint128 private _liquidity = type(uint128).max;
 
     event Flash(
         address indexed recipient,
@@ -79,8 +83,8 @@ contract MockPancakeV3Pool {
         uint256 amount0,
         uint256 amount1,
         bytes calldata data
-    ) external {
-        require(amount0 > 0 || amount1 > 0, "At least one amount must be > 0");
+    ) external override {
+        require(amount0 > 0 || amount1 > 0, "Both amounts cannot be zero");
 
         // Calculate fees (fee is in hundredths of a bip, so divide by 1e6)
         uint256 fee0 = (amount0 * fee) / 1e6;
@@ -89,6 +93,14 @@ contract MockPancakeV3Pool {
         // Record balances before flash loan
         uint256 balance0Before = IERC20(token0).balanceOf(address(this));
         uint256 balance1Before = IERC20(token1).balanceOf(address(this));
+
+        // Verify pool has sufficient liquidity for the requested amounts
+        if (amount0 > 0) {
+            require(balance0Before >= amount0, "Insufficient liquidity");
+        }
+        if (amount1 > 0) {
+            require(balance1Before >= amount1, "Insufficient liquidity");
+        }
 
         // Transfer the flash loan amounts to recipient
         if (amount0 > 0) {
@@ -140,6 +152,21 @@ contract MockPancakeV3Pool {
             balance0After - balance0Before,
             balance1After - balance1Before
         );
+    }
+
+    /**
+     * @notice Returns the current liquidity of the pool
+     * @dev Required by PancakeSwapFlashArbitrage.executeArbitrage() for fail-fast liquidity check
+     */
+    function liquidity() external view override returns (uint128) {
+        return _liquidity;
+    }
+
+    /**
+     * @notice Set mock liquidity for testing (0 = inactive pool)
+     */
+    function setLiquidity(uint128 newLiquidity) external {
+        _liquidity = newLiquidity;
     }
 
     /**

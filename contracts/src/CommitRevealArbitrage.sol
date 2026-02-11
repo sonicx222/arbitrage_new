@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
-import "./interfaces/IDexRouter.sol";
 
 /**
  * @title CommitRevealArbitrage
@@ -60,7 +59,7 @@ import "./interfaces/IDexRouter.sol";
  * - Refactored to inherit from BaseFlashArbitrage
  * - Migrated from mapping-based to EnumerableSet-based router management
  * - Eliminated ~250 lines of duplicate code
- * - No functional changes beyond router management API
+ * - BREAKING: Router management API changed (approveRouter→addApprovedRouter, revokeRouter→removeApprovedRouter)
  *
  * ## Changelog v2.0.0
  * - Changed RevealParams to support multi-router arbitrage
@@ -180,7 +179,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     error InvalidDeadline();
     error InvalidOwnerAddress();
 
-    // Note: Common errors (RouterNotApproved, InsufficientProfit, SwapFailed, InvalidRouterAddress,
+    // Note: Common errors (RouterNotApproved, InsufficientProfit, InvalidRouterAddress,
     // InvalidAmount, EmptySwapPath, PathTooLong, InvalidSwapPath, SwapPathAssetMismatch) inherited from BaseFlashArbitrage
 
     // ==========================================================================
@@ -192,6 +191,8 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @param _owner The contract owner address
      */
     constructor(address _owner) BaseFlashArbitrage(_owner) {
+        if (_owner == address(0)) revert InvalidOwnerAddress();
+
         // minimumProfit inherited from BaseFlashArbitrage (defaults to 0)
         // MUST be configured by owner before use
         // Note: Commit+reveal gas cost ~315k gas (~$10 @ 20 gwei, $2500 ETH)
@@ -267,14 +268,17 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * Requirements:
      * - Commitment must exist
      * - Commitment not already revealed
+     * - Caller must be the original committer (prevents griefing)
      *
      * @param commitmentHash Hash to cancel
      */
     function cancelCommit(bytes32 commitmentHash) external {
         if (commitments[commitmentHash] == 0) revert CommitmentNotFound();
         if (revealed[commitmentHash]) revert CommitmentAlreadyRevealed();
+        if (committers[commitmentHash] != msg.sender) revert UnauthorizedRevealer();
 
         delete commitments[commitmentHash];
+        delete committers[commitmentHash];
         emit CommitCancelled(commitmentHash, msg.sender);
     }
 
@@ -322,6 +326,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /**
      * @notice Executes arbitrage and verifies profit meets thresholds
      * @dev Internal helper extracted for testability (P2 refactoring)
+     *      Uses base contract's _executeSwaps and _verifyAndTrackProfit for DRY consistency.
      * @param commitmentHash Hash of the commitment being revealed
      * @param params Reveal parameters containing swap details
      * @return profit The actual profit earned from the arbitrage
@@ -335,15 +340,16 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         delete commitments[commitmentHash];
         delete committers[commitmentHash];
 
-        // Execute arbitrage swap
-        profit = _executeArbitrageSwap(params);
+        // Execute multi-hop swaps using base contract's _executeSwaps (DRY)
+        // Note: calldata SwapStep[] is implicitly copied to memory by Solidity compiler
+        uint256 amountReceived = _executeSwaps(params.asset, params.amountIn, params.swapPath, params.deadline);
 
-        // Verify profit meets minimum thresholds
-        // Check user-specified minimum first (per-commitment threshold)
-        if (profit < params.minProfit) revert InsufficientProfit();
+        // Calculate profit: final amount must exceed initial investment
+        if (amountReceived <= params.amountIn) revert InsufficientProfit();
+        profit = amountReceived - params.amountIn;
 
-        // Check contract-wide minimum (owner-controlled floor)
-        if (profit < minimumProfit) revert BelowMinimumProfit();
+        // Verify profit meets thresholds and update tracking (base contract)
+        _verifyAndTrackProfit(profit, params.minProfit, params.asset);
 
         return profit;
     }
@@ -374,7 +380,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * 1. Commitment hash matches revealed parameters
      * 2. At least 1 block has passed since commit
      * 3. Commitment not expired (< 10 blocks old)
-     * 4. Swap deadline is reasonable (< 5 minutes)
+     * 4. Swap deadline is reasonable (<= MAX_SWAP_DEADLINE from current block)
      * 5. Swap path not empty and not too long (<= MAX_SWAP_HOPS)
      * 6. Path starts with asset and ends with asset
      * 7. All routers in path are approved
@@ -420,75 +426,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
         );
     }
 
-    // ==========================================================================
-    // Internal Functions
-    // ==========================================================================
-
-    /**
-     * @notice Execute multi-hop arbitrage swap path
-     * @dev Uses SwapHelpers library for shared swap logic (DRY principle)
-     *
-     * ## v2.1.0 Update - Fixed Profit Calculation (BUG FIX)
-     * Changed from balance-based to amount-based profit tracking.
-     * Previous version used balanceOf() which could be affected by residual
-     * token balances from previous operations. New version tracks amounts
-     * through the swap path directly, matching the pattern used in all
-     * flash loan contracts for consistency.
-     *
-     * ## v2.0.0 Update
-     * Refactored to support multi-hop paths (e.g., WETH → USDC → DAI → WETH)
-     * Previously only supported single-router round trips.
-     *
-     * Flow:
-     * 1. Start with params.amountIn
-     * 2. Execute each swap in the path sequentially
-     * 3. Calculate profit (final amount - initial amount)
-     *
-     * @param params Reveal parameters with swap path
-     * @return profit Profit amount in asset units
-     */
-    function _executeArbitrageSwap(RevealParams calldata params)
-        internal
-        returns (uint256 profit)
-    {
-        uint256 currentAmount = params.amountIn;
-        address currentToken = params.asset;
-        uint256 pathLength = params.swapPath.length;
-
-        // Gas optimization: Pre-allocate path array once, reuse across iterations
-        address[] memory path = new address[](2);
-
-        // Execute each swap in the path
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = params.swapPath[i];
-
-            // Execute swap using shared library function
-            currentAmount = SwapHelpers.executeSingleSwap(
-                currentToken,
-                currentAmount,
-                step.router,
-                step.tokenIn,
-                step.tokenOut,
-                step.amountOutMin,
-                path,
-                params.deadline
-            );
-
-            // Update for next iteration
-            currentToken = step.tokenOut;
-
-            unchecked { ++i; }
-        }
-
-        // Verify we end up with the same asset we started with (for profit calculation)
-        if (currentToken != params.asset) revert InvalidSwapPath();
-
-        // Calculate profit: final amount - initial amount
-        // Safety check: final amount must exceed initial investment
-        if (currentAmount <= params.amountIn) revert InsufficientProfit();
-
-        profit = currentAmount - params.amountIn;
-    }
+    // Note: _executeArbitrageSwap removed in v3.1.0 — now uses base contract's _executeSwaps (DRY)
 
     // ==========================================================================
     // View Functions
