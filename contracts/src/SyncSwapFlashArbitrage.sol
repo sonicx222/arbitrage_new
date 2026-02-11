@@ -38,7 +38,7 @@ import "./interfaces/IDexRouter.sol";
  * - Returns correct EIP-3156 success hash
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
+ * @custom:version 2.1.0
  * @custom:implementation-plan Task 3.4 - SyncSwap Flash Loan Provider (zkSync Era)
  * @custom:standard EIP-3156 Flash Loans
  *

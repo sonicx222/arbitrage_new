@@ -391,7 +391,7 @@ export async function estimateDeploymentCost(
     const deployTxData = await contractFactory.getDeployTransaction(...constructorArgs);
     const estimatedGas = await ethers.provider.estimateGas(deployTxData);
     const feeData = await ethers.provider.getFeeData();
-    const gasPrice = feeData.gasPrice || 0n;
+    const gasPrice = feeData.gasPrice ?? 0n;
     const estimatedCost = estimatedGas * gasPrice;
 
     console.log(`\nEstimated Deployment Cost:`);
@@ -437,7 +437,7 @@ export function validateMinimumProfit(
 
   // For testnets, allow low or zero thresholds
   if (isKnownTestnet) {
-    return minimumProfit || 0n;
+    return minimumProfit ?? 0n;
   }
 
   // CRITICAL: If network is unknown (not in testnet or mainnet list), treat as mainnet
@@ -452,7 +452,7 @@ export function validateMinimumProfit(
     throw new Error(
       `[ERR_NO_PROFIT_THRESHOLD] Mainnet deployment requires positive minimum profit threshold.\n` +
       `Network: ${networkName} ${isKnownMainnet ? '(mainnet)' : '(unknown - treated as mainnet)'}\n` +
-      `Provided: ${minimumProfit || 0n} wei\n\n` +
+      `Provided: ${minimumProfit ?? 0n} wei\n\n` +
       `Fix: Define DEFAULT_MINIMUM_PROFIT['${networkName}'] in deployment script.\n` +
       `Example: ethers.parseEther('0.01') for 0.01 ETH minimum profit.\n\n` +
       `This prevents contracts from accepting unprofitable trades that waste gas.\n\n` +

@@ -64,7 +64,7 @@ async function main() {
 
     // Get current gas price
     const feeData = await ethers.provider.getFeeData();
-    const gasPrice = feeData.gasPrice || 0n;
+    const gasPrice = feeData.gasPrice ?? 0n;
     const gasPriceGwei = parseFloat(ethers.formatUnits(gasPrice, 'gwei'));
 
     console.log(`Current Gas Price: ${gasPriceGwei.toFixed(2)} gwei`);

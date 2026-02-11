@@ -52,7 +52,7 @@ import "./base/BaseFlashArbitrage.sol";
  * - Pre-allocated path array: Reused across all swaps
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 3.0.0
+ * @custom:version 3.1.0
  * @custom:implementation-plan Task 3.1: Commit-Reveal Smart Contract (Pragmatic Balance)
  *
  * ## Changelog v3.0.0 (Refactoring)
@@ -99,6 +99,10 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     /// @notice Maximum blocks for commitment validity (prevents staleness)
     /// @dev 10 blocks = ~2 minutes on most chains (12s blocks)
     uint256 public constant MAX_COMMIT_AGE_BLOCKS = 10;
+
+    /// @notice Maximum number of commitments in a single batchCommit call
+    /// @dev Prevents gas-limit DoS; consistent with MAX_BATCH_WHITELIST in PancakeSwapFlashArbitrage
+    uint256 public constant MAX_BATCH_COMMITS = 50;
 
     // Note: MAX_SWAP_DEADLINE and MAX_SWAP_HOPS inherited from BaseFlashArbitrage
 
@@ -175,12 +179,12 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
     error CommitmentExpired();
     error InvalidCommitmentHash();
     error UnauthorizedRevealer();
+    error BatchTooLarge(uint256 provided, uint256 max);
     error BelowMinimumProfit();
     error InvalidDeadline();
-    error InvalidOwnerAddress();
-
     // Note: Common errors (RouterNotApproved, InsufficientProfit, InvalidRouterAddress,
-    // InvalidAmount, EmptySwapPath, PathTooLong, InvalidSwapPath, SwapPathAssetMismatch) inherited from BaseFlashArbitrage
+    // InvalidAmount, EmptySwapPath, PathTooLong, InvalidSwapPath, SwapPathAssetMismatch,
+    // InvalidOwnerAddress) inherited from BaseFlashArbitrage
 
     // ==========================================================================
     // Constructor
@@ -191,8 +195,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      * @param _owner The contract owner address
      */
     constructor(address _owner) BaseFlashArbitrage(_owner) {
-        if (_owner == address(0)) revert InvalidOwnerAddress();
-
+        // Zero-address validation handled by BaseFlashArbitrage constructor
         // minimumProfit inherited from BaseFlashArbitrage (defaults to 0)
         // MUST be configured by owner before use
         // Note: Commit+reveal gas cost ~315k gas (~$10 @ 20 gwei, $2500 ETH)
@@ -240,6 +243,7 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
      */
     function batchCommit(bytes32[] calldata commitmentHashes) external whenNotPaused returns (uint256 successCount) {
         uint256 len = commitmentHashes.length;
+        if (len > MAX_BATCH_COMMITS) revert BatchTooLarge(len, MAX_BATCH_COMMITS);
         uint256 currentBlock = block.number;
 
         for (uint256 i = 0; i < len;) {

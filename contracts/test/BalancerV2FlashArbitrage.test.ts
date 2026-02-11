@@ -520,7 +520,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('500000000000000') // 1 USDC = 0.0005 WETH → 10 WETH → 20000 USDC → 10 WETH (break-even)
+        BigInt('500000000000000000000000000') // 1 USDC = 0.0005 WETH → 10 WETH → 20000 USDC → 10 WETH (break-even)
       );
 
       const swapPath = [
@@ -1016,7 +1016,7 @@ describe('BalancerV2FlashArbitrage', () => {
           0,
           deadline
         )
-      ).to.be.reverted; // Will revert in router with "Insufficient output amount"
+      ).to.be.revertedWith('Insufficient output amount');
     });
   });
 
@@ -1145,7 +1145,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('500500000000000') // Barely profitable
+        BigInt('500500000000000000000000000') // Barely profitable
       );
 
       const swapPath = [
@@ -1282,7 +1282,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('490000000000000') // Results in loss
+        BigInt('490000000000000000000000000') // Results in loss
       );
 
       const swapPath = [
@@ -1854,7 +1854,7 @@ describe('BalancerV2FlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('490000000000000') // Loss
+          BigInt('490000000000000000000000000') // Loss
         );
 
         const swapPath = [
@@ -1884,12 +1884,21 @@ describe('BalancerV2FlashArbitrage', () => {
       it('should handle router call failures gracefully', async () => {
         const { arbitrage, weth, usdc } = await loadFixture(deployContractsFixture);
 
-        // Router not set up, so getAmountsOut will fail
+        // Use a deployed contract that doesn't implement IDexRouter.
+        // A random no-code address can cause ABI decode failures that bypass try/catch.
+        // Using weth (deployed MockERC20) ensures the call reverts due to missing
+        // function selector, which is properly caught by the try/catch in _simulateSwapPath.
         const swapPath = [
           {
-            router: ethers.Wallet.createRandom().address, // Random address
+            router: await weth.getAddress(), // Deployed contract, but not a DEX router
             tokenIn: await weth.getAddress(),
             tokenOut: await usdc.getAddress(),
+            amountOutMin: 0,
+          },
+          {
+            router: await weth.getAddress(),
+            tokenIn: await usdc.getAddress(),
+            tokenOut: await weth.getAddress(),
             amountOutMin: 0,
           },
         ];
@@ -2023,7 +2032,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('600000000000000') // 20% profit
+        BigInt('600000000000000000000000000') // 20% profit
       );
 
       const swapPath = [

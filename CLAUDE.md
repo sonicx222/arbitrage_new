@@ -1,56 +1,28 @@
 # Role
-- You are a senior developer who has expertise in Decentralized Finance/Web3/Blockchains building professional, efficient and profitable arbitrage trading systems
 
-# Environment Setup
+Senior DeFi/Web3 developer building a professional multi-chain arbitrage trading system.
 
-**Prerequisites:**
-- Node.js >= 22.0.0 (check: `node --version`)
-- npm >= 9.0.0 (check: `npm --version`)
-- Redis (via Docker or in-memory mode)
+# System Overview
 
-**Initial Setup:**
-```bash
-npm install
-npm run dev:setup  # Copies .env.example to .env
+**Chains:** 11 (BSC, Ethereum, Arbitrum, Base, Polygon, Optimism, Avalanche, Fantom, zkSync, Linea, Solana)
+**DEXs:** 44+ across all chains
+**Architecture:** Partitioned detectors (4 partitions), Redis Streams (ADR-002), L1 Price Matrix with SharedArrayBuffer (ADR-005), Worker threads for path finding (ADR-012), Circuit breakers (ADR-018)
+**Stack:** TypeScript, Node.js, Solidity ^0.8.19, Hardhat, ethers v6, Jest, OpenZeppelin 4.9.6
+
+# Monorepo Structure
+
+```
+services/          9 microservices (coordinator, 4 partitions, execution, cross-chain, mempool, unified-detector)
+shared/            7 shared packages (types, config, core, ml, security, test-utils, constants)
+contracts/         Smart contracts (Hardhat project)
+  src/             Source contracts (base/, interfaces/, mocks/)
+  test/            Hardhat test suites (Chai + ethers v6)
+  scripts/         Deployment and utility scripts
+infrastructure/    Docker, deployment configs
+docs/              Architecture, ADRs, strategies, conventions
 ```
 
-**Configure .env:**
-See `.env.example` for all required variables. Key ones:
-- `REDIS_URL` - Redis connection (default: redis://localhost:6379)
-- `PARTITION_ID` - Which partition this service belongs to
-- RPC API keys for chains you want to monitor
-
-**Environment File Priority:**
-- `.env.local` (gitignored) - Highest priority, local overrides
-- `.env` - Base configuration, can be committed
-- Environment variables - System-level overrides
-- Defaults in code - Lowest priority
-
-**Example**: If `.env` has `REDIS_PORT=6379` and `.env.local` has `REDIS_PORT=6380`, the system uses `6380`.
-
-**Best Practice**:
-- Put sensitive values (private keys, auth tokens) ONLY in `.env.local`
-- Put shared defaults in `.env`
-- Never commit `.env.local` (already in `.gitignore`)
-
-# Architecture Quick Reference
-
-**Monorepo Structure:**
-- `services/` - 9 microservices (coordinator, 4 partitions, execution, cross-chain, mempool, unified-detector)
-- `shared/` - 7 shared packages (types, config, core, ml, security, test-utils, constants)
-- `contracts/` - Smart contracts
-- `infrastructure/` - Docker, deployment configs
-
-**Service Ports:**
-- 3000: Coordinator (dashboard)
-- 3001-3004: Partition detectors (asia-fast, l2-turbo, high-value, solana)
-- 3005: Execution Engine
-- 3006: Cross-Chain Detector
-- 3007: Mempool Detector
-
-**Build Dependencies:**
-Must build in order: types → config → core → ml → main
-Use `npm run build` (handles order) or `npm run build:deps` (just shared packages)
+**Service Ports:** 3000 (Coordinator), 3001-3004 (Partitions), 3005 (Execution), 3006 (Cross-Chain), 3007 (Mempool)
 
 **Path Aliases:**
 - `@arbitrage/types` - shared/types
@@ -58,136 +30,198 @@ Use `npm run build` (handles order) or `npm run build:deps` (just shared package
 - `@arbitrage/config` - shared/config/src
 - `@shared/security` - shared/security/src
 
+**Build Order:** types -> config -> core -> ml -> services
+
 # Commands
 
-## Development
+## Build & Check
 ```bash
-# Start Redis (choose one)
-npm run dev:redis          # Docker (recommended)
-npm run dev:redis:memory   # In-memory (no Docker)
-
-# Start all services with hot reload
-npm run dev:all            # All 9 services
-npm run dev:minimal        # Just Coordinator + P1 + Execution
-
-# Individual services (fast hot-reload with tsx)
-npm run dev:coordinator:fast
-npm run dev:partition:asia:fast
-npm run dev:partition:l2:fast
-npm run dev:partition:high:fast
-npm run dev:cross-chain:fast
-npm run dev:execution:fast
-
-# Service management
-npm run dev:status         # Check running services
-npm run dev:stop           # Stop all services
-npm run dev:cleanup        # Clean up orphaned processes
+npm run build              # Build all (dependency order)
+npm run build:clean        # Clean cache + full rebuild
+npm run build:deps         # Shared packages only
+npm run typecheck          # Type checking without emit
 ```
 
-## Testing
+## Test
 ```bash
 npm test                              # All tests
 npm run test:unit                     # Unit tests
-npm run test:unit:shard1              # Unit tests shard 1 of 3
 npm run test:integration              # Integration tests
-npm run test:integration:shard1       # Integration shard 1 of 2
 npm run test:e2e                      # End-to-end tests
 npm run test:performance              # Performance benchmarks
-npm run test:smoke                    # Quick smoke tests
-npm run test:professional-quality     # Full quality check
-npm run test:debug                    # Debug mode with logging
+npm run test:coverage                 # Coverage report
 npm run test:changed                  # Only changed files
-npm run test:related <file>           # Tests related to file
-npm run test:coverage                 # Generate coverage report
 ```
 
-## Building
+**Contracts tests (Hardhat):**
 ```bash
-npm run build              # Build all (follows dependency order)
-npm run build:clean        # Clean cache + full rebuild
-npm run build:deps         # Build shared packages only
-npm run typecheck          # Type checking without emit
-npm run typecheck:watch    # Watch mode type checking
+cd contracts && npx hardhat test                    # All contract tests
+cd contracts && npx hardhat test test/MyTest.test.ts  # Single test file
+cd contracts && npx hardhat compile                 # Compile only
 ```
-
-## Linting
-```bash
-npm run lint               # Check code style
-npm run lint:fix           # Auto-fix style issues
-```
-
-## Simulation Modes
-Test without real blockchain connections:
-```bash
-npm run dev:simulate:full          # Full simulation (no Redis, no blockchain)
-npm run dev:simulate:full:memory   # With in-memory Redis
-npm run dev:simulate               # Just blockchain simulation
-npm run dev:simulate:execution     # Just execution simulation
-```
-
-## Validation & Code Generation
-Validate configurations and generate code from contracts:
-```bash
-# Contract code generation
-npm run generate:error-selectors   # Generate error selectors from contract ABI
-                                     # Output: services/execution-engine/src/strategies/error-selectors.generated.ts
-                                     # Prevents drift between contracts and TypeScript error mappings
-
-# Configuration validation
-npm run validate:mev-setup          # Validate MEV protection configuration for all chains
-                                     # Checks: Flashbots auth keys, BloXroute headers, relay URLs
-                                     # Run before deployment to catch config issues early
-
-npm run verify:router-approval      # Verify on-chain router approvals match config
-                                     # Usage: npx tsx scripts/verify-router-approval.ts --chain ethereum
-                                     #    or: npx tsx scripts/verify-router-approval.ts --all
-                                     # Prevents [ERR_UNAPPROVED_ROUTER] failures that waste gas
-```
-
-# Code style
-- /docs/agent/code_conventions.md
-
-# Workflow
-- Write tests first following TDD
-- Stick to the existing architecture design and implementation structure
-- ALWAYS read and understand relevant files before proposing edits. Do not speculate about code you have not inspected
-- Understand the data flow. Then propose a fix
-- The corrected code should be functional, efficient, and adhere to best practices in node.js programming
-- Always create a regression test after fixing a critical issue
-- Be sure to typecheck when you're done making a series of code changes
-
-# Key Documentation
-When working on this codebase, refer to these documents:
-
-## Architecture
-- /docs/architecture/ARCHITECTURE_V2.md - System design (v2.8)
-- /docs/architecture/CURRENT_STATE.md - Service inventory
-- /docs/architecture/adr/README.md - 27 ADRs with decisions
 
 ## Development
-- /docs/local-development.md - Setup guide
-- /docs/CONFIGURATION.md - All config options
-- /docs/API.md - Service endpoints
+```bash
+npm run dev:redis          # Start Redis via Docker
+npm run dev:redis:memory   # In-memory Redis (no Docker)
+npm run dev:all            # All 9 services with hot reload
+npm run dev:minimal        # Coordinator + P1 + Execution only
+npm run dev:status         # Check running services
+npm run dev:stop           # Stop all services
+```
 
-## Patterns
-- /docs/strategies.md - Arbitrage strategies
-- /docs/agent/code_conventions.md - Code patterns
+## Validation & Codegen
+```bash
+npm run generate:error-selectors   # Generate error selectors from ABI
+npm run validate:mev-setup          # Validate MEV config for all chains
+npm run verify:router-approval      # Verify on-chain router approvals
+npm run lint:fix                    # Auto-fix linting
+```
 
-# Documentation Maintenance
-When making changes:
-- Update relevant ADRs if architectural impact
-- Add @see references in JSDoc for traceability
-- Update CURRENT_STATE.md if adding services
-- Update API.md if changing endpoints
+# Environment Setup
+
+**Prerequisites:** Node.js >= 22.0.0, npm >= 9.0.0, Redis (Docker or in-memory)
+
+```bash
+npm install && npm run dev:setup  # Install + copy .env.example to .env
+```
+
+**Env file priority:** `.env.local` (gitignored, highest) > `.env` (base) > env vars > code defaults
+
+Put secrets (private keys, auth tokens) ONLY in `.env.local`.
+
+# Workflow
+
+1. Read and understand relevant files before proposing any edits
+2. Write tests first (TDD) -- verify the test fails, then implement
+3. Stick to existing architecture and implementation patterns
+4. Trace the data flow before proposing fixes
+5. Create regression tests for critical bug fixes
+6. Run `npm run typecheck` after making code changes
+7. For contracts: run `npx hardhat compile && npx hardhat test` to verify
+
+# Code Style
+
+See `/docs/agent/code_conventions.md` for full patterns.
+
+Key rules:
+- ES modules (import/export), not CommonJS
+- Use `@arbitrage/*` path aliases across packages, not relative paths
+- Use proper nullable types (no `as any` casts)
+- Use `??` (nullish coalescing) not `||` for numeric values that can be 0
+- Async reset/cleanup functions must await disconnect operations
+- Constructor DI pattern for testable classes (not factory functions)
+- Set up mocks in `beforeEach()`, override in individual tests
+- Import from source files directly, not barrel exports (index.ts)
 
 # Performance Critical
-Hot-path code (<50ms target) in:
-- shared/core/src/price-matrix.ts
-- shared/core/src/partitioned-detector.ts
-- services/execution-engine/
-- services/unified-detector/
 
-Follow ADR-022 patterns for hot-path changes.
+**Hot-path latency target: <50ms** (price-update -> detection -> execution)
+
+Hot-path files:
+- `shared/core/src/price-matrix.ts` - L1 cache, SharedArrayBuffer
+- `shared/core/src/partitioned-detector.ts` - Opportunity detection
+- `services/execution-engine/` - Trade execution
+- `services/unified-detector/` - Event processing
+- WebSocket handlers - Event ingestion
+
+Rules for hot-path code (ADR-022):
+- No blocking operations (sync I/O, unbounded loops)
+- Minimize allocations (no spread operators in loops)
+- O(1) lookups only (Map/Set, not array.find/filter)
+- Pre-allocate arrays, use cached values
+- Mutable objects in tight loops (avoid immutable patterns)
+
+# Contract Architecture
+
+**Inheritance:** `BaseFlashArbitrage` (abstract, 1135 lines) -> 5 derived contracts:
+- `FlashLoanArbitrage` (Aave V3) - executeOperation callback
+- `BalancerV2FlashArbitrage` (Balancer V2) - receiveFlashLoan callback
+- `PancakeSwapFlashArbitrage` (PancakeSwap V3) - pancakeV3FlashCallback
+- `SyncSwapFlashArbitrage` (SyncSwap/zkSync) - onFlashLoan (EIP-3156)
+- `CommitRevealArbitrage` - MEV-protected with commit-reveal scheme
+
+**Utility:** `MultiPathQuoter` - Stateless batch quoting contract
+
+**Access model:** ALL `executeArbitrage()` / `reveal()` functions use OPEN ACCESS (no onlyOwner). The atomic flash loan model with profit verification prevents fund extraction. Admin functions (pause, withdraw, setConfig) use `onlyOwner` via Ownable2Step.
+
+**OpenZeppelin 4.9.6 patterns:**
+- `Ownable2Step` - Two-step ownership transfer
+- `Pausable` - Emergency pause on all critical functions
+- `ReentrancyGuard` - `nonReentrant` on all external entry points
+- `SafeERC20` - `safeTransfer`, `forceApprove` for all token ops
+- `EnumerableSet` - O(1) approved router management
+
+**Contract versioning:** Base contract at 2.1.0, derived flash loan contracts at 2.1.0, CommitRevealArbitrage at 3.1.0.
+
+# Contract Testing Patterns (Hardhat + Chai + ethers v6)
+
+**Framework:** Hardhat with `loadFixture` for snapshot/restore efficiency.
+
+**Assertion patterns -- CRITICAL:**
+- OpenZeppelin 4.x uses string-based `require()` messages, NOT custom errors for ERC20 operations
+- Contract custom errors use `.revertedWithCustomError(contract, 'ErrorName')`
+- OZ4 ERC20 errors use `.revertedWith('ERC20: transfer amount exceeds balance')`
+- Mock `require()` messages use `.revertedWith('Exact string message')`
+- NEVER use bare `.to.be.reverted` -- always specify the expected error
+
+```typescript
+// Custom errors (contract-defined)
+await expect(tx).to.be.revertedWithCustomError(contract, 'InsufficientProfit');
+
+// OpenZeppelin 4.x string-based errors
+await expect(tx).to.be.revertedWith('ERC20: transfer amount exceeds balance');
+
+// Mock require() messages
+await expect(tx).to.be.revertedWith('Insufficient output amount');
+
+// WRONG - bare revert hides the actual error
+await expect(tx).to.be.reverted; // Don't do this
+```
+
+**Token decimal handling in tests:**
+- WETH/DAI: 18 decimals (`ethers.parseEther('10')`)
+- USDC/USDT: 6 decimals (`ethers.parseUnits('10', 6)`)
+- When mocking exchange rates between tokens of different decimals, account for the decimal difference in the rate calculation
+- Prefer same-decimal token pairs (e.g., WETH/DAI) for simpler mock setup
+
+**Mock contracts:** Located in `contracts/src/mocks/`. When writing tests:
+- MockDexRouter uses `require("Insufficient output amount")` (string, not custom error)
+- MockAavePool premium is configurable (default 9 bps = 0.09%)
+- MockBalancerVault has zero flash loan fee
+- MockSyncSwapVault charges 0.3% fee
+- MockPancakeV3Pool fee is tier-based (typically 2500 bps = 0.25%)
+- MockMaliciousRouter attacks once via `attackCount == 0` guard
+
+**Deployment scripts:** Use `?? 0` / `?? 0n` (not `|| 0`) for fallback values in all scripts under `contracts/scripts/`.
+
+# Key Documentation
+
+## Architecture
+- `/docs/architecture/ARCHITECTURE_V2.md` - System design (v2.8)
+- `/docs/architecture/CURRENT_STATE.md` - Service inventory
+- `/docs/architecture/adr/README.md` - 27 ADRs with decisions
+
+## Development
+- `/docs/local-development.md` - Setup guide
+- `/docs/CONFIGURATION.md` - All config options
+- `/docs/API.md` - Service endpoints
+
+## Patterns
+- `/docs/strategies.md` - Arbitrage strategies
+- `/docs/agent/code_conventions.md` - Code patterns
+
+## Analysis Reports
+- `.agent-reports/FINAL_UNIFIED_REPORT.md` - Latest deep analysis (28 findings, grade B+)
+
+# Documentation Maintenance
+
+When making changes:
+- Update relevant ADRs if architectural impact
+- Add `@see` references in JSDoc/NatSpec for traceability
+- Update `CURRENT_STATE.md` if adding services
+- Update `API.md` if changing endpoints
+- Keep NatSpec `@custom:version` tags in sync across contracts
 
 # Common Gotchas
 
@@ -197,54 +231,71 @@ Follow ADR-022 patterns for hot-path changes.
 
 **Build Issues:**
 - If builds fail, try `npm run build:clean` to clear TypeScript cache
-- Shared packages must build first (types → config → core → ml)
-- Check `npm run typecheck` catches most issues before build
-- `.tsbuildinfo` cache file can cause stale build issues - clean it with `npm run clean:cache`
+- Shared packages must build first (types -> config -> core -> ml)
+- `.tsbuildinfo` cache can cause stale builds -- clean with `npm run clean:cache`
 
 **Redis Issues:**
-- Never use `KEYS` command (blocks Redis) - use `SCAN` iterator
-- Always await disconnect() in cleanup
-- Distinguish "not found" from "unavailable" by throwing on errors
+- Never use `KEYS` command (blocks Redis) -- use `SCAN` iterator
+- Always await `disconnect()` in cleanup
+- Throw on Redis errors (distinguish "not found" from "unavailable")
 
-**Testing Patterns:**
-- Use constructor pattern for DI-based classes, not factory functions
-  - ✅ `new ServiceClass(config, deps)` - allows proper mock injection
-  - ❌ `createService(config, deps)` - may cache module imports
+**Contract Issues:**
+- OZ4 ERC20 uses string reverts (`require`), NOT custom errors -- this affects test assertions
+- `forceApprove` handles non-zero to non-zero approvals safely (USDT pattern)
+- Flash loan callbacks are implicitly protected by calling function's `nonReentrant`
+- `totalProfits` accumulator mixes denominations (legacy) -- use `tokenProfits` per-asset mapping instead
+- Token address configs vary by chain -- check `contracts/scripts/lib/addresses.ts` for coverage gaps
+
+**Testing Patterns (Jest for services):**
+- Constructor DI pattern for testable classes (not factory functions)
 - Set up mocks in `beforeEach()`, override in individual tests
-  - Cast to `jest.Mock`: `(mockedFunction as jest.Mock).mockReturnValue(value)`
-  - Don't use `jest.spyOn()` for module-level functions - doesn't work with cached imports
-- Import directly from source files, not barrel exports (index.ts)
-  - ✅ `from '../../../src/detector/service'` - direct file import
-  - ❌ `from '../../../src/detector'` - barrel export can cause mock issues
-- Create local `createMockDeps()` helper for consistent dependency injection
-- Always import mocked functions after jest.mock() to get typed mock
-- Example pattern (from factory-integration.test.ts):
-  ```typescript
-  // Import class + mocked functions
-  import { ServiceClass } from '../../../src/path/to/service';
-  import { mockedFunction } from '@arbitrage/config';
-
-  // Set up in beforeEach
-  beforeEach(() => {
-    (mockedFunction as jest.Mock).mockReturnValue(defaultValue);
-  });
-
-  // Override in test
-  it('test name', async () => {
-    (mockedFunction as jest.Mock).mockReturnValue(testValue);
-    const service = new ServiceClass(config, createMockDeps());
-    const result = await service.method();
-    expect(result).toBeDefined();
-  });
-  ```
+- Cast to `jest.Mock`: `(mockedFunction as jest.Mock).mockReturnValue(value)`
+- Import from source files directly, not barrel exports (index.ts)
 - See `shared/core/__tests__/unit/detector/factory-integration.test.ts` for reference
 
-**Performance:**
-- Hot-path code must complete in <50ms
-- Files in shared/core/src/price-matrix.ts and partitioned-detector.ts are critical
-- See ADR-022 for performance patterns
+**Testing Patterns (Hardhat for contracts):**
+- Use `loadFixture(deployContractsFixture)` for every test (snapshot/restore)
+- Match token decimals between mock setup and assertions
+- Always verify specific error types (see "Assertion patterns" above)
+- Test both authorized and unauthorized callers for every admin function
+- Include reentrancy tests using MockMaliciousRouter for all flash loan contracts
 
 **Path Aliases:**
 - Use `@arbitrage/*` and `@shared/*` imports, not relative paths across packages
-- TSConfig baseUrl and paths configure these aliases
 - Must run `npm run build:deps` after changing shared packages
+
+# Agent Spawning Lessons
+
+Patterns learned from running multi-agent deep analysis and fix workflows on this codebase:
+
+## Cross-Verification is Essential
+- Agent findings must be cross-verified against actual code before acting on them
+- In the contracts deep analysis, an agent flagged `APPROVED_ROUTERS` as unused (CRITICAL) -- cross-verification showed deployment scripts DO use them at `deploy.ts:149`
+- Always read both the flagged code AND its callers/consumers before accepting a finding
+
+## OpenZeppelin Version Awareness
+- This project uses OZ 4.9.6 (check `contracts/package.json`), which uses string-based `require()` messages
+- OZ 5.x uses custom errors -- do NOT assume OZ5 patterns when writing test assertions
+- Mock contracts in `src/mocks/` also use string `require()` -- match assertion style accordingly
+
+## Token Decimal Precision in Test Setup
+- When mocking exchange rates between tokens of different decimal precision (e.g., WETH 18 vs USDC 6), the raw amounts are vastly different
+- Prefer same-decimal pairs (WETH/DAI both 18) for simpler mock arithmetic
+- Example: 10 WETH raw = 10e18, 10 USDC raw = 10e6 -- a 1:1 rate at raw level is nonsensical
+
+## Nullish Coalescing for Numeric Values
+- `|| 0` treats legitimate `0` and `0n` as falsy, silently replacing them
+- `?? 0` only replaces `null`/`undefined`, preserving zero values
+- This applies throughout `contracts/scripts/` for block numbers, gas prices, and profit thresholds
+
+## Agent Specialization Works
+- 6 parallel specialized agents (architecture, bugs, security, test quality, mock fidelity, performance) found 28 unique issues with cross-agent agreement on 6 areas
+- Bug Hunter and Security agents independently found the same access control doc mismatch, validating both findings
+- Mock Fidelity agent caught protocol behavior gaps that Bug Hunter missed (and vice versa)
+- Architecture agent caught config drift issues invisible to code-only analysis
+
+## Fix Ordering Matters
+- Fix contract source first (Solidity changes), then tests, then scripts
+- Compile after source changes to catch errors early (`npx hardhat compile`)
+- Run full test suite after all fixes to catch interaction effects
+- Some "simple" assertion fixes require understanding OZ version and mock internals

@@ -231,7 +231,7 @@ describe('Aave V3 Interface Compliance', () => {
           '0x',
           0
         )
-      ).to.be.reverted;
+      ).to.be.revertedWith('Mock forced revert');
     });
   });
 
@@ -268,7 +268,7 @@ describe('Aave V3 Interface Compliance', () => {
           '0x',
           0
         )
-      ).to.be.reverted;
+      ).to.be.revertedWith('ERC20: transfer amount exceeds balance');
     });
 
     it('should succeed if repayment is exact (amount + fee)', async () => {
@@ -387,7 +387,7 @@ describe('Aave V3 Interface Compliance', () => {
           '0x',
           0
         )
-      ).to.be.reverted;
+      ).to.be.revertedWith('Flash loan execution failed');
     });
   });
 

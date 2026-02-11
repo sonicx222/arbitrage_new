@@ -733,7 +733,8 @@ describe('FlashLoanArbitrage', () => {
         BigInt('505000000000000000000000000') // USDC→WETH rate
       );
 
-      // Circular path WETH→USDC→WETH with impossibly high amountOutMin on first hop
+      // Circular path WETH→USDC→WETH with impossibly high amountOutMin on first hop.
+      // Second hop amountOutMin must be > 0 to pass slippage protection validation.
       const swapPath = [
         {
           router: await dexRouter1.getAddress(),
@@ -745,7 +746,7 @@ describe('FlashLoanArbitrage', () => {
           router: await dexRouter1.getAddress(),
           tokenIn: await usdc.getAddress(),
           tokenOut: await weth.getAddress(),
-          amountOutMin: 0,
+          amountOutMin: 1,
         },
       ];
 

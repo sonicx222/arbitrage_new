@@ -44,14 +44,17 @@ import "../interfaces/IDexRouter.sol";
  *
  * ## Access Control Design Decision
  *
- * executeArbitrage() access control varies by protocol:
- * - onlyOwner: FlashLoanArbitrage (Aave), PancakeSwapFlashArbitrage — restricts who can trigger trades
- * - open access: BalancerV2FlashArbitrage, SyncSwapFlashArbitrage — safe because flash loans are
- *   atomic (caller can't extract funds; unprofitable trades revert via InsufficientProfit)
+ * executeArbitrage() uses OPEN ACCESS on ALL derived contracts:
+ * - FlashLoanArbitrage (Aave V3): open access — atomic flash loans prevent fund extraction
+ * - PancakeSwapFlashArbitrage (PancakeSwap V3): open access — same atomic safety
+ * - BalancerV2FlashArbitrage (Balancer V2): open access — same atomic safety
+ * - SyncSwapFlashArbitrage (SyncSwap/zkSync): open access — same atomic safety
  * - CommitRevealArbitrage: open access with commit-reveal pattern for MEV protection
  *
  * This is intentional: open-access contracts allow keeper bots to execute without owner keys,
- * reducing operational risk. The profit check ensures only profitable trades succeed.
+ * reducing operational risk. The profit check (InsufficientProfit revert) ensures only
+ * profitable trades succeed. Flash loans are atomic — the caller cannot extract funds
+ * because unprofitable trades revert the entire transaction including the loan.
  *
  * Base contract provides:
  * - Common structs (SwapStep)
@@ -169,6 +172,7 @@ abstract contract BaseFlashArbitrage is
     // Errors
     // ==========================================================================
 
+    error InvalidOwnerAddress();
     error InvalidRouterAddress();
     error RouterAlreadyApproved();
     error RouterNotApproved();
@@ -193,6 +197,7 @@ abstract contract BaseFlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _owner) {
+        if (_owner == address(0)) revert InvalidOwnerAddress();
         swapDeadline = DEFAULT_SWAP_DEADLINE;
         _transferOwnership(_owner);
     }
@@ -507,12 +512,21 @@ abstract contract BaseFlashArbitrage is
 
     /**
      * @notice Withdraws ETH from the contract
+     * @dev Uses gas-limited call (10,000 gas) to prevent the recipient from executing
+     *      arbitrary logic in their receive/fallback function. This is a security measure.
+     *
+     *      WARNING: Some smart contract wallets (Gnosis Safe, Argent) may require >10,000 gas
+     *      to receive ETH. If withdrawal to a multisig fails, use one of these workarounds:
+     *      1. Withdraw to an intermediary EOA, then forward to the multisig
+     *      2. Wrap ETH to WETH using a helper, then use withdrawToken() instead
+     *
      * @param to The recipient address
      * @param amount The amount to withdraw
      */
     function withdrawETH(address payable to, uint256 amount) external onlyOwner {
         if (to == address(0)) revert InvalidRecipient();
-        // Gas-limited call prevents recipient from executing arbitrary logic
+        // Gas-limited call (10,000) prevents recipient from executing arbitrary logic.
+        // Sufficient for EOAs and simple contracts; may fail for complex multisig wallets.
         (bool success, ) = to.call{value: amount, gas: 10000}("");
         if (!success) revert ETHTransferFailed();
         emit ETHWithdrawn(to, amount);

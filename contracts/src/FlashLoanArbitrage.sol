@@ -23,7 +23,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * - Emergency pause functionality
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
+ * @custom:version 2.1.0
  *
  * @custom:warning UNSUPPORTED TOKEN TYPES
  * This contract does NOT support:

@@ -25,7 +25,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * - Pool whitelist security (prevents malicious pool callbacks)
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
+ * @custom:version 2.1.0
  *
  * ## Changelog v2.0.0 (Refactoring)
  * - Refactored to inherit from BaseFlashArbitrage (eliminates 350+ lines of duplicate code)

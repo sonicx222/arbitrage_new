@@ -162,7 +162,7 @@ async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
 
   // Get deployment details
   const receipt = await deployTx?.wait();
-  const blockNumber = receipt?.blockNumber || 0;
+  const blockNumber = receipt?.blockNumber ?? 0;
   const gasUsed = receipt?.gasUsed?.toString() || '0';
   const block = await ethers.provider.getBlock(blockNumber);
   const timestamp = block?.timestamp || Math.floor(Date.now() / 1000);

@@ -1015,6 +1015,94 @@ describe('CommitRevealArbitrage', () => {
   });
 
   // ===========================================================================
+  // 4b. Reentrancy Attack Tests
+  // ===========================================================================
+  describe('4b. Reentrancy Attack', () => {
+    it('should prevent reentrancy attacks during reveal', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, dai, owner, user } =
+        await loadFixture(deployContractsFixture);
+
+      // Deploy malicious router that tries reentrancy during swap execution
+      const MaliciousRouterFactory = await ethers.getContractFactory('MockMaliciousRouter');
+      const maliciousRouter = await MaliciousRouterFactory.deploy(
+        await commitRevealArbitrage.getAddress()
+      );
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await maliciousRouter.getAddress());
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Fund the malicious router with enough tokens (1:1 passthrough uses raw amounts)
+      // Use DAI (18 decimals) to match WETH (18 decimals) so 1:1 raw swap works cleanly
+      await weth.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+      await dai.mint(await maliciousRouter.getAddress(), ethers.parseEther('100'));
+
+      // Set favorable exchange rate on dexRouter1 for the 2nd hop to generate profit
+      // DAI→WETH at rate that gives 1% profit: 10 DAI → 10.1 WETH
+      await dexRouter1.setExchangeRate(
+        await dai.getAddress(),
+        await weth.getAddress(),
+        ethers.parseEther('1.01') // 1.01 WETH per DAI (1% profit)
+      );
+
+      // Path: WETH→DAI (malicious, 1:1 + reentrancy) → DAI→WETH (normal, 1% profit)
+      const amountIn = ethers.parseEther('10');
+      const swapPath = [
+        {
+          router: await maliciousRouter.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await dai.getAddress(),
+          amountOutMin: 1n,
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await dai.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      // Commit
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+
+      // Mine 1 block to satisfy MIN_DELAY_BLOCKS
+      await mineBlocks(1);
+
+      // Fund the contract for the reveal
+      await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt
+      };
+
+      // The reentrancy attack in the first swap triggers a re-entrant call.
+      // The malicious router tries to call executeArbitrage() which is blocked
+      // by the nonReentrant lock held by reveal().
+      await commitRevealArbitrage.connect(user).reveal(revealParams);
+
+      // Verify the attack was actually attempted but failed
+      expect(await maliciousRouter.attackAttempted()).to.be.true;
+      expect(await maliciousRouter.attackSucceeded()).to.be.false;
+    });
+  });
+
+  // ===========================================================================
   // 5. Reveal Phase - Swap Execution Tests
   // ===========================================================================
   describe('5. Reveal Phase - Swap Execution', () => {

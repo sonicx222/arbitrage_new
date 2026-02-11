@@ -1097,7 +1097,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('501000000000000') // Gives ~0.02 WETH profit (1% gain minus 0.3% fee = ~0.7%)
+        BigInt('501000000000000000000000000') // Gives ~0.02 WETH profit (0.2% gain minus 0.3% fee ≈ loss)
       );
 
       const amountIn = ethers.parseEther('10');
@@ -1123,7 +1123,7 @@ describe('SyncSwapFlashArbitrage', () => {
         syncSwapArbitrage
           .connect(user)
           .executeArbitrage(await weth.getAddress(), amountIn, swapPath, minProfit, deadline)
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InsufficientProfit');
     });
 
     it('should use max of params.minProfit and contract minimumProfit', async () => {
@@ -1605,7 +1605,7 @@ describe('SyncSwapFlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('490000000000000') // Lose money
+          BigInt('490000000000000000000000000') // Lose money
         );
 
         const swapPath = [

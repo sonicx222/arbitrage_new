@@ -47,7 +47,7 @@ import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for g
  * - Approved router system prevents malicious DEX interactions
  *
  * @custom:security-contact security@arbitrage.system
- * @custom:version 2.0.0
+ * @custom:version 2.1.0
  * @custom:implementation-plan Task 2.2 - Balancer V2 Flash Loan Provider
  *
  * ## Changelog v2.0.0 (Refactoring)
