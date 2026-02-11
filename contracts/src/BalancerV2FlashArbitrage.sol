@@ -5,8 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IBalancerV2Vault.sol";
-import "./interfaces/IFlashLoanReceiver.sol";
-import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at line 269
+import "./interfaces/IFlashLoanErrors.sol";
+import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
  * @title BalancerV2FlashArbitrage
@@ -33,7 +33,7 @@ import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at
  * Fee-free status is hardcoded in Balancer V2 Vault and cannot be changed without
  * a full protocol upgrade, making it a reliable long-term advantage.
  *
- * @see https://docs.balancer.fi/reference/contracts/flash-loans.html
+ * Reference: https://docs.balancer.fi/reference/contracts/flash-loans.html
  *
  * Balancer V2 Flash Loan Advantages:
  * - Zero flash loan fees (unlike Aave V3's 0.09%)
@@ -64,7 +64,8 @@ import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at
  */
 contract BalancerV2FlashArbitrage is
     BaseFlashArbitrage,
-    IFlashLoanRecipient
+    IFlashLoanRecipient,
+    IFlashLoanErrors
 {
     using SafeERC20 for IERC20;
 
@@ -79,8 +80,7 @@ contract BalancerV2FlashArbitrage is
     // Errors (Protocol-Specific)
     // ==========================================================================
 
-    error InvalidVaultAddress();
-    error InvalidFlashLoanCaller();
+    // InvalidProtocolAddress, InvalidFlashLoanCaller inherited from IFlashLoanErrors
     error MultiAssetNotSupported();
 
     // ==========================================================================
@@ -93,11 +93,11 @@ contract BalancerV2FlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _vault, address _owner) BaseFlashArbitrage(_owner) {
-        if (_vault == address(0)) revert InvalidVaultAddress();
+        if (_vault == address(0)) revert InvalidProtocolAddress();
 
         // Verify vault is a contract (has code deployed)
         // Protection against typos or EOA addresses during deployment
-        if (_vault.code.length == 0) revert InvalidVaultAddress();
+        if (_vault.code.length == 0) revert InvalidProtocolAddress();
 
         VAULT = IBalancerV2Vault(_vault);
     }
@@ -192,8 +192,8 @@ contract BalancerV2FlashArbitrage is
         // Update profit tracking
         totalProfits += profit;
 
-        // Repay the flash loan by transferring tokens back to Vault
-        // Balancer V2 checks its balance after the callback returns to verify repayment
+        // Repayment: PUSH pattern - we transfer tokens directly to Vault
+        // Balancer V2 checks its balance after callback returns to verify repayment
         IERC20(asset).safeTransfer(address(VAULT), amountOwed);
 
         emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
@@ -207,9 +207,9 @@ contract BalancerV2FlashArbitrage is
 
     /**
      * @notice Calculates the expected profit for an arbitrage opportunity
-     * @dev This is a simulation that doesn't execute the actual swaps
-     *
-     * Note: Balancer V2 charges 0% flash loan fees, so the only costs are DEX swap fees
+     * @dev Simulates swaps via DEX router getAmountsOut() without executing.
+     *      Uses shared _simulateSwapPath() from BaseFlashArbitrage.
+     *      Balancer V2 charges 0% flash loan fees -- only DEX swap fees apply.
      *
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan (caller should ensure > 0)
@@ -222,76 +222,15 @@ contract BalancerV2FlashArbitrage is
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // Balancer V2 has 0% flash loan fee
+        // Balancer V2: 0% flash loan fee
         flashLoanFee = 0;
 
-        // Early validation - swapPath must start with the flash-loaned asset
-        uint256 pathLength = swapPath.length;
-        if (pathLength == 0 || swapPath[0].tokenIn != asset) {
+        uint256 simulatedOutput = _simulateSwapPath(asset, amount, swapPath);
+        if (simulatedOutput == 0) {
             return (0, flashLoanFee);
         }
 
-        // Simulate swaps to get expected output
-        uint256 currentAmount = amount;
-        address currentToken = asset;
-
-        // Gas optimization: Pre-allocate path array once
-        address[] memory path = new address[](2);
-
-        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
-        address[] memory visitedTokens = new address[](pathLength + 1);
-        visitedTokens[0] = asset;
-        uint256 visitedCount = 1;
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = swapPath[i];
-
-            if (step.tokenIn != currentToken) {
-                return (0, flashLoanFee); // Invalid path
-            }
-
-            // Check for cycle: token appears twice before final step
-            if (i < pathLength - 1) {
-                for (uint256 j = 0; j < visitedCount; j++) {
-                    if (visitedTokens[j] == step.tokenOut) {
-                        return (0, flashLoanFee); // Cycle detected
-                    }
-                }
-            }
-
-            // Track visited token
-            visitedTokens[visitedCount] = step.tokenOut;
-            unchecked { ++visitedCount; }
-
-            // Reuse pre-allocated path array
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
-                uint256[] memory amounts
-            ) {
-                currentAmount = amounts[amounts.length - 1];
-                currentToken = step.tokenOut;
-            } catch {
-                return (0, flashLoanFee); // Router call failed
-            }
-
-            unchecked { ++i; }
-        }
-
-        // Check if we end with the correct asset
-        if (currentToken != asset) {
-            return (0, flashLoanFee);
-        }
-
-        // Calculate profit (no flash loan fee for Balancer V2!)
-        uint256 amountOwed = amount; // No fees!
-        if (currentAmount > amountOwed) {
-            expectedProfit = currentAmount - amountOwed;
-        } else {
-            expectedProfit = 0;
-        }
-
+        expectedProfit = _calculateProfit(amount, simulatedOutput, flashLoanFee);
         return (expectedProfit, flashLoanFee);
     }
 }

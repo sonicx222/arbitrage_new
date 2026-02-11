@@ -40,6 +40,7 @@ import { SYNCSWAP_VAULTS } from '@arbitrage/config';
 import { APPROVED_ROUTERS } from '../deployments/addresses';
 import {
   normalizeNetworkName,
+  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
   checkDeployerBalance,
   estimateDeploymentCost,
   validateMinimumProfit,
@@ -48,6 +49,7 @@ import {
   smokeTestFlashLoanContract,
   saveDeploymentResult,
   printDeploymentSummary,
+  getMinimumProfitForProtocol,  // P2-003 FIX: Import centralized profit policy
   DEFAULT_VERIFICATION_RETRIES,
   DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type SyncSwapDeploymentResult,
@@ -70,24 +72,17 @@ const SYNCSWAP_VAULT_ADDRESSES = SYNCSWAP_VAULTS;
 const DEFAULT_APPROVED_ROUTERS = APPROVED_ROUTERS;
 
 /**
- * Default minimum profit settings by network (in native token wei)
- * SyncSwap charges 0.3% fees, so profit threshold should account for this
+ * P2-003 FIX: Minimum profit thresholds now imported from deployment-utils.ts
+ * (centralized policy shared across all deployment scripts)
  *
- * MAINNET: Must be defined with positive values to prevent unprofitable trades
- * TESTNET: Low thresholds for testing
+ * For SyncSwap deployments (0.3% flash loan fee - higher than Aave's 0.09%),
+ * we use the standard thresholds which already account for worst-case fees.
  *
- * Phase 4A: Now enforced by validateMinimumProfit() - mainnet deployments
- * without proper thresholds will fail with clear error messages
+ * Note: SyncSwap's higher fee means we keep conservative thresholds without discount.
+ *
+ * @see lib/deployment-utils.ts - DEFAULT_MINIMUM_PROFIT for policy details
+ * @see lib/deployment-utils.ts - getMinimumProfitForProtocol() handles SyncSwap fee
  */
-const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
-  // Mainnets
-  'zksync-mainnet': ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  'zksync': ethers.parseEther('0.001'), // Alias for mainnet
-
-  // Testnets
-  'zksync-testnet': ethers.parseEther('0.0001'), // Lower for testnet
-  'zksync-sepolia': ethers.parseEther('0.0001'),
-};
 
 // =============================================================================
 // Types
@@ -120,8 +115,8 @@ async function deploySyncSwapFlashArbitrage(
 
   // Phase 4A: Network name normalization
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   console.log('\n========================================');
   console.log('SyncSwapFlashArbitrage Deployment');
@@ -168,7 +163,7 @@ async function deploySyncSwapFlashArbitrage(
   console.log('\nConfiguring contract...');
 
   // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
-  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const rawMinimumProfit = config.minimumProfit ?? getMinimumProfitForProtocol(networkName, 'syncswap');
   const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
 
   if (minimumProfit > 0n) {
@@ -209,7 +204,8 @@ async function deploySyncSwapFlashArbitrage(
   }
 
   // Phase 4A: Smoke test - verify contract is callable
-  await smokeTestFlashLoanContract(syncSwapFlashArbitrage, ownerAddress);
+  // P2-010 FIX: Pass contract address for bytecode verification
+  await smokeTestFlashLoanContract(syncSwapFlashArbitrage, ownerAddress, contractAddress);
 
   return {
     network: networkName,
@@ -233,7 +229,7 @@ async function deploySyncSwapFlashArbitrage(
  * Kept as wrapper for backward compatibility
  */
 async function saveSyncSwapDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'syncswap-registry.json');
+  await saveDeploymentResult(result, 'syncswap-registry.json', 'SyncSwapFlashArbitrage');
 }
 
 // =============================================================================
@@ -262,10 +258,11 @@ async function main(): Promise<void> {
   console.log(`\nStarting SyncSwapFlashArbitrage deployment to ${networkName}...`);
 
   // Deploy with Phase 4A improvements
+  // P2-003 FIX: Use centralized profit policy (SyncSwap uses standard thresholds)
   const result = await deploySyncSwapFlashArbitrage({
     vaultAddress,
     approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
-    minimumProfit: DEFAULT_MINIMUM_PROFIT[networkName],
+    minimumProfit: getMinimumProfitForProtocol(networkName, 'syncswap'),
   });
 
   // Save and print summary

@@ -10,10 +10,14 @@
  *
  * Note: Use tsx (not ts-node) to handle ESM imports correctly.
  *
+ * P1-004 FIX: Added network name normalization to handle aliases
+ * (e.g., zksync-mainnet vs zksync)
+ *
  * @see Issue 3.1 - Address synchronization risk
  */
 
-import { AAVE_V3_POOL_ADDRESSES } from '../deployments/addresses';
+import { ethers } from 'hardhat';  // P2-004 FIX: Import for address validation
+import { AAVE_V3_POOL_ADDRESSES, normalizeChainName } from '../deployments/addresses';
 
 // Import dynamically since we're in a different package context
 // In production, use: import { FLASH_LOAN_PROVIDERS } from '@arbitrage/config';
@@ -52,14 +56,29 @@ async function validateAddresses(): Promise<void> {
   }
 
   const results: ValidationResult[] = [];
+
+  // P1-004 FIX: Normalize all chain names before comparison
+  // Build normalized lookup maps to handle aliases (zksync-mainnet → zksync)
+  const normalizedContracts: Record<string, string> = {};
+  for (const [chain, address] of Object.entries(AAVE_V3_POOL_ADDRESSES)) {
+    const normalized = normalizeChainName(chain);
+    normalizedContracts[normalized] = address;
+  }
+
+  const normalizedService: Record<string, FlashLoanProvider> = {};
+  for (const [chain, provider] of Object.entries(flashLoanProviders)) {
+    const normalized = normalizeChainName(chain);
+    normalizedService[normalized] = provider;
+  }
+
   const allChains = new Set([
-    ...Object.keys(AAVE_V3_POOL_ADDRESSES),
-    ...Object.keys(flashLoanProviders),
+    ...Object.keys(normalizedContracts),
+    ...Object.keys(normalizedService),
   ]);
 
   for (const chain of allChains) {
-    const contractsAddress = AAVE_V3_POOL_ADDRESSES[chain];
-    const serviceProvider = flashLoanProviders[chain];
+    const contractsAddress = normalizedContracts[chain];
+    const serviceProvider = normalizedService[chain];
     const serviceAddress = serviceProvider?.address;
     const protocol = serviceProvider?.protocol;
 
@@ -76,21 +95,46 @@ async function validateAddresses(): Promise<void> {
       continue;
     }
 
-    // Check for mismatches
+    // P2-004 FIX: Validate address format before comparison
     let match = true;
     let issue: string | undefined;
 
-    if (!contractsAddress && serviceAddress) {
-      match = false;
-      issue = 'Missing in contracts/deployments/addresses.ts';
-    } else if (contractsAddress && !serviceAddress) {
-      match = false;
-      issue = 'Missing in shared/config/src/service-config.ts';
-    } else if (contractsAddress && serviceAddress) {
-      // Case-insensitive comparison for addresses
-      match = contractsAddress.toLowerCase() === serviceAddress.toLowerCase();
-      if (!match) {
-        issue = 'Address mismatch between files';
+    // Validate contractsAddress format
+    if (contractsAddress) {
+      if (!ethers.isAddress(contractsAddress)) {
+        match = false;
+        issue = `Invalid address format in contracts: ${contractsAddress}`;
+      } else if (contractsAddress === ethers.ZeroAddress) {
+        match = false;
+        issue = `Zero address in contracts (0x000...000) - likely placeholder`;
+      }
+    }
+
+    // Validate serviceAddress format
+    if (serviceAddress && !issue) {
+      if (!ethers.isAddress(serviceAddress)) {
+        match = false;
+        issue = `Invalid address format in service: ${serviceAddress}`;
+      } else if (serviceAddress === ethers.ZeroAddress) {
+        match = false;
+        issue = `Zero address in service (0x000...000) - likely placeholder`;
+      }
+    }
+
+    // Check for mismatches (only if format validation passed)
+    if (!issue) {
+      if (!contractsAddress && serviceAddress) {
+        match = false;
+        issue = 'Missing in contracts/deployments/addresses.ts';
+      } else if (contractsAddress && !serviceAddress) {
+        match = false;
+        issue = 'Missing in shared/config/src/service-config.ts';
+      } else if (contractsAddress && serviceAddress) {
+        // Case-insensitive comparison for addresses
+        match = contractsAddress.toLowerCase() === serviceAddress.toLowerCase();
+        if (!match) {
+          issue = 'Address mismatch between files';
+        }
       }
     }
 

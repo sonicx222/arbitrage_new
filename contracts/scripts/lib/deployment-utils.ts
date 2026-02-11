@@ -114,6 +114,98 @@ export interface RouterApprovalResult {
 export const DEFAULT_VERIFICATION_RETRIES = 3;
 export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds
 
+/**
+ * Centralized minimum profit policy for all flash loan protocols
+ *
+ * P2-003 FIX: Single source of truth for profit thresholds across all deployments.
+ * Previously each script had its own values, leading to inconsistencies.
+ *
+ * **Policy Rationale**:
+ * - Base thresholds cover: gas costs + flash loan fees + safety margin
+ * - Testnets: Low thresholds for testing (0.001 ETH or equivalent)
+ * - Mainnets: Conservative thresholds to prevent unprofitable trades
+ *
+ * **Network-Specific Values**:
+ * - Ethereum: 0.005 ETH (~$15 @ $3000/ETH) - high gas costs
+ * - L2s (Arbitrum, Base, Optimism): 0.002 ETH (~$6) - lower gas
+ * - BSC: 0.01 BNB (~$6 @ $600/BNB) - moderate gas
+ * - Polygon: 2 MATIC (~$2 @ $1/MATIC) - very low gas
+ * - Avalanche: 0.1 AVAX (~$4 @ $40/AVAX) - moderate gas
+ * - Fantom: 5 FTM (~$2 @ $0.40/FTM) - very low gas
+ * - zkSync: 0.002 ETH (~$6) - L2 gas costs
+ *
+ * **Flash Loan Fee Impact**:
+ * These thresholds assume worst-case flash loan fees:
+ * - Aave V3: 0.09% fee
+ * - Balancer: 0% fee (can use slightly lower thresholds)
+ * - PancakeSwap: pool-dependent fees
+ * - SyncSwap: 0.3% fee
+ *
+ * For protocols with 0% fees (Balancer), use getMinimumProfitForProtocol()
+ * to apply a 30% discount to the base threshold.
+ */
+export const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
+  // Testnets - low thresholds for testing (use canonical camelCase names)
+  sepolia: ethers.parseEther('0.001'),            // 0.001 ETH
+  arbitrumSepolia: ethers.parseEther('0.001'),    // 0.001 ETH
+  baseSepolia: ethers.parseEther('0.001'),        // 0.001 ETH
+  'zksync-testnet': ethers.parseEther('0.001'),   // 0.001 ETH
+
+  // Mainnets - conservative thresholds
+  ethereum: ethers.parseEther('0.005'),   // 0.005 ETH (~$15 @ $3000/ETH)
+  arbitrum: ethers.parseEther('0.002'),   // 0.002 ETH (~$6 @ $3000/ETH)
+  base: ethers.parseEther('0.002'),       // 0.002 ETH (~$6 @ $3000/ETH)
+  optimism: ethers.parseEther('0.002'),   // 0.002 ETH (~$6 @ $3000/ETH)
+  bsc: ethers.parseEther('0.01'),         // 0.01 BNB (~$6 @ $600/BNB)
+  polygon: ethers.parseEther('2'),        // 2 MATIC (~$2 @ $1/MATIC)
+  avalanche: ethers.parseEther('0.1'),    // 0.1 AVAX (~$4 @ $40/AVAX)
+  fantom: ethers.parseEther('5'),         // 5 FTM (~$2 @ $0.40/FTM)
+  zksync: ethers.parseEther('0.002'),     // 0.002 ETH (~$6 @ $3000/ETH)
+  'zksync-mainnet': ethers.parseEther('0.002'), // Alias
+  linea: ethers.parseEther('0.002'),      // 0.002 ETH (~$6 @ $3000/ETH)
+};
+
+/**
+ * Get minimum profit threshold adjusted for protocol-specific fees
+ *
+ * P2-003 FIX: Allows protocol-specific adjustments to base thresholds.
+ *
+ * @param network - Network name (normalized)
+ * @param protocol - Flash loan protocol ('aave', 'balancer', 'pancakeswap', 'syncswap')
+ * @returns Minimum profit threshold in wei
+ *
+ * @example
+ * // Balancer has 0% fees, so accept 30% lower profit threshold
+ * const threshold = getMinimumProfitForProtocol('ethereum', 'balancer');
+ * // Returns 0.0035 ETH instead of 0.005 ETH
+ */
+export function getMinimumProfitForProtocol(
+  network: string,
+  protocol: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap'
+): bigint {
+  const baseThreshold = DEFAULT_MINIMUM_PROFIT[network];
+
+  if (!baseThreshold) {
+    // Unknown network - return conservative default
+    return ethers.parseEther('0.005');
+  }
+
+  // Balancer has 0% flash loan fees (vs Aave's 0.09%)
+  // Can accept 30% lower profit threshold since we save on fees
+  if (protocol === 'balancer') {
+    return (baseThreshold * 70n) / 100n;
+  }
+
+  // SyncSwap has higher fees (0.3% vs Aave's 0.09%)
+  // Keep standard threshold (already conservative)
+  if (protocol === 'syncswap') {
+    return baseThreshold;
+  }
+
+  // Aave and PancakeSwap use standard threshold
+  return baseThreshold;
+}
+
 // =============================================================================
 // Network Normalization (Phase 2 Fix)
 // =============================================================================
@@ -121,10 +213,14 @@ export const DEFAULT_VERIFICATION_INITIAL_DELAY_MS = 30000; // 30 seconds
 /**
  * Normalize network names to canonical form
  *
- * Handles various network name aliases:
- * - zksync-mainnet → zksync
- * - zksync-sepolia → zksync-testnet
- * - arbitrumSepolia → arbitrum-sepolia
+ * Handles zkSync network name aliases:
+ * - zksync-mainnet → zksync (Hardhat config name → canonical name)
+ * - zksync-sepolia → zksync-testnet (explorer name → canonical name)
+ *
+ * NOTE: Testnet names like 'arbitrumSepolia' and 'baseSepolia' are already
+ * in canonical camelCase form, matching APPROVED_ROUTERS, AAVE_V3_POOLS,
+ * TOKEN_ADDRESSES, and all other address lookup maps. Do NOT normalize
+ * them to kebab-case - that would break address lookups.
  *
  * @param name - Raw network name from hardhat config
  * @returns Canonical network name
@@ -133,10 +229,32 @@ export function normalizeNetworkName(name: string): string {
   const aliases: Record<string, string> = {
     'zksync-mainnet': 'zksync',
     'zksync-sepolia': 'zksync-testnet',
-    'arbitrumSepolia': 'arbitrum-sepolia',
-    'baseSepolia': 'base-sepolia',
   };
   return aliases[name] || name;
+}
+
+/**
+ * Safely get chain ID as a number with validation
+ *
+ * P1-007 FIX: Validates chainId range before coercing from bigint to number
+ * to prevent precision loss on custom networks with very large chain IDs.
+ *
+ * @returns Chain ID as number
+ * @throws Error if chain ID exceeds Number.MAX_SAFE_INTEGER
+ */
+export async function getSafeChainId(): Promise<number> {
+  const chainIdBigInt = (await ethers.provider.getNetwork()).chainId;
+
+  // Validate range before coercion
+  if (chainIdBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(
+      `[ERR_CHAIN_ID_TOO_LARGE] Chain ID ${chainIdBigInt} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER}).\n` +
+      `This network uses an unsupported chain ID that cannot be safely represented as a JavaScript number.\n` +
+      `All production EVM chains use IDs < 2^32, but this network violates that assumption.`
+    );
+  }
+
+  return Number(chainIdBigInt);
 }
 
 // =============================================================================
@@ -291,35 +409,49 @@ export function validateMinimumProfit(
   networkName: string,
   minimumProfit: bigint | undefined
 ): bigint {
+  // CRITICAL FIX (P0-002): Explicit testnet check - fail-safe approach
+  // If network is not explicitly in testnet list, treat as mainnet (safer than reverse)
+  const isKnownTestnet = isTestnet(networkName);
+  const isKnownMainnet = isMainnet(networkName);
+
   // For testnets, allow low or zero thresholds
-  if (isTestnet(networkName)) {
+  if (isKnownTestnet) {
     return minimumProfit || 0n;
   }
 
-  // For mainnets, REQUIRE a positive threshold
-  if (isMainnet(networkName)) {
-    if (!minimumProfit || minimumProfit === 0n) {
-      throw new Error(
-        `[ERR_NO_PROFIT_THRESHOLD] Mainnet deployment requires positive minimum profit threshold.\n` +
-        `Network: ${networkName} (mainnet)\n` +
-        `Provided: ${minimumProfit || 0n} wei\n\n` +
-        `Fix: Define DEFAULT_MINIMUM_PROFIT['${networkName}'] in deployment script.\n` +
-        `Example: ethers.parseEther('0.01') for 0.01 ETH minimum profit.\n\n` +
-        `This prevents contracts from accepting unprofitable trades that waste gas.`
-      );
-    }
-
-    // Warn if threshold seems low for mainnet
-    const minRecommended = ethers.parseEther('0.001'); // 0.001 ETH = ~$3
-    if (minimumProfit < minRecommended) {
-      console.warn('\n⚠️  WARNING: Low profit threshold for mainnet deployment');
-      console.warn(`   Configured: ${ethers.formatEther(minimumProfit)} ETH`);
-      console.warn(`   Recommended: ≥ ${ethers.formatEther(minRecommended)} ETH`);
-      console.warn(`   Low thresholds may execute unprofitable trades.\n`);
-    }
+  // CRITICAL: If network is unknown (not in testnet or mainnet list), treat as mainnet
+  // This is the fail-safe approach: better to reject unknown networks than allow zero profit
+  if (!isKnownMainnet) {
+    console.warn(`\n⚠️  WARNING: Network '${networkName}' not in known mainnet or testnet list`);
+    console.warn(`   Treating as mainnet (fail-safe: require profit threshold)\n`);
   }
 
-  return minimumProfit || 0n;
+  // For mainnets (or unknown networks), REQUIRE a positive threshold
+  if (!minimumProfit || minimumProfit === 0n) {
+    throw new Error(
+      `[ERR_NO_PROFIT_THRESHOLD] Mainnet deployment requires positive minimum profit threshold.\n` +
+      `Network: ${networkName} ${isKnownMainnet ? '(mainnet)' : '(unknown - treated as mainnet)'}\n` +
+      `Provided: ${minimumProfit || 0n} wei\n\n` +
+      `Fix: Define DEFAULT_MINIMUM_PROFIT['${networkName}'] in deployment script.\n` +
+      `Example: ethers.parseEther('0.01') for 0.01 ETH minimum profit.\n\n` +
+      `This prevents contracts from accepting unprofitable trades that waste gas.\n\n` +
+      (isKnownMainnet ? '' :
+        `Note: '${networkName}' is not in the known testnet list. If this is a testnet:\n` +
+        `  1. Add to TESTNET_CHAINS in contracts/deployments/addresses.ts\n` +
+        `  2. Re-run deployment\n`)
+    );
+  }
+
+  // Warn if threshold seems low for mainnet
+  const minRecommended = ethers.parseEther('0.001'); // 0.001 ETH = ~$3
+  if (minimumProfit < minRecommended) {
+    console.warn('\n⚠️  WARNING: Low profit threshold for mainnet deployment');
+    console.warn(`   Configured: ${ethers.formatEther(minimumProfit)} ETH`);
+    console.warn(`   Recommended: ≥ ${ethers.formatEther(minRecommended)} ETH`);
+    console.warn(`   Low thresholds may execute unprofitable trades.\n`);
+  }
+
+  return minimumProfit;
 }
 
 // =============================================================================
@@ -494,6 +626,7 @@ export async function verifyContractWithRetry(
  *
  * @param result - Deployment result to save (any deployment result type)
  * @param registryName - Name of registry file (default: 'registry.json')
+ * @param contractType - Contract type key for central registry (e.g., 'FlashLoanArbitrage', 'BalancerV2FlashArbitrage')
  * @throws Error if lock cannot be acquired after max retries or if file I/O fails
  */
 export async function saveDeploymentResult(
@@ -504,7 +637,8 @@ export async function saveDeploymentResult(
     | SyncSwapDeploymentResult
     | CommitRevealDeploymentResult
     | MultiPathQuoterDeploymentResult,
-  registryName = 'registry.json'
+  registryName: string,
+  contractType: string
 ): Promise<void> {
   const deploymentsDir = path.join(__dirname, '..', '..', 'deployments');
 
@@ -518,11 +652,17 @@ export async function saveDeploymentResult(
   fs.writeFileSync(networkFile, JSON.stringify(result, null, 2));
   console.log(`\n📝 Deployment saved to: ${networkFile}`);
 
-  // Update master registry with file locking to prevent concurrent corruption
-  const registryFile = path.join(deploymentsDir, registryName);
+  // Update per-contract registry (flat overwrite per network — correct for single-contract registries)
+  if (registryName !== 'registry.json') {
+    const perContractRegistryFile = path.join(deploymentsDir, registryName);
+    await updateRegistryWithLock(perContractRegistryFile, result);
+    console.log(`📝 Per-contract registry updated: ${perContractRegistryFile}`);
+  }
 
-  await updateRegistryWithLock(registryFile, result);
-  console.log(`📝 Registry updated: ${registryFile}`);
+  // Always merge into central registry.json so generate-addresses.ts sees all contract types
+  const centralRegistryFile = path.join(deploymentsDir, 'registry.json');
+  await mergeIntoCentralRegistry(centralRegistryFile, result, contractType);
+  console.log(`📝 Central registry updated: ${centralRegistryFile} [${contractType}]`);
 }
 
 /**
@@ -566,16 +706,18 @@ async function updateRegistryWithLock(
   const baseDelay = 1000; // 1 second
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    let releaseLock: (() => Promise<void>) | undefined;
+    let lockAcquired = false;
 
     try {
-      // Acquire exclusive lock (create lock file if registry doesn't exist yet)
-      // Options:
-      // - stale: 30000ms - Consider lock stale if holder process crashed >30s ago
-      // - retries: 0 - Don't retry internally, we handle retries ourselves
-      releaseLock = fs.existsSync(registryFile)
-        ? lockfile.lockSync(registryFile, { stale: 30000, retries: 0 })
-        : undefined; // No lock needed if file doesn't exist (first deployment)
+      // Acquire exclusive lock. Create an empty file first if it doesn't
+      // exist so proper-lockfile has something to lock on. This prevents
+      // a race condition where two concurrent first-deployments both skip
+      // locking because the file doesn't exist yet.
+      if (!fs.existsSync(registryFile)) {
+        fs.writeFileSync(registryFile, '{}', 'utf8');
+      }
+      await lockfile.lock(registryFile, { stale: 300000, retries: 0 });
+      lockAcquired = true;
 
       // CRITICAL SECTION: Read-Modify-Write must be atomic
       let registry: Record<
@@ -594,6 +736,17 @@ async function updateRegistryWithLock(
           registry = JSON.parse(content);
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
+
+          // CRITICAL FIX (P0-003): Release lock before throwing to prevent lock file orphaning
+          if (lockAcquired) {
+            try {
+              await lockfile.unlock(registryFile);
+              lockAcquired = false;
+            } catch (unlockError) {
+              console.error('⚠️  Failed to release lock after parse error:', unlockError);
+            }
+          }
+
           // Don't silently create new registry - this might indicate corruption
           throw new Error(
             `[ERR_REGISTRY_CORRUPT] Failed to read/parse deployment registry.\n` +
@@ -607,24 +760,30 @@ async function updateRegistryWithLock(
       // Add/update deployment record
       registry[result.network] = result;
 
-      // Write atomically: write to temp file, then rename (atomic on POSIX)
+      // Write atomically: write to temp file, then rename
       const tempFile = `${registryFile}.tmp`;
       fs.writeFileSync(tempFile, JSON.stringify(registry, null, 2), 'utf8');
       fs.renameSync(tempFile, registryFile);
 
       // SUCCESS: Release lock and return
-      if (releaseLock) {
-        lockfile.unlockSync(registryFile);
+      if (lockAcquired) {
+        await lockfile.unlock(registryFile);
+        lockAcquired = false;
       }
       return;
 
     } catch (error) {
       // Release lock if acquired
-      if (releaseLock) {
+      if (lockAcquired) {
         try {
-          lockfile.unlockSync(registryFile);
+          await lockfile.unlock(registryFile);
+          lockAcquired = false;
         } catch (unlockError) {
-          // Ignore unlock errors (lock file might be stale)
+          // P1-008 FIX: Don't silently ignore - log warning
+          console.error('⚠️  WARNING: Failed to release deployment lock');
+          console.error(`   Lock file: ${registryFile}.lock`);
+          console.error(`   Error: ${unlockError}`);
+          console.error('   Subsequent deployments may be delayed by stale lock timeout (30s)');
         }
       }
 
@@ -648,6 +807,133 @@ async function updateRegistryWithLock(
       const errorMsg = error instanceof Error ? error.message : String(error);
       throw new Error(
         `[ERR_REGISTRY_UPDATE] Failed to update deployment registry after ${attempt} attempt(s).\n` +
+        `File: ${registryFile}\n` +
+        `Error: ${errorMsg}\n` +
+        (isLockError
+          ? `Registry is locked by another deployment. Wait for it to complete and try again.`
+          : `This may indicate file system issues or registry corruption.`)
+      );
+    }
+  }
+}
+
+/**
+ * Merge a deployment into the central registry.json with per-contract-type granularity
+ *
+ * Unlike updateRegistryWithLock (which overwrites the entire network entry),
+ * this function merges only the specific contract type address into the network
+ * object, preserving all other contract-type entries.
+ *
+ * **Schema**: registry.json stores `{ [network]: { [contractType]: address, ... } }`
+ * which matches what generate-addresses.ts expects.
+ *
+ * @param registryFile - Absolute path to registry.json
+ * @param result - Deployment result (any type)
+ * @param contractType - Contract type key (e.g., 'FlashLoanArbitrage')
+ * @throws Error if lock cannot be acquired after 3 retries or if file I/O fails
+ */
+async function mergeIntoCentralRegistry(
+  registryFile: string,
+  result:
+    | DeploymentResult
+    | BalancerDeploymentResult
+    | PancakeSwapDeploymentResult
+    | SyncSwapDeploymentResult
+    | CommitRevealDeploymentResult
+    | MultiPathQuoterDeploymentResult,
+  contractType: string
+): Promise<void> {
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    let lockAcquired = false;
+
+    try {
+      // Ensure file exists for locking
+      if (!fs.existsSync(registryFile)) {
+        fs.writeFileSync(registryFile, '{}', 'utf8');
+      }
+      await lockfile.lock(registryFile, { stale: 300000, retries: 0 });
+      lockAcquired = true;
+
+      // CRITICAL SECTION: Read-Modify-Write must be atomic
+      let registry: Record<string, any> = {};
+
+      if (fs.existsSync(registryFile)) {
+        try {
+          const content = fs.readFileSync(registryFile, 'utf8');
+          registry = JSON.parse(content);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+
+          if (lockAcquired) {
+            try {
+              await lockfile.unlock(registryFile);
+              lockAcquired = false;
+            } catch (unlockError) {
+              console.error('⚠️  Failed to release lock after parse error:', unlockError);
+            }
+          }
+
+          throw new Error(
+            `[ERR_REGISTRY_CORRUPT] Failed to read/parse central registry.\n` +
+            `File: ${registryFile}\n` +
+            `Error: ${errorMsg}\n` +
+            `This may indicate registry corruption. Check the file manually.`
+          );
+        }
+      }
+
+      // Merge: set only the specific contract type address, preserving other entries
+      const network = result.network;
+      if (!registry[network] || typeof registry[network] !== 'object') {
+        registry[network] = {};
+      }
+      registry[network][contractType] = result.contractAddress;
+      registry[network].deployedAt = result.timestamp;
+      registry[network].deployedBy = result.deployerAddress;
+      registry[network].verified = result.verified;
+
+      // Write atomically
+      const tempFile = `${registryFile}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(registry, null, 2), 'utf8');
+      fs.renameSync(tempFile, registryFile);
+
+      // Release lock and return
+      if (lockAcquired) {
+        await lockfile.unlock(registryFile);
+        lockAcquired = false;
+      }
+      return;
+
+    } catch (error) {
+      if (lockAcquired) {
+        try {
+          await lockfile.unlock(registryFile);
+          lockAcquired = false;
+        } catch (unlockError) {
+          console.error('⚠️  WARNING: Failed to release central registry lock');
+          console.error(`   Lock file: ${registryFile}.lock`);
+          console.error(`   Error: ${unlockError}`);
+        }
+      }
+
+      const isLockError = error instanceof Error && error.message.includes('ELOCKED');
+
+      if (isLockError && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt - 1);
+        console.warn(
+          `⚠️  Central registry locked by another deployment (attempt ${attempt}/${maxRetries})\n` +
+          `   Retrying in ${delay}ms...`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `[ERR_REGISTRY_UPDATE] Failed to merge into central registry after ${attempt} attempt(s).\n` +
         `File: ${registryFile}\n` +
         `Error: ${errorMsg}\n` +
         (isLockError
@@ -721,23 +1007,45 @@ async function runSmokeTestChecks(
  * Run basic smoke tests on deployed contract
  *
  * Verifies:
+ * - Bytecode exists at address (P2-010 FIX)
  * - Owner is correct
  * - Contract is not paused
  * - Minimum profit is set
  *
  * @param contract - Deployed contract instance
  * @param expectedOwner - Expected owner address
+ * @param contractAddress - Contract address for bytecode verification (P2-010 FIX)
  * @returns true if all checks pass
  */
 export async function smokeTestFlashLoanContract(
   contract: any,
-  expectedOwner: string
+  expectedOwner: string,
+  contractAddress?: string  // P2-010 FIX: Optional for backward compatibility
 ): Promise<boolean> {
   const checks: Array<{
     name: string;
     fn: () => Promise<boolean>;
     critical: boolean;
-  }> = [
+  }> = [];
+
+  // P2-010 FIX: Verify bytecode exists if address provided
+  if (contractAddress) {
+    checks.push({
+      name: 'Bytecode exists at address',
+      fn: async () => {
+        const code = await ethers.provider.getCode(contractAddress);
+        if (code === '0x' || code.length < 10) {
+          console.error(`   No bytecode at ${contractAddress}`);
+          return false;
+        }
+        console.log(`   Bytecode size: ${(code.length - 2) / 2} bytes`);
+        return true;
+      },
+      critical: true,
+    });
+  }
+
+  checks.push(
     {
       name: 'Owner is correct',
       fn: async () => (await contract.owner()) === expectedOwner,
@@ -752,8 +1060,8 @@ export async function smokeTestFlashLoanContract(
       name: 'Minimum profit ≥ 0',
       fn: async () => (await contract.minimumProfit()) >= 0n,
       critical: true,
-    },
-  ];
+    }
+  );
 
   return runSmokeTestChecks(checks, 'smoke tests');
 }
@@ -863,12 +1171,17 @@ export async function smokeTestMultiPathQuoter(
       name: 'Contract responds to getBatchedQuotes([])',
       fn: async () => {
         try {
-          // Empty array should execute without crashing (may revert with specific error, but should be callable)
           await contract.getBatchedQuotes.staticCall([]);
           return true;
-        } catch (error) {
-          // Expected to revert for empty array, but should not crash
-          // If we get here, contract is callable
+        } catch (error: any) {
+          const msg = error?.message || String(error);
+          // Contract reverts are expected for empty arrays (contract is callable)
+          // Network/RPC errors indicate deployment problems
+          if (msg.includes('NETWORK_ERROR') || msg.includes('TIMEOUT') || msg.includes('SERVER_ERROR')) {
+            console.error(`   RPC error: ${msg.slice(0, 100)}`);
+            return false;
+          }
+          // Contract revert = contract exists and responds
           return true;
         }
       },
@@ -885,20 +1198,41 @@ export async function smokeTestMultiPathQuoter(
 
 /**
  * Print standardized deployment summary
+ *
+ * Accepts any deployment result type (base, Balancer, PancakeSwap, SyncSwap,
+ * CommitReveal, MultiPathQuoter). Fields that don't exist on certain types
+ * (e.g., minimumProfit on MultiPathQuoter) are handled gracefully.
  */
-export function printDeploymentSummary(result: DeploymentResult): void {
+export function printDeploymentSummary(
+  result:
+    | DeploymentResult
+    | BalancerDeploymentResult
+    | PancakeSwapDeploymentResult
+    | SyncSwapDeploymentResult
+    | CommitRevealDeploymentResult
+    | MultiPathQuoterDeploymentResult
+): void {
   console.log('\n========================================');
   console.log('Deployment Summary');
   console.log('========================================');
   console.log(`Network:          ${result.network} (chainId: ${result.chainId})`);
   console.log(`Contract:         ${result.contractAddress}`);
-  console.log(`Owner:            ${result.ownerAddress}`);
+  if ('ownerAddress' in result && result.ownerAddress) {
+    console.log(`Owner:            ${result.ownerAddress}`);
+  }
   console.log(`Deployer:         ${result.deployerAddress}`);
   console.log(`Transaction:      ${result.transactionHash}`);
   console.log(`Block:            ${result.blockNumber}`);
   console.log(`Timestamp:        ${new Date(result.timestamp * 1000).toISOString()}`);
-  console.log(`Minimum Profit:   ${ethers.formatEther(result.minimumProfit)} ETH`);
-  console.log(`Approved Routers: ${result.approvedRouters.length}`);
+  if ('minimumProfit' in result && result.minimumProfit !== undefined) {
+    console.log(`Minimum Profit:   ${ethers.formatEther(result.minimumProfit)} ETH`);
+  }
+  if ('approvedRouters' in result && Array.isArray(result.approvedRouters)) {
+    console.log(`Approved Routers: ${result.approvedRouters.length}`);
+  }
+  if ('gasUsed' in result && result.gasUsed) {
+    console.log(`Gas Used:         ${result.gasUsed}`);
+  }
   console.log(`Verified:         ${result.verified ? '✅ Yes' : '❌ No'}`);
   console.log('========================================\n');
 }

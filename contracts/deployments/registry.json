@@ -53,6 +53,17 @@
     "deployedBy": null,
     "verified": false
   },
+  "baseSepolia": {
+    "FlashLoanArbitrage": null,
+    "PancakeSwapFlashArbitrage": null,
+    "BalancerV2FlashArbitrage": null,
+    "SyncSwapFlashArbitrage": null,
+    "CommitRevealArbitrage": null,
+    "MultiPathQuoter": null,
+    "deployedAt": null,
+    "deployedBy": null,
+    "verified": false
+  },
   "zksync-testnet": {
     "FlashLoanArbitrage": null,
     "PancakeSwapFlashArbitrage": null,

@@ -20,24 +20,56 @@
  * @see contracts/SYNCSWAP_DEPLOYMENT.md#rollback-plan
  */
 
-import { ethers } from 'hardhat';
+import { ethers, network } from 'hardhat';
 
 type Action = 'pause' | 'unpause';
 
-async function main() {
-  // Parse action from command line arguments
-  const action = process.argv[2] as Action | undefined;
-
-  if (!action || !['pause', 'unpause'].includes(action)) {
-    console.error('\n❌ Invalid or missing action argument');
-    console.error('\nUsage:');
-    console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts pause --network <network>');
-    console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network <network>');
-    console.error('\nActions:');
-    console.error('  pause   - Emergency stop (halt all arbitrage execution)');
-    console.error('  unpause - Resume operations (enable arbitrage execution)');
+/**
+ * P2-007 FIX: Parse command line arguments properly
+ * Handles both positional and flag-style arguments:
+ *   npx hardhat run scripts/toggle-syncswap-pause.ts pause --network zksync
+ *   npx hardhat run scripts/toggle-syncswap-pause.ts --action=pause --network zksync
+ */
+function parseAction(): Action {
+  // Check for --action=<value> flag
+  const actionFlagMatch = process.argv.find(arg => arg.startsWith('--action='));
+  if (actionFlagMatch) {
+    const action = actionFlagMatch.split('=')[1];
+    if (action === 'pause' || action === 'unpause') {
+      return action;
+    }
+    console.error(`\n❌ [ERR_INVALID_ACTION] Invalid action flag: ${action}`);
+    console.error('Valid values: pause, unpause');
     process.exit(1);
   }
+
+  // Check for positional argument (after script name, before --network)
+  const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
+  if (args.length > 0) {
+    const action = args[0];
+    if (action === 'pause' || action === 'unpause') {
+      return action;
+    }
+    console.error(`\n❌ [ERR_INVALID_ACTION] Invalid positional argument: ${action}`);
+    console.error('Valid values: pause, unpause');
+    process.exit(1);
+  }
+
+  // No action provided - show usage
+  console.error('\n❌ [ERR_INVALID_ACTION] Invalid or missing action argument');
+  console.error('\nUsage:');
+  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts pause --network <network>');
+  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network <network>');
+  console.error('  npx hardhat run scripts/toggle-syncswap-pause.ts --action=pause --network <network>');
+  console.error('\nActions:');
+  console.error('  pause   - Emergency stop (halt all arbitrage execution)');
+  console.error('  unpause - Resume operations (enable arbitrage execution)');
+  process.exit(1);
+}
+
+async function main() {
+  // P2-007 FIX: Use proper argument parser
+  const action = parseAction();
 
   const [signer] = await ethers.getSigners();
   const contractAddress = process.env.SYNCSWAP_CONTRACT_ADDRESS;
@@ -53,8 +85,9 @@ async function main() {
   console.log(`Signer: ${signer.address}`);
 
   if (!contractAddress) {
+    // P2-008 FIX: Add error code
     throw new Error(
-      'SYNCSWAP_CONTRACT_ADDRESS environment variable not set.\n' +
+      '[ERR_NO_CONTRACT_ADDRESS] SYNCSWAP_CONTRACT_ADDRESS environment variable not set.\n' +
       'Set it to the deployed contract address:\n' +
       '  export SYNCSWAP_CONTRACT_ADDRESS=0x...'
     );
@@ -131,7 +164,7 @@ async function main() {
       console.log('2. Deploy fix if needed');
       console.log('3. Test thoroughly on testnet');
       console.log('4. Unpause the contract when ready:');
-      console.log(`   npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network ${(await ethers.provider.getNetwork()).name}`);
+      console.log(`   npx hardhat run scripts/toggle-syncswap-pause.ts unpause --network ${network.name}`);
     } else {
       console.log(`   Pause status: ${isPaused ? 'PAUSED ❌' : 'ACTIVE ✅'}`);
 

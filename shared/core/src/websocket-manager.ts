@@ -1741,7 +1741,7 @@ export class WebSocketManager {
     // S3.3: Track reconnection attempts
     this.qualityMetrics.reconnectCount++;
 
-    if (this.reconnectAttempts >= (this.config.maxReconnectAttempts || 10)) {
+    if (this.reconnectAttempts >= (this.config.maxReconnectAttempts ?? 10)) {
       this.logger.error('Max reconnection attempts reached across all URLs');
       // Emit error for handlers
       this.errorHandlers.forEach(handler => {

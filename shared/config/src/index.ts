@@ -282,6 +282,20 @@ export {
 } from './service-config';
 
 // =============================================================================
+// FLASH LOAN AVAILABILITY MATRIX (Interface Analysis Fix #2)
+// =============================================================================
+export {
+  FLASH_LOAN_AVAILABILITY,
+  FlashLoanProtocol,
+  getSupportedProtocols,
+  isProtocolSupported,
+  validateFlashLoanSupport,
+  getPreferredProtocol,
+  FlashLoanNotSupportedError,
+  FLASH_LOAN_STATS,
+} from './flash-loan-availability';
+
+// =============================================================================
 // CROSS-CHAIN NORMALIZATION
 // =============================================================================
 export {

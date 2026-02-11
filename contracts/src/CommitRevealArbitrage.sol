@@ -496,91 +496,27 @@ contract CommitRevealArbitrage is BaseFlashArbitrage {
 
     /**
      * @notice Calculate expected profit for commit-reveal arbitrage
-     * @dev Simulates the arbitrage path without executing on-chain
-     *      No flash loan fees for commit-reveal (user provides upfront capital)
+     * @dev Simulates the arbitrage path without executing on-chain.
+     *      Uses shared _simulateSwapPath() from BaseFlashArbitrage.
+     *      No flash loan fees for commit-reveal (user provides upfront capital).
      *
      * @param asset The asset to swap (must start and end with this)
      * @param amountIn The amount to swap
      * @param swapPath Array of swap steps defining the arbitrage path
      * @return expectedProfit The expected profit (0 if unprofitable or invalid path)
-     *
-     * ## Usage
-     * This function allows off-chain profit simulation before committing.
-     * Returns 0 for any invalid path or unprofitable opportunity.
-     *
-     * ## Gas Cost
-     * View function - free to call (no gas cost)
      */
     function calculateExpectedProfit(
         address asset,
         uint256 amountIn,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit) {
-        uint256 pathLength = swapPath.length;
+        if (amountIn == 0 || swapPath.length > MAX_SWAP_HOPS) return 0;
 
-        // Validate basic requirements
-        if (pathLength == 0 || amountIn == 0) return 0;
-        if (pathLength > MAX_SWAP_HOPS) return 0;
-        if (swapPath[0].tokenIn != asset) return 0;
+        uint256 simulatedOutput = _simulateSwapPath(asset, amountIn, swapPath);
+        if (simulatedOutput == 0) return 0;
 
-        uint256 currentAmount = amountIn;
-        address currentToken = asset;
-
-        // Pre-allocate path array (gas optimization)
-        address[] memory path = new address[](2);
-
-        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
-        address[] memory visitedTokens = new address[](pathLength + 1);
-        visitedTokens[0] = asset;
-        uint256 visitedCount = 1;
-
-        // Simulate each swap
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = swapPath[i];
-
-            // Validate token continuity
-            if (step.tokenIn != currentToken) return 0;
-
-            // Check for cycle: token appears twice before final step
-            if (i < pathLength - 1) {
-                for (uint256 j = 0; j < visitedCount; j++) {
-                    if (visitedTokens[j] == step.tokenOut) {
-                        return 0; // Cycle detected
-                    }
-                }
-            }
-
-            // Track visited token
-            visitedTokens[visitedCount] = step.tokenOut;
-            unchecked { ++visitedCount; }
-
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            // Try to get quote from router
-            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
-                uint256[] memory amounts
-            ) {
-                currentAmount = amounts[amounts.length - 1];
-                currentToken = step.tokenOut;
-            } catch {
-                return 0; // Router call failed
-            }
-
-            unchecked { ++i; }
-        }
-
-        // Verify path ends with original asset
-        if (currentToken != asset) return 0;
-
-        // Calculate profit (no flash loan fees for commit-reveal)
-        if (currentAmount > amountIn) {
-            expectedProfit = currentAmount - amountIn;
-        } else {
-            expectedProfit = 0;
-        }
-
-        return expectedProfit;
+        // No flash loan fees for commit-reveal (user provides upfront capital)
+        return _calculateProfit(amountIn, simulatedOutput, 0);
     }
 
     // Note: Router management (addApprovedRouter, removeApprovedRouter, etc.),

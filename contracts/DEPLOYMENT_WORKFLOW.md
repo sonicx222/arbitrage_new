@@ -42,6 +42,71 @@ This document describes the **actual** deployment workflow for flash loan arbitr
 
 ---
 
+## Gas Cost Estimates
+
+**P2-001 FIX**: Estimated deployment costs to help with wallet funding.
+
+Use these estimates to fund your deployer wallet. Actual costs vary with network gas prices.
+
+### Contract Deployment Costs
+
+| Contract | Ethereum | Arbitrum | BSC | Polygon | Base | Optimism |
+|----------|----------|----------|-----|---------|------|----------|
+| **FlashLoanArbitrage** (Aave V3) | ~0.015 ETH | ~0.001 ETH | ~0.005 BNB | ~15 MATIC | ~0.001 ETH | ~0.001 ETH |
+| **BalancerV2FlashArbitrage** | ~0.018 ETH | ~0.0012 ETH | ~0.006 BNB | ~18 MATIC | ~0.0012 ETH | ~0.0012 ETH |
+| **PancakeSwapFlashArbitrage** | ~0.020 ETH | ~0.0015 ETH | ~0.007 BNB | ~20 MATIC | ~0.0015 ETH | ~0.0015 ETH |
+| **SyncSwapFlashArbitrage** (zkSync) | N/A | N/A | N/A | N/A | N/A | N/A |
+| **CommitRevealArbitrage** | ~0.012 ETH | ~0.0008 ETH | ~0.004 BNB | ~12 MATIC | ~0.0008 ETH | ~0.0008 ETH |
+| **MultiPathQuoter** | ~0.008 ETH | ~0.0005 ETH | ~0.003 BNB | ~8 MATIC | ~0.0005 ETH | ~0.0005 ETH |
+
+**Notes**:
+- Costs include: deployment + configuration (setMinimumProfit + router approvals)
+- Router approvals scale with number of routers (~0.001 ETH per router on Ethereum)
+- Estimates assume moderate gas prices (30 gwei Ethereum, 0.1 gwei Arbitrum)
+- **zkSync Era**: SyncSwap deployment costs ~0.005 ETH (L2 gas model differs)
+- **Testnet**: Same gas limits, but free/cheap test tokens
+
+### Real-Time Gas Estimation
+
+For accurate pre-deployment estimates, use:
+```bash
+# Check current gas prices and estimate deployment cost
+npx hardhat run scripts/check-balance.ts --network {network}
+```
+
+This script:
+- Shows current gas price on the network
+- Estimates deployment cost at current prices
+- Warns if balance is insufficient
+
+### Funding Recommendations
+
+**Testnet**:
+- Faucet: Get free test tokens (links in `/docs/local-development.md`)
+- Recommended: 0.1 ETH equivalent (enough for multiple deployments + testing)
+
+**Mainnet**:
+- Recommended: 2x estimated cost (buffer for gas price spikes)
+- Example: For Ethereum FlashLoanArbitrage (~0.015 ETH), fund with 0.03 ETH
+- Monitor gas prices: Use tools like Etherscan Gas Tracker or blocknative.com
+- Deploy during low-traffic periods (weekends, off-peak hours) to save 30-50%
+
+### Cost Breakdown Example (Ethereum FlashLoanArbitrage)
+
+| Operation | Gas Limit | Gas Cost @ 30 gwei | USD @ $3000/ETH |
+|-----------|-----------|-------------------|------------------|
+| Contract Deployment | ~400,000 | ~0.012 ETH | ~$36 |
+| setMinimumProfit() | ~50,000 | ~0.0015 ETH | ~$4.50 |
+| approveRouter() × 2 | ~100,000 | ~0.003 ETH | ~$9 |
+| **Total** | **~550,000** | **~0.0165 ETH** | **~$49.50** |
+
+**Cost Savings**:
+- Balancer V2 has 0% flash loan fees (saves 0.09% per trade vs Aave V3)
+- On a $100K flash loan: Save $90 per trade
+- Break-even: ~550 trades to recover higher deployment cost
+
+---
+
 ## Deployment Process
 
 ### Step 1: Run Deployment Script

@@ -558,3 +558,9 @@ export function parseGasEstimate(value: string | number | bigint | undefined): b
 // =============================================================================
 
 export * from './test-support';
+
+// =============================================================================
+// Canonical Chain Identifiers (Interface Analysis Fix #4)
+// =============================================================================
+
+export * from './chains';

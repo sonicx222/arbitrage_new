@@ -38,6 +38,7 @@ import { BALANCER_V2_VAULTS } from '@arbitrage/config';
 import { APPROVED_ROUTERS } from '../deployments/addresses';
 import {
   normalizeNetworkName,
+  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
   checkDeployerBalance,
   estimateDeploymentCost,
   validateMinimumProfit,
@@ -46,6 +47,7 @@ import {
   smokeTestFlashLoanContract,
   saveDeploymentResult,
   printDeploymentSummary,
+  getMinimumProfitForProtocol,  // P2-003 FIX: Import centralized profit policy
   DEFAULT_VERIFICATION_RETRIES,
   DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type BalancerDeploymentResult,
@@ -68,25 +70,17 @@ const BALANCER_V2_VAULT_ADDRESSES = BALANCER_V2_VAULTS;
 const DEFAULT_APPROVED_ROUTERS = APPROVED_ROUTERS;
 
 /**
- * Default minimum profit settings by chain (in native token wei)
- * Balancer V2 charges 0% fees, so profit threshold can be lower
+ * P2-003 FIX: Minimum profit thresholds now imported from deployment-utils.ts
+ * (centralized policy shared across all deployment scripts)
  *
- * MAINNET: Must be defined with positive values to prevent unprofitable trades
- * TESTNET: Low thresholds for testing
+ * For Balancer V2 deployments (0% flash loan fee), we use getMinimumProfitForProtocol()
+ * which applies a 30% discount to the base threshold, reflecting the cost savings.
  *
- * Phase 4A: Now enforced by validateMinimumProfit() - mainnet deployments
- * without proper thresholds will fail with clear error messages
+ * Example: Ethereum base threshold is 0.005 ETH, Balancer gets 0.0035 ETH (30% lower)
+ *
+ * @see lib/deployment-utils.ts - DEFAULT_MINIMUM_PROFIT for policy details
+ * @see lib/deployment-utils.ts - getMinimumProfitForProtocol() for fee adjustments
  */
-const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
-  // Mainnets - set conservative thresholds to prevent unprofitable trades
-  // Lower than Aave V3 thresholds since Balancer has 0% fees
-  ethereum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  polygon: ethers.parseEther('0.5'), // 0.5 MATIC (~$0.50 at $1/MATIC)
-  arbitrum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  optimism: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  base: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  fantom: ethers.parseEther('1'), // 1 FTM (~$0.50 at $0.50/FTM)
-};
 
 // =============================================================================
 // Types
@@ -119,8 +113,8 @@ async function deployBalancerV2FlashArbitrage(
 
   // Phase 4A: Network name normalization
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   console.log('\n========================================');
   console.log('BalancerV2FlashArbitrage Deployment');
@@ -167,7 +161,7 @@ async function deployBalancerV2FlashArbitrage(
   console.log('\nConfiguring contract...');
 
   // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
-  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const rawMinimumProfit = config.minimumProfit ?? getMinimumProfitForProtocol(networkName, 'balancer');
   const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
 
   if (minimumProfit > 0n) {
@@ -208,7 +202,8 @@ async function deployBalancerV2FlashArbitrage(
   }
 
   // Phase 4A: Smoke test - verify contract is callable
-  await smokeTestFlashLoanContract(balancerV2FlashArbitrage, ownerAddress);
+  // P2-010 FIX: Pass contract address for bytecode verification
+  await smokeTestFlashLoanContract(balancerV2FlashArbitrage, ownerAddress, contractAddress);
 
   return {
     network: networkName,
@@ -232,7 +227,7 @@ async function deployBalancerV2FlashArbitrage(
  * Kept as wrapper for backward compatibility
  */
 async function saveBalancerDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'balancer-registry.json');
+  await saveDeploymentResult(result, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
 }
 
 // =============================================================================
@@ -258,10 +253,11 @@ async function main(): Promise<void> {
   console.log(`\nStarting BalancerV2FlashArbitrage deployment to ${networkName}...`);
 
   // Deploy with Phase 4A improvements
+  // P2-003 FIX: Use centralized profit policy with Balancer's 30% discount (0% fees)
   const result = await deployBalancerV2FlashArbitrage({
     vaultAddress,
     approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
-    minimumProfit: DEFAULT_MINIMUM_PROFIT[networkName],
+    minimumProfit: getMinimumProfitForProtocol(networkName, 'balancer'),
   });
 
   // Save and print summary

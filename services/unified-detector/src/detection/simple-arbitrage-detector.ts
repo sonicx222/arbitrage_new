@@ -230,13 +230,11 @@ export class SimpleArbitrageDetector {
   /**
    * Check if token order is reversed between two pairs.
    */
+  // HOT-PATH OPT (Perf-4): PairSnapshot tokens are already lowercase (normalized
+  // in chain-instance.ts initializePairs and carried through SnapshotManager).
+  // Skip redundant toLowerCase() calls on every comparison.
   private isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    const token1_0 = pair1.token0.toLowerCase();
-    const token1_1 = pair1.token1.toLowerCase();
-    const token2_0 = pair2.token0.toLowerCase();
-    const token2_1 = pair2.token1.toLowerCase();
-
-    return token1_0 === token2_1 && token1_1 === token2_0;
+    return pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0;
   }
 
   /**

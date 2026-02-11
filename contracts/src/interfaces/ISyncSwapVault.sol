@@ -12,12 +12,21 @@ pragma solidity ^0.8.19;
  *
  * ## Flash Loan Fee
  * - 0.3% (30 basis points)
- * - Fee is calculated as: `(amount * 0.003)` or `(amount * flashLoanFeePercentage()) / 1e18`
+ * - Fee is calculated as: `fee = (amount * flashLoanFeePercentage()) / 1e18`
+ *   - Example: 1000 ETH loan → fee = (1000 * 3e15) / 1e18 = 3 ETH
  * - Fee percentage stored with 18 decimals: `flashLoanFeePercentage()` returns 3e15 (0.3%)
  *
- * **Repayment**: Borrower must repay `amount + fee`
- * **Vault Verification**: After the loan, vault verifies that its balance increased by at least `fee`
- *   (this is the "surplus" - the net profit after lending `amount` and receiving `amount + fee`)
+ * **Repayment**: Borrower must repay `amount + fee` (e.g., 1003 ETH for 1000 ETH loan)
+ *
+ * **Vault Verification Process**:
+ * 1. Vault records balance before loan: `balanceBefore`
+ * 2. Vault transfers `amount` to borrower
+ * 3. Borrower executes trades and repays `amount + fee`
+ * 4. Vault checks: `balanceAfter - balanceBefore >= fee`
+ * 5. The difference (`balanceAfter - balanceBefore`) is the vault's profit
+ *
+ * **Important**: Fee is calculated ON THE LOAN AMOUNT, not on vault profit.
+ * The vault profit happens to equal the fee when borrower repays correctly.
  *
  * ## Callback Interfaces
  * SyncSwap supports two callback interfaces:
@@ -117,11 +126,20 @@ interface ISyncSwapVault {
      * - Receiver must implement IERC3156FlashBorrower
      * - Receiver must return correct hash from onFlashLoan()
      * - Receiver must approve Vault to transfer `amount + fee`
+     *
+     * @custom:gas Typical Gas Costs
+     * - Base flash loan overhead: ~55,000 gas (includes EIP-3156 validation)
+     * - Fee calculation: ~3,000 gas (calls flashFee())
+     * - Callback execution: Variable (depends on arbitrage complexity)
+     * - Single-asset flash loan: ~350,000-550,000 gas total
+     * - **Recommendation**: Budget 550,000 gas for single-asset arbitrage on zkSync Era
+     * - **Note**: zkSync Era has different gas model - these are L2 gas estimates only
+     * - **zkSync**: Add L1 gas costs for data availability (~30,000-50,000 gas equivalent)
      */
     function flashLoan(
         IERC3156FlashBorrower receiver,
         address token,
-        uint amount,
+        uint256 amount,
         bytes memory userData
     ) external returns (bool);
 
@@ -137,7 +155,7 @@ interface ISyncSwapVault {
      * - flashLoanFeePercentage() = 3000000000000000 (3e15)
      * - Represents 0.3% fee (30 basis points)
      */
-    function flashLoanFeePercentage() external view returns (uint);
+    function flashLoanFeePercentage() external view returns (uint256);
 
     // =========================================================================
     // Helper Functions

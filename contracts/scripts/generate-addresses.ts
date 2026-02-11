@@ -5,23 +5,28 @@
  * eliminating manual address updates and preventing human error.
  *
  * **Usage**:
+ *   npx ts-node contracts/scripts/generate-addresses.ts
+ *   # Or add to package.json:
  *   npm run generate:addresses
- *   # Or automatically after deployment:
- *   npm run deploy:all
  *
- * **Phase 1 Implementation**: Skeleton for future development
- * **Status**: 🚧 NOT YET FUNCTIONAL - Foundation only
+ * **Status**: PARTIAL - Core pipeline works (load → extract → generate → write)
+ * but lacks production safeguards (see TODOs below).
  *
- * **TODO** (Issue 2.1):
- * 1. Implement registry.json parsing
- * 2. Extract addresses by contract type
- * 3. Generate TypeScript output
- * 4. Preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
- * 5. Add validation
- * 6. Integrate with build process
+ * **Limitations**:
+ * - No address format validation (accepts any string)
+ * - No atomic writes (crash during write corrupts file)
+ * - Generated code does not preserve manual sections (APPROVED_ROUTERS, TOKEN_ADDRESSES)
+ * - No helper functions generated (hasDeployed*, get*, etc.)
+ * - Only reads from registry.json; contract-specific registries (balancer-registry.json, etc.) are ignored
+ *
+ * **Recommended Next Steps**:
+ * 1. Test the script: npx tsx contracts/scripts/generate-addresses.ts
+ * 2. Add address format validation (0x + 40 hex chars)
+ * 3. Merge all contract-specific registries before extraction
+ * 4. Add npm script: "generate:addresses": "tsx contracts/scripts/generate-addresses.ts"
+ * 5. Add atomic file writes (temp + rename)
  *
  * @see contracts/deployments/README.md - Auto-Generation Plan section
- * @see DEEP_DIVE_ANALYSIS_FINDINGS.md - Issue 2.1, 9.1
  */
 
 import * as fs from 'fs';
@@ -264,12 +269,32 @@ function writeGeneratedFile(code: string): void {
  * @param addresses - Addresses to validate
  */
 function validateAddresses(addresses: AddressesByType): void {
-  // TODO: Implement
   console.log('✓ Validating generated addresses...');
 
+  const addressRegex = /^0x[0-9a-fA-F]{40}$/;
+  const zeroAddress = '0x0000000000000000000000000000000000000000';
   let totalAddresses = 0;
-  for (const networks of Object.values(addresses)) {
-    totalAddresses += Object.keys(networks).length;
+  const issues: string[] = [];
+
+  for (const [contractType, networks] of Object.entries(addresses)) {
+    for (const [network, address] of Object.entries(networks)) {
+      totalAddresses++;
+
+      if (!addressRegex.test(address)) {
+        issues.push(`  ❌ ${contractType}.${network}: Invalid format: ${address}`);
+      } else if (address === zeroAddress) {
+        issues.push(`  ❌ ${contractType}.${network}: Zero address (placeholder)`);
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    console.error('\n❌ Address validation failed:\n');
+    issues.forEach((issue) => console.error(issue));
+    throw new Error(
+      `[ERR_INVALID_ADDRESSES] ${issues.length} invalid address(es) found in registry. ` +
+      `Fix the registry entries and try again.`
+    );
   }
 
   console.log(`  ✅ ${totalAddresses} total address(es) validated`);
@@ -282,16 +307,16 @@ function validateAddresses(addresses: AddressesByType): void {
 /**
  * Generate addresses.ts from registry.json
  *
- * **Current Status**: Skeleton implementation
- * **Next Steps**: Implement TODOs above
+ * **Current Status**: Core pipeline functional, missing production safeguards
+ * **Next Steps**: Address validation, atomic writes, multi-registry merge
  */
 async function main(): Promise<void> {
   console.log('\n========================================');
   console.log('Generate addresses.ts from registry.json');
   console.log('========================================\n');
 
-  console.log('⚠️  NOTE: This is a skeleton implementation');
-  console.log('   See TODOs in script for full implementation\n');
+  console.log('⚠️  NOTE: Core pipeline works but lacks production safeguards');
+  console.log('   See TODOs in script for remaining work\n');
 
   try {
     // Step 1: Load registry

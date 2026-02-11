@@ -18,12 +18,14 @@ import {
 // Test Fixtures
 // =============================================================================
 
+// HOT-PATH OPT (Perf-3): Addresses are pre-normalized to lowercase at pair creation
+// time in chain-instance.ts. Test fixtures reflect production behavior.
 function createMockPair(overrides?: Partial<ExtendedPair>): ExtendedPair {
   return {
     address: '0xpair1',
     dex: 'uniswap',
-    token0: '0xToken0',
-    token1: '0xToken1',
+    token0: '0xtoken0',
+    token1: '0xtoken1',
     reserve0: '1000000000000000000000', // 1000 tokens
     reserve1: '2000000000000000000000', // 2000 tokens
     fee: 0.003,
@@ -68,10 +70,10 @@ describe('SnapshotManager', () => {
       const snapshot = manager.createPairSnapshot(pair);
 
       expect(snapshot).not.toBeNull();
-      expect(snapshot!.address).toBe(pair.address.toLowerCase());
+      expect(snapshot!.address).toBe(pair.address);
       expect(snapshot!.dex).toBe(pair.dex);
-      expect(snapshot!.token0).toBe(pair.token0.toLowerCase());
-      expect(snapshot!.token1).toBe(pair.token1.toLowerCase());
+      expect(snapshot!.token0).toBe(pair.token0);
+      expect(snapshot!.token1).toBe(pair.token1);
       expect(snapshot!.reserve0).toBe(pair.reserve0);
       expect(snapshot!.reserve1).toBe(pair.reserve1);
       expect(snapshot!.blockNumber).toBe(pair.blockNumber);
@@ -145,22 +147,22 @@ describe('SnapshotManager', () => {
   describe('createPairsSnapshot (batch with caching)', () => {
     it('should create snapshots for all valid pairs', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
-      pairs.set('pair2', createMockPair({ address: '0xPair2' }));
-      pairs.set('pair3', createMockPair({ address: '0xPair3' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
+      pairs.set('pair2', createMockPair({ address: '0xpair2' }));
+      pairs.set('pair3', createMockPair({ address: '0xpair3' }));
 
       const snapshots = manager.createPairsSnapshot(pairs);
 
       expect(snapshots.size).toBe(3);
-      expect(snapshots.has('0xpair1')).toBe(true); // Lowercased
+      expect(snapshots.has('0xpair1')).toBe(true);
       expect(snapshots.has('0xpair2')).toBe(true);
       expect(snapshots.has('0xpair3')).toBe(true);
     });
 
     it('should filter out invalid pairs', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('valid', createMockPair({ address: '0xValid' }));
-      pairs.set('invalid', createMockPair({ address: '0xInvalid', reserve0: '0' }));
+      pairs.set('valid', createMockPair({ address: '0xvalid' }));
+      pairs.set('invalid', createMockPair({ address: '0xinvalid', reserve0: '0' }));
 
       const snapshots = manager.createPairsSnapshot(pairs);
 
@@ -171,7 +173,7 @@ describe('SnapshotManager', () => {
 
     it('should return cached result within TTL', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const first = manager.createPairsSnapshot(pairs);
       const second = manager.createPairsSnapshot(pairs);
@@ -183,7 +185,7 @@ describe('SnapshotManager', () => {
       const shortTtlManager = createSnapshotManager({ cacheTtlMs: 10 });
 
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const first = shortTtlManager.createPairsSnapshot(pairs);
 
@@ -199,7 +201,7 @@ describe('SnapshotManager', () => {
 
     it('should force refresh when forceRefresh is true', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const first = manager.createPairsSnapshot(pairs);
       const second = manager.createPairsSnapshot(pairs, true); // Force refresh
@@ -215,7 +217,7 @@ describe('SnapshotManager', () => {
   describe('Cache Invalidation', () => {
     it('should invalidate cache', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const first = manager.createPairsSnapshot(pairs);
       manager.invalidateCache();
@@ -234,7 +236,7 @@ describe('SnapshotManager', () => {
 
     it('should clear all caches on clear()', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       manager.createPairsSnapshot(pairs);
       manager.clear();
@@ -252,10 +254,10 @@ describe('SnapshotManager', () => {
     it('should convert snapshots to DexPool format', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({
-        address: '0xPair1',
+        address: '0xpair1',
         dex: 'uniswap',
-        token0: '0xToken0',
-        token1: '0xToken1',
+        token0: '0xtoken0',
+        token1: '0xtoken1',
         fee: 0.003,
       }));
 
@@ -271,7 +273,7 @@ describe('SnapshotManager', () => {
 
     it('should use version-based caching for pools', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const snapshots = manager.createPairsSnapshot(pairs);
       const pools1 = manager.getDexPools(snapshots);
@@ -282,7 +284,7 @@ describe('SnapshotManager', () => {
 
     it('should recalculate pools when version changes', () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       const snapshots1 = manager.createPairsSnapshot(pairs);
       const pools1 = manager.getDexPools(snapshots1);
@@ -298,7 +300,7 @@ describe('SnapshotManager', () => {
     it('should calculate price from reserves', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({
-        address: '0xPair1',
+        address: '0xpair1',
         reserve0: '1000000000000000000', // 1 token0
         reserve1: '2000000000000000000', // 2 token1
       }));
@@ -313,7 +315,7 @@ describe('SnapshotManager', () => {
     it('should calculate liquidity from reserves', () => {
       const pairs = new Map<string, ExtendedPair>();
       pairs.set('pair1', createMockPair({
-        address: '0xPair1',
+        address: '0xpair1',
         reserve0: '1000000000000000000', // 1 token0
         reserve1: '2000000000000000000', // 2 token1
       }));
@@ -358,18 +360,20 @@ describe('SnapshotManager', () => {
       expect(snapshot).not.toBeNull();
     });
 
-    it('should lowercase all addresses', () => {
+    it('should pass through pre-normalized addresses as-is', () => {
+      // HOT-PATH OPT (Perf-3): Addresses are pre-normalized at pair creation time.
+      // createPairSnapshot no longer lowercases defensively for hot-path performance.
       const pair = createMockPair({
-        address: '0xABCDEF',
-        token0: '0xToken0UPPER',
-        token1: '0xTOKEN1UPPER',
+        address: '0xabcdef',
+        token0: '0xtoken0addr',
+        token1: '0xtoken1addr',
       });
 
       const snapshot = manager.createPairSnapshot(pair);
 
       expect(snapshot!.address).toBe('0xabcdef');
-      expect(snapshot!.token0).toBe('0xtoken0upper');
-      expect(snapshot!.token1).toBe('0xtoken1upper');
+      expect(snapshot!.token0).toBe('0xtoken0addr');
+      expect(snapshot!.token1).toBe('0xtoken1addr');
     });
   });
 
@@ -381,7 +385,7 @@ describe('SnapshotManager', () => {
     it('should handle concurrent createPairsSnapshot calls', async () => {
       const pairs = new Map<string, ExtendedPair>();
       for (let i = 0; i < 100; i++) {
-        pairs.set(`pair${i}`, createMockPair({ address: `0xPair${i}` }));
+        pairs.set(`pair${i}`, createMockPair({ address: `0xpair${i}` }));
       }
 
       // Multiple concurrent calls
@@ -399,7 +403,7 @@ describe('SnapshotManager', () => {
 
     it('should handle concurrent invalidation and snapshot creation', async () => {
       const pairs = new Map<string, ExtendedPair>();
-      pairs.set('pair1', createMockPair({ address: '0xPair1' }));
+      pairs.set('pair1', createMockPair({ address: '0xpair1' }));
 
       // Interleaved operations
       const operations = [];

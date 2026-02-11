@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "../libraries/SwapHelpers.sol";
+import "../interfaces/IDexRouter.sol";
 
 /**
  * @title BaseFlashArbitrage
@@ -243,6 +244,117 @@ abstract contract BaseFlashArbitrage is
         if (currentToken != startAsset) revert InvalidSwapPath();
 
         return currentAmount;
+    }
+
+    // ==========================================================================
+    // Internal Functions - Swap Simulation (View)
+    // ==========================================================================
+
+    /**
+     * @notice Simulates multi-hop swaps to estimate final output amount
+     * @dev Shared logic for calculateExpectedProfit() across all protocol contracts.
+     *      Uses DEX router getAmountsOut() to simulate each hop without executing.
+     *
+     *      Returns 0 on any failure (invalid path, cycle, router error) so callers
+     *      can return (0, flashLoanFee) as appropriate.
+     *
+     *      Includes cycle detection: if an intermediate token appears twice before
+     *      the final step, the path is rejected as inefficient. O(n^2) but bounded
+     *      by MAX_SWAP_HOPS=5 (max 15 comparisons).
+     *
+     * @param asset The starting/ending asset (must form a cycle)
+     * @param amount The starting amount
+     * @param swapPath Array of swap steps defining the path
+     * @return finalAmount The simulated output amount, or 0 if path is invalid
+     */
+    function _simulateSwapPath(
+        address asset,
+        uint256 amount,
+        SwapStep[] calldata swapPath
+    ) internal view returns (uint256 finalAmount) {
+        uint256 pathLength = swapPath.length;
+
+        // Early validation
+        if (pathLength == 0 || swapPath[0].tokenIn != asset) {
+            return 0;
+        }
+
+        uint256 currentAmount = amount;
+        address currentToken = asset;
+
+        // Gas optimization: Pre-allocate path array once, reuse across iterations
+        address[] memory path = new address[](2);
+
+        // Track visited tokens to detect inefficient cycles
+        address[] memory visitedTokens = new address[](pathLength + 1);
+        visitedTokens[0] = asset;
+        uint256 visitedCount = 1;
+
+        for (uint256 i = 0; i < pathLength;) {
+            SwapStep calldata step = swapPath[i];
+
+            // Validate token continuity
+            if (step.tokenIn != currentToken) {
+                return 0;
+            }
+
+            // Cycle detection: reject if token seen before (except final step
+            // returning to start asset, which is the desired behavior)
+            if (i < pathLength - 1) {
+                for (uint256 j = 0; j < visitedCount;) {
+                    if (visitedTokens[j] == step.tokenOut) {
+                        return 0;
+                    }
+                    unchecked { ++j; }
+                }
+            }
+
+            visitedTokens[visitedCount] = step.tokenOut;
+            unchecked { ++visitedCount; }
+
+            // Simulate swap via router's view function
+            path[0] = step.tokenIn;
+            path[1] = step.tokenOut;
+
+            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
+                uint256[] memory amounts
+            ) {
+                currentAmount = amounts[amounts.length - 1];
+                currentToken = step.tokenOut;
+            } catch {
+                return 0;
+            }
+
+            unchecked { ++i; }
+        }
+
+        // Verify cycle completed (must end with start asset for flash loan repayment)
+        if (currentToken != asset) {
+            return 0;
+        }
+
+        return currentAmount;
+    }
+
+    /**
+     * @notice Calculates profit from simulated output and flash loan fee
+     * @dev Common profit calculation used by all protocol-specific calculateExpectedProfit()
+     *
+     * @param amount Original flash loan amount
+     * @param simulatedOutput Output from _simulateSwapPath()
+     * @param flashLoanFee Protocol-specific flash loan fee
+     * @return expectedProfit Net profit after repayment + fees, or 0 if unprofitable
+     */
+    function _calculateProfit(
+        uint256 amount,
+        uint256 simulatedOutput,
+        uint256 flashLoanFee
+    ) internal pure returns (uint256 expectedProfit) {
+        uint256 amountOwed = amount + flashLoanFee;
+        if (simulatedOutput > amountOwed) {
+            return simulatedOutput - amountOwed;
+        }
+        return 0;
     }
 
     // ==========================================================================

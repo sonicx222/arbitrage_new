@@ -5,7 +5,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/IFlashLoanReceiver.sol";
-import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at line 295
+import "./interfaces/IFlashLoanErrors.sol";
+import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
  * @title FlashLoanArbitrage
@@ -62,7 +63,8 @@ import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at
  */
 contract FlashLoanArbitrage is
     BaseFlashArbitrage,
-    IFlashLoanSimpleReceiver
+    IFlashLoanSimpleReceiver,
+    IFlashLoanErrors
 {
     using SafeERC20 for IERC20;
 
@@ -80,13 +82,8 @@ contract FlashLoanArbitrage is
     /// @notice The Aave V3 Pool address for flash loans
     IPool public immutable POOL;
 
-    // ==========================================================================
-    // Errors (Protocol-Specific)
-    // ==========================================================================
-
-    error InvalidPoolAddress();
-    error InvalidFlashLoanInitiator();
-    error InvalidFlashLoanCaller();
+    // Errors: InvalidProtocolAddress, InvalidFlashLoanCaller, InvalidFlashLoanInitiator
+    // inherited from IFlashLoanErrors
 
     // ==========================================================================
     // Constructor
@@ -98,11 +95,11 @@ contract FlashLoanArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _pool, address _owner) BaseFlashArbitrage(_owner) {
-        if (_pool == address(0)) revert InvalidPoolAddress();
+        if (_pool == address(0)) revert InvalidProtocolAddress();
 
         // Verify pool is a contract (has code deployed)
         // Protection against typos or EOA addresses during deployment
-        if (_pool.code.length == 0) revert InvalidPoolAddress();
+        if (_pool.code.length == 0) revert InvalidProtocolAddress();
 
         POOL = IPool(_pool);
     }
@@ -188,9 +185,9 @@ contract FlashLoanArbitrage is
         // Update profit tracking
         totalProfits += profit;
 
-        // Approve the Pool to pull the owed amount
-        // Fix 9.1: Use forceApprove instead of safeIncreaseAllowance to prevent
-        // allowance accumulation and handle tokens that revert on non-zero to non-zero approval
+        // Repayment: PULL pattern - Aave Pool pulls tokens via transferFrom after callback
+        // Use forceApprove (not safeIncreaseAllowance) to prevent allowance accumulation
+        // and handle tokens that revert on non-zero to non-zero approval
         IERC20(asset).forceApprove(address(POOL), amountOwed);
 
         emit ArbitrageExecuted(asset, amount, profit, block.timestamp);
@@ -207,117 +204,31 @@ contract FlashLoanArbitrage is
 
     /**
      * @notice Calculates the expected profit for an arbitrage opportunity
-     * @dev This is a simulation that doesn't execute the actual swaps
-     *
-     * Fix 10.4: Performance optimization note - This function makes sequential
-     * external calls to getAmountsOut() for each swap step. For competitive
-     * speed in MEV environments, consider these alternatives:
-     *
-     * 1. Cache quotes off-chain: Call this function only for final verification,
-     *    use off-chain quote aggregation for initial screening.
-     *
-     * 2. Multicall pattern: If the caller can batch read calls, combine this
-     *    with other view functions to reduce round trips.
-     *
-     * 3. Custom quoter: Deploy a quoter contract that batches getAmountsOut()
-     *    calls internally using DELEGATECALL.
-     *
-     * Current implementation prioritizes correctness and gas efficiency over
-     * latency. The sequential approach is safer for production use.
-     *
-     * Note: This view function does NOT validate amount > 0 or check deadlines
-     * since those are execution-time validations. Callers should validate inputs
-     * before calling executeArbitrage().
+     * @dev Simulates swaps via DEX router getAmountsOut() without executing.
+     *      Uses shared _simulateSwapPath() from BaseFlashArbitrage for path
+     *      validation, cycle detection, and swap simulation.
      *
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan (caller should ensure > 0)
      * @param swapPath Array of swap steps
      * @return expectedProfit The expected profit after all fees
-     * @return flashLoanFee The flash loan fee
+     * @return flashLoanFee The Aave V3 flash loan fee (0.09%)
      */
     function calculateExpectedProfit(
         address asset,
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // Calculate flash loan fee (0.09% for Aave V3)
+        // Aave V3 fee: (amount * premiumBps) / 10000
         uint128 premiumBps = POOL.FLASHLOAN_PREMIUM_TOTAL();
         flashLoanFee = (amount * premiumBps) / BPS_DENOMINATOR;
 
-        // Fix 4.3: Early validation - swapPath must start with the flash-loaned asset
-        uint256 pathLength = swapPath.length;
-        if (pathLength == 0 || swapPath[0].tokenIn != asset) {
+        uint256 simulatedOutput = _simulateSwapPath(asset, amount, swapPath);
+        if (simulatedOutput == 0) {
             return (0, flashLoanFee);
         }
 
-        // Simulate swaps to get expected output
-        uint256 currentAmount = amount;
-        address currentToken = asset;
-
-        // Gas optimization: Pre-allocate path array once, reuse across iterations
-        // Saves ~200 gas per swap step by avoiding repeated memory allocation
-        // (Same pattern as _executeSwaps)
-        address[] memory path = new address[](2);
-
-        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
-        // Pre-allocate array for visited tokens (max size = pathLength + 1 for start asset)
-        address[] memory visitedTokens = new address[](pathLength + 1);
-        visitedTokens[0] = asset; // Start asset
-        uint256 visitedCount = 1;
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = swapPath[i];
-
-            if (step.tokenIn != currentToken) {
-                return (0, flashLoanFee); // Invalid path
-            }
-
-            // Check for cycle: token appears twice before final step
-            // Allow final step to return to start asset (that's the goal)
-            // Cycle detection: O(n²) complexity for path validation
-            // Acceptable for MAX_SWAP_HOPS=5 (max 15 comparisons)
-            // Alternative would be mapping (not possible in view functions)
-            if (i < pathLength - 1) {
-                for (uint256 j = 0; j < visitedCount; j++) {
-                    if (visitedTokens[j] == step.tokenOut) {
-                        return (0, flashLoanFee); // Cycle detected - inefficient path
-                    }
-                }
-            }
-
-            // Track this token as visited
-            visitedTokens[visitedCount] = step.tokenOut;
-            unchecked { ++visitedCount; }
-
-            // Reuse pre-allocated path array
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
-                uint256[] memory amounts
-            ) {
-                currentAmount = amounts[amounts.length - 1];
-                currentToken = step.tokenOut;
-            } catch {
-                return (0, flashLoanFee); // Router call failed
-            }
-
-            unchecked { ++i; }
-        }
-
-        // Check if we end with the correct asset
-        if (currentToken != asset) {
-            return (0, flashLoanFee);
-        }
-
-        // Calculate profit
-        uint256 amountOwed = amount + flashLoanFee;
-        if (currentAmount > amountOwed) {
-            expectedProfit = currentAmount - amountOwed;
-        } else {
-            expectedProfit = 0;
-        }
-
+        expectedProfit = _calculateProfit(amount, simulatedOutput, flashLoanFee);
         return (expectedProfit, flashLoanFee);
     }
 }

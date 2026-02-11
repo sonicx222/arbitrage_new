@@ -1616,9 +1616,18 @@ export class CrossChainStrategy extends BaseExecutionStrategy {
         // Prepare and execute sell transaction
         const sellTx = await this.prepareDexSwapTransaction(sellOpportunity, state.destChain, ctx);
 
+        const feeData = await destProvider.getFeeData();
+        const gasOverrides: Record<string, bigint> = {};
+        if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
+          gasOverrides.maxFeePerGas = feeData.maxFeePerGas;
+          gasOverrides.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+        } else if (feeData.gasPrice != null) {
+          gasOverrides.gasPrice = feeData.gasPrice;
+        }
+
         const signedTx = await destWallet.sendTransaction({
           ...sellTx,
-          gasPrice: await destProvider.getFeeData().then(fd => fd.gasPrice),
+          ...gasOverrides,
         });
 
         const receipt = await signedTx.wait();

@@ -5,14 +5,20 @@
  * updates needed for service-config.ts and addresses.ts.
  *
  * Usage:
- *   npx ts-node scripts/update-balancer-config.ts
+ *   npx ts-node scripts/update-balancer-config.ts              # Print config snippets
+ *   npx ts-node scripts/update-balancer-config.ts --write      # Auto-update addresses.ts
  *
  * Output:
  *   Prints configuration snippets that can be copy-pasted into config files
+ *
+ * P2-009 FIX: Added --write flag to auto-update contracts/deployments/addresses.ts
+ * Note: service-config.ts and execution-engine config still require manual updates
+ * due to complex TypeScript AST manipulation requirements.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { normalizeNetworkName } from './lib/deployment-utils'; // P1-004 FIX: Import normalization
 
 // =============================================================================
 // Types
@@ -71,7 +77,9 @@ function generateFlashLoanProvidersConfig(
   lines.push('// =============================================================================\n');
 
   for (const [network, deployment] of Object.entries(deployments).sort()) {
-    lines.push(`  ${network}: {`);
+    // P1-004 FIX: Normalize network name for consistent lookups
+    const normalizedNetwork = normalizeNetworkName(network);
+    lines.push(`  ${normalizedNetwork}: {`);
     lines.push(`    address: '${deployment.vaultAddress}',  // Balancer V2 Vault`);
     lines.push(`    protocol: 'balancer_v2',`);
     lines.push(`    fee: 0  // 0% flash loan fee (saves 0.09% vs Aave V3)`);
@@ -98,7 +106,8 @@ function generateContractAddressesConfig(
 
   lines.push('contractAddresses: {');
   for (const [network, deployment] of Object.entries(deployments).sort()) {
-    lines.push(`  ${network}: '${deployment.contractAddress}',  // BalancerV2FlashArbitrage`);
+      const normalizedNetwork = normalizeNetworkName(network);
+    lines.push(`  ${normalizedNetwork}: '${deployment.contractAddress}',  // BalancerV2FlashArbitrage`);
   }
   lines.push('},');
 
@@ -121,7 +130,8 @@ function generateApprovedRoutersConfig(
 
   lines.push('approvedRouters: {');
   for (const [network, deployment] of Object.entries(deployments).sort()) {
-    lines.push(`  ${network}: [`);
+    const normalizedNetwork = normalizeNetworkName(network);
+    lines.push(`  ${normalizedNetwork}: [`);
     for (const router of deployment.approvedRouters) {
       lines.push(`    '${router}',`);
     }
@@ -191,12 +201,63 @@ function generateEnvTemplate(deployments: Record<string, DeploymentResult>): str
   return lines.join('\n');
 }
 
+/**
+ * P2-009 FIX: Auto-update contracts/deployments/addresses.ts with deployed addresses
+ */
+function autoUpdateAddressesFile(deployments: Record<string, DeploymentResult>): void {
+  const addressesPath = path.join(__dirname, '..', 'deployments', 'addresses.ts');
+
+  if (!fs.existsSync(addressesPath)) {
+    console.error(`❌ [ERR_FILE_NOT_FOUND] addresses.ts not found at: ${addressesPath}`);
+    return;
+  }
+
+  let content = fs.readFileSync(addressesPath, 'utf8');
+  let modified = false;
+
+  // Update BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES constant
+  const addressesRegex = /export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES:\s*Record<string,\s*string>\s*=\s*\{[^}]*\}/s;
+
+  if (addressesRegex.test(content)) {
+    // Build new addresses object
+    const addressesEntries = Object.entries(deployments)
+      .sort()
+      .map(([network, deployment]) => {
+        const normalizedNetwork = normalizeNetworkName(network);
+        return `  ${normalizedNetwork}: '${deployment.contractAddress}', // BalancerV2FlashArbitrage (deployed ${new Date(deployment.timestamp * 1000).toISOString().split('T')[0]})`;
+      })
+      .join('\n');
+
+    const newAddressesBlock = `export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {\n${addressesEntries}\n}`;
+
+    content = content.replace(addressesRegex, newAddressesBlock);
+    modified = true;
+  } else {
+    console.warn('⚠️  Warning: BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES constant not found in addresses.ts');
+    console.warn('   Manual update required');
+  }
+
+  if (modified) {
+    // Write updated content back to file
+    fs.writeFileSync(addressesPath, content, 'utf8');
+    console.log(`✅ Updated: contracts/deployments/addresses.ts`);
+    console.log(`   Updated BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES with ${Object.keys(deployments).length} networks\n`);
+  }
+}
+
 // =============================================================================
 // Main Entry Point
 // =============================================================================
 
 function main(): void {
+  // P2-009 FIX: Check for --write flag
+  const shouldAutoUpdate = process.argv.includes('--write');
+
   console.log('\n🔧 Balancer V2 Configuration Update Helper\n');
+
+  if (shouldAutoUpdate) {
+    console.log('🔒 Auto-update mode enabled (--write flag detected)\n');
+  }
 
   // Load deployments
   const deployments = loadDeploymentRegistry();
@@ -206,6 +267,15 @@ function main(): void {
     console.log('\nDeploy contracts first:');
     console.log('  npx hardhat run scripts/deploy-balancer.ts --network ethereum');
     process.exit(1);
+  }
+
+  // P2-009 FIX: Auto-update addresses.ts if --write flag is present
+  if (shouldAutoUpdate) {
+    console.log('═'.repeat(75));
+    console.log('AUTO-UPDATE: contracts/deployments/addresses.ts');
+    console.log('═'.repeat(75));
+    console.log();
+    autoUpdateAddressesFile(deployments);
   }
 
   // Print summary
@@ -239,11 +309,28 @@ function main(): void {
   console.log('═'.repeat(75));
   console.log('✅ NEXT STEPS');
   console.log('═'.repeat(75));
-  console.log('\n1. Copy the configuration snippets above into the respective files');
-  console.log('2. Restart services to load new configuration');
-  console.log('3. Run integration tests to verify deployment');
-  console.log('4. Monitor flash loan metrics for success rate and fee savings');
-  console.log('5. Update implementation plan document (Task 2.2 → Complete)');
+
+  if (shouldAutoUpdate) {
+    console.log('\n✅ addresses.ts has been auto-updated');
+    console.log('\n⚠️  Manual updates still required:');
+    console.log('1. Copy service-config.ts snippets above into shared/config/src/service-config.ts');
+    console.log('2. Copy FlashLoanStrategy config snippets into execution-engine config');
+    console.log('3. Restart services to load new configuration: npm run dev:stop && npm run dev:all');
+    console.log('4. Run integration tests to verify deployment');
+    console.log('5. Monitor flash loan metrics for success rate and fee savings');
+    console.log('6. Update implementation plan document (Task 2.2 → Complete)');
+  } else {
+    console.log('\n💡 TIP: Run with --write flag to auto-update addresses.ts:');
+    console.log('   npx ts-node scripts/update-balancer-config.ts --write\n');
+    console.log('📋 Manual steps required:');
+    console.log('1. Copy the configuration snippets above into the respective files');
+    console.log('2. Or run with --write to auto-update addresses.ts');
+    console.log('3. Restart services to load new configuration');
+    console.log('4. Run integration tests to verify deployment');
+    console.log('5. Monitor flash loan metrics for success rate and fee savings');
+    console.log('6. Update implementation plan document (Task 2.2 → Complete)');
+  }
+
   console.log('\n🎉 You\'ll save 0.09% on every flash loan with Balancer V2!\n');
 }
 

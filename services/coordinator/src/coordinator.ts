@@ -950,8 +950,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       status: health.status
     });
 
-    // FIX: Reset stream errors on successful processing
-    this.streamConsumerManager?.resetErrors();
+    // P2-5: Do not reset stream errors from health messages.
+    // Health messages arrive every 5-10s and would mask real stream errors,
+    // making the consecutive error threshold unreachable.
   }
 
   // P1-1 fix: Maximum opportunities to track (prevents unbounded memory growth)
@@ -1162,8 +1163,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       timestamp: Date.now()
     });
 
-    // FIX: Reset stream errors on successful processing
-    this.streamConsumerManager?.resetErrors();
+    // P2-5: Do not reset stream errors from whale alerts.
+    // Only the opportunity handler (primary data path) should reset errors.
   }
 
   // Track active pairs for volume monitoring (rolling window)
@@ -1215,8 +1216,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
     }
 
-    // FIX: Reset stream errors on successful processing
-    this.streamConsumerManager?.resetErrors();
+    // P2-5: Do not reset stream errors from swap events.
+    // Only the opportunity handler (primary data path) should reset errors.
   }
 
   /**
@@ -1255,7 +1256,6 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Skip detailed logging for empty windows (no swaps in this 5s period)
     if (swapCount === 0) {
-      this.streamConsumerManager?.resetErrors();
       return;
     }
 
@@ -1271,8 +1271,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       });
     }
 
-    // FIX: Reset stream errors on successful processing
-    this.streamConsumerManager?.resetErrors();
+    // P2-5: Do not reset stream errors from volume aggregates.
+    // Only the opportunity handler (primary data path) should reset errors.
   }
 
   /**
@@ -1307,8 +1307,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // P3-005 FIX: Track active pairs with size limit enforcement
     this.trackActivePair(pairKey, chain, dex);
 
-    // FIX: Reset stream errors on successful processing
-    this.streamConsumerManager?.resetErrors();
+    // P2-5: Do not reset stream errors from price updates.
+    // Only the opportunity handler (primary data path) should reset errors.
   }
 
   /**

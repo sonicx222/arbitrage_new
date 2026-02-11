@@ -27,8 +27,10 @@ import {
 
 /**
  * Testnet chain identifiers
+ *
+ * P1-006 FIX: Added 'baseSepolia' (referenced in deploy scripts but missing from type)
  */
-export type TestnetChain = 'sepolia' | 'arbitrumSepolia' | 'zksync-testnet' | 'zksync-sepolia';
+export type TestnetChain = 'sepolia' | 'arbitrumSepolia' | 'baseSepolia' | 'zksync-testnet' | 'zksync-sepolia';
 
 /**
  * EVM mainnet chain identifiers
@@ -78,10 +80,13 @@ export const MAINNET_CHAINS: readonly EVMMainnetChain[] = [
  * NOTE: Both 'zksync-testnet' and 'zksync-sepolia' are included as they're
  * aliases for the same network (zkSync Era Sepolia testnet). Different contexts
  * use different names (Hardhat config vs. block explorers).
+ *
+ * P1-006 FIX: Added 'baseSepolia' - Base Sepolia testnet (L2 testnet)
  */
 export const TESTNET_CHAINS: readonly TestnetChain[] = [
   'sepolia',
   'arbitrumSepolia',
+  'baseSepolia',  // P1-006 FIX: Base Sepolia testnet
   'zksync-testnet',
   'zksync-sepolia',  // Alias for zksync-testnet (zkSync Era Sepolia)
 ] as const;
@@ -160,16 +165,10 @@ export const AAVE_V3_POOL_ADDRESSES = AAVE_V3_POOLS;
  * 3. Manually copy address and uncomment/update the line below
  * 4. Commit updated file to version control
  *
- * **Future Enhancement**: Auto-generate this file from registry.json (TODO)
+ * **Future Enhancement**: Auto-generate this file from registry.json
  */
 export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
-  // Testnets - manually update after deployment
-  // sepolia: '0x...', // TODO: Deploy and update
-  // arbitrumSepolia: '0x...', // TODO: Deploy and update
-
-  // Mainnets - manually update after security audit and deployment
-  // ethereum: '0x...', // TODO: Deploy after audit
-  // arbitrum: '0x...', // TODO: Deploy after audit
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================
@@ -179,22 +178,13 @@ export const FLASH_LOAN_CONTRACT_ADDRESSES: Record<string, string> = {
 /**
  * MultiPathQuoter contract addresses by chain.
  *
- * This contract batches getAmountsOut() calls for multiple swap paths in a single RPC call,
+ * Batches getAmountsOut() calls for multiple swap paths in a single RPC call,
  * reducing latency from N sequential calls to 1 batched call.
  *
- * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
  * @see contracts/src/MultiPathQuoter.sol
  */
 export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
-  // Testnets - update after deployment
-  // sepolia: '0x...', // TODO: Deploy and update
-  // arbitrumSepolia: '0x...', // TODO: Deploy and update
-
-  // Mainnets - update after security audit and deployment
-  // ethereum: '0x...', // TODO: Deploy after audit
-  // arbitrum: '0x...', // TODO: Deploy after audit
-  // base: '0x...', // TODO: Deploy after audit
-  // optimism: '0x...', // TODO: Deploy after audit
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================
@@ -204,23 +194,14 @@ export const MULTI_PATH_QUOTER_ADDRESSES: Record<string, string> = {
 /**
  * PancakeSwapFlashArbitrage contract addresses by chain.
  *
- * This contract enables flash loans via PancakeSwap V3 pools on BSC and other chains.
- * Key advantage: Access to PancakeSwap's massive liquidity on BSC (larger than Aave V3).
+ * Flash loans via PancakeSwap V3 pools on BSC and other chains.
+ * Key advantage: Access to PancakeSwap's massive BSC liquidity (larger than Aave V3).
  *
- * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
- * Run `npx hardhat run scripts/deploy-pancakeswap.ts --network bsc` to deploy.
- *
+ * Deploy: `npx hardhat run scripts/deploy-pancakeswap.ts --network bsc`
  * @see contracts/src/PancakeSwapFlashArbitrage.sol
- * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 2.1
  */
 export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
-  // Mainnets - update after security audit and deployment
-  // bsc: '0x...', // TODO: Deploy after audit
-  // ethereum: '0x...', // TODO: Deploy after audit
-  // arbitrum: '0x...', // TODO: Deploy after audit
-  // base: '0x...', // TODO: Deploy after audit
-  // zksync: '0x...', // TODO: Deploy after audit
-  // linea: '0x...', // TODO: Deploy after audit
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================
@@ -230,23 +211,14 @@ export const PANCAKESWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
 /**
  * BalancerV2FlashArbitrage contract addresses by chain.
  *
- * This contract enables flash loans via Balancer V2 Vaults.
+ * Flash loans via Balancer V2 Vaults.
  * Key advantage: 0% flash loan fees (vs Aave V3's 0.09%), maximizing profit potential.
  *
- * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
- * Run `npx hardhat run scripts/deploy-balancer.ts --network ethereum` to deploy.
- *
+ * Deploy: `npx hardhat run scripts/deploy-balancer.ts --network ethereum`
  * @see contracts/src/BalancerV2FlashArbitrage.sol
- * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 2.2
  */
 export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
-  // Mainnets - update after security audit and deployment
-  // ethereum: '0x...', // TODO: Deploy after audit
-  // polygon: '0x...', // TODO: Deploy after audit
-  // arbitrum: '0x...', // TODO: Deploy after audit
-  // optimism: '0x...', // TODO: Deploy after audit
-  // base: '0x...', // TODO: Deploy after audit
-  // fantom: '0x...', // TODO: Deploy after audit (Beethoven X)
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================
@@ -256,19 +228,13 @@ export const BALANCER_V2_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
 /**
  * SyncSwapFlashArbitrage contract addresses by network.
  *
- * This contract enables flash loans via SyncSwap Vaults on zkSync Era.
- * Key advantage: EIP-3156 standard compliance, optimized for zkSync Era L2.
+ * Flash loans via SyncSwap Vaults on zkSync Era (EIP-3156 compliant).
  *
- * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
- * Run `npx hardhat run scripts/deploy-syncswap.ts --network zksync` to deploy.
- *
+ * Deploy: `npx hardhat run scripts/deploy-syncswap.ts --network zksync`
  * @see contracts/src/SyncSwapFlashArbitrage.sol
- * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.4
  */
 export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
-  // zkSync Era - update after deployment
-  // 'zksync': '0x...', // TODO: Deploy and update
-  // 'zksync-testnet': '0x...', // TODO: Deploy and update (testnet)
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================
@@ -278,31 +244,13 @@ export const SYNCSWAP_FLASH_ARBITRAGE_ADDRESSES: Record<string, string> = {
 /**
  * CommitRevealArbitrage contract addresses by chain.
  *
- * This contract implements a two-step commit-reveal pattern to protect against:
- * - Front-running attacks
- * - Sandwich attacks
- * - MEV extraction by searchers
+ * Two-step commit-reveal pattern for MEV protection (front-running, sandwich attacks).
  *
- * Step 1: Submit commitment hash on-chain (prevents front-running)
- * Step 2: After block confirmation, reveal and execute transaction
- *
- * NOTE: These are placeholders. Update with actual deployed addresses after deployment.
- * Run `npx hardhat run scripts/deploy-commit-reveal.ts --network ethereum` to deploy.
- *
+ * Deploy: `npx hardhat run scripts/deploy-commit-reveal.ts --network ethereum`
  * @see contracts/src/CommitRevealArbitrage.sol
- * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Task 3.1
  */
 export const COMMIT_REVEAL_ARBITRAGE_ADDRESSES: Record<string, string> = {
-  // Testnets - update after deployment
-  // sepolia: '0x...', // TODO: Deploy and update
-  // arbitrumSepolia: '0x...', // TODO: Deploy and update
-
-  // Mainnets - update after security audit and deployment
-  // ethereum: '0x...', // TODO: Deploy after audit
-  // polygon: '0x...', // TODO: Deploy after audit
-  // arbitrum: '0x...', // TODO: Deploy after audit
-  // base: '0x...', // TODO: Deploy after audit
-  // optimism: '0x...', // TODO: Deploy after audit
+  // Populated after deployment. See registry.json for deployment status.
 };
 
 // =============================================================================

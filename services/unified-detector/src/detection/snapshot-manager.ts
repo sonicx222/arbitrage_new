@@ -129,11 +129,14 @@ export class SnapshotManager {
       return null;
     }
 
+    // HOT-PATH OPT (Perf-3): Skip redundant toLowerCase() calls.
+    // Addresses are already normalized to lowercase at pair creation time
+    // (chain-instance.ts initializePairs). Callers are responsible for normalization.
     return {
-      address: pair.address.toLowerCase(),
+      address: pair.address,
       dex: pair.dex,
-      token0: pair.token0.toLowerCase(),
-      token1: pair.token1.toLowerCase(),
+      token0: pair.token0,
+      token1: pair.token1,
       reserve0: pair.reserve0,
       reserve1: pair.reserve1,
       fee: validateFee(pair.fee),

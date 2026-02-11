@@ -977,7 +977,8 @@ export class ChainDetectorInstance extends EventEmitter {
       const priceUpdate: PriceUpdate = {
         chain: this.chainId,
         dex: pair.dex,
-        pairKey: `${pair.dex}_${pair.token0}_${pair.token1}`,
+        // HOT-PATH OPT (Perf-5): Use cached pairKey to avoid per-event string allocation
+        pairKey: pair.pairKey ?? `${pair.dex}_${pair.token0}_${pair.token1}`,
         token0: pair.token0,
         token1: pair.token1,
         price,
@@ -1625,18 +1626,15 @@ export class ChainDetectorInstance extends EventEmitter {
         // Falls back to template literal if chainPairKey wasn't pre-computed (e.g., newly added pairs)
         this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
 
-        // P1-9 FIX: Use Object.assign for atomic pair updates
-        // This prevents partial updates if concurrent access occurs during
-        // initialization or other event handling
-        // FIX Perf 10.2: Include cached BigInt values to avoid re-parsing downstream
-        Object.assign(pair, {
-          reserve0,
-          reserve1,
-          reserve0BigInt,
-          reserve1BigInt,
-          blockNumber,
-          lastUpdate: Date.now()
-        });
+        // HOT-PATH OPT (Perf-2): Direct property assignment instead of Object.assign.
+        // Object.assign creates a temporary object; in single-threaded JS there is
+        // no atomicity benefit. Direct writes avoid the allocation overhead.
+        pair.reserve0 = reserve0;
+        pair.reserve1 = reserve1;
+        pair.reserve0BigInt = reserve0BigInt;
+        pair.reserve1BigInt = reserve1BigInt;
+        pair.blockNumber = blockNumber;
+        pair.lastUpdate = Date.now();
 
         // R3 Refactor: Delegate cache invalidation to SnapshotManager
         // SnapshotManager handles version-based cache coherency and TTL internally
@@ -1667,6 +1665,11 @@ export class ChainDetectorInstance extends EventEmitter {
       if (!pair) return;
 
       this.eventsProcessed++;
+
+      // HOT-PATH OPT (Perf-1): Early exit if no swap event consumers configured.
+      // Avoids 4 BigInt conversions, pairInfo construction, and SwapEvent allocation
+      // for the majority case where whale detection is not enabled.
+      if (!this.whaleAlertPublisher) return;
 
       // Build complete SwapEvent with decoded amounts
       const amount0In = log.data ? BigInt('0x' + log.data.slice(2, 66)).toString() : '0';

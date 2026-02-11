@@ -43,8 +43,8 @@ describe('contracts/deployments/addresses', () => {
 
   describe('Chain Type System', () => {
     it('should have testnet chains defined', () => {
-      expect(TESTNET_CHAINS).toEqual(['sepolia', 'arbitrumSepolia', 'zksync-testnet', 'zksync-sepolia']);
-      expect(TESTNET_CHAINS.length).toBeGreaterThan(0);
+      expect(TESTNET_CHAINS).toEqual(['sepolia', 'arbitrumSepolia', 'baseSepolia', 'zksync-testnet', 'zksync-sepolia']);
+      expect(TESTNET_CHAINS.length).toBe(5);
     });
 
     it('should have mainnet chains defined', () => {
@@ -57,6 +57,7 @@ describe('contracts/deployments/addresses', () => {
     it('should correctly identify testnet chains', () => {
       expect(isTestnet('sepolia')).toBe(true);
       expect(isTestnet('arbitrumSepolia')).toBe(true);
+      expect(isTestnet('baseSepolia')).toBe(true);
       expect(isTestnet('zksync-testnet')).toBe(true);
       expect(isTestnet('zksync-sepolia')).toBe(true);  // Alias for zksync-testnet
 
@@ -255,23 +256,23 @@ describe('contracts/deployments/addresses', () => {
   });
 
   describe('getQuoterAddress', () => {
-    it('should return undefined for chains without deployed quoters', () => {
-      expect(getQuoterAddress('ethereum')).toBeUndefined();
-      expect(getQuoterAddress('sepolia')).toBeUndefined();
+    it('should throw for chains without deployed quoters', () => {
+      expect(() => getQuoterAddress('ethereum')).toThrow('[ERR_NO_QUOTER]');
+      expect(() => getQuoterAddress('sepolia')).toThrow('[ERR_NO_QUOTER]');
     });
 
-    it('should return undefined for unknown chains', () => {
-      expect(getQuoterAddress('unknown')).toBeUndefined();
-      expect(getQuoterAddress('')).toBeUndefined();
+    it('should throw for unknown chains', () => {
+      expect(() => getQuoterAddress('unknown')).toThrow('[ERR_NO_QUOTER]');
+      expect(() => getQuoterAddress('')).toThrow('[ERR_NO_QUOTER]');
     });
 
     it('should use Map for O(1) lookup', () => {
       const start = performance.now();
       for (let i = 0; i < 1000; i++) {
-        getQuoterAddress('ethereum');
+        try { getQuoterAddress('ethereum'); } catch { /* expected throw */ }
       }
       const duration = performance.now() - start;
-      expect(duration).toBeLessThan(10);
+      expect(duration).toBeLessThan(50); // Throwing path is slower than Map.get
     });
   });
 

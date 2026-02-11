@@ -40,6 +40,14 @@ interface IPool {
      * @param amount The amount of the asset being flash-borrowed
      * @param params Variadic packed params to pass to the receiver as extra information
      * @param referralCode Code used to register the integrator
+     *
+     * @custom:gas Typical Gas Costs
+     * - Base flash loan overhead: ~60,000 gas (higher than Balancer due to Aave's accounting)
+     * - Fee calculation: ~5,000 gas (queries FLASHLOAN_PREMIUM_TOTAL)
+     * - Callback execution: Variable (depends on arbitrage complexity)
+     * - Single-asset flash loan: ~350,000-600,000 gas total
+     * - **Recommendation**: Budget 600,000 gas for single-asset arbitrage
+     * - **Note**: Aave V3's 0.09% fee is lower than alternatives, but base gas cost is slightly higher
      */
     function flashLoanSimple(
         address receiverAddress,

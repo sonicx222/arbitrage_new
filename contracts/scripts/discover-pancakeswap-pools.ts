@@ -21,8 +21,8 @@
 import { ethers, network } from 'hardhat';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PANCAKESWAP_V3_FACTORIES } from '@arbitrage/config';
-import { normalizeNetworkName } from './lib/deployment-utils';
+import { PANCAKESWAP_V3_FACTORIES, CORE_TOKENS } from '@arbitrage/config';  // P2-002 FIX: Import token addresses
+import { normalizeNetworkName, getSafeChainId } from './lib/deployment-utils';  // P1-007 FIX: Import safe chain ID getter
 
 // =============================================================================
 // Configuration
@@ -35,116 +35,68 @@ import { normalizeNetworkName } from './lib/deployment-utils';
 const PANCAKESWAP_V3_FACTORY_ADDRESSES = PANCAKESWAP_V3_FACTORIES;
 
 /**
- * Common token pairs to check (by chain)
+ * P2-002 FIX: Build common token pairs dynamically from CORE_TOKENS
+ *
+ * This eliminates hardcoded token addresses in favor of importing from @arbitrage/config.
+ * Maintains single source of truth for token addresses across the entire codebase.
+ *
+ * Strategy: Generate pairs for high-volume anchor tokens (native + stables)
+ * - Native token (WETH, WBNB, etc.) paired with all stables
+ * - Stable triangle: USDT/USDC, USDC/DAI
+ *
+ * @param networkName - Network name (e.g., 'bsc', 'ethereum', 'arbitrum')
+ * @returns Array of token pairs for discovery
  */
-const COMMON_TOKEN_PAIRS: Record<
-  string,
-  Array<{ tokenA: string; tokenB: string; symbol: string }>
-> = {
-  bsc: [
-    {
-      tokenA: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
-      tokenB: '0x55d398326f99059fF775485246999027B3197955', // USDT
-      symbol: 'WBNB/USDT',
-    },
-    {
-      tokenA: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
-      tokenB: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // USDC
-      symbol: 'WBNB/USDC',
-    },
-    {
-      tokenA: '0x55d398326f99059fF775485246999027B3197955', // USDT
-      tokenB: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', // USDC
-      symbol: 'USDT/USDC',
-    },
-    {
-      tokenA: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
-      tokenB: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', // ETH
-      symbol: 'WBNB/ETH',
-    },
-    {
-      tokenA: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB
-      tokenB: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', // BTCB
-      symbol: 'WBNB/BTCB',
-    },
-  ],
-  ethereum: [
-    {
-      tokenA: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-      tokenB: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-      symbol: 'WETH/USDC',
-    },
-    {
-      tokenA: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-      tokenB: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
-      symbol: 'WETH/USDT',
-    },
-    {
-      tokenA: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-      tokenB: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
-      symbol: 'USDC/USDT',
-    },
-    {
-      tokenA: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-      tokenB: '0x6B175474E89094C44Da98b954EedcdeCB5BAA7D3', // DAI
-      symbol: 'WETH/DAI',
-    },
-    {
-      tokenA: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-      tokenB: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599', // WBTC
-      symbol: 'WETH/WBTC',
-    },
-  ],
-  arbitrum: [
-    {
-      tokenA: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
-      tokenB: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // USDC (Native)
-      symbol: 'WETH/USDC',
-    },
-    {
-      tokenA: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
-      tokenB: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USDT
-      symbol: 'WETH/USDT',
-    },
-    {
-      tokenA: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', // USDC
-      tokenB: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', // USDT
-      symbol: 'USDC/USDT',
-    },
-    {
-      tokenA: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
-      tokenB: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', // USDC.e (Bridged)
-      symbol: 'WETH/USDC.e',
-    },
-    {
-      tokenA: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // WETH
-      tokenB: '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f', // WBTC
-      symbol: 'WETH/WBTC',
-    },
-  ],
-  base: [
-    {
-      tokenA: '0x4200000000000000000000000000000000000006', // WETH
-      tokenB: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC (Native)
-      symbol: 'WETH/USDC',
-    },
-    {
-      tokenA: '0x4200000000000000000000000000000000000006', // WETH
-      tokenB: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', // DAI
-      symbol: 'WETH/DAI',
-    },
-    {
-      tokenA: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC
-      tokenB: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', // DAI
-      symbol: 'USDC/DAI',
-    },
-    {
-      tokenA: '0x4200000000000000000000000000000000000006', // WETH
-      tokenB: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', // USDbC (Bridged USDC)
-      symbol: 'WETH/USDbC',
-    },
-  ],
-};
+function getCommonTokenPairs(
+  networkName: string
+): Array<{ tokenA: string; tokenB: string; symbol: string }> {
+  const tokens = CORE_TOKENS[networkName];
+  if (!tokens || tokens.length === 0) {
+    return [];
+  }
+
+  // Build lookup map for easy access
+  const tokenMap = new Map(tokens.map(t => [t.symbol, t.address]));
+
+  const pairs: Array<{ tokenA: string; tokenB: string; symbol: string }> = [];
+
+  // Helper to add pair if both tokens exist
+  const addPair = (symbolA: string, symbolB: string) => {
+    const addrA = tokenMap.get(symbolA);
+    const addrB = tokenMap.get(symbolB);
+    if (addrA && addrB) {
+      pairs.push({
+        tokenA: addrA,
+        tokenB: addrB,
+        symbol: `${symbolA}/${symbolB}`,
+      });
+    }
+  };
+
+  // Identify native token symbol by network
+  const nativeSymbol = networkName === 'bsc' ? 'WBNB' :
+                       networkName === 'polygon' ? 'WMATIC' :
+                       'WETH'; // Ethereum, Arbitrum, Base, Optimism all use WETH
+
+  // Native token paired with major stables
+  addPair(nativeSymbol, 'USDT');
+  addPair(nativeSymbol, 'USDC');
+  addPair(nativeSymbol, 'DAI');
+
+  // Stable triangle (high-volume arbitrage pairs)
+  addPair('USDT', 'USDC');
+  addPair('USDC', 'DAI');
+  addPair('USDT', 'DAI');
+
+  // Native token paired with major crypto assets
+  addPair(nativeSymbol, 'WBTC');
+  if (networkName === 'bsc') {
+    addPair('WBNB', 'ETH');   // BSC has bridged ETH
+    addPair('WBNB', 'BTCB');  // BSC uses BTCB instead of WBTC
+  }
+
+  return pairs;
+}
 
 /**
  * PancakeSwap V3 fee tiers (in hundredths of a bip)
@@ -234,7 +186,14 @@ async function getPoolLiquidity(poolAddress: string): Promise<{
  * Discover all pools for token pairs
  *
  * Phase 3 Optimization: Parallelized pool discovery using Promise.all()
- * Performance: ~2s → ~200ms (10x faster) for 5 pairs × 4 fee tiers
+ *
+ * P1-005 FIX: Updated performance claims to be realistic
+ * Performance: Concurrent RPC calls provide 2-3x speedup over serial discovery
+ * (actual speedup depends on RPC provider rate limits and connection pooling)
+ *
+ * Note: Earlier claims of 10x speedup were overly optimistic. Most public RPCs
+ * (Infura, Alchemy, QuickNode) rate-limit to 10-30 req/sec, and ethers.js uses
+ * connection pooling (4-6 concurrent requests). Real-world speedup is 2-3x, not 10x.
  */
 async function discoverPools(
   factoryAddress: string,
@@ -375,8 +334,8 @@ function printDiscoverySummary(result: PoolDiscoveryResult): void {
 async function main(): Promise<void> {
   // Normalize network name for consistent handling (zksync-mainnet → zksync, etc.)
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   // Get Factory address for the network
   const factoryAddress = PANCAKESWAP_V3_FACTORY_ADDRESSES[networkName];
@@ -387,12 +346,13 @@ async function main(): Promise<void> {
     );
   }
 
-  // Get token pairs for the network
-  const tokenPairs = COMMON_TOKEN_PAIRS[networkName];
-  if (!tokenPairs || tokenPairs.length === 0) {
+  // P2-002 FIX: Get token pairs dynamically from CORE_TOKENS config
+  const tokenPairs = getCommonTokenPairs(networkName);
+  if (tokenPairs.length === 0) {
     throw new Error(
       `No token pairs configured for network: ${networkName}\n` +
-        `Supported networks: ${Object.keys(COMMON_TOKEN_PAIRS).join(', ')}`
+        `This means CORE_TOKENS is not configured for this network in @arbitrage/config.\n` +
+        `Supported networks: ${Object.keys(CORE_TOKENS).join(', ')}`
     );
   }
 

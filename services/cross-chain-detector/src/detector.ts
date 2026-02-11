@@ -520,6 +520,9 @@ export class CrossChainDetectorService {
         this.mlPredictionManager.clear();
         this.mlPredictionManager = null;
       }
+      if (this.streamConsumer) {
+        this.streamConsumer.removeAllListeners();
+      }
       this.streamConsumer = null;
       this.bridgeCostEstimator = null;
 
@@ -998,9 +1001,10 @@ export class CrossChainDetectorService {
         priceDiff: priceDiff,
         percentageDiff: priceDiffPercent,
         tradeSizeUsd: this.config.defaultTradeSizeUsd ?? 1000,
-        estimatedProfit: netProfit / 1e18, // Convert from wei to ETH
+        // Values are in the token's smallest unit (e.g., wei for ETH, 1e-6 for USDC)
+        estimatedProfit: netProfit,
         bridgeCost: 0, // Same-chain opportunity
-        netProfit: netProfit / 1e18,
+        netProfit: netProfit,
         createdAt: now,
         timestamp: now,
         confidence,

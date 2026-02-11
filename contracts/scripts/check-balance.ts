@@ -16,15 +16,17 @@
  */
 
 import { ethers, network } from 'hardhat';
+import { normalizeNetworkName } from './lib/deployment-utils';
 
 async function main() {
   const [deployer] = await ethers.getSigners();
   const networkInfo = await ethers.provider.getNetwork();
+  const networkName = normalizeNetworkName(network.name);
 
   console.log('\n========================================');
   console.log('Account Balance Check');
   console.log('========================================');
-  console.log(`Network: ${network.name} (chainId: ${networkInfo.chainId})`);
+  console.log(`Network: ${networkName} (chainId: ${networkInfo.chainId})`);
   console.log(`Address: ${deployer.address}`);
 
   try {
@@ -34,24 +36,17 @@ async function main() {
 
     console.log(`\nNative Token Balance: ${balanceEth} ETH`);
 
-    // Get approximate USD value (using rough estimates)
-    const ethPriceEstimates: Record<string, number> = {
-      ethereum: 2500,
-      sepolia: 2500,
-      arbitrum: 2500,
-      'arbitrum-sepolia': 2500,
-      zksync: 2500,
-      'zksync-testnet': 2500,
-      bsc: 300, // BNB price
-      polygon: 0.8, // MATIC price
-      avalanche: 25, // AVAX price
-      fantom: 0.3, // FTM price
-    };
-
-    const estimatedPrice = ethPriceEstimates[network.name] || 2500;
-    const usdValue = parseFloat(balanceEth) * estimatedPrice;
-
-    console.log(`Estimated Value: ~$${usdValue.toFixed(2)} USD`);
+    // P1-001 FIX: Removed hardcoded price estimates (stale, unreliable)
+    // P1-002 FIX: Don't show USD estimates for unknown networks
+    // USD value estimation requires real-time price data to be accurate.
+    // Displaying stale estimates (e.g., ETH at $2500 when real price is $3500)
+    // misleads users about funding requirements.
+    //
+    // To add USD estimates in the future:
+    // 1. Use a price oracle API (e.g., CoinGecko, CoinMarketCap)
+    // 2. Cache prices with short TTL (5-15 minutes)
+    // 3. Handle API failures gracefully
+    // 4. Show price timestamp: "~$3,500 USD (price from 2024-02-10 14:30 UTC)"
 
     // Estimate deployment costs
     console.log('\n========================================');
@@ -60,6 +55,8 @@ async function main() {
 
     const gasEstimates = {
       'FlashLoanArbitrage': 2000000,
+      'BalancerV2FlashArbitrage': 2000000,
+      'PancakeSwapFlashArbitrage': 2500000, // Includes pool whitelisting gas
       'SyncSwapFlashArbitrage': 2000000,
       'CommitRevealArbitrage': 1500000,
       'MultiPathQuoter': 500000,
@@ -76,10 +73,9 @@ async function main() {
     Object.entries(gasEstimates).forEach(([contract, gas]) => {
       const costWei = BigInt(gas) * gasPrice;
       const costEth = ethers.formatEther(costWei);
-      const costUsd = parseFloat(costEth) * estimatedPrice;
       console.log(`${contract}:`);
       console.log(`  Gas: ~${(gas / 1000000).toFixed(1)}M`);
-      console.log(`  Cost: ~${parseFloat(costEth).toFixed(4)} ETH (~$${costUsd.toFixed(2)} USD)`);
+      console.log(`  Cost: ~${parseFloat(costEth).toFixed(4)} ETH`);
       console.log('');
     });
 
@@ -107,13 +103,13 @@ async function main() {
       console.log('How to Fund This Account');
       console.log('========================================');
 
-      if (network.name === 'zksync' || network.name === 'zksync-testnet') {
+      if (networkName === 'zksync' || networkName === 'zksync-testnet') {
         console.log('zkSync Era requires bridging from Ethereum:');
         console.log('1. Go to: https://portal.zksync.io/bridge/');
         console.log('2. Connect wallet');
         console.log('3. Bridge ETH from Ethereum to zkSync Era');
         console.log(`4. Send to: ${deployer.address}`);
-      } else if (network.name === 'sepolia' || network.name === 'arbitrum-sepolia') {
+      } else if (networkName === 'sepolia' || networkName === 'arbitrumSepolia' || networkName === 'baseSepolia') {
         console.log('Testnet ETH:');
         console.log('1. Use a faucet to get testnet ETH');
         console.log('2. Sepolia faucet: https://sepoliafaucet.com/');

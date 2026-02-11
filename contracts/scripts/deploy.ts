@@ -35,6 +35,9 @@ import {
   saveDeploymentResult as saveResult,
   printDeploymentSummary,
   normalizeNetworkName,
+  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
+  DEFAULT_MINIMUM_PROFIT,  // P2-003 FIX: Import centralized profit policy
+  getMinimumProfitForProtocol,  // P2-003 FIX: Import protocol adjuster
   DEFAULT_VERIFICATION_RETRIES,
   DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type DeploymentResult,
@@ -45,23 +48,14 @@ import {
 // =============================================================================
 
 /**
- * Default minimum profit settings (in wei)
+ * P2-003 FIX: Minimum profit thresholds now imported from deployment-utils.ts
+ * (centralized policy shared across all deployment scripts)
  *
- * MAINNET: Must be defined with positive values to prevent unprofitable trades
- * TESTNET: Low thresholds for testing
+ * For Aave V3 deployments, we use the standard thresholds from DEFAULT_MINIMUM_PROFIT.
+ * Use getMinimumProfitForProtocol('network', 'aave') to get protocol-adjusted values.
  *
- * Phase 1 Fix: Now enforced by validateMinimumProfit() - mainnet deployments
- * without proper thresholds will fail with clear error messages
+ * @see lib/deployment-utils.ts - DEFAULT_MINIMUM_PROFIT for policy details
  */
-const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
-  // Testnets - low thresholds for testing
-  sepolia: ethers.parseEther('0.001'),
-  arbitrumSepolia: ethers.parseEther('0.001'),
-
-  // Mainnets - set conservative thresholds to prevent unprofitable trades
-  ethereum: ethers.parseEther('0.01'), // 0.01 ETH ≈ $30 at $3000/ETH
-  arbitrum: ethers.parseEther('0.005'), // 0.005 ETH ≈ $15
-};
 
 // =============================================================================
 // Types
@@ -91,8 +85,8 @@ async function deployFlashLoanArbitrage(
 ): Promise<FlashLoanDeploymentResult> {
   const [deployer] = await ethers.getSigners();
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   console.log('\n========================================');
   console.log('FlashLoanArbitrage Deployment');
@@ -141,7 +135,7 @@ async function deployFlashLoanArbitrage(
   console.log('\nConfiguring contract...');
 
   // Phase 1 Fix: Validate minimum profit (throws on mainnet if zero/undefined)
-  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const rawMinimumProfit = config.minimumProfit ?? getMinimumProfitForProtocol(networkName, 'aave');
   const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
 
   if (minimumProfit > 0n) {
@@ -182,7 +176,8 @@ async function deployFlashLoanArbitrage(
   }
 
   // Phase 2 Addition: Smoke tests
-  await smokeTestFlashLoanContract(flashLoanArbitrage, ownerAddress);
+  // P2-010 FIX: Pass contract address for bytecode verification
+  await smokeTestFlashLoanContract(flashLoanArbitrage, ownerAddress, contractAddress);
 
   return {
     network: networkName,
@@ -223,14 +218,15 @@ async function main(): Promise<void> {
   console.log(`\nStarting FlashLoanArbitrage deployment to ${networkName}...`);
 
   // Deploy with Phase 1 & 2 improvements
+  // P2-003 FIX: Use centralized profit policy with protocol adjustment
   const result = await deployFlashLoanArbitrage({
     aavePoolAddress,
     approvedRouters: APPROVED_ROUTERS[networkName],
-    minimumProfit: DEFAULT_MINIMUM_PROFIT[networkName],
+    minimumProfit: getMinimumProfitForProtocol(networkName, 'aave'),
   });
 
   // Save deployment result
-  await saveResult(result, 'registry.json');
+  await saveResult(result, 'registry.json', 'FlashLoanArbitrage');
 
   // Print summary
   printDeploymentSummary(result);

@@ -78,7 +78,7 @@ const createMockOpportunity = (overrides?: Partial<ArbitrageOpportunity>): Arbit
   timestamp: Date.now(),
   buyChain: 'ethereum',
   sellChain: 'ethereum',
-  buyDex: 'uniswap',
+  buyDex: 'uniswap_v3',
   sellDex: 'sushiswap',
   confidence: 0.95,
   buyPrice: 2000,
@@ -399,7 +399,7 @@ describe('FlashLoanStrategy', () => {
 
       // Function selector for executeArbitrage
       const iface = new ethers.Interface([
-        'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit)'
+        'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline)'
       ]);
       const expectedSelector = iface.getFunction('executeArbitrage')!.selector;
 
@@ -729,12 +729,13 @@ describe('FlashLoanStrategy', () => {
       expect(strategy.isProtocolSupported('avalanche')).toBe(true);
     });
 
-    it('should not support non-Aave V3 chains', () => {
-      // These chains use different flash loan protocols
-      expect(strategy.isProtocolSupported('bsc')).toBe(false); // PancakeSwap
-      expect(strategy.isProtocolSupported('fantom')).toBe(false); // SpookySwap
+    it('should correctly identify protocol support per chain', () => {
+      // BSC uses PancakeSwap V3 — supported since Task 2.1
+      expect(strategy.isProtocolSupported('bsc')).toBe(true);
+      // These chains use protocols not yet in FlashLoanStrategy
+      expect(strategy.isProtocolSupported('fantom')).toBe(false); // Balancer V2
       expect(strategy.isProtocolSupported('zksync')).toBe(false); // SyncSwap
-      expect(strategy.isProtocolSupported('linea')).toBe(false); // SyncSwap
+      expect(strategy.isProtocolSupported('linea')).toBe(false); // SyncSwap (not configured)
     });
 
     it('should return false for unknown chains', () => {
@@ -742,22 +743,23 @@ describe('FlashLoanStrategy', () => {
     });
 
     it('should return error for unsupported protocol chain execution', async () => {
-      const opportunity = createMockOpportunity({ buyChain: 'bsc' });
+      // fantom uses balancer_v2 which FlashLoanStrategy does not yet support
+      const opportunity = createMockOpportunity({ buyChain: 'fantom' });
       const ctx = createMockContext();
-      ctx.providers.set('bsc', createMockProvider());
-      ctx.wallets.set('bsc', createMockWallet());
+      ctx.providers.set('fantom', createMockProvider());
+      ctx.wallets.set('fantom', createMockWallet());
 
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not supported');
-      expect(result.error).toContain('pancakeswap_v3');
+      expect(result.error).toContain('balancer_v2');
     });
 
     it('should get protocol for chain', () => {
       expect(strategy.getProtocolForChain('ethereum')).toBe('aave_v3');
       expect(strategy.getProtocolForChain('bsc')).toBe('pancakeswap_v3');
-      expect(strategy.getProtocolForChain('fantom')).toBe('spookyswap');
+      expect(strategy.getProtocolForChain('fantom')).toBe('balancer_v2');
       expect(strategy.getProtocolForChain('zksync')).toBe('syncswap');
     });
 
@@ -765,8 +767,8 @@ describe('FlashLoanStrategy', () => {
       const supported = strategy.getSupportedProtocolChains();
       expect(supported).toContain('ethereum');
       expect(supported).toContain('polygon');
-      expect(supported).not.toContain('bsc');
-      expect(supported).not.toContain('fantom');
+      expect(supported).toContain('bsc'); // Task 2.1: PancakeSwap V3 support
+      expect(supported).not.toContain('fantom'); // Balancer V2 not yet in FlashLoanStrategy
     });
   });
 
@@ -928,7 +930,7 @@ describe('FlashLoanStrategy', () => {
 
     it('should handle missing sellDex by using buyDex', async () => {
       const opportunity = createMockOpportunity({
-        buyDex: 'uniswap',
+        buyDex: 'uniswap_v3',
         sellDex: undefined,
       });
       const ctx = createMockContext();

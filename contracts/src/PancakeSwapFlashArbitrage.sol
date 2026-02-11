@@ -4,9 +4,10 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./interfaces/IPancakeV3FlashCallback.sol";
-import "./interfaces/IFlashLoanReceiver.sol";
-import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at line 458
+import "./interfaces/IFlashLoanErrors.sol";
+import "./interfaces/IDexRouter.sol"; // Used by calculateExpectedProfit() for getAmountsOut()
 
 /**
  * @title PancakeSwapFlashArbitrage
@@ -51,7 +52,8 @@ import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at
  * ## Architecture Notes
  * PancakeSwap V3 uses a different flash loan mechanism than Aave V3:
  * - Callback: pancakeV3FlashCallback(fee0, fee1, data) instead of executeOperation()
- * - Pool-specific fees: 100, 500, 2500, 10000 bps (vs Aave's fixed 9 bps)
+ * - Pool-specific fees: 100, 500, 2500, 10000 (hundredths of a bip, i.e., 1e-6)
+ *   → 0.01%, 0.05%, 0.25%, 1.00% respectively (vs Aave's fixed 0.09%)
  * - Security: Must verify callback caller is a whitelisted PancakeSwap V3 pool
  * - Fees paid at end of transaction, not pulled by pool
  *
@@ -59,9 +61,11 @@ import "./interfaces/IDexRouter.sol"; // Explicit import for IDexRouter usage at
  */
 contract PancakeSwapFlashArbitrage is
     BaseFlashArbitrage,
-    IPancakeV3FlashCallback
+    IPancakeV3FlashCallback,
+    IFlashLoanErrors
 {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     // ==========================================================================
     // Constants (Protocol-Specific)
@@ -116,12 +120,10 @@ contract PancakeSwapFlashArbitrage is
     // Errors (Protocol-Specific)
     // ==========================================================================
 
-    error InvalidFactoryAddress();
-    error InvalidPoolAddress();
+    // InvalidProtocolAddress, InvalidFlashLoanCaller inherited from IFlashLoanErrors
     error PoolAlreadyWhitelisted();
     error PoolNotWhitelisted();
     error EmptyPoolsArray();
-    error InvalidFlashLoanCaller();
     error FlashLoanNotActive();
     error FlashLoanAlreadyActive();
     error PoolNotFound();
@@ -139,11 +141,11 @@ contract PancakeSwapFlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _factory, address _owner) BaseFlashArbitrage(_owner) {
-        if (_factory == address(0)) revert InvalidFactoryAddress();
+        if (_factory == address(0)) revert InvalidProtocolAddress();
 
         // Verify factory is a contract (has code deployed)
         // Protection against typos or EOA addresses during deployment
-        if (_factory.code.length == 0) revert InvalidFactoryAddress();
+        if (_factory.code.length == 0) revert InvalidProtocolAddress();
 
         FACTORY = IPancakeV3Factory(_factory);
     }
@@ -175,7 +177,7 @@ contract PancakeSwapFlashArbitrage is
 
         // Protocol-specific validations
         // C4 Fix: Validate pool is not zero address (clearer error, gas optimization)
-        if (pool == address(0)) revert InvalidPoolAddress();
+        if (pool == address(0)) revert InvalidProtocolAddress();
 
         // Validate pool is whitelisted (security critical)
         if (!_whitelistedPools.contains(pool)) revert PoolNotWhitelisted();
@@ -278,7 +280,8 @@ contract PancakeSwapFlashArbitrage is
         // Update profit tracking
         totalProfits += profit;
 
-        // Repay the pool (transfer back the borrowed amount + fee)
+        // Repayment: PUSH pattern - we transfer tokens directly to pool
+        // PancakeSwap V3 checks pool balance after callback to verify repayment
         IERC20(context.asset).safeTransfer(msg.sender, amountOwed);
 
         emit ArbitrageExecuted(context.asset, context.amount, profit, block.timestamp);
@@ -296,7 +299,7 @@ contract PancakeSwapFlashArbitrage is
      * @param pool The pool address to whitelist
      */
     function whitelistPool(address pool) external onlyOwner {
-        if (pool == address(0)) revert InvalidPoolAddress();
+        if (pool == address(0)) revert InvalidProtocolAddress();
         if (!_whitelistedPools.add(pool)) revert PoolAlreadyWhitelisted();
 
         emit PoolWhitelisted(pool);
@@ -391,13 +394,15 @@ contract PancakeSwapFlashArbitrage is
 
     /**
      * @notice Calculates the expected profit for an arbitrage opportunity
-     * @dev This is a simulation that doesn't execute the actual swaps
-     * @param pool The PancakeSwap V3 pool address
+     * @dev Simulates swaps via DEX router getAmountsOut() without executing.
+     *      Uses shared _simulateSwapPath() from BaseFlashArbitrage.
+     *
+     * @param pool The PancakeSwap V3 pool address (for fee tier query)
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan
      * @param swapPath Array of swap steps
      * @return expectedProfit The expected profit after all fees
-     * @return flashLoanFee The flash loan fee
+     * @return flashLoanFee The PancakeSwap V3 flash loan fee (pool fee tier dependent)
      */
     function calculateExpectedProfit(
         address pool,
@@ -405,82 +410,17 @@ contract PancakeSwapFlashArbitrage is
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // Get pool fee
-        IPancakeV3Pool poolContract = IPancakeV3Pool(pool);
-        uint24 feeTier = poolContract.fee();
-
-        // Calculate flash loan fee
-        // Fee is calculated as: amount * feeTier / 1e6
-        // feeTier is in hundredths of a bip (e.g., 2500 = 0.25% = 2500/1e6)
+        // PancakeSwap V3 fee: (amount * feeTier) / 1e6
+        // feeTier is in hundredths of a bip (e.g., 2500 = 0.25%)
+        uint24 feeTier = IPancakeV3Pool(pool).fee();
         flashLoanFee = (amount * feeTier) / 1e6;
 
-        // Early validation - swapPath must start with the flash-loaned asset
-        uint256 pathLength = swapPath.length;
-        if (pathLength == 0 || swapPath[0].tokenIn != asset) {
+        uint256 simulatedOutput = _simulateSwapPath(asset, amount, swapPath);
+        if (simulatedOutput == 0) {
             return (0, flashLoanFee);
         }
 
-        // Simulate swaps to get expected output
-        uint256 currentAmount = amount;
-        address currentToken = asset;
-
-        // Gas optimization: Pre-allocate path array once
-        address[] memory path = new address[](2);
-
-        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
-        address[] memory visitedTokens = new address[](pathLength + 1);
-        visitedTokens[0] = asset;
-        uint256 visitedCount = 1;
-
-        for (uint256 i = 0; i < pathLength;) {
-            SwapStep calldata step = swapPath[i];
-
-            if (step.tokenIn != currentToken) {
-                return (0, flashLoanFee); // Invalid path
-            }
-
-            // Check for cycle: token appears twice before final step
-            if (i < pathLength - 1) {
-                for (uint256 j = 0; j < visitedCount; j++) {
-                    if (visitedTokens[j] == step.tokenOut) {
-                        return (0, flashLoanFee); // Cycle detected
-                    }
-                }
-            }
-
-            // Track visited token
-            visitedTokens[visitedCount] = step.tokenOut;
-            unchecked { ++visitedCount; }
-
-            // Reuse pre-allocated path array
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
-                uint256[] memory amounts
-            ) {
-                currentAmount = amounts[amounts.length - 1];
-                currentToken = step.tokenOut;
-            } catch {
-                return (0, flashLoanFee); // Router call failed
-            }
-
-            unchecked { ++i; }
-        }
-
-        // Check if we end with the correct asset
-        if (currentToken != asset) {
-            return (0, flashLoanFee);
-        }
-
-        // Calculate profit
-        uint256 amountOwed = amount + flashLoanFee;
-        if (currentAmount > amountOwed) {
-            expectedProfit = currentAmount - amountOwed;
-        } else {
-            expectedProfit = 0;
-        }
-
+        expectedProfit = _calculateProfit(amount, simulatedOutput, flashLoanFee);
         return (expectedProfit, flashLoanFee);
     }
 }

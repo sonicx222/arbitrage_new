@@ -30,6 +30,7 @@ import { PANCAKESWAP_V3_FACTORIES } from '@arbitrage/config';
 import { APPROVED_ROUTERS } from '../deployments/addresses';
 import {
   normalizeNetworkName,
+  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
   checkDeployerBalance,
   estimateDeploymentCost,
   validateMinimumProfit,
@@ -38,6 +39,7 @@ import {
   smokeTestFlashLoanContract,
   saveDeploymentResult,
   printDeploymentSummary,
+  getMinimumProfitForProtocol,  // P2-003 FIX: Import centralized profit policy
   DEFAULT_VERIFICATION_RETRIES,
   DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type PancakeSwapDeploymentResult,
@@ -136,21 +138,14 @@ const COMMON_TOKEN_PAIRS: Record<string, Array<{ tokenA: string; tokenB: string;
 const FEE_TIERS = [100, 500, 2500, 10000] as const;
 
 /**
- * Default minimum profit settings (in wei)
+ * P2-003 FIX: Minimum profit thresholds now imported from deployment-utils.ts
+ * (centralized policy shared across all deployment scripts)
  *
- * MAINNET: Must be defined with positive values to prevent unprofitable trades
- * TESTNET: Low thresholds for testing
+ * For PancakeSwap V3 deployments, we use the standard thresholds.
+ * Use getMinimumProfitForProtocol('network', 'pancakeswap') for consistency.
  *
- * Phase 4A: Now enforced by validateMinimumProfit() - mainnet deployments
- * without proper thresholds will fail with clear error messages
+ * @see lib/deployment-utils.ts - DEFAULT_MINIMUM_PROFIT for policy details
  */
-const DEFAULT_MINIMUM_PROFIT: Record<string, bigint> = {
-  // Mainnets - set conservative thresholds to prevent unprofitable trades
-  bsc: ethers.parseEther('0.001'), // 0.001 BNB (~$0.30 at $300/BNB)
-  ethereum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  arbitrum: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-  base: ethers.parseEther('0.001'), // 0.001 ETH (~$3 at $3000/ETH)
-};
 
 // =============================================================================
 // Types
@@ -229,8 +224,8 @@ async function deployPancakeSwapFlashArbitrage(
 
   // Phase 4A: Network name normalization
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   console.log('\n========================================');
   console.log('PancakeSwapFlashArbitrage Deployment');
@@ -276,7 +271,7 @@ async function deployPancakeSwapFlashArbitrage(
   console.log('\nConfiguring contract...');
 
   // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
-  const rawMinimumProfit = config.minimumProfit || DEFAULT_MINIMUM_PROFIT[networkName];
+  const rawMinimumProfit = config.minimumProfit ?? getMinimumProfitForProtocol(networkName, 'pancakeswap');
   const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
 
   if (minimumProfit > 0n) {
@@ -352,7 +347,8 @@ async function deployPancakeSwapFlashArbitrage(
   }
 
   // Phase 4A: Smoke test - verify contract is callable
-  await smokeTestFlashLoanContract(pancakeSwapFlashArbitrage, ownerAddress);
+  // P2-010 FIX: Pass contract address for bytecode verification
+  await smokeTestFlashLoanContract(pancakeSwapFlashArbitrage, ownerAddress, contractAddress);
 
   return {
     network: networkName,
@@ -376,7 +372,7 @@ async function deployPancakeSwapFlashArbitrage(
  * Kept as wrapper for backward compatibility
  */
 async function savePancakeSwapDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'pancakeswap-registry.json');
+  await saveDeploymentResult(result, 'pancakeswap-registry.json', 'PancakeSwapFlashArbitrage');
 }
 
 // =============================================================================
@@ -402,10 +398,11 @@ async function main(): Promise<void> {
   console.log(`\nStarting PancakeSwapFlashArbitrage deployment to ${networkName}...`);
 
   // Deploy with Phase 4A improvements
+  // P2-003 FIX: Use centralized profit policy
   const result = await deployPancakeSwapFlashArbitrage({
     factoryAddress,
     approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
-    minimumProfit: DEFAULT_MINIMUM_PROFIT[networkName],
+    minimumProfit: getMinimumProfitForProtocol(networkName, 'pancakeswap'),
     whitelistPools: true, // Task 2.1 (C4): Enable batch pool whitelisting
   });
 

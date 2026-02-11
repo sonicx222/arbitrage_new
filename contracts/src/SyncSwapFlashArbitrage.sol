@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./base/BaseFlashArbitrage.sol";
 import "./interfaces/ISyncSwapVault.sol";
+import "./interfaces/IFlashLoanErrors.sol";
 import "./interfaces/IDexRouter.sol";
 
 /**
@@ -27,7 +28,7 @@ import "./interfaces/IDexRouter.sol";
  * - EIP-3156 compliant callback interface
  * - Single Vault contract per chain (no pool discovery needed)
  * - Supports native ETH via address(0)
- * - Fee calculated on surplus balance after repayment
+ * - Fee calculated on the loan amount (not surplus balance)
  * - Fee is configurable by governance and may vary over time
  *
  * Security Model:
@@ -55,7 +56,8 @@ import "./interfaces/IDexRouter.sol";
  */
 contract SyncSwapFlashArbitrage is
     BaseFlashArbitrage,
-    IERC3156FlashBorrower
+    IERC3156FlashBorrower,
+    IFlashLoanErrors
 {
     using SafeERC20 for IERC20;
 
@@ -79,9 +81,8 @@ contract SyncSwapFlashArbitrage is
     // Errors (Protocol-Specific)
     // ==========================================================================
 
-    error InvalidVaultAddress();
-    error InvalidFlashLoanCaller();
-    error InvalidInitiator();
+    // InvalidProtocolAddress, InvalidFlashLoanCaller, InvalidFlashLoanInitiator
+    // inherited from IFlashLoanErrors
     error FlashLoanFailed();
 
     // ==========================================================================
@@ -94,11 +95,11 @@ contract SyncSwapFlashArbitrage is
      * @param _owner The contract owner address
      */
     constructor(address _vault, address _owner) BaseFlashArbitrage(_owner) {
-        if (_vault == address(0)) revert InvalidVaultAddress();
+        if (_vault == address(0)) revert InvalidProtocolAddress();
 
         // Verify vault is a contract (has code deployed)
         // Protection against typos or EOA addresses during deployment
-        if (_vault.code.length == 0) revert InvalidVaultAddress();
+        if (_vault.code.length == 0) revert InvalidProtocolAddress();
 
         VAULT = ISyncSwapVault(_vault);
     }
@@ -165,7 +166,7 @@ contract SyncSwapFlashArbitrage is
 
         // Security: Verify the flash loan was initiated by this contract
         // Prevents external actors from triggering callbacks
-        if (initiator != address(this)) revert InvalidInitiator();
+        if (initiator != address(this)) revert InvalidFlashLoanInitiator();
 
         // Decode user data
         (SwapStep[] memory swapPath, uint256 minProfit) = abi.decode(
@@ -185,17 +186,17 @@ contract SyncSwapFlashArbitrage is
         // Calculate actual profit
         uint256 profit = amountReceived - amountOwed;
 
-        // Check profit meets minimum threshold
-        // Use max of per-trade minProfit and global minimumProfit
-        uint256 effectiveMinProfit = minProfit > minimumProfit ? minProfit : minimumProfit;
+        // Check profit meets minimum threshold (cache storage read to save ~100 gas)
+        uint256 _minimumProfit = minimumProfit;
+        uint256 effectiveMinProfit = minProfit > _minimumProfit ? minProfit : _minimumProfit;
         if (profit < effectiveMinProfit) revert InsufficientProfit();
 
         // Update total profits tracking
         totalProfits += profit;
 
-        // Approve Vault to pull repayment (EIP-3156 standard behavior)
-        // Vault will pull amountOwed from this contract after callback returns
-        // Use forceApprove for safe non-zero to non-zero approval handling
+        // Repayment: PULL pattern - SyncSwap Vault pulls tokens via transferFrom
+        // after callback returns (EIP-3156 standard behavior).
+        // Use forceApprove for safe non-zero to non-zero approval handling.
         IERC20(token).forceApprove(address(VAULT), amountOwed);
 
         // Emit success event
@@ -213,100 +214,29 @@ contract SyncSwapFlashArbitrage is
 
     /**
      * @notice Calculate expected profit for an arbitrage opportunity
+     * @dev Simulates swaps via DEX router getAmountsOut() without executing.
+     *      Uses shared _simulateSwapPath() from BaseFlashArbitrage.
+     *
      * @param asset The asset to flash loan
      * @param amount The amount to flash loan
      * @param swapPath Array of swap steps defining the arbitrage path
      * @return expectedProfit Expected profit after fees (0 if unprofitable or invalid)
-     * @return flashLoanFee Flash loan fee amount (0.3% of amount)
-     *
-     * @dev Simulates swaps using DEX router's getAmountsOut() without executing on-chain.
-     *      Returns 0 for expectedProfit if path is invalid or unprofitable.
+     * @return flashLoanFee Flash loan fee amount (~0.3%, queried from Vault)
      */
     function calculateExpectedProfit(
         address asset,
         uint256 amount,
         SwapStep[] calldata swapPath
     ) external view returns (uint256 expectedProfit, uint256 flashLoanFee) {
-        // P3 Optimization: Query fee rate once per calculation
-        // Query fee for 1e18 tokens to get the per-token fee rate, then scale for actual amount
-        // This approach assumes linear fee structure (standard for EIP-3156 implementations)
-        // and allows for consistent scaling across any amount size.
-        // Typical SyncSwap fee: 0.3% (30 bps), but we always query to ensure accuracy
-        //
-        // Bug Fix (P1): Round up division to prevent underestimating fees for small amounts
-        // Formula: (a * b + c - 1) / c rounds up instead of down
-        // This ensures we never underestimate the fee required for repayment
-        //
-        // Note: Potential overflow for amounts near type(uint256).max / feeRate is prevented
-        // by Solidity 0.8.19's built-in overflow protection (will revert if overflow occurs)
-        uint256 feeRate = VAULT.flashFee(asset, 1e18);
-        flashLoanFee = (amount * feeRate + 1e18 - 1) / 1e18;
+        // SyncSwap EIP-3156: query exact fee from Vault
+        flashLoanFee = VAULT.flashFee(asset, amount);
 
-        // Validate basic path requirements
-        if (swapPath.length == 0 || swapPath[0].tokenIn != asset) {
+        uint256 simulatedOutput = _simulateSwapPath(asset, amount, swapPath);
+        if (simulatedOutput == 0) {
             return (0, flashLoanFee);
         }
 
-        uint256 currentAmount = amount;
-        address currentToken = asset;
-        address[] memory path = new address[](2);
-
-        // Track visited tokens to detect cycles (Fix 4.4: P2 resilience improvement)
-        address[] memory visitedTokens = new address[](swapPath.length + 1);
-        visitedTokens[0] = asset;
-        uint256 visitedCount = 1;
-
-        // Simulate each swap
-        for (uint256 i = 0; i < swapPath.length;) {
-            SwapStep calldata step = swapPath[i];
-
-            // Validate path continuity
-            if (step.tokenIn != currentToken) {
-                return (0, flashLoanFee);
-            }
-
-            // Check for cycle: token appears twice before final step
-            if (i < swapPath.length - 1) {
-                for (uint256 j = 0; j < visitedCount; j++) {
-                    if (visitedTokens[j] == step.tokenOut) {
-                        return (0, flashLoanFee); // Cycle detected
-                    }
-                }
-            }
-
-            // Track visited token
-            visitedTokens[visitedCount] = step.tokenOut;
-            unchecked { ++visitedCount; }
-
-            path[0] = step.tokenIn;
-            path[1] = step.tokenOut;
-
-            // Try to get amounts out (catches reverts from invalid pairs)
-            try IDexRouter(step.router).getAmountsOut(currentAmount, path) returns (
-                uint256[] memory amounts
-            ) {
-                currentAmount = amounts[amounts.length - 1];
-                currentToken = step.tokenOut;
-            } catch {
-                return (0, flashLoanFee);
-            }
-
-            unchecked { ++i; }
-        }
-
-        // Validate cycle completed (ends with start asset)
-        if (currentToken != asset) {
-            return (0, flashLoanFee);
-        }
-
-        // Calculate profit (if positive)
-        uint256 amountOwed = amount + flashLoanFee;
-        if (currentAmount > amountOwed) {
-            expectedProfit = currentAmount - amountOwed;
-        } else {
-            expectedProfit = 0;
-        }
-
+        expectedProfit = _calculateProfit(amount, simulatedOutput, flashLoanFee);
         return (expectedProfit, flashLoanFee);
     }
 

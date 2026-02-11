@@ -350,11 +350,11 @@ export class SolanaDetector extends EventEmitter {
       commitment: config.commitment || 'confirmed',
       rpcFallbackUrls: config.rpcFallbackUrls || [],
       wsFallbackUrls: config.wsFallbackUrls || [],
-      healthCheckIntervalMs: config.healthCheckIntervalMs || 30000,
-      connectionPoolSize: config.connectionPoolSize || 3,
-      maxRetries: config.maxRetries || 3,
-      retryDelayMs: config.retryDelayMs || 1000,
-      minProfitThreshold: config.minProfitThreshold || 0.3
+      healthCheckIntervalMs: config.healthCheckIntervalMs ?? 30000,
+      connectionPoolSize: config.connectionPoolSize ?? 3,
+      maxRetries: config.maxRetries ?? 3,
+      retryDelayMs: config.retryDelayMs ?? 1000,
+      minProfitThreshold: config.minProfitThreshold ?? 0.3
     };
 
     // Set up logging

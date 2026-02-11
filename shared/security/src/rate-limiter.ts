@@ -58,6 +58,10 @@ export class RateLimiter {
     this.redisPromise = getRedisClient().then(client => {
       this.redis = client;
       return client;
+    }).catch(err => {
+      // Clear cached promise so next call retries instead of returning the same rejection
+      this.redisPromise = null;
+      throw err;
     });
 
     return this.redisPromise;

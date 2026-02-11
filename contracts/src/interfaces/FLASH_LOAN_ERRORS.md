@@ -56,110 +56,37 @@ error InvalidFlashLoanInitiator();
 
 ## Implementation Status
 
-### Current State (Before Standardization)
+### ✅ Migration Complete (as of 2026-02-11)
 
-| Contract | Protocol Error | Caller Error | Initiator Error |
-|----------|----------------|--------------|-----------------|
-| FlashLoanArbitrage | `InvalidPoolAddress` | `InvalidFlashLoanCaller` ✅ | `InvalidFlashLoanInitiator` ✅ |
-| BalancerV2FlashArbitrage | `InvalidVaultAddress` | `InvalidFlashLoanCaller` ✅ | N/A |
-| PancakeSwapFlashArbitrage | `InvalidFactoryAddress` | `InvalidFlashLoanCaller` ✅ | N/A |
-| SyncSwapFlashArbitrage | `InvalidVaultAddress` | `InvalidFlashLoanCaller` ✅ | `InvalidInitiator` ❌ |
+All contracts now use standardized error names via `IFlashLoanErrors.sol` shared interface:
 
-### Target State (After Standardization)
+| Contract | Protocol Error | Caller Error | Initiator Error | Source |
+|----------|----------------|--------------|-----------------|--------|
+| FlashLoanArbitrage | `InvalidProtocolAddress` ✅ | `InvalidFlashLoanCaller` ✅ | `InvalidFlashLoanInitiator` ✅ | `IFlashLoanErrors` |
+| BalancerV2FlashArbitrage | `InvalidProtocolAddress` ✅ | `InvalidFlashLoanCaller` ✅ | N/A | `IFlashLoanErrors` |
+| PancakeSwapFlashArbitrage | `InvalidProtocolAddress` ✅ | `InvalidFlashLoanCaller` ✅ | N/A | `IFlashLoanErrors` |
+| SyncSwapFlashArbitrage | `InvalidProtocolAddress` ✅ | `InvalidFlashLoanCaller` ✅ | `InvalidFlashLoanInitiator` ✅ | `IFlashLoanErrors` |
 
-| Contract | Protocol Error | Caller Error | Initiator Error |
-|----------|----------------|--------------|-----------------|
-| FlashLoanArbitrage | `InvalidProtocolAddress` | `InvalidFlashLoanCaller` ✅ | `InvalidFlashLoanInitiator` ✅ |
-| BalancerV2FlashArbitrage | `InvalidProtocolAddress` | `InvalidFlashLoanCaller` ✅ | N/A |
-| PancakeSwapFlashArbitrage | `InvalidProtocolAddress` | `InvalidFlashLoanCaller` ✅ | N/A |
-| SyncSwapFlashArbitrage | `InvalidProtocolAddress` | `InvalidFlashLoanCaller` ✅ | `InvalidFlashLoanInitiator` |
+**Shared Interface**: `contracts/src/interfaces/IFlashLoanErrors.sol`
 
-## Migration Guide
-
-For each contract, update error definitions and usage:
-
-### FlashLoanArbitrage.sol
-
-```solidity
-// OLD
-error InvalidPoolAddress();
-
-// NEW
-error InvalidProtocolAddress();
-
-// Update usage in constructor
-if (_pool == address(0)) revert InvalidProtocolAddress();
-```
-
-### BalancerV2FlashArbitrage.sol
-
-```solidity
-// OLD
-error InvalidVaultAddress();
-
-// NEW
-error InvalidProtocolAddress();
-
-// Update usage in constructor
-if (_vault == address(0)) revert InvalidProtocolAddress();
-```
-
-### PancakeSwapFlashArbitrage.sol
-
-```solidity
-// OLD
-error InvalidFactoryAddress();
-error InvalidPoolAddress();
-
-// NEW
-error InvalidProtocolAddress();
-// Note: Use same error for both factory and pool validation
-
-// Update usage in constructor
-if (_factory == address(0)) revert InvalidProtocolAddress();
-```
-
-### SyncSwapFlashArbitrage.sol
-
-```solidity
-// OLD
-error InvalidVaultAddress();
-error InvalidInitiator();
-
-// NEW
-error InvalidProtocolAddress();
-error InvalidFlashLoanInitiator();
-
-// Update usage
-if (_vault == address(0)) revert InvalidProtocolAddress();
-if (initiator != address(this)) revert InvalidFlashLoanInitiator();
-```
+All four contracts inherit `IFlashLoanErrors` instead of declaring errors locally,
+preventing future naming drift.
 
 ## Benefits
 
 1. **Unified Monitoring**: Single error pattern to track across all protocols
 2. **Better DX**: Developers memorize one error name, not four
-3. **Reduced Code**: Shared error handling logic
+3. **Reduced Code**: Shared `IFlashLoanErrors` interface (single source of truth)
 4. **Clearer Intent**: "Protocol" is protocol-agnostic (works for Pool, Vault, Factory)
-
-## Backward Compatibility
-
-**Breaking Change**: Yes - changes error names that external code may catch
-
-**Migration Path**:
-1. Update monitoring/alerting to recognize new error names
-2. Update integration tests
-3. Deploy new contracts with standardized errors
-4. No runtime behavior changes (same validations, just different error names)
+5. **Drift Prevention**: Errors defined once, inherited everywhere
 
 ## Future Additions
 
-As new flash loan providers are added, use these standardized errors:
-- Protocol address validation: `InvalidProtocolAddress()`
-- Callback caller check: `InvalidFlashLoanCaller()`
-- Initiator validation: `InvalidFlashLoanInitiator()`
+As new flash loan providers are added:
+1. Inherit `IFlashLoanErrors` in the new contract
+2. Use standardized errors for protocol/caller/initiator validation
+3. Define protocol-specific errors locally (e.g., `PoolNotWhitelisted`)
 
 ## See Also
 
-- Individual contract error definitions (before standardization)
-- Deep dive analysis: contracts/INTERFACE_DEEP_DIVE_ANALYSIS.md Section 5
+- `contracts/src/interfaces/IFlashLoanErrors.sol` - Shared error definitions

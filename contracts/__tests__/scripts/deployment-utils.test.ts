@@ -83,7 +83,7 @@ describe('Deployment Utilities', () => {
     });
 
     describe('Testnet Behavior', () => {
-      const testnets = ['sepolia', 'arbitrumSepolia', 'zksync-testnet', 'base-sepolia'];
+      const testnets = ['sepolia', 'arbitrumSepolia', 'zksync-testnet', 'baseSepolia'];
 
       test.each(testnets)('should allow %s with undefined profit', (network) => {
         const result = validateMinimumProfit(network, undefined);
@@ -115,9 +115,10 @@ describe('Deployment Utilities', () => {
         expect(result).toBe(profit);
       });
 
-      it('should return 0n for unknown network with undefined', () => {
-        const result = validateMinimumProfit('unknown-network', undefined);
-        expect(result).toBe(0n);
+      it('should throw for unknown network with undefined profit (fail-safe)', () => {
+        expect(() => validateMinimumProfit('unknown-network', undefined)).toThrow(
+          '[ERR_NO_PROFIT_THRESHOLD]'
+        );
       });
     });
   });
@@ -141,19 +142,17 @@ describe('Deployment Utilities', () => {
       });
     });
 
-    describe('Arbitrum Network Aliases', () => {
-      it('should normalize arbitrumSepolia to arbitrum-sepolia', () => {
-        expect(normalizeNetworkName('arbitrumSepolia')).toBe('arbitrum-sepolia');
+    describe('Testnet Names (camelCase canonical - no normalization)', () => {
+      it('should keep arbitrumSepolia unchanged (canonical camelCase)', () => {
+        expect(normalizeNetworkName('arbitrumSepolia')).toBe('arbitrumSepolia');
+      });
+
+      it('should keep baseSepolia unchanged (canonical camelCase)', () => {
+        expect(normalizeNetworkName('baseSepolia')).toBe('baseSepolia');
       });
 
       it('should keep arbitrum as is', () => {
         expect(normalizeNetworkName('arbitrum')).toBe('arbitrum');
-      });
-    });
-
-    describe('Base Network Aliases', () => {
-      it('should normalize baseSepolia to base-sepolia', () => {
-        expect(normalizeNetworkName('baseSepolia')).toBe('base-sepolia');
       });
 
       it('should keep base as is', () => {
@@ -574,5 +573,169 @@ describe('Smoke Test Functions', () => {
       // Should pass because any callable response (even error) means contract exists
       expect(result).toBe(true);
     });
+  });
+});
+
+// =============================================================================
+// saveDeploymentResult() — Central Registry Merge Tests
+// =============================================================================
+
+describe('saveDeploymentResult — Central Registry Merge', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const { saveDeploymentResult } = require('../../scripts/lib/deployment-utils');
+
+  const deploymentsDir = path.join(__dirname, '..', '..', 'scripts', 'lib', '..', '..', 'deployments');
+  let originalRegistryContent: string | null = null;
+  let registryPath: string;
+  let balancerRegistryPath: string;
+  let networkFilePath: string;
+
+  beforeEach(() => {
+    registryPath = path.join(deploymentsDir, 'registry.json');
+    balancerRegistryPath = path.join(deploymentsDir, 'balancer-registry.json');
+    networkFilePath = path.join(deploymentsDir, 'testnetwork.json');
+
+    // Save original registry content
+    if (fs.existsSync(registryPath)) {
+      originalRegistryContent = fs.readFileSync(registryPath, 'utf8');
+    }
+  });
+
+  afterEach(() => {
+    // Restore original registry content
+    if (originalRegistryContent !== null) {
+      fs.writeFileSync(registryPath, originalRegistryContent, 'utf8');
+    }
+
+    // Clean up temp files
+    for (const f of [balancerRegistryPath, networkFilePath]) {
+      if (fs.existsSync(f)) {
+        try { fs.unlinkSync(f); } catch { /* ignore */ }
+      }
+    }
+
+    // Clean up lock files
+    for (const f of [registryPath + '.lock', balancerRegistryPath + '.lock']) {
+      if (fs.existsSync(f)) {
+        try { fs.unlinkSync(f); } catch { /* ignore */ }
+      }
+    }
+  });
+
+  const makeResult = (overrides: any = {}) => ({
+    network: 'testnetwork',
+    chainId: 999,
+    contractAddress: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    ownerAddress: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+    deployerAddress: '0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
+    transactionHash: '0x1234',
+    blockNumber: 100,
+    timestamp: 1700000000,
+    minimumProfit: '1000000000000000',
+    approvedRouters: [],
+    verified: true,
+    ...overrides,
+  });
+
+  it('should merge contractType into central registry without destroying other entries', async () => {
+    // Seed registry with existing data
+    const initialRegistry = {
+      testnetwork: {
+        FlashLoanArbitrage: '0x1111111111111111111111111111111111111111',
+        PancakeSwapFlashArbitrage: null,
+        BalancerV2FlashArbitrage: null,
+        deployedAt: 1699000000,
+        deployedBy: '0xOLD',
+        verified: true,
+      },
+    };
+    fs.writeFileSync(registryPath, JSON.stringify(initialRegistry, null, 2), 'utf8');
+
+    // Deploy Balancer — should merge into central registry, not overwrite
+    const result = makeResult({
+      contractAddress: '0x2222222222222222222222222222222222222222',
+      vaultAddress: '0xVAULT',
+      flashLoanFee: '0',
+    });
+
+    await saveDeploymentResult(result, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
+
+    // Read central registry and verify merge
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+
+    // Balancer entry should be set
+    expect(registry.testnetwork.BalancerV2FlashArbitrage).toBe('0x2222222222222222222222222222222222222222');
+
+    // Existing FlashLoan entry should be preserved
+    expect(registry.testnetwork.FlashLoanArbitrage).toBe('0x1111111111111111111111111111111111111111');
+
+    // Metadata should be updated
+    expect(registry.testnetwork.deployedAt).toBe(1700000000);
+    expect(registry.testnetwork.deployedBy).toBe('0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC');
+    expect(registry.testnetwork.verified).toBe(true);
+  });
+
+  it('should also write per-contract registry for non-registry.json registryName', async () => {
+    // Ensure clean state
+    if (fs.existsSync(balancerRegistryPath)) {
+      fs.unlinkSync(balancerRegistryPath);
+    }
+
+    const result = makeResult({
+      contractAddress: '0x3333333333333333333333333333333333333333',
+      vaultAddress: '0xVAULT',
+      flashLoanFee: '0',
+    });
+
+    await saveDeploymentResult(result, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
+
+    // Per-contract registry should exist
+    expect(fs.existsSync(balancerRegistryPath)).toBe(true);
+    const perContract = JSON.parse(fs.readFileSync(balancerRegistryPath, 'utf8'));
+    expect(perContract.testnetwork).toBeDefined();
+    expect(perContract.testnetwork.contractAddress).toBe('0x3333333333333333333333333333333333333333');
+  });
+
+  it('should NOT write per-contract registry when registryName is registry.json', async () => {
+    // This is the Aave/FlashLoan case — only writes to central registry
+    const result = makeResult();
+
+    await saveDeploymentResult(result, 'registry.json', 'FlashLoanArbitrage');
+
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    expect(registry.testnetwork.FlashLoanArbitrage).toBe('0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  });
+
+  it('should handle sequential deployments of different contract types to same network', async () => {
+    // Seed empty registry
+    fs.writeFileSync(registryPath, '{}', 'utf8');
+
+    // Deploy FlashLoan
+    await saveDeploymentResult(
+      makeResult({ contractAddress: '0x1111111111111111111111111111111111111111' }),
+      'registry.json',
+      'FlashLoanArbitrage'
+    );
+
+    // Deploy Balancer
+    await saveDeploymentResult(
+      makeResult({ contractAddress: '0x2222222222222222222222222222222222222222', vaultAddress: '0xV', flashLoanFee: '0' }),
+      'balancer-registry.json',
+      'BalancerV2FlashArbitrage'
+    );
+
+    // Deploy CommitReveal
+    await saveDeploymentResult(
+      makeResult({ contractAddress: '0x3333333333333333333333333333333333333333', gasUsed: '500000' }),
+      'commit-reveal-registry.json',
+      'CommitRevealArbitrage'
+    );
+
+    // All three should be in central registry
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    expect(registry.testnetwork.FlashLoanArbitrage).toBe('0x1111111111111111111111111111111111111111');
+    expect(registry.testnetwork.BalancerV2FlashArbitrage).toBe('0x2222222222222222222222222222222222222222');
+    expect(registry.testnetwork.CommitRevealArbitrage).toBe('0x3333333333333333333333333333333333333333');
   });
 });

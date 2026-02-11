@@ -35,15 +35,16 @@
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 1 Task 1.2
  */
 
-import { ethers, network, run } from 'hardhat';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ethers, network } from 'hardhat';
 import {
   normalizeNetworkName,
+  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
   checkDeployerBalance,
   estimateDeploymentCost,
   verifyContractWithRetry,
+  smokeTestMultiPathQuoter,
   saveDeploymentResult,
+  printDeploymentSummary,  // P3-005 FIX: Use shared function instead of duplicate
   DEFAULT_VERIFICATION_RETRIES,
   DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
   type MultiPathQuoterDeploymentResult
@@ -88,8 +89,8 @@ type DeploymentResult = MultiPathQuoterDeploymentResult;
 async function deployMultiPathQuoter(): Promise<DeploymentResult> {
   const [deployer] = await ethers.getSigners();
   const networkName = normalizeNetworkName(network.name);
-  // Chain IDs are always < Number.MAX_SAFE_INTEGER in practice (all EVM chains use IDs < 2^32)
-  const chainId = Number((await ethers.provider.getNetwork()).chainId);
+  // P1-007 FIX: Use safe chain ID getter with validation
+  const chainId = await getSafeChainId();
 
   console.log('\n========================================');
   console.log('MultiPathQuoter Deployment');
@@ -135,49 +136,9 @@ async function deployMultiPathQuoter(): Promise<DeploymentResult> {
 
   // Smoke test: verify contract is deployed and functional
   console.log('\nRunning smoke test...');
-  try {
-    // 1. Check interface exists
-    const contractInterface = multiPathQuoter.interface;
-    const hasBatchedQuotesFunction = contractInterface.hasFunction('getBatchedQuotes');
-
-    if (!hasBatchedQuotesFunction) {
-      console.log('⚠️  Smoke test failed: getBatchedQuotes function not found in ABI');
-      return {
-        network: networkName,
-        chainId,
-        contractAddress,
-        deployerAddress: deployer.address,
-        transactionHash: deployTx?.hash || '',
-        blockNumber,
-        timestamp,
-        gasUsed,
-        verified: false,
-      };
-    }
-
-    // 2. Verify contract bytecode exists at address (catches deployment failures)
-    const code = await ethers.provider.getCode(contractAddress);
-    if (code === '0x') {
-      console.log('⚠️  Smoke test failed: No bytecode at contract address');
-      return {
-        network: networkName,
-        chainId,
-        contractAddress,
-        deployerAddress: deployer.address,
-        transactionHash: deployTx?.hash || '',
-        blockNumber,
-        timestamp,
-        gasUsed,
-        verified: false,
-      };
-    }
-
-    console.log('✅ Smoke test passed:');
-    console.log('   - getBatchedQuotes function available in ABI');
-    console.log(`   - Contract deployed at ${contractAddress}`);
-    console.log(`   - Bytecode size: ${(code.length - 2) / 2} bytes`);
-  } catch (error) {
-    console.log('⚠️  Smoke test failed:', error);
+  const smokeTestPassed = await smokeTestMultiPathQuoter(multiPathQuoter);
+  if (!smokeTestPassed) {
+    console.log('⚠️  Smoke test failed — contract may not be deployed correctly');
   }
 
   return {
@@ -198,27 +159,18 @@ async function deployMultiPathQuoter(): Promise<DeploymentResult> {
  * Kept as wrapper for backward compatibility
  */
 async function saveMultiPathQuoterDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'multi-path-quoter-registry.json');
+  await saveDeploymentResult(result, 'multi-path-quoter-registry.json', 'MultiPathQuoter');
 }
 
 /**
  * Print deployment summary and next steps
  */
-function printDeploymentSummary(result: DeploymentResult): void {
-  console.log('\n========================================');
-  console.log('Deployment Summary');
-  console.log('========================================');
-  console.log(`Network:      ${result.network} (${result.chainId})`);
-  console.log(`Contract:     ${result.contractAddress}`);
-  console.log(`Deployer:     ${result.deployerAddress}`);
-  console.log(`Transaction:  ${result.transactionHash}`);
-  console.log(`Block:        ${result.blockNumber}`);
-  console.log(`Timestamp:    ${new Date(result.timestamp * 1000).toISOString()}`);
-  console.log(`Gas Used:     ${result.gasUsed}`);
-  console.log(`Verified:     ${result.verified ? '✅ Yes' : '❌ No'}`);
-  console.log('========================================\n');
-
-  console.log('📋 NEXT STEPS:');
+/**
+ * P3-005 FIX: Print contract-specific next steps (shared summary moved to deployment-utils)
+ * This function prints MultiPathQuoter-specific configuration steps
+ */
+function printMultiPathQuoterNextSteps(result: DeploymentResult): void {
+  console.log('📋 MULTI-PATH QUOTER SPECIFIC STEPS:');
   console.log('');
   console.log('1. Update contract addresses in TWO configuration files:');
   console.log('');
@@ -269,7 +221,9 @@ async function main(): Promise<void> {
 
   // Save and print summary
   await saveMultiPathQuoterDeployment(result);
+  // P3-005 FIX: Use shared summary, then contract-specific next steps
   printDeploymentSummary(result);
+  printMultiPathQuoterNextSteps(result);
 
   console.log('🎉 Deployment complete!');
   console.log('\n⚠️  IMPORTANT: Remember to update service-config.ts with the deployed address!');

@@ -274,6 +274,7 @@ export const ServiceConfigSchema = z.object({
  */
 export const FlashLoanProtocolSchema = z.enum([
   'aave_v3',
+  'balancer_v2',
   'pancakeswap_v3',
   'spookyswap',
   'syncswap',

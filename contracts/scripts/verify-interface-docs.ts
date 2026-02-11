@@ -18,6 +18,32 @@
 import fs from 'fs';
 import path from 'path';
 
+// P2-005 FIX: Centralized, absolute file paths relative to script location
+// This makes paths resilient to:
+// - Running script from different working directories
+// - Project restructuring
+// - Symlinking or path aliasing
+const CONTRACTS_ROOT = path.join(__dirname, '..');
+
+const FILE_PATHS = {
+  // Solidity contracts to verify
+  contracts: [
+    path.join(CONTRACTS_ROOT, 'src', 'FlashLoanArbitrage.sol'),
+    path.join(CONTRACTS_ROOT, 'src', 'BalancerV2FlashArbitrage.sol'),
+    path.join(CONTRACTS_ROOT, 'src', 'PancakeSwapFlashArbitrage.sol'),
+    path.join(CONTRACTS_ROOT, 'src', 'SyncSwapFlashArbitrage.sol'),
+  ],
+
+  // Documentation and interface files
+  errorsDocs: path.join(CONTRACTS_ROOT, 'src', 'interfaces', 'FLASH_LOAN_ERRORS.md'),
+  syncSwapInterface: path.join(CONTRACTS_ROOT, 'src', 'interfaces', 'ISyncSwapVault.sol'),
+  balancerInterface: path.join(CONTRACTS_ROOT, 'src', 'interfaces', 'IBalancerV2Vault.sol'),
+  balancerMock: path.join(CONTRACTS_ROOT, 'src', 'mocks', 'MockBalancerVault.sol'),
+
+  // TypeScript provider (outside contracts/ directory)
+  syncSwapProvider: path.join(CONTRACTS_ROOT, '..', 'services', 'execution-engine', 'src', 'strategies', 'flash-loan-providers', 'syncswap.provider.ts'),
+};
+
 // ANSI color codes for terminal output
 const colors = {
   reset: '\x1b[0m',
@@ -90,14 +116,9 @@ function verifyErrorMessages(): VerificationResult {
   console.log(`\n${colors.blue}${colors.bold}1. Verifying Error Messages${colors.reset}`);
   console.log('   Checking that documented errors match Solidity implementations...\n');
 
-  const contractFiles = [
-    'src/FlashLoanArbitrage.sol',
-    'src/BalancerV2FlashArbitrage.sol',
-    'src/PancakeSwapFlashArbitrage.sol',
-    'src/SyncSwapFlashArbitrage.sol',
-  ];
-
-  const docFile = 'src/interfaces/FLASH_LOAN_ERRORS.md';
+  // P2-005 FIX: Use centralized file paths
+  const contractFiles = FILE_PATHS.contracts;
+  const docFile = FILE_PATHS.errorsDocs;
   const docContent = readFile(docFile);
 
   if (!docContent) {
@@ -153,8 +174,8 @@ function verifyFeeCalculations(): VerificationResult {
   console.log(`\n${colors.blue}${colors.bold}2. Verifying Fee Calculation Examples${colors.reset}`);
   console.log('   Checking that documented fee examples are accurate...\n');
 
-  // Check ISyncSwapVault documentation
-  const interfaceFile = 'src/interfaces/ISyncSwapVault.sol';
+  // P2-005 FIX: Use centralized file paths
+  const interfaceFile = FILE_PATHS.syncSwapInterface;
   const content = readFile(interfaceFile);
 
   if (!content) {
@@ -188,8 +209,8 @@ function verifyFeeCalculations(): VerificationResult {
     allPassed = false;
   }
 
-  // Check TypeScript provider documentation
-  const providerFile = '../services/execution-engine/src/strategies/flash-loan-providers/syncswap.provider.ts';
+  // P2-005 FIX: Use centralized file path for TypeScript provider
+  const providerFile = FILE_PATHS.syncSwapProvider;
   const providerContent = readFile(providerFile);
 
   if (providerContent) {
@@ -216,8 +237,9 @@ function verifyArrayValidation(): VerificationResult {
   console.log(`\n${colors.blue}${colors.bold}3. Verifying Array Validation Documentation${colors.reset}`);
   console.log('   Checking that Balancer V2 array validation docs match implementation...\n');
 
-  const interfaceFile = 'src/interfaces/IBalancerV2Vault.sol';
-  const mockFile = 'src/mocks/MockBalancerVault.sol';
+  // P2-005 FIX: Use centralized file paths
+  const interfaceFile = FILE_PATHS.balancerInterface;
+  const mockFile = FILE_PATHS.balancerMock;
 
   const interfaceContent = readFile(interfaceFile);
   const mockContent = readFile(mockFile);
