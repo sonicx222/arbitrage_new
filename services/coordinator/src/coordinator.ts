@@ -78,6 +78,9 @@ import { OpportunityRouter } from './opportunities';
 // P1-8 FIX: Import LeadershipElectionService to replace inline leadership code
 import { LeadershipElectionService } from './leadership';
 
+// P1-2: Import extracted ActivePairsTracker for bounded pair tracking
+import { ActivePairsTracker } from './tracking';
+
 // P2-11: Import IntervalManager for centralized interval lifecycle management
 import { IntervalManager } from '@arbitrage/core';
 
@@ -375,9 +378,15 @@ export class CoordinatorService implements CoordinatorStateProvider {
     this.MAX_OPPORTUNITIES = this.config.maxOpportunities!;
     this.OPPORTUNITY_TTL_MS = this.config.opportunityTtlMs!;
     this.OPPORTUNITY_CLEANUP_INTERVAL_MS = this.config.opportunityCleanupIntervalMs!;
-    this.PAIR_TTL_MS = this.config.pairTtlMs!;
-    // P3-005 FIX: Initialize max active pairs limit
-    this.MAX_ACTIVE_PAIRS = this.config.maxActivePairs!;
+
+    // P1-2: Initialize extracted ActivePairsTracker
+    this.activePairsTracker = new ActivePairsTracker(
+      this.logger,
+      {
+        pairTtlMs: this.config.pairTtlMs!,
+        maxActivePairs: this.config.maxActivePairs!,
+      }
+    );
 
     // FIX: Initialize alert notifier for sending alerts to external channels
     // P0-002 FIX: Add defensive initialization with fallback
@@ -704,7 +713,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.alertCooldownManager?.clear();
       this.opportunities.clear();
       // FIX: Clear activePairs to prevent stale data on restart
-      this.activePairs.clear();
+      this.activePairsTracker?.clear();
       // R2 REFACTOR: Reset stream consumer manager state
       this.streamConsumerManager?.reset();
 
@@ -1168,12 +1177,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // Only the opportunity handler (primary data path) should reset errors.
   }
 
-  // Track active pairs for volume monitoring (rolling window)
-  private activePairs: Map<string, { lastSeen: number; chain: string; dex: string }> = new Map();
-  // FIX: Now configurable via CoordinatorConfig (previously static)
-  private readonly PAIR_TTL_MS: number;
-  // P3-005 FIX: Add size limit to prevent unbounded memory growth
-  private readonly MAX_ACTIVE_PAIRS: number;
+  // P1-2: Active pairs tracking extracted to ActivePairsTracker class
+  // Provides TTL-based cleanup and emergency eviction with hysteresis
+  private activePairsTracker: ActivePairsTracker | null = null;
+
+  /**
+   * @deprecated Access via activePairsTracker instead. Kept for backward compat in tests.
+   * Returns the internal Map from activePairsTracker for test access via (coordinator as any).activePairs
+   */
+  private get activePairs(): ActivePairsTracker | null {
+    return this.activePairsTracker;
+  }
 
   /**
    * Handle swap event messages from stream:swap-events.
@@ -1318,74 +1332,21 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
-   * Cleanup stale entries from activePairs map.
-   * Called periodically to prevent unbounded memory growth.
+   * P1-2: Delegates to ActivePairsTracker.cleanup().
+   * Kept as method for backward compatibility with integration tests.
    */
   private cleanupActivePairs(): void {
-    const now = Date.now();
-    const toDelete: string[] = [];
-
-    for (const [pairAddress, info] of this.activePairs) {
-      if (now - info.lastSeen > this.PAIR_TTL_MS) {
-        toDelete.push(pairAddress);
-      }
-    }
-
-    for (const pairAddress of toDelete) {
-      this.activePairs.delete(pairAddress);
-    }
-
-    this.systemMetrics.activePairsTracked = this.activePairs.size;
-
-    if (toDelete.length > 0) {
-      this.logger.debug('Cleaned up stale active pairs', {
-        removed: toDelete.length,
-        remaining: this.activePairs.size
-      });
-    }
+    this.activePairsTracker!.cleanup();
+    this.systemMetrics.activePairsTracked = this.activePairsTracker!.size;
   }
 
   /**
-   * P3-005 FIX: Track active trading pair with size limit enforcement.
-   * Adds emergency cleanup if map exceeds MAX_ACTIVE_PAIRS to prevent unbounded memory growth.
-   *
-   * @param pairKey - Unique identifier for the trading pair
-   * @param chain - Blockchain the pair is on
-   * @param dex - DEX where the pair trades
+   * P1-2: Delegates to ActivePairsTracker.trackPair().
+   * Kept as method for backward compatibility with startStreamConsumers handler map.
    */
   private trackActivePair(pairKey: string, chain: string, dex: string): void {
-    this.activePairs.set(pairKey, {
-      lastSeen: Date.now(),
-      chain,
-      dex
-    });
-
-    // P0 FIX #2 + #11: Emergency cleanup with hysteresis and O(n log k) selection.
-    // - Uses findKSmallest() instead of Array.from().sort() for O(n log k) vs O(n log n)
-    // - Removes down to 75% of limit (hysteresis band) to prevent re-triggering
-    //   on the very next message. Previously removed only 10%, causing repeated
-    //   expensive cleanup on every hot-path price update/swap/volume message.
-    if (this.activePairs.size > this.MAX_ACTIVE_PAIRS) {
-      const targetSize = Math.floor(this.MAX_ACTIVE_PAIRS * 0.75);
-      const toRemove = this.activePairs.size - targetSize;
-      const oldest = findKSmallest(
-        this.activePairs.entries(),
-        toRemove,
-        ([, a], [, b]) => a.lastSeen - b.lastSeen
-      );
-
-      for (const [key] of oldest) {
-        this.activePairs.delete(key);
-      }
-
-      this.logger.debug('Emergency activePairs cleanup triggered', {
-        removed: oldest.length,
-        remaining: this.activePairs.size,
-        limit: this.MAX_ACTIVE_PAIRS
-      });
-    }
-
-    this.systemMetrics.activePairsTracked = this.activePairs.size;
+    this.activePairsTracker!.trackPair(pairKey, chain, dex);
+    this.systemMetrics.activePairsTracked = this.activePairsTracker!.size;
   }
 
   /**

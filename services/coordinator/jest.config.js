@@ -10,6 +10,7 @@ module.exports = {
   // FIX: Add moduleNameMapper for workspace packages
   moduleNameMapper: {
     '^@arbitrage/core$': '<rootDir>/../../shared/core/src/index.ts',
+    '^@arbitrage/core/(.*)$': '<rootDir>/../../shared/core/src/$1',
     '^@arbitrage/types$': '<rootDir>/../../shared/types/index.ts',
     '^@arbitrage/config$': '<rootDir>/../../shared/config/index.ts',
     '^@arbitrage/security$': '<rootDir>/../../shared/security/src/index.ts',
