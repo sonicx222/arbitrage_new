@@ -7,6 +7,14 @@ import {
   MockERC20,
   MockSyncSwapVault,
 } from '../typechain-types';
+import {
+  deployBaseFixture,
+  fundProvider,
+  RATE_USDC_TO_WETH_1PCT_PROFIT,
+  RATE_USDC_TO_WETH_2PCT_PROFIT,
+  RATE_WETH_TO_USDC,
+  getDeadline,
+} from './helpers';
 
 /**
  * SyncSwapFlashArbitrage Contract Tests
@@ -25,22 +33,12 @@ import {
 describe('SyncSwapFlashArbitrage', () => {
   // Test fixtures for consistent state
   async function deployContractsFixture() {
-    const [owner, user, attacker] = await ethers.getSigners();
+    const base = await deployBaseFixture();
 
-    // Deploy mock tokens
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
-    const weth = await MockERC20Factory.deploy('Wrapped Ether', 'WETH', 18);
-    const usdc = await MockERC20Factory.deploy('USD Coin', 'USDC', 6);
-    const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
-
-    // Deploy mock SyncSwap Vault
+    // Deploy SyncSwap Vault (requires WETH address) and fund it
     const MockSyncSwapVaultFactory = await ethers.getContractFactory('MockSyncSwapVault');
-    const vault = await MockSyncSwapVaultFactory.deploy(await weth.getAddress());
-
-    // Deploy mock DEX routers (2 routers for arbitrage)
-    const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
-    const dexRouter1 = await MockDexRouterFactory.deploy('Router1');
-    const dexRouter2 = await MockDexRouterFactory.deploy('Router2');
+    const vault = await MockSyncSwapVaultFactory.deploy(await base.weth.getAddress());
+    await fundProvider(base, await vault.getAddress());
 
     // Deploy SyncSwapFlashArbitrage contract
     const SyncSwapFlashArbitrageFactory = await ethers.getContractFactory(
@@ -48,34 +46,10 @@ describe('SyncSwapFlashArbitrage', () => {
     );
     const syncSwapArbitrage = await SyncSwapFlashArbitrageFactory.deploy(
       await vault.getAddress(),
-      owner.address
+      base.owner.address
     );
 
-    // Fund SyncSwap Vault for flash loans
-    await weth.mint(await vault.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await vault.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await vault.getAddress(), ethers.parseEther('1000000'));
-
-    // Fund DEX routers for swaps
-    await weth.mint(await dexRouter1.getAddress(), ethers.parseEther('1000'));
-    await weth.mint(await dexRouter2.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await dexRouter1.getAddress(), ethers.parseUnits('1000000', 6));
-    await usdc.mint(await dexRouter2.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await dexRouter1.getAddress(), ethers.parseEther('1000000'));
-    await dai.mint(await dexRouter2.getAddress(), ethers.parseEther('1000000'));
-
-    return {
-      syncSwapArbitrage,
-      vault,
-      dexRouter1,
-      dexRouter2,
-      weth,
-      usdc,
-      dai,
-      owner,
-      user,
-      attacker,
-    };
+    return { syncSwapArbitrage, vault, ...base };
   }
 
   // ===========================================================================
@@ -388,7 +362,7 @@ describe('SyncSwapFlashArbitrage', () => {
           },
         ];
 
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         // Execute arbitrage
         await syncSwapArbitrage
@@ -439,7 +413,7 @@ describe('SyncSwapFlashArbitrage', () => {
           },
         ];
 
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -460,7 +434,7 @@ describe('SyncSwapFlashArbitrage', () => {
           },
         ];
 
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage.connect(user).executeArbitrage(await weth.getAddress(), 0, swapPath, 0n, deadline)
@@ -494,7 +468,7 @@ describe('SyncSwapFlashArbitrage', () => {
 
         const amountIn = ethers.parseEther('1');
         const swapPath: any[] = [];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -515,7 +489,7 @@ describe('SyncSwapFlashArbitrage', () => {
           tokenOut: await usdc.getAddress(),
           amountOutMin: 1n,
         });
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -540,7 +514,7 @@ describe('SyncSwapFlashArbitrage', () => {
             amountOutMin: 1n,
           },
         ];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -565,7 +539,7 @@ describe('SyncSwapFlashArbitrage', () => {
             amountOutMin: 1n,
           },
         ];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -590,7 +564,7 @@ describe('SyncSwapFlashArbitrage', () => {
             amountOutMin: 0n, // No slippage protection!
           },
         ];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -615,7 +589,7 @@ describe('SyncSwapFlashArbitrage', () => {
             amountOutMin: 1n,
           },
         ];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -649,7 +623,7 @@ describe('SyncSwapFlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('505000000000000000000000000')
+          RATE_USDC_TO_WETH_1PCT_PROFIT
         );
 
         const amountIn = ethers.parseEther('1');
@@ -667,7 +641,7 @@ describe('SyncSwapFlashArbitrage', () => {
             amountOutMin: 1n,
           },
         ];
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         await expect(
           syncSwapArbitrage
@@ -777,7 +751,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       const tx = await syncSwapArbitrage
         .connect(user)
@@ -840,7 +814,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         syncSwapArbitrage
@@ -925,7 +899,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         syncSwapArbitrage
@@ -957,7 +931,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Cycle completeness check: last tokenOut (USDC) != asset (WETH)
       await expect(
@@ -1001,7 +975,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Token continuity check: step[1].tokenIn (DAI) != step[0].tokenOut (USDC)
       await expect(
@@ -1062,7 +1036,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         syncSwapArbitrage
@@ -1116,7 +1090,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const minProfit = ethers.parseEther('1'); // Require 1 WETH profit (too high)
 
       await expect(
@@ -1149,7 +1123,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000') // 0.000505 ETH per USDC = 10.1 ETH from 20000 USDC
+        RATE_USDC_TO_WETH_1PCT_PROFIT // 0.000505 ETH per USDC = 10.1 ETH from 20000 USDC
       );
 
       const amountIn = ethers.parseEther('10');
@@ -1168,7 +1142,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         syncSwapArbitrage
@@ -1197,7 +1171,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const initialTotalProfits = await syncSwapArbitrage.totalProfits();
@@ -1218,7 +1192,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await syncSwapArbitrage
         .connect(user)
@@ -1696,7 +1670,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // The malicious router attempts reentrancy during the first swap.
       // ReentrancyGuard blocks it (attackSucceeded=false), but the swap itself
@@ -1793,7 +1767,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Execute arbitrage
       const tx = await syncSwapArbitrage
@@ -1829,7 +1803,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000') // 0.000505 ETH per USDC
+        RATE_USDC_TO_WETH_1PCT_PROFIT // 0.000505 ETH per USDC
       );
 
       const amountIn = ethers.parseEther('5');
@@ -1848,7 +1822,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Execute first arbitrage
       await syncSwapArbitrage
@@ -1888,7 +1862,7 @@ describe('SyncSwapFlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('10');
@@ -1907,7 +1881,7 @@ describe('SyncSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       const tx = await syncSwapArbitrage
         .connect(user)

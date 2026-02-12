@@ -46,9 +46,12 @@ import {
   shutdownPartitionService,
   setupDetectorEventHandlers,
   setupProcessHandlers,
+  createPartitionEntry,
+  parsePartitionEnvironmentConfig,
   SHUTDOWN_TIMEOUT_MS,
   PartitionServiceConfig,
-  PartitionDetectorInterface
+  PartitionDetectorInterface,
+  PartitionEnvironmentConfig
 } from '@arbitrage/core';
 
 // =============================================================================
@@ -432,6 +435,111 @@ describe('Partition Service Utilities', () => {
         type: 'primary_down'
       });
     });
+
+    it('should register statusChange event handler', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      expect(mockDetector.listenerCount('statusChange')).toBe(1);
+    });
+
+    it('should log warn on statusChange degradation (connected -> error)', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('statusChange', {
+        chainId: 'bsc',
+        oldStatus: 'connected',
+        newStatus: 'error'
+      });
+
+      expect(logger.hasLogMatching('warn', 'Chain status degraded: bsc')).toBe(true);
+      const warnLogs = logger.getLogs('warn');
+      const degradedLog = warnLogs.find(log => log.msg.includes('Chain status degraded'));
+      expect(degradedLog?.meta).toMatchObject({
+        partition: 'test-partition',
+        from: 'connected',
+        to: 'error'
+      });
+    });
+
+    it('should log warn on statusChange degradation (connected -> disconnected)', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('statusChange', {
+        chainId: 'polygon',
+        oldStatus: 'connected',
+        newStatus: 'disconnected'
+      });
+
+      expect(logger.hasLogMatching('warn', 'Chain status degraded: polygon')).toBe(true);
+    });
+
+    it('should log info on statusChange recovery (error -> connected)', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('statusChange', {
+        chainId: 'bsc',
+        oldStatus: 'error',
+        newStatus: 'connected'
+      });
+
+      expect(logger.hasLogMatching('info', 'Chain status recovered: bsc')).toBe(true);
+      const infoLogs = logger.getLogs('info');
+      const recoveryLog = infoLogs.find(log => log.msg.includes('Chain status recovered'));
+      expect(recoveryLog?.meta).toMatchObject({
+        partition: 'test-partition',
+        from: 'error',
+        to: 'connected'
+      });
+    });
+
+    it('should log info on statusChange recovery (disconnected -> connected)', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('statusChange', {
+        chainId: 'polygon',
+        oldStatus: 'disconnected',
+        newStatus: 'connected'
+      });
+
+      expect(logger.hasLogMatching('info', 'Chain status recovered: polygon')).toBe(true);
+    });
+
+    it('should log debug on statusChange neutral transition', () => {
+      setupDetectorEventHandlers(
+        mockDetector,
+        logger as unknown as PartitionLogger,
+        'test-partition'
+      );
+
+      mockDetector.emit('statusChange', {
+        chainId: 'bsc',
+        oldStatus: 'connected',
+        newStatus: 'connecting'
+      });
+
+      // Neutral transitions (not degradation or recovery) log at debug level
+      expect(logger.hasLogMatching('debug', 'Chain status changed: bsc')).toBe(true);
+    });
   });
 
   // ===========================================================================
@@ -537,6 +645,275 @@ describe('Partition Service Utilities', () => {
     it('should handle single P3 chain override', () => {
       const chains = validateAndFilterChains('ethereum', highValueDefaultChains);
       expect(chains).toEqual(['ethereum']);
+    });
+  });
+
+  // ===========================================================================
+  // parsePartitionEnvironmentConfig Tests
+  // ===========================================================================
+
+  describe('parsePartitionEnvironmentConfig', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = { ...originalEnv };
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+    });
+
+    it('should return all 9 fields with correct types', () => {
+      process.env.REDIS_URL = 'redis://localhost:6379';
+      process.env.PARTITION_CHAINS = 'bsc,polygon';
+      process.env.HEALTH_CHECK_PORT = '3001';
+      process.env.INSTANCE_ID = 'test-instance';
+      process.env.REGION_ID = 'us-east1';
+      process.env.ENABLE_CROSS_REGION_HEALTH = 'true';
+      process.env.NODE_ENV = 'production';
+      process.env.BSC_RPC_URL = 'https://bsc-rpc.example.com';
+      process.env.BSC_WS_URL = 'wss://bsc-ws.example.com';
+
+      const config = parsePartitionEnvironmentConfig(['bsc', 'polygon']);
+
+      expect(config.redisUrl).toBe('redis://localhost:6379');
+      expect(config.partitionChains).toBe('bsc,polygon');
+      expect(config.healthCheckPort).toBe('3001');
+      expect(config.instanceId).toBe('test-instance');
+      expect(config.regionId).toBe('us-east1');
+      expect(config.enableCrossRegionHealth).toBe(true);
+      expect(config.nodeEnv).toBe('production');
+      expect(config.rpcUrls).toEqual({
+        bsc: 'https://bsc-rpc.example.com',
+        polygon: undefined
+      });
+      expect(config.wsUrls).toEqual({
+        bsc: 'wss://bsc-ws.example.com',
+        polygon: undefined
+      });
+    });
+
+    it('should return undefined for unset optional env vars', () => {
+      const config = parsePartitionEnvironmentConfig(['bsc']);
+
+      expect(config.redisUrl).toBeUndefined();
+      expect(config.partitionChains).toBeUndefined();
+      expect(config.healthCheckPort).toBeUndefined();
+      expect(config.instanceId).toBeUndefined();
+      expect(config.regionId).toBeUndefined();
+    });
+
+    it('should default enableCrossRegionHealth to true when env var not set', () => {
+      const config = parsePartitionEnvironmentConfig([]);
+      expect(config.enableCrossRegionHealth).toBe(true);
+    });
+
+    it('should set enableCrossRegionHealth to false only for exact string "false"', () => {
+      process.env.ENABLE_CROSS_REGION_HEALTH = 'false';
+      const config = parsePartitionEnvironmentConfig([]);
+      expect(config.enableCrossRegionHealth).toBe(false);
+    });
+
+    it('should default nodeEnv to "development" when NODE_ENV not set', () => {
+      delete process.env.NODE_ENV;
+      const config = parsePartitionEnvironmentConfig([]);
+      expect(config.nodeEnv).toBe('development');
+    });
+
+    it('should parse RPC/WS URLs for each chain using uppercase env var names', () => {
+      process.env.ETHEREUM_RPC_URL = 'https://eth.example.com';
+      process.env.ETHEREUM_WS_URL = 'wss://eth-ws.example.com';
+      process.env.ZKSYNC_RPC_URL = 'https://zksync.example.com';
+
+      const config = parsePartitionEnvironmentConfig(['ethereum', 'zksync', 'linea']);
+
+      expect(config.rpcUrls.ethereum).toBe('https://eth.example.com');
+      expect(config.wsUrls.ethereum).toBe('wss://eth-ws.example.com');
+      expect(config.rpcUrls.zksync).toBe('https://zksync.example.com');
+      expect(config.wsUrls.zksync).toBeUndefined();
+      expect(config.rpcUrls.linea).toBeUndefined();
+      expect(config.wsUrls.linea).toBeUndefined();
+    });
+  });
+
+  // ===========================================================================
+  // createPartitionEntry Tests
+  // ===========================================================================
+
+  describe('createPartitionEntry', () => {
+    let processExitSpy: jest.SpiedFunction<typeof process.exit>;
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = { ...originalEnv, JEST_WORKER_ID: 'test', NODE_ENV: 'test' };
+      processExitSpy = jest.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+    });
+
+    afterEach(() => {
+      processExitSpy.mockRestore();
+      // Clean up any process listeners that may have been registered
+      process.removeAllListeners('SIGTERM');
+      process.removeAllListeners('SIGINT');
+      process.removeAllListeners('uncaughtException');
+      process.removeAllListeners('unhandledRejection');
+      process.env = originalEnv;
+    });
+
+    it('should create entry for valid partition (asia-fast)', () => {
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(entry.partitionId).toBe('asia-fast');
+        expect(entry.chains).toEqual(['bsc', 'polygon', 'avalanche', 'fantom']);
+        expect(entry.region).toBe('asia-southeast1');
+        expect(entry.detector).toBeDefined();
+        expect(entry.config).toBeDefined();
+        expect(entry.config.partitionId).toBe('asia-fast');
+        expect(entry.config.chains).toEqual(expect.arrayContaining(['bsc', 'polygon', 'avalanche', 'fantom']));
+        expect(entry.cleanupProcessHandlers).toBeInstanceOf(Function);
+        expect(entry.envConfig).toBeDefined();
+        expect(entry.runner).toBeDefined();
+        expect(processExitSpy).not.toHaveBeenCalled();
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should create entry for valid partition (l2-turbo)', () => {
+      const entry = createPartitionEntry(
+        'l2-turbo',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(entry.partitionId).toBe('l2-turbo');
+        expect(entry.chains).toEqual(['arbitrum', 'optimism', 'base']);
+        expect(entry.region).toBe('asia-southeast1');
+        expect(processExitSpy).not.toHaveBeenCalled();
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should call process.exit(1) for unknown partition ID', () => {
+      // exitWithConfigError calls process.exit(1) which is mocked to no-op
+      // The function continues due to defensive optional chaining
+      const entry = createPartitionEntry(
+        'nonexistent-partition',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(processExitSpy).toHaveBeenCalledWith(1);
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should pass correctly-typed detector config to createDetector callback', () => {
+      const createDetectorSpy = jest.fn(
+        (_cfg: Record<string, unknown>) => new MockDetector() as PartitionDetectorInterface
+      );
+
+      const entry = createPartitionEntry('asia-fast', createDetectorSpy);
+
+      try {
+        expect(createDetectorSpy).toHaveBeenCalledTimes(1);
+        const passedConfig = createDetectorSpy.mock.calls[0][0];
+        expect(passedConfig).toMatchObject({
+          partitionId: 'asia-fast',
+          chains: expect.arrayContaining(['bsc', 'polygon', 'avalanche', 'fantom']),
+          instanceId: expect.any(String),
+          regionId: expect.any(String),
+          enableCrossRegionHealth: expect.any(Boolean),
+          healthCheckPort: expect.any(Number),
+        });
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should respect PARTITION_CHAINS env var override', () => {
+      process.env.PARTITION_CHAINS = 'bsc,polygon';
+
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      try {
+        // Validated chains should be filtered to only the override
+        expect(entry.config.chains).toEqual(['bsc', 'polygon']);
+        expect(processExitSpy).not.toHaveBeenCalled();
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should respect INSTANCE_ID env var', () => {
+      process.env.INSTANCE_ID = 'custom-test-instance';
+
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(entry.config.instanceId).toBe('custom-test-instance');
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should respect REGION_ID env var override', () => {
+      process.env.REGION_ID = 'eu-west1';
+
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(entry.config.regionId).toBe('eu-west1');
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should include envConfig in result', () => {
+      process.env.REDIS_URL = 'redis://test:6379';
+
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      try {
+        expect(entry.envConfig).toBeDefined();
+        expect(entry.envConfig.redisUrl).toBe('redis://test:6379');
+        expect(entry.envConfig.nodeEnv).toBeDefined();
+      } finally {
+        entry.cleanupProcessHandlers();
+      }
+    });
+
+    it('should register process handlers that can be cleaned up', () => {
+      const entry = createPartitionEntry(
+        'asia-fast',
+        () => new MockDetector()
+      );
+
+      // Process handlers should be registered
+      const sigtermBefore = process.listenerCount('SIGTERM');
+      expect(sigtermBefore).toBeGreaterThanOrEqual(1);
+
+      // Cleanup should remove them
+      entry.cleanupProcessHandlers();
+      const sigtermAfter = process.listenerCount('SIGTERM');
+      expect(sigtermAfter).toBeLessThan(sigtermBefore);
     });
   });
 });

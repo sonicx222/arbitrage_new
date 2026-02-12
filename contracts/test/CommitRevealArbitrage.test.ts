@@ -3,6 +3,13 @@ import { ethers } from 'hardhat';
 import { loadFixture, mine } from '@nomicfoundation/hardhat-network-helpers';
 import { CommitRevealArbitrage, MockDexRouter, MockERC20 } from '../typechain-types';
 import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import {
+  deployBaseFixture,
+  RATE_USDC_TO_WETH_1PCT_PROFIT,
+  RATE_USDC_TO_WETH_2PCT_PROFIT,
+  RATE_WETH_TO_USDC,
+  getDeadline,
+} from './helpers';
 
 /**
  * CommitRevealArbitrage Contract Tests
@@ -19,45 +26,16 @@ import { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 describe('CommitRevealArbitrage', () => {
   // Test fixtures for consistent state
   async function deployContractsFixture() {
-    const [owner, user, attacker] = await ethers.getSigners();
+    const base = await deployBaseFixture();
 
-    // Deploy mock tokens
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
-    const weth = await MockERC20Factory.deploy('Wrapped Ether', 'WETH', 18);
-    const usdc = await MockERC20Factory.deploy('USD Coin', 'USDC', 6);
-    const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
-
-    // Deploy mock DEX routers (2 routers for arbitrage)
-    const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
-    const dexRouter1 = await MockDexRouterFactory.deploy('Router1');
-    const dexRouter2 = await MockDexRouterFactory.deploy('Router2');
-
-    // Deploy CommitRevealArbitrage contract
+    // Deploy CommitRevealArbitrage contract (no flash loan provider needed)
     const CommitRevealArbitrageFactory = await ethers.getContractFactory('CommitRevealArbitrage');
-    const commitRevealArbitrage = await CommitRevealArbitrageFactory.deploy(owner.address);
+    const commitRevealArbitrage = await CommitRevealArbitrageFactory.deploy(base.owner.address);
 
-    // Fund DEX routers for swaps
-    await weth.mint(await dexRouter1.getAddress(), ethers.parseEther('1000'));
-    await weth.mint(await dexRouter2.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await dexRouter1.getAddress(), ethers.parseUnits('1000000', 6));
-    await usdc.mint(await dexRouter2.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await dexRouter1.getAddress(), ethers.parseEther('1000000'));
-    await dai.mint(await dexRouter2.getAddress(), ethers.parseEther('1000000'));
+    // Fund user with tokens for direct arbitrage
+    await base.weth.mint(base.user.address, ethers.parseEther('100'));
 
-    // Fund user with tokens for arbitrage
-    await weth.mint(user.address, ethers.parseEther('100'));
-
-    return {
-      commitRevealArbitrage,
-      dexRouter1,
-      dexRouter2,
-      weth,
-      usdc,
-      dai,
-      owner,
-      user,
-      attacker,
-    };
+    return { commitRevealArbitrage, ...base };
   }
 
   /**
@@ -311,7 +289,7 @@ describe('CommitRevealArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('505000000000000000000000000')
+          RATE_USDC_TO_WETH_1PCT_PROFIT
         );
 
         const amountIn = ethers.parseEther('1');
@@ -330,7 +308,7 @@ describe('CommitRevealArbitrage', () => {
           },
         ];
 
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
         const salt = ethers.randomBytes(32);
 
         const commitmentHash = createCommitmentHash(
@@ -420,7 +398,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -439,7 +417,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -486,7 +464,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -505,7 +483,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -553,7 +531,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 500;
+      const deadline = await getDeadline(500);
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -596,7 +574,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -616,7 +594,7 @@ describe('CommitRevealArbitrage', () => {
       ];
 
       // Calculate deadline within MAX_SWAP_DEADLINE (600 seconds)
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 250;
+      const deadline = await getDeadline(250);
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -670,7 +648,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -716,7 +694,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -759,7 +737,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -778,7 +756,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -825,7 +803,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -844,7 +822,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -984,7 +962,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1061,7 +1039,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1118,7 +1096,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -1137,7 +1115,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1219,7 +1197,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1278,7 +1256,7 @@ describe('CommitRevealArbitrage', () => {
         { router: await dexRouter1.getAddress(), tokenIn: await busd.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1329,7 +1307,7 @@ describe('CommitRevealArbitrage', () => {
         { router: await dexRouter1.getAddress(), tokenIn: await tusd.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1n },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1364,7 +1342,7 @@ describe('CommitRevealArbitrage', () => {
       const amountIn = ethers.parseEther('1');
       const swapPath: any[] = []; // Empty!
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1408,7 +1386,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1452,7 +1430,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1502,7 +1480,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1567,7 +1545,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
       const minProfit = ethers.parseEther('0.1'); // Require 0.1 WETH profit (high)
 
@@ -1634,7 +1612,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -1700,7 +1678,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       // User specifies higher minProfit than global
@@ -1744,7 +1722,7 @@ describe('CommitRevealArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amountIn = ethers.parseEther('1');
@@ -1763,7 +1741,7 @@ describe('CommitRevealArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
       const salt = ethers.randomBytes(32);
 
       const commitmentHash = createCommitmentHash(
@@ -2068,7 +2046,7 @@ describe('CommitRevealArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('505000000000000000000000000')
+          RATE_USDC_TO_WETH_1PCT_PROFIT
         );
 
         const swapPath = [

@@ -4,8 +4,8 @@
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';  // BUG-FIX: Import at module level (was require per call)
-import { createLogger } from '../../core/src/logger';
-import { getRedisClient } from '../../core/src/redis';
+import { createLogger } from '@arbitrage/core';
+import { getRedisClient } from '@arbitrage/core';
 
 // =============================================================================
 // DI Types (P16 pattern - enables testability without Jest mock hoisting)

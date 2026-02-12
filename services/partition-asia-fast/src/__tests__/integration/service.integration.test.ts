@@ -46,37 +46,13 @@ const mockHealthServer = {
   listen: jest.fn(),
 };
 
-jest.mock('@arbitrage/core', () => ({
-  createLogger: jest.fn().mockReturnValue(mockLogger),
-  parsePort: jest.fn().mockImplementation((portEnv, defaultPort) => {
-    if (!portEnv) return defaultPort;
-    const parsed = parseInt(portEnv, 10);
-    return isNaN(parsed) ? defaultPort : parsed;
-  }),
-  validateAndFilterChains: jest.fn().mockImplementation((chainsEnv, defaultChains) => {
-    if (!chainsEnv) return [...defaultChains];
-    return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
-  }),
-  createPartitionHealthServer: jest.fn().mockReturnValue(mockHealthServer),
-  setupDetectorEventHandlers: jest.fn(),
-  setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()),
-  exitWithConfigError: jest.fn(),
-  // New shared utilities for typed environment config
-  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
-  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((chainNames: readonly string[]) => ({
-    redisUrl: process.env.REDIS_URL,
-    partitionChains: process.env.PARTITION_CHAINS,
-    healthCheckPort: process.env.HEALTH_CHECK_PORT,
-    instanceId: process.env.INSTANCE_ID,
-    regionId: process.env.REGION_ID,
-    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-    nodeEnv: process.env.NODE_ENV || 'development',
-    rpcUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
-    wsUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
-  })),
-  validatePartitionEnvironmentConfig: jest.fn().mockImplementation(
-    (envConfig, partitionId, chainNames, logger) => {
-      // Simulate production warnings for missing RPC/WS URLs
+jest.mock('@arbitrage/core', () => {
+  const PORTS: Record<string, number> = {
+    'asia-fast': 3001, 'l2-turbo': 3002, 'high-value': 3003, 'solana-native': 3004,
+  };
+
+  const mockValidateEnvConfig = jest.fn().mockImplementation(
+    (envConfig: any, partitionId: string, chainNames: string[], logger: any) => {
       if (envConfig.nodeEnv === 'production') {
         const missingRpcUrls: string[] = [];
         const missingWsUrls: string[] = [];
@@ -105,68 +81,154 @@ jest.mock('@arbitrage/core', () => ({
         }
       }
     }
-  ),
-  generateInstanceId: jest.fn().mockImplementation((partitionId: string, providedId?: string) => {
-    if (providedId) return providedId;
-    return `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
-  }),
-  getRedisClient: jest.fn().mockResolvedValue({
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  getRedisStreamsClient: jest.fn().mockResolvedValue({
-    xadd: jest.fn().mockResolvedValue('stream-id'),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  createServiceState: jest.fn().mockReturnValue(mockStateManager),
-  getPerformanceLogger: jest.fn().mockReturnValue({
-    logHealthCheck: jest.fn(),
-  }),
-  getCrossRegionHealthManager: jest.fn().mockReturnValue({
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    removeAllListeners: jest.fn(),
-  }),
-  getGracefulDegradationManager: jest.fn().mockReturnValue({
-    registerCapabilities: jest.fn(),
-    triggerDegradation: jest.fn(),
-  }),
-  // Centralized constants
-  PARTITION_PORTS: {
-    'asia-fast': 3001,
-    'l2-turbo': 3002,
-    'high-value': 3003,
-    'solana-native': 3004,
-  },
-  PARTITION_SERVICE_NAMES: {
-    'asia-fast': 'partition-asia-fast',
-    'l2-turbo': 'partition-l2-turbo',
-    'high-value': 'partition-high-value',
-    'solana-native': 'partition-solana',
-  },
-  PartitionServiceConfig: {},
-  // R9: Partition Service Runner Factory
-  runPartitionService: jest.fn().mockImplementation((options: {
-    createDetector: (cfg: unknown) => unknown;
-    detectorConfig: unknown;
-  }) => ({
-    detector: options.createDetector(options.detectorConfig),
-    start: jest.fn().mockResolvedValue(undefined),
-    getState: jest.fn().mockReturnValue('idle'),
-    cleanup: jest.fn(),
-    healthServer: { current: null },
-  })),
-  createPartitionServiceRunner: jest.fn().mockImplementation((options: {
-    createDetector: (cfg: unknown) => unknown;
-    detectorConfig: unknown;
-  }) => ({
-    detector: options.createDetector(options.detectorConfig),
-    start: jest.fn().mockResolvedValue(undefined),
-    getState: jest.fn().mockReturnValue('idle'),
-    cleanup: jest.fn(),
-    healthServer: { current: null },
-  })),
-}));
+  );
+
+  return {
+    createLogger: jest.fn().mockReturnValue(mockLogger),
+    parsePort: jest.fn().mockImplementation((portEnv: string | undefined, defaultPort: number) => {
+      if (!portEnv) return defaultPort;
+      const parsed = parseInt(portEnv, 10);
+      return isNaN(parsed) ? defaultPort : parsed;
+    }),
+    validateAndFilterChains: jest.fn().mockImplementation((chainsEnv: string | undefined, defaultChains: readonly string[]) => {
+      if (!chainsEnv) return [...defaultChains];
+      return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
+    }),
+    createPartitionHealthServer: jest.fn().mockReturnValue(mockHealthServer),
+    setupDetectorEventHandlers: jest.fn(),
+    setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()),
+    exitWithConfigError: jest.fn(),
+    closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+    parsePartitionEnvironmentConfig: jest.fn().mockImplementation((chainNames: readonly string[]) => ({
+      redisUrl: process.env.REDIS_URL,
+      partitionChains: process.env.PARTITION_CHAINS,
+      healthCheckPort: process.env.HEALTH_CHECK_PORT,
+      instanceId: process.env.INSTANCE_ID,
+      regionId: process.env.REGION_ID,
+      enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+      nodeEnv: process.env.NODE_ENV || 'development',
+      rpcUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+      wsUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+    })),
+    validatePartitionEnvironmentConfig: mockValidateEnvConfig,
+    generateInstanceId: jest.fn().mockImplementation((partitionId: string, providedId?: string) => {
+      if (providedId) return providedId;
+      return `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+    }),
+    getRedisClient: jest.fn().mockResolvedValue({
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    getRedisStreamsClient: jest.fn().mockResolvedValue({
+      xadd: jest.fn().mockResolvedValue('stream-id'),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    createServiceState: jest.fn().mockReturnValue(mockStateManager),
+    getPerformanceLogger: jest.fn().mockReturnValue({
+      logHealthCheck: jest.fn(),
+    }),
+    getCrossRegionHealthManager: jest.fn().mockReturnValue({
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      on: jest.fn(),
+      removeAllListeners: jest.fn(),
+    }),
+    getGracefulDegradationManager: jest.fn().mockReturnValue({
+      registerCapabilities: jest.fn(),
+      triggerDegradation: jest.fn(),
+    }),
+    PARTITION_PORTS: PORTS,
+    PARTITION_SERVICE_NAMES: {
+      'asia-fast': 'partition-asia-fast',
+      'l2-turbo': 'partition-l2-turbo',
+      'high-value': 'partition-high-value',
+      'solana-native': 'partition-solana',
+    },
+    PartitionServiceConfig: {},
+    runPartitionService: jest.fn().mockImplementation((options: {
+      createDetector: (cfg: unknown) => unknown;
+      detectorConfig: unknown;
+    }) => ({
+      detector: options.createDetector(options.detectorConfig),
+      start: jest.fn().mockResolvedValue(undefined),
+      getState: jest.fn().mockReturnValue('idle'),
+      cleanup: jest.fn(),
+      healthServer: { current: null },
+    })),
+    createPartitionServiceRunner: jest.fn().mockImplementation((options: {
+      createDetector: (cfg: unknown) => unknown;
+      detectorConfig: unknown;
+    }) => ({
+      detector: options.createDetector(options.detectorConfig),
+      start: jest.fn().mockResolvedValue(undefined),
+      getState: jest.fn().mockReturnValue('idle'),
+      cleanup: jest.fn(),
+      healthServer: { current: null },
+    })),
+    // R10: createPartitionEntry mock
+    createPartitionEntry: jest.fn().mockImplementation((partitionId: string, createDetector: (cfg: unknown) => unknown) => {
+      const { getPartition } = require('@arbitrage/config');
+      const partitionConfig = getPartition(partitionId);
+      const chains: string[] = partitionConfig?.chains ?? [];
+      const region: string = partitionConfig?.region ?? 'us-east1';
+      const defaultPort = PORTS[partitionId] ?? 3000;
+
+      const envConfig = {
+        redisUrl: process.env.REDIS_URL,
+        partitionChains: process.env.PARTITION_CHAINS,
+        healthCheckPort: process.env.HEALTH_CHECK_PORT,
+        instanceId: process.env.INSTANCE_ID,
+        regionId: process.env.REGION_ID,
+        enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+        nodeEnv: process.env.NODE_ENV || 'development',
+        rpcUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+        wsUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+      };
+
+      // Call validatePartitionEnvironmentConfig to simulate real behavior
+      mockValidateEnvConfig(envConfig, partitionId, chains, mockLogger);
+
+      const instanceId = envConfig.instanceId
+        ?? `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+      const healthCheckPort = envConfig.healthCheckPort
+        ? (parseInt(envConfig.healthCheckPort, 10) || defaultPort)
+        : defaultPort;
+
+      // Handle PARTITION_CHAINS env var filtering (matches real createPartitionEntry behavior)
+      let resolvedChains = [...chains];
+      if (envConfig.partitionChains) {
+        resolvedChains = envConfig.partitionChains.split(',').map((c: string) => c.trim().toLowerCase());
+      }
+
+      const detectorConfig = {
+        partitionId,
+        chains: resolvedChains,
+        instanceId,
+        regionId: envConfig.regionId ?? region,
+        enableCrossRegionHealth: envConfig.enableCrossRegionHealth ?? true,
+        healthCheckPort,
+      };
+
+      const detector = createDetector(detectorConfig);
+
+      return {
+        detector,
+        config: detectorConfig,
+        partitionId,
+        chains,
+        region,
+        cleanupProcessHandlers: jest.fn(),
+        envConfig,
+        runner: {
+          detector,
+          start: jest.fn().mockResolvedValue(undefined),
+          getState: jest.fn().mockReturnValue('idle'),
+          cleanup: jest.fn(),
+          healthServer: { current: null },
+        },
+      };
+    }),
+  };
+});
 
 jest.mock('@arbitrage/config', () => ({
   getPartition: jest.fn().mockImplementation((partitionId: string) => ({
@@ -327,24 +389,15 @@ describe('P1 Asia-Fast Partition Service Integration', () => {
   });
 
   describe('Service Runner Factory', () => {
-    it('should call runPartitionService with correct service configuration', async () => {
+    it('should call createPartitionEntry with correct partition ID', async () => {
       jest.resetModules();
-      const { runPartitionService } = await import('@arbitrage/core');
+      const { createPartitionEntry } = await import('@arbitrage/core');
       const { cleanupProcessHandlers } = await import('../../index');
       cleanupFn = cleanupProcessHandlers;
 
-      expect(runPartitionService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({
-            partitionId: 'asia-fast',
-            serviceName: 'partition-asia-fast',
-          }),
-          detectorConfig: expect.objectContaining({
-            partitionId: 'asia-fast',
-          }),
-          createDetector: expect.any(Function),
-          logger: expect.anything(),
-        })
+      expect(createPartitionEntry).toHaveBeenCalledWith(
+        'asia-fast',
+        expect.any(Function)
       );
     });
 

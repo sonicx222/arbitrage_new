@@ -8,6 +8,13 @@ import {
   MockDexRouter,
   MockERC20,
 } from '../typechain-types';
+import {
+  deployBaseFixture,
+  RATE_USDC_TO_WETH_1PCT_PROFIT,
+  RATE_USDC_TO_WETH_2PCT_PROFIT,
+  RATE_WETH_TO_USDC,
+  getDeadline,
+} from './helpers';
 
 /**
  * PancakeSwapFlashArbitrage Contract Tests
@@ -25,35 +32,26 @@ import {
 describe('PancakeSwapFlashArbitrage', () => {
   // Test fixtures for consistent state
   async function deployContractsFixture() {
-    const [owner, user, attacker] = await ethers.getSigners();
+    const base = await deployBaseFixture();
+    const { weth, usdc, dai } = base;
 
-    // Deploy mock tokens
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
-    const weth = await MockERC20Factory.deploy('Wrapped Ether', 'WETH', 18);
-    const usdc = await MockERC20Factory.deploy('USD Coin', 'USDC', 6);
-    const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
-
-    // Deploy mock PancakeSwap V3 factory
+    // Deploy PancakeSwap V3 factory and create pools
     const MockPancakeV3FactoryFactory = await ethers.getContractFactory('MockPancakeV3Factory');
     const pancakeFactory = await MockPancakeV3FactoryFactory.deploy();
 
-    // Create WETH/USDC pool with 0.25% fee (2500 bps - most common)
     const wethAddress = await weth.getAddress();
     const usdcAddress = await usdc.getAddress();
+    const daiAddress = await dai.getAddress();
+
+    // WETH/USDC pool with 0.25% fee (2500 bps - most common)
     await pancakeFactory.createPool(wethAddress, usdcAddress, 2500);
     const wethUsdcPoolAddress = await pancakeFactory.getPool(wethAddress, usdcAddress, 2500);
     const wethUsdcPool = await ethers.getContractAt('MockPancakeV3Pool', wethUsdcPoolAddress);
 
-    // Create USDC/DAI pool with 0.01% fee (100 bps - stablecoin pair)
-    const daiAddress = await dai.getAddress();
+    // USDC/DAI pool with 0.01% fee (100 bps - stablecoin pair)
     await pancakeFactory.createPool(usdcAddress, daiAddress, 100);
     const usdcDaiPoolAddress = await pancakeFactory.getPool(usdcAddress, daiAddress, 100);
     const usdcDaiPool = await ethers.getContractAt('MockPancakeV3Pool', usdcDaiPoolAddress);
-
-    // Deploy mock DEX routers (2 routers for arbitrage)
-    const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
-    const dexRouter1 = await MockDexRouterFactory.deploy('Router1');
-    const dexRouter2 = await MockDexRouterFactory.deploy('Router2');
 
     // Deploy PancakeSwapFlashArbitrage contract
     const PancakeSwapFlashArbitrageFactory = await ethers.getContractFactory(
@@ -61,37 +59,16 @@ describe('PancakeSwapFlashArbitrage', () => {
     );
     const flashArbitrage = await PancakeSwapFlashArbitrageFactory.deploy(
       await pancakeFactory.getAddress(),
-      owner.address
+      base.owner.address
     );
 
-    // Setup mock token supplies in pools
+    // Fund pools for flash loans
     await weth.mint(wethUsdcPoolAddress, ethers.parseEther('10000'));
     await usdc.mint(wethUsdcPoolAddress, ethers.parseUnits('20000000', 6));
     await usdc.mint(usdcDaiPoolAddress, ethers.parseUnits('5000000', 6));
     await dai.mint(usdcDaiPoolAddress, ethers.parseEther('5000000'));
 
-    // Fund DEX routers for swaps
-    await weth.mint(await dexRouter1.getAddress(), ethers.parseEther('1000'));
-    await weth.mint(await dexRouter2.getAddress(), ethers.parseEther('1000'));
-    await usdc.mint(await dexRouter1.getAddress(), ethers.parseUnits('1000000', 6));
-    await usdc.mint(await dexRouter2.getAddress(), ethers.parseUnits('1000000', 6));
-    await dai.mint(await dexRouter1.getAddress(), ethers.parseEther('1000000'));
-    await dai.mint(await dexRouter2.getAddress(), ethers.parseEther('1000000'));
-
-    return {
-      flashArbitrage,
-      pancakeFactory,
-      wethUsdcPool,
-      usdcDaiPool,
-      dexRouter1,
-      dexRouter2,
-      weth,
-      usdc,
-      dai,
-      owner,
-      user,
-      attacker,
-    };
+    return { flashArbitrage, pancakeFactory, wethUsdcPool, usdcDaiPool, ...base };
   }
 
   // ===========================================================================
@@ -401,7 +378,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       await dexRouter2.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')  // ~1.02 WETH per 2000 USDC (0.00051 WETH per USDC)
+        RATE_USDC_TO_WETH_2PCT_PROFIT  // ~1.02 WETH per 2000 USDC (0.00051 WETH per USDC)
       );
 
       const flashAmount = ethers.parseEther('10');
@@ -420,7 +397,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Record pool balance before to verify flash loan repayment
       const poolBalanceBefore = await weth.balanceOf(await wethUsdcPool.getAddress());
@@ -484,7 +461,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Should revert because profit doesn't cover the 0.25% flash loan fee
       await expect(
@@ -524,7 +501,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         flashArbitrage.executeArbitrage(
@@ -559,7 +536,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       await dexRouter2.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000') // ~1% profit
+        RATE_USDC_TO_WETH_1PCT_PROFIT // ~1% profit
       );
 
       const swapPath = [
@@ -652,7 +629,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Should fail because contract is paused
       await expect(
@@ -704,7 +681,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Should fail because pool is not whitelisted
       await expect(
@@ -788,7 +765,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         flashArbitrage.executeArbitrage(
@@ -825,7 +802,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         flashArbitrage.executeArbitrage(
@@ -856,7 +833,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         flashArbitrage.executeArbitrage(
@@ -1070,7 +1047,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Should revert because factory.getPool() won't return this pool's address
       await expect(
@@ -1163,7 +1140,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         flashArbitrage.executeArbitrage(
@@ -1230,7 +1207,7 @@ describe('PancakeSwapFlashArbitrage', () => {
       await dexRouter2.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -1248,7 +1225,7 @@ describe('PancakeSwapFlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       const tx = await flashArbitrage.executeArbitrage(
         await wethUsdcPool.getAddress(),

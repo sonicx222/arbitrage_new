@@ -46,96 +46,151 @@ const mockStateManager = {
   getState: jest.fn().mockReturnValue('idle'),
 };
 
-jest.mock('@arbitrage/core', () => ({
-  createLogger: jest.fn().mockReturnValue(mockLogger),
-  parsePort: jest.fn().mockImplementation((portEnv, defaultPort) => {
-    if (!portEnv) return defaultPort;
-    const parsed = parseInt(portEnv, 10);
-    return isNaN(parsed) ? defaultPort : parsed;
-  }),
-  validateAndFilterChains: jest.fn().mockImplementation((chainsEnv, defaultChains) => {
-    if (!chainsEnv) return [...defaultChains];
-    return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
-  }),
-  createPartitionHealthServer: jest.fn().mockReturnValue({
-    close: jest.fn((cb) => cb && cb()),
-    on: jest.fn(),
-  }),
-  setupDetectorEventHandlers: jest.fn(),
-  setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()), // Returns cleanup function
-  exitWithConfigError: jest.fn().mockImplementation((msg, ctx) => {
-    throw new Error(`Config error: ${msg}`);
-  }),
-  closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
-  // BUG-FIX: Add missing mock functions for environment config parsing
-  // Return proper defaults when process.env variables aren't set
-  parsePartitionEnvironmentConfig: jest.fn().mockImplementation((defaultChains) => ({
-    partitionChains: process.env.PARTITION_CHAINS || undefined,
-    healthCheckPort: process.env.HEALTH_CHECK_PORT || undefined,
-    instanceId: process.env.INSTANCE_ID || undefined,
-    regionId: process.env.REGION_ID || undefined,
-    enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-  })),
-  validatePartitionEnvironmentConfig: jest.fn(),
-  generateInstanceId: jest.fn().mockImplementation((partitionId, instanceId) =>
-    instanceId || `p3-${partitionId}-${Date.now()}`
-  ),
-  getRedisClient: jest.fn().mockResolvedValue({
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  getRedisStreamsClient: jest.fn().mockResolvedValue({
-    xadd: jest.fn().mockResolvedValue('stream-id'),
-    disconnect: jest.fn().mockResolvedValue(undefined),
-  }),
-  createServiceState: jest.fn().mockReturnValue(mockStateManager),
-  getPerformanceLogger: jest.fn().mockReturnValue({
-    logHealthCheck: jest.fn(),
-  }),
-  getCrossRegionHealthManager: jest.fn().mockReturnValue({
-    start: jest.fn().mockResolvedValue(undefined),
-    stop: jest.fn().mockResolvedValue(undefined),
-    on: jest.fn(),
-    removeAllListeners: jest.fn(),
-  }),
-  getGracefulDegradationManager: jest.fn().mockReturnValue({
-    registerCapabilities: jest.fn(),
-    triggerDegradation: jest.fn(),
-  }),
-  // Centralized constants (P1-1/P1-2-FIX: Single source of truth)
-  PARTITION_PORTS: {
-    'asia-fast': 3001,
-    'l2-turbo': 3002,
-    'high-value': 3003,
-    'solana-native': 3004,
-  },
-  PARTITION_SERVICE_NAMES: {
-    'asia-fast': 'partition-asia-fast',
-    'l2-turbo': 'partition-l2-turbo',
-    'high-value': 'partition-high-value',
-    'solana-native': 'partition-solana',
-  },
-  // R9: Partition Service Runner Factory
-  runPartitionService: jest.fn().mockImplementation((options: {
-    createDetector: (cfg: unknown) => unknown;
-    detectorConfig: unknown;
-  }) => ({
-    detector: options.createDetector(options.detectorConfig),
-    start: jest.fn().mockResolvedValue(undefined),
-    getState: jest.fn().mockReturnValue('idle'),
-    cleanup: jest.fn(),
-    healthServer: { current: null },
-  })),
-  createPartitionServiceRunner: jest.fn().mockImplementation((options: {
-    createDetector: (cfg: unknown) => unknown;
-    detectorConfig: unknown;
-  }) => ({
-    detector: options.createDetector(options.detectorConfig),
-    start: jest.fn().mockResolvedValue(undefined),
-    getState: jest.fn().mockReturnValue('idle'),
-    cleanup: jest.fn(),
-    healthServer: { current: null },
-  })),
-}));
+jest.mock('@arbitrage/core', () => {
+  const PORTS: Record<string, number> = {
+    'asia-fast': 3001, 'l2-turbo': 3002, 'high-value': 3003, 'solana-native': 3004,
+  };
+
+  return {
+    createLogger: jest.fn().mockReturnValue(mockLogger),
+    parsePort: jest.fn().mockImplementation((portEnv: string | undefined, defaultPort: number) => {
+      if (!portEnv) return defaultPort;
+      const parsed = parseInt(portEnv, 10);
+      return isNaN(parsed) ? defaultPort : parsed;
+    }),
+    validateAndFilterChains: jest.fn().mockImplementation((chainsEnv: string | undefined, defaultChains: readonly string[]) => {
+      if (!chainsEnv) return [...defaultChains];
+      return chainsEnv.split(',').map((c: string) => c.trim().toLowerCase());
+    }),
+    createPartitionHealthServer: jest.fn().mockReturnValue({
+      close: jest.fn((cb: () => void) => cb && cb()),
+      on: jest.fn(),
+    }),
+    setupDetectorEventHandlers: jest.fn(),
+    setupProcessHandlers: jest.fn().mockReturnValue(jest.fn()),
+    exitWithConfigError: jest.fn().mockImplementation((msg: string) => {
+      throw new Error(`Config error: ${msg}`);
+    }),
+    closeServerWithTimeout: jest.fn().mockResolvedValue(undefined),
+    parsePartitionEnvironmentConfig: jest.fn().mockImplementation((chainNames: readonly string[]) => ({
+      redisUrl: process.env.REDIS_URL,
+      partitionChains: process.env.PARTITION_CHAINS,
+      healthCheckPort: process.env.HEALTH_CHECK_PORT,
+      instanceId: process.env.INSTANCE_ID,
+      regionId: process.env.REGION_ID,
+      enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+      nodeEnv: process.env.NODE_ENV || 'development',
+      rpcUrls: Object.fromEntries(chainNames.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+      wsUrls: Object.fromEntries(chainNames.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+    })),
+    validatePartitionEnvironmentConfig: jest.fn(),
+    generateInstanceId: jest.fn().mockImplementation((partitionId: string, instanceId?: string) =>
+      instanceId || `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`
+    ),
+    getRedisClient: jest.fn().mockResolvedValue({
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    getRedisStreamsClient: jest.fn().mockResolvedValue({
+      xadd: jest.fn().mockResolvedValue('stream-id'),
+      disconnect: jest.fn().mockResolvedValue(undefined),
+    }),
+    createServiceState: jest.fn().mockReturnValue(mockStateManager),
+    getPerformanceLogger: jest.fn().mockReturnValue({
+      logHealthCheck: jest.fn(),
+    }),
+    getCrossRegionHealthManager: jest.fn().mockReturnValue({
+      start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
+      on: jest.fn(),
+      removeAllListeners: jest.fn(),
+    }),
+    getGracefulDegradationManager: jest.fn().mockReturnValue({
+      registerCapabilities: jest.fn(),
+      triggerDegradation: jest.fn(),
+    }),
+    PARTITION_PORTS: PORTS,
+    PARTITION_SERVICE_NAMES: {
+      'asia-fast': 'partition-asia-fast',
+      'l2-turbo': 'partition-l2-turbo',
+      'high-value': 'partition-high-value',
+      'solana-native': 'partition-solana',
+    },
+    runPartitionService: jest.fn().mockImplementation((options: {
+      createDetector: (cfg: unknown) => unknown;
+      detectorConfig: unknown;
+    }) => ({
+      detector: options.createDetector(options.detectorConfig),
+      start: jest.fn().mockResolvedValue(undefined),
+      getState: jest.fn().mockReturnValue('idle'),
+      cleanup: jest.fn(),
+      healthServer: { current: null },
+    })),
+    createPartitionServiceRunner: jest.fn().mockImplementation((options: {
+      createDetector: (cfg: unknown) => unknown;
+      detectorConfig: unknown;
+    }) => ({
+      detector: options.createDetector(options.detectorConfig),
+      start: jest.fn().mockResolvedValue(undefined),
+      getState: jest.fn().mockReturnValue('idle'),
+      cleanup: jest.fn(),
+      healthServer: { current: null },
+    })),
+    // R10: createPartitionEntry mock
+    createPartitionEntry: jest.fn().mockImplementation((partitionId: string, createDetector: (cfg: unknown) => unknown) => {
+      const { getPartition } = require('@arbitrage/config');
+      const partitionConfig = getPartition(partitionId);
+      const chains: string[] = partitionConfig?.chains ?? [];
+      const region: string = partitionConfig?.region ?? 'us-east1';
+      const defaultPort = PORTS[partitionId] ?? 3000;
+
+      const envConfig = {
+        redisUrl: process.env.REDIS_URL,
+        partitionChains: process.env.PARTITION_CHAINS,
+        healthCheckPort: process.env.HEALTH_CHECK_PORT,
+        instanceId: process.env.INSTANCE_ID,
+        regionId: process.env.REGION_ID,
+        enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+        nodeEnv: process.env.NODE_ENV || 'development',
+        rpcUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
+        wsUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
+      };
+
+      const instanceId = envConfig.instanceId
+        ?? `${partitionId}-${process.env.HOSTNAME || 'local'}-${Date.now()}`;
+      const healthCheckPort = envConfig.healthCheckPort
+        ? (parseInt(envConfig.healthCheckPort, 10) || defaultPort)
+        : defaultPort;
+
+      const detectorConfig = {
+        partitionId,
+        chains: [...chains],
+        instanceId,
+        regionId: envConfig.regionId ?? region,
+        enableCrossRegionHealth: envConfig.enableCrossRegionHealth ?? true,
+        healthCheckPort,
+      };
+
+      const detector = createDetector(detectorConfig);
+
+      return {
+        detector,
+        config: detectorConfig,
+        partitionId,
+        chains,
+        region,
+        cleanupProcessHandlers: jest.fn(),
+        envConfig,
+        runner: {
+          detector,
+          start: jest.fn().mockResolvedValue(undefined),
+          getState: jest.fn().mockReturnValue('idle'),
+          cleanup: jest.fn(),
+          healthServer: { current: null },
+        },
+      };
+    }),
+  };
+});
 
 // Mock @arbitrage/config with P3 High-Value configuration
 jest.mock('@arbitrage/config', () => ({
@@ -262,15 +317,15 @@ describe('P3 High-Value Partition Service', () => {
   });
 
   describe('Initialization', () => {
-    it('should call createLogger with correct namespace', async () => {
+    it('should call createPartitionEntry with correct partition ID', async () => {
       jest.resetModules();
-      const { createLogger } = await import('@arbitrage/core');
+      const { createPartitionEntry } = await import('@arbitrage/core');
       await import('../../index');
 
-      expect(createLogger).toHaveBeenCalledWith('partition-high-value:main');
+      expect(createPartitionEntry).toHaveBeenCalledWith('high-value', expect.any(Function));
     });
 
-    it('should call getPartition with high-value partition ID', async () => {
+    it('should call getPartition via createPartitionEntry', async () => {
       jest.resetModules();
       const { getPartition } = await import('@arbitrage/config');
       await import('../../index');
@@ -278,24 +333,12 @@ describe('P3 High-Value Partition Service', () => {
       expect(getPartition).toHaveBeenCalledWith('high-value');
     });
 
-    it('should call runPartitionService with correct configuration', async () => {
+    it('should produce correct config from createPartitionEntry', async () => {
       jest.resetModules();
-      const { runPartitionService } = await import('@arbitrage/core');
-      await import('../../index');
+      const { config } = await import('../../index');
 
-      expect(runPartitionService).toHaveBeenCalledWith(
-        expect.objectContaining({
-          config: expect.objectContaining({
-            partitionId: 'high-value',
-            serviceName: 'partition-high-value',
-          }),
-          detectorConfig: expect.objectContaining({
-            partitionId: 'high-value',
-          }),
-          createDetector: expect.any(Function),
-          logger: expect.anything(),
-        })
-      );
+      expect(config.partitionId).toBe('high-value');
+      expect(config.chains).toEqual(expect.arrayContaining(['ethereum', 'zksync', 'linea']));
     });
 
     it('should have detector with event handling capabilities', async () => {
@@ -334,9 +377,9 @@ describe('P3 High-Value Partition Service', () => {
       expect(PARTITION_SERVICE_NAMES['high-value']).toBe('partition-high-value');
     });
 
-    it('should use shared exitWithConfigError', async () => {
-      const { exitWithConfigError } = jest.requireMock('@arbitrage/core');
-      expect(exitWithConfigError).toBeDefined();
+    it('should use createPartitionEntry factory from @arbitrage/core', async () => {
+      const { createPartitionEntry } = jest.requireMock('@arbitrage/core');
+      expect(createPartitionEntry).toBeDefined();
     });
   });
 });
@@ -364,11 +407,10 @@ describe('P3 Environment Variable Handling', () => {
       console.warn('Cleanup function failed:', error);
     } finally {
       cleanupFn = null;
-      // Force remove all process listeners as last resort to prevent leaks
-      process.removeAllListeners('SIGTERM');
-      process.removeAllListeners('SIGINT');
-      process.removeAllListeners('uncaughtException');
-      process.removeAllListeners('unhandledRejection');
+      // We do NOT use removeAllListeners() as it can remove Jest's own handlers for
+      // uncaughtException and unhandledRejection, causing test framework issues.
+      // The cleanupFn from setupProcessHandlers uses process.off() with specific handler
+      // references, so it correctly removes only the handlers registered by that module.
     }
     process.env = originalEnv;
   });
@@ -445,7 +487,7 @@ describe('P3 Environment Variable Handling', () => {
     const { config, cleanupProcessHandlers } = await import('../../index');
     cleanupFn = cleanupProcessHandlers;
 
-    expect(config.instanceId).toMatch(/^p3-high-value-/);
+    expect(config.instanceId).toMatch(/^high-value-/);
   });
 });
 
@@ -503,10 +545,8 @@ describe('P3 Error Handling', () => {
       // Ignore cleanup errors
     } finally {
       cleanupFn = null;
-      process.removeAllListeners('SIGTERM');
-      process.removeAllListeners('SIGINT');
-      process.removeAllListeners('uncaughtException');
-      process.removeAllListeners('unhandledRejection');
+      // We do NOT use removeAllListeners() as it can remove Jest's own handlers for
+      // uncaughtException and unhandledRejection, causing test framework issues.
     }
     process.env = originalEnv;
   });

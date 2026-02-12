@@ -19,6 +19,8 @@ import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
 import { CHAINS, TESTNET_CHAINS } from '../../config/src';
+import { getPartition } from '../../config/src/partitions';
+import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './partition-router';
 
 // =============================================================================
 // Types
@@ -474,11 +476,12 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           timestamp: Date.now()
         }));
       } catch (error) {
+        logger.error('Health check failed', { error: (error as Error).message });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: config.serviceName,
           status: 'error',
-          error: (error as Error).message
+          error: 'Internal health check failed'
         }));
       }
     } else if (req.url === '/stats') {
@@ -496,11 +499,12 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           chainStats: Object.fromEntries(stats.chainStats)
         }));
       } catch (error) {
+        logger.error('Stats endpoint failed', { error: (error as Error).message });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: config.serviceName,
           status: 'error',
-          error: (error as Error).message
+          error: 'Internal stats check failed'
         }));
       }
     } else if (req.url === '/ready') {
@@ -1131,4 +1135,154 @@ export function runPartitionService(
   }
 
   return runner;
+}
+
+// =============================================================================
+// R10: Partition Entry Point Factory (ADR-024 Extension)
+// =============================================================================
+
+/**
+ * Result from createPartitionEntry, containing all values needed for
+ * backward-compatible exports from partition service entry points.
+ */
+export interface PartitionEntryResult {
+  /** The detector instance (cast to concrete type by consumer if needed) */
+  detector: PartitionDetectorInterface;
+
+  /** Detector config (compatible with UnifiedDetectorConfig) */
+  config: {
+    partitionId: string;
+    chains: string[];
+    instanceId: string;
+    regionId: string;
+    enableCrossRegionHealth: boolean;
+    healthCheckPort: number;
+  };
+
+  /** Partition ID constant */
+  partitionId: string;
+
+  /** Configured chains for this partition */
+  chains: readonly string[];
+
+  /** Deployment region */
+  region: string;
+
+  /** Process handler cleanup function */
+  cleanupProcessHandlers: ProcessHandlerCleanup;
+
+  /** Parsed environment configuration */
+  envConfig: PartitionEnvironmentConfig;
+
+  /** Full runner instance for advanced use */
+  runner: PartitionServiceRunner;
+}
+
+/**
+ * R10: Creates a complete partition service entry point from just a partition ID.
+ *
+ * This factory eliminates boilerplate across P1/P2/P3 partition services by
+ * encapsulating the common initialization sequence:
+ * 1. Retrieve partition config (chains, region, provider)
+ * 2. Validate chains are configured
+ * 3. Parse and validate environment config
+ * 4. Build service and detector configs
+ * 5. Run the partition service via runPartitionService()
+ *
+ * Each partition entry point reduces from ~140 lines to ~15 lines.
+ *
+ * @param partitionId - The partition ID (e.g., from PARTITION_IDS.ASIA_FAST)
+ * @param createDetector - Factory function to create the detector instance
+ * @returns All values needed for backward-compatible exports
+ *
+ * @example
+ * ```typescript
+ * import { createPartitionEntry } from '@arbitrage/core';
+ * import { UnifiedChainDetector } from '@arbitrage/unified-detector';
+ * import { PARTITION_IDS } from '@arbitrage/config';
+ *
+ * const entry = createPartitionEntry(
+ *   PARTITION_IDS.ASIA_FAST,
+ *   (cfg) => new UnifiedChainDetector(cfg)
+ * );
+ *
+ * export const detector = entry.detector as UnifiedChainDetector;
+ * export const config = entry.config;
+ * export const P1_PARTITION_ID = entry.partitionId;
+ * export const P1_CHAINS = entry.chains;
+ * export const P1_REGION = entry.region;
+ * export const cleanupProcessHandlers = entry.cleanupProcessHandlers;
+ * export const envConfig = entry.envConfig;
+ * ```
+ *
+ * @see ADR-003: Partitioned Chain Detectors
+ * @see ADR-024: Partition Service Factory Pattern
+ */
+export function createPartitionEntry(
+  partitionId: string,
+  createDetector: (config: PartitionServiceRunnerOptions['detectorConfig']) => PartitionDetectorInterface
+): PartitionEntryResult {
+  const serviceName = PARTITION_SERVICE_NAMES[partitionId] ?? `partition-${partitionId}`;
+  const logger = createLogger(`${serviceName}:main`);
+  const defaultPort = PARTITION_PORTS[partitionId] ?? 3000;
+
+  // Partition configuration retrieval
+  const partitionConfig = getPartition(partitionId);
+  if (!partitionConfig) {
+    exitWithConfigError('Partition configuration not found', { partitionId }, logger);
+  }
+
+  // Defensive null-safety for test compatibility
+  const chains: readonly string[] = partitionConfig?.chains ?? [];
+  const region = partitionConfig?.region ?? 'us-east1';
+
+  if (!chains || chains.length === 0) {
+    exitWithConfigError('Partition has no chains configured', {
+      partitionId,
+      chains
+    }, logger);
+  }
+
+  // Environment Configuration
+  const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(chains);
+  validatePartitionEnvironmentConfig(envConfig, partitionId, chains, logger);
+
+  // Service Configuration
+  const serviceConfig: PartitionServiceConfig = {
+    partitionId,
+    serviceName,
+    defaultChains: chains,
+    defaultPort,
+    region,
+    provider: partitionConfig?.provider ?? 'oracle'
+  };
+
+  // Build detector config
+  const detectorConfig = {
+    partitionId,
+    chains: validateAndFilterChains(envConfig?.partitionChains, chains, logger),
+    instanceId: generateInstanceId(partitionId, envConfig?.instanceId),
+    regionId: envConfig?.regionId ?? region,
+    enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,
+    healthCheckPort: parsePort(envConfig?.healthCheckPort, defaultPort, logger)
+  };
+
+  // Service Runner
+  const runner = runPartitionService({
+    config: serviceConfig,
+    detectorConfig,
+    createDetector,
+    logger
+  });
+
+  return {
+    detector: runner.detector,
+    config: detectorConfig,
+    partitionId,
+    chains,
+    region,
+    cleanupProcessHandlers: runner.cleanup,
+    envConfig,
+    runner
+  };
 }

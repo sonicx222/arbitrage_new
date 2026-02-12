@@ -12,7 +12,7 @@
  * - High-frequency event handling for L2 throughput
  *
  * Architecture Note:
- * Uses the shared partition service runner factory for consistent startup,
+ * Uses the shared createPartitionEntry factory for consistent startup,
  * shutdown, and health server behavior across all partition services.
  *
  * Environment Variables:
@@ -30,103 +30,29 @@
  */
 
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';
-import {
-  createLogger,
-  parsePort,
-  validateAndFilterChains,
-  exitWithConfigError,
-  parsePartitionEnvironmentConfig,
-  validatePartitionEnvironmentConfig,
-  generateInstanceId,
-  PartitionServiceConfig,
-  PartitionEnvironmentConfig,
-  runPartitionService,
-  PARTITION_PORTS,
-  PARTITION_SERVICE_NAMES,
-} from '@arbitrage/core';
-import { getPartition, PARTITION_IDS } from '@arbitrage/config';
+import { createPartitionEntry, PartitionEnvironmentConfig } from '@arbitrage/core';
+import { PARTITION_IDS } from '@arbitrage/config';
 
 // =============================================================================
-// P2 Partition Constants
+// P2 Partition Entry (Data-driven via createPartitionEntry factory)
 // =============================================================================
 
-const P2_PARTITION_ID = PARTITION_IDS.L2_TURBO;
-const P2_DEFAULT_PORT = PARTITION_PORTS[P2_PARTITION_ID] ?? 3002;
+const entry = createPartitionEntry(
+  PARTITION_IDS.L2_TURBO,
+  (cfg) => new UnifiedChainDetector(cfg)
+);
 
 // =============================================================================
-// Configuration
+// Exports (Backward-compatible)
 // =============================================================================
 
-const logger = createLogger('partition-l2-turbo:main');
-
-// Partition configuration retrieval
-const partitionConfig = getPartition(P2_PARTITION_ID);
-if (!partitionConfig) {
-  exitWithConfigError('P2 partition configuration not found', { partitionId: P2_PARTITION_ID }, logger);
-}
-
-// Defensive null-safety for test compatibility
-const P2_CHAINS: readonly string[] = partitionConfig?.chains ?? [];
-const P2_REGION = partitionConfig?.region ?? 'asia-southeast1';
-
-if (!P2_CHAINS || P2_CHAINS.length === 0) {
-  exitWithConfigError('P2 partition has no chains configured', {
-    partitionId: P2_PARTITION_ID,
-    chains: P2_CHAINS
-  }, logger);
-}
-
-// =============================================================================
-// Environment Configuration
-// =============================================================================
-
-const envConfig: PartitionEnvironmentConfig = parsePartitionEnvironmentConfig(P2_CHAINS);
-validatePartitionEnvironmentConfig(envConfig, P2_PARTITION_ID, P2_CHAINS, logger);
-
-// =============================================================================
-// Service Configuration
-// =============================================================================
-
-const serviceConfig: PartitionServiceConfig = {
-  partitionId: P2_PARTITION_ID,
-  serviceName: PARTITION_SERVICE_NAMES[P2_PARTITION_ID] ?? 'partition-l2-turbo',
-  defaultChains: P2_CHAINS,
-  defaultPort: P2_DEFAULT_PORT,
-  region: P2_REGION,
-  provider: partitionConfig?.provider ?? 'oracle'
-};
-
-// Build detector config with explicit types for the factory
-const detectorConfig = {
-  partitionId: P2_PARTITION_ID,
-  chains: validateAndFilterChains(envConfig?.partitionChains, P2_CHAINS, logger),
-  instanceId: generateInstanceId(P2_PARTITION_ID, envConfig?.instanceId),
-  regionId: envConfig?.regionId ?? P2_REGION,
-  enableCrossRegionHealth: envConfig?.enableCrossRegionHealth ?? true,
-  healthCheckPort: parsePort(envConfig?.healthCheckPort, P2_DEFAULT_PORT, logger)
-};
-
-// Re-export config with UnifiedDetectorConfig type for backward compatibility
-const config: UnifiedDetectorConfig = detectorConfig;
-
-// =============================================================================
-// Service Runner (Using shared factory for consistent behavior)
-// =============================================================================
-
-const runner = runPartitionService({
-  config: serviceConfig,
-  detectorConfig,
-  createDetector: (cfg) => new UnifiedChainDetector(cfg),
-  logger
-});
-
-// =============================================================================
-// Exports (Maintaining backward compatibility)
-// =============================================================================
-
-// Cast back to UnifiedChainDetector for consumers that need the full type
-const detector = runner.detector as UnifiedChainDetector;
-const cleanupProcessHandlers = runner.cleanup;
+const detector = entry.detector as UnifiedChainDetector;
+const config: UnifiedDetectorConfig = entry.config;
+const P2_PARTITION_ID = entry.partitionId;
+const P2_CHAINS = entry.chains;
+const P2_REGION = entry.region;
+const cleanupProcessHandlers = entry.cleanupProcessHandlers;
+const envConfig = entry.envConfig;
 
 export {
   detector,

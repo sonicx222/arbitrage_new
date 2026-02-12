@@ -697,29 +697,29 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
       const fs = await import('fs');
       const path = await import('path');
 
-      // P0-FIX: Test updated to match centralized port pattern
-      // Ports now come from PARTITION_PORTS constant with fallback defaults
+      // R10: P1-P3 now use createPartitionEntry factory which handles ports internally.
+      // Verify they use the factory pattern instead of direct PARTITION_PORTS access.
 
-      // Verify P1 uses correct port via PARTITION_PORTS
+      // Verify P1 uses createPartitionEntry
       const p1Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-asia-fast/src/index.ts'),
         'utf-8'
       );
-      expect(p1Content).toMatch(/P1_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3001/);
+      expect(p1Content).toMatch(/createPartitionEntry/);
 
-      // Verify P2 uses correct port via PARTITION_PORTS
+      // Verify P2 uses createPartitionEntry
       const p2Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-l2-turbo/src/index.ts'),
         'utf-8'
       );
-      expect(p2Content).toMatch(/P2_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3002/);
+      expect(p2Content).toMatch(/createPartitionEntry/);
 
-      // Verify P3 uses correct port via PARTITION_PORTS
+      // Verify P3 uses createPartitionEntry
       const p3Content = fs.readFileSync(
         path.join(process.cwd(), 'services/partition-high-value/src/index.ts'),
         'utf-8'
       );
-      expect(p3Content).toMatch(/P3_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3003/);
+      expect(p3Content).toMatch(/createPartitionEntry/);
 
       // Verify P4 uses correct port via PARTITION_PORTS
       const p4Content = fs.readFileSync(

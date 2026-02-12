@@ -1,5 +1,5 @@
 /**
- * Jest Configuration for P1 Asia-Fast Partition Service
+ * Jest Configuration for P2 L2-Turbo Partition Service
  *
  * Tests partition-specific configuration, health endpoints,
  * and service lifecycle.

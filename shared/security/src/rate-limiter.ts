@@ -4,8 +4,8 @@
 // P0-3 FIX: Added proper async initialization for Redis client
 // P1-3 FIX: Replace KEYS with SCAN in cleanup()
 
-import { createLogger } from '../../core/src/logger';
-import { getRedisClient, RedisClient } from '../../core/src/redis';
+import { createLogger } from '@arbitrage/core';
+import { getRedisClient, RedisClient } from '@arbitrage/core';
 
 const logger = createLogger('rate-limiter');
 

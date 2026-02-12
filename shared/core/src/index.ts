@@ -1616,7 +1616,9 @@ export {
   generateInstanceId,
   // R9: Partition Service Runner Factory
   createPartitionServiceRunner,
-  runPartitionService
+  runPartitionService,
+  // R10: Partition Entry Point Factory
+  createPartitionEntry
 } from './partition-service-utils';
 export type {
   PartitionServiceConfig,
@@ -1628,7 +1630,9 @@ export type {
   // R9: Partition Service Runner types
   ServiceLifecycleState,
   PartitionServiceRunnerOptions,
-  PartitionServiceRunner
+  PartitionServiceRunner,
+  // R10: Partition Entry Point Result
+  PartitionEntryResult
 } from './partition-service-utils';
 
 // =============================================================================

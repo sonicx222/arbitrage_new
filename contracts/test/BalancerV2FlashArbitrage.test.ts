@@ -2,6 +2,14 @@ import { expect } from 'chai';
 import { ethers } from 'hardhat';
 import { loadFixture } from '@nomicfoundation/hardhat-network-helpers';
 import { BalancerV2FlashArbitrage, MockDexRouter, MockERC20, MockBalancerVault } from '../typechain-types';
+import {
+  deployBaseFixture,
+  fundProvider,
+  RATE_USDC_TO_WETH_1PCT_PROFIT,
+  RATE_USDC_TO_WETH_2PCT_PROFIT,
+  RATE_WETH_TO_USDC,
+  getDeadline,
+} from './helpers';
 
 /**
  * BalancerV2FlashArbitrage Contract Tests
@@ -21,55 +29,26 @@ import { BalancerV2FlashArbitrage, MockDexRouter, MockERC20, MockBalancerVault }
 describe('BalancerV2FlashArbitrage', () => {
   // Test fixtures for consistent state
   async function deployContractsFixture() {
-    const [owner, user, attacker] = await ethers.getSigners();
+    const BALANCER_AMOUNTS = {
+      wethPerRouter: ethers.parseEther('10000'),
+      usdcPerRouter: ethers.parseUnits('10000000', 6),
+      daiPerRouter: ethers.parseEther('10000000'),
+    };
+    const base = await deployBaseFixture(BALANCER_AMOUNTS);
 
-    // Deploy mock tokens
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
-    const weth = await MockERC20Factory.deploy('Wrapped Ether', 'WETH', 18);
-    const usdc = await MockERC20Factory.deploy('USD Coin', 'USDC', 6);
-    const dai = await MockERC20Factory.deploy('Dai Stablecoin', 'DAI', 18);
-
-    // Deploy mock Balancer Vault
+    // Deploy Balancer Vault and fund it for flash loans
     const MockBalancerVaultFactory = await ethers.getContractFactory('MockBalancerVault');
     const vault = await MockBalancerVaultFactory.deploy();
-
-    // Deploy mock DEX routers
-    const MockDexRouterFactory = await ethers.getContractFactory('MockDexRouter');
-    const dexRouter1 = await MockDexRouterFactory.deploy('Router1');
-    const dexRouter2 = await MockDexRouterFactory.deploy('Router2');
+    await fundProvider(base, await vault.getAddress(), BALANCER_AMOUNTS);
 
     // Deploy BalancerV2FlashArbitrage contract
     const BalancerV2FlashArbitrageFactory = await ethers.getContractFactory('BalancerV2FlashArbitrage');
     const arbitrage = await BalancerV2FlashArbitrageFactory.deploy(
       await vault.getAddress(),
-      owner.address
+      base.owner.address
     );
 
-    // Fund vault with tokens for flash loans
-    await weth.mint(await vault.getAddress(), ethers.parseEther('10000'));
-    await usdc.mint(await vault.getAddress(), ethers.parseUnits('10000000', 6));
-    await dai.mint(await vault.getAddress(), ethers.parseEther('10000000'));
-
-    // Fund DEX routers for swaps
-    await weth.mint(await dexRouter1.getAddress(), ethers.parseEther('10000'));
-    await weth.mint(await dexRouter2.getAddress(), ethers.parseEther('10000'));
-    await usdc.mint(await dexRouter1.getAddress(), ethers.parseUnits('10000000', 6));
-    await usdc.mint(await dexRouter2.getAddress(), ethers.parseUnits('10000000', 6));
-    await dai.mint(await dexRouter1.getAddress(), ethers.parseEther('10000000'));
-    await dai.mint(await dexRouter2.getAddress(), ethers.parseEther('10000000'));
-
-    return {
-      arbitrage,
-      vault,
-      dexRouter1,
-      dexRouter2,
-      weth,
-      usdc,
-      dai,
-      owner,
-      user,
-      attacker,
-    };
+    return { arbitrage, vault, ...base };
   }
 
   // ===========================================================================
@@ -325,7 +304,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('505000000000000000000000000')
+        RATE_USDC_TO_WETH_1PCT_PROFIT
       );
 
       const amount = ethers.parseEther('1');
@@ -344,7 +323,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -372,7 +351,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const amount = ethers.parseEther('10');
@@ -391,7 +370,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -417,7 +396,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const amount = ethers.parseEther('10');
@@ -436,7 +415,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       const totalProfitsBefore = await arbitrage.totalProfits();
 
@@ -465,7 +444,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const amount = ethers.parseEther('10');
@@ -484,7 +463,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // tokenProfits should be 0 for WETH before execution
       const wethProfitsBefore = await arbitrage.tokenProfits(await weth.getAddress());
@@ -538,7 +517,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Even with minProfit=0, a zero-profit trade should revert
       await expect(
@@ -564,7 +543,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -589,7 +568,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp - 100; // Past deadline
+      const deadline = await getDeadline(-100); // Past deadline
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -605,7 +584,7 @@ describe('BalancerV2FlashArbitrage', () => {
     it('should revert on empty swap path', async () => {
       const { arbitrage, weth, user } = await loadFixture(deployContractsFixture);
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -631,7 +610,7 @@ describe('BalancerV2FlashArbitrage', () => {
         amountOutMin: 1,
       });
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -658,7 +637,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -685,7 +664,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -712,7 +691,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -739,7 +718,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -770,7 +749,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -788,7 +767,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -849,7 +828,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -890,7 +869,7 @@ describe('BalancerV2FlashArbitrage', () => {
         { router: await dexRouter1.getAddress(), tokenIn: await busd.getAddress(), tokenOut: await weth.getAddress(), amountOutMin: 1 },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -929,7 +908,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -962,7 +941,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -988,7 +967,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -1006,7 +985,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -1090,7 +1069,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const vaultBalanceBefore = await weth.balanceOf(await vault.getAddress());
@@ -1110,7 +1089,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -1163,7 +1142,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Require huge profit
       await expect(
@@ -1191,7 +1170,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -1209,7 +1188,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -1236,7 +1215,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -1254,7 +1233,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Should succeed since profit > max(0.05, 0.01)
       await arbitrage.connect(user).executeArbitrage(
@@ -1300,7 +1279,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await expect(
         arbitrage.connect(user).executeArbitrage(
@@ -1671,7 +1650,7 @@ describe('BalancerV2FlashArbitrage', () => {
           },
         ];
 
-        const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+        const deadline = await getDeadline();
 
         // The malicious router attempts reentrancy during the first swap.
         // ReentrancyGuard blocks it (attackSucceeded=false), but the swap itself
@@ -1709,7 +1688,7 @@ describe('BalancerV2FlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('510000000000000000000000000')
+          RATE_USDC_TO_WETH_2PCT_PROFIT
         );
 
         const swapPath = [
@@ -1750,7 +1729,7 @@ describe('BalancerV2FlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('510000000000000000000000000')
+          RATE_USDC_TO_WETH_2PCT_PROFIT
         );
 
         const swapPath = [
@@ -1926,7 +1905,7 @@ describe('BalancerV2FlashArbitrage', () => {
         await dexRouter1.setExchangeRate(
           await usdc.getAddress(),
           await weth.getAddress(),
-          BigInt('510000000000000000000000000')
+          RATE_USDC_TO_WETH_2PCT_PROFIT
         );
 
         // Create a path with an inefficient cycle: WETH→USDC→WETH→USDC→WETH
@@ -2005,7 +1984,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -2050,7 +2029,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -2077,7 +2056,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -2095,7 +2074,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),
@@ -2133,7 +2112,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -2151,7 +2130,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       // Execute first arbitrage
       await arbitrage.connect(user).executeArbitrage(
@@ -2200,7 +2179,7 @@ describe('BalancerV2FlashArbitrage', () => {
       await dexRouter1.setExchangeRate(
         await usdc.getAddress(),
         await weth.getAddress(),
-        BigInt('510000000000000000000000000')
+        RATE_USDC_TO_WETH_2PCT_PROFIT
       );
 
       const swapPath = [
@@ -2218,7 +2197,7 @@ describe('BalancerV2FlashArbitrage', () => {
         },
       ];
 
-      const deadline = (await ethers.provider.getBlock('latest'))!.timestamp + 300;
+      const deadline = await getDeadline();
 
       const tx = await arbitrage.connect(user).executeArbitrage(
         await weth.getAddress(),

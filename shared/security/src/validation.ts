@@ -7,7 +7,7 @@
 import Joi from 'joi';
 import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
-import { createLogger } from '../../core/src/logger';
+import { createLogger } from '@arbitrage/core';
 
 const logger = createLogger('validation');
 
