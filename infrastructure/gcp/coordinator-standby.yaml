@@ -29,7 +29,7 @@ metadata:
   name: arbitrage-coordinator-standby
   annotations:
     run.googleapis.com/launch-stage: GA
-    run.googleapis.com/ingress: all
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
 spec:
   template:
     metadata:
@@ -85,7 +85,7 @@ spec:
               path: /health
               port: 3000
             initialDelaySeconds: 15
-            periodSeconds: 30
+            periodSeconds: 15  # ADR-007: standardized 15s health check interval
             timeoutSeconds: 10
             failureThreshold: 3
           readinessProbe:

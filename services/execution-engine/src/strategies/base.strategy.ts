@@ -1041,10 +1041,20 @@ export abstract class BaseExecutionStrategy {
     const amountIn = BigInt(opportunity.amountIn);
     // P0-001 FIX: Use ?? to preserve 0 as valid profit (|| treats 0 as falsy)
     const expectedProfit = opportunity.expectedProfit ?? 0;
-    const expectedProfitWei = ethers.parseUnits(
-      Math.max(0, expectedProfit).toFixed(18),
-      18
-    );
+    // P1-1 FIX: expectedProfit semantics differ by opportunity type:
+    // - intra-chain (type='simple'): decimal fraction of amountIn (0.01 = 1%)
+    // - cross-chain: absolute token amount (e.g., 0.5 = 0.5 tokens)
+    let expectedProfitWei: bigint;
+    if (opportunity.type === 'simple' && expectedProfit > 0 && expectedProfit < 1) {
+      // Intra-chain: profit is a fraction of trade amount
+      expectedProfitWei = amountIn * BigInt(Math.floor(Math.max(0, expectedProfit) * 1e18)) / BigInt(1e18);
+    } else {
+      // Cross-chain or explicit amount: parse as absolute token amount
+      expectedProfitWei = ethers.parseUnits(
+        Math.max(0, expectedProfit).toFixed(18),
+        18
+      );
+    }
     const expectedAmountOut = amountIn + expectedProfitWei;
     const minAmountOut = expectedAmountOut - (expectedAmountOut * SLIPPAGE_BASIS_POINTS_BIGINT / 10000n);
 

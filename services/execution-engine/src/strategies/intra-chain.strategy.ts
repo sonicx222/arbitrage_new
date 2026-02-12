@@ -20,7 +20,7 @@
  */
 
 import { ethers } from 'ethers';
-import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, hasCommitRevealContract } from '@arbitrage/config';
+import { COMMIT_REVEAL_CONTRACTS, DEXES, FEATURE_FLAGS, getCommitRevealContract, getTokenDecimals, hasCommitRevealContract } from '@arbitrage/config';
 import { getErrorMessage, MevRiskAnalyzer, type TransactionContext } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type { StrategyContext, ExecutionResult, Logger } from '../types';
@@ -471,9 +471,12 @@ export class IntraChainStrategy extends BaseExecutionStrategy {
         );
       }
 
+      // P2-1 FIX: Use token-specific decimals instead of assuming 18 (USDC/USDT have 6)
+      const tokenIn = opportunity.tokenIn || opportunity.token0 || '';
+      const tokenDecimals = getTokenDecimals(chain, tokenIn);
       const minProfit = opportunity.expectedProfit
-        ? ethers.parseEther((opportunity.expectedProfit * 0.8).toFixed(18)) // 80% of expected profit (Fix #3)
-        : ethers.parseEther('0.001'); // Minimum 0.001 ETH
+        ? ethers.parseUnits((opportunity.expectedProfit * 0.8).toFixed(tokenDecimals), tokenDecimals)
+        : ethers.parseUnits('0.001', tokenDecimals);
 
       // Build swap path for commit-reveal v2.0.0 interface
       const swapPath = [{

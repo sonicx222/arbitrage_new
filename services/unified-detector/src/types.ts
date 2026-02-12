@@ -10,8 +10,8 @@ import { TimeoutError } from '@arbitrage/types';
 
 // Fee utilities and price bounds - import from canonical source (@arbitrage/core)
 import {
-  type FeeBasisPoints as CanonicalFeeBasisPoints,
-  type FeeDecimal as CanonicalFeeDecimal,
+  type FeeBasisPoints,
+  type FeeDecimal,
   bpsToDecimal,
   decimalToBps,
   validateFee as canonicalValidateFee,
@@ -91,52 +91,8 @@ export function asLogger<T extends Logger>(logger: T): Logger {
 // Fee Types and Constants
 // =============================================================================
 
-/**
- * FIX 6.3: Fee representation standardization.
- *
- * IMPORTANT: This codebase uses TWO fee representations:
- * - **Decimal** (0.003 = 0.30%): Used in pair objects, arbitrage calculations
- * - **Basis Points** (30 = 0.30%): Used in config, DexPool interface
- *
- * All fee utilities are now imported from '@arbitrage/core' (single source of truth).
- * These re-exports maintain backward compatibility.
- *
- * @see shared/core/src/utils/fee-utils.ts for canonical implementation
- */
-
-// Re-export branded types from canonical source
-/** @deprecated Import from '@arbitrage/core' instead */
-export type FeeBasisPoints = CanonicalFeeBasisPoints;
-/** @deprecated Import from '@arbitrage/core' instead */
-export type FeeDecimal = CanonicalFeeDecimal;
-
-// Re-export fee constants from canonical source for backward compatibility
-/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
-export const FEE_UNISWAP_V2_DECIMAL = FEE_CONSTANTS.UNISWAP_V2;
-/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
-export const FEE_UNISWAP_V3_LOW_DECIMAL = FEE_CONSTANTS.V3_LOWEST;
-/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
-export const FEE_UNISWAP_V3_MEDIUM_DECIMAL = FEE_CONSTANTS.V3_LOW;
-/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
-export const FEE_UNISWAP_V3_HIGH_DECIMAL = FEE_CONSTANTS.V3_MEDIUM;
-/** @deprecated Import from '@arbitrage/core' FEE_CONSTANTS instead */
-export const FEE_DEFAULT_DECIMAL = FEE_CONSTANTS.DEFAULT;
-
-/**
- * Convert basis points to decimal fee.
- * @deprecated Import bpsToDecimal from '@arbitrage/core' instead
- */
-export function basisPointsToDecimal(basisPoints: number): FeeDecimal {
-  return bpsToDecimal(basisPoints);
-}
-
-/**
- * Convert decimal fee to basis points.
- * @deprecated Import decimalToBps from '@arbitrage/core' instead
- */
-export function decimalToBasisPoints(decimal: number): FeeBasisPoints {
-  return decimalToBps(decimal);
-}
+// Re-export branded types from canonical source for internal use
+export type { FeeBasisPoints, FeeDecimal };
 
 // =============================================================================
 // Environment Variable Utilities
@@ -364,7 +320,7 @@ export async function withTimeoutResult<T>(
  * Validate and sanitize a fee value for safe calculations.
  * @deprecated Import validateFee from '@arbitrage/core' instead
  */
-export function validateFee(fee: number | undefined | null, defaultFee: number = FEE_DEFAULT_DECIMAL): number {
+export function validateFee(fee: number | undefined | null, defaultFee: number = FEE_CONSTANTS.DEFAULT): number {
   return canonicalValidateFee(fee, defaultFee);
 }
 

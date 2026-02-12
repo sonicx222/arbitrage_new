@@ -38,7 +38,6 @@ import {
   runPartitionService,
   PARTITION_PORTS,
   PARTITION_SERVICE_NAMES,
-  PartitionDetectorInterface
 } from '@arbitrage/core';
 import { getPartition, PARTITION_IDS } from '@arbitrage/config';
 
@@ -109,26 +108,10 @@ const config: UnifiedDetectorConfig = detectorConfig;
 // Service Runner (Using shared factory for consistent behavior)
 // =============================================================================
 
-/**
- * TYPE-CAST-EXPLANATION:
- * The `as unknown as` cast is required because UnifiedChainDetector doesn't
- * explicitly implement PartitionDetectorInterface, though it has all required
- * methods. The interfaces have slightly different return type signatures:
- *
- * - PartitionDetectorInterface.getStats() returns { chainStats: Map<string, unknown> }
- * - UnifiedChainDetector.getStats() returns { chainStats: Map<string, ChainStats> }
- *
- * The types ARE compatible at runtime (more specific → less specific is OK),
- * but TypeScript can't verify this without explicit implementation.
- *
- * TODO: Refactor UnifiedChainDetector to explicitly implement PartitionDetectorInterface
- * by aligning the return types or using interface generics.
- * @see ADR-024: Partition Service Factory Pattern
- */
 const runner = runPartitionService({
   config: serviceConfig,
   detectorConfig,
-  createDetector: (cfg) => new UnifiedChainDetector(cfg) as unknown as PartitionDetectorInterface,
+  createDetector: (cfg) => new UnifiedChainDetector(cfg),
   logger
 });
 
@@ -137,7 +120,7 @@ const runner = runPartitionService({
 // =============================================================================
 
 // Cast back to UnifiedChainDetector for consumers that need the full type
-const detector = runner.detector as unknown as UnifiedChainDetector;
+const detector = runner.detector as UnifiedChainDetector;
 const cleanupProcessHandlers = runner.cleanup;
 
 export {

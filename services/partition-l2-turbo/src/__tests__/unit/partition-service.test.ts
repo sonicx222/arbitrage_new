@@ -5,7 +5,7 @@
  * The JEST_WORKER_ID guard in index.ts prevents auto-start during import.
  */
 
-import { EventEmitter } from 'events';
+import { MockUnifiedChainDetector } from '@arbitrage/test-utils/mocks/partition-service.mock';
 
 // =============================================================================
 // Mocks - Must be defined before imports
@@ -159,68 +159,7 @@ jest.mock('@arbitrage/config', () => ({
   },
 }));
 
-// Mock UnifiedChainDetector
-class MockUnifiedChainDetector extends EventEmitter {
-  private _config: Record<string, unknown>;
-  private _started = false;
-
-  constructor(config: Record<string, unknown>) {
-    super();
-    this._config = config;
-  }
-
-  async start(): Promise<void> {
-    this._started = true;
-  }
-
-  async stop(): Promise<void> {
-    this._started = false;
-  }
-
-  getPartitionId(): string {
-    return this._config.partitionId as string;
-  }
-
-  getChains(): string[] {
-    return this._config.chains as string[];
-  }
-
-  getHealthyChains(): string[] {
-    return this._config.chains as string[];
-  }
-
-  isRunning(): boolean {
-    return this._started;
-  }
-
-  getStats() {
-    return {
-      partitionId: this._config.partitionId,
-      chains: this._config.chains,
-      totalEventsProcessed: 0,
-      totalOpportunitiesFound: 0,
-      uptimeSeconds: 0,
-      memoryUsageMB: 0,
-      chainStats: new Map(),
-    };
-  }
-
-  async getPartitionHealth() {
-    return {
-      status: 'healthy',
-      partitionId: this._config.partitionId,
-      chainHealth: new Map(),
-      totalEventsProcessed: 0,
-      avgEventLatencyMs: 0,
-      memoryUsage: 0,
-      cpuUsage: 0,
-      uptimeSeconds: 0,
-      lastHealthCheck: Date.now(),
-      activeOpportunities: 0,
-    };
-  }
-}
-
+// Use shared MockUnifiedChainDetector from @arbitrage/test-utils
 jest.mock('@arbitrage/unified-detector', () => ({
   UnifiedChainDetector: MockUnifiedChainDetector,
 }));

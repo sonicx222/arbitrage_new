@@ -25,6 +25,8 @@ const dirsToClean = [
   'services/partition-l2-turbo/dist',
   'services/partition-high-value/dist',
   'services/cross-chain-detector/dist',
+  'services/partition-solana/dist',
+  'services/mempool-detector/dist',
   'infrastructure/redis/dist',
 ];
 

@@ -24,6 +24,7 @@ export interface BatchConfig {
 export class EventBatcher {
   private batches: Map<string, {
     events: any[];
+    keys: Set<string>; // P1-2 FIX: O(1) dedup lookup instead of O(n) array scan
     timeout: NodeJS.Timeout;
     created: number;
   }> = new Map();
@@ -71,19 +72,21 @@ export class EventBatcher {
     if (!batch) {
       batch = {
         events: [],
+        keys: new Set<string>(),
         timeout: setTimeout(() => this.flushBatch(key), this.config.maxWaitTime),
         created: Date.now()
       };
       this.batches.set(key, batch);
     }
 
-    // Deduplication logic
+    // P1-2 FIX: O(1) deduplication using Set instead of O(n) array scan
     if (this.config.enableDeduplication) {
-      const isDuplicate = this.isDuplicateEvent(batch.events, event);
-      if (isDuplicate) {
+      const eventKey = this.getEventKey(event);
+      if (batch.keys.has(eventKey)) {
         logger.debug('Duplicate event detected, skipping', { pairKey: key });
         return;
       }
+      batch.keys.add(eventKey);
     }
 
     batch.events.push(event);
@@ -215,21 +218,6 @@ export class EventBatcher {
 
     // Fallback
     return 'unknown_pair';
-  }
-
-  private isDuplicateEvent(existingEvents: any[], newEvent: any): boolean {
-    // Simple deduplication based on event hash or key properties
-    // In production, this would be more sophisticated
-    const newEventKey = this.getEventKey(newEvent);
-
-    for (const existingEvent of existingEvents) {
-      const existingEventKey = this.getEventKey(existingEvent);
-      if (existingEventKey === newEventKey) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   private getEventKey(event: any): string {

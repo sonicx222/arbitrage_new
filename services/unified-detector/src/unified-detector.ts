@@ -32,7 +32,8 @@ import {
   getRedisStreamsClient,
   GracefulDegradationManager,
   getGracefulDegradationManager,
-  FailoverEvent
+  FailoverEvent,
+  PartitionDetectorInterface
 } from '@arbitrage/core';
 
 import {
@@ -137,7 +138,7 @@ export type { ChainStats } from './types';
 // Unified Chain Detector
 // =============================================================================
 
-export class UnifiedChainDetector extends EventEmitter {
+export class UnifiedChainDetector extends EventEmitter implements PartitionDetectorInterface {
   private logger: Logger;
   private perfLogger: PerformanceLogger;
   private stateManager: ServiceStateManager;

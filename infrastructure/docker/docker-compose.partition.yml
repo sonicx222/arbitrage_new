@@ -55,6 +55,22 @@
 
 version: '3.8'
 
+# =============================================================================
+# FIX L8: Platform Compatibility Notes
+# =============================================================================
+# This configuration is tested on linux/amd64. If deploying on linux/arm64
+# (e.g., AWS Graviton, Apple Silicon, Oracle Ampere):
+#
+# 1. All Node.js images support arm64 natively — no changes needed.
+# 2. redis:7-alpine supports arm64 natively.
+# 3. If using platform-specific native modules (e.g., bcrypt), ensure the
+#    Dockerfile uses multi-stage builds that compile on the target arch.
+# 4. To force a platform: add `platform: linux/amd64` to individual services
+#    or use `docker buildx build --platform linux/arm64` for cross-compilation.
+#
+# See: https://docs.docker.com/compose/compose-file/05-services/#platform
+# =============================================================================
+
 services:
   # =============================================================================
   # Infrastructure Services
@@ -66,9 +82,9 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-changeme}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "--no-auth-warning", "ping"]
       # FIX P3-1: Standardize to 15s interval per ADR-007 (was 10s)
       # Consistent with docker-compose.yml and health-check.sh default
       interval: 15s
@@ -94,7 +110,7 @@ services:
       - PARTITION_CHAINS=bsc,polygon,avalanche,fantom
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-asia-fast-${HOSTNAME:-local}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -147,7 +163,7 @@ services:
       - PARTITION_CHAINS=arbitrum,optimism,base
       - REGION_ID=asia-southeast1
       - INSTANCE_ID=partition-l2-turbo-${HOSTNAME:-local}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -199,7 +215,7 @@ services:
       - PARTITION_CHAINS=ethereum,zksync,linea
       - REGION_ID=us-east1
       - INSTANCE_ID=partition-high-value-${HOSTNAME:-local}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -252,7 +268,7 @@ services:
       - PARTITION_CHAINS=solana
       - REGION_ID=us-west1
       - INSTANCE_ID=partition-solana-${HOSTNAME:-local}
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEALTH_CHECK_PORT=3001
       - ENABLE_CROSS_REGION_HEALTH=true
@@ -260,7 +276,8 @@ services:
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:?SOLANA_RPC_URL is required}
       - SOLANA_WS_URL=${SOLANA_WS_URL:?SOLANA_WS_URL is required}
     ports:
-      - "3016:3001"
+      # FIX H2: Was 3016, corrected to 3014 (local port 3004 + 10 offset)
+      - "3014:3001"
     depends_on:
       redis:
         condition: service_healthy
@@ -299,12 +316,13 @@ services:
       dockerfile: services/cross-chain-detector/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=cross-chain-detector-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
     ports:
-      - "3014:3001"
+      # FIX H2: Was 3014, corrected to 3016 (local port 3006 + 10 offset)
+      - "3016:3001"
     depends_on:
       redis:
         condition: service_healthy
@@ -338,7 +356,7 @@ services:
       dockerfile: services/execution-engine/Dockerfile
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - INSTANCE_ID=execution-engine-${HOSTNAME:-local}
       - HEALTH_CHECK_PORT=3001
@@ -384,7 +402,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - PORT=3000
       - INSTANCE_ID=coordinator-${HOSTNAME:-local}
@@ -411,6 +429,12 @@ services:
         limits:
           memory: 256M
           cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',r=>{process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     networks:
       - arbitrage-network
     restart: unless-stopped

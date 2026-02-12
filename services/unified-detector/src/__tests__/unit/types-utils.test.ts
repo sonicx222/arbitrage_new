@@ -10,8 +10,6 @@ import {
   parseFloatEnvVar,
   toWebSocketUrl,
   isUnstableChain,
-  basisPointsToDecimal,
-  decimalToBasisPoints
 } from '../../types';
 
 // =============================================================================
@@ -200,43 +198,5 @@ describe('isUnstableChain', () => {
   });
 });
 
-// =============================================================================
-// Fee Conversion Tests
-// =============================================================================
-
-describe('basisPointsToDecimal', () => {
-  it('should convert 30 basis points to 0.003', () => {
-    expect(basisPointsToDecimal(30)).toBe(0.003);
-  });
-
-  it('should convert 0 basis points to 0', () => {
-    expect(basisPointsToDecimal(0)).toBe(0);
-  });
-
-  it('should convert 10000 basis points to 1', () => {
-    expect(basisPointsToDecimal(10000)).toBe(1);
-  });
-
-  it('should handle non-integer basis points', () => {
-    expect(basisPointsToDecimal(25)).toBe(0.0025);
-  });
-});
-
-describe('decimalToBasisPoints', () => {
-  it('should convert 0.003 to 30 basis points', () => {
-    expect(decimalToBasisPoints(0.003)).toBe(30);
-  });
-
-  it('should convert 0 to 0 basis points', () => {
-    expect(decimalToBasisPoints(0)).toBe(0);
-  });
-
-  it('should convert 1 to 10000 basis points', () => {
-    expect(decimalToBasisPoints(1)).toBe(10000);
-  });
-
-  it('should round to nearest integer', () => {
-    expect(decimalToBasisPoints(0.00333)).toBe(33);
-    expect(decimalToBasisPoints(0.00337)).toBe(34);
-  });
-});
+// Fee conversion tests removed — bpsToDecimal/decimalToBps are tested
+// in their canonical location: shared/core (via @arbitrage/core)

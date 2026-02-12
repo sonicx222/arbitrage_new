@@ -166,6 +166,18 @@ variable "ssh_public_key" {
   type        = string
 }
 
+variable "admin_cidr_blocks" {
+  description = "CIDR blocks allowed for SSH and management access (restrict to your IP)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # OVERRIDE in terraform.tfvars with your IP, e.g. ["203.0.113.10/32"]
+}
+
+variable "service_cidr_blocks" {
+  description = "CIDR blocks allowed for service port access (restrict to known coordinators)"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]  # OVERRIDE in terraform.tfvars with coordinator/monitoring IPs
+}
+
 # =============================================================================
 # Docker Configuration
 # =============================================================================

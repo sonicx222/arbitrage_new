@@ -58,19 +58,19 @@ groups:
           description: "Warming error rate is {{ $value | humanizePercentage }} (target: <1%). Chain: {{ $labels.chain }}"
           runbook_url: "https://docs.arbitrage.com/runbooks/warming-errors"
 
-      # Critical: Cache hit rate dropped significantly
+      # Critical: Cache hit rate dropped significantly (aligned with monitoring/alert-rules.yml: 80%)
       - alert: CacheHitRateDropped
         expr: |
           rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) /
             (rate(arbitrage_cache_hits_total{cache_level="L1"}[5m]) +
-             rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.85
+             rate(arbitrage_cache_misses_total{cache_level="L1"}[5m])) < 0.80
         for: 10m
         labels:
           severity: critical
           component: cache
         annotations:
-          summary: "L1 cache hit rate below 85%"
-          description: "L1 cache hit rate is {{ $value | humanizePercentage }} (target: >90%). Chain: {{ $labels.chain }}"
+          summary: "L1 cache hit rate below 80%"
+          description: "L1 cache hit rate is {{ $value | humanizePercentage }} (critical: 80%, target: >90%). Chain: {{ $labels.chain }}"
           runbook_url: "https://docs.arbitrage.com/runbooks/cache-hit-rate-low"
 
   - name: warming_infrastructure_warning

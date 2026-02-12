@@ -305,8 +305,8 @@ groups:
       # RPC Provider Health
       - alert: RPCProviderDegraded
         expr: |
-          rate(arbitrage_rpc_errors_total[5m]) by (provider) /
-          rate(arbitrage_rpc_calls_total[5m]) by (provider) > 0.05
+          sum(rate(arbitrage_rpc_errors_total[5m])) by (provider) /
+          sum(rate(arbitrage_rpc_calls_total[5m])) by (provider) > 0.05
         for: 20m
         labels:
           severity: info

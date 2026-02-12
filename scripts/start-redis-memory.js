@@ -147,4 +147,8 @@ async function main() {
 // Entry Point
 // =============================================================================
 
-main();
+// FIX M10: Add .catch() consistent with other scripts (stop-local.js, status-local.js, etc.)
+main().catch(error => {
+  console.error(`Redis memory server failed: ${error.message}`);
+  process.exit(1);
+});

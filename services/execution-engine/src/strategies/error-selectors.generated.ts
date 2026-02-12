@@ -31,11 +31,12 @@ export const CUSTOM_ERROR_SELECTORS: Record<string, string> = {
   '0x42301c23': 'InsufficientOutputAmount', // InsufficientOutputAmount()
   '0x4e47f8ea': 'InsufficientProfit', // InsufficientProfit()
   '0x7a58c192': 'InvalidSwapDeadline', // InvalidSwapDeadline()
-  '0x81ceff30': 'SwapFailed', // SwapFailed()
+  // FIX C5: Removed ghost SwapFailed (0x81ceff30) — not in any contract ABI
   '0x86a559ea': 'EmptySwapPath', // EmptySwapPath()
   '0x9c8d2cd2': 'InvalidRecipient', // InvalidRecipient()
   '0xa83116fc': 'TransactionTooOld', // TransactionTooOld()
   '0xb12d13eb': 'ETHTransferFailed', // ETHTransferFailed()
+  '0xd924e5f4': 'InvalidOwnerAddress', // InvalidOwnerAddress() — FIX M6: was missing
   '0xddd77f0d': 'PathTooLong', // PathTooLong(uint256,uint256)
   '0xe17c49b7': 'InvalidFlashLoanCaller', // InvalidFlashLoanCaller()
   '0xef7cc6b6': 'InvalidFlashLoanInitiator', // InvalidFlashLoanInitiator()
@@ -56,11 +57,11 @@ export const ERROR_NAME_TO_SELECTOR: Record<string, string> = {
   'InsufficientOutputAmount': '0x42301c23',
   'InsufficientProfit': '0x4e47f8ea',
   'InvalidSwapDeadline': '0x7a58c192',
-  'SwapFailed': '0x81ceff30',
   'EmptySwapPath': '0x86a559ea',
   'InvalidRecipient': '0x9c8d2cd2',
   'TransactionTooOld': '0xa83116fc',
   'ETHTransferFailed': '0xb12d13eb',
+  'InvalidOwnerAddress': '0xd924e5f4',
   'PathTooLong': '0xddd77f0d',
   'InvalidFlashLoanCaller': '0xe17c49b7',
   'InvalidFlashLoanInitiator': '0xef7cc6b6',
@@ -81,11 +82,11 @@ export const ERROR_SIGNATURES: Record<string, string> = {
   'InsufficientOutputAmount': 'InsufficientOutputAmount()',
   'InsufficientProfit': 'InsufficientProfit()',
   'InvalidSwapDeadline': 'InvalidSwapDeadline()',
-  'SwapFailed': 'SwapFailed()',
   'EmptySwapPath': 'EmptySwapPath()',
   'InvalidRecipient': 'InvalidRecipient()',
   'TransactionTooOld': 'TransactionTooOld()',
   'ETHTransferFailed': 'ETHTransferFailed()',
+  'InvalidOwnerAddress': 'InvalidOwnerAddress()',
   'PathTooLong': 'PathTooLong(uint256,uint256)',
   'InvalidFlashLoanCaller': 'InvalidFlashLoanCaller()',
   'InvalidFlashLoanInitiator': 'InvalidFlashLoanInitiator()',

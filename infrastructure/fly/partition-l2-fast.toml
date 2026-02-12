@@ -26,6 +26,7 @@ primary_region = "sin"
 [env]
   NODE_ENV = "production"
   PARTITION_ID = "l2-turbo"
+  PARTITION_CHAINS = "arbitrum,optimism,base"
   REGION_ID = "asia-southeast1"
   LOG_LEVEL = "info"
   HEALTH_CHECK_PORT = "3001"

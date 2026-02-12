@@ -2,7 +2,7 @@
  * Unit tests for template-renderer.js
  */
 
-const { renderTemplate, getNestedValue } = require('../template-renderer');
+const { renderTemplate, getNestedValue, escapeHtml } = require('../template-renderer');
 
 describe('template-renderer', () => {
   describe('getNestedValue', () => {
@@ -35,6 +35,29 @@ describe('template-renderer', () => {
     it('should handle null/undefined gracefully', () => {
       expect(getNestedValue(null, 'any')).toBeUndefined();
       expect(getNestedValue(undefined, 'any')).toBeUndefined();
+    });
+  });
+
+  describe('escapeHtml', () => {
+    it('should escape angle brackets', () => {
+      expect(escapeHtml('<script>')).toBe('&lt;script&gt;');
+    });
+
+    it('should escape ampersands', () => {
+      expect(escapeHtml('A & B')).toBe('A &amp; B');
+    });
+
+    it('should escape quotes', () => {
+      expect(escapeHtml('"test"')).toBe('&quot;test&quot;');
+      expect(escapeHtml("'test'")).toBe('&#039;test&#039;');
+    });
+
+    it('should handle empty string', () => {
+      expect(escapeHtml('')).toBe('');
+    });
+
+    it('should convert non-strings', () => {
+      expect(escapeHtml(42)).toBe('42');
     });
   });
 
@@ -87,8 +110,14 @@ describe('template-renderer', () => {
       expect(renderTemplate(template, data)).toBe('Active: true, Disabled: false');
     });
 
-    it('should handle HTML content', () => {
+    it('should escape HTML in double-brace placeholders', () => {
       const template = '<div>{{content}}</div>';
+      const data = { content: '<script>alert("xss")</script>' };
+      expect(renderTemplate(template, data)).toBe('<div>&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;</div>');
+    });
+
+    it('should NOT escape HTML in triple-brace placeholders', () => {
+      const template = '<div>{{{content}}}</div>';
       const data = { content: '<span>Hello</span>' };
       expect(renderTemplate(template, data)).toBe('<div><span>Hello</span></div>');
     });

@@ -1076,19 +1076,15 @@ describe('FlashLoanStrategy - buildNHopSwapSteps', () => {
     expect(steps[0].amountOutMin).toBe(expectedMin);
   });
 
-  it('should use 1 wei minimum if expectedOutput not provided', () => {
+  it('should throw if expectedOutput not provided (P0-2 FIX: no 1 wei fallback)', () => {
     const opportunity = createMockOpportunity({ tokenIn: WETH });
 
-    const steps = strategy.buildNHopSwapSteps(opportunity, {
-      hops: [{ router: MOCK_ROUTER_A, tokenOut: WETH }], // No expectedOutput
-      chain: 'ethereum',
-    });
-
-    expect(steps[0].amountOutMin).toBe(1n);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[WARN_SLIPPAGE]'),
-      expect.any(Object)
-    );
+    expect(() => {
+      strategy.buildNHopSwapSteps(opportunity, {
+        hops: [{ router: MOCK_ROUTER_A, tokenOut: WETH }], // No expectedOutput
+        chain: 'ethereum',
+      });
+    }).toThrow('[ERR_MISSING_EXPECTED_OUTPUT]');
   });
 
   it('should build 4-hop quadrilateral path', () => {

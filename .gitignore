@@ -130,6 +130,21 @@ desktop.ini
 *.sublime-project
 
 # =============================================================================
+# Terraform (state may contain sensitive values)
+# =============================================================================
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# =============================================================================
 # Docker
 # =============================================================================
 docker-compose.override.yml
@@ -147,6 +162,7 @@ temp/
 *.bak
 *.backup
 *.orig
+*.txt
 
 # =============================================================================
 # Hardhat / Blockchain Development

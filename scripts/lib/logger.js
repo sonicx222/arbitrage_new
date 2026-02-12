@@ -269,4 +269,23 @@ module.exports = {
  * BACKWARD COMPATIBILITY:
  * Old code using log() and logService() continues to work unchanged.
  * No breaking changes - migration is optional but recommended.
+ *
+ * FIX L7: LOGGING CONVENTION (Emoji vs ANSI)
+ * ─────────────────────────────────────────────
+ * JS scripts (CommonJS):
+ *   Use ScriptLogger semantic methods — they output ANSI symbols (✓, ⚠, ✗)
+ *   which render correctly in all terminals.
+ *     const { logger } = require('./lib/logger');
+ *     logger.success('Done');  // outputs: ✓ Done
+ *
+ * TS scripts (ESM/ts-node):
+ *   TS scripts under scripts/ cannot easily import the JS logger.
+ *   Use emoji prefixes for visual consistency:
+ *     console.log('✅ Done');
+ *     console.error('❌ Failed');
+ *     console.warn('⚠️  Warning');
+ *
+ * Both approaches produce visually similar output. The key rule is:
+ * NEVER mix raw ANSI escape codes with emoji in the same script.
+ * Pick one style per file and be consistent.
  */

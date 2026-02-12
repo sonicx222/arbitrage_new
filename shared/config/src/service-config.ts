@@ -444,6 +444,7 @@ export const FLASH_LOAN_PROVIDERS: Record<string, {
   address: string;
   protocol: string;
   fee: number;  // Basis points (bps): 100 bps = 1%
+  approvedRouters?: string[];  // FIX M7: Optional list of approved router addresses per chain
 }> = {
   // Aave V3 Pool addresses - https://docs.aave.com/developers/deployed-contracts
   // FIX 3.1.3-1: Corrected Ethereum Aave V3 Pool address (was 0x87870BcD2C4C2e84a8c3C3a3fcACc94666C0d6CF)

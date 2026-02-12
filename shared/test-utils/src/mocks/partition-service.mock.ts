@@ -94,17 +94,22 @@ export interface MockDetectorOptions {
 /**
  * Mock implementation of UnifiedChainDetector for testing.
  * Extends EventEmitter to support event-based testing.
+ *
+ * Accepts either MockDetectorOptions or a generic config object (as passed by
+ * partition services via `new UnifiedChainDetector(config)`), making it usable
+ * both as a direct mock and as a jest.mock constructor replacement.
  */
 export class MockUnifiedChainDetector extends EventEmitter {
   private partitionId: string;
   private chains: string[];
   private running: boolean;
 
-  constructor(options: MockDetectorOptions = {}) {
+  constructor(options: MockDetectorOptions | Record<string, unknown> = {}) {
     super();
-    this.partitionId = options.partitionId || 'test-partition';
-    this.chains = options.chains || ['bsc', 'polygon'];
-    this.running = options.isRunning || false;
+    const opts = options as Record<string, unknown>;
+    this.partitionId = (opts.partitionId as string) || 'test-partition';
+    this.chains = (opts.chains as string[]) || ['bsc', 'polygon'];
+    this.running = (opts.isRunning as boolean) || false;
   }
 
   async start(): Promise<void> {
@@ -135,12 +140,16 @@ export class MockUnifiedChainDetector extends EventEmitter {
 
   async getPartitionHealth() {
     return {
-      status: this.running ? 'healthy' : 'unhealthy',
+      status: this.running ? 'healthy' : 'starting',
       partitionId: this.partitionId,
-      chainHealth: new Map(this.chains.map(c => [c, { status: 'healthy' }])),
-      uptimeSeconds: 100,
-      totalEventsProcessed: 1000,
-      memoryUsage: 100 * 1024 * 1024, // 100MB
+      chainHealth: new Map(),
+      totalEventsProcessed: 0,
+      avgEventLatencyMs: 0,
+      memoryUsage: 0,
+      cpuUsage: 0,
+      uptimeSeconds: 0,
+      lastHealthCheck: Date.now(),
+      activeOpportunities: 0,
     };
   }
 
@@ -148,10 +157,10 @@ export class MockUnifiedChainDetector extends EventEmitter {
     return {
       partitionId: this.partitionId,
       chains: this.chains,
-      totalEventsProcessed: 1000,
-      totalOpportunitiesFound: 10,
-      uptimeSeconds: 100,
-      memoryUsageMB: 100,
+      totalEventsProcessed: 0,
+      totalOpportunitiesFound: 0,
+      uptimeSeconds: 0,
+      memoryUsageMB: 0,
       chainStats: new Map(),
     };
   }

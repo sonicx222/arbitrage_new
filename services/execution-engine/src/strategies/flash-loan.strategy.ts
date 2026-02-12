@@ -1170,13 +1170,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         // Use provided expected output with slippage applied
         amountOutMin = hop.expectedOutput - (hop.expectedOutput * slippage / BPS_DENOMINATOR);
       } else {
-        // Default to 1 wei as minimum (caller should provide expectedOutput for safety)
-        this.logger.warn('[WARN_SLIPPAGE] No expectedOutput provided for hop, using 1 wei minimum', {
-          hopIndex: i,
-          tokenIn: currentTokenIn,
-          tokenOut: hop.tokenOut,
-        });
-        amountOutMin = 1n;
+        // P0-2 FIX: Reject hops without expectedOutput instead of using 1 wei minimum.
+        // A 1 wei amountOutMin provides zero slippage protection — any sandwich attack
+        // or price movement would drain the entire trade amount.
+        throw new Error(
+          `[ERR_MISSING_EXPECTED_OUTPUT] Hop ${i} (${currentTokenIn} → ${hop.tokenOut}) ` +
+          `has no expectedOutput. Cannot calculate safe amountOutMin for flash loan.`
+        );
       }
 
       steps.push({

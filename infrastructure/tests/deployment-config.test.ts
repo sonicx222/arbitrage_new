@@ -24,6 +24,9 @@ const ORACLE_DIR = path.join(INFRA_ROOT, 'oracle', 'terraform');
 const GCP_DIR = path.join(INFRA_ROOT, 'gcp');
 const SCRIPTS_DIR = path.join(INFRA_ROOT, 'scripts');
 
+// Infrastructure paths for docker compose
+const DOCKER_DIR = path.join(INFRA_ROOT, 'docker');
+
 // Partition configuration (should match partitions.ts)
 const PARTITIONS = {
   'asia-fast': {
@@ -46,6 +49,13 @@ const PARTITIONS = {
     provider: 'oracle',
     memory: 768,
     port: 3013
+  },
+  'solana-native': {
+    chains: ['solana'],
+    region: 'us-west1',
+    provider: 'fly',
+    memory: 512,
+    port: 3016
   }
 };
 
@@ -161,6 +171,63 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
     });
   });
 
+  describe('partition-solana.toml', () => {
+    const configPath = path.join(FLY_DIR, 'partition-solana.toml');
+    let config: any;
+
+    beforeAll(() => {
+      if (fileExists(configPath)) {
+        config = parseToml(readFile(configPath));
+      }
+    });
+
+    it('should exist', () => {
+      expect(fileExists(configPath)).toBe(true);
+    });
+
+    it('should have correct app name', () => {
+      expect(config.app).toBe('arbitrage-solana');
+    });
+
+    it('should deploy to US West region (close to Solana validators)', () => {
+      expect(config.primary_region).toBe('sjc');
+    });
+
+    it('should set partition environment variables', () => {
+      expect(config.env.PARTITION_ID).toBe('solana-native');
+      expect(config.env.PARTITION_CHAINS).toBe('solana');
+      expect(config.env.REGION_ID).toBe('us-west1');
+      expect(config.env.NODE_ENV).toBe('production');
+    });
+
+    it('should configure correct memory limit (512MB for Solana)', () => {
+      expect(config.vm).toBeDefined();
+      expect(config.vm.memory_mb).toBe(512);
+      expect(config.vm.cpus).toBe(1);
+      expect(config.vm.cpu_kind).toBe('shared');
+    });
+
+    it('should enable health checks', () => {
+      expect(config.checks).toBeDefined();
+      expect(config.checks.health).toBeDefined();
+      expect(config.checks.health.path).toBe('/health');
+      expect(config.checks.health.port).toBe(3001);
+    });
+
+    it('should enable cross-region health reporting', () => {
+      expect(config.env.ENABLE_CROSS_REGION_HEALTH).toBe('true');
+    });
+
+    it('should configure HTTP service on port 3001', () => {
+      expect(config.http_service).toBeDefined();
+      expect(config.http_service.internal_port).toBe(3001);
+    });
+
+    it('should use partition-solana Dockerfile', () => {
+      expect(config.build.dockerfile).toContain('partition-solana');
+    });
+  });
+
   describe('deploy.sh', () => {
     const scriptPath = path.join(FLY_DIR, 'deploy.sh');
 
@@ -176,12 +243,165 @@ describe('Phase 3: Fly.io Deployment Configuration', () => {
     it('should define deployment functions', () => {
       const content = readFile(scriptPath);
       expect(content).toContain('deploy_l2_fast');
+      expect(content).toContain('deploy_solana');
       expect(content).toContain('deploy_coordinator_standby');
     });
 
     it('should check for fly CLI', () => {
       const content = readFile(scriptPath);
       expect(content).toContain('fly');
+    });
+  });
+});
+
+// =============================================================================
+// Phase 3: Docker Compose Configuration Tests
+// =============================================================================
+
+describe('Phase 3: Docker Compose Configuration', () => {
+  describe('docker-compose.yml (base)', () => {
+    const configPath = path.join(DOCKER_DIR, 'docker-compose.yml');
+    let config: any;
+
+    beforeAll(() => {
+      if (fileExists(configPath)) {
+        config = parseYaml(readFile(configPath));
+      }
+    });
+
+    it('should exist', () => {
+      expect(fileExists(configPath)).toBe(true);
+    });
+
+    it('should define all required services', () => {
+      const services = Object.keys(config.services);
+      expect(services).toContain('redis');
+      expect(services).toContain('unified-detector');
+      expect(services).toContain('cross-chain-detector');
+      expect(services).toContain('execution-engine');
+      expect(services).toContain('coordinator');
+    });
+
+    it('should configure Redis with authentication', () => {
+      const redis = config.services.redis;
+      expect(redis.command).toContain('--requirepass');
+    });
+
+    it('should configure Redis healthcheck with auth', () => {
+      const redis = config.services.redis;
+      expect(redis.healthcheck).toBeDefined();
+      expect(redis.healthcheck.test).toBeDefined();
+      // Redis healthcheck should include auth flag
+      const testCmd = Array.isArray(redis.healthcheck.test)
+        ? redis.healthcheck.test.join(' ')
+        : redis.healthcheck.test;
+      expect(testCmd).toContain('-a');
+    });
+
+    it('should set HEALTH_CHECK_PORT on all detector services', () => {
+      const detectorServices = ['unified-detector', 'cross-chain-detector', 'execution-engine'];
+      for (const svc of detectorServices) {
+        const envList = config.services[svc].environment;
+        const envStr = Array.isArray(envList) ? envList.join(' ') : JSON.stringify(envList);
+        expect(envStr).toContain('HEALTH_CHECK_PORT=3001');
+      }
+    });
+
+    it('should configure healthchecks on all services', () => {
+      const allServices = ['unified-detector', 'cross-chain-detector', 'execution-engine', 'coordinator'];
+      for (const svc of allServices) {
+        expect(config.services[svc].healthcheck).toBeDefined();
+        expect(config.services[svc].healthcheck.test).toBeDefined();
+      }
+    });
+
+    it('should use Redis password in all REDIS_URL references', () => {
+      const servicesWithRedis = ['unified-detector', 'cross-chain-detector', 'execution-engine', 'coordinator'];
+      for (const svc of servicesWithRedis) {
+        const envList = config.services[svc].environment;
+        const redisUrlEntry = envList.find((e: string) => e.startsWith('REDIS_URL='));
+        expect(redisUrlEntry).toBeDefined();
+        expect(redisUrlEntry).toContain('REDIS_PASSWORD');
+      }
+    });
+
+    it('should have correct dependency chain', () => {
+      // unified-detector depends on redis
+      expect(config.services['unified-detector'].depends_on).toBeDefined();
+      // cross-chain depends on unified-detector
+      const crossChainDeps = config.services['cross-chain-detector'].depends_on;
+      expect(crossChainDeps).toHaveProperty('unified-detector');
+      // coordinator depends on all others
+      const coordDeps = config.services.coordinator.depends_on;
+      expect(coordDeps).toHaveProperty('redis');
+      expect(coordDeps).toHaveProperty('unified-detector');
+      expect(coordDeps).toHaveProperty('execution-engine');
+    });
+
+    it('should expose coordinator on port 3000', () => {
+      const ports = config.services.coordinator.ports;
+      expect(ports).toBeDefined();
+      expect(ports.some((p: string) => p.includes('3000'))).toBe(true);
+    });
+  });
+
+  describe('docker-compose.partition.yml (production)', () => {
+    const configPath = path.join(DOCKER_DIR, 'docker-compose.partition.yml');
+    let config: any;
+
+    beforeAll(() => {
+      if (fileExists(configPath)) {
+        config = parseYaml(readFile(configPath));
+      }
+    });
+
+    it('should exist', () => {
+      expect(fileExists(configPath)).toBe(true);
+    });
+
+    it('should define all partition services', () => {
+      const services = Object.keys(config.services);
+      expect(services).toContain('partition-asia-fast');
+      expect(services).toContain('partition-l2-turbo');
+      expect(services).toContain('partition-high-value');
+      expect(services).toContain('partition-solana');
+    });
+
+    it('should map correct external ports per partition', () => {
+      expect(config.services['partition-asia-fast'].ports).toContainEqual('3011:3001');
+      expect(config.services['partition-l2-turbo'].ports).toContainEqual('3012:3001');
+      expect(config.services['partition-high-value'].ports).toContainEqual('3013:3001');
+      expect(config.services['partition-solana'].ports).toContainEqual('3016:3001');
+    });
+
+    it('should configure healthchecks on all services including coordinator', () => {
+      const allServices = [
+        'partition-asia-fast', 'partition-l2-turbo', 'partition-high-value',
+        'partition-solana', 'cross-chain-detector', 'execution-engine', 'coordinator'
+      ];
+      for (const svc of allServices) {
+        expect(config.services[svc].healthcheck).toBeDefined();
+        expect(config.services[svc].healthcheck.interval).toBe('15s');
+      }
+    });
+
+    it('should configure Redis with authentication', () => {
+      const redis = config.services.redis;
+      expect(redis.command).toContain('--requirepass');
+    });
+
+    it('should set correct PARTITION_ID for each partition', () => {
+      const partitionEnvs: Record<string, string> = {
+        'partition-asia-fast': 'asia-fast',
+        'partition-l2-turbo': 'l2-turbo',
+        'partition-high-value': 'high-value',
+        'partition-solana': 'solana-native'
+      };
+      for (const [svc, expectedId] of Object.entries(partitionEnvs)) {
+        const envList = config.services[svc].environment;
+        const partitionEntry = envList.find((e: string) => e.startsWith('PARTITION_ID='));
+        expect(partitionEntry).toBe(`PARTITION_ID=${expectedId}`);
+      }
     });
   });
 });
@@ -479,7 +699,8 @@ describe('Phase 3: Configuration Consistency', () => {
       'partition-l2-fast': 3012,
       'partition-high-value': 3013,
       'cross-chain-detector': 3014,
-      'execution-engine': 3015
+      'execution-engine': 3015,
+      'partition-solana': 3016
     };
 
     it('should have unique ports across all services', () => {

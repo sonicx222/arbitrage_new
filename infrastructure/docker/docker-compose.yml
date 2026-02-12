@@ -9,9 +9,9 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-changeme}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "--no-auth-warning", "ping"]
       interval: 15s  # Consistent with ADR-007 health check interval
       timeout: 10s
       retries: 3
@@ -28,8 +28,9 @@ services:
     build: ../../services/unified-detector
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
+      - HEALTH_CHECK_PORT=3001
       - PARTITION_ID=${PARTITION_ID:-default}
       - INSTANCE_ID=${INSTANCE_ID:-unified-1}
       - REGION_ID=${REGION_ID:-us-east-1}
@@ -49,8 +50,9 @@ services:
     build: ../../services/cross-chain-detector
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
+      - HEALTH_CHECK_PORT=3001
     depends_on:
       redis:
         condition: service_healthy
@@ -69,8 +71,9 @@ services:
     build: ../../services/execution-engine
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
+      - HEALTH_CHECK_PORT=3001
       - ETHEREUM_PRIVATE_KEY=${ETHEREUM_PRIVATE_KEY}
       - BSC_PRIVATE_KEY=${BSC_PRIVATE_KEY}
       - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
@@ -97,7 +100,7 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - LOG_LEVEL=info
       - PORT=3000
     depends_on:

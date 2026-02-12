@@ -72,7 +72,7 @@ generate_knative_yaml() {
     log_info "Generating Knative YAML with PROJECT_ID=$GCP_PROJECT..."
 
     # Substitute PROJECT_ID placeholder in the YAML template
-    sed "s/PROJECT_ID/$GCP_PROJECT/g" "$SCRIPT_DIR/coordinator-standby.yaml" > "$output_file"
+    sed "s|PROJECT_ID|$GCP_PROJECT|g" "$SCRIPT_DIR/coordinator-standby.yaml" > "$output_file"
 
     log_info "Generated: $output_file"
     echo "$output_file"
@@ -144,7 +144,8 @@ deploy_service() {
         --image "$IMAGE_NAME:latest" \
         --platform managed \
         --region "$GCP_REGION" \
-        --allow-unauthenticated \
+        --no-allow-unauthenticated \
+        --ingress internal-and-cloud-load-balancing \
         --memory 256Mi \
         --cpu 1 \
         --min-instances 1 \

@@ -8,6 +8,7 @@
 #
 # Services:
 #   l2-fast            Deploy L2-Fast partition (Arbitrum, Optimism, Base)
+#   solana             Deploy Solana partition
 #   coordinator-standby Deploy Coordinator standby instance
 #   all                Deploy all Fly.io services
 #
@@ -234,6 +235,73 @@ deploy_coordinator_standby() {
     log_info "Coordinator standby deployed and verified successfully"
 }
 
+# Set up secrets for Solana partition
+setup_solana_secrets() {
+    log_info "Setting up secrets for Solana partition..."
+    log_warn "Secrets will be hidden from terminal output for security"
+
+    echo -n "Enter REDIS_URL (Upstash Redis connection URL): "
+    read -rs REDIS_URL
+    echo ""
+
+    echo -n "Enter SOLANA_RPC_URL: "
+    read -rs SOLANA_RPC_URL
+    echo ""
+
+    echo -n "Enter SOLANA_WS_URL: "
+    read -rs SOLANA_WS_URL
+    echo ""
+
+    fly secrets set \
+        REDIS_URL="$REDIS_URL" \
+        SOLANA_RPC_URL="$SOLANA_RPC_URL" \
+        SOLANA_WS_URL="$SOLANA_WS_URL" \
+        -c "$SCRIPT_DIR/partition-solana.toml"
+
+    log_info "Secrets set for Solana partition"
+}
+
+# Deploy Solana partition
+deploy_solana() {
+    log_info "Deploying Solana partition..."
+
+    cd "$PROJECT_ROOT"
+
+    if [ "$DRY_RUN" = true ]; then
+        log_info "[DRY-RUN] Would deploy: fly deploy -c $SCRIPT_DIR/partition-solana.toml"
+        return 0
+    fi
+
+    # Verify config file exists
+    if [ ! -f "$SCRIPT_DIR/partition-solana.toml" ]; then
+        log_error "Config file not found: $SCRIPT_DIR/partition-solana.toml"
+        return 1
+    fi
+
+    # Create app if it doesn't exist
+    if ! fly apps list 2>/dev/null | grep -q "arbitrage-solana"; then
+        log_info "Creating app: arbitrage-solana"
+        if ! fly apps create arbitrage-solana --org personal; then
+            log_error "Failed to create app: arbitrage-solana"
+            return 1
+        fi
+    fi
+
+    # Deploy with error handling
+    if ! fly deploy -c "$SCRIPT_DIR/partition-solana.toml"; then
+        log_error "Deployment failed for Solana partition"
+        return 1
+    fi
+
+    # Verify deployment health
+    if ! verify_deployment_health "arbitrage-solana" "$SCRIPT_DIR/partition-solana.toml"; then
+        log_error "Deployment verification failed for Solana partition"
+        return 1
+    fi
+
+    log_info "Solana partition deployed and verified successfully"
+}
+
 # Show status of all Fly.io services
 show_status() {
     log_info "Fly.io Services Status:"
@@ -242,6 +310,12 @@ show_status() {
     if fly apps list | grep -q "arbitrage-l2-fast"; then
         echo "=== L2-Fast Partition ==="
         fly status -c "$SCRIPT_DIR/partition-l2-fast.toml" 2>/dev/null || echo "Not deployed"
+        echo ""
+    fi
+
+    if fly apps list | grep -q "arbitrage-solana"; then
+        echo "=== Solana Partition ==="
+        fly status -c "$SCRIPT_DIR/partition-solana.toml" 2>/dev/null || echo "Not deployed"
         echo ""
     fi
 
@@ -261,7 +335,7 @@ main() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case $1 in
-            l2-fast|coordinator-standby|all|status)
+            l2-fast|solana|coordinator-standby|all|status)
                 SERVICE="$1"
                 shift
                 ;;
@@ -278,6 +352,7 @@ main() {
                 echo ""
                 echo "Services:"
                 echo "  l2-fast              Deploy L2-Fast partition"
+                echo "  solana               Deploy Solana partition"
                 echo "  coordinator-standby  Deploy Coordinator standby"
                 echo "  all                  Deploy all services"
                 echo "  status               Show status of all services"
@@ -307,14 +382,20 @@ main() {
             [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
             deploy_l2_fast
             ;;
+        solana)
+            [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
+            deploy_solana
+            ;;
         coordinator-standby)
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
             deploy_coordinator_standby
             ;;
         all)
             [ "$SETUP_SECRETS" = true ] && setup_l2_fast_secrets
+            [ "$SETUP_SECRETS" = true ] && setup_solana_secrets
             [ "$SETUP_SECRETS" = true ] && setup_coordinator_secrets
             deploy_l2_fast
+            deploy_solana
             deploy_coordinator_standby
             ;;
         status)

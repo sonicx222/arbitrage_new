@@ -49,13 +49,6 @@ const REDIS_STARTUP_TIMEOUT_SEC = 30;
 const SERVICE_STARTUP_MAX_ATTEMPTS = 30;
 
 /**
- * @deprecated Use SERVICE_STARTUP_MAX_ATTEMPTS instead
- * Kept for backward compatibility during migration
- * @type {number}
- */
-const SERVICE_STARTUP_TIMEOUT_SEC = SERVICE_STARTUP_MAX_ATTEMPTS;
-
-/**
  * Timeout for unit test execution (milliseconds).
  * @type {number}
  */
@@ -189,7 +182,6 @@ module.exports = {
   TCP_CONNECTION_TIMEOUT_MS,
   REDIS_STARTUP_TIMEOUT_SEC,
   SERVICE_STARTUP_MAX_ATTEMPTS,
-  SERVICE_STARTUP_TIMEOUT_SEC, // @deprecated - use SERVICE_STARTUP_MAX_ATTEMPTS
   UNIT_TEST_TIMEOUT_MS,
   INTEGRATION_TEST_TIMEOUT_MS,
   PERFORMANCE_TEST_TIMEOUT_MS,

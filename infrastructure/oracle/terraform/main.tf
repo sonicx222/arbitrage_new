@@ -24,6 +24,22 @@ terraform {
       version = ">= 5.0.0"
     }
   }
+
+  # Remote backend for state management (configure in backend.tfvars)
+  # Prevents sensitive values from being stored in local .tfstate files.
+  # To use: terraform init -backend-config=backend.tfvars
+  #
+  # backend "s3" {
+  #   # OCI Object Storage is S3-compatible
+  #   bucket   = "arbitrage-terraform-state"
+  #   key      = "infrastructure/terraform.tfstate"
+  #   region   = "ap-singapore-1"
+  #   endpoint = "https://<namespace>.compat.objectstorage.<region>.oraclecloud.com"
+  #   skip_region_validation      = true
+  #   skip_credentials_validation = true
+  #   skip_metadata_api_check     = true
+  #   force_path_style            = true
+  # }
 }
 
 # =============================================================================
@@ -135,27 +151,33 @@ resource "oci_core_security_list" "singapore_public_sl" {
   vcn_id         = oci_core_vcn.singapore_vcn.id
   display_name   = "arbitrage-singapore-public-sl"
 
-  # Allow SSH
-  ingress_security_rules {
-    protocol    = "6" # TCP
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    tcp_options {
-      min = 22
-      max = 22
+  # Allow SSH (restricted to admin IPs — override admin_cidr_blocks in terraform.tfvars)
+  dynamic "ingress_security_rules" {
+    for_each = var.admin_cidr_blocks
+    content {
+      protocol    = "6" # TCP
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      tcp_options {
+        min = 22
+        max = 22
+      }
     }
   }
 
   # Allow health check ports (3011-3012 for partitions that may run in Singapore)
   # 3011 = Asia-Fast partition
   # 3012 = L2-Fast partition (if deployed to OCI instead of Fly.io)
-  ingress_security_rules {
-    protocol    = "6"
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    tcp_options {
-      min = 3011
-      max = 3012
+  dynamic "ingress_security_rules" {
+    for_each = var.service_cidr_blocks
+    content {
+      protocol    = "6"
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      tcp_options {
+        min = 3011
+        max = 3012
+      }
     }
   }
 
@@ -226,36 +248,45 @@ resource "oci_core_security_list" "us_east_public_sl" {
   vcn_id         = oci_core_vcn.us_east_vcn.id
   display_name   = "arbitrage-us-east-public-sl"
 
-  # Allow SSH
-  ingress_security_rules {
-    protocol    = "6"
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    tcp_options {
-      min = 22
-      max = 22
+  # Allow SSH (restricted to admin IPs — override admin_cidr_blocks in terraform.tfvars)
+  dynamic "ingress_security_rules" {
+    for_each = var.admin_cidr_blocks
+    content {
+      protocol    = "6"
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      tcp_options {
+        min = 22
+        max = 22
+      }
     }
   }
 
-  # Allow health check ports
-  ingress_security_rules {
-    protocol    = "6"
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    tcp_options {
-      min = 3013
-      max = 3015
+  # Allow service ports (restricted — override service_cidr_blocks in terraform.tfvars)
+  dynamic "ingress_security_rules" {
+    for_each = var.service_cidr_blocks
+    content {
+      protocol    = "6"
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      tcp_options {
+        min = 3013
+        max = 3015
+      }
     }
   }
 
-  # Allow coordinator port
-  ingress_security_rules {
-    protocol    = "6"
-    source      = "0.0.0.0/0"
-    source_type = "CIDR_BLOCK"
-    tcp_options {
-      min = 3000
-      max = 3000
+  # Allow coordinator port (restricted)
+  dynamic "ingress_security_rules" {
+    for_each = var.service_cidr_blocks
+    content {
+      protocol    = "6"
+      source      = ingress_security_rules.value
+      source_type = "CIDR_BLOCK"
+      tcp_options {
+        min = 3000
+        max = 3000
+      }
     }
   }
 
@@ -316,6 +347,7 @@ resource "oci_core_instance" "asia_fast_partition" {
       chains            = join(",", var.partition_asia_fast.chains)
       region_id         = "asia-southeast1"
       health_port       = var.partition_asia_fast.health_port
+      memory_mb         = var.partition_asia_fast.memory_mb
       redis_url         = var.redis_url
       log_level         = var.log_level
       docker_image      = var.docker_image_asia_fast
@@ -379,6 +411,7 @@ resource "oci_core_instance" "high_value_partition" {
       chains            = join(",", var.partition_high_value.chains)
       region_id         = "us-east1"
       health_port       = var.partition_high_value.health_port
+      memory_mb         = var.partition_high_value.memory_mb
       redis_url         = var.redis_url
       log_level         = var.log_level
       docker_image      = var.docker_image_high_value

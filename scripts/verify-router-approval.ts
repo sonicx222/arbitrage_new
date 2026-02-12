@@ -26,11 +26,42 @@
 import { ethers } from 'ethers';
 import {
   FLASH_LOAN_PROVIDERS,
-  getFlashLoanContractAddress,
   FLASH_LOAN_ARBITRAGE_ABI,
-  PANCAKESWAP_FLASH_ARBITRAGE_ABI,
-  RPC_URLS,
+  BALANCER_V2_FLASH_ARBITRAGE_ABI,
+  SYNCSWAP_FLASH_ARBITRAGE_ABI,
 } from '../shared/config/src';
+
+// FIX C2: getFlashLoanContractAddress and RPC_URLS don't exist in shared/config.
+// Contract addresses and RPC URLs are read from environment variables per chain.
+// Format: <CHAIN>_CONTRACT_ADDRESS and <CHAIN>_RPC_URL
+
+/**
+ * Get the flash loan arbitrage contract address for a chain from env vars.
+ * @returns Contract address or null if not configured
+ */
+function getFlashLoanContractAddress(chain: string, _protocol: string): string | null {
+  const envKey = `${chain.toUpperCase()}_CONTRACT_ADDRESS`;
+  return process.env[envKey] || null;
+}
+
+/**
+ * Get RPC URL for a chain from env vars.
+ * @returns RPC URL or null if not configured
+ */
+function getRpcUrl(chain: string): string | null {
+  const envKey = `${chain.toUpperCase()}_RPC_URL`;
+  return process.env[envKey] || null;
+}
+
+// FIX C3: Map all protocols to their ABIs (was binary if/else handling only 2 of 9 protocols)
+// All ABIs include isApprovedRouter(); we add getApprovedRouters() for querying
+const PROTOCOL_ABI_MAP: Record<string, string[]> = {
+  aave_v3: [...FLASH_LOAN_ARBITRAGE_ABI, 'function getApprovedRouters() external view returns (address[])'],
+  balancer_v2: [...BALANCER_V2_FLASH_ARBITRAGE_ABI, 'function getApprovedRouters() external view returns (address[])'],
+  syncswap: [...SYNCSWAP_FLASH_ARBITRAGE_ABI, 'function getApprovedRouters() external view returns (address[])'],
+  // PancakeSwap V3 uses same base interface as Aave (different callback, same admin functions)
+  pancakeswap_v3: [...FLASH_LOAN_ARBITRAGE_ABI, 'function getApprovedRouters() external view returns (address[])'],
+};
 
 interface ValidationResult {
   chain: string;
@@ -73,21 +104,23 @@ async function validateChain(chain: string): Promise<ValidationResult> {
       return result;
     }
 
-    // Get RPC provider
-    const rpcUrl = RPC_URLS[chain];
+    // FIX C2: Get RPC URL from env vars (RPC_URLS config doesn't exist)
+    const rpcUrl = getRpcUrl(chain);
     if (!rpcUrl) {
       result.status = 'ERROR';
-      result.issues.push(`No RPC URL configured for chain '${chain}'`);
+      result.issues.push(`No RPC URL configured for chain '${chain}'. Set ${chain.toUpperCase()}_RPC_URL env var.`);
       return result;
     }
 
     const provider = new ethers.JsonRpcProvider(rpcUrl);
 
-    // Get contract ABI based on protocol
-    const contractAbi =
-      providerConfig.protocol === 'aave_v3'
-        ? FLASH_LOAN_ARBITRAGE_ABI
-        : PANCAKESWAP_FLASH_ARBITRAGE_ABI;
+    // FIX C3: Get ABI from protocol-to-ABI map (was binary if/else for only 2 protocols)
+    const contractAbi = PROTOCOL_ABI_MAP[providerConfig.protocol];
+    if (!contractAbi) {
+      result.status = 'ERROR';
+      result.issues.push(`Unknown protocol '${providerConfig.protocol}' — no ABI mapping available`);
+      return result;
+    }
 
     const contract = new ethers.Contract(contractAddress, contractAbi, provider);
 

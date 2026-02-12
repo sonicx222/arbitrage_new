@@ -129,7 +129,10 @@ function checkPackageJson() {
 function main() {
   // Skip check if SKIP_PREINSTALL_CHECK is set (useful for CI)
   if (process.env.SKIP_PREINSTALL_CHECK === 'true') {
-    log('Preinstall check skipped (SKIP_PREINSTALL_CHECK=true)', colors.yellow);
+    // FIX L1: Log prominent warning when supply chain checks are bypassed
+    log('\n[Security] WARNING: Pre-install security checks SKIPPED', colors.bold + colors.yellow);
+    log('  Supply chain attack detection is disabled (SKIP_PREINSTALL_CHECK=true)', colors.yellow);
+    log('  This should only be used in trusted CI environments.\n', colors.yellow);
     return;
   }
 

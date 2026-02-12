@@ -25,6 +25,30 @@ function isWindows() {
 }
 
 // =============================================================================
+// Shell Execution Helper
+// =============================================================================
+
+/**
+ * FIX M8: Shared exec() wrapper that eliminates duplicated callback patterns.
+ * Executes a shell command and returns stdout, or null if the command fails
+ * or produces no output.
+ *
+ * @param {string} cmd - Shell command to execute
+ * @returns {Promise<string|null>} Trimmed stdout, or null on error/empty output
+ */
+function execCommand(cmd) {
+  return new Promise((resolve) => {
+    exec(cmd, (error, stdout) => {
+      if (error || !stdout || !stdout.trim()) {
+        resolve(null);
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+}
+
+// =============================================================================
 // Process Management
 // =============================================================================
 
@@ -33,15 +57,19 @@ function isWindows() {
  * @param {number} pid - Process ID to kill
  * @returns {Promise<boolean>} - True if killed successfully
  */
-function killProcess(pid) {
-  return new Promise((resolve) => {
-    const cmd = isWindows()
-      ? `taskkill /PID ${pid} /F /T 2>nul`
-      : `kill -9 ${pid} 2>/dev/null`;
+async function killProcess(pid) {
+  // FIX M12: Validate PID is a positive integer before interpolating into shell command
+  const safePid = parseInt(pid, 10);
+  if (!Number.isInteger(safePid) || safePid <= 0) {
+    return false;
+  }
+  const cmd = isWindows()
+    ? `taskkill /PID ${safePid} /F /T 2>nul`
+    : `kill -9 ${safePid} 2>/dev/null`;
 
-    exec(cmd, (error) => {
-      resolve(!error);
-    });
+  // Kill commands produce no stdout on success — use raw exec for error-based success check
+  return new Promise((resolve) => {
+    exec(cmd, (error) => resolve(!error));
   });
 }
 
@@ -53,31 +81,27 @@ function killProcess(pid) {
  * @param {number} pid - Process ID to check
  * @returns {Promise<boolean>} - True if process exists
  */
-function processExists(pid) {
-  return new Promise((resolve) => {
-    if (isWindows()) {
-      // Windows: use tasklist to check if PID exists
-      exec(`tasklist /FI "PID eq ${pid}" /NH`, (error, stdout) => {
-        if (error) {
-          resolve(false);
-          return;
-        }
-        // Check if PID appears in output as a complete column value
-        // Use word boundary regex to avoid false positives (e.g., PID 123 matching 1234)
-        // Format: "image.exe    PID   Console    1    Memory K"
-        const pidPattern = new RegExp(`\\b${pid}\\b`);
-        resolve(pidPattern.test(stdout));
-      });
-    } else {
-      // Unix: signal 0 is reliable (doesn't actually send signal, just checks existence)
-      try {
-        process.kill(pid, 0);
-        resolve(true);
-      } catch {
-        resolve(false);
-      }
-    }
-  });
+async function processExists(pid) {
+  // FIX M12: Validate PID before interpolating into shell command
+  const safePid = parseInt(pid, 10);
+  if (!Number.isInteger(safePid) || safePid <= 0) {
+    return false;
+  }
+  if (isWindows()) {
+    const output = await execCommand(`tasklist /FI "PID eq ${safePid}" /NH`);
+    if (!output) return false;
+    // Check if PID appears in output as a complete column value
+    // Use word boundary regex to avoid false positives (e.g., PID 123 matching 1234)
+    const pidPattern = new RegExp(`\\b${safePid}\\b`);
+    return pidPattern.test(output);
+  }
+  // Unix: signal 0 is reliable (doesn't actually send signal, just checks existence)
+  try {
+    process.kill(safePid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -85,97 +109,83 @@ function processExists(pid) {
  * @param {number} port - Port number
  * @returns {Promise<number[]>} - Array of PIDs using the port
  */
-function findProcessesByPort(port) {
-  return new Promise((resolve) => {
-    if (isWindows()) {
-      // Windows: use netstat
-      exec(`netstat -ano | findstr :${port} | findstr LISTENING`, (error, stdout) => {
-        if (error || !stdout.trim()) {
-          resolve([]);
-          return;
-        }
-        const pids = new Set();
-        stdout.trim().split('\n').forEach(line => {
-          const parts = line.trim().split(/\s+/);
-          const pid = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(pid) && pid > 0) {
-            pids.add(pid);
-          }
-        });
-        resolve(Array.from(pids));
-      });
-    } else {
-      // Unix: use lsof
-      exec(`lsof -t -i :${port} 2>/dev/null || true`, (error, stdout) => {
-        if (error || !stdout.trim()) {
-          resolve([]);
-          return;
-        }
-        const pids = stdout.trim().split('\n')
-          .map(p => parseInt(p, 10))
-          .filter(p => !isNaN(p) && p > 0);
-        resolve(pids);
-      });
+async function findProcessesByPort(port) {
+  // FIX M12: Validate port before interpolating into shell command
+  const safePort = parseInt(port, 10);
+  if (!Number.isInteger(safePort) || safePort < 1 || safePort > 65535) {
+    return [];
+  }
+  if (isWindows()) {
+    const output = await execCommand(`netstat -ano | findstr :${safePort} | findstr LISTENING`);
+    if (!output) return [];
+    const pids = new Set();
+    output.split('\n').forEach(line => {
+      const parts = line.trim().split(/\s+/);
+      const pid = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(pid) && pid > 0) {
+        pids.add(pid);
+      }
+    });
+    return Array.from(pids);
+  }
+  // Unix: use lsof
+  const output = await execCommand(`lsof -t -i :${safePort} 2>/dev/null || true`);
+  if (!output) return [];
+  return output.split('\n')
+    .map(p => parseInt(p, 10))
+    .filter(p => !isNaN(p) && p > 0);
+}
+
+/**
+ * Parse process lines from command output into {pid, cmd} objects.
+ * @param {string} output - Raw command output
+ * @param {function} lineParser - Function that extracts {pid, cmd} from a line, or null to skip
+ * @returns {Array<{pid: number, cmd: string}>}
+ */
+function parseProcessLines(output, lineParser) {
+  const processes = [];
+  output.split('\n').forEach(line => {
+    const result = lineParser(line);
+    if (result && !isNaN(result.pid) && result.pid > 0) {
+      processes.push(result);
     }
   });
+  return processes;
 }
 
 /**
  * Find ghost node processes related to the project (cross-platform).
  * @returns {Promise<Array<{pid: number, cmd: string}>>} - Array of ghost processes
  */
-function findGhostNodeProcesses() {
-  return new Promise((resolve) => {
-    if (isWindows()) {
-      // Windows: use wmic to find node processes
-      exec('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv 2>nul', (error, stdout) => {
-        if (error || !stdout.trim()) {
-          resolve([]);
-          return;
-        }
-        const processes = [];
-        stdout.trim().split('\n').forEach(line => {
-          // FIX P3-1: Tighten matching to prevent killing unrelated projects
-          // Must contain "arbitrage" AND either "ts-node" or "services/*/index.ts"
-          const hasArbitrage = line.includes('arbitrage');
-          const hasTsNode = line.includes('ts-node');
-          const hasServices = line.includes('services') && line.includes('index.ts');
-
-          if (hasArbitrage && (hasTsNode || hasServices)) {
-            const parts = line.split(',');
-            if (parts.length >= 3) {
-              const pid = parseInt(parts[parts.length - 1], 10);
-              const cmd = parts.slice(1, -1).join(',');
-              if (!isNaN(pid) && pid > 0) {
-                processes.push({ pid, cmd: cmd.substring(0, 80) });
-              }
-            }
-          }
-        });
-        resolve(processes);
-      });
-    } else {
-      // Unix: use ps
-      // FIX P3-1: Require "arbitrage" in command line to avoid matching unrelated projects
-      exec('ps aux 2>/dev/null | grep arbitrage | grep -E "ts-node|services/.*/src/index.ts" | grep -v grep || true', (error, stdout) => {
-        if (error || !stdout.trim()) {
-          resolve([]);
-          return;
-        }
-        const processes = [];
-        stdout.trim().split('\n').forEach(line => {
-          const parts = line.split(/\s+/);
-          if (parts.length >= 2) {
-            const pid = parseInt(parts[1], 10);
-            const cmd = parts.slice(10).join(' ');
-            if (!isNaN(pid) && pid > 0) {
-              processes.push({ pid, cmd: cmd.substring(0, 80) });
-            }
-          }
-        });
-        resolve(processes);
-      });
-    }
+async function findGhostNodeProcesses() {
+  if (isWindows()) {
+    const output = await execCommand('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv 2>nul');
+    if (!output) return [];
+    return parseProcessLines(output, (line) => {
+      // FIX P3-1: Tighten matching to prevent killing unrelated projects
+      const hasArbitrage = line.includes('arbitrage');
+      const hasTsNode = line.includes('ts-node');
+      const hasServices = line.includes('services') && line.includes('index.ts');
+      if (!hasArbitrage || !(hasTsNode || hasServices)) return null;
+      const parts = line.split(',');
+      if (parts.length < 3) return null;
+      return {
+        pid: parseInt(parts[parts.length - 1], 10),
+        cmd: parts.slice(1, -1).join(',').substring(0, 80)
+      };
+    });
+  }
+  // Unix: use ps
+  // FIX P3-1: Require "arbitrage" in command line to avoid matching unrelated projects
+  const output = await execCommand('ps aux 2>/dev/null | grep arbitrage | grep -E "ts-node|services/.*/src/index.ts" | grep -v grep || true');
+  if (!output) return [];
+  return parseProcessLines(output, (line) => {
+    const parts = line.split(/\s+/);
+    if (parts.length < 2) return null;
+    return {
+      pid: parseInt(parts[1], 10),
+      cmd: parts.slice(10).join(' ').substring(0, 80)
+    };
   });
 }
 
@@ -184,21 +194,11 @@ function findGhostNodeProcesses() {
  * FIX P3-1: Tightened matching to avoid killing unrelated projects.
  * @returns {Promise<void>}
  */
-function killTsNodeProcesses() {
-  return new Promise((resolve) => {
-    if (isWindows()) {
-      // Windows: kill node processes running arbitrage ts-node
-      // Must contain both "ts-node" AND "arbitrage" to avoid unrelated projects
-      exec('wmic process where "commandline like \'%ts-node%\' and commandline like \'%arbitrage%\' and name=\'node.exe\'" call terminate 2>nul', () => {
-        resolve();
-      });
-    } else {
-      // Unix: use pkill with pattern matching both ts-node and arbitrage
-      exec('pkill -f "ts-node.*arbitrage" 2>/dev/null', () => {
-        resolve();
-      });
-    }
-  });
+async function killTsNodeProcesses() {
+  const cmd = isWindows()
+    ? 'wmic process where "commandline like \'%ts-node%\' and commandline like \'%arbitrage%\' and name=\'node.exe\'" call terminate 2>nul'
+    : 'pkill -f "ts-node.*arbitrage" 2>/dev/null';
+  await execCommand(cmd);
 }
 
 // =============================================================================
@@ -207,6 +207,7 @@ function killTsNodeProcesses() {
 
 module.exports = {
   isWindows,
+  execCommand,
   killProcess,
   processExists,
   findProcessesByPort,

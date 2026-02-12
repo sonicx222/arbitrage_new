@@ -223,7 +223,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: 3000,
           script: 'test.js'
-        })).toThrow('name" is required');
+        })).toThrow('Invalid Service name: expected string, got undefined');
       });
 
       it('should throw error for non-string name', () => {
@@ -232,7 +232,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: 3000,
           script: 'test.js'
-        })).toThrow('name" is required and must be a string');
+        })).toThrow('Invalid Service name: expected string, got number');
       });
     });
 
@@ -242,7 +242,7 @@ describe('ServicesConfig', () => {
           name: 'Test Service',
           port: 3000,
           script: 'test.js'
-        })).toThrow('"type" is required');
+        })).toThrow('Invalid Service "Test Service" type: "undefined"');
       });
 
       it('should throw error for invalid type', () => {
@@ -251,7 +251,7 @@ describe('ServicesConfig', () => {
           type: 'invalid',
           port: 3000,
           script: 'test.js'
-        })).toThrow('Invalid type "invalid"');
+        })).toThrow('Invalid Service "Test Service" type: "invalid"');
       });
 
       it('should accept valid node type', () => {
@@ -288,7 +288,7 @@ describe('ServicesConfig', () => {
           name: 'Test Service',
           type: 'node',
           script: 'test.js'
-        })).toThrow('"port" is required');
+        })).toThrow('Invalid port for Service "Test Service": expected number, got undefined');
       });
 
       it('should throw error for non-number port', () => {
@@ -297,7 +297,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: '3000',
           script: 'test.js'
-        })).toThrow('"port" is required and must be a number');
+        })).toThrow('Invalid port for Service "Test Service": expected number, got string');
       });
 
       it('should throw error for port below valid range', () => {
@@ -306,7 +306,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: 0,
           script: 'test.js'
-        })).toThrow('Invalid port 0');
+        })).toThrow('Invalid port for Service "Test Service": 0');
       });
 
       it('should throw error for port above valid range', () => {
@@ -315,7 +315,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: 70000,
           script: 'test.js'
-        })).toThrow('Invalid port 70000');
+        })).toThrow('Invalid port for Service "Test Service": 70000');
       });
 
       it('should accept valid port in range', () => {
@@ -334,7 +334,7 @@ describe('ServicesConfig', () => {
           name: 'Test Service',
           type: 'node',
           port: 3000
-        })).toThrow('"script" is required for type="node"');
+        })).toThrow('Invalid Service "Test Service" script: expected string, got undefined');
       });
 
       it('should throw error for non-string script', () => {
@@ -343,7 +343,7 @@ describe('ServicesConfig', () => {
           type: 'node',
           port: 3000,
           script: 123
-        })).toThrow('"script" is required for type="node"');
+        })).toThrow('Invalid Service "Test Service" script: expected string, got number');
       });
 
       it('should throw error for non-existent script file', () => {
@@ -402,7 +402,7 @@ describe('ServicesConfig', () => {
           port: 3000,
           script: 'services/coordinator/src/index.ts',
           healthEndpoint: 123
-        })).toThrow('"healthEndpoint" must be a string');
+        })).toThrow('expected string, got number');
       });
 
       it('should accept valid healthEndpoint starting with /', () => {

@@ -52,8 +52,6 @@ export {
   type FeeBasisPoints,
   type FeeDecimal,
   asLogger,
-  basisPointsToDecimal,
-  decimalToBasisPoints,
 } from './types';
 
 // =============================================================================

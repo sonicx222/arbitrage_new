@@ -52,7 +52,6 @@ import {
 } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
-  calculateBridgeCostUsd,
   // Used for individual token normalization in extractTokenFromPair, whale analysis, etc.
   normalizeTokenForCrossChain,
   // REFACTOR: Use centralized default quote tokens from config
@@ -942,6 +941,11 @@ export class CrossChainDetectorService {
       // If buying tokenOut, price of tokenOut increases
       const postSwapPrice = affectedPrice.price * (1 + priceImpact);
 
+      // P2-2 FIX: Guard against zero/negative post-swap price to prevent division by zero
+      if (postSwapPrice <= 0) {
+        return;
+      }
+
       // Find best alternative price on other DEXes/chains
       let bestAltPrice = 0;
       let bestAltSource: typeof pricesForPair[0] | null = null;
@@ -966,8 +970,10 @@ export class CrossChainDetectorService {
 
       // Apply confidence boost for pending opportunities
       // Higher confidence for larger pending swaps and shorter deadline
-      const timeToDeadline = intent.deadline - Math.floor(Date.now() / 1000);
-      const deadlineBoost = Math.min(timeToDeadline / 300, 1.0); // Max boost at 5min deadline
+      // P1-3 FIX: Normalize deadline to ms (same as handlePendingOpportunity) before computing time delta
+      const normalizedDeadlineMs = intent.deadline < 1e10 ? intent.deadline * 1000 : intent.deadline;
+      const timeToDeadlineSec = (normalizedDeadlineMs - Date.now()) / 1000;
+      const deadlineBoost = Math.min(timeToDeadlineSec / 300, 1.0); // Max boost at 5min deadline
       const baseConfidence = 0.6 + (priceImpact * 10); // Higher impact = higher confidence
       const confidence = Math.min(baseConfidence * deadlineBoost, 0.95);
 
@@ -1476,35 +1482,19 @@ export class CrossChainDetectorService {
 
   /**
    * ADR-014: Delegate bridge cost estimation to BridgeCostEstimator module.
-   * This replaces the previous inline implementation with the modular component.
+   *
+   * P0-1 FIX: Returns bridge cost in USD/token for correct comparison with priceDiff.
+   * Previously called estimateBridgeCost() which returns cost in token units,
+   * but priceDiff and the threshold (minProfitPercentage * price) are in USD/token.
    */
   private estimateBridgeCost(sourceChain: string, targetChain: string, tokenUpdate: PriceUpdate): number {
-    if (this.bridgeCostEstimator) {
-      return this.bridgeCostEstimator.estimateBridgeCost(sourceChain, targetChain, tokenUpdate);
+    if (!this.bridgeCostEstimator) {
+      throw new Error('BridgeCostEstimator not initialized — cannot estimate bridge cost before initialize()');
     }
-
-    // Fallback if module not initialized (should not happen in normal operation)
-    this.logger.warn('BridgeCostEstimator not initialized, using fallback');
-    return this.fallbackBridgeCostLegacy(sourceChain, targetChain);
-  }
-
-  /**
-   * Legacy fallback bridge cost estimation.
-   * Only used if BridgeCostEstimator module fails to initialize.
-   * @deprecated Use BridgeCostEstimator module instead
-   */
-  private fallbackBridgeCostLegacy(sourceChain: string, targetChain: string): number {
-    const tradeSizeUsd = this.config.defaultTradeSizeUsd!;
-    const bridgeCostResult = calculateBridgeCostUsd(sourceChain, targetChain, tradeSizeUsd);
-
-    if (bridgeCostResult) {
-      return bridgeCostResult.fee;
-    }
-
-    // Minimal fallback
-    const baseFeePercentage = 0.1;
-    const minFeeUsd = 2.0;
-    return Math.max(tradeSizeUsd * (baseFeePercentage / 100), minFeeUsd);
+    const estimate = this.bridgeCostEstimator.getDetailedEstimate(sourceChain, targetChain, tokenUpdate);
+    const tradeTokens = this.bridgeCostEstimator.extractTokenAmount(tokenUpdate);
+    if (tradeTokens <= 0) return estimate.costUsd; // Conservative fallback
+    return estimate.costUsd / tradeTokens;
   }
 
   // Method to update bridge predictor with actual bridge transaction data

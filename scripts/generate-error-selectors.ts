@@ -11,7 +11,7 @@
  * Output:
  *   services/execution-engine/src/strategies/error-selectors.generated.ts
  *
- * @see base.strategy.ts:1934 - TODO that this script addresses
+ * @see base.strategy.ts parseRevertReason() - uses the generated selectors
  */
 
 import * as fs from 'fs';
