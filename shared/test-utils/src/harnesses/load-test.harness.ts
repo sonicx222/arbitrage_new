@@ -16,6 +16,7 @@
  */
 
 import { performance } from 'perf_hooks';
+import { clearIntervalSafe } from '@arbitrage/core';
 import { LoadTestResult, MemoryMetrics, GCMetrics, LatencyMetrics } from '../types/cache-types';
 
 export interface LoadTestConfig {
@@ -360,10 +361,7 @@ export class LoadTestHarness {
    * Stop memory monitoring
    */
   private stopMemoryMonitoring(): void {
-    if (this.memoryMonitorInterval) {
-      clearInterval(this.memoryMonitorInterval);
-      this.memoryMonitorInterval = null;
-    }
+    this.memoryMonitorInterval = clearIntervalSafe(this.memoryMonitorInterval);
   }
 
   /**

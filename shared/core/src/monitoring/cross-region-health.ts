@@ -20,6 +20,7 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient, RedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 import { getDistributedLockManager, DistributedLockManager } from '../distributed-lock';
@@ -279,15 +280,8 @@ export class CrossRegionHealthManager extends EventEmitter {
     this.logger.info('Stopping CrossRegionHealthManager');
 
     // Clear intervals
-    if (this.leaderHeartbeatInterval) {
-      clearInterval(this.leaderHeartbeatInterval);
-      this.leaderHeartbeatInterval = null;
-    }
-
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    this.leaderHeartbeatInterval = clearIntervalSafe(this.leaderHeartbeatInterval);
+    this.healthCheckInterval = clearIntervalSafe(this.healthCheckInterval);
 
     // P2-2 FIX: Unsubscribe from Redis pub/sub to prevent callback memory leak
     if (this.redis) {
@@ -401,10 +395,7 @@ export class CrossRegionHealthManager extends EventEmitter {
     this.isLeader = false;
     this.leaderLock = null;
 
-    if (this.leaderHeartbeatInterval) {
-      clearInterval(this.leaderHeartbeatInterval);
-      this.leaderHeartbeatInterval = null;
-    }
+    this.leaderHeartbeatInterval = clearIntervalSafe(this.leaderHeartbeatInterval);
 
     const region = this.regions.get(this.config.regionId);
     if (region) {
@@ -455,10 +446,7 @@ export class CrossRegionHealthManager extends EventEmitter {
       this.isLeader = false;
       this.leaderLock = null;
 
-      if (this.leaderHeartbeatInterval) {
-        clearInterval(this.leaderHeartbeatInterval);
-        this.leaderHeartbeatInterval = null;
-      }
+      this.leaderHeartbeatInterval = clearIntervalSafe(this.leaderHeartbeatInterval);
 
       this.logger.info('Released leadership', {
         instanceId: this.config.instanceId

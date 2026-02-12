@@ -17,6 +17,7 @@
  */
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 
 const logger = createLogger('correlation-analyzer');
 
@@ -757,10 +758,7 @@ export class CorrelationAnalyzer {
    * Stop the analyzer and clean up resources.
    */
   destroy(): void {
-    if (this.updateTimer) {
-      clearInterval(this.updateTimer);
-      this.updateTimer = null;
-    }
+    this.updateTimer = clearIntervalSafe(this.updateTimer);
     this.reset();
   }
 

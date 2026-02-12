@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import { CHAINS } from '@arbitrage/config';
-import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider } from '@arbitrage/core';
+import { getErrorMessage, NonceManager, BatchProvider, createBatchProvider, clearIntervalSafe } from '@arbitrage/core';
 import type { ServiceStateManager, BatchProviderConfig } from '@arbitrage/core';
 import type { Logger, ProviderHealth, ProviderService as IProviderService, ExecutionStats } from '../types';
 import {
@@ -259,10 +259,7 @@ export class ProviderServiceImpl implements IProviderService {
    * Stop health monitoring.
    */
   stopHealthChecks(): void {
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    this.healthCheckInterval = clearIntervalSafe(this.healthCheckInterval);
   }
 
   /**

@@ -17,7 +17,12 @@ import { ExecutionEngineService, SimulationConfig } from './engine';
 import {
   createLogger,
   getCrossRegionHealthManager,
-  resetCrossRegionHealthManager
+  resetCrossRegionHealthManager,
+  parseEnvInt,
+  getCrossRegionEnvConfig,
+  setupServiceShutdown,
+  closeHealthServer,
+  runServiceMain,
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
 import {
@@ -74,30 +79,27 @@ function getCircuitBreakerConfigFromEnv() {
 
 /**
  * Parse standby configuration from environment variables (ADR-007).
+ *
+ * Uses shared getCrossRegionEnvConfig for common cross-region fields (S-6).
+ * Execution-engine-specific fields (queue pause, standby flag) are parsed here.
  */
 function getStandbyConfigFromEnv() {
   const isStandby = process.env.IS_STANDBY === 'true';
   const queuePausedOnStart = process.env.QUEUE_PAUSED_ON_START === 'true';
-  const regionId = process.env.REGION_ID || 'us-east1';
-  const serviceName = process.env.SERVICE_NAME || 'execution-engine';
 
-  // Health check settings for cross-region monitoring
-  const healthCheckIntervalMs = parseInt(process.env.HEALTH_CHECK_INTERVAL_MS || '10000', 10);
-  const failoverThreshold = parseInt(process.env.FAILOVER_THRESHOLD || '3', 10);
-  const failoverTimeoutMs = parseInt(process.env.FAILOVER_TIMEOUT_MS || '60000', 10);
-  const leaderHeartbeatIntervalMs = parseInt(process.env.LEADER_HEARTBEAT_INTERVAL_MS || '10000', 10);
-  const leaderLockTtlMs = parseInt(process.env.LEADER_LOCK_TTL_MS || '30000', 10);
+  // Shared cross-region health settings (S-6 consolidation)
+  const crossRegion = getCrossRegionEnvConfig('execution-engine');
 
   return {
     isStandby,
     queuePausedOnStart,
-    regionId,
-    serviceName,
-    healthCheckIntervalMs,
-    failoverThreshold,
-    failoverTimeoutMs,
-    leaderHeartbeatIntervalMs,
-    leaderLockTtlMs
+    regionId: crossRegion.regionId,
+    serviceName: crossRegion.serviceName,
+    healthCheckIntervalMs: crossRegion.healthCheckIntervalMs,
+    failoverThreshold: crossRegion.failoverThreshold,
+    failoverTimeoutMs: crossRegion.failoverTimeoutMs,
+    leaderHeartbeatIntervalMs: crossRegion.leaderHeartbeatIntervalMs,
+    leaderLockTtlMs: crossRegion.leaderLockTtlMs,
   };
 }
 
@@ -295,18 +297,11 @@ async function main() {
 
     await engine.start();
 
-    // FIX B5: Guard against double shutdown when user presses Ctrl+C multiple times
-    let isShuttingDown = false;
-    const shutdown = async (signal: string) => {
-      if (isShuttingDown) {
-        logger.debug(`Already shutting down, ignoring ${signal}`);
-        return;
-      }
-      isShuttingDown = true;
-
-      logger.info(`Received ${signal}, shutting down gracefully`);
-
-      try {
+    // Graceful shutdown with shared bootstrap utility
+    setupServiceShutdown({
+      logger,
+      serviceName: 'Execution Engine',
+      onShutdown: async () => {
         // Stop cross-region health manager if running
         // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
         if (crossRegionManager) {
@@ -314,28 +309,9 @@ async function main() {
           await resetCrossRegionHealthManager();
         }
 
-        // FIX B4: Properly await health server close
-        if (healthServer) {
-          await new Promise<void>((resolve) => {
-            healthServer!.close(() => resolve());
-          });
-        }
+        await closeHealthServer(healthServer);
         await engine.stop();
-        process.exit(0);
-      } catch (error) {
-        logger.error('Error during shutdown', {
-          error: error instanceof Error ? error.message : String(error)
-        });
-        process.exit(1);
-      }
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-
-    // FIX B4: Add unhandledRejection handler for better error visibility
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled rejection in Execution Engine', { reason, promise });
+      },
     });
 
     logger.info('Execution Engine Service is running', {
@@ -352,7 +328,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('Unhandled error in Execution Engine Service:', error);
-  process.exit(1);
-});
+runServiceMain({ main, serviceName: 'Execution Engine Service', logger });

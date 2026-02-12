@@ -10,7 +10,7 @@ import { Application, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import type { RouteLogger } from '../types';
+import type { MinimalLogger } from '../types';
 
 /**
  * Configure all middleware on an Express application.
@@ -18,7 +18,7 @@ import type { RouteLogger } from '../types';
  * @param app - Express application
  * @param logger - Logger for request logging
  */
-export function configureMiddleware(app: Application, logger: RouteLogger): void {
+export function configureMiddleware(app: Application, logger: MinimalLogger): void {
   // Security headers
   app.use(helmet({
     contentSecurityPolicy: {
@@ -92,7 +92,7 @@ function configureCors(req: Request, res: Response, next: NextFunction): void {
 /**
  * Create request logging middleware.
  */
-function createRequestLogger(logger: RouteLogger) {
+function createRequestLogger(logger: MinimalLogger) {
   return (req: Request, res: Response, next: NextFunction): void => {
     const start = Date.now();
     const clientIP = req.ip || req.socket.remoteAddress || 'unknown';

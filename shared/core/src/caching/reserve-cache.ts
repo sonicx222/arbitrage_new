@@ -20,6 +20,7 @@
  */
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import type { Resettable } from '@arbitrage/types';
 
 const logger = createLogger('reserve-cache');
@@ -323,10 +324,7 @@ export class ReserveCache implements Resettable {
    * Stop metrics logging and clean up resources.
    */
   dispose(): void {
-    if (this.metricsInterval) {
-      clearInterval(this.metricsInterval);
-      this.metricsInterval = null;
-    }
+    this.metricsInterval = clearIntervalSafe(this.metricsInterval);
   }
 
   // ===========================================================================

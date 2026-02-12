@@ -9,8 +9,9 @@
  * Uses static code analysis to verify compliance without needing
  * to import actual modules (avoids dependency issues in tests).
  *
- * TDD Approach: These tests are written BEFORE implementation.
- * They should FAIL with current code that has Pub/Sub fallback.
+ * Note: BaseDetector (base-detector.ts) has been removed per deprecation plan.
+ * The "Base Detector" compliance section now verifies the file no longer exists,
+ * confirming complete removal of the legacy Pub/Sub fallback code.
  *
  * @see docs/architecture/adr/ADR-002-redis-streams.md
  *
@@ -26,19 +27,10 @@ import * as path from 'path';
 // Test Fixtures
 // =============================================================================
 
-let baseDetectorSource: string;
 let indexSource: string;
 
 beforeAll(async () => {
-  // Load source files for static analysis
-  const baseDetectorPath = path.join(__dirname, '../../src/base-detector.ts');
   const indexPath = path.join(__dirname, '../../src/index.ts');
-
-  try {
-    baseDetectorSource = await fs.readFile(baseDetectorPath, 'utf-8');
-  } catch {
-    baseDetectorSource = '';
-  }
 
   try {
     indexSource = await fs.readFile(indexPath, 'utf-8');
@@ -48,92 +40,26 @@ beforeAll(async () => {
 });
 
 // =============================================================================
-// ADR-002 Compliance Tests: Base Detector
+// ADR-002 Compliance Tests: Base Detector Removed
 // =============================================================================
 
 describe('ADR-002 Compliance: Redis Streams Required', () => {
-  describe('Base Detector - No Pub/Sub Fallback', () => {
-    it('should NOT contain "falling back to Pub/Sub" patterns', () => {
-      // Per ADR-002: Should fail fast, not fallback
-      expect(baseDetectorSource).not.toMatch(/falling back to Pub\/Sub/i);
-      expect(baseDetectorSource).not.toMatch(/fallback to Pub\/Sub/i);
-    });
-
-    it('should NOT have useStreams flag that can be set to false', () => {
-      // Per ADR-002: Streams should always be used
-      expect(baseDetectorSource).not.toMatch(/this\.useStreams\s*=\s*false/);
-    });
-
-    it('should NOT have else-if patterns that call redis.publish', () => {
-      // Pattern: else if (this.redis) { await this.redis.publish(...) }
-      // This is the fallback pattern that violates ADR-002
-      const fallbackPattern = /}\s*else\s+if\s*\(\s*this\.redis\s*\)\s*\{[^}]*\.publish\s*\(/;
-      expect(baseDetectorSource).not.toMatch(fallbackPattern);
-    });
-
-    it('should NOT call redis.publish in catch blocks', () => {
-      // Pattern: catch { ... this.redis.publish }
-      // This is the error fallback pattern that violates ADR-002
-      const catchFallbackPattern = /catch[^}]*\{[^}]*this\.redis\s*[?.]?\s*publish/;
-      expect(baseDetectorSource).not.toMatch(catchFallbackPattern);
-    });
-
-    it('should have Streams-only publish methods', () => {
-      // The publish methods should NOT have fallback branches
-      // Count occurrences of redis.publish in publish methods
-      const publishMethodPattern = /protected async publish\w+\([^)]*\)[^{]*\{[\s\S]*?(?=protected|private|public|$)/g;
-      const publishMethods = baseDetectorSource.match(publishMethodPattern) || [];
-
-      for (const method of publishMethods) {
-        // Should not contain redis.publish fallback
-        expect(method).not.toMatch(/this\.redis\s*[?.]?\s*publish/);
+  describe('Base Detector - Removed (Legacy Pub/Sub Eliminated)', () => {
+    it('should have removed base-detector.ts entirely', async () => {
+      // BaseDetector was the primary source of Pub/Sub fallback code.
+      // Its removal guarantees ADR-002 compliance for all legacy patterns.
+      const baseDetectorPath = path.join(__dirname, '../../src/base-detector.ts');
+      let exists = true;
+      try {
+        await fs.access(baseDetectorPath);
+      } catch {
+        exists = false;
       }
+      expect(exists).toBe(false);
     });
 
-    it('should require Streams client for publishing', () => {
-      // Should have checks that throw if streams unavailable
-      // Either: if (!this.streamsClient) throw ...
-      // Or: if (!this.priceUpdateBatcher) throw ...
-      const requireStreamsPattern = /if\s*\(\s*!this\.(streamsClient|priceUpdateBatcher|swapEventBatcher)\s*\)\s*\{?\s*throw/;
-
-      // This test will fail initially - need to add these checks
-      expect(baseDetectorSource).toMatch(requireStreamsPattern);
-    });
-  });
-
-  describe('Base Detector - useStreams Flag Removal', () => {
-    it('should NOT declare useStreams as a settable property', () => {
-      // Per ADR-002: Streams is always required, no flag needed
-      // Pattern: protected useStreams = true; (with potential to be set to false)
-      const useStreamsFlagPattern = /protected\s+useStreams\s*[=:]/;
-
-      // Should either not exist or be removed
-      expect(baseDetectorSource).not.toMatch(useStreamsFlagPattern);
-    });
-
-    it('should NOT check useStreams in conditionals', () => {
-      // Pattern: if (this.useStreams && ...)
-      // This should be removed - always use streams
-      const useStreamsCheckPattern = /if\s*\(\s*this\.useStreams\s*(&&|\|\|)/;
-      expect(baseDetectorSource).not.toMatch(useStreamsCheckPattern);
-    });
-  });
-
-  describe('Initialization Requirements', () => {
-    it('should throw on Streams initialization failure (not fallback)', () => {
-      // Pattern: catch (streamsError) { this.useStreams = false; }
-      // Should be: catch (streamsError) { throw new Error(...) }
-      const fallbackInitPattern = /catch[^}]*\{[^}]*this\.useStreams\s*=\s*false/;
-      expect(baseDetectorSource).not.toMatch(fallbackInitPattern);
-    });
-
-    it('should have error message mentioning Streams required per ADR-002', () => {
-      // When Streams fails, error should reference ADR-002
-      // This is a documentation requirement
-      if (baseDetectorSource.includes('throw new Error')) {
-        const adrReferencePattern = /throw new Error\([^)]*ADR-002|throw new Error\([^)]*Streams.*required/i;
-        expect(baseDetectorSource).toMatch(adrReferencePattern);
-      }
+    it('should not export BaseDetector from barrel', () => {
+      expect(indexSource).not.toMatch(/export\s*\{[^}]*BaseDetector[^}]*\}\s*from\s*['"]\.\/base-detector['"]/);
     });
   });
 });
@@ -221,8 +147,17 @@ describe('ADR-002: Message Flow Architecture', () => {
 
   it('should have batching configured for high-frequency streams', () => {
     // Price updates and swap events need batching
-    // Check base-detector has batch configuration
-    expect(baseDetectorSource).toMatch(/createBatcher|BatchConfig|maxBatchSize/);
+    // Batching is now in the composition-based detector (chain-instance / unified-detector),
+    // not the removed base-detector. Check redis-streams.ts for batch support.
+    const streamsPath = path.join(__dirname, '../../src/redis-streams.ts');
+    let streamsSource: string;
+    try {
+      const fsSync = require('fs');
+      streamsSource = fsSync.readFileSync(streamsPath, 'utf-8');
+    } catch {
+      streamsSource = '';
+    }
+    expect(streamsSource).toMatch(/createBatcher|BatchConfig|maxBatchSize/);
   });
 });
 
@@ -231,29 +166,18 @@ describe('ADR-002: Message Flow Architecture', () => {
 // =============================================================================
 
 describe('P0 Implementation Checklist', () => {
-  it('documents required changes for ADR-002 compliance', () => {
+  it('documents completed ADR-002 compliance changes', () => {
     /*
-     * Required Changes (P0):
+     * Completed Changes:
      *
-     * 1. base-detector.ts:
-     *    - Remove useStreams flag (line 112)
-     *    - Remove `this.useStreams = false` (line 255)
-     *    - Remove all `else if (this.redis)` fallback branches
-     *    - Remove all `catch { redis.publish }` fallback patterns
-     *    - Add `throw new Error('Streams required per ADR-002')` on init failure
+     * 1. base-detector.ts: REMOVED entirely (deprecated class deleted).
+     *    All Pub/Sub fallback code eliminated with the file removal.
      *
-     * 2. Publish methods to modify:
-     *    - publishPriceUpdate (lines 1211-1232)
-     *    - publishSwapEvent (lines 1234-1270)
-     *    - publishArbitrageOpportunity (lines 1272-1296)
-     *    - publishWhaleTransaction (lines 1298-1319)
-     *    - publishWhaleAlert (lines 1322-1343)
-     *    - publishVolumeAggregate (lines 1346-1370)
+     * 2. Publishing now handled by composition-based services:
+     *    - services/unified-detector/ uses Redis Streams directly
+     *    - shared/core/src/publishing/publishing-service.ts for shared publishing
      *
-     * 3. Each publish method should:
-     *    - Check if batcher/streamsClient exists, throw if not
-     *    - Use only Streams for publishing
-     *    - NOT fallback to Pub/Sub on error
+     * 3. All services use Streams-only publishing (no Pub/Sub fallback).
      */
 
     // This test always passes - it's documentation

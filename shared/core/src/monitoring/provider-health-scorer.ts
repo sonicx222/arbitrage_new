@@ -21,6 +21,7 @@
  */
 
 import { createLogger, Logger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { PROVIDER_CONFIGS } from '@arbitrage/config';
 
 /**
@@ -593,10 +594,7 @@ export class ProviderHealthScorer {
    * Stop periodic decay
    */
   private stopDecay(): void {
-    if (this.decayTimer) {
-      clearInterval(this.decayTimer);
-      this.decayTimer = null;
-    }
+    this.decayTimer = clearIntervalSafe(this.decayTimer);
   }
 
   /**

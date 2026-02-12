@@ -3,6 +3,7 @@
 // This is the single most important metric for measuring system professionalism
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient, RedisClient } from '../redis';
 
 const logger = createLogger('professional-quality-monitor');
@@ -187,10 +188,7 @@ export class ProfessionalQualityMonitor {
    * Stop the periodic assessment (for cleanup in tests).
    */
   stopPeriodicAssessment(): void {
-    if (this.assessmentInterval) {
-      clearInterval(this.assessmentInterval);
-      this.assessmentInterval = null;
-    }
+    this.assessmentInterval = clearIntervalSafe(this.assessmentInterval);
   }
 
   // Record a detection operation result

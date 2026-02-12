@@ -10,8 +10,8 @@ import { Router } from 'express';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import type { CoordinatorStateProvider, SystemMetrics, Alert } from '../api/types';
 
-// Mock @shared/security to bypass auth in tests
-jest.mock('@shared/security', () => ({
+// Mock @arbitrage/security to bypass auth in tests
+jest.mock('@arbitrage/security', () => ({
   apiAuth: jest.fn().mockReturnValue((_req: any, _res: any, next: any) => next()),
   apiAuthorize: jest.fn().mockReturnValue((_req: any, _res: any, next: any) => next()),
   isAuthEnabled: jest.fn().mockReturnValue(false)

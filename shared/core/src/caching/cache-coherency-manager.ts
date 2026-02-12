@@ -2,6 +2,7 @@
 // Maintains cache consistency across distributed nodes
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient } from '../redis';
 
 const logger = createLogger('cache-coherency');
@@ -654,10 +655,7 @@ export class CacheCoherencyManager {
 
   // Cleanup
   destroy(): void {
-    if (this.gossipTimer) {
-      clearInterval(this.gossipTimer);
-      this.gossipTimer = null;
-    }
+    this.gossipTimer = clearIntervalSafe(this.gossipTimer);
 
     this.nodes.clear();
     this.pendingOperations.length = 0;

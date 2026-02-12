@@ -701,18 +701,30 @@ export function apiAuth(options: AuthOptions = {}) {
 
   return async (req: any, res: any, next: any) => {
     try {
-      // If no auth is enabled, skip auth (dev mode)
-      // Set a default user with full permissions so apiAuthorize doesn't fail
+      // P1 FIX #8: Only allow auth bypass in test/development environments.
+      // Previously, missing JWT_SECRET + API_KEYS in production granted admin access.
       if (!isAuthEnabled()) {
-        moduleLogger.debug('Auth not configured - allowing request with default dev user');
-        req.user = {
-          id: 'dev-user',
-          username: 'dev',
-          roles: ['admin'],  // Array to match User interface
-          permissions: ['*:*'], // Full access in dev mode
-          isApiKey: false,
-          isActive: true
-        };
+        const nodeEnv = process.env.NODE_ENV;
+        if (nodeEnv === 'test' || nodeEnv === 'development') {
+          moduleLogger.debug('Auth not configured - allowing request with default dev user (non-production)');
+          req.user = {
+            id: 'dev-user',
+            username: 'dev',
+            roles: ['admin'],  // Array to match User interface
+            permissions: ['*:*'], // Full access in dev/test mode
+            isApiKey: false,
+            isActive: true
+          };
+          return next();
+        }
+        // In production (or unknown NODE_ENV), reject if auth is required
+        if (required) {
+          moduleLogger.error('Auth not configured in production - rejecting request. Set JWT_SECRET or API_KEYS.');
+          return res.status(503).json({
+            error: 'Authentication not configured',
+            message: 'Server authentication is not properly configured. Contact administrator.',
+          });
+        }
         return next();
       }
 

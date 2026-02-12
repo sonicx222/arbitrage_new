@@ -11,6 +11,7 @@
  * - R2: Streaming → streaming/ folder (StreamConsumerManager)
  * - R2: Health monitoring → health/ folder (HealthMonitor)
  * - R2: Opportunities → opportunities/ folder (OpportunityRouter)
+ * - P2-11: IntervalManager (@arbitrage/core) for centralized interval lifecycle
  *
  * @see ARCHITECTURE_V2.md Section 4.5 (Layer 5: Coordination)
  * @see ADR-002: Redis Streams over Pub/Sub
@@ -37,10 +38,12 @@ import {
   StreamConsumer,
   getStreamHealthMonitor,
   // R7 Consolidation: Use shared SimpleCircuitBreaker instead of inline implementation
-  SimpleCircuitBreaker
+  SimpleCircuitBreaker,
+  disconnectWithTimeout,
+  findKSmallest,
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
-import { isAuthEnabled } from '@shared/security';
+import { isAuthEnabled } from '@arbitrage/security';
 
 // Import extracted API modules
 // FIX: Import Logger and Alert from consolidated api/types (single source of truth)
@@ -49,7 +52,7 @@ import {
   setupAllRoutes,
   SystemMetrics,
   CoordinatorStateProvider,
-  RouteLogger,
+  MinimalLogger,
   Logger,
   Alert
 } from './api';
@@ -57,7 +60,7 @@ import {
 // Import alert notification system
 import { AlertNotifier, AlertCooldownManager } from './alerts';
 
-// Import type guard utilities and collections
+// Import type guard utilities
 import {
   getString,
   getNumber,
@@ -66,7 +69,6 @@ import {
   getOptionalNumber,
   unwrapMessageData,
   hasRequiredString,
-  findKSmallest
 } from './utils';
 
 // R2: Import extracted subsystem modules
@@ -77,7 +79,7 @@ import { OpportunityRouter } from './opportunities';
 import { LeadershipElectionService } from './leadership';
 
 // P2-11: Import IntervalManager for centralized interval lifecycle management
-import { IntervalManager } from './interval-manager';
+import { IntervalManager } from '@arbitrage/core';
 
 // =============================================================================
 // Service Name Patterns (FIX 3.2: Configurable instead of hardcoded)
@@ -115,6 +117,7 @@ interface LeaderElectionConfig {
 /**
  * FIX: Graceful degradation modes per ADR-007.
  * R2: Re-exported from health/ module for backward compatibility.
+ * @deprecated Import directly from './health' instead
  * @see health/health-monitor.ts for implementation
  */
 export { DegradationLevel } from './health';
@@ -230,7 +233,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Manages distributed leadership election using Redis locks
   private leadershipElection: LeadershipElectionService | null = null;
   // P1-8 FIX: Track leadership status (delegated to LeadershipElectionService)
-  // Kept as private field for backward compatibility with existing code
+  // P2 FIX #19: This field is a write-target for the onLeadershipChange callback
+  // and fallback before leadershipElection is initialized. All reads that affect
+  // behavior should use getIsLeader() which delegates to LeadershipElectionService.
   private isLeader = false;
   // P1-8 FIX: Activation state tracking (replaced by LeadershipElectionService.setActivating())
   // Kept for backward compatibility during transition
@@ -271,8 +276,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // Consumer group configs for streams
   private readonly consumerGroups: ConsumerGroupConfig[];
 
-  // P0-FIX 1.2: Dead Letter Queue stream for failed messages
-  // Messages that fail processing are moved here for manual investigation/replay
+  // P0-FIX 1.2: Dead Letter Queue stream for GENERAL message processing failures.
+  // Used by StreamConsumerManager for messages that fail parsing/handling.
+  // P2 FIX #21 NOTE: OpportunityRouter uses a separate DLQ ('stream:forwarding-dlq')
+  // for execution forwarding failures — different failure mode, different schema.
   private static readonly DLQ_STREAM = 'stream:dead-letter-queue';
 
   // P0-FIX 1.3: Pending message recovery configuration
@@ -321,8 +328,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // - Use `||` for strings where empty string is invalid (e.g., hostnames, service names)
     // - Use `||` for ports/IDs where 0 is semantically invalid
     // See: docs/agent/code_conventions.md for full guidelines
+
+    // P1 FIX #14: NaN-safe parseInt wrapper - returns defaultValue if env var is non-numeric
+    const safeParseInt = (value: string | undefined, defaultValue: number): number => {
+      if (!value) return defaultValue;
+      const parsed = parseInt(value, 10);
+      return Number.isNaN(parsed) ? defaultValue : parsed;
+    };
+
     this.config = {
-      port: config?.port || parseInt(process.env.PORT || '3000'),
+      // P2 FIX #20: Read COORDINATOR_PORT (per .env.example) with PORT fallback
+      port: config?.port || safeParseInt(process.env.COORDINATOR_PORT ?? process.env.PORT, 3000),
       leaderElection: {
         lockKey: 'coordinator:leader:lock',
         lockTtlMs: 30000, // 30 seconds
@@ -337,18 +353,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
       canBecomeLeader: config?.canBecomeLeader ?? true,
       regionId: config?.regionId,
       // FIX: Configurable constants with env var support
-      maxOpportunities: config?.maxOpportunities ?? parseInt(process.env.MAX_OPPORTUNITIES || '1000'),
-      opportunityTtlMs: config?.opportunityTtlMs ?? parseInt(process.env.OPPORTUNITY_TTL_MS || '60000'),
-      opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? parseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS || '10000'),
-      pairTtlMs: config?.pairTtlMs ?? parseInt(process.env.PAIR_TTL_MS || '300000'),
+      // P1 FIX #14: Use safeParseInt to guard against NaN from malformed env vars
+      maxOpportunities: config?.maxOpportunities ?? safeParseInt(process.env.MAX_OPPORTUNITIES, 1000),
+      opportunityTtlMs: config?.opportunityTtlMs ?? safeParseInt(process.env.OPPORTUNITY_TTL_MS, 60000),
+      opportunityCleanupIntervalMs: config?.opportunityCleanupIntervalMs ?? safeParseInt(process.env.OPPORTUNITY_CLEANUP_INTERVAL_MS, 10000),
+      pairTtlMs: config?.pairTtlMs ?? safeParseInt(process.env.PAIR_TTL_MS, 300000),
       // P3-005 FIX: Add configurable max active pairs limit
-      maxActivePairs: config?.maxActivePairs ?? parseInt(process.env.MAX_ACTIVE_PAIRS || '10000'),
+      maxActivePairs: config?.maxActivePairs ?? safeParseInt(process.env.MAX_ACTIVE_PAIRS, 10000),
       // FIX Config 3.2: Environment-aware alert cooldown
       // Development: 30 seconds (faster feedback cycle)
       // Production: 5 minutes (prevent alert spam)
-      alertCooldownMs: config?.alertCooldownMs ?? parseInt(
+      alertCooldownMs: config?.alertCooldownMs ?? safeParseInt(
         process.env.ALERT_COOLDOWN_MS ||
-        (process.env.NODE_ENV === 'development' ? '30000' : '300000')
+        (process.env.NODE_ENV === 'development' ? '30000' : '300000'),
+        300000
       )
       // P0-3 FIX: enableLegacyHealthPolling REMOVED - all services use streams (ADR-002)
     };
@@ -674,34 +692,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
       }
 
       // P0-NEW-6 FIX: Disconnect Redis Streams client with timeout
-      if (this.streamsClient) {
-        try {
-          await Promise.race([
-            this.streamsClient.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Streams client disconnect timeout')), 5000)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Streams client disconnect timeout or error', { error: (error as Error).message });
-        }
-        this.streamsClient = null;
-      }
+      await disconnectWithTimeout(this.streamsClient, 'Streams client', 5000, this.logger);
+      this.streamsClient = null;
 
       // P0-NEW-6 FIX: Disconnect legacy Redis with timeout
-      if (this.redis) {
-        try {
-          await Promise.race([
-            this.redis.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Redis disconnect timeout')), 5000)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Redis disconnect timeout or error', { error: (error as Error).message });
-        }
-        this.redis = null;
-      }
+      await disconnectWithTimeout(this.redis, 'Redis', 5000, this.logger);
+      this.redis = null;
 
       // Clear collections
       this.serviceHealth.clear();
@@ -968,16 +964,20 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // R2: Delegate to opportunity router
     if (this.opportunityRouter) {
-      const processed = await this.opportunityRouter.processOpportunity(data, this.isLeader);
+      // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
+      const processed = await this.opportunityRouter.processOpportunity(data, this.getIsLeader());
       if (processed) {
         // Update local metrics from router
         this.systemMetrics.totalOpportunities = this.opportunityRouter.getTotalOpportunities();
         this.systemMetrics.pendingOpportunities = this.opportunityRouter.getPendingCount();
         this.systemMetrics.totalExecutions = this.opportunityRouter.getTotalExecutions();
+        // P0 FIX #3: Only reset errors when opportunity is successfully processed.
+        // Previously called on every message (including duplicates and rejects),
+        // which masked legitimate stream consumer errors by resetting the counter.
+        this.streamConsumerManager?.resetErrors();
       }
       // P1-7 FIX: Always sync dropped opportunities (not just when processed)
       this.systemMetrics.opportunitiesDropped = this.opportunityRouter.getOpportunitiesDropped();
-      this.streamConsumerManager?.resetErrors();
       return;
     }
 
@@ -993,13 +993,13 @@ export class CoordinatorService implements CoordinatorStateProvider {
     const opportunityTimestamp = getNumber(data, 'timestamp', Date.now());
 
     const existing = this.opportunities.get(opportunityId);
-    if (existing && Math.abs((existing.timestamp || 0) - opportunityTimestamp) < 5000) {
+    if (existing && Math.abs((existing.timestamp ?? 0) - opportunityTimestamp) < 5000) {
       this.logger.debug('Duplicate opportunity detected, skipping', {
         id: opportunityId,
         existingTimestamp: existing.timestamp,
         newTimestamp: opportunityTimestamp
       });
-      this.streamConsumerManager?.resetErrors();
+      // P0 FIX #3: Do not reset errors on duplicate/rejected messages
       return;
     }
 
@@ -1011,7 +1011,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
           profitPercentage,
           reason: profitPercentage < -100 ? 'below_minimum' : 'above_maximum'
         });
-        this.streamConsumerManager?.resetErrors();
+        // P0 FIX #3: Do not reset errors on duplicate/rejected messages
         return;
       }
     }
@@ -1040,7 +1040,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
       sellDex: opportunity.sellDex
     });
 
-    if (this.isLeader && (opportunity.status === 'pending' || opportunity.status === undefined)) {
+    // P2 FIX #19: Use getIsLeader() to always read canonical leadership state
+    if (this.getIsLeader() && (opportunity.status === 'pending' || opportunity.status === undefined)) {
       await this.forwardToExecutionEngine(opportunity);
     }
 
@@ -1083,7 +1084,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
       const oldestK = findKSmallest(
         this.opportunities.entries(),
         removeCount,
-        ([, a], [, b]) => (a.timestamp || 0) - (b.timestamp || 0)
+        ([, a], [, b]) => (a.timestamp ?? 0) - (b.timestamp ?? 0)
       );
       for (const [id] of oldestK) {
         this.opportunities.delete(id);
@@ -1108,10 +1109,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
    */
   private startOpportunityCleanup(): void {
     // P2-11: Use IntervalManager for centralized lifecycle management
-    this.intervalManager.register({
-      name: 'opportunity-cleanup',
-      intervalMs: this.OPPORTUNITY_CLEANUP_INTERVAL_MS,
-      callback: () => {
+    this.intervalManager.set(
+      'opportunity-cleanup',
+      () => {
         if (!this.stateManager.isRunning()) return;
 
         try {
@@ -1120,7 +1120,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.error('Opportunity cleanup failed', { error });
         }
       },
-    });
+      this.OPPORTUNITY_CLEANUP_INTERVAL_MS
+    );
 
     this.logger.info('Opportunity cleanup interval started', {
       intervalMs: this.OPPORTUNITY_CLEANUP_INTERVAL_MS,
@@ -1200,7 +1201,12 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     // Update metrics
     this.systemMetrics.totalSwapEvents++;
-    this.systemMetrics.totalVolumeUsd += usdValue;
+    // P2 FIX #15: Guard against precision loss at Number.MAX_SAFE_INTEGER.
+    // At realistic volumes (<$1B/day), this takes ~24,000 years to hit.
+    // Cap at MAX_SAFE_INTEGER to prevent silent precision degradation.
+    if (this.systemMetrics.totalVolumeUsd < Number.MAX_SAFE_INTEGER - usdValue) {
+      this.systemMetrics.totalVolumeUsd += usdValue;
+    }
 
     // P3-005 FIX: Track active pairs with size limit enforcement
     this.trackActivePair(pairAddress, chain, dex);
@@ -1354,19 +1360,26 @@ export class CoordinatorService implements CoordinatorStateProvider {
       dex
     });
 
-    // Emergency cleanup if over limit (removes oldest 10%)
+    // P0 FIX #2 + #11: Emergency cleanup with hysteresis and O(n log k) selection.
+    // - Uses findKSmallest() instead of Array.from().sort() for O(n log k) vs O(n log n)
+    // - Removes down to 75% of limit (hysteresis band) to prevent re-triggering
+    //   on the very next message. Previously removed only 10%, causing repeated
+    //   expensive cleanup on every hot-path price update/swap/volume message.
     if (this.activePairs.size > this.MAX_ACTIVE_PAIRS) {
-      const toRemove = Math.floor(this.MAX_ACTIVE_PAIRS * 0.1);
-      const sorted = Array.from(this.activePairs.entries())
-        .sort(([, a], [, b]) => a.lastSeen - b.lastSeen)
-        .slice(0, toRemove);
+      const targetSize = Math.floor(this.MAX_ACTIVE_PAIRS * 0.75);
+      const toRemove = this.activePairs.size - targetSize;
+      const oldest = findKSmallest(
+        this.activePairs.entries(),
+        toRemove,
+        ([, a], [, b]) => a.lastSeen - b.lastSeen
+      );
 
-      for (const [key] of sorted) {
+      for (const [key] of oldest) {
         this.activePairs.delete(key);
       }
 
       this.logger.debug('Emergency activePairs cleanup triggered', {
-        removed: toRemove,
+        removed: oldest.length,
         remaining: this.activePairs.size,
         limit: this.MAX_ACTIVE_PAIRS
       });
@@ -1550,10 +1563,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   private startHealthMonitoring(): void {
     // P2-11: Use IntervalManager for centralized lifecycle management
     // Update metrics periodically
-    this.intervalManager.register({
-      name: 'metrics-update',
-      intervalMs: 5000,
-      callback: async () => {
+    this.intervalManager.set(
+      'metrics-update',
+      async () => {
         // P1-8 FIX: Use stateManager.isRunning() for consistency
         if (!this.stateManager.isRunning()) return;
 
@@ -1568,7 +1580,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.error('Metrics update failed', { error });
         }
       },
-    });
+      5000
+    );
 
     // P0-3 FIX: Legacy health polling REMOVED (was deprecated since v2.0.0)
     // All services now use Redis Streams exclusively (ADR-002)
@@ -1577,10 +1590,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // FIX P1: Use dedicated interval for cleanup operations
     // This runs regardless of legacy polling mode to ensure cleanup always happens
     // Previous bug: cleanup only ran if legacy polling was disabled due to ?? operator
-    this.intervalManager.register({
-      name: 'general-cleanup',
-      intervalMs: 10000,
-      callback: () => {
+    this.intervalManager.set(
+      'general-cleanup',
+      () => {
         if (!this.stateManager.isRunning()) return;
 
         try {
@@ -1593,7 +1605,8 @@ export class CoordinatorService implements CoordinatorStateProvider {
           this.logger.error('Cleanup operations failed', { error });
         }
       },
-    });
+      10000
+    );
   }
 
   private async reportHealth(): Promise<void> {
@@ -1876,7 +1889,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
    *
    * @returns Logger instance
    */
-  getLogger(): RouteLogger {
+  getLogger(): MinimalLogger {
     return this.logger;
   }
 
@@ -1999,6 +2012,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
       if (acquired) {
         // Successful activation - update config.isStandby atomically at the end
         this.config.isStandby = false;
+        // P1 FIX #4: Clear standby in LeadershipElectionService so it can
+        // re-acquire leadership if lost, without needing another activation signal
+        this.leadershipElection!.clearStandby();
         this.logger.warn('✅ STANDBY COORDINATOR ACTIVATED - Now leader', {
           instanceId: this.config.leaderElection.instanceId,
           regionId: this.config.regionId

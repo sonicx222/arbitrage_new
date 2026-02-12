@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
-import { CircularBuffer, type Logger } from '@arbitrage/core';
+import { CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type Logger } from '@arbitrage/core';
 import { CHAIN_NAME_TO_ID } from '@arbitrage/config';
 import type {
   BloXrouteFeedConfig,
@@ -708,30 +708,21 @@ export class BloXrouteFeed extends EventEmitter {
    * Stop heartbeat timer.
    */
   private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.heartbeatTimer = clearIntervalSafe(this.heartbeatTimer);
   }
 
   /**
    * Clear connection timeout timer.
    */
   private clearConnectionTimeout(): void {
-    if (this.connectionTimeoutTimer) {
-      clearTimeout(this.connectionTimeoutTimer);
-      this.connectionTimeoutTimer = null;
-    }
+    this.connectionTimeoutTimer = clearTimeoutSafe(this.connectionTimeoutTimer);
   }
 
   /**
    * Clear reconnection timer.
    */
   private clearReconnectionTimer(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.reconnectTimer = clearTimeoutSafe(this.reconnectTimer);
   }
 }
 

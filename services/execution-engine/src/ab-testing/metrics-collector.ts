@@ -10,6 +10,7 @@
  * @see FINAL_IMPLEMENTATION_PLAN.md Task 3: A/B Testing Framework
  */
 
+import { clearTimeoutSafe } from '@arbitrage/core';
 import type { RedisClient } from '@arbitrage/core';
 import type {
   ExperimentMetrics,
@@ -209,20 +210,14 @@ export class MetricsCollector {
     await Promise.all(writePromises);
 
     // Clear flush timer
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.flushTimer = clearTimeoutSafe(this.flushTimer);
   }
 
   /**
    * Stop the metrics collector and flush pending data.
    */
   async stop(): Promise<void> {
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
+    this.flushTimer = clearTimeoutSafe(this.flushTimer);
     await this.flush();
   }
 

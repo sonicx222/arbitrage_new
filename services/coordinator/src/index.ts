@@ -22,94 +22,71 @@
 
 // P2-004 FIX: Export reusable utilities for other services
 export { CoordinatorService } from './coordinator';
-export { IntervalManager } from './interval-manager';
-export type { IntervalOptions, IntervalStats } from './interval-manager';
 
 // Internal imports for bootstrapping
 import { CoordinatorService } from './coordinator';
 import {
   createLogger,
   getCrossRegionHealthManager,
-  resetCrossRegionHealthManager
+  resetCrossRegionHealthManager,
+  parseEnvInt,
+  getCrossRegionEnvConfig,
+  setupServiceShutdown,
+  runServiceMain,
 } from '@arbitrage/core';
 import type { CrossRegionHealthConfig } from '@arbitrage/core';
 
 const logger = createLogger('coordinator');
 
 /**
- * FIX: Helper to parse and validate numeric environment variables.
- * Throws descriptive error if value is invalid or out of range.
- */
-function parseEnvInt(
-  name: string,
-  defaultValue: number,
-  min: number,
-  max: number
-): number {
-  const raw = process.env[name];
-  if (!raw) return defaultValue;
-
-  const parsed = parseInt(raw, 10);
-  if (isNaN(parsed)) {
-    throw new Error(`Invalid ${name}: "${raw}" is not a valid integer`);
-  }
-  if (parsed < min || parsed > max) {
-    throw new Error(`Invalid ${name}: ${parsed} is out of range [${min}, ${max}]`);
-  }
-  return parsed;
-}
-
-/**
  * Parse standby configuration from environment variables.
  * Returns configuration object for coordinator and cross-region health.
+ *
+ * Uses shared getCrossRegionEnvConfig for common cross-region fields (S-6).
+ * Coordinator-specific fields (leader lock key, standby flags) are parsed here.
  *
  * FIX: Added validation for numeric env vars to catch misconfigurations early.
  */
 function getStandbyConfigFromEnv() {
   const isStandby = process.env.IS_STANDBY === 'true';
   const canBecomeLeader = process.env.CAN_BECOME_LEADER !== 'false'; // Default true
-  const regionId = process.env.REGION_ID || 'us-east1';
   const instanceRole = process.env.INSTANCE_ROLE || (isStandby ? 'standby' : 'primary');
-  const serviceName = process.env.SERVICE_NAME || 'coordinator';
 
-  // Leader election settings with validation
+  // Shared cross-region health settings (S-6 consolidation)
+  const crossRegion = getCrossRegionEnvConfig('coordinator');
+
+  // Coordinator-specific: Leader lock key
   const leaderLockKey = process.env.LEADER_LOCK_KEY || 'coordinator:leader:lock';
-  const leaderLockTtlMs = parseEnvInt('LEADER_LOCK_TTL_MS', 30000, 5000, 300000);
-  const leaderHeartbeatIntervalMs = parseEnvInt('LEADER_HEARTBEAT_INTERVAL_MS', 10000, 1000, 60000);
-
-  // Health check settings with validation
-  const healthCheckIntervalMs = parseEnvInt('HEALTH_CHECK_INTERVAL_MS', 10000, 1000, 60000);
-  const failoverThreshold = parseEnvInt('FAILOVER_THRESHOLD', 3, 1, 10);
-  const failoverTimeoutMs = parseEnvInt('FAILOVER_TIMEOUT_MS', 60000, 10000, 300000);
 
   // Validate heartbeat is less than lock TTL (per ADR-007: should be ~1/3 of TTL)
-  if (leaderHeartbeatIntervalMs >= leaderLockTtlMs) {
+  if (crossRegion.leaderHeartbeatIntervalMs >= crossRegion.leaderLockTtlMs) {
     throw new Error(
-      `Invalid configuration: LEADER_HEARTBEAT_INTERVAL_MS (${leaderHeartbeatIntervalMs}) ` +
-      `must be less than LEADER_LOCK_TTL_MS (${leaderLockTtlMs})`
+      `Invalid configuration: LEADER_HEARTBEAT_INTERVAL_MS (${crossRegion.leaderHeartbeatIntervalMs}) ` +
+      `must be less than LEADER_LOCK_TTL_MS (${crossRegion.leaderLockTtlMs})`
     );
   }
 
   return {
     isStandby,
     canBecomeLeader,
-    regionId,
+    regionId: crossRegion.regionId,
     instanceRole,
-    serviceName,
+    serviceName: crossRegion.serviceName,
     leaderLockKey,
-    leaderLockTtlMs,
-    leaderHeartbeatIntervalMs,
-    healthCheckIntervalMs,
-    failoverThreshold,
-    failoverTimeoutMs
+    leaderLockTtlMs: crossRegion.leaderLockTtlMs,
+    leaderHeartbeatIntervalMs: crossRegion.leaderHeartbeatIntervalMs,
+    healthCheckIntervalMs: crossRegion.healthCheckIntervalMs,
+    failoverThreshold: crossRegion.failoverThreshold,
+    failoverTimeoutMs: crossRegion.failoverTimeoutMs,
   };
 }
 
 async function main() {
   try {
     const standbyConfig = getStandbyConfigFromEnv();
-    // FIX: Validate PORT env var
-    const port = parseEnvInt('PORT', 3000, 1, 65535);
+    // P2 FIX #20: Read COORDINATOR_PORT (per .env.example) with PORT fallback
+    const portEnvName = process.env.COORDINATOR_PORT ? 'COORDINATOR_PORT' : 'PORT';
+    const port = parseEnvInt(portEnvName, 3000, 1, 65535);
 
     logger.info('Starting Coordinator Service', {
       isStandby: standbyConfig.isStandby,
@@ -220,19 +197,11 @@ async function main() {
     // Start coordinator service
     await coordinator.start(port);
 
-    // Graceful shutdown handler
-    // FIX: Guard against double shutdown when user presses Ctrl+C multiple times
-    let isShuttingDown = false;
-    const shutdown = async (signal: string) => {
-      if (isShuttingDown) {
-        logger.debug(`Already shutting down, ignoring ${signal}`);
-        return;
-      }
-      isShuttingDown = true;
-
-      logger.info(`Received ${signal}, shutting down gracefully`);
-
-      try {
+    // Graceful shutdown with shared bootstrap utility
+    setupServiceShutdown({
+      logger,
+      serviceName: 'Coordinator',
+      onShutdown: async () => {
         // P1-2 FIX: Remove event listeners before destroying manager to prevent memory leak
         crossRegionManager.removeAllListeners();
 
@@ -241,19 +210,8 @@ async function main() {
 
         // Stop coordinator
         await coordinator.stop();
-
-        process.exit(0);
-      } catch (error) {
-        logger.error('Error during shutdown', {
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        });
-        process.exit(1);
-      }
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
+      },
+    });
 
     logger.info('Coordinator Service is running', {
       port,
@@ -269,7 +227,4 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('Unhandled error in Coordinator Service:', error);
-  process.exit(1);
-});
+runServiceMain({ main, serviceName: 'Coordinator Service', logger });

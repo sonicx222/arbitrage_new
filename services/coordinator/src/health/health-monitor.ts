@@ -299,26 +299,22 @@ export class HealthMonitor {
   }
 
   /**
-   * Send an alert with cooldown to prevent spam.
+   * Send an alert to the coordinator for cooldown-managed delivery.
+   *
+   * P0 FIX #1: Removed local cooldown check to fix double-cooldown bug.
+   * Previously, this method set cooldown in HealthMonitor's own Map, then
+   * called onAlert → coordinator.sendAlert() → AlertCooldownManager, which
+   * delegates back to HealthMonitor.getAlertCooldowns() and found the cooldown
+   * just set 0ms ago, silently dropping ALL alerts from HealthMonitor.
+   *
+   * Cooldown management is now solely handled by AlertCooldownManager in
+   * coordinator.sendAlert(). HealthMonitor raises alerts; the coordinator
+   * decides whether to send them based on cooldown state.
    *
    * @param alert - Alert to send
    */
   sendAlertWithCooldown(alert: Alert): void {
-    const alertKey = `${alert.type}_${alert.service || 'system'}`;
-    const now = Date.now();
-    const lastAlert = this.alertCooldowns.get(alertKey) || 0;
-
-    // Cooldown for same alert type
-    if (now - lastAlert > this.config.alertCooldownMs) {
-      this.alertCooldowns.set(alertKey, now);
-      this.onAlert(alert);
-
-      // P2-005 FIX: Use configurable threshold for cleanup
-      // Periodic cleanup of stale cooldowns when threshold is exceeded
-      if (this.alertCooldowns.size > this.config.cooldownCleanupThreshold) {
-        this.cleanupAlertCooldowns(now);
-      }
-    }
+    this.onAlert(alert);
   }
 
   /**
@@ -371,7 +367,8 @@ export class HealthMonitor {
         activeServices++;
       }
       // Sum memory usage
-      totalMemory += health.memoryUsage || 0;
+      // P1 FIX #5: Use ?? to preserve legitimate 0 values
+      totalMemory += health.memoryUsage ?? 0;
       // Calculate latency - use explicit if available, else from heartbeat
       const latency = health.latency ?? (health.lastHeartbeat ? now - health.lastHeartbeat : 0);
       totalLatency += latency;

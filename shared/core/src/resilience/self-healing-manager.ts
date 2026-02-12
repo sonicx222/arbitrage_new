@@ -2,6 +2,7 @@
 // Automatically detects failures and orchestrates recovery
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 import { CircuitBreaker, CircuitBreakerError, createCircuitBreaker } from './circuit-breaker';
@@ -244,10 +245,7 @@ export class SelfHealingManager {
     this.restartTimers.clear();
 
     // P5-FIX-2: Clear rate limiter cleanup timer
-    if (this.rateLimiterCleanupTimer) {
-      clearInterval(this.rateLimiterCleanupTimer);
-      this.rateLimiterCleanupTimer = null;
-    }
+    this.rateLimiterCleanupTimer = clearIntervalSafe(this.rateLimiterCleanupTimer);
 
     // P2-FIX: Wait for any pending health checks to complete before stopping
     const pendingLocks = Array.from(this.healthUpdateLocks.values());

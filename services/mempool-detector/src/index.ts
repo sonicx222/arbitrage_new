@@ -21,6 +21,8 @@ import {
   CircularBuffer,
   getRedisStreamsClient,
   resetRedisStreamsInstance,
+  setupServiceShutdown,
+  runServiceMain,
   type Logger,
   type RedisStreamsClient,
   type StreamBatcher,
@@ -842,49 +844,20 @@ export * from './decoders';
 // MAIN ENTRY POINT
 // =============================================================================
 
-// Auto-start service when run directly (not during tests)
-if (!process.env.JEST_WORKER_ID) {
-  const logger = createLogger('mempool-detector');
+const _bootstrapLogger = createLogger('mempool-detector');
+
+async function main() {
   const service = createMempoolDetectorService();
 
-  // Shutdown flag to prevent multiple shutdown attempts (FIX 5.4)
-  let isShuttingDown = false;
+  await service.start();
 
-  // Handle process signals (FIX 6.1: Use logger instead of console)
-  const shutdown = async (signal: string) => {
-    if (isShuttingDown) {
-      logger.debug('Already shutting down, ignoring signal', { signal });
-      return;
-    }
-    isShuttingDown = true;
-
-    logger.info('Shutting down mempool detector', { signal });
-    try {
+  setupServiceShutdown({
+    logger: _bootstrapLogger,
+    serviceName: 'Mempool Detector',
+    onShutdown: async () => {
       await service.stop();
-      logger.info('Mempool detector shutdown complete');
-      process.exit(0);
-    } catch (error) {
-      logger.error('Error during shutdown', { error });
-      process.exit(1);
-    }
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-
-  // FIX 5.4: Handle uncaught errors
-  process.on('uncaughtException', (error) => {
-    logger.error('Uncaught exception', { error: error.message, stack: error.stack });
-    shutdown('uncaughtException').catch(() => process.exit(1));
-  });
-
-  process.on('unhandledRejection', (reason) => {
-    logger.error('Unhandled rejection', { reason });
-  });
-
-  // Start the service
-  service.start().catch((error) => {
-    logger.error('Failed to start mempool detector', { error });
-    process.exit(1);
+    },
   });
 }
+
+runServiceMain({ main, serviceName: 'Mempool Detector Service', logger: _bootstrapLogger });

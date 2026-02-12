@@ -16,6 +16,7 @@
  */
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { CHAINS, NATIVE_TOKEN_PRICES } from '@arbitrage/config';
 
 // =============================================================================
@@ -301,10 +302,7 @@ export class GasPriceCache {
 
     this.isRunning = false;
 
-    if (this.refreshTimer) {
-      clearInterval(this.refreshTimer);
-      this.refreshTimer = null;
-    }
+    this.refreshTimer = clearIntervalSafe(this.refreshTimer);
 
     // Clear providers
     this.providers.clear();
@@ -631,10 +629,7 @@ export class GasPriceCache {
 
     this.refreshTimer = setInterval(async () => {
       if (!this.isRunning) {
-        if (this.refreshTimer) {
-          clearInterval(this.refreshTimer);
-          this.refreshTimer = null;
-        }
+        this.refreshTimer = clearIntervalSafe(this.refreshTimer);
         return;
       }
 

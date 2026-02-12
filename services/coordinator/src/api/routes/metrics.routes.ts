@@ -8,7 +8,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { apiAuth, apiAuthorize } from '@shared/security';
+import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import { findKLargest, getRedisClient } from '@arbitrage/core';
 import type { CoordinatorStateProvider } from '../types';
 
@@ -68,7 +68,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
       // If we have <= limit opportunities, no need to sort
       if (opportunitiesMap.size <= limit) {
         const opportunities = Array.from(opportunitiesMap.values())
-          .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
         res.json(opportunities);
         return;
       }
@@ -79,7 +79,7 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
       const result = findKLargest(
         opportunitiesMap.values(),
         limit,
-        (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
+        (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0)
       );
       res.json(result);
     }
@@ -131,11 +131,18 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
     apiAuthorize('metrics', 'read'),
     async (_req: Request, res: Response) => {
       try {
-        const redis = await getRedisClient();
+        // P1 FIX #13: Add timeout guard to prevent hanging if Redis is unavailable
+        const redis = await Promise.race([
+          getRedisClient(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+          ),
+        ]);
         const stats = redis.getCommandStats();
         res.json(stats);
       } catch (error) {
-        res.status(500).json({
+        const isTimeout = error instanceof Error && error.message === 'Redis connection timeout';
+        res.status(isTimeout ? 504 : 500).json({
           error: 'Failed to get Redis stats',
           message: error instanceof Error ? error.message : 'Unknown error'
         });
@@ -155,13 +162,20 @@ export function createMetricsRoutes(state: CoordinatorStateProvider): Router {
     apiAuthorize('metrics', 'read'),
     async (_req: Request, res: Response) => {
       try {
-        const redis = await getRedisClient();
+        // P1 FIX #13: Add timeout guard to prevent hanging if Redis is unavailable
+        const redis = await Promise.race([
+          getRedisClient(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Redis connection timeout')), 5000)
+          ),
+        ]);
         const dashboard = redis.getUsageDashboard();
         res.type('text/plain').send(dashboard);
       } catch (error) {
         // Phase 4 FIX: Include error details for debugging (consistent with text/plain response type)
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        res.status(500).type('text/plain').send(`Failed to get Redis dashboard: ${errorMsg}`);
+        const statusCode = error instanceof Error && error.message === 'Redis connection timeout' ? 504 : 500;
+        res.status(statusCode).type('text/plain').send(`Failed to get Redis dashboard: ${errorMsg}`);
       }
     }
   );

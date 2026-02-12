@@ -13,6 +13,7 @@
  * @see FINAL_IMPLEMENTATION_PLAN.md Task 3: A/B Testing Framework
  */
 
+import { clearIntervalSafe } from '@arbitrage/core';
 import type { RedisClient } from '@arbitrage/core';
 import type {
   Experiment,
@@ -151,10 +152,7 @@ export class ABTestingFramework {
       return;
     }
 
-    if (this.experimentRefreshTimer) {
-      clearInterval(this.experimentRefreshTimer);
-      this.experimentRefreshTimer = null;
-    }
+    this.experimentRefreshTimer = clearIntervalSafe(this.experimentRefreshTimer);
 
     await this.metricsCollector.stop();
     this.activeExperiments.clear();

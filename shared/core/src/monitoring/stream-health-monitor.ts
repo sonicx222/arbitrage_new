@@ -8,6 +8,7 @@
  */
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { getRedisStreamsClient, RedisStreamsClient } from '../redis-streams';
 
 /** Logger interface for dependency injection */
@@ -246,10 +247,7 @@ export class StreamHealthMonitor {
    * Stop health monitoring
    */
   async stop(): Promise<void> {
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
-    }
+    this.monitoringInterval = clearIntervalSafe(this.monitoringInterval);
 
     // Clear maps to free memory
     this.lastAlerts.clear();

@@ -14,6 +14,7 @@
  */
 
 import { createLogger, Logger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import type {
   ExecutionOutcome,
   ExecutionProbabilityConfig,
@@ -683,10 +684,7 @@ export class ExecutionProbabilityTracker {
   }
 
   private stopCleanupTimer(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
   }
 
   // ---------------------------------------------------------------------------

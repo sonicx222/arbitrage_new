@@ -186,7 +186,11 @@ export class AlertCooldownManager {
   clear(): void {
     if (!this.delegate) {
       this.localCooldowns.clear();
+    } else {
+      // Delegate mode: cooldowns are managed by HealthMonitor, clear is a no-op
+      this.logger?.debug('clear() called in delegate mode - cooldowns are managed by HealthMonitor', {
+        delegateSize: this.delegate.getAlertCooldowns().size,
+      });
     }
-    // Note: When using delegate, we don't clear as that's managed by HealthMonitor
   }
 }

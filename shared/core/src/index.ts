@@ -259,6 +259,13 @@ export type {
   IntervalManagerStats
 } from './interval-manager';
 
+// Lifecycle Utilities (safe interval/timeout cleanup)
+export {
+  clearIntervalSafe,
+  clearTimeoutSafe,
+  stopAndNullify
+} from './lifecycle-utils';
+
 // #############################################################################
 // #                                                                           #
 // #                       SECTION 2: RESILIENCE                               #
@@ -942,29 +949,20 @@ export {
 // #############################################################################
 
 // =============================================================================
-// 6.1 Base Detectors
+// 6.1 Base Detectors (REMOVED)
 // =============================================================================
 
-/**
- * @deprecated BaseDetector and related types are legacy.
- * Use composition with extracted components instead:
- * - initializeDetectorConnections() for Redis/Streams setup
- * - initializePairs() for pair discovery
- * - decodeSyncEventData(), buildPriceUpdate() for event processing
- * - createDetectorHealthMonitor() for health monitoring
- * - createFactoryIntegrationService() for factory subscriptions
- *
- * See services/unified-detector/ for composition pattern examples.
- * Will be removed in v2.0.
- */
-export { BaseDetector } from './base-detector';
-export type {
-  DetectorConfig as BaseDetectorConfig,
-  PairSnapshot,
-  ExtendedPair,
-  BaseDetectorDeps,
-  BaseDetectorLogger
-} from './base-detector';
+// BaseDetector class and related types (DetectorConfig, BaseDetectorDeps,
+// BaseDetectorLogger) have been removed per deprecation plan.
+// Use composition with extracted components instead:
+// - initializeDetectorConnections() for Redis/Streams setup
+// - initializePairs() for pair discovery
+// - decodeSyncEventData(), buildPriceUpdate() for event processing
+// - createDetectorHealthMonitor() for health monitoring
+// - createFactoryIntegrationService() for factory subscriptions
+//
+// PairSnapshot and ExtendedPair are now exported from ./components/pair-repository.
+// See services/unified-detector/ for composition pattern examples.
 
 // NOTE: PartitionedDetector removed - use UnifiedChainDetector instead
 // See: services/unified-detector/ for current multi-chain detection implementation
@@ -1345,6 +1343,10 @@ export {
   parseTokenPairKey,
   isSameTokenPair,
 
+  // HOT-PATH: Pre-normalized token pair utilities (ADR-022)
+  isSameTokenPairPreNormalized,
+  isReverseOrderPreNormalized,
+
   // Token order utilities
   isReverseOrder,
   sortTokens,
@@ -1596,6 +1598,24 @@ export type {
 // #############################################################################
 
 // =============================================================================
+// 12.0 Service Bootstrap Utilities (S-4 dedup)
+// =============================================================================
+
+export {
+  setupServiceShutdown,
+  createSimpleHealthServer,
+  runServiceMain,
+  closeHealthServer,
+} from './service-bootstrap';
+export type {
+  ServiceShutdownConfig,
+  ServiceShutdownCleanup,
+  SimpleHealthServerConfig,
+  HealthCheckResult,
+  RunServiceMainConfig,
+} from './service-bootstrap';
+
+// =============================================================================
 // 12.1 Partition Service Utilities (P12-P16 refactor)
 // =============================================================================
 
@@ -1743,6 +1763,24 @@ export type {
 // #############################################################################
 
 // =============================================================================
+// 14.0 Environment Variable Parsing (S-6 Consolidation)
+// =============================================================================
+
+export {
+  parseEnvInt,
+  parseEnvIntSafe,
+  parseEnvBool,
+  getCrossRegionEnvConfig,
+} from './env-utils';
+export type { CrossRegionEnvConfig } from './env-utils';
+
+// =============================================================================
+// 14.0.1 Disconnect Utilities (C-2 Consolidation)
+// =============================================================================
+
+export { disconnectWithTimeout } from './disconnect-utils';
+
+// =============================================================================
 // 14.1 Common Validators (Lightweight validation utilities)
 // =============================================================================
 
@@ -1846,21 +1884,11 @@ export type {
 // 15.1 Domain Models
 // =============================================================================
 
-export * from './domain-models';
+// REMOVED: domain-models.ts (dead code, cleaned up)
+// REMOVED: repositories.ts (dead code, cleaned up)
 
 // =============================================================================
-// 15.2 Repositories
-// =============================================================================
-
-export {
-  RedisArbitrageRepository,
-  RedisExecutionRepository,
-  createArbitrageRepository,
-  createExecutionRepository
-} from './repositories';
-
-// =============================================================================
-// 15.3 Message Validators (REF-2)
+// 15.2 Message Validators (REF-2)
 // =============================================================================
 
 export {

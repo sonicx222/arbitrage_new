@@ -14,6 +14,7 @@
 // all consumers are reading from streams.
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe, stopAndNullify } from '../lifecycle-utils';
 import { getRedisClient } from '../redis';
 import { getRedisStreamsClient, RedisStreamsClient, StreamConsumer, ConsumerGroupConfig } from '../redis-streams';
 import { getCircuitBreakerRegistry } from './circuit-breaker';
@@ -230,16 +231,10 @@ export class ExpertSelfHealingManager {
     this.isRunning = false;
 
     // Clear monitoring intervals
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = null;
-    }
+    this.monitoringInterval = clearIntervalSafe(this.monitoringInterval);
 
     // P0-10 FIX: Stop stream consumers gracefully
-    if (this.failureStreamConsumer) {
-      await this.failureStreamConsumer.stop();
-      this.failureStreamConsumer = null;
-    }
+    this.failureStreamConsumer = await stopAndNullify(this.failureStreamConsumer);
 
     // Cancel all active recovery actions
     for (const [actionId, action] of this.activeRecoveryActions) {

@@ -23,18 +23,36 @@ export function createHealthRoutes(state: CoordinatorStateProvider): Router {
   /**
    * GET /api/health
    * Returns system health status for load balancer checks.
+   *
+   * P2 FIX #18: Return minimal response for unauthenticated requests.
+   * Load balancers only need status + systemHealth. Full service topology
+   * (service names, instance ID) is only included if the request has
+   * an authenticated user (req.user is set by upstream auth middleware).
    */
   router.get(
     '/health',
     ValidationMiddleware.validateHealthCheck,
-    (_req: Request, res: Response) => {
-      const serviceHealth = state.getServiceHealthMap();
+    (req: Request, res: Response) => {
+      const systemHealth = state.getSystemMetrics().systemHealth;
+      const status = systemHealth >= 50 ? 'ok' : 'degraded';
 
+      // Minimal response for unauthenticated requests (load balancer probes)
+      if (!(req as any).user) {
+        res.json({
+          status,
+          systemHealth,
+          timestamp: Date.now()
+        });
+        return;
+      }
+
+      // Full response for authenticated requests
+      const serviceHealth = state.getServiceHealthMap();
       res.json({
-        status: 'ok',
+        status,
         isLeader: state.getIsLeader(),
         instanceId: state.getInstanceId(),
-        systemHealth: state.getSystemMetrics().systemHealth,
+        systemHealth,
         services: Object.fromEntries(serviceHealth),
         timestamp: Date.now()
       });

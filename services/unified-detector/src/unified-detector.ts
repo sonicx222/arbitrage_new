@@ -33,7 +33,9 @@ import {
   GracefulDegradationManager,
   getGracefulDegradationManager,
   FailoverEvent,
-  PartitionDetectorInterface
+  PartitionDetectorInterface,
+  stopAndNullify,
+  clearIntervalSafe,
 } from '@arbitrage/core';
 
 import {
@@ -351,19 +353,13 @@ export class UnifiedChainDetector extends EventEmitter implements PartitionDetec
       this.logger.info('Stopping UnifiedChainDetector');
 
       // BUG-FIX: Stop opportunity cleanup interval and clear tracking
-      if (this.opportunityCleanupInterval) {
-        clearInterval(this.opportunityCleanupInterval);
-        this.opportunityCleanupInterval = null;
-      }
+      this.opportunityCleanupInterval = clearIntervalSafe(this.opportunityCleanupInterval);
       this.activeOpportunities.clear();
 
       // REFACTOR 9.1: Stop extracted modules
 
       // Stop metrics collection
-      if (this.metricsCollector) {
-        await this.metricsCollector.stop();
-        this.metricsCollector = null;
-      }
+      this.metricsCollector = await stopAndNullify(this.metricsCollector);
 
       // Stop health reporter (includes cross-region health if enabled)
       if (this.healthReporter) {

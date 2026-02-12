@@ -28,6 +28,7 @@ import {
   ConsumerGroupConfig,
   StreamConsumer,
   getErrorMessage,
+  stopAndNullify,
 } from '@arbitrage/core';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
@@ -221,10 +222,7 @@ export class OpportunityConsumer {
    */
   async stop(): Promise<void> {
     // Stop stream consumer first
-    if (this.streamConsumer) {
-      await this.streamConsumer.stop();
-      this.streamConsumer = null;
-    }
+    this.streamConsumer = await stopAndNullify(this.streamConsumer);
 
     // Batch ACK all pending messages using pipeline pattern
     if (this.pendingMessages.size > 0) {

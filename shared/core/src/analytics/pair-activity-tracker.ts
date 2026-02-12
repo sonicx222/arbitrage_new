@@ -19,6 +19,7 @@
  */
 
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 
 const logger = createLogger('pair-activity-tracker');
 
@@ -322,10 +323,7 @@ export class PairActivityTracker {
    * Stop the tracker and clean up resources.
    */
   destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
     this.pairs.clear();
   }
 

@@ -75,7 +75,9 @@ export interface OpportunityRouterConfig {
   maxRetries?: number;
   /** Base delay in ms for exponential backoff (default: 10) */
   retryBaseDelayMs?: number;
-  /** Dead letter queue stream name (default: 'stream:forwarding-dlq') */
+  /** Dead letter queue stream for FORWARDING failures (default: 'stream:forwarding-dlq').
+   * P2 FIX #21 NOTE: Intentionally separate from StreamConsumerManager's
+   * 'stream:dead-letter-queue' — different failure mode, different schema. */
   dlqStream?: string;
 }
 
@@ -187,7 +189,7 @@ export class OpportunityRouter {
 
     // Duplicate detection
     const existing = this.opportunities.get(id);
-    if (existing && Math.abs((existing.timestamp || 0) - timestamp) < this.config.duplicateWindowMs) {
+    if (existing && Math.abs((existing.timestamp ?? 0) - timestamp) < this.config.duplicateWindowMs) {
       this.logger.debug('Duplicate opportunity detected, skipping', {
         id,
         existingTimestamp: existing.timestamp,
@@ -467,7 +469,7 @@ export class OpportunityRouter {
       const oldestK = findKSmallest(
         this.opportunities.entries(),
         removeCount,
-        ([, a], [, b]) => (a.timestamp || 0) - (b.timestamp || 0)
+        ([, a], [, b]) => (a.timestamp ?? 0) - (b.timestamp ?? 0)
       );
 
       // Delete the oldest entries

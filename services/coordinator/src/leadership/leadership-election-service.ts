@@ -16,6 +16,8 @@
  * @see P2-SERVICE from refactoring-roadmap.md
  */
 
+import { clearTimeoutSafe } from '@arbitrage/core';
+
 /**
  * Minimal logger interface for dependency injection.
  * Using a local interface to avoid circular dependencies with shared packages.
@@ -98,7 +100,9 @@ export class LeadershipElectionService {
   private readonly config: LeadershipElectionConfig;
   private readonly redis: LeadershipRedisClient;
   private readonly logger: Logger;
-  private readonly isStandby: boolean;
+  // P1 FIX #4: Removed readonly - isStandby must be mutable so activated
+  // standby instances can re-acquire leadership if lost after activation.
+  private isStandby: boolean;
   private readonly canBecomeLeader: boolean;
   private readonly onAlert?: (alert: LeadershipAlert) => void;
   private readonly onLeadershipChange?: (isLeader: boolean) => void;
@@ -171,10 +175,7 @@ export class LeadershipElectionService {
     this.running = false;
 
     // Stop heartbeat
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
+    this.heartbeatInterval = clearTimeoutSafe(this.heartbeatInterval);
 
     // Release leadership if we hold it
     await this.releaseLeadership();
@@ -182,6 +183,21 @@ export class LeadershipElectionService {
     this.logger.info('Leadership election service stopped', {
       instanceId: this.config.instanceId,
     });
+  }
+
+  /**
+   * P1 FIX #4: Clear standby mode after successful activation.
+   * Once a standby instance has been activated and acquired leadership,
+   * it should no longer be considered standby. This allows it to
+   * re-acquire leadership if lost, without needing another activation signal.
+   */
+  clearStandby(): void {
+    if (this.isStandby) {
+      this.isStandby = false;
+      this.logger.info('Standby mode cleared - instance is now active', {
+        instanceId: this.config.instanceId,
+      });
+    }
   }
 
   /**
@@ -306,87 +322,102 @@ export class LeadershipElectionService {
   }
 
   /**
-   * Start the heartbeat loop with jittered interval
+   * Calculate jittered interval for the next heartbeat tick.
+   * P3 FIX #31: Recalculate jitter per tick to prevent thundering herd convergence.
+   * Previously jitter was computed once at start, so instances starting near the
+   * same time would all use the same fixed interval.
+   */
+  private getJitteredInterval(): number {
+    const jitterMs = Math.floor(Math.random() * this.jitterRangeMs) - (this.jitterRangeMs / 2);
+    return Math.max(1000, this.config.heartbeatIntervalMs + jitterMs);
+  }
+
+  /**
+   * Start the heartbeat loop with per-tick jittered interval.
+   * Uses recursive setTimeout instead of setInterval so each tick gets fresh jitter.
    */
   private startHeartbeat(): void {
-    const { heartbeatIntervalMs, instanceId } = this.config;
-
-    // S4.1.1-FIX-3: Add jitter to prevent thundering herd on leader failover
-    const jitterMs = Math.floor(Math.random() * this.jitterRangeMs) - (this.jitterRangeMs / 2);
-    const effectiveInterval = Math.max(1000, heartbeatIntervalMs + jitterMs);
-
-    this.logger.debug('Leader heartbeat interval with jitter', {
-      baseInterval: heartbeatIntervalMs,
-      jitter: jitterMs,
-      effectiveInterval,
-    });
-
-    this.heartbeatInterval = setInterval(async () => {
+    const scheduleNext = () => {
       if (!this.running) return;
+      const interval = this.getJitteredInterval();
+      this.heartbeatInterval = setTimeout(() => this.heartbeatTick(scheduleNext), interval);
+    };
+    scheduleNext();
+  }
 
-      try {
-        if (this._isLeader) {
-          const renewed = await this.renewLeaderLock();
-          if (renewed) {
-            // Reset failure count on successful heartbeat
-            this.consecutiveHeartbeatFailures = 0;
-          } else {
-            // Lost leadership (another instance took over or lock expired)
-            this.setLeaderStatus(false);
-            this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
-            this.sendAlert({
-              type: 'LEADER_LOST',
-              message: `Instance ${instanceId} lost leadership - lock renewal failed`,
-              severity: 'warning',
-              data: { instanceId },
-              timestamp: Date.now(),
-            });
-          }
+  /**
+   * Execute a single heartbeat tick, then schedule the next one.
+   */
+  private async heartbeatTick(scheduleNext: () => void): Promise<void> {
+    if (!this.running) return;
+
+    const { instanceId } = this.config;
+
+    try {
+      if (this._isLeader) {
+        const renewed = await this.renewLeaderLock();
+        if (renewed) {
+          // Reset failure count on successful heartbeat
+          this.consecutiveHeartbeatFailures = 0;
         } else {
-          // Try to acquire leadership
-          await this.tryAcquireLeadership();
-        }
-
-      } catch (error) {
-        // Track consecutive failures and demote if threshold exceeded
-        this.consecutiveHeartbeatFailures++;
-        this.logger.error('Leader heartbeat failed', {
-          error,
-          consecutiveFailures: this.consecutiveHeartbeatFailures,
-          maxFailures: this.maxHeartbeatFailures,
-          wasLeader: this._isLeader,
-        });
-
-        this.sendAlert({
-          type: 'LEADER_HEARTBEAT_FAILURE',
-          message: `Heartbeat failure #${this.consecutiveHeartbeatFailures}`,
-          severity: 'warning',
-          data: {
-            instanceId,
-            consecutiveFailures: this.consecutiveHeartbeatFailures,
-            maxFailures: this.maxHeartbeatFailures,
-            wasLeader: this._isLeader,
-          },
-          timestamp: Date.now(),
-        });
-
-        // If we're the leader and have too many failures, demote self
-        if (this._isLeader && this.consecutiveHeartbeatFailures >= this.maxHeartbeatFailures) {
+          // Lost leadership (another instance took over or lock expired)
           this.setLeaderStatus(false);
-          this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
-            failures: this.consecutiveHeartbeatFailures,
-          });
-
+          this.logger.warn('Lost leadership - lock renewal failed', { instanceId });
           this.sendAlert({
-            type: 'LEADER_DEMOTION',
-            message: `Leader demoted due to ${this.consecutiveHeartbeatFailures} consecutive heartbeat failures`,
-            severity: 'critical',
-            data: { instanceId, failures: this.consecutiveHeartbeatFailures },
+            type: 'LEADER_LOST',
+            message: `Instance ${instanceId} lost leadership - lock renewal failed`,
+            severity: 'warning',
+            data: { instanceId },
             timestamp: Date.now(),
           });
         }
+      } else {
+        // Try to acquire leadership
+        await this.tryAcquireLeadership();
       }
-    }, effectiveInterval);
+
+    } catch (error) {
+      // Track consecutive failures and demote if threshold exceeded
+      this.consecutiveHeartbeatFailures++;
+      this.logger.error('Leader heartbeat failed', {
+        error,
+        consecutiveFailures: this.consecutiveHeartbeatFailures,
+        maxFailures: this.maxHeartbeatFailures,
+        wasLeader: this._isLeader,
+      });
+
+      this.sendAlert({
+        type: 'LEADER_HEARTBEAT_FAILURE',
+        message: `Heartbeat failure #${this.consecutiveHeartbeatFailures}`,
+        severity: 'warning',
+        data: {
+          instanceId,
+          consecutiveFailures: this.consecutiveHeartbeatFailures,
+          maxFailures: this.maxHeartbeatFailures,
+          wasLeader: this._isLeader,
+        },
+        timestamp: Date.now(),
+      });
+
+      // If we're the leader and have too many failures, demote self
+      if (this._isLeader && this.consecutiveHeartbeatFailures >= this.maxHeartbeatFailures) {
+        this.setLeaderStatus(false);
+        this.logger.error('Demoting self from leader due to consecutive heartbeat failures', {
+          failures: this.consecutiveHeartbeatFailures,
+        });
+
+        this.sendAlert({
+          type: 'LEADER_DEMOTION',
+          message: `Leader demoted due to ${this.consecutiveHeartbeatFailures} consecutive heartbeat failures`,
+          severity: 'critical',
+          data: { instanceId, failures: this.consecutiveHeartbeatFailures },
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    // Schedule next tick with fresh jitter
+    scheduleNext();
   }
 
   /**

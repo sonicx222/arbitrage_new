@@ -118,6 +118,10 @@ export {
   parseTokenPairKey,
   isSameTokenPair,
 
+  // HOT-PATH: Pre-normalized token pair utilities (ADR-022)
+  isSameTokenPairPreNormalized,
+  isReverseOrderPreNormalized,
+
   // Token order utilities
   isReverseOrder,
   sortTokens,

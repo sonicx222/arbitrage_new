@@ -33,6 +33,7 @@ import {
   MevProviderFactory,
   BridgeRouterFactory,
   getErrorMessage,
+  disconnectWithTimeout,
   // Phase 3: Capital Risk Management (Task 3.4.5)
   DrawdownCircuitBreaker,
   resetDrawdownCircuitBreaker,
@@ -45,6 +46,8 @@ import {
   type TradingAllowedResult,
   type EVCalculation,
   type PositionSize,
+  stopAndNullify,
+  clearIntervalSafe,
 } from '@arbitrage/core';
 // P1 FIX: Import extracted lock conflict tracker
 import { LockConflictTracker } from './services/lock-conflict-tracker';
@@ -581,43 +584,25 @@ export class ExecutionEngineService {
       this.clearIntervals();
 
       // P0 Refactoring: Stop health monitoring manager
-      if (this.healthMonitoringManager) {
-        this.healthMonitoringManager.stop();
-        this.healthMonitoringManager = null;
-      }
+      this.healthMonitoringManager = await stopAndNullify(this.healthMonitoringManager);
 
       // Stop simulation metrics collector (Phase 1.1.3)
-      if (this.simulationMetricsCollector) {
-        this.simulationMetricsCollector.stop();
-        this.simulationMetricsCollector = null;
-      }
+      this.simulationMetricsCollector = await stopAndNullify(this.simulationMetricsCollector);
 
       // Stop circuit breaker (Phase 1.3.1)
-      if (this.circuitBreaker) {
-        this.circuitBreaker.stop();
-        this.circuitBreaker = null;
-      }
+      this.circuitBreaker = await stopAndNullify(this.circuitBreaker);
 
       // Task 3: Stop A/B testing framework
-      if (this.abTestingFramework) {
-        await this.abTestingFramework.stop();
-        this.abTestingFramework = null;
-      }
+      this.abTestingFramework = await stopAndNullify(this.abTestingFramework);
 
       // Stop Phase 2 pending state components
       await this.shutdownPendingStateSimulation();
 
       // Stop consumer
-      if (this.opportunityConsumer) {
-        await this.opportunityConsumer.stop();
-        this.opportunityConsumer = null;
-      }
+      this.opportunityConsumer = await stopAndNullify(this.opportunityConsumer);
 
       // Stop nonce manager
-      if (this.nonceManager) {
-        this.nonceManager.stop();
-        this.nonceManager = null;
-      }
+      this.nonceManager = await stopAndNullify(this.nonceManager);
 
       // Stop provider service (Phase 3: now async for batch provider shutdown)
       if (this.providerService) {
@@ -626,49 +611,16 @@ export class ExecutionEngineService {
       }
 
       // Shutdown lock manager with timeout
-      if (this.lockManager) {
-        try {
-          await Promise.race([
-            this.lockManager.shutdown(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Lock manager shutdown timeout')), SHUTDOWN_TIMEOUT_MS)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Lock manager shutdown timeout or error', { error: getErrorMessage(error) });
-        }
-        this.lockManager = null;
-      }
+      await disconnectWithTimeout(this.lockManager, 'Lock manager', SHUTDOWN_TIMEOUT_MS, this.logger);
+      this.lockManager = null;
 
       // Disconnect streams client with timeout
-      if (this.streamsClient) {
-        try {
-          await Promise.race([
-            this.streamsClient.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Streams client disconnect timeout')), SHUTDOWN_TIMEOUT_MS)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Streams client disconnect timeout or error', { error: getErrorMessage(error) });
-        }
-        this.streamsClient = null;
-      }
+      await disconnectWithTimeout(this.streamsClient, 'Streams client', SHUTDOWN_TIMEOUT_MS, this.logger);
+      this.streamsClient = null;
 
       // Disconnect Redis with timeout
-      if (this.redis) {
-        try {
-          await Promise.race([
-            this.redis.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Redis disconnect timeout')), SHUTDOWN_TIMEOUT_MS)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Redis disconnect timeout or error', { error: getErrorMessage(error) });
-        }
-        this.redis = null;
-      }
+      await disconnectWithTimeout(this.redis, 'Redis', SHUTDOWN_TIMEOUT_MS, this.logger);
+      this.redis = null;
 
       // Clear queue
       if (this.queueService) {
@@ -713,10 +665,7 @@ export class ExecutionEngineService {
    * Only executionProcessingInterval remains here (hot-path related).
    */
   private clearIntervals(): void {
-    if (this.executionProcessingInterval) {
-      clearInterval(this.executionProcessingInterval);
-      this.executionProcessingInterval = null;
-    }
+    this.executionProcessingInterval = clearIntervalSafe(this.executionProcessingInterval);
   }
 
   // ===========================================================================

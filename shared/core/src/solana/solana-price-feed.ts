@@ -18,6 +18,7 @@
 import { EventEmitter } from 'events';
 import { Connection, PublicKey, Commitment, AccountInfo, Context } from '@solana/web3.js';
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 
 // Import from extracted pool-parsers module
 import {
@@ -338,10 +339,7 @@ export class SolanaPriceFeed extends EventEmitter {
     this.running = false;
 
     // Stop staleness monitoring
-    if (this.stalenessCheckInterval) {
-      clearInterval(this.stalenessCheckInterval);
-      this.stalenessCheckInterval = null;
-    }
+    this.stalenessCheckInterval = clearIntervalSafe(this.stalenessCheckInterval);
 
     // Unsubscribe from all pools
     const poolAddresses = Array.from(this.subscriptions.keys());

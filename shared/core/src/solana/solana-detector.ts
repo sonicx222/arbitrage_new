@@ -27,6 +27,7 @@ import {
   PerformanceLogger
 } from '../logger';
 import { AsyncMutex } from '../async/async-mutex';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { withTimeout } from '../async/async-utils';
 import { getRedisClient, RedisClient } from '../redis';
 import {
@@ -539,10 +540,7 @@ export class SolanaDetector extends EventEmitter {
 
   private async cleanup(): Promise<void> {
     // Stop health monitoring
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    this.healthCheckInterval = clearIntervalSafe(this.healthCheckInterval);
 
     // Unsubscribe from all programs
     for (const [programId] of this.subscriptions) {
@@ -1253,10 +1251,7 @@ export class SolanaDetector extends EventEmitter {
   private startHealthMonitoring(): void {
     this.healthCheckInterval = setInterval(async () => {
       if (!this.running || this.stopping) {
-        if (this.healthCheckInterval) {
-          clearInterval(this.healthCheckInterval);
-          this.healthCheckInterval = null;
-        }
+        this.healthCheckInterval = clearIntervalSafe(this.healthCheckInterval);
         return;
       }
 

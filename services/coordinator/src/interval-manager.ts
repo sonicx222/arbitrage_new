@@ -135,8 +135,9 @@ export class IntervalManager {
     };
 
     // Run immediately if requested
+    // P2 FIX #17: Use .catch() instead of void to prevent unhandled rejection
     if (runImmediately) {
-      void wrappedCallback();
+      wrappedCallback().catch(() => {});
     }
 
     // Register interval

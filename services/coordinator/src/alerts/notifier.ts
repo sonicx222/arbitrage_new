@@ -16,7 +16,7 @@
  */
 
 // FIX: Import Alert from consolidated type definition (single source of truth)
-import type { RouteLogger, Alert, AlertSeverity } from '../api/types';
+import type { MinimalLogger, Alert, AlertSeverity } from '../api/types';
 
 // Re-export for consumers that import from this module
 export type { Alert, AlertSeverity };
@@ -64,10 +64,11 @@ export interface NotificationChannel {
 export class DiscordChannel implements NotificationChannel {
   readonly name = 'discord';
   private webhookUrl: string | undefined;
-  private logger: RouteLogger;
+  private logger: MinimalLogger;
 
-  constructor(logger: RouteLogger) {
-    this.webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  // P2 FIX #12: Accept optional webhookUrl for DI/testing, fall back to env var
+  constructor(logger: MinimalLogger, webhookUrl?: string) {
+    this.webhookUrl = webhookUrl ?? process.env.DISCORD_WEBHOOK_URL;
     this.logger = logger;
   }
 
@@ -133,10 +134,11 @@ export class DiscordChannel implements NotificationChannel {
 export class SlackChannel implements NotificationChannel {
   readonly name = 'slack';
   private webhookUrl: string | undefined;
-  private logger: RouteLogger;
+  private logger: MinimalLogger;
 
-  constructor(logger: RouteLogger) {
-    this.webhookUrl = process.env.SLACK_WEBHOOK_URL;
+  // P2 FIX #12: Accept optional webhookUrl for DI/testing, fall back to env var
+  constructor(logger: MinimalLogger, webhookUrl?: string) {
+    this.webhookUrl = webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
     this.logger = logger;
   }
 
@@ -218,7 +220,7 @@ export class SlackChannel implements NotificationChannel {
  */
 export class AlertNotifier {
   private channels: NotificationChannel[] = [];
-  private logger: RouteLogger;
+  private logger: MinimalLogger;
 
   // FIX: Circuit breaker state per channel
   private circuitBreakers: Map<string, CircuitBreakerState> = new Map();
@@ -234,10 +236,12 @@ export class AlertNotifier {
   // FIX: Track dropped alerts due to circuit breaker
   private droppedAlerts = 0;
 
+  // P2 FIX #12: Accept optional channels array for DI/testing
   constructor(
-    logger: RouteLogger,
+    logger: MinimalLogger,
     maxHistorySize: number = 1000,
-    circuitConfig?: Partial<CircuitBreakerConfig>
+    circuitConfig?: Partial<CircuitBreakerConfig>,
+    channels?: NotificationChannel[]
   ) {
     this.logger = logger;
     this.maxHistorySize = maxHistorySize;
@@ -245,9 +249,13 @@ export class AlertNotifier {
     // Pre-allocate buffer for better memory locality
     this.alertHistoryBuffer = new Array(maxHistorySize);
 
-    // Initialize channels
-    this.channels.push(new DiscordChannel(logger));
-    this.channels.push(new SlackChannel(logger));
+    // Initialize channels — use injected channels or create defaults
+    if (channels) {
+      this.channels.push(...channels);
+    } else {
+      this.channels.push(new DiscordChannel(logger));
+      this.channels.push(new SlackChannel(logger));
+    }
 
     // Initialize circuit breakers for each channel
     for (const channel of this.channels) {
@@ -387,9 +395,10 @@ export class AlertNotifier {
     );
 
     // Process results and update circuit breakers
-    results.forEach((result) => {
+    // P1 FIX #9: Use index parameter instead of O(n) indexOf lookup
+    results.forEach((result, index) => {
       if (result.status === 'rejected') {
-        const channelName = channelsToSend[results.indexOf(result)]?.name || 'unknown';
+        const channelName = channelsToSend[index]?.name || 'unknown';
         this.recordFailure(channelName);
         this.logger.error('Alert notification failed', {
           channel: channelName,

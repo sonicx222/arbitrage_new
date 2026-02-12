@@ -16,6 +16,7 @@
 
 import { ethers } from 'ethers';
 import { createLogger } from './logger';
+import { clearIntervalSafe } from './lifecycle-utils';
 
 const logger = createLogger('nonce-manager');
 
@@ -516,10 +517,7 @@ export class NonceManager {
    * Stop background sync.
    */
   stop(): void {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-      this.syncInterval = null;
-    }
+    this.syncInterval = clearIntervalSafe(this.syncInterval);
 
     logger.info('NonceManager stopped');
   }

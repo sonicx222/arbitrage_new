@@ -5,6 +5,7 @@ import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
 import { createLogger } from '../logger';
+import { clearTimeoutSafe } from '../lifecycle-utils';
 
 const logger = createLogger('worker-pool');
 
@@ -304,10 +305,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.isRunning = false;
 
     // Clear dispatch timer to prevent new dispatches
-    if (this.dispatchTimer) {
-      clearTimeout(this.dispatchTimer);
-      this.dispatchTimer = null;
-    }
+    this.dispatchTimer = clearTimeoutSafe(this.dispatchTimer);
 
     // Reject all pending tasks and clear their timeouts
     for (const [taskId, taskPromise] of this.activeTasks) {
@@ -506,10 +504,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     if (!this.isRunning) return;
 
     // Clear any existing timer
-    if (this.dispatchTimer) {
-      clearTimeout(this.dispatchTimer);
-      this.dispatchTimer = null;
-    }
+    this.dispatchTimer = clearTimeoutSafe(this.dispatchTimer);
 
     // Schedule next dispatch with minimal delay
     this.dispatchTimer = setTimeout(() => {

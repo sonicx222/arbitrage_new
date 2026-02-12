@@ -16,6 +16,7 @@
 
 import { SwapEvent } from '../../../types';
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 
 const logger = createLogger('swap-event-filter');
 
@@ -516,10 +517,7 @@ export class SwapEventFilter {
   }
 
   private restartAggregationTimer(): void {
-    if (this.aggregationTimer) {
-      clearInterval(this.aggregationTimer);
-      this.aggregationTimer = null;
-    }
+    this.aggregationTimer = clearIntervalSafe(this.aggregationTimer);
     if (!this.destroyed) {
       this.startAggregationTimer();
     }
@@ -595,10 +593,7 @@ export class SwapEventFilter {
   }
 
   private restartCleanupTimer(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
     if (!this.destroyed) {
       this.startCleanupTimer();
     }
@@ -743,15 +738,8 @@ export class SwapEventFilter {
     }
     this.destroyed = true;
 
-    if (this.aggregationTimer) {
-      clearInterval(this.aggregationTimer);
-      this.aggregationTimer = null;
-    }
-
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.aggregationTimer = clearIntervalSafe(this.aggregationTimer);
+    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
 
     // Flush any remaining aggregations
     this.flushAggregationBuckets();

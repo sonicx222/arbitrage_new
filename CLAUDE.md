@@ -28,7 +28,7 @@ docs/              Architecture, ADRs, strategies, conventions
 - `@arbitrage/types` - shared/types
 - `@arbitrage/core` - shared/core/src
 - `@arbitrage/config` - shared/config/src
-- `@shared/security` - shared/security/src
+- `@arbitrage/security` - shared/security/src
 
 **Build Order:** types -> config -> core -> ml -> services
 

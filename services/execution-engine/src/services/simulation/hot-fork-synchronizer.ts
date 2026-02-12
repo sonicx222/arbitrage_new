@@ -15,7 +15,7 @@
  */
 
 import { ethers } from 'ethers';
-import { createPinoLogger, CircularBuffer, type ILogger } from '@arbitrage/core';
+import { createPinoLogger, CircularBuffer, clearIntervalSafe, clearTimeoutSafe, type ILogger } from '@arbitrage/core';
 import type { AnvilForkManager } from './anvil-manager';
 import type { Logger } from '../../types';
 import type { BaseMetrics } from './types';
@@ -274,16 +274,10 @@ export class HotForkSynchronizer {
       return;
     }
 
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-      this.syncInterval = null;
-    }
+    this.syncInterval = clearIntervalSafe(this.syncInterval);
 
     // Fix 10.5: Clear adaptive sync timeout
-    if (this.syncTimeout) {
-      clearTimeout(this.syncTimeout);
-      this.syncTimeout = null;
-    }
+    this.syncTimeout = clearTimeoutSafe(this.syncTimeout);
 
     this.state = 'stopped';
   }

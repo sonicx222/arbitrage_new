@@ -162,9 +162,12 @@ export function getTokenPairKeyCached(token0: string, token1: string): string {
   // Evict oldest entries if at capacity (simple FIFO eviction)
   if (TOKEN_PAIR_KEY_CACHE.size >= TOKEN_PAIR_KEY_CACHE_MAX_SIZE) {
     // Delete first 1000 entries (10% batch eviction for efficiency)
-    const keysToDelete = Array.from(TOKEN_PAIR_KEY_CACHE.keys()).slice(0, 1000);
-    for (const key of keysToDelete) {
+    // Iterator-based deletion avoids Array.from() + slice() allocations
+    let deleted = 0;
+    for (const key of TOKEN_PAIR_KEY_CACHE.keys()) {
+      if (deleted >= 1000) break;
       TOKEN_PAIR_KEY_CACHE.delete(key);
+      deleted++;
     }
   }
 
@@ -229,6 +232,37 @@ export function isSameTokenPair(
   const key1 = getTokenPairKey(pair1Token0, pair1Token1);
   const key2 = getTokenPairKey(pair2Token0, pair2Token1);
   return key1 === key2;
+}
+
+// =============================================================================
+// HOT-PATH: Pre-Normalized Token Pair Utilities
+// These variants skip all normalization (toLowerCase/trim) for maximum performance.
+// Inputs MUST be already lowercase. Use in hot paths where tokens are pre-normalized.
+// @see ADR-022 for hot-path optimization rationale
+// =============================================================================
+
+/**
+ * Check if two token pairs represent the same pair (pre-normalized addresses).
+ * HOT-PATH: No normalization, direct comparison. Inputs MUST be already lowercase.
+ * @see ADR-022 for hot-path optimization rationale
+ */
+export function isSameTokenPairPreNormalized(
+  pair1Token0: string, pair1Token1: string,
+  pair2Token0: string, pair2Token1: string
+): boolean {
+  return (pair1Token0 === pair2Token0 && pair1Token1 === pair2Token1) ||
+         (pair1Token0 === pair2Token1 && pair1Token1 === pair2Token0);
+}
+
+/**
+ * Check if token order is reversed between two pairs (pre-normalized addresses).
+ * HOT-PATH: No normalization, direct comparison. Inputs MUST be already lowercase.
+ * @see ADR-022 for hot-path optimization rationale
+ */
+export function isReverseOrderPreNormalized(
+  pair1Token0: string, pair2Token0: string
+): boolean {
+  return pair1Token0 !== pair2Token0;
 }
 
 // =============================================================================

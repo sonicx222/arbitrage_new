@@ -66,10 +66,18 @@ export const getBpsDenominatorBigInt = (): bigint => BigInt(BPS_DENOMINATOR);
  *
  * @see contracts/src/FlashLoanArbitrage.sol
  */
-export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
+/**
+ * Shared ABI function signatures common to all flash arbitrage contracts.
+ * Extracted to avoid duplication across provider-specific ABIs.
+ */
+const SHARED_ARBITRAGE_ABI_FUNCTIONS: string[] = [
   'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
   'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
   'function isApprovedRouter(address router) external view returns (bool)',
+];
+
+export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
+  ...SHARED_ARBITRAGE_ABI_FUNCTIONS,
   'function POOL() external view returns (address)',
 ];
 
@@ -91,9 +99,7 @@ export const FLASH_LOAN_ARBITRAGE_ABI: string[] = [
  * @see contracts/src/BalancerV2FlashArbitrage.sol
  */
 export const BALANCER_V2_FLASH_ARBITRAGE_ABI: string[] = [
-  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
-  'function isApprovedRouter(address router) external view returns (bool)',
+  ...SHARED_ARBITRAGE_ABI_FUNCTIONS,
   'function VAULT() external view returns (address)',
 ];
 
@@ -149,9 +155,7 @@ export const getSyncSwapFeeBpsBigInt = (): bigint => BigInt(SYNCSWAP_FEE_BPS);
  * @see contracts/src/interfaces/ISyncSwapVault.sol
  */
 export const SYNCSWAP_FLASH_ARBITRAGE_ABI: string[] = [
-  'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-  'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
-  'function isApprovedRouter(address router) external view returns (bool)',
+  ...SHARED_ARBITRAGE_ABI_FUNCTIONS,
   'function VAULT() external view returns (address)',
 ];
 

@@ -49,6 +49,8 @@ import {
   PriceOracle,
   // P1-5 FIX: Reusable concurrency guard for detection and health loops
   OperationGuard,
+  disconnectWithTimeout,
+  clearIntervalSafe,
 } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
@@ -476,34 +478,12 @@ export class CrossChainDetectorService {
       this.clearAllIntervals();
 
       // P0-NEW-6 FIX: Disconnect streams client with timeout
-      if (this.streamsClient) {
-        try {
-          await Promise.race([
-            this.streamsClient.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Streams client disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Streams client disconnect timeout or error', { error: (error as Error).message });
-        }
-        this.streamsClient = null;
-      }
+      await disconnectWithTimeout(this.streamsClient, 'Streams client', CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS, this.logger);
+      this.streamsClient = null;
 
       // P0-NEW-6 FIX: Disconnect Redis with timeout
-      if (this.redis) {
-        try {
-          await Promise.race([
-            this.redis.disconnect(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('Redis disconnect timeout')), CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS)
-            )
-          ]);
-        } catch (error) {
-          this.logger.warn('Redis disconnect timeout or error', { error: (error as Error).message });
-        }
-        this.redis = null;
-      }
+      await disconnectWithTimeout(this.redis, 'Redis', CrossChainDetectorService.SHUTDOWN_TIMEOUT_MS, this.logger);
+      this.redis = null;
 
       // ADR-014: Clear modular components
       if (this.priceDataManager) {
@@ -544,19 +524,10 @@ export class CrossChainDetectorService {
     if (this.streamConsumer) {
       this.streamConsumer.stop();
     }
-    if (this.opportunityDetectionInterval) {
-      clearInterval(this.opportunityDetectionInterval);
-      this.opportunityDetectionInterval = null;
-    }
-    if (this.healthMonitoringInterval) {
-      clearInterval(this.healthMonitoringInterval);
-      this.healthMonitoringInterval = null;
-    }
+    this.opportunityDetectionInterval = clearIntervalSafe(this.opportunityDetectionInterval);
+    this.healthMonitoringInterval = clearIntervalSafe(this.healthMonitoringInterval);
     // Phase 3: Clear ETH price refresh interval
-    if (this.ethPriceRefreshInterval) {
-      clearInterval(this.ethPriceRefreshInterval);
-      this.ethPriceRefreshInterval = null;
-    }
+    this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
   }
 
   // ===========================================================================
@@ -725,10 +696,7 @@ export class CrossChainDetectorService {
    */
   private startEthPriceRefresh(): void {
     // P3-002 FIX: Defensive guard - clear existing interval if called twice
-    if (this.ethPriceRefreshInterval) {
-      clearInterval(this.ethPriceRefreshInterval);
-      this.ethPriceRefreshInterval = null;
-    }
+    this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
 
     // Refresh immediately on start
     this.refreshEthPrice().catch(error => {

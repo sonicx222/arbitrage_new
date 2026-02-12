@@ -540,7 +540,7 @@ describe('API Key Authentication Unit Tests', () => {
 
   beforeAll(async () => {
     // Dynamic import after mocks are set up
-    // Use relative path since @shared/security isn't in Jest moduleNameMapper
+    // Use relative path since @arbitrage/security isn't in Jest moduleNameMapper
     const authModule = await import('../../../../../shared/security/src/auth');
     apiAuth = authModule.apiAuth;
     apiAuthorize = authModule.apiAuthorize;

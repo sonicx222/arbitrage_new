@@ -32,6 +32,7 @@ export interface RedisStreamsClientDeps {
   RedisImpl?: RedisStreamsConstructor;
 }
 import { createLogger, Logger } from './logger';
+import { clearTimeoutSafe } from './lifecycle-utils';
 
 // =============================================================================
 // Types
@@ -193,10 +194,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
       return;
     }
 
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.timer = clearTimeoutSafe(this.timer);
 
     if (this.queue.length === 0) {
       return;
@@ -263,10 +261,7 @@ export class StreamBatcher<T = Record<string, unknown>> {
     }
     this.destroyed = true;
 
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.timer = clearTimeoutSafe(this.timer);
 
     // P0-2 FIX: Merge any pending messages before final flush
     if (this.pendingDuringFlush.length > 0) {
@@ -936,10 +931,7 @@ export class StreamConsumer {
     this.running = false;
     this.stats.isRunning = false;
 
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer);
-      this.pollTimer = null;
-    }
+    this.pollTimer = clearTimeoutSafe(this.pollTimer);
   }
 
   /**

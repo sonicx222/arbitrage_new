@@ -56,6 +56,8 @@ import {
   createHierarchicalCache,
   // FIX (Issue 2.1): Import bpsToDecimal for fee conversion (replaces deprecated dexFeeToPercentage)
   bpsToDecimal,
+  disconnectWithTimeout,
+  stopAndNullify,
 } from '@arbitrage/core';
 
 import {
@@ -713,33 +715,18 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // REFACTOR: Stop simulation via extracted handler (handles both EVM and non-EVM)
     // FIX Inconsistency 6.1: Await async stop for consistency
-    if (this.simulationHandler) {
-      await this.simulationHandler.stop();
-      this.simulationHandler = null;
-    }
+    this.simulationHandler = await stopAndNullify(this.simulationHandler);
 
     // Task 2.1.3: Stop factory subscription service
     // P0-FIX 1.5: Await async stop to ensure cleanup completes before clearing pairs
     // Without await, factory events could arrive after pairsByAddress.clear() causing null dereference
-    if (this.factorySubscriptionService) {
-      await this.factorySubscriptionService.stop();
-      this.factorySubscriptionService = null;
-    }
+    this.factorySubscriptionService = await stopAndNullify(this.factorySubscriptionService);
 
     // P0-NEW-6 FIX: Disconnect WebSocket with timeout to prevent indefinite hangs
     if (this.wsManager) {
       // Remove all event listeners before disconnecting to prevent memory leak
       this.wsManager.removeAllListeners();
-      try {
-        await Promise.race([
-          this.wsManager.disconnect(),
-          new Promise<void>((_, reject) =>
-            setTimeout(() => reject(new Error('WebSocket disconnect timeout')), WS_DISCONNECT_TIMEOUT_MS)
-          )
-        ]);
-      } catch (error) {
-        this.logger.warn('WebSocket disconnect timeout or error', { error: (error as Error).message });
-      }
+      await disconnectWithTimeout(this.wsManager, 'WebSocket', WS_DISCONNECT_TIMEOUT_MS, this.logger);
       this.wsManager = null;
     }
 
@@ -1956,27 +1943,6 @@ export class ChainDetectorInstance extends EventEmitter {
         });
       }
     }
-  }
-
-  /**
-   * Check if two pairs represent the same token pair (in either order).
-   * HOT-PATH: Called during arbitrage detection.
-   * NOTE: Tokens in PairSnapshot are already lowercase (normalized at creation/snapshot).
-   */
-  private isSameTokenPair(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    return (
-      (pair1.token0 === pair2.token0 && pair1.token1 === pair2.token1) ||
-      (pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0)
-    );
-  }
-
-  /**
-   * Check if token order is reversed between two pairs.
-   * HOT-PATH: Called during arbitrage calculation.
-   * NOTE: Tokens in PairSnapshot are already lowercase (normalized at creation/snapshot).
-   */
-  private isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    return pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0;
   }
 
   /**

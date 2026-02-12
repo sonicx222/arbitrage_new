@@ -43,8 +43,8 @@ const projectConfig = {
     '^@arbitrage/unified-detector/(.*)$': '<rootDir>/services/unified-detector/src/$1',
     '^@arbitrage/ml$': '<rootDir>/shared/ml/src',
     '^@arbitrage/ml/(.*)$': '<rootDir>/shared/ml/src/$1',
-    '^@shared/security$': '<rootDir>/shared/security/src',
-    '^@shared/security/(.*)$': '<rootDir>/shared/security/src/$1'
+    '^@arbitrage/security$': '<rootDir>/shared/security/src',
+    '^@arbitrage/security/(.*)$': '<rootDir>/shared/security/src/$1'
   },
 
   // Module file extensions

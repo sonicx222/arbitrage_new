@@ -17,6 +17,7 @@
  */
 
 import { ethers } from 'ethers';
+import { clearTimeoutSafe } from '../lifecycle-utils';
 import {
   TokenBucketRateLimiter,
   type RateLimiterConfig,
@@ -335,10 +336,7 @@ export class BatchProvider {
    */
   async flushBatch(): Promise<void> {
     // Clear timeout if set
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
-      this.batchTimeout = null;
-    }
+    this.batchTimeout = clearTimeoutSafe(this.batchTimeout);
 
     // Get pending requests
     const batch = this.pendingBatch;
@@ -418,10 +416,7 @@ export class BatchProvider {
     await this.flushBatch();
 
     // Clear timeout
-    if (this.batchTimeout) {
-      clearTimeout(this.batchTimeout);
-      this.batchTimeout = null;
-    }
+    this.batchTimeout = clearTimeoutSafe(this.batchTimeout);
   }
 
   // ===========================================================================

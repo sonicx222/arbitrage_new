@@ -37,10 +37,10 @@
       "@arbitrage/core/*": [
         "../../shared/core/src/*"
       ],
-      "@shared/security": [
+      "@arbitrage/security": [
         "../../shared/security/src"
       ],
-      "@shared/security/*": [
+      "@arbitrage/security/*": [
         "../../shared/security/src/*"
       ]
     }

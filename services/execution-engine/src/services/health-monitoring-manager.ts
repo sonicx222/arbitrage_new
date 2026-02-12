@@ -24,6 +24,7 @@ import {
   type PerformanceLogger,
   type ServiceStateManager,
   type RedisClient,
+  clearIntervalSafe,
 } from '@arbitrage/core';
 import type { ServiceHealth } from '@arbitrage/types';
 import type {
@@ -323,14 +324,8 @@ export class HealthMonitoringManager {
    * Called during stop() and for cleanup.
    */
   private clearIntervals(): void {
-    if (this.healthMonitoringInterval) {
-      clearInterval(this.healthMonitoringInterval);
-      this.healthMonitoringInterval = null;
-    }
-    if (this.stalePendingCleanupInterval) {
-      clearInterval(this.stalePendingCleanupInterval);
-      this.stalePendingCleanupInterval = null;
-    }
+    this.healthMonitoringInterval = clearIntervalSafe(this.healthMonitoringInterval);
+    this.stalePendingCleanupInterval = clearIntervalSafe(this.stalePendingCleanupInterval);
   }
 }
 

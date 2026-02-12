@@ -1,7 +1,13 @@
 // Cross-Chain Detector Service Entry Point
-import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
+import { Server } from 'http';
 import { CrossChainDetectorService } from './detector';
-import { createLogger } from '@arbitrage/core';
+import {
+  createLogger,
+  createSimpleHealthServer,
+  setupServiceShutdown,
+  closeHealthServer,
+  runServiceMain,
+} from '@arbitrage/core';
 
 const logger = createLogger('cross-chain-detector');
 
@@ -12,51 +18,6 @@ const HEALTH_CHECK_PORT = parseInt(process.env.HEALTH_CHECK_PORT || process.env.
 
 let healthServer: Server | null = null;
 
-/**
- * Create and start HTTP health check server for the Cross-Chain Detector.
- */
-function createHealthServer(detector: CrossChainDetectorService): Server {
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    if (req.url === '/health') {
-      const isRunning = detector.isRunning();
-      const statusCode = isRunning ? 200 : 503;
-      const status = isRunning ? 'healthy' : 'unhealthy';
-
-      res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        service: 'cross-chain-detector',
-        status,
-        uptime: process.uptime(),
-        memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-        timestamp: Date.now()
-      }));
-    } else if (req.url === '/ready') {
-      const ready = detector.isRunning();
-      res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        service: 'cross-chain-detector',
-        ready
-      }));
-    } else if (req.url === '/') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        service: 'cross-chain-detector',
-        description: 'Cross-Chain Arbitrage Detector Service',
-        endpoints: ['/health', '/ready']
-      }));
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not found' }));
-    }
-  });
-
-  server.listen(HEALTH_CHECK_PORT, () => {
-    logger.info(`Health server listening on port ${HEALTH_CHECK_PORT}`);
-  });
-
-  return server;
-}
-
 async function main() {
   try {
     logger.info('Starting Cross-Chain Detector Service', {
@@ -66,44 +27,31 @@ async function main() {
     const detector = new CrossChainDetectorService();
 
     // Start health server first
-    healthServer = createHealthServer(detector);
+    healthServer = createSimpleHealthServer({
+      port: HEALTH_CHECK_PORT,
+      serviceName: 'cross-chain-detector',
+      logger,
+      description: 'Cross-Chain Arbitrage Detector Service',
+      healthCheck: () => {
+        const isRunning = detector.isRunning();
+        return {
+          status: isRunning ? 'healthy' : 'unhealthy',
+          uptime: process.uptime(),
+          memoryMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        };
+      },
+      readyCheck: () => detector.isRunning(),
+    });
 
     await detector.start();
 
-    // FIX B5: Guard against double shutdown when user presses Ctrl+C multiple times
-    let isShuttingDown = false;
-    const shutdown = async (signal: string) => {
-      if (isShuttingDown) {
-        logger.debug(`Already shutting down, ignoring ${signal}`);
-        return;
-      }
-      isShuttingDown = true;
-
-      logger.info(`Received ${signal}, shutting down gracefully`);
-
-      try {
-        // FIX B4: Properly await health server close
-        if (healthServer) {
-          await new Promise<void>((resolve) => {
-            healthServer!.close(() => resolve());
-          });
-        }
+    setupServiceShutdown({
+      logger,
+      serviceName: 'Cross-Chain Detector',
+      onShutdown: async () => {
+        await closeHealthServer(healthServer);
         await detector.stop();
-        process.exit(0);
-      } catch (error) {
-        logger.error('Error during shutdown', {
-          error: error instanceof Error ? error.message : String(error)
-        });
-        process.exit(1);
-      }
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-
-    // FIX B4: Add unhandledRejection handler for better error visibility
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled rejection in Cross-Chain Detector', { reason, promise });
+      },
     });
 
     logger.info('Cross-Chain Detector Service is running');
@@ -114,10 +62,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('Unhandled error in Cross-Chain Detector Service:', error);
-  process.exit(1);
-});
+runServiceMain({ main, serviceName: 'Cross-Chain Detector Service', logger });
 
 // =============================================================================
 // Module Exports (ADR-014: Modular Detector Components)

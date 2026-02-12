@@ -46,12 +46,8 @@
 // DomainArbitrageError is replaced by ArbitrageError from @arbitrage/types
 // =============================================================================
 
-/**
- * @deprecated Since v1.0.0. Use ArbitrageError from '@arbitrage/types' instead.
- * The DomainArbitrageError class uses an older error pattern.
- * Migration: new ArbitrageError(msg, code, service) from '@arbitrage/types'
- */
-export { ArbitrageError as DomainArbitrageError } from '../domain-models';
+// REMOVED: DomainArbitrageError (domain-models.ts dead code, cleaned up)
+// Migration: Use ArbitrageError from '@arbitrage/types' instead.
 
 // =============================================================================
 // DEPRECATED ASYNC UTILITIES

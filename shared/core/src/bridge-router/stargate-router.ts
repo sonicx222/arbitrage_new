@@ -31,6 +31,7 @@ import {
   BRIDGE_TIMES,
 } from './types';
 import { createLogger } from '../logger';
+import { clearIntervalSafe } from '../lifecycle-utils';
 import { AsyncMutex } from '../async/async-mutex';
 
 const logger = createLogger('stargate-router');
@@ -166,10 +167,7 @@ export class StargateRouter implements IBridgeRouter {
    * Stop the router and cleanup resources
    */
   dispose(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
+    this.cleanupTimer = clearIntervalSafe(this.cleanupTimer);
   }
 
   /**

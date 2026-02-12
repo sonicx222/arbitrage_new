@@ -10,6 +10,7 @@
 
 import WebSocket from 'ws';
 import { createLogger } from './logger';
+import { clearIntervalSafe, clearTimeoutSafe } from './lifecycle-utils';
 import { getProviderHealthScorer, ProviderHealthScorer, METHOD_CU_COSTS } from './monitoring/provider-health-scorer';
 import { EventProcessingWorkerPool, getWorkerPool } from './async/worker-pool';
 
@@ -1710,10 +1711,7 @@ export class WebSocketManager {
    * S3.3: Stop proactive health monitoring.
    */
   stopProactiveHealthCheck(): void {
-    if (this.healthCheckTimer) {
-      clearInterval(this.healthCheckTimer);
-      this.healthCheckTimer = null;
-    }
+    this.healthCheckTimer = clearIntervalSafe(this.healthCheckTimer);
   }
 
   /**
@@ -1809,23 +1807,14 @@ export class WebSocketManager {
   }
 
   private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.heartbeatTimer = clearIntervalSafe(this.heartbeatTimer);
   }
 
   private clearConnectionTimeout(): void {
-    if (this.connectionTimeoutTimer) {
-      clearTimeout(this.connectionTimeoutTimer);
-      this.connectionTimeoutTimer = null;
-    }
+    this.connectionTimeoutTimer = clearTimeoutSafe(this.connectionTimeoutTimer);
   }
 
   private clearReconnectionTimer(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.reconnectTimer = clearTimeoutSafe(this.reconnectTimer);
   }
 }

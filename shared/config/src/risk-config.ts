@@ -16,8 +16,13 @@
  */
 
 // =============================================================================
-// HELPER: BigInt Parsing with Validation (FIX 3.2)
+// HELPER: Env Parsing with Validation (FIX 3.2)
 // =============================================================================
+
+// S-6: Use shared parseEnvIntSafe for integer parsing
+// NOTE: Cannot import from @arbitrage/core here because config builds before core.
+// The shared parseEnvIntSafe in core has identical semantics. If the build order
+// changes in the future, this local copy can be replaced with an import.
 
 /**
  * FIX 3.2: Parse environment variable to BigInt with validation.
@@ -73,8 +78,12 @@ function parseEnvFloat(envVar: string, defaultValue: number, min = 0, max = 1): 
 }
 
 /**
- * FIX 3.2: Parse environment variable to integer with validation.
- * Prevents NaN from invalid integer strings.
+ * FIX 3.2: Parse environment variable to integer with validation (safe mode).
+ * Prevents NaN from invalid integer strings. Returns default/min on invalid input.
+ *
+ * NOTE: This is functionally identical to parseEnvIntSafe in @arbitrage/core/env-utils.
+ * It remains local because shared/config builds before shared/core in the dependency chain.
+ * See S-6 consolidation notes.
  *
  * @param envVar - Environment variable name
  * @param defaultValue - Default value

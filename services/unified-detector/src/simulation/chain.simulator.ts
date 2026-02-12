@@ -17,7 +17,8 @@ import {
   ChainSimulator,
   getChainSimulator,
   stopChainSimulator,
-  SimulatedPairConfig
+  SimulatedPairConfig,
+  clearIntervalSafe,
 } from '@arbitrage/core';
 
 import { ArbitrageOpportunity, PriceUpdate } from '@arbitrage/types';
@@ -284,10 +285,7 @@ export class ChainSimulationHandler {
     this.isRunning = false;
 
     // Stop non-EVM simulation interval
-    if (this.nonEvmSimulationInterval) {
-      clearInterval(this.nonEvmSimulationInterval);
-      this.nonEvmSimulationInterval = null;
-    }
+    this.nonEvmSimulationInterval = clearIntervalSafe(this.nonEvmSimulationInterval);
 
     // Stop chain simulator
     if (this.chainSimulator) {

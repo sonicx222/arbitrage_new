@@ -9,7 +9,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
-import { apiAuth, apiAuthorize } from '@shared/security';
+import { apiAuth, apiAuthorize } from '@arbitrage/security';
 import type { CoordinatorStateProvider } from '../types';
 
 /**

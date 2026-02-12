@@ -19,6 +19,7 @@
 
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
+import { clearIntervalSafe } from './lifecycle-utils';
 
 const logger = createLogger('simulation-mode');
 
@@ -749,10 +750,7 @@ export class ChainSimulator extends EventEmitter {
     if (!this.running) return;
     this.running = false;
 
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-    }
+    this.interval = clearIntervalSafe(this.interval);
 
     this.logger.info('Chain simulator stopped', { chainId: this.config.chainId });
   }
@@ -1394,10 +1392,7 @@ export class CrossChainSimulator extends EventEmitter {
     if (!this.running) return;
     this.running = false;
 
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
-    }
+    this.interval = clearIntervalSafe(this.interval);
 
     this.logger.info('Cross-chain simulator stopped');
   }

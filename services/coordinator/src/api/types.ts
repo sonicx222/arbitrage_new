@@ -107,7 +107,7 @@ export interface CoordinatorStateProvider {
   deleteAlertCooldown(key: string): boolean;
 
   /** Logger for route handlers */
-  getLogger(): RouteLogger;
+  getLogger(): MinimalLogger;
 
   /** Get alert history for /api/alerts endpoint */
   getAlertHistory(limit?: number): Alert[];

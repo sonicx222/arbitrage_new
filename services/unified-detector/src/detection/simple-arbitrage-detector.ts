@@ -37,6 +37,8 @@ import {
   // FIX 6: Use shared price bounds constants
   MIN_SAFE_PRICE,
   MAX_SAFE_PRICE,
+  // HOT-PATH: Pre-normalized token order check (ADR-022)
+  isReverseOrderPreNormalized,
 } from '@arbitrage/core';
 
 import { ARBITRAGE_CONFIG, DETECTOR_CONFIG } from '@arbitrage/config';
@@ -153,7 +155,7 @@ export class SimpleArbitrageDetector {
     }
 
     // BUG FIX: Adjust price for reverse order pairs
-    const isReversed = this.isReverseOrder(pair1, pair2);
+    const isReversed = isReverseOrderPreNormalized(pair1.token0, pair2.token0);
     const price2 = isReversed ? 1 / price2Raw : price2Raw;
 
     const minPrice = Math.min(price1, price2);
@@ -225,16 +227,6 @@ export class SimpleArbitrageDetector {
     };
 
     return opportunity;
-  }
-
-  /**
-   * Check if token order is reversed between two pairs.
-   */
-  // HOT-PATH OPT (Perf-4): PairSnapshot tokens are already lowercase (normalized
-  // in chain-instance.ts initializePairs and carried through SnapshotManager).
-  // Skip redundant toLowerCase() calls on every comparison.
-  private isReverseOrder(pair1: PairSnapshot, pair2: PairSnapshot): boolean {
-    return pair1.token0 === pair2.token1 && pair1.token1 === pair2.token0;
   }
 
   /**

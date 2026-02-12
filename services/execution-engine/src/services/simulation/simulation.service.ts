@@ -9,7 +9,7 @@
  * @see Phase 1.1: Transaction Simulation Integration in implementation plan
  */
 
-import { getErrorMessage } from '@arbitrage/core';
+import { getErrorMessage, clearIntervalSafe } from '@arbitrage/core';
 import type { Logger } from '../../types';
 import {
   ISimulationService,
@@ -160,10 +160,7 @@ export class SimulationService implements ISimulationService {
     this.cacheCleanupInterval = setInterval(() => {
       // Self-clear if stopped (per code conventions)
       if (this.stopped) {
-        if (this.cacheCleanupInterval) {
-          clearInterval(this.cacheCleanupInterval);
-          this.cacheCleanupInterval = null;
-        }
+        this.cacheCleanupInterval = clearIntervalSafe(this.cacheCleanupInterval);
         return;
       }
 
@@ -540,10 +537,7 @@ export class SimulationService implements ISimulationService {
     this.stopped = true;
 
     // Fix 4.2: Stop periodic cache cleanup
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
-    }
+    this.cacheCleanupInterval = clearIntervalSafe(this.cacheCleanupInterval);
 
     // Clear the cache to free memory
     this.simulationCache.clear();
