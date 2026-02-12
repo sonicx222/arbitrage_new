@@ -287,11 +287,11 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
       return false;
     }
 
-    // Amount fields (may be serialized as string from Redis)
-    if (intent.amountIn === undefined || intent.amountIn === null) {
+    // FIX #7: Amount fields must be valid numeric strings for BigInt conversion
+    if (typeof intent.amountIn !== 'string' || !intent.amountIn || !/^\d+$/.test(intent.amountIn)) {
       return false;
     }
-    if (intent.expectedAmountOut === undefined || intent.expectedAmountOut === null) {
+    if (typeof intent.expectedAmountOut !== 'string' || !intent.expectedAmountOut || !/^\d+$/.test(intent.expectedAmountOut)) {
       return false;
     }
 

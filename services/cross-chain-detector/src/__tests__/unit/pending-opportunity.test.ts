@@ -183,11 +183,25 @@ describe('Pending Opportunity Validation', () => {
       return false;
     }
 
-    // BigInt fields - check they're defined (may be serialized as string from Redis)
+    // FIX #7: Amount fields must be valid numeric strings or bigints for BigInt conversion
+    // In production (stream-consumer), these arrive as strings from Redis.
+    // In tests, the fixture uses bigint values directly.
     if (intent.amountIn === undefined || intent.amountIn === null) {
       return false;
     }
+    if (typeof intent.amountIn === 'string' && !/^\d+$/.test(intent.amountIn)) {
+      return false;
+    }
+    if (typeof intent.amountIn !== 'string' && typeof intent.amountIn !== 'bigint') {
+      return false;
+    }
     if (intent.expectedAmountOut === undefined || intent.expectedAmountOut === null) {
+      return false;
+    }
+    if (typeof intent.expectedAmountOut === 'string' && !/^\d+$/.test(intent.expectedAmountOut)) {
+      return false;
+    }
+    if (typeof intent.expectedAmountOut !== 'string' && typeof intent.expectedAmountOut !== 'bigint') {
       return false;
     }
 

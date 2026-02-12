@@ -405,7 +405,7 @@ describe('ConfidenceCalculator', () => {
         { dominantDirection: 'neutral', netFlowUsd: 1000, superWhaleCount: 0 },
       );
 
-      // significantFlowThresholdUsd default = 500000
+      // significantFlowThresholdUsd default = 100000 (aligned with detector.ts)
       const largeFlow = calculator.calculate(
         makeLowPrice(2500),
         { price: 2750 },

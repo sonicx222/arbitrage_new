@@ -104,6 +104,9 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
   const priceData: PriceData = {};
   let updateCounter = 0;
 
+  // FIX #6: Cached pair count to avoid O(n) traversal in getPairCount()
+  let pairCount = 0;
+
   // PERF-P4: Snapshot caching to avoid rebuilding when no data has changed
   // FIX 5.2: Use modulo to prevent integer overflow after billions of updates
   const MAX_VERSION = Number.MAX_SAFE_INTEGER - 1000; // Reset well before overflow
@@ -159,8 +162,15 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
         priceData[update.chain][update.dex] = {};
       }
 
+      // FIX #6: Track new pair insertions for cached pair count
+      const isNewPair = !(update.pairKey in priceData[update.chain][update.dex]);
+
       // Store update
       priceData[update.chain][update.dex][update.pairKey] = update;
+
+      if (isNewPair) {
+        pairCount++;
+      }
 
       // PERF-P4: Increment version to invalidate cached snapshot
       // FIX 5.2: Reset version counter to prevent overflow
@@ -221,6 +231,7 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
           const update = priceData[chain][dex][pairKey];
           if (update && update.timestamp < cutoffTime) {
             delete priceData[chain][dex][pairKey];
+            pairCount--;
             dataRemoved = true;
           }
         }
@@ -409,13 +420,8 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
    * Get count of pairs being monitored.
    */
   function getPairCount(): number {
-    let count = 0;
-    for (const chain of Object.keys(priceData)) {
-      for (const dex of Object.keys(priceData[chain])) {
-        count += Object.keys(priceData[chain][dex]).length;
-      }
-    }
-    return count;
+    // FIX #6: Return cached counter instead of O(n) traversal
+    return pairCount;
   }
 
   /**
@@ -427,6 +433,9 @@ export function createPriceDataManager(config: PriceDataManagerConfig): PriceDat
       delete priceData[chain];
     }
     updateCounter = 0;
+
+    // FIX #6: Reset cached pair count
+    pairCount = 0;
 
     // PERF-P4: Reset cache
     // FIX 4.4: Reset to consistent values that won't cause cache collision

@@ -95,18 +95,20 @@ export interface ConfidenceCalculatorConfig {
 // Default Configuration
 // =============================================================================
 
+// FIX #2: Aligned defaults with detector.ts DEFAULT_WHALE_CONFIG and DEFAULT_ML_CONFIG
+// so standalone CC tests use production-consistent values.
 export const DEFAULT_CONFIDENCE_CONFIG: ConfidenceCalculatorConfig = {
   ml: {
     enabled: false,
     minConfidence: 0.6,
     alignedBoost: 1.15,
-    opposedPenalty: 0.85,
+    opposedPenalty: 0.9,
   },
   whale: {
-    whaleBullishBoost: 1.1,
-    whaleBearishPenalty: 0.9,
-    superWhaleBoost: 1.15,
-    significantFlowThresholdUsd: 500000,
+    whaleBullishBoost: 1.15,
+    whaleBearishPenalty: 0.85,
+    superWhaleBoost: 1.25,
+    significantFlowThresholdUsd: 100000,
   },
   maxConfidence: 0.95,
 };

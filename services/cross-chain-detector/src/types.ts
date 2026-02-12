@@ -211,7 +211,7 @@ export interface CrossChainOpportunity {
   /** Percentage price difference */
   percentageDiff: number;
 
-  /** Estimated gross profit (before bridge costs) */
+  /** Estimated gross profit as price differential (before bridge/gas costs). Equal to priceDiff. */
   estimatedProfit: number;
 
   /** Estimated bridge cost in token units (FIX: Required field, default 0 if unknown) */

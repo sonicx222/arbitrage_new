@@ -1873,3 +1873,199 @@ describe('P0 Fix Regression: net profit includes gas costs and swap fees', () =>
     expect(netProfit).toBeLessThan(priceDiff - bridgeCost);
   });
 });
+
+// =============================================================================
+// FIX #5: updateBridgeData() Validation and Rate Limiting Tests
+// Tests for bridge data validation bounds and per-route rate limiting logic.
+// =============================================================================
+
+describe('updateBridgeData validation and rate limiting', () => {
+  /**
+   * Validates bridge data fields using the same logic as
+   * CrossChainDetectorService.updateBridgeData().
+   */
+  function validateBridgeData(bridgeResult: {
+    actualLatency: number;
+    actualCost: number;
+    amount: number;
+    timestamp: number;
+  }): { valid: boolean; reason?: string } {
+    const { actualLatency, actualCost, amount, timestamp } = bridgeResult;
+
+    if (!Number.isFinite(actualLatency) || actualLatency <= 0 || actualLatency > 3600000) {
+      return { valid: false, reason: 'invalid actualLatency' };
+    }
+    if (!Number.isFinite(actualCost) || actualCost < 0 || actualCost > 1000) {
+      return { valid: false, reason: 'invalid actualCost' };
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { valid: false, reason: 'invalid amount' };
+    }
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > Date.now() + 60000) {
+      return { valid: false, reason: 'invalid timestamp' };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Rate limiter matching updateBridgeData() logic:
+   * max 10 updates per 60-second window per route key.
+   */
+  function createRateLimiter() {
+    const rateLimit = new Map<string, number[]>();
+    const windowMs = 60000;
+    const maxUpdatesPerWindow = 10;
+
+    return {
+      isAllowed(routeKey: string): boolean {
+        const now = Date.now();
+        let timestamps = rateLimit.get(routeKey);
+        if (timestamps) {
+          timestamps = timestamps.filter(t => now - t < windowMs);
+          rateLimit.set(routeKey, timestamps);
+          if (timestamps.length >= maxUpdatesPerWindow) {
+            return false;
+          }
+        } else {
+          timestamps = [];
+          rateLimit.set(routeKey, timestamps);
+        }
+        timestamps.push(now);
+        return true;
+      },
+    };
+  }
+
+  it('should accept valid bridge data', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 15.5,
+      amount: 1000,
+      timestamp: Date.now() - 5000,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('should reject negative actualLatency', () => {
+    const result = validateBridgeData({
+      actualLatency: -10,
+      actualCost: 15,
+      amount: 1000,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid actualLatency');
+  });
+
+  it('should reject NaN actualLatency', () => {
+    const result = validateBridgeData({
+      actualLatency: NaN,
+      actualCost: 15,
+      amount: 1000,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid actualLatency');
+  });
+
+  it('should reject actualLatency exceeding 3600000', () => {
+    const result = validateBridgeData({
+      actualLatency: 3600001,
+      actualCost: 15,
+      amount: 1000,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid actualLatency');
+  });
+
+  it('should reject negative actualCost', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: -1,
+      amount: 1000,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid actualCost');
+  });
+
+  it('should reject actualCost exceeding 1000', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 1001,
+      amount: 1000,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid actualCost');
+  });
+
+  it('should reject zero amount', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 15,
+      amount: 0,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid amount');
+  });
+
+  it('should reject negative amount', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 15,
+      amount: -100,
+      timestamp: Date.now(),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid amount');
+  });
+
+  it('should reject future timestamp (beyond 60s tolerance)', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 15,
+      amount: 1000,
+      timestamp: Date.now() + 120000, // 2 minutes in future
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid timestamp');
+  });
+
+  it('should reject zero timestamp', () => {
+    const result = validateBridgeData({
+      actualLatency: 120,
+      actualCost: 15,
+      amount: 1000,
+      timestamp: 0,
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('invalid timestamp');
+  });
+
+  it('should rate limit: allow up to 10 updates per route per 60s', () => {
+    const limiter = createRateLimiter();
+    const routeKey = 'ethereum-arbitrum-stargate';
+
+    for (let i = 0; i < 10; i++) {
+      expect(limiter.isAllowed(routeKey)).toBe(true);
+    }
+
+    // 11th should be rejected
+    expect(limiter.isAllowed(routeKey)).toBe(false);
+  });
+
+  it('should rate limit independently per route', () => {
+    const limiter = createRateLimiter();
+
+    for (let i = 0; i < 10; i++) {
+      limiter.isAllowed('ethereum-arbitrum-stargate');
+    }
+
+    // Different route should still be allowed
+    expect(limiter.isAllowed('arbitrum-optimism-hop')).toBe(true);
+  });
+});

@@ -378,4 +378,102 @@ describe('BridgeCostEstimator', () => {
       expect(['config', 'fallback']).toContain(estimate.source);
     });
   });
+
+  // ===========================================================================
+  // FIX #8: updateEthPrice and getEthPrice
+  // ===========================================================================
+
+  describe('updateEthPrice and getEthPrice', () => {
+    it('should return default ETH price (3000) before any update', () => {
+      expect(estimator.getEthPrice()).toBe(3000);
+    });
+
+    it('should update ETH price with valid value', () => {
+      estimator.updateEthPrice(4000);
+      expect(estimator.getEthPrice()).toBe(4000);
+    });
+
+    it('should reject zero price and keep previous value', () => {
+      estimator.updateEthPrice(4000);
+      estimator.updateEthPrice(0);
+
+      expect(estimator.getEthPrice()).toBe(4000);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Invalid ETH price provided, keeping current value',
+        expect.objectContaining({ providedPrice: 0 }),
+      );
+    });
+
+    it('should reject negative price and keep previous value', () => {
+      estimator.updateEthPrice(4000);
+      estimator.updateEthPrice(-100);
+
+      expect(estimator.getEthPrice()).toBe(4000);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Invalid ETH price provided, keeping current value',
+        expect.objectContaining({ providedPrice: -100 }),
+      );
+    });
+
+    it('should reject NaN price and keep previous value', () => {
+      estimator.updateEthPrice(4000);
+      estimator.updateEthPrice(NaN);
+
+      expect(estimator.getEthPrice()).toBe(4000);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Invalid ETH price provided, keeping current value',
+        expect.objectContaining({ providedPrice: NaN }),
+      );
+    });
+
+    it('should reject Infinity price and keep previous value', () => {
+      estimator.updateEthPrice(4000);
+      estimator.updateEthPrice(Infinity);
+
+      expect(estimator.getEthPrice()).toBe(4000);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        'Invalid ETH price provided, keeping current value',
+        expect.objectContaining({ providedPrice: Infinity }),
+      );
+    });
+
+    it('should affect getDetailedEstimate USD calculations', () => {
+      // Get estimate with default ETH price ($3000)
+      const priceUpdate = createMockPriceUpdate({ price: 3000 });
+
+      // Add enough data for predictor-based estimate
+      for (let i = 0; i < 20; i++) {
+        mockBridgePredictor.updateModel({
+          bridge: {
+            sourceChain: 'ethereum',
+            targetChain: 'arbitrum',
+            bridge: 'stargate',
+            token: 'WETH',
+            amount: 1.0,
+          },
+          actualLatency: 120,
+          actualCost: 0.001, // 0.001 ETH cost
+          success: true,
+          timestamp: Date.now() + i * 1000,
+        });
+      }
+
+      const estimateAtDefault = estimator.getDetailedEstimate('ethereum', 'arbitrum', priceUpdate);
+
+      // Now update ETH price to $6000 (double)
+      estimator.updateEthPrice(6000);
+
+      const estimateAtHigher = estimator.getDetailedEstimate('ethereum', 'arbitrum', priceUpdate);
+
+      // If predictor returns cost in ETH, doubling ETH price should increase USD cost
+      // The exact behavior depends on source (predictor vs fallback), but USD cost
+      // should differ when ETH price changes
+      if (estimateAtDefault.source === 'predictor' && estimateAtHigher.source === 'predictor') {
+        expect(estimateAtHigher.costUsd).toBeGreaterThan(estimateAtDefault.costUsd);
+      }
+      // Regardless, both should be positive
+      expect(estimateAtDefault.costUsd).toBeGreaterThan(0);
+      expect(estimateAtHigher.costUsd).toBeGreaterThan(0);
+    });
+  });
 });

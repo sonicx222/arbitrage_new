@@ -96,6 +96,8 @@ import {
   MLPredictionConfig,
   // FIX 7.1: Import toDisplayTokenPair for pending opportunity formatting
   toDisplayTokenPair,
+  // FIX #13: Import separator for exact token matching in whale pair lookup
+  TOKEN_PAIR_INTERNAL_SEPARATOR,
   // P0-7: Pre-validation types (config and callback used for DI)
   PreValidationConfig,
   PreValidationSimulationCallback,
@@ -238,6 +240,9 @@ export class CrossChainDetectorService {
   private readonly detectionGuard = new OperationGuard('detection');
   // SECURITY-FIX: Rate limiting for whale-triggered detection to prevent DoS
   private readonly whaleGuard = new OperationGuard('whale-detection', { cooldownMs: 1000 });
+
+  // FIX #5: Rate limiting for updateBridgeData() to prevent abuse
+  private bridgeDataRateLimit: Map<string, number[]> = new Map();
 
   // FIX #5: Circuit breaker for detection loop errors
   private consecutiveDetectionErrors = 0;
@@ -530,6 +535,8 @@ export class CrossChainDetectorService {
     this.healthMonitoringInterval = clearIntervalSafe(this.healthMonitoringInterval);
     // Phase 3: Clear ETH price refresh interval
     this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
+    // FIX #5: Clear rate limit state on shutdown
+    this.bridgeDataRateLimit.clear();
   }
 
   // ===========================================================================
@@ -987,8 +994,8 @@ export class CrossChainDetectorService {
         // (publisher divides by 100, so store as percentage e.g. 2.0 for 2%)
         percentageDiff: priceDiffPercent * 100,
         tradeSizeUsd: this.config.defaultTradeSizeUsd ?? 1000,
-        // Values are in the token's smallest unit (e.g., wei for ETH, 1e-6 for USDC)
-        estimatedProfit: netProfit,
+        // FIX #1: Use priceDiff (gross profit) to match cross-chain path and JSDoc semantics
+        estimatedProfit: priceDiff,
         bridgeCost: 0, // Same-chain opportunity
         netProfit: netProfit,
         createdAt: now,
@@ -1514,6 +1521,31 @@ export class CrossChainDetectorService {
     success: boolean;
     timestamp: number;
   }): void {
+    // FIX #5: Rate limit per route (max 10 updates per 60 seconds)
+    const routeKey = `${bridgeResult.sourceChain}-${bridgeResult.targetChain}-${bridgeResult.bridge}`;
+    const now = Date.now();
+    const windowMs = 60000;
+    const maxUpdatesPerWindow = 10;
+
+    let timestamps = this.bridgeDataRateLimit.get(routeKey);
+    if (timestamps) {
+      // Prune timestamps outside the window
+      timestamps = timestamps.filter(t => now - t < windowMs);
+      this.bridgeDataRateLimit.set(routeKey, timestamps);
+
+      if (timestamps.length >= maxUpdatesPerWindow) {
+        this.logger.warn('Rate limited updateBridgeData', {
+          routeKey,
+          updatesInWindow: timestamps.length,
+        });
+        return;
+      }
+    } else {
+      timestamps = [];
+      this.bridgeDataRateLimit.set(routeKey, timestamps);
+    }
+    timestamps.push(now);
+
     // FIX #7: Validate bridge data bounds before passing to predictor
     // Prevents poisoned/invalid data from corrupting the prediction model
     const { actualLatency, actualCost, amount, timestamp } = bridgeResult;
@@ -1781,11 +1813,12 @@ export class CrossChainDetectorService {
       // We need to find ALL pairs that contain this token and check for arbitrage.
       const normalizedWhaleToken = normalizeTokenForCrossChain(whaleTx.token);
 
-      // Find all token pairs containing the whale's token
+      // FIX #13: Use exact token part matching instead of substring includes()
+      // to prevent "ETH" from matching "WETH_USDC" via substring
       const matchingPairs: string[] = [];
       for (const tokenPair of indexedSnapshot.tokenPairs) {
-        // tokenPair is in format "TOKEN0_TOKEN1"
-        if (tokenPair.includes(normalizedWhaleToken)) {
+        const tokenParts = tokenPair.split(TOKEN_PAIR_INTERNAL_SEPARATOR);
+        if (tokenParts.some(part => part === normalizedWhaleToken)) {
           matchingPairs.push(tokenPair);
         }
       }
