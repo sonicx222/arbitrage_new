@@ -2069,3 +2069,416 @@ describe('updateBridgeData validation and rate limiting', () => {
     expect(limiter.isAllowed('arbitrum-optimism-hop')).toBe(true);
   });
 });
+
+// =============================================================================
+// ETH Price Circuit Breaker Tests (FIX #9)
+//
+// Tests the rate-of-change circuit breaker that rejects ETH prices deviating
+// >20% from the median of recent prices. Uses inline logic matching production
+// implementation in CrossChainDetectorService.validateEthPriceRate().
+// =============================================================================
+
+describe('ETH Price Circuit Breaker (FIX #9)', () => {
+  const ETH_PRICE_HISTORY_SIZE = 10;
+  const ETH_PRICE_MAX_DEVIATION = 0.2; // 20%
+
+  /**
+   * Simulates validateEthPriceRate logic from CrossChainDetectorService
+   */
+  function createEthPriceValidator() {
+    const recentPrices: number[] = [];
+
+    return {
+      validate(price: number): boolean {
+        if (recentPrices.length >= 3) {
+          const sorted = recentPrices.slice().sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          const median = sorted.length % 2 === 0
+            ? (sorted[mid - 1] + sorted[mid]) / 2
+            : sorted[mid];
+
+          const deviation = Math.abs(price - median) / median;
+          if (deviation > ETH_PRICE_MAX_DEVIATION) {
+            return false; // Rejected
+          }
+        }
+
+        recentPrices.push(price);
+        if (recentPrices.length > ETH_PRICE_HISTORY_SIZE) {
+          recentPrices.splice(0, recentPrices.length - ETH_PRICE_HISTORY_SIZE);
+        }
+        return true; // Accepted
+      },
+      getHistory(): number[] {
+        return [...recentPrices];
+      },
+    };
+  }
+
+  it('should accept prices when fewer than 3 data points exist', () => {
+    const validator = createEthPriceValidator();
+
+    // First two prices accepted unconditionally (no median to compare against)
+    expect(validator.validate(3000)).toBe(true);
+    expect(validator.validate(3100)).toBe(true);
+    expect(validator.getHistory()).toHaveLength(2);
+  });
+
+  it('should accept prices within 20% of median', () => {
+    const validator = createEthPriceValidator();
+
+    // Build history: median = 3000
+    validator.validate(2900);
+    validator.validate(3000);
+    validator.validate(3100);
+
+    // 15% above median (~3450) should be accepted
+    expect(validator.validate(3450)).toBe(true);
+  });
+
+  it('should reject prices deviating >20% from median', () => {
+    const validator = createEthPriceValidator();
+
+    // Build history: median = 3000
+    validator.validate(2900);
+    validator.validate(3000);
+    validator.validate(3100);
+
+    // Poisoned price ($200) — 93% deviation from median, should be rejected
+    expect(validator.validate(200)).toBe(false);
+
+    // History should NOT include the rejected price
+    expect(validator.getHistory()).toHaveLength(3);
+    expect(validator.getHistory()).not.toContain(200);
+  });
+
+  it('should reject price spikes >20% above median', () => {
+    const validator = createEthPriceValidator();
+
+    // Build history: median = 3000
+    validator.validate(2900);
+    validator.validate(3000);
+    validator.validate(3100);
+
+    // 25% above median (3750) should be rejected
+    expect(validator.validate(3750)).toBe(false);
+  });
+
+  it('should accept gradual price changes within threshold', () => {
+    const validator = createEthPriceValidator();
+
+    // Gradual price increase: 3000 -> 3100 -> 3200 -> 3300 -> 3400
+    // Each step is ~3% change, well within 20%
+    expect(validator.validate(3000)).toBe(true);
+    expect(validator.validate(3100)).toBe(true);
+    expect(validator.validate(3200)).toBe(true);
+    expect(validator.validate(3300)).toBe(true);
+    expect(validator.validate(3400)).toBe(true);
+
+    expect(validator.getHistory()).toHaveLength(5);
+  });
+
+  it('should cap history at ETH_PRICE_HISTORY_SIZE entries', () => {
+    const validator = createEthPriceValidator();
+
+    // Add 12 prices (exceeds size limit of 10)
+    for (let i = 0; i < 12; i++) {
+      validator.validate(3000 + i * 10); // Gradual increase
+    }
+
+    expect(validator.getHistory()).toHaveLength(ETH_PRICE_HISTORY_SIZE);
+  });
+
+  it('should use median (not mean) to resist outlier influence', () => {
+    const validator = createEthPriceValidator();
+
+    // History with one high outlier that was accepted early
+    // Prices: 3000, 3000, 3500 (accepted before 3 points existed)
+    validator.validate(3000);
+    validator.validate(3000);
+    validator.validate(3500); // Accepted (only 2 data points at validation time)
+
+    // Median of [3000, 3000, 3500] = 3000 (middle value when sorted)
+    // A price of 3100 should be accepted (3.3% from median 3000)
+    expect(validator.validate(3100)).toBe(true);
+
+    // A price of 200 should be rejected (93% from median)
+    expect(validator.validate(200)).toBe(false);
+  });
+});
+
+// =============================================================================
+// FIX #3: Lifecycle State Machine Tests
+//
+// Tests the start/stop lifecycle state transitions using inline state machine
+// logic. The production implementation uses ServiceStateManager; these tests
+// verify the state transition contract that start()/stop() depend on.
+// =============================================================================
+
+describe('Lifecycle State Machine (FIX #3)', () => {
+  enum State {
+    IDLE = 'IDLE',
+    STARTING = 'STARTING',
+    RUNNING = 'RUNNING',
+    STOPPING = 'STOPPING',
+    STOPPED = 'STOPPED',
+    ERROR = 'ERROR',
+  }
+
+  /**
+   * Simulates the lifecycle state machine from ServiceStateManager/CrossChainDetectorService.
+   * @see detector.ts start()/stop() methods
+   * @see service-state.ts executeStart()/executeStop()
+   */
+  function createLifecycle() {
+    let state = State.IDLE;
+    const initModules = jest.fn<() => void>();
+    const cleanupModules = jest.fn<() => void>();
+
+    return {
+      getState: () => state,
+      async start(shouldFail = false): Promise<boolean> {
+        if (state !== State.IDLE && state !== State.STOPPED) return false;
+        state = State.STARTING;
+        try {
+          if (shouldFail) throw new Error('Start failed');
+          initModules();
+          state = State.RUNNING;
+          return true;
+        } catch {
+          state = State.ERROR;
+          return false;
+        }
+      },
+      async stop(): Promise<boolean> {
+        if (state !== State.RUNNING && state !== State.ERROR) return false;
+        state = State.STOPPING;
+        cleanupModules();
+        state = State.STOPPED;
+        return true;
+      },
+      getInitModules: () => initModules,
+      getCleanupModules: () => cleanupModules,
+    };
+  }
+
+  it('should transition IDLE -> RUNNING on successful start', async () => {
+    const lifecycle = createLifecycle();
+    expect(lifecycle.getState()).toBe(State.IDLE);
+
+    const result = await lifecycle.start();
+
+    expect(result).toBe(true);
+    expect(lifecycle.getState()).toBe(State.RUNNING);
+    expect(lifecycle.getInitModules()).toHaveBeenCalledTimes(1);
+  });
+
+  it('should transition RUNNING -> STOPPED on stop', async () => {
+    const lifecycle = createLifecycle();
+    await lifecycle.start();
+
+    const result = await lifecycle.stop();
+
+    expect(result).toBe(true);
+    expect(lifecycle.getState()).toBe(State.STOPPED);
+    expect(lifecycle.getCleanupModules()).toHaveBeenCalledTimes(1);
+  });
+
+  it('should transition to ERROR state when start fails', async () => {
+    const lifecycle = createLifecycle();
+
+    const result = await lifecycle.start(true);
+
+    expect(result).toBe(false);
+    expect(lifecycle.getState()).toBe(State.ERROR);
+  });
+
+  it('should allow stop from ERROR state (cleanup)', async () => {
+    const lifecycle = createLifecycle();
+    await lifecycle.start(true);
+    expect(lifecycle.getState()).toBe(State.ERROR);
+
+    const result = await lifecycle.stop();
+
+    expect(result).toBe(true);
+    expect(lifecycle.getState()).toBe(State.STOPPED);
+  });
+
+  it('should prevent double-start from RUNNING state', async () => {
+    const lifecycle = createLifecycle();
+    await lifecycle.start();
+
+    const result = await lifecycle.start();
+
+    expect(result).toBe(false);
+    expect(lifecycle.getState()).toBe(State.RUNNING);
+  });
+
+  it('should prevent stop from IDLE state', async () => {
+    const lifecycle = createLifecycle();
+
+    const result = await lifecycle.stop();
+
+    expect(result).toBe(false);
+    expect(lifecycle.getState()).toBe(State.IDLE);
+  });
+
+  it('should allow restart after stop (STOPPED -> RUNNING)', async () => {
+    const lifecycle = createLifecycle();
+    await lifecycle.start();
+    await lifecycle.stop();
+    expect(lifecycle.getState()).toBe(State.STOPPED);
+
+    const result = await lifecycle.start();
+
+    expect(result).toBe(true);
+    expect(lifecycle.getState()).toBe(State.RUNNING);
+    expect(lifecycle.getInitModules()).toHaveBeenCalledTimes(2);
+  });
+});
+
+// =============================================================================
+// FIX #3/#4: findArbitrageInPrices Core Algorithm Tests
+//
+// Tests the price comparison and opportunity generation logic in isolation.
+// The production method is private, so we test the inline algorithm here
+// matching the core logic from detector.ts:1335-1498.
+// =============================================================================
+
+describe('findArbitrageInPrices algorithm (FIX #3/#4)', () => {
+  interface TestPricePoint {
+    chain: string;
+    dex: string;
+    pairKey: string;
+    price: number;
+    timestamp: number;
+  }
+
+  /**
+   * Simplified inline implementation of findArbitrageInPrices core logic.
+   * Tests min/max finding, price diff calculation, and profit threshold filtering.
+   * @see detector.ts findArbitrageInPrices method
+   */
+  function findArbitrage(
+    chainPrices: TestPricePoint[],
+    bridgeCost: number,
+    minProfitThreshold: number,
+    maxPriceAgeMs = 30000,
+  ) {
+    if (chainPrices.length < 2) return [];
+
+    let lowest = chainPrices[0];
+    let highest = chainPrices[0];
+
+    for (let i = 1; i < chainPrices.length; i++) {
+      if (chainPrices[i].price < lowest.price) lowest = chainPrices[i];
+      if (chainPrices[i].price > highest.price) highest = chainPrices[i];
+    }
+
+    // Invalid price guard (check both low and high)
+    if (lowest.price <= 0 || !Number.isFinite(lowest.price)) return [];
+    if (highest.price <= 0 || !Number.isFinite(highest.price)) return [];
+
+    // Staleness guard
+    const now = Date.now();
+    if (now - lowest.timestamp > maxPriceAgeMs || now - highest.timestamp > maxPriceAgeMs) {
+      return [];
+    }
+
+    const priceDiff = highest.price - lowest.price;
+    const netProfit = priceDiff - bridgeCost;
+
+    if (netProfit > minProfitThreshold * lowest.price) {
+      return [{
+        sourceChain: lowest.chain,
+        sourceDex: lowest.dex,
+        targetChain: highest.chain,
+        targetDex: highest.dex,
+        priceDiff,
+        bridgeCost,
+        netProfit,
+        sourcePrice: lowest.price,
+        targetPrice: highest.price,
+      }];
+    }
+    return [];
+  }
+
+  const now = Date.now();
+
+  it('should find opportunity when price diff exceeds threshold', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 2500, timestamp: now },
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2600, timestamp: now },
+    ];
+
+    const result = findArbitrage(prices, 10, 0.001); // bridgeCost=$10, minProfit=0.1%
+    expect(result).toHaveLength(1);
+    expect(result[0].sourceChain).toBe('ethereum');
+    expect(result[0].targetChain).toBe('arbitrum');
+    expect(result[0].priceDiff).toBe(100);
+    expect(result[0].netProfit).toBe(90); // 100 - 10
+  });
+
+  it('should return empty when profit below threshold after bridge cost', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 2500, timestamp: now },
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2505, timestamp: now },
+    ];
+
+    // Bridge cost $10 wipes out the $5 price diff
+    const result = findArbitrage(prices, 10, 0.001);
+    expect(result).toHaveLength(0);
+  });
+
+  it('should return empty for fewer than 2 price points', () => {
+    expect(findArbitrage([], 10, 0.001)).toHaveLength(0);
+    expect(findArbitrage([
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 2500, timestamp: now },
+    ], 10, 0.001)).toHaveLength(0);
+  });
+
+  it('should correctly identify min and max from multiple chains', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 2550, timestamp: now },
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2450, timestamp: now }, // lowest
+      { chain: 'polygon', dex: 'quickswap', pairKey: 'WETH_USDC', price: 2600, timestamp: now }, // highest
+      { chain: 'optimism', dex: 'velodrome', pairKey: 'WETH_USDC', price: 2500, timestamp: now },
+    ];
+
+    const result = findArbitrage(prices, 5, 0.001);
+    expect(result).toHaveLength(1);
+    expect(result[0].sourceChain).toBe('arbitrum'); // lowest price
+    expect(result[0].targetChain).toBe('polygon'); // highest price
+    expect(result[0].priceDiff).toBe(150); // 2600 - 2450
+  });
+
+  it('should reject stale prices beyond max age', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 2500, timestamp: now - 60000 }, // 1min old
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2600, timestamp: now },
+    ];
+
+    // Max age 30s - first price is 60s old, should reject
+    const result = findArbitrage(prices, 5, 0.001, 30000);
+    expect(result).toHaveLength(0);
+  });
+
+  it('should reject zero or negative prices', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: 0, timestamp: now },
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2600, timestamp: now },
+    ];
+
+    expect(findArbitrage(prices, 5, 0.001)).toHaveLength(0);
+  });
+
+  it('should reject Infinity prices', () => {
+    const prices: TestPricePoint[] = [
+      { chain: 'ethereum', dex: 'uniswap', pairKey: 'WETH_USDC', price: Infinity, timestamp: now },
+      { chain: 'arbitrum', dex: 'camelot', pairKey: 'WETH_USDC', price: 2600, timestamp: now },
+    ];
+
+    expect(findArbitrage(prices, 5, 0.001)).toHaveLength(0);
+  });
+});

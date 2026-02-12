@@ -499,6 +499,50 @@ describe('MLPredictionManager', () => {
       const prediction = await disabledManager.getCachedPrediction('ethereum', 'uniswap_WETH_USDC', 3000);
       expect(prediction).toBeNull();
     });
+
+    // FIX #18: Test timeout behavior when ML prediction takes too long
+    it('should return null when prediction exceeds maxLatencyMs timeout', async () => {
+      // Override mock predictor to simulate a slow prediction
+      const originalPredictPrice = mockPredictor.predictPrice;
+      mockPredictor.predictPrice = () =>
+        new Promise((resolve) => setTimeout(() => resolve(mockPredictionResult), 500));
+
+      // Create manager with very short timeout
+      const timeoutManager = createMLPredictionManager({
+        logger: mockLogger,
+        mlConfig: { ...mlConfig, maxLatencyMs: 50 },
+      });
+      await timeoutManager.initialize();
+
+      // Add sufficient price history
+      const baseUpdate: PriceUpdate = {
+        chain: 'ethereum',
+        dex: 'uniswap',
+        pairKey: 'uniswap_WETH_USDC',
+        price: 3000,
+        timestamp: Date.now(),
+        blockNumber: 12345,
+        token0: 'WETH',
+        token1: 'USDC',
+        reserve0: '1000000000000000000',
+        reserve1: '3000000000',
+        latency: 50,
+      };
+      for (let i = 0; i < 15; i++) {
+        timeoutManager.trackPriceUpdate({
+          ...baseUpdate,
+          price: 3000 + i,
+          timestamp: Date.now() + i * 100,
+        });
+      }
+
+      // Should return null due to timeout
+      const prediction = await timeoutManager.getCachedPrediction('ethereum', 'uniswap_WETH_USDC', 3014);
+      expect(prediction).toBeNull();
+
+      // Restore original predictor
+      mockPredictor.predictPrice = originalPredictPrice;
+    }, 10000);
   });
 
   // ===========================================================================

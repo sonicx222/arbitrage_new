@@ -50,6 +50,15 @@ describe('OpportunityPublisher', () => {
     logArbitrageOpportunity: jest.Mock;
   };
 
+  // FIX #16: Helper to create publisher with typed mocks, reducing 38 `as any` casts to 3
+  const createTestPublisher = (overrides?: Partial<Parameters<typeof createOpportunityPublisher>[0]>) =>
+    createOpportunityPublisher({
+      streamsClient: mockStreamsClient as unknown as Parameters<typeof createOpportunityPublisher>[0]['streamsClient'],
+      perfLogger: mockPerfLogger as unknown as Parameters<typeof createOpportunityPublisher>[0]['perfLogger'],
+      logger: logger as unknown as Logger,
+      ...overrides,
+    });
+
   beforeEach(() => {
     jest.clearAllMocks();
 
@@ -71,11 +80,7 @@ describe('OpportunityPublisher', () => {
 
   describe('createOpportunityPublisher', () => {
     it('should create publisher with required config', () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       expect(publisher).toBeDefined();
       expect(typeof publisher.publish).toBe('function');
@@ -91,26 +96,22 @@ describe('OpportunityPublisher', () => {
 
   describe('publish', () => {
     it('should publish new opportunity', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity();
       const result = await publisher.publish(opportunity);
 
       expect(result).toBe(true);
-      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalled();
+      // FIX #17: Assert stream name constant to catch stream routing drift
+      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledWith(
+        'stream:opportunities',
+        expect.anything(),
+      );
       expect(mockPerfLogger.logArbitrageOpportunity).toHaveBeenCalled();
     });
 
     it('should convert to ArbitrageOpportunity format', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity();
       await publisher.publish(opportunity);
@@ -125,11 +126,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should extract token names from pair key', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity({ token: 'WETH/USDC' });
       await publisher.publish(opportunity);
@@ -140,11 +137,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should cache opportunity after publishing', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity();
       await publisher.publish(opportunity);
@@ -155,11 +148,7 @@ describe('OpportunityPublisher', () => {
     it('should return false on publish error', async () => {
       mockStreamsClient.xaddWithLimit.mockRejectedValue(new Error('Redis error'));
 
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity();
       const result = await publisher.publish(opportunity);
@@ -175,12 +164,7 @@ describe('OpportunityPublisher', () => {
 
   describe('deduplication', () => {
     it('should skip duplicate opportunities within dedupe window', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-        dedupeWindowMs: 5000,
-      });
+      const publisher = createTestPublisher({ dedupeWindowMs: 5000 });
 
       const opportunity = createTestOpportunity();
 
@@ -196,12 +180,9 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should republish if profit improved significantly', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
+      const publisher = createTestPublisher({
         dedupeWindowMs: 5000,
-        minProfitImprovement: 0.1, // 10% improvement needed
+        minProfitImprovement: 0.1,
       });
 
       const opportunity1 = createTestOpportunity({ netProfit: 100 });
@@ -215,12 +196,9 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should not republish if profit improvement is below threshold', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
+      const publisher = createTestPublisher({
         dedupeWindowMs: 5000,
-        minProfitImprovement: 0.1, // 10% improvement needed
+        minProfitImprovement: 0.1,
       });
 
       const opportunity1 = createTestOpportunity({ netProfit: 100 });
@@ -234,11 +212,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should generate deterministic dedupe key', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       // Same source-target-token should dedupe
       const opp1 = createTestOpportunity({
@@ -263,11 +237,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should allow different chain pairs', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opp1 = createTestOpportunity({
         sourceChain: 'ethereum',
@@ -293,11 +263,7 @@ describe('OpportunityPublisher', () => {
 
   describe('getCacheSize', () => {
     it('should return current cache size', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       expect(publisher.getCacheSize()).toBe(0);
 
@@ -315,11 +281,8 @@ describe('OpportunityPublisher', () => {
 
   describe('cleanup', () => {
     it('should remove entries older than TTL', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-        cacheTtlMs: 100, // 100ms TTL
+      const publisher = createTestPublisher({
+        cacheTtlMs: 100,
         maxCacheSize: 1000,
       });
 
@@ -334,12 +297,9 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should trim cache when over max size', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
+      const publisher = createTestPublisher({
         maxCacheSize: 2,
-        cacheTtlMs: 60000, // Long TTL
+        cacheTtlMs: 60000,
       });
 
       // Add 3 opportunities (exceeds maxCacheSize of 2)
@@ -368,11 +328,7 @@ describe('OpportunityPublisher', () => {
 
   describe('clear', () => {
     it('should remove all cached opportunities', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       await publisher.publish(createTestOpportunity({ token: 'TOKEN1' }));
       await publisher.publish(createTestOpportunity({
@@ -388,11 +344,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should allow publishing after clear', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity();
 
@@ -414,11 +366,8 @@ describe('OpportunityPublisher', () => {
     it('should set correct profit fields', async () => {
       // FIX #3: Trade amount is now calculated based on defaultTradeSizeUsd and sourcePrice
       // With sourcePrice=2500 and defaultTradeSizeUsd=2500, we get 1 token
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-        defaultTradeSizeUsd: 2500, // Match sourcePrice to get 1 token worth
+      const publisher = createTestPublisher({
+        defaultTradeSizeUsd: 2500,
       });
 
       const opportunity = createTestOpportunity({
@@ -438,11 +387,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should set cross-chain specific fields', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-      });
+      const publisher = createTestPublisher();
 
       const opportunity = createTestOpportunity({
         bridgeCost: 25,
@@ -458,12 +403,7 @@ describe('OpportunityPublisher', () => {
     });
 
     it('should generate unique IDs', async () => {
-      const publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
-        perfLogger: mockPerfLogger as any,
-        logger: logger as unknown as Logger,
-        dedupeWindowMs: 0, // Disable dedupe to test ID generation
-      });
+      const publisher = createTestPublisher({ dedupeWindowMs: 0 });
 
       await publisher.publish(createTestOpportunity());
       publisher.clear();

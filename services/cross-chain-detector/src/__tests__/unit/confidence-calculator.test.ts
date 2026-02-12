@@ -630,4 +630,117 @@ describe('ConfidenceCalculator', () => {
       expect(config.whale.whaleBullishBoost).toBe(DEFAULT_CONFIDENCE_CONFIG.whale.whaleBullishBoost);
     });
   });
+
+  // ===========================================================================
+  // FIX #22: Exact-value regression tests
+  // ===========================================================================
+
+  describe('exact-value regression tests (FIX #22)', () => {
+    it('should calculate exact base confidence for 10% price diff', () => {
+      // Formula: rawConfidence = min(highPrice/lowPrice - 1, 0.5) * 2
+      // = min(2750/2500 - 1, 0.5) * 2 = min(0.1, 0.5) * 2 = 0.2
+      // Age penalty: timestamp = now, so ageFactor ≈ 1.0
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2750 },
+      );
+
+      expect(confidence).toBeCloseTo(0.2, 5);
+    });
+
+    it('should calculate exact base confidence for 2% price diff', () => {
+      // = min(2550/2500 - 1, 0.5) * 2 = min(0.02, 0.5) * 2 = 0.04
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2550 },
+      );
+
+      expect(confidence).toBeCloseTo(0.04, 5);
+    });
+
+    it('should calculate exact confidence with bullish whale boost', () => {
+      // Base: 0.2 (10% price diff)
+      // Whale bullish boost: 0.2 * 1.15 = 0.23
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2750 },
+        { dominantDirection: 'bullish', netFlowUsd: 50000, superWhaleCount: 0 },
+      );
+
+      expect(confidence).toBeCloseTo(0.23, 5);
+    });
+
+    it('should calculate exact confidence with super whale + bullish + significant flow', () => {
+      // Base: 0.2 (10% price diff)
+      // Whale bullish: 0.2 * 1.15 = 0.23
+      // Super whale: 0.23 * 1.25 = 0.2875
+      // Significant flow (600000 > 100000): 0.2875 * 1.1 = 0.31625
+      // Total multiplier: 1.15 * 1.25 * 1.1 = 1.58125 > 1.5 cap
+      // FIX #10: Capped at 1.5x -> 0.2 * 1.5 = 0.3
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2750 },
+        { dominantDirection: 'bullish', netFlowUsd: 600000, superWhaleCount: 2 },
+      );
+
+      expect(confidence).toBeCloseTo(0.3, 5);
+    });
+
+    it('should cap stacked ML + whale boosts at 1.5x (FIX #10)', () => {
+      // Use calculator with ML enabled and high boosts
+      const mlCalc = new ConfidenceCalculator(
+        {
+          ml: { enabled: true, minConfidence: 0.6, alignedBoost: 1.15, opposedPenalty: 0.9 },
+          maxConfidence: 0.99, // raise cap so we can observe the 1.5x multiplier cap
+        },
+        logger,
+      );
+
+      // Base: 0.4 (20% price diff: min(3000/2500 - 1, 0.5) * 2 = 0.4)
+      // ML aligned source up: 0.4 * 1.15 = 0.46
+      // ML target sideways (with source already aligned): 0.46 * 1.05 = 0.483
+      // Whale bullish: 0.483 * 1.15 = 0.55545
+      // Super whale: 0.55545 * 1.25 = 0.6943125
+      // Significant flow: 0.6943125 * 1.1 = 0.76374375
+      // Total multiplier: 1.2075 * 1.58125 = 1.9098... > 1.5 cap
+      // FIX #10: Capped at 1.5x -> 0.4 * 1.5 = 0.6
+      const confidence = mlCalc.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 3000 },
+        { dominantDirection: 'bullish', netFlowUsd: 600000, superWhaleCount: 2 },
+        {
+          source: { direction: 'up', confidence: 0.8, predictedPrice: 2600, timeHorizon: 3600, features: [] },
+          target: { direction: 'sideways', confidence: 0.8, predictedPrice: 3000, timeHorizon: 3600, features: [] },
+        },
+      );
+
+      expect(confidence).toBeCloseTo(0.6, 5);
+    });
+
+    it('should not cap when combined multiplier is below 1.5x', () => {
+      // Base: 0.2 (10% price diff)
+      // Whale bullish only: 0.2 * 1.15 = 0.23
+      // Multiplier = 1.15, under 1.5x cap
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2750 },
+        { dominantDirection: 'bullish', netFlowUsd: 50000, superWhaleCount: 0 },
+      );
+
+      // Should NOT be capped, exact value: 0.23
+      expect(confidence).toBeCloseTo(0.23, 5);
+    });
+
+    it('should apply bearish whale penalty exactly', () => {
+      // Base: 0.2
+      // Whale bearish: 0.2 * 0.85 = 0.17
+      const confidence = calculator.calculate(
+        makeLowPrice(2500, Date.now()),
+        { price: 2750 },
+        { dominantDirection: 'bearish', netFlowUsd: -50000, superWhaleCount: 0 },
+      );
+
+      expect(confidence).toBeCloseTo(0.17, 5);
+    });
+  });
 });

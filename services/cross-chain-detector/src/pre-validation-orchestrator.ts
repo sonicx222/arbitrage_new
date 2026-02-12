@@ -195,9 +195,6 @@ export class PreValidationOrchestrator {
    * @returns True if opportunity passes validation (or validation skipped)
    */
   private async executePreValidation(opportunity: CrossChainOpportunity): Promise<boolean> {
-    // Increment budget usage
-    this.budgetUsed++;
-
     const startTime = Date.now();
 
     try {
@@ -219,6 +216,9 @@ export class PreValidationOrchestrator {
         tradeSizeUsd: opportunity.tradeSizeUsd ?? this.defaultTradeSizeUsd,
         expectedPrice: opportunity.sourcePrice,
       };
+
+      // Increment budget usage only when simulation actually runs
+      this.budgetUsed++;
 
       // Execute simulation with timeout
       const simResult = await Promise.race([

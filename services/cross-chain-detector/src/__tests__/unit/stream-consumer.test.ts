@@ -62,19 +62,24 @@ describe('StreamConsumer', () => {
     jest.useRealTimers();
   });
 
+  // FIX #16: Helper to create consumer with typed mocks, reducing `as any` casts
+  const createTestConsumer = (overrides?: Partial<Parameters<typeof createStreamConsumer>[0]>) =>
+    createStreamConsumer({
+      instanceId: 'test-instance',
+      streamsClient: mockStreamsClient as unknown as Parameters<typeof createStreamConsumer>[0]['streamsClient'],
+      stateManager: mockStateManager as unknown as Parameters<typeof createStreamConsumer>[0]['stateManager'],
+      logger: logger as unknown as Logger,
+      consumerGroups,
+      ...overrides,
+    });
+
   // ===========================================================================
   // Creation
   // ===========================================================================
 
   describe('createStreamConsumer', () => {
     it('should create consumer with required config', () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-      });
+      const consumer = createTestConsumer();
 
       expect(consumer).toBeDefined();
       expect(typeof consumer.createConsumerGroups).toBe('function');
@@ -83,13 +88,7 @@ describe('StreamConsumer', () => {
     });
 
     it('should be an EventEmitter', () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-      });
+      const consumer = createTestConsumer();
 
       expect(consumer).toBeInstanceOf(EventEmitter);
     });
@@ -101,13 +100,7 @@ describe('StreamConsumer', () => {
 
   describe('createConsumerGroups', () => {
     it('should create all configured consumer groups', async () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-      });
+      const consumer = createTestConsumer();
 
       await consumer.createConsumerGroups();
 
@@ -117,13 +110,7 @@ describe('StreamConsumer', () => {
     it('should handle errors gracefully', async () => {
       mockStreamsClient.createConsumerGroup.mockRejectedValue(new Error('Redis error'));
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-      });
+      const consumer = createTestConsumer();
 
       await consumer.createConsumerGroups();
 
@@ -137,14 +124,7 @@ describe('StreamConsumer', () => {
 
   describe('start', () => {
     it('should start polling interval', () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
 
@@ -152,14 +132,7 @@ describe('StreamConsumer', () => {
     });
 
     it('should poll streams at configured interval', async () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
 
@@ -174,14 +147,7 @@ describe('StreamConsumer', () => {
 
   describe('stop', () => {
     it('should clear polling interval', () => {
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
       consumer.stop();
@@ -220,14 +186,7 @@ describe('StreamConsumer', () => {
         { id: '123-0', data: validUpdate },
       ]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       const priceUpdateHandler = jest.fn();
       consumer.on('priceUpdate', priceUpdateHandler);
@@ -254,14 +213,7 @@ describe('StreamConsumer', () => {
         { id: '123-0', data: invalidUpdate },
       ]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       const priceUpdateHandler = jest.fn();
       consumer.on('priceUpdate', priceUpdateHandler);
@@ -305,14 +257,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '456-0', data: validTx }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       const whaleTxHandler = jest.fn();
       consumer.on('whaleTransaction', whaleTxHandler);
@@ -338,14 +283,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '456-0', data: invalidTx }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       const whaleTxHandler = jest.fn();
       consumer.on('whaleTransaction', whaleTxHandler);
@@ -408,14 +346,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '789-0', data: validOpp }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups: consumerGroupsWithPending,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ consumerGroups: consumerGroupsWithPending, pollIntervalMs: 100 });
 
       const pendingOppHandler = jest.fn();
       consumer.on('pendingOpportunity', pendingOppHandler);
@@ -447,14 +378,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '789-0', data: invalidOpp }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups: consumerGroupsWithPending,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ consumerGroups: consumerGroupsWithPending, pollIntervalMs: 100 });
 
       const pendingOppHandler = jest.fn();
       consumer.on('pendingOpportunity', pendingOppHandler);
@@ -500,14 +424,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '789-0', data: oppMissingGasPrice }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups: consumerGroupsWithPending,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ consumerGroups: consumerGroupsWithPending, pollIntervalMs: 100 });
 
       const pendingOppHandler = jest.fn();
       consumer.on('pendingOpportunity', pendingOppHandler);
@@ -551,14 +468,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '789-0', data: oppHighSlippage }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups: consumerGroupsWithPending,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ consumerGroups: consumerGroupsWithPending, pollIntervalMs: 100 });
 
       const pendingOppHandler = jest.fn();
       consumer.on('pendingOpportunity', pendingOppHandler);
@@ -603,14 +513,7 @@ describe('StreamConsumer', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ id: '789-0', data: oppMissingType }]);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups: consumerGroupsWithPending,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ consumerGroups: consumerGroupsWithPending, pollIntervalMs: 100 });
 
       const pendingOppHandler = jest.fn();
       consumer.on('pendingOpportunity', pendingOppHandler);
@@ -643,14 +546,7 @@ describe('StreamConsumer', () => {
       // All xreadgroup calls will be slow (never resolve immediately)
       mockStreamsClient.xreadgroup.mockReturnValue(slowPoll);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 50,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 50 });
 
       consumer.start();
 
@@ -682,14 +578,7 @@ describe('StreamConsumer', () => {
     it('should skip poll when service is not running', async () => {
       mockStateManager.isRunning.mockReturnValue(false);
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
 
@@ -711,14 +600,7 @@ describe('StreamConsumer', () => {
       // and logged, but not emitted as error events (for resilience)
       mockStreamsClient.xreadgroup.mockRejectedValue(new Error('Connection lost'));
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
 
@@ -736,14 +618,7 @@ describe('StreamConsumer', () => {
     it('should not log timeout errors (they are expected)', async () => {
       mockStreamsClient.xreadgroup.mockRejectedValue(new Error('timeout'));
 
-      const consumer = createStreamConsumer({
-        instanceId: 'test-instance',
-        streamsClient: mockStreamsClient as any,
-        stateManager: mockStateManager as any,
-        logger: logger as unknown as Logger,
-        consumerGroups,
-        pollIntervalMs: 100,
-      });
+      const consumer = createTestConsumer({ pollIntervalMs: 100 });
 
       consumer.start();
 

@@ -253,6 +253,11 @@ export class CrossChainDetectorService {
   // FIX #22: Reuse ML predictions map across cycles to reduce GC pressure
   private mlPredictionsCache = new Map<string, PredictionResult | null>();
 
+  // FIX #9: ETH price circuit breaker - track recent prices for rate-of-change rejection
+  private recentEthPrices: number[] = [];
+  private static readonly ETH_PRICE_HISTORY_SIZE = 10;
+  private static readonly ETH_PRICE_MAX_DEVIATION = 0.2; // 20% from median
+
   // FIX #23: Cycle counter for structured logging
   private detectionCycleCounter = 0;
 
@@ -537,6 +542,8 @@ export class CrossChainDetectorService {
     this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
     // FIX #5: Clear rate limit state on shutdown
     this.bridgeDataRateLimit.clear();
+    // FIX #9: Clear ETH price history on shutdown
+    this.recentEthPrices.length = 0;
   }
 
   // ===========================================================================
@@ -665,6 +672,41 @@ export class CrossChainDetectorService {
   }
 
   /**
+   * FIX #9: Validate ETH price against recent history to reject poisoned prices.
+   * Uses median of recent prices and rejects deviations >20%.
+   * Returns true if price is valid, false if rejected.
+   */
+  private validateEthPriceRate(price: number): boolean {
+    // Need at least 3 data points for meaningful median comparison
+    if (this.recentEthPrices.length >= 3) {
+      const sorted = this.recentEthPrices.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 === 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2
+        : sorted[mid];
+
+      const deviation = Math.abs(price - median) / median;
+      if (deviation > CrossChainDetectorService.ETH_PRICE_MAX_DEVIATION) {
+        this.logger.warn('ETH price rejected: exceeds rate-of-change threshold', {
+          price,
+          median,
+          deviation: (deviation * 100).toFixed(1) + '%',
+          threshold: (CrossChainDetectorService.ETH_PRICE_MAX_DEVIATION * 100) + '%',
+          recentCount: this.recentEthPrices.length,
+        });
+        return false;
+      }
+    }
+
+    // Track accepted price
+    this.recentEthPrices.push(price);
+    if (this.recentEthPrices.length > CrossChainDetectorService.ETH_PRICE_HISTORY_SIZE) {
+      this.recentEthPrices.splice(0, this.recentEthPrices.length - CrossChainDetectorService.ETH_PRICE_HISTORY_SIZE);
+    }
+    return true;
+  }
+
+  /**
    * FIX: Update ETH price in BridgeCostEstimator when we receive ETH/WETH price updates.
    * This ensures bridge cost estimation uses accurate gas prices.
    */
@@ -681,7 +723,10 @@ export class CrossChainDetectorService {
     if (isEthPair && update.price > 0) {
       // ETH price should be in the thousands range (sanity check)
       if (update.price > 100 && update.price < 100000) {
-        this.bridgeCostEstimator.updateEthPrice(update.price);
+        // FIX #9: Apply rate-of-change circuit breaker
+        if (this.validateEthPriceRate(update.price)) {
+          this.bridgeCostEstimator.updateEthPrice(update.price);
+        }
       }
     }
   }
@@ -746,11 +791,14 @@ export class CrossChainDetectorService {
       if (ethPrice.price > 0 && !ethPrice.isStale) {
         // Sanity check: ETH should be in reasonable range
         if (ethPrice.price > 100 && ethPrice.price < 100000) {
-          this.bridgeCostEstimator.updateEthPrice(ethPrice.price);
-          this.logger.debug('ETH price refreshed from PriceOracle', {
-            price: ethPrice.price,
-            source: ethPrice.source
-          });
+          // FIX #9: Apply rate-of-change circuit breaker
+          if (this.validateEthPriceRate(ethPrice.price)) {
+            this.bridgeCostEstimator.updateEthPrice(ethPrice.price);
+            this.logger.debug('ETH price refreshed from PriceOracle', {
+              price: ethPrice.price,
+              source: ethPrice.source
+            });
+          }
         }
       } else if (ethPrice.isStale) {
         this.logger.debug('ETH price is stale, skipping update', {

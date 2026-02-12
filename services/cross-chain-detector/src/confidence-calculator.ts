@@ -171,6 +171,9 @@ export class ConfidenceCalculator {
     // Step 3: Apply age penalty for stale data
     confidence = this.applyAgePenalty(confidence, lowPrice.update.timestamp);
 
+    // Capture pre-boost confidence for FIX #10 multiplier cap
+    const preBoostConfidence = confidence;
+
     // Step 4: Apply ML prediction adjustments (if enabled and available)
     const { mlConfidence, mlSupported } = this.applyMLAdjustment(confidence, mlPrediction);
     confidence = mlConfidence;
@@ -178,7 +181,16 @@ export class ConfidenceCalculator {
     // Step 5: Apply whale activity adjustments (if available)
     confidence = this.applyWhaleAdjustment(confidence, whaleData);
 
-    // Step 6: Cap confidence at maximum
+    // Step 6: Cap combined boost multiplier at 1.5x (FIX #10)
+    // Prevents stacked whale + ML boosters from inflating confidence beyond 1.5x
+    if (preBoostConfidence > 0) {
+      const effectiveMultiplier = confidence / preBoostConfidence;
+      if (effectiveMultiplier > 1.5) {
+        confidence = preBoostConfidence * 1.5;
+      }
+    }
+
+    // Step 7: Cap confidence at maximum
     const maxConfidence = this.config.maxConfidence ?? 0.95;
     confidence = Math.min(confidence, maxConfidence);
 
