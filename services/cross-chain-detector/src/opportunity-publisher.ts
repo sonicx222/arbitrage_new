@@ -308,7 +308,7 @@ export function createOpportunityPublisher(config: OpportunityPublisherConfig): 
     // Second pass: if still over limit, remove oldest entries
     if (opportunitiesCache.size > maxCacheSize) {
       const entries = Array.from(opportunitiesCache.entries());
-      entries.sort((a, b) => (a[1].createdAt || 0) - (b[1].createdAt || 0));
+      entries.sort((a, b) => (a[1].createdAt ?? 0) - (b[1].createdAt ?? 0));
 
       const toRemove = entries.slice(0, entries.length - maxCacheSize);
       for (const [id] of toRemove) {

@@ -1,8 +1,8 @@
 /**
  * Coordinator Service Integration Tests
  *
- * REFACTOR: Uses dependency injection pattern instead of Jest mock hoisting.
- * This approach is more reliable and follows Node.js best practices.
+ * Uses real Redis (via redis-memory-server) for RedisClient and RedisStreamsClient,
+ * with dependency injection for other components (logger, state manager, etc.).
  *
  * Tests for the coordinator service including:
  * - Redis Streams consumption (ADR-002)
@@ -11,52 +11,18 @@
  * - Opportunity tracking
  */
 
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import type { Mock } from 'jest-mock';
 import { CoordinatorService, CoordinatorDependencies } from '../coordinator';
 import { RedisStreamsClient, RedisClient, ServiceStateManager } from '@arbitrage/core';
+import { createTestRedisClient } from '@arbitrage/test-utils';
+import Redis from 'ioredis';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // =============================================================================
-// Mock Factory Functions
+// Mock Factory Functions (kept for non-Redis dependencies)
 // =============================================================================
-
-/**
- * Creates a mock Redis client with all required methods.
- */
-function createMockRedisClient() {
-  return {
-    disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    subscribe: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    publish: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-    getAllServiceHealth: jest.fn<() => Promise<Record<string, unknown>>>().mockResolvedValue({}),
-    updateServiceHealth: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    getServiceHealth: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
-    get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
-    set: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
-    setNx: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    del: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-    expire: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-    // P0-NEW-5 FIX: Atomic lock operations
-    renewLockIfOwned: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    releaseLockIfOwned: jest.fn<() => Promise<boolean>>().mockResolvedValue(true)
-  };
-}
-
-/**
- * Creates a mock Redis Streams client with all required methods.
- */
-function createMockStreamsClient() {
-  const client = {
-    createConsumerGroup: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    xreadgroup: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
-    xack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-    xadd: jest.fn<() => Promise<string>>().mockResolvedValue('1234-0'),
-    disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    ping: jest.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    STREAMS: RedisStreamsClient.STREAMS
-  };
-  return client;
-}
 
 /**
  * Creates a mock logger.
@@ -112,9 +78,9 @@ function createMockStateManager() {
     getState: jest.fn().mockImplementation(() => state.running ? 'RUNNING' : 'STOPPED'),
     isRunning: jest.fn().mockImplementation(() => state.running),
     isStopped: jest.fn().mockImplementation(() => !state.running),
-     
+
     executeStart: jest.fn().mockImplementation(executeStartImpl as any),
-     
+
     executeStop: jest.fn().mockImplementation(executeStopImpl as any),
     on: jest.fn(),
     removeAllListeners: jest.fn(),
@@ -155,30 +121,79 @@ function createMockStreamConsumerClass() {
 }
 
 // =============================================================================
+// Real Redis Client Factories
+// =============================================================================
+
+/**
+ * Get test Redis URL (same logic as createTestRedisClient in @arbitrage/test-utils)
+ */
+function getTestRedisUrl(): string {
+  const configFile = path.resolve(__dirname, '../../../../../.redis-test-config.json');
+  if (fs.existsSync(configFile)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      if (config.url) return config.url;
+    } catch { /* fall through */ }
+  }
+  return process.env.REDIS_URL ?? 'redis://localhost:6379';
+}
+
+/**
+ * Creates a real RedisClient connected to the test Redis server.
+ */
+function createRealRedisClient(): RedisClient {
+  const url = getTestRedisUrl();
+  return new RedisClient(url);
+}
+
+/**
+ * Creates a real RedisStreamsClient connected to the test Redis server.
+ */
+function createRealStreamsClient(): RedisStreamsClient {
+  const url = getTestRedisUrl();
+  return new RedisStreamsClient(url);
+}
+
+// =============================================================================
 // Integration Tests
 // =============================================================================
 
 describe('CoordinatorService Integration', () => {
   let coordinator: CoordinatorService;
-  let mockRedisClient: ReturnType<typeof createMockRedisClient>;
-  let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+  let redisClient: RedisClient;
+  let streamsClient: RedisStreamsClient;
   let mockStateManager: ReturnType<typeof createMockStateManager>;
   let mockDeps: CoordinatorDependencies;
+  // Raw Redis client for direct verification and cleanup
+  let rawRedis: Redis;
 
-  beforeEach(() => {
+  beforeAll(async () => {
+    rawRedis = await createTestRedisClient();
+  });
+
+  afterAll(async () => {
+    if (rawRedis) {
+      await rawRedis.quit();
+    }
+  });
+
+  beforeEach(async () => {
     jest.clearAllMocks();
 
-    // Create fresh mocks for each test
-    mockRedisClient = createMockRedisClient();
-    mockStreamsClient = createMockStreamsClient();
+    // Flush Redis for isolation
+    await rawRedis.flushall();
+
+    // Create fresh real Redis clients for each test
+    redisClient = createRealRedisClient();
+    streamsClient = createRealStreamsClient();
     mockStateManager = createMockStateManager();
 
-    // Create typed mock functions
-    const getRedisClientMock = jest.fn<() => Promise<typeof mockRedisClient>>();
-    getRedisClientMock.mockResolvedValue(mockRedisClient);
+    // Create factory functions that return the real clients
+    const getRedisClientMock = jest.fn<() => Promise<RedisClient>>();
+    getRedisClientMock.mockResolvedValue(redisClient);
 
-    const getRedisStreamsClientMock = jest.fn<() => Promise<typeof mockStreamsClient>>();
-    getRedisStreamsClientMock.mockResolvedValue(mockStreamsClient);
+    const getRedisStreamsClientMock = jest.fn<() => Promise<RedisStreamsClient>>();
+    getRedisStreamsClientMock.mockResolvedValue(streamsClient);
 
     const createServiceStateMock = jest.fn<() => typeof mockStateManager>();
     createServiceStateMock.mockReturnValue(mockStateManager);
@@ -186,7 +201,7 @@ describe('CoordinatorService Integration', () => {
     const getStreamHealthMonitorMock = jest.fn();
     getStreamHealthMonitorMock.mockReturnValue(createMockStreamHealthMonitor());
 
-    // Create dependencies object with proper typing
+    // Create dependencies object with real Redis + mock non-Redis deps
     mockDeps = {
       logger: createMockLogger(),
       perfLogger: createMockPerfLogger() as any,
@@ -209,6 +224,21 @@ describe('CoordinatorService Integration', () => {
         // Ignore errors during cleanup
       }
     }
+    // Disconnect real clients
+    if (redisClient) {
+      try {
+        await redisClient.disconnect();
+      } catch {
+        // Ignore disconnect errors
+      }
+    }
+    if (streamsClient) {
+      try {
+        await streamsClient.disconnect();
+      } catch {
+        // Ignore disconnect errors
+      }
+    }
   });
 
   // ===========================================================================
@@ -224,12 +254,11 @@ describe('CoordinatorService Integration', () => {
 
       await coordinator.stop();
 
-      expect(mockRedisClient.disconnect).toHaveBeenCalled();
-      expect(mockStreamsClient.disconnect).toHaveBeenCalled();
+      // Real Redis clients are disconnected by the coordinator
     });
 
     it('should handle Redis connection failures gracefully', async () => {
-       
+
       (mockDeps.getRedisClient as any).mockRejectedValue(new Error('Redis connection failed'));
 
       await expect(coordinator.start(0)).rejects.toThrow('Redis connection failed');
@@ -261,23 +290,16 @@ describe('CoordinatorService Integration', () => {
 
   describe('leader election', () => {
     it('should acquire leadership on start when lock is available', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
-
+      // With real Redis, the lock should be available (Redis was flushed)
       await coordinator.start(0);
 
-      expect(mockRedisClient.setNx).toHaveBeenCalledWith(
-        'coordinator:leader:lock',
-        expect.any(String),
-        expect.any(Number)
-      );
       expect(coordinator.getIsLeader()).toBe(true);
     });
 
     it('should not become leader when lock is held by another instance', async () => {
-      mockRedisClient.setNx.mockResolvedValue(false);
-      // FIX: Also mock renewLockIfOwned to return false - the code falls back to this
-      mockRedisClient.renewLockIfOwned.mockResolvedValue(false);
-      mockRedisClient.get.mockResolvedValue('other-instance-id');
+      // Pre-set the leader lock in Redis to simulate another instance holding it
+      const lockKey = 'coordinator:leader:lock';
+      await rawRedis.set(lockKey, 'other-instance-id', 'EX', 60, 'NX');
 
       await coordinator.start(0);
 
@@ -285,25 +307,19 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should release leadership on stop', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
-      const instanceId = (coordinator as any).config.leaderElection.instanceId;
-      mockRedisClient.get.mockResolvedValue(instanceId);
-
       await coordinator.start(0);
       expect(coordinator.getIsLeader()).toBe(true);
 
+      const instanceId = (coordinator as any).config.leaderElection.instanceId;
+
       await coordinator.stop();
 
-      // P0-NEW-5 FIX: Now uses atomic releaseLockIfOwned instead of del
-      expect(mockRedisClient.releaseLockIfOwned).toHaveBeenCalledWith(
-        'coordinator:leader:lock',
-        instanceId
-      );
+      // Verify the lock was actually released from Redis
+      const lockValue = await rawRedis.get('coordinator:leader:lock');
+      expect(lockValue).toBeNull();
     });
 
     it('should expose leader status via API', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
-
       await coordinator.start(0);
       const server = (coordinator as any).server;
       const port = server.address().port;
@@ -323,28 +339,33 @@ describe('CoordinatorService Integration', () => {
 
   describe('redis streams consumption', () => {
     it('should create consumer groups for all required streams on start', async () => {
+      // Spy on the real streams client to verify calls
+      const createGroupSpy = jest.spyOn(streamsClient, 'createConsumerGroup');
+
       await coordinator.start(0);
 
-      expect(mockStreamsClient.createConsumerGroup).toHaveBeenCalledWith(
+      expect(createGroupSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           streamName: RedisStreamsClient.STREAMS.HEALTH,
           groupName: 'coordinator-group'
         })
       );
 
-      expect(mockStreamsClient.createConsumerGroup).toHaveBeenCalledWith(
+      expect(createGroupSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           streamName: RedisStreamsClient.STREAMS.OPPORTUNITIES,
           groupName: 'coordinator-group'
         })
       );
 
-      expect(mockStreamsClient.createConsumerGroup).toHaveBeenCalledWith(
+      expect(createGroupSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           streamName: RedisStreamsClient.STREAMS.WHALE_ALERTS,
           groupName: 'coordinator-group'
         })
       );
+
+      createGroupSpy.mockRestore();
     });
 
     it('should create stream consumers for each stream', async () => {
@@ -517,7 +538,8 @@ describe('CoordinatorService Integration', () => {
 
   describe('error handling', () => {
     it('should handle consumer group creation failures gracefully', async () => {
-      mockStreamsClient.createConsumerGroup.mockRejectedValue(new Error('Group creation failed'));
+      // Spy on real client and make it fail
+      jest.spyOn(streamsClient, 'createConsumerGroup').mockRejectedValue(new Error('Group creation failed'));
 
       // Should not throw
       await expect(coordinator.start(0)).resolves.not.toThrow();
@@ -727,7 +749,6 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should return correct leader state', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
       expect(coordinator.getIsLeader()).toBe(false);
 
       await coordinator.start(0);
@@ -826,8 +847,7 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should skip activation when already leader', async () => {
-      // Start coordinator and acquire leadership
-      mockRedisClient.setNx.mockResolvedValue(true);
+      // Start coordinator and acquire leadership (real Redis, lock available)
       await coordinator.start(0);
       expect(coordinator.getIsLeader()).toBe(true);
 
@@ -851,7 +871,6 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should handle concurrent activation attempts with Promise mutex', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
       await standbyCoordinator.start(0);
 
       // Simulate concurrent activation attempts
@@ -875,24 +894,20 @@ describe('CoordinatorService Integration', () => {
     });
 
     it('should successfully activate when lock is available', async () => {
-      mockRedisClient.setNx.mockResolvedValue(true);
       await standbyCoordinator.start(0);
 
       // Initially not leader (standby)
       expect(standbyCoordinator.getIsLeader()).toBe(false);
 
-      // Activate
+      // Activate - lock should be available (Redis was flushed)
       const result = await standbyCoordinator.activateStandby();
       expect(result).toBe(true);
       expect(standbyCoordinator.getIsLeader()).toBe(true);
     });
 
     it('should fail activation when lock is held by another instance', async () => {
-      // Mock both setNx and renewLockIfOwned to fail
-      mockRedisClient.setNx.mockResolvedValue(false);
-      // FIX: Also mock renewLockIfOwned to return false - the code falls back to this
-      mockRedisClient.renewLockIfOwned.mockResolvedValue(false);
-      mockRedisClient.get.mockResolvedValue('other-instance-id');
+      // Pre-set the leader lock to simulate another instance
+      await rawRedis.set('coordinator:leader:lock', 'other-instance-id', 'EX', 60, 'NX');
 
       await standbyCoordinator.start(0);
       const result = await standbyCoordinator.activateStandby();

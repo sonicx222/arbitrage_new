@@ -18,10 +18,9 @@ import {
   assignChainToPartition,
   getEnabledPartitions,
   PartitionConfig,
-  getChainsForPartition
-} from '../../config/src/partitions';
-
-import { CHAINS } from '../../config/src';
+  getChainsForPartition,
+  CHAINS,
+} from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from './logging';
 
 // Lazy-initialized logger for deprecation warnings

@@ -52,43 +52,6 @@ import {
 import { DexLookupService } from '../services/dex-lookup.service';
 import { SwapBuilder } from '../services/swap-builder.service';
 
-// Re-export for backward compatibility
-export {
-  GasPriceOptimizer,
-  validateGasPriceConfiguration,
-  validateGasPrice,
-  getFallbackGasPrice,
-  GAS_SPIKE_MULTIPLIER_BIGINT,
-  WEI_PER_GWEI,
-  MIN_GAS_PRICE_GWEI,
-  MAX_GAS_PRICE_GWEI,
-  DEFAULT_GAS_PRICES_GWEI,
-  FALLBACK_GAS_PRICES_WEI,
-  type GasConfigValidationResult,
-  type GasBaselineEntry,
-} from '../services/gas-price-optimizer';
-
-export {
-  NonceAllocationManager,
-  acquireChainNonceLock,
-  releaseChainNonceLock,
-  checkConcurrentNonceAccess,
-  clearNonceAllocationTracking,
-} from '../services/nonce-allocation-manager';
-
-export {
-  MevProtectionService,
-  checkMevEligibility,
-  type MevEligibilityResult,
-} from '../services/mev-protection-service';
-
-export {
-  BridgeProfitabilityAnalyzer,
-  checkBridgeProfitability,
-  type BridgeProfitabilityOptions,
-  type BridgeProfitabilityResult,
-} from '../services/bridge-profitability-analyzer';
-
 // Hybrid mode exports
 export { checkHybridExecutionMode as isHybridExecutionMode };
 export type { HybridModeConfig };

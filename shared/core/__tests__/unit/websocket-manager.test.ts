@@ -180,46 +180,16 @@ describe('WebSocketManager', () => {
   });
 
   describe('Configuration Defaults', () => {
-    it('should use default reconnectInterval when not specified', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'default reconnectInterval', config: {} },
+      { desc: 'default maxReconnectAttempts', config: {} },
+      { desc: 'default connectionTimeout', config: {} },
+      { desc: 'custom configuration values', config: { reconnectInterval: 3000, maxReconnectAttempts: 5, heartbeatInterval: 20000, connectionTimeout: 5000 } },
+    ])('should initialize correctly with $desc', ({ config }) => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      // Default is 5000ms - we verify the manager is created without errors
-      expect(manager).toBeDefined();
-    });
-
-    it('should use default maxReconnectAttempts when not specified', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      // Default is 10 - we verify the manager is created without errors
-      expect(manager).toBeDefined();
-    });
-
-    it('should use default connectionTimeout when not specified', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      // Default is 10000ms - we verify the manager is created without errors
-      expect(manager).toBeDefined();
-    });
-
-    it('should allow custom configuration values', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        reconnectInterval: 3000,
-        maxReconnectAttempts: 5,
-        heartbeatInterval: 20000,
-        connectionTimeout: 5000,
-      };
-
-      manager = new WebSocketManager(config);
+        ...config,
+      });
       expect(manager).toBeDefined();
     });
   });
@@ -576,23 +546,14 @@ describe('WebSocketManager Exponential Backoff', () => {
   });
 
   describe('Exponential Backoff Configuration', () => {
-    it('should accept chainId configuration', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'with explicit chainId', config: { chainId: 'arbitrum' } },
+      { desc: 'with default chainId', config: {} },
+    ])('should accept configuration $desc', ({ config }) => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
-        chainId: 'arbitrum',
-      };
-
-      manager = new WebSocketManager(config);
-      // Should not throw
-      expect(manager).toBeDefined();
-    });
-
-    it('should use default chainId when not specified', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
+        ...config,
+      } as WebSocketConfig);
       expect(manager).toBeDefined();
     });
   });
@@ -618,49 +579,19 @@ describe('WebSocketManager Rate Limit Handling (S3.3)', () => {
       });
     });
 
-    it('should detect JSON-RPC error code -32005 (Infura/Alchemy rate limit)', () => {
-      const error = { code: -32005, message: 'Limit exceeded' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect JSON-RPC error code -32016 (rate limit)', () => {
-      const error = { code: -32016, message: 'Rate limit' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect WebSocket close code 1008 (policy violation)', () => {
-      const error = { code: 1008, message: 'Policy violation' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect WebSocket close code 1013 (try again later)', () => {
-      const error = { code: 1013, message: 'Try again' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect HTTP status code 429', () => {
-      const error = { code: 429, message: 'Too many requests' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect "rate limit" in error message', () => {
-      const error = { message: 'Request rate limit exceeded' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect "too many requests" in error message', () => {
-      const error = { message: 'Too many requests from your IP' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect "quota exceeded" in error message', () => {
-      const error = { message: 'Daily quota exceeded for this API key' };
-      expect(manager.isRateLimitError(error)).toBe(true);
-    });
-
-    it('should detect "throttled" in error message', () => {
-      const error = { message: 'Request throttled' };
-      expect(manager.isRateLimitError(error)).toBe(true);
+    it.each([
+      { desc: 'JSON-RPC -32005 (Infura/Alchemy)', error: { code: -32005, message: 'Limit exceeded' }, expected: true },
+      { desc: 'JSON-RPC -32016 (rate limit)', error: { code: -32016, message: 'Rate limit' }, expected: true },
+      { desc: 'WebSocket 1008 (policy violation)', error: { code: 1008, message: 'Policy violation' }, expected: true },
+      { desc: 'WebSocket 1013 (try again later)', error: { code: 1013, message: 'Try again' }, expected: true },
+      { desc: 'HTTP 429', error: { code: 429, message: 'Too many requests' }, expected: true },
+      { desc: '"rate limit" in message', error: { message: 'Request rate limit exceeded' }, expected: true },
+      { desc: '"too many requests" in message', error: { message: 'Too many requests from your IP' }, expected: true },
+      { desc: '"quota exceeded" in message', error: { message: 'Daily quota exceeded for this API key' }, expected: true },
+      { desc: '"throttled" in message', error: { message: 'Request throttled' }, expected: true },
+      { desc: 'case-insensitive matching', error: { message: 'RATE LIMIT EXCEEDED' }, expected: true },
+    ])('should detect rate limit: $desc', ({ error, expected }) => {
+      expect(manager.isRateLimitError(error)).toBe(expected);
     });
 
     it('should not detect normal errors as rate limits', () => {
@@ -677,11 +608,6 @@ describe('WebSocketManager Rate Limit Handling (S3.3)', () => {
       for (const error of normalErrors) {
         expect(manager.isRateLimitError(error)).toBe(false);
       }
-    });
-
-    it('should handle case-insensitive matching', () => {
-      const error = { message: 'RATE LIMIT EXCEEDED' };
-      expect(manager.isRateLimitError(error)).toBe(true);
     });
   });
 
@@ -880,53 +806,22 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
   });
 
   describe('Configuration', () => {
-    it('should default to worker parsing disabled', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'disabled by default', config: {}, expectedEnabled: false, expectedThreshold: undefined },
+      { desc: 'enabled when configured', config: { useWorkerParsing: true }, expectedEnabled: true, expectedThreshold: 2048 },
+      { desc: 'custom threshold', config: { useWorkerParsing: true, workerParsingThresholdBytes: 4096 }, expectedEnabled: true, expectedThreshold: 4096 },
+    ])('should initialize with $desc', ({ config, expectedEnabled, expectedThreshold }) => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
+        ...config,
+      });
       const stats = manager.getWorkerParsingStats();
 
-      expect(stats.enabled).toBe(false);
-    });
-
-    it('should enable worker parsing when configured', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: true,
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getWorkerParsingStats();
-
-      expect(stats.enabled).toBe(true);
-    });
-
-    it('should use default threshold of 1KB', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: true,
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getWorkerParsingStats();
-
-      // P1-PHASE1: Default threshold changed from 1024 to 2048
-      expect(stats.thresholdBytes).toBe(2048);
-    });
-
-    it('should accept custom threshold', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: true,
-        workerParsingThresholdBytes: 4096, // Custom threshold
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getWorkerParsingStats();
-
-      expect(stats.thresholdBytes).toBe(4096);
+      expect(stats.enabled).toBe(expectedEnabled);
+      if (expectedThreshold !== undefined) {
+        // P1-PHASE1: Default threshold changed from 1024 to 2048
+        expect(stats.thresholdBytes).toBe(expectedThreshold);
+      }
     });
   });
 

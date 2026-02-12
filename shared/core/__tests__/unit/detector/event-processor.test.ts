@@ -359,6 +359,12 @@ describe('EventProcessor', () => {
       expect(generatePairKey('sushiswap', '0xA', '0xB')).toBe('sushiswap_0xA_0xB');
       expect(generatePairKey('pancakeswap', '0xA', '0xB')).toBe('pancakeswap_0xA_0xB');
     });
+
+    it('should be case-sensitive', () => {
+      const key1 = generatePairKey('uniswap_v2', '0xAAA', '0xBBB');
+      const key2 = generatePairKey('uniswap_v2', '0xaaa', '0xbbb');
+      expect(key1).not.toBe(key2);
+    });
   });
 
   // ==========================================================================

@@ -19,7 +19,7 @@ import {
 } from '@arbitrage/core';
 
 import type {
-  SwapEvent,
+  ValidatedSwapEvent as SwapEvent,
   SwapEventFilterConfig,
   FilterResult,
   VolumeAggregate,
@@ -732,5 +732,122 @@ describe('WhaleAlert Interface', () => {
     });
 
     filter.processEvent(createMockSwapEvent({ usdValue: 100000 }));
+  });
+});
+
+// =============================================================================
+// S1.2.5: Prometheus Metrics Export (merged from swap-event-filter-extended)
+// =============================================================================
+
+describe('S1.2.5: Prometheus Metrics Export', () => {
+  let filter: SwapEventFilter;
+
+  beforeEach(() => {
+    resetSwapEventFilter();
+    filter = new SwapEventFilter();
+  });
+
+  afterEach(() => {
+    filter.destroy();
+  });
+
+  it('should export Prometheus-format metrics', () => {
+    filter.processEvent(createMockSwapEvent({ usdValue: 1000, transactionHash: '0xtx1' }));
+    filter.processEvent(createMockSwapEvent({ usdValue: 60000, transactionHash: '0xtx2' }));
+
+    const metrics = filter.getPrometheusMetrics();
+
+    expect(metrics).toContain('swap_filter_total_processed');
+    expect(metrics).toContain('swap_filter_total_passed');
+    expect(metrics).toContain('swap_filter_total_filtered');
+    expect(metrics).toContain('swap_filter_whale_alerts');
+    expect(metrics).toContain('swap_filter_rate');
+    expect(metrics).toContain('swap_filter_avg_processing_time_ms');
+    expect(metrics).toContain('swap_filter_dedup_cache_size');
+    expect(metrics).toContain('swap_filter_reason_count');
+  });
+
+  it('should include correct metric types (counter vs gauge)', () => {
+    const metrics = filter.getPrometheusMetrics();
+
+    expect(metrics).toContain('# TYPE swap_filter_total_processed counter');
+    expect(metrics).toContain('# TYPE swap_filter_rate gauge');
+  });
+});
+
+// =============================================================================
+// Hypothesis Validation (merged from swap-event-filter-extended)
+// =============================================================================
+
+describe('Hypothesis Validation: Event Reduction with Signal Retention', () => {
+  let filter: SwapEventFilter;
+
+  beforeEach(() => {
+    resetSwapEventFilter();
+    filter = new SwapEventFilter({
+      minUsdValue: 10,
+      whaleThreshold: 50000
+    });
+  });
+
+  afterEach(() => {
+    filter.destroy();
+  });
+
+  it('should achieve high event reduction while retaining actionable signals', () => {
+    // Simulate realistic distribution of swap events
+    // 80% dust (<$10), 19% normal ($10-$50K), 1% whale (>$50K)
+    const events: SwapEvent[] = [];
+
+    // 800 dust transactions
+    for (let i = 0; i < 800; i++) {
+      events.push(createMockSwapEvent({
+        usdValue: Math.random() * 9, // $0-$9
+        transactionHash: `0xdust${i}`
+      }));
+    }
+
+    // 190 normal transactions
+    for (let i = 0; i < 190; i++) {
+      events.push(createMockSwapEvent({
+        usdValue: 10 + Math.random() * 49990, // $10-$50K
+        transactionHash: `0xnormal${i}`
+      }));
+    }
+
+    // 10 whale transactions
+    for (let i = 0; i < 10; i++) {
+      events.push(createMockSwapEvent({
+        usdValue: 50000 + Math.random() * 950000, // $50K-$1M
+        transactionHash: `0xwhale${i}`
+      }));
+    }
+
+    const results = filter.processBatch(events);
+    const stats = filter.getStats();
+
+    // Verify event reduction
+    const reductionRate = (stats.totalFiltered / stats.totalProcessed) * 100;
+    expect(reductionRate).toBeGreaterThan(70); // At least 70% reduction
+
+    // Verify signal retention - all whales should be detected
+    expect(results.whaleAlerts.length).toBe(10);
+
+    // Verify all actionable transactions passed
+    expect(results.passed.length).toBe(200); // 190 normal + 10 whale
+  });
+
+  it('should detect 100% of whale transactions', () => {
+    const whaleSwaps = Array.from({ length: 100 }, (_, i) =>
+      createMockSwapEvent({
+        usdValue: 60000 + Math.random() * 940000,
+        transactionHash: `0xwhale${i}`
+      })
+    );
+
+    const results = filter.processBatch(whaleSwaps);
+
+    expect(results.whaleAlerts.length).toBe(100);
+    expect(results.passed.length).toBe(100);
   });
 });

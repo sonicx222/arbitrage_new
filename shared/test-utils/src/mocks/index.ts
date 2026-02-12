@@ -34,6 +34,12 @@ export type {
   MockHttpServer,
 } from './partition-service.mock';
 
+// Shared mock factories (PerfLogger, ExecutionStateManager)
+export {
+  createMockPerfLogger,
+  createMockExecutionStateManager,
+} from './mock-factories';
+
 // Provider mocks (ethers.js)
 export {
   createMockProvider,

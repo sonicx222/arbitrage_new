@@ -7,7 +7,9 @@
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { BridgeLatencyPredictor } from '../../bridge-predictor';
+import { Logger } from '../../types';
 import { CrossChainBridge } from '@arbitrage/types';
+import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
 // Tests
@@ -15,9 +17,12 @@ import { CrossChainBridge } from '@arbitrage/types';
 
 describe('BridgeLatencyPredictor', () => {
   let predictor: BridgeLatencyPredictor;
+  let logger: RecordingLogger;
 
   beforeEach(() => {
-    predictor = new BridgeLatencyPredictor();
+    logger = new RecordingLogger();
+    // FIX #21: Pass DI logger (cast needed due to LogMeta vs object type mismatch)
+    predictor = new BridgeLatencyPredictor(logger as unknown as Logger);
   });
 
   // ===========================================================================

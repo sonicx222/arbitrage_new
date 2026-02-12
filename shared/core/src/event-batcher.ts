@@ -5,9 +5,9 @@ import { createLogger } from './logger';
 
 const logger = createLogger('event-batcher');
 
-export interface BatchedEvent {
+export interface BatchedEvent<T = any> {
   pairKey: string;
-  events: any[];
+  events: T[];
   timestamp: number;
   batchSize: number;
 }
@@ -21,16 +21,16 @@ export interface BatchConfig {
   maxQueueSize?: number;
 }
 
-export class EventBatcher {
+export class EventBatcher<T = any> {
   private batches: Map<string, {
-    events: any[];
+    events: T[];
     keys: Set<string>; // P1-2 FIX: O(1) dedup lookup instead of O(n) array scan
     timeout: NodeJS.Timeout;
     created: number;
   }> = new Map();
   private config: Required<BatchConfig>;
-  private onBatchReady: (batch: BatchedEvent) => void;
-  private processingQueue: BatchedEvent[] = [];
+  private onBatchReady: (batch: BatchedEvent<T>) => void;
+  private processingQueue: BatchedEvent<T>[] = [];
   private isProcessing = false;
   // P2-FIX: Mutex lock to prevent TOCTOU race condition in processQueue
   private processingLock: Promise<void> | null = null;
@@ -39,7 +39,7 @@ export class EventBatcher {
 
   constructor(
     config: Partial<BatchConfig> = {},
-    onBatchReady: (batch: BatchedEvent) => void
+    onBatchReady: (batch: BatchedEvent<T>) => void
   ) {
     this.config = {
       maxBatchSize: config.maxBatchSize || 10,
@@ -60,7 +60,7 @@ export class EventBatcher {
     });
   }
 
-  addEvent(event: any, pairKey?: string): void {
+  addEvent(event: T, pairKey?: string): void {
     const key = pairKey || this.extractPairKey(event);
     if (!key) {
       logger.warn('Unable to extract pair key from event, processing immediately', { event });
@@ -97,7 +97,7 @@ export class EventBatcher {
     }
   }
 
-  addEvents(events: any[], pairKey?: string): void {
+  addEvents(events: T[], pairKey?: string): void {
     for (const event of events) {
       this.addEvent(event, pairKey);
     }
@@ -116,7 +116,7 @@ export class EventBatcher {
     this.batches.delete(pairKey);
 
     // Create batched event
-    const batchedEvent: BatchedEvent = {
+    const batchedEvent: BatchedEvent<T> = {
       pairKey,
       events: batch.events,
       timestamp: Date.now(),
@@ -203,31 +203,29 @@ export class EventBatcher {
     };
   }
 
-  private extractPairKey(event: any): string {
-    // Extract pair key from different event types
-    if (event.pairKey) {
-      return event.pairKey;
+  private extractPairKey(event: T): string {
+    // Duck-typing: inspect event shape at runtime to extract pair key
+    const e = event as Record<string, any>;
+    if (e.pairKey) {
+      return e.pairKey;
     }
 
-    if (event.address && event.topics) {
-      // This looks like a blockchain log event
-      // We would need to map contract addresses to pair keys
-      // For now, return a generic key
-      return `contract_${event.address}`;
+    if (e.address && e.topics) {
+      return `contract_${e.address}`;
     }
 
-    // Fallback
     return 'unknown_pair';
   }
 
-  private getEventKey(event: any): string {
-    // Generate a unique key for event deduplication
-    if (event.transactionHash && event.logIndex !== undefined) {
-      return `${event.transactionHash}_${event.logIndex}`;
+  private getEventKey(event: T): string {
+    // Duck-typing: inspect event shape at runtime for dedup key
+    const e = event as Record<string, any>;
+    if (e.transactionHash && e.logIndex !== undefined) {
+      return `${e.transactionHash}_${e.logIndex}`;
     }
 
-    if (event.id) {
-      return event.id;
+    if (e.id) {
+      return e.id;
     }
 
     // Fallback to JSON stringification (expensive but works)
@@ -297,9 +295,9 @@ export class EventBatcher {
    * Process an event immediately without batching.
    * P3-FIX: Handle async callback errors to prevent unhandled rejections.
    */
-  private processEventImmediately(event: any): void {
+  private processEventImmediately(event: T): void {
     // For events that can't be batched, process immediately
-    const batchedEvent: BatchedEvent = {
+    const batchedEvent: BatchedEvent<T> = {
       pairKey: 'immediate',
       events: [event],
       timestamp: Date.now(),
@@ -349,11 +347,11 @@ export class EventBatcher {
 }
 
 // Factory function for creating configured batchers
-export function createEventBatcher(
+export function createEventBatcher<T = any>(
   config: Partial<BatchConfig>,
-  onBatchReady: (batch: BatchedEvent) => void
-): EventBatcher {
-  return new EventBatcher(config, onBatchReady);
+  onBatchReady: (batch: BatchedEvent<T>) => void
+): EventBatcher<T> {
+  return new EventBatcher<T>(config, onBatchReady);
 }
 
 // =============================================================================

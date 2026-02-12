@@ -26,7 +26,7 @@ This document provides a snapshot of the current arbitrage trading system archit
 | **Partition High-Value** | 3001 | 3013 | Detector | P3: Ethereum, zkSync, Linea (Unified Detector) |
 | **Partition Solana** | 3001 | 3014 | Detector | P4: Solana (non-EVM, Unified Detector) |
 | **Execution Engine** | 3001 | 3015 | Core | Trade execution and MEV protection |
-| **Cross-Chain Detector** | 3001 | 3016 | Detector | Cross-chain arbitrage opportunities |
+| **Cross-Chain Detector** | 3006 | 3016 | Detector | Cross-chain arbitrage opportunities |
 | **Unified Detector (Mempool)** | 3007 | 3007 | Detector | **P1-004 FIX**: Multi-chain detector running mempool partition (pre-block arbitrage via bloXroute BDN). Implements ADR-003 partitioned architecture. |
 
 **Note**: All partition services use internal port 3001 (configurable via `HEALTH_CHECK_PORT`), mapped to unique external ports (3011-3016) in docker-compose. The services run the Unified Detector (`@arbitrage/unified-detector`) with different `PARTITION_ID` configurations.

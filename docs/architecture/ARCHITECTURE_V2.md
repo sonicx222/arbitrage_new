@@ -116,7 +116,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 │ │                │ │                │ │                │ │                │ │      ││
 │ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │ Rail ││
 │ ││ Partition 1  ││ ││ Partition 3  ││ ││ Cross-Chain  ││ ││ Partition 4  ││ │ way  ││
-│ ││BSC/Poly/Avax ││ ││ ETH/zkSync   ││ ││ Analyzer     ││ ││ SOLANA       ││ │      ││
+│ ││BSC/Poly/Avax ││ ││ ETH/zkSync   ││ ││ Detector     ││ ││ SOLANA       ││ │      ││
 │ ││ Oracle ARM   ││ ││ Oracle ARM   ││ ││ Oracle AMD   ││ ││ Fly.io US-W  ││ │ + Bkp││
 │ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │Render││
 │ │                │ │                │ │                │ │                │ │      ││
@@ -190,7 +190,7 @@ The architecture combines two patterns:
 │  and enables resource-efficient deployment (ADR-003).                           │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
-│  ├── Cross-Chain Analyzer (Multi-chain opportunity detection)                   │
+│  ├── Cross-Chain Detector (Multi-chain opportunity detection)                   │
 │  ├── ML Predictor (Price movement prediction)                                   │
 │  ├── Volume Aggregator (Swap event intelligence)                                │
 │  ├── Multi-Leg Path Finder (T3.11: 5-7 token cycle detection)                   │
@@ -489,7 +489,7 @@ Total Target: <10ms end-to-end
 
 ```
 Price Update (Chain A) ─┐
-                        ├──→ Cross-Chain Analyzer ──→ Opportunity Detected
+                        ├──→ Cross-Chain Detector ──→ Opportunity Detected
 Price Update (Chain B) ─┘           │
                                     │
                               Uses: Materialized Price Matrix
@@ -648,7 +648,7 @@ All phases remain within Upstash 10K/day limit due to batching.
 | Provider | Service | Region | Resources | Cost |
 |----------|---------|--------|-----------|------|
 | Oracle Cloud ARM | Partition 1, 3 | SG, US | 4 OCPU, 24GB | $0 |
-| Oracle Cloud AMD | Cross-Chain Analyzer | US | 1 OCPU, 1GB | $0 |
+| Oracle Cloud AMD | Cross-Chain Detector | US | 1 OCPU, 1GB | $0 |
 | Fly.io | Partition 2 | Singapore | 512MB | $0 |
 | Railway | Executor Primary | US-West | 512MB | $0 |
 | Render | Executor Backup | US-East | 512MB | $0 |

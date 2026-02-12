@@ -61,22 +61,20 @@ interface PreValidationConfig {
 
 ### Implementation Location
 
-Pre-validation is implemented in `CrossChainDetectorService.publishArbitrageOpportunity()`:
+Pre-validation is implemented via the extracted `PreValidationOrchestrator` module
+(`services/cross-chain-detector/src/pre-validation-orchestrator.ts`), which encapsulates
+sample-based validation, budget tracking, and simulation callback injection:
 
 ```typescript
-// services/cross-chain-detector/src/detector.ts
-private async publishArbitrageOpportunity(opportunity: CrossChainOpportunity): Promise<void> {
-  if (preValidConfig?.enabled) {
-    const shouldPreValidate = await this.shouldPreValidate(opportunity, preValidConfig);
-    if (shouldPreValidate) {
-      const isValid = await this.preValidateOpportunity(opportunity, preValidConfig);
-      if (!isValid) {
-        return; // Skip publishing
-      }
-    }
-  }
-  await this.opportunityPublisher.publish(opportunity);
-}
+// services/cross-chain-detector/src/pre-validation-orchestrator.ts
+const orchestrator = createPreValidationOrchestrator({
+  config: preValidConfig,
+  simulationCallback,
+  logger,
+});
+
+// Called from CrossChainDetectorService.publishArbitrageOpportunity()
+const isValid = await orchestrator.shouldPublish(opportunity);
 ```
 
 ## Consequences

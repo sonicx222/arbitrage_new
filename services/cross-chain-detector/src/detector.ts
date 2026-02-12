@@ -268,7 +268,7 @@ export class CrossChainDetectorService {
 
   constructor(userConfig: DetectorConfig = {}) {
     this.perfLogger = getPerformanceLogger('cross-chain-detector');
-    this.bridgePredictor = new BridgeLatencyPredictor();
+    this.bridgePredictor = new BridgeLatencyPredictor(this.logger);
 
     // Config C1: Merge user config with defaults
     this.config = {
@@ -508,6 +508,8 @@ export class CrossChainDetectorService {
       // P1-5 FIX: Reset concurrency guards for clean restart
       this.healthGuard.forceRelease();
       this.detectionGuard.forceRelease();
+      // FIX #4: Release whaleGuard to prevent stale guard blocking whale detection on hot restart
+      this.whaleGuard.forceRelease();
 
       this.logger.info('Cross-Chain Detector Service stopped');
     });
@@ -820,7 +822,7 @@ export class CrossChainDetectorService {
 
       // NOTE: Per-event debug logging removed - high-frequency mempool events
       // Track pending opportunities for metrics (increment internal counter)
-      this.pendingOpportunitiesReceived = (this.pendingOpportunitiesReceived || 0) + 1;
+      this.pendingOpportunitiesReceived++;
 
       // FIX 7.1: Implement pending opportunity analysis
       // Task 1.3.4: Full implementation of mempool-based opportunity detection
@@ -887,7 +889,12 @@ export class CrossChainDetectorService {
       // For AMM DEXs, price impact ≈ amountIn / reserve (simplified constant product)
       // Use estimatedImpact from mempool detector if available, otherwise estimate
       // Use the update object which contains reserve0/reserve1
-      const priceImpact = estimatedImpact ?? this.estimatePriceImpact(intent, pricesForPair[0].update);
+      // FIX #8: Validate estimatedImpact bounds before using it
+      // If the value from Redis is not finite or exceeds 50% impact, fall back to local estimation
+      const rawImpact = estimatedImpact;
+      const priceImpact = (rawImpact !== undefined && Number.isFinite(rawImpact) && rawImpact >= 0 && rawImpact <= 0.5)
+        ? rawImpact
+        : this.estimatePriceImpact(intent, pricesForPair[0].update);
 
       if (priceImpact < 0.001) {
         // Less than 0.1% impact - not significant enough
@@ -896,9 +903,12 @@ export class CrossChainDetectorService {
 
       // Find the price point that would be affected by this pending swap
       // (the DEX where the pending swap is executing)
+      // FIX #3: Use intent.type (DEX name like 'uniswapV2') instead of intent.router (hex address)
+      // for matching against p.dex (e.g., 'uniswap'). Hex addresses never contain DEX names.
+      // Fall back to chain-only match if intent.type doesn't match any tracked DEX.
       const affectedPrice = pricesForPair.find(p =>
-        p.chain === chainName && intent.router.toLowerCase().includes(p.dex.toLowerCase())
-      );
+        p.chain === chainName && intent.type.toLowerCase().includes(p.dex.toLowerCase())
+      ) ?? pricesForPair.find(p => p.chain === chainName);
 
       if (!affectedPrice) {
         // Pending swap is on a DEX we're not tracking
@@ -973,7 +983,9 @@ export class CrossChainDetectorService {
         targetDex: bestAltSource.dex,
         targetPrice: bestAltPrice,
         priceDiff: priceDiff,
-        percentageDiff: priceDiffPercent,
+        // P0 FIX: Convert decimal ratio to percentage to match cross-chain path convention
+        // (publisher divides by 100, so store as percentage e.g. 2.0 for 2%)
+        percentageDiff: priceDiffPercent * 100,
         tradeSizeUsd: this.config.defaultTradeSizeUsd ?? 1000,
         // Values are in the token's smallest unit (e.g., wei for ETH, 1e-6 for USDC)
         estimatedProfit: netProfit,
@@ -1295,6 +1307,22 @@ export class CrossChainDetectorService {
       return opportunities;
     }
 
+    // FIX #11: Hard staleness rejection - reject prices beyond max age
+    // This prevents trading on outdated prices even when confidence boosters
+    // (whale + ML) could push stale opportunities above the threshold.
+    // Hot-path: single Date.now() call, two comparisons, no allocations.
+    const now = Date.now();
+    const maxPriceAgeMs = this.config.maxPriceAgeMs ?? 30000;
+    if (now - lowestPrice.update.timestamp > maxPriceAgeMs ||
+        now - highestPrice.update.timestamp > maxPriceAgeMs) {
+      this.logger.debug('Rejecting stale price pair', {
+        lowestAge: now - lowestPrice.update.timestamp,
+        highestAge: now - highestPrice.update.timestamp,
+        maxAgeMs: maxPriceAgeMs,
+      });
+      return opportunities;
+    }
+
     const priceDiff = highestPrice.price - lowestPrice.price;
     const percentageDiff = (priceDiff / lowestPrice.price) * 100;
 
@@ -1312,7 +1340,16 @@ export class CrossChainDetectorService {
       return opportunities;
     }
 
-    const netProfit = priceDiff - bridgeCost;
+    // P0 FIX: Include gas costs and swap fees in net profit calculation
+    // Gas costs: source chain swap + dest chain swap, converted to per-token units
+    const tradeTokens = this.bridgeCostEstimator!.extractTokenAmount(lowestPrice.update);
+    const gasCostPerToken = tradeTokens > 0
+      ? (ARBITRAGE_CONFIG.estimatedGasCost * 2) / tradeTokens
+      : 0;
+    // Swap fees: buy on source + sell on dest (per-token cost from price * fee rate)
+    const swapFeePerToken = ARBITRAGE_CONFIG.feePercentage * (lowestPrice.price + highestPrice.price);
+
+    const netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
 
     if (netProfit > ARBITRAGE_CONFIG.minProfitPercentage * lowestPrice.price) {
       // Build ML prediction object if predictions available
@@ -1477,6 +1514,47 @@ export class CrossChainDetectorService {
     success: boolean;
     timestamp: number;
   }): void {
+    // FIX #7: Validate bridge data bounds before passing to predictor
+    // Prevents poisoned/invalid data from corrupting the prediction model
+    const { actualLatency, actualCost, amount, timestamp } = bridgeResult;
+
+    // Validate actualLatency: positive, finite, < ~41.7 days (3600000s)
+    // Accommodates native L2-to-L1 bridges (up to 7 days / 604800s)
+    if (!Number.isFinite(actualLatency) || actualLatency <= 0 || actualLatency > 3600000) {
+      this.logger.warn('Rejected bridge data: invalid actualLatency', {
+        actualLatency,
+        bridge: bridgeResult.bridge,
+      });
+      return;
+    }
+
+    // Validate actualCost: non-negative, finite, < 1000 (reasonable upper bound in token units)
+    if (!Number.isFinite(actualCost) || actualCost < 0 || actualCost > 1000) {
+      this.logger.warn('Rejected bridge data: invalid actualCost', {
+        actualCost,
+        bridge: bridgeResult.bridge,
+      });
+      return;
+    }
+
+    // Validate amount: positive, finite
+    if (!Number.isFinite(amount) || amount <= 0) {
+      this.logger.warn('Rejected bridge data: invalid amount', {
+        amount,
+        bridge: bridgeResult.bridge,
+      });
+      return;
+    }
+
+    // Validate timestamp: positive, not in the future (with 60s tolerance)
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > Date.now() + 60000) {
+      this.logger.warn('Rejected bridge data: invalid timestamp', {
+        timestamp,
+        bridge: bridgeResult.bridge,
+      });
+      return;
+    }
+
     const bridgeObj: CrossChainBridge = {
       bridge: bridgeResult.bridge,
       sourceChain: bridgeResult.sourceChain,
@@ -1522,8 +1600,7 @@ export class CrossChainDetectorService {
 
   private filterValidOpportunities(opportunities: CrossChainOpportunity[]): CrossChainOpportunity[] {
     return opportunities
-      .filter(opp => opp.netProfit > 0)
-      .filter(opp => opp.confidence > ARBITRAGE_CONFIG.confidenceThreshold)
+      .filter(opp => opp.netProfit > 0 && opp.confidence > ARBITRAGE_CONFIG.confidenceThreshold)
       // Phase 3: Prioritize whale-triggered opportunities
       .sort((a, b) => {
         // Whale-triggered first

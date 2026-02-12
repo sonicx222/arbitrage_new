@@ -4,21 +4,22 @@
  * Tests Solana simulation functionality via Helius API.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { HeliusSimulationProvider, createHeliusProvider } from './helius-provider';
-import type { SolanaSimulationRequest, HeliusProviderConfig } from './helius-provider';
+import type { SolanaSimulationRequest, SolanaSimulationResult, HeliusProviderConfig } from './helius-provider';
+import type { SimulationRequest } from './types';
 
 // Mock fetch globally
-const mockFetch = vi.fn();
+const mockFetch = jest.fn<(...args: any[]) => Promise<any>>();
 global.fetch = mockFetch as unknown as typeof fetch;
 
 describe('HeliusSimulationProvider', () => {
   let provider: HeliusSimulationProvider;
   const mockLogger = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
   };
 
   const defaultConfig: HeliusProviderConfig = {
@@ -32,13 +33,13 @@ describe('HeliusSimulationProvider', () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
     mockFetch.mockReset();
     provider = new HeliusSimulationProvider(defaultConfig);
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   describe('constructor', () => {
@@ -80,11 +81,11 @@ describe('HeliusSimulationProvider', () => {
   });
 
   describe('simulate', () => {
-    const mockRequest: SolanaSimulationRequest = {
+    const mockRequest = {
       chain: 'solana',
       transaction: 'base64-encoded-transaction-data',
       commitment: 'confirmed',
-    };
+    } as unknown as SimulationRequest;
 
     it('should simulate transaction successfully via Helius', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -104,7 +105,7 @@ describe('HeliusSimulationProvider', () => {
         }),
       });
 
-      const result = await provider.simulate(mockRequest);
+      const result = await provider.simulate(mockRequest) as SolanaSimulationResult;
 
       expect(result.success).toBe(true);
       expect(result.wouldRevert).toBe(false);
@@ -142,7 +143,7 @@ describe('HeliusSimulationProvider', () => {
       const evmRequest = {
         chain: 'ethereum',
         transaction: {} as any,
-      };
+      } as SimulationRequest;
 
       const result = await provider.simulate(evmRequest);
 
@@ -171,7 +172,7 @@ describe('HeliusSimulationProvider', () => {
         }),
       });
 
-      const result = await provider.simulate(mockRequest);
+      const result = await provider.simulate(mockRequest) as SolanaSimulationResult;
 
       expect(result.success).toBe(true);
       expect(result.programLogs).toEqual(['Success via fallback']);
@@ -281,7 +282,7 @@ describe('HeliusSimulationProvider', () => {
       const result = await provider.simulate({
         chain: 'solana',
         transaction: 'test',
-      });
+      } as unknown as SimulationRequest);
 
       expect(result.wouldRevert).toBe(true);
       expect(result.revertReason).toContain('Instruction 2');
@@ -304,7 +305,7 @@ describe('HeliusSimulationProvider', () => {
       const result = await provider.simulate({
         chain: 'solana',
         transaction: 'invalid',
-      });
+      } as unknown as SimulationRequest);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Invalid transaction encoding');
@@ -333,7 +334,7 @@ describe('HeliusSimulationProvider', () => {
       const result = await provider.simulate({
         chain: 'solana',
         transaction: 'test',
-      });
+      } as unknown as SimulationRequest);
 
       expect(result.success).toBe(true);
       expect(provider.getFallbackUsedCount()).toBe(1);
@@ -368,13 +369,13 @@ describe('HeliusSimulationProvider', () => {
         }),
       });
 
-      const request: SolanaSimulationRequest = {
+      const request = {
         chain: 'solana',
         transaction: 'test',
         accountsToReturn: ['ABC123'],
-      };
+      } as unknown as SimulationRequest;
 
-      const result = await provider.simulate(request);
+      const result = await provider.simulate(request) as SolanaSimulationResult;
 
       expect(result.success).toBe(true);
       expect(result.accountChanges).toHaveLength(1);
@@ -387,10 +388,10 @@ describe('HeliusSimulationProvider', () => {
 describe('createHeliusProvider', () => {
   it('should create provider instance', () => {
     const mockLogger = {
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
     };
 
     const provider = createHeliusProvider({

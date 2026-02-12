@@ -52,7 +52,7 @@ describe('BridgeCostEstimator', () => {
 
   beforeEach(() => {
     mockLogger = createMockLogger();
-    mockBridgePredictor = new BridgeLatencyPredictor();
+    mockBridgePredictor = new BridgeLatencyPredictor(mockLogger as any);
 
     estimator = createBridgeCostEstimator({
       bridgePredictor: mockBridgePredictor,

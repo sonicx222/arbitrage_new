@@ -201,10 +201,28 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (typeof tx.chain !== 'string' || !tx.chain) {
       return false;
     }
-    if (typeof tx.usdValue !== 'number' || isNaN(tx.usdValue) || tx.usdValue < 0) {
+    // FIX #9: Validate usdValue is finite and within reasonable bounds ($100B cap)
+    if (typeof tx.usdValue !== 'number' || isNaN(tx.usdValue) || tx.usdValue < 0 ||
+        !Number.isFinite(tx.usdValue) || tx.usdValue > 100_000_000_000) {
       return false;
     }
     if (typeof tx.direction !== 'string' || !['buy', 'sell'].includes(tx.direction)) {
+      return false;
+    }
+    // FIX #9: Validate token (string, non-empty)
+    if (typeof tx.token !== 'string' || !tx.token) {
+      return false;
+    }
+    // FIX #9: Validate transactionHash (string, non-empty)
+    if (typeof tx.transactionHash !== 'string' || !tx.transactionHash) {
+      return false;
+    }
+    // FIX #9: Validate amount (number, positive, finite)
+    if (typeof tx.amount !== 'number' || isNaN(tx.amount) || tx.amount <= 0 || !Number.isFinite(tx.amount)) {
+      return false;
+    }
+    // FIX #9: Validate timestamp (number, positive)
+    if (typeof tx.timestamp !== 'number' || isNaN(tx.timestamp) || tx.timestamp <= 0) {
       return false;
     }
 
@@ -236,6 +254,10 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (typeof intent.router !== 'string' || !intent.router) {
       return false;
     }
+    // FIX: Validate intent.type (SwapRouterType) — used by detector.ts for DEX matching
+    if (typeof intent.type !== 'string' || !intent.type) {
+      return false;
+    }
     if (typeof intent.tokenIn !== 'string' || !intent.tokenIn) {
       return false;
     }
@@ -256,7 +278,12 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
     if (typeof intent.nonce !== 'number' || intent.nonce < 0) {
       return false;
     }
-    if (typeof intent.slippageTolerance !== 'number' || intent.slippageTolerance < 0) {
+    if (typeof intent.slippageTolerance !== 'number' || intent.slippageTolerance < 0 || intent.slippageTolerance > 0.5) {
+      return false;
+    }
+    // FIX #6: Validate gasPrice to prevent BigInt(undefined) crash in detector.ts
+    // gasPrice must be a numeric string suitable for BigInt conversion
+    if (typeof intent.gasPrice !== 'string' || !intent.gasPrice || !/^\d+$/.test(intent.gasPrice)) {
       return false;
     }
 
@@ -305,71 +332,76 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
   // ===========================================================================
 
   /**
-   * Consume price updates from Redis Streams.
+   * FIX #14: Generic stream consumption function.
+   * Extracts the common pattern from consumePriceUpdates, consumeWhaleAlerts,
+   * and consumePendingOpportunities to eliminate code duplication.
+   *
+   * @param streamName - Redis stream name to consume from
+   * @param batchSize - Number of messages to read per batch
+   * @param validator - Type guard function to validate messages
+   * @param eventName - Event name to emit for valid messages
+   * @param errorLabel - Label for error log messages
    */
-  async function consumePriceUpdates(): Promise<void> {
+  async function consumeStream<T>(
+    streamName: string,
+    batchSize: number,
+    validator: (data: T | null | undefined) => data is T,
+    eventName: string,
+    errorLabel: string
+  ): Promise<void> {
     const config = consumerGroups.find(
-      (c) => c.streamName === RedisStreamsClient.STREAMS.PRICE_UPDATES
+      (c) => c.streamName === streamName
     );
     if (!config) return;
 
     try {
-      // FIX 3.2: Use configurable block timeout instead of hardcoded value
       const messages = await streamsClient.xreadgroup(config, {
-        count: priceUpdatesBatchSize,
+        count: batchSize,
         block: blockTimeoutMs,
         startId: '>',
       });
 
       for (const message of messages) {
-        const update = message.data as unknown as PriceUpdate;
-        if (!validatePriceUpdate(update)) {
-          logger.warn('Skipping invalid price update message', { messageId: message.id });
+        const data = message.data as unknown as T;
+        if (!validator(data)) {
+          logger.warn(`Skipping invalid ${errorLabel} message`, { messageId: message.id });
           await streamsClient.xack(config.streamName, config.groupName, message.id);
           continue;
         }
-        emitter.emit('priceUpdate', update);
+        emitter.emit(eventName, data);
         await streamsClient.xack(config.streamName, config.groupName, message.id);
       }
     } catch (error) {
       if (!(error as Error).message?.includes('timeout')) {
-        logger.error('Error consuming price updates stream', { error: (error as Error).message });
+        logger.error(`Error consuming ${errorLabel} stream`, { error: (error as Error).message });
       }
     }
+  }
+
+  /**
+   * Consume price updates from Redis Streams.
+   */
+  async function consumePriceUpdates(): Promise<void> {
+    return consumeStream<PriceUpdate>(
+      RedisStreamsClient.STREAMS.PRICE_UPDATES,
+      priceUpdatesBatchSize,
+      validatePriceUpdate,
+      'priceUpdate',
+      'price update'
+    );
   }
 
   /**
    * Consume whale alerts from Redis Streams.
    */
   async function consumeWhaleAlerts(): Promise<void> {
-    const config = consumerGroups.find(
-      (c) => c.streamName === RedisStreamsClient.STREAMS.WHALE_ALERTS
+    return consumeStream<WhaleTransaction>(
+      RedisStreamsClient.STREAMS.WHALE_ALERTS,
+      whaleAlertsBatchSize,
+      validateWhaleTransaction,
+      'whaleTransaction',
+      'whale transaction'
     );
-    if (!config) return;
-
-    try {
-      // FIX 3.2: Use configurable block timeout instead of hardcoded value
-      const messages = await streamsClient.xreadgroup(config, {
-        count: whaleAlertsBatchSize,
-        block: blockTimeoutMs,
-        startId: '>',
-      });
-
-      for (const message of messages) {
-        const whaleTx = message.data as unknown as WhaleTransaction;
-        if (!validateWhaleTransaction(whaleTx)) {
-          logger.warn('Skipping invalid whale transaction message', { messageId: message.id });
-          await streamsClient.xack(config.streamName, config.groupName, message.id);
-          continue;
-        }
-        emitter.emit('whaleTransaction', whaleTx);
-        await streamsClient.xack(config.streamName, config.groupName, message.id);
-      }
-    } catch (error) {
-      if (!(error as Error).message?.includes('timeout')) {
-        logger.error('Error consuming whale alerts stream', { error: (error as Error).message });
-      }
-    }
   }
 
   /**
@@ -377,33 +409,13 @@ export function createStreamConsumer(config: StreamConsumerConfig): StreamConsum
    * Task 1.3.3: Integration with Existing Detection
    */
   async function consumePendingOpportunities(): Promise<void> {
-    const config = consumerGroups.find(
-      (c) => c.streamName === RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES
+    return consumeStream<PendingOpportunity>(
+      RedisStreamsClient.STREAMS.PENDING_OPPORTUNITIES,
+      pendingOpportunityBatchSize,
+      validatePendingOpportunity,
+      'pendingOpportunity',
+      'pending opportunity'
     );
-    if (!config) return;
-
-    try {
-      const messages = await streamsClient.xreadgroup(config, {
-        count: pendingOpportunityBatchSize,
-        block: blockTimeoutMs,
-        startId: '>',
-      });
-
-      for (const message of messages) {
-        const pendingOpp = message.data as unknown as PendingOpportunity;
-        if (!validatePendingOpportunity(pendingOpp)) {
-          logger.warn('Skipping invalid pending opportunity message', { messageId: message.id });
-          await streamsClient.xack(config.streamName, config.groupName, message.id);
-          continue;
-        }
-        emitter.emit('pendingOpportunity', pendingOpp);
-        await streamsClient.xack(config.streamName, config.groupName, message.id);
-      }
-    } catch (error) {
-      if (!(error as Error).message?.includes('timeout')) {
-        logger.error('Error consuming pending opportunities stream', { error: (error as Error).message });
-      }
-    }
   }
 
   /**

@@ -1914,114 +1914,20 @@ export type {
   ValidationResult
 } from './message-validators';
 
-// =============================================================================
-// 15.4 Re-exported Types (from @arbitrage/types)
-// =============================================================================
-
-export type {
-  Chain,
-  Dex,
-  Token,
-  Pair,
-  PriceUpdate,
-  ArbitrageOpportunity,
-  SwapEvent,
-  WhaleTransaction,
-  MessageEvent,
-  ServiceHealth,
-  PerformanceMetrics,
-  PredictionResult,
-  MLModelMetrics,
-  ServiceConfig,
-  DetectorConfig,
-  ExecutionConfig,
-  ArbitrageError,
-  NetworkError,
-  ValidationError
-} from '../../types';
-
 // #############################################################################
 // #                                                                           #
-// #             SECTION 16: DEPRECATED & INTERNAL API RE-EXPORTS              #
+// #                    SECTION 16: INTERNAL API RE-EXPORTS                    #
 // #                                                                           #
 // #############################################################################
-
-// =============================================================================
-// REF-1/ARCH-1: DEPRECATED arbitrage-calculator.ts exports
-// REFACTOR: Most functions have been migrated to components/price-calculator
-// and components/arbitrage-detector. Only keeping legacy exports that don't
-// have direct replacements yet.
-//
-// MIGRATION GUIDE:
-// - calculatePriceFromReserves → components/price-calculator (DONE)
-// - calculatePriceFromBigIntReserves → components/price-calculator (DONE)
-// - safeBigIntDivision → components/price-calculator (DONE)
-// - invertPrice → components/price-calculator (DONE)
-// - calculatePriceDifferencePercent → components/price-calculator (DONE)
-// - getDefaultFee → components/price-calculator (DONE)
-// - getMinProfitThreshold → components/price-calculator (DONE)
-// - isSameTokenPair → components/token-utils (DONE)
-// - isReverseOrder → components/token-utils (DONE)
-// - calculateCrossChainArbitrage → components/arbitrage-detector (DONE)
-// - validatePairSnapshot → components/arbitrage-detector as isValidPairSnapshot
-// - createPairSnapshot → components/pair-repository as PairRepository.createSnapshot()
-// - calculateIntraChainArbitrage → components/arbitrage-detector as detectArbitrage
-// =============================================================================
-// REMOVED: Deprecated exports from arbitrage-calculator.ts
-// The following have been migrated to components/:
-// - calculateIntraChainArbitrage → Use SimpleArbitrageDetector from unified-detector
-// - validatePairSnapshot → Use local validation in SnapshotManager
-// - createPairSnapshot → Use SnapshotManager.createPairSnapshot()
-// - PairSnapshot type → Use PairSnapshot from simple-arbitrage-detector
-// - PriceComparisonResult type → Use SpreadResult from price-calculator
-// - ArbitrageCalcConfig type → Use detection config in services
-// =============================================================================
-
-// REMOVED: ArbitrageService and EnterpriseConfigManager (unused, cleaned up)
-// DEPRECATED: AdvancedArbitrageOrchestrator removed per ADR-002
-// The orchestrator used Pub/Sub which violates ADR-002 (Redis Streams required)
-// Use the coordinator service pattern with Redis Streams instead
-// See: services/coordinator/src/coordinator.ts
-
-// REMOVED: MatrixPriceCache and PredictiveCacheWarmer (unused modules cleaned up)
-// REMOVED: ABTestingFramework (unused module cleaned up)
-// REMOVED: Other professional-grade modules (unused, cleaned up):
-// - AdvancedStatisticalArbitrage
-// - RiskManagementEngine
-// - EnterpriseTestingFramework
-// - EnterpriseConfigurationManager
 
 /**
  * Internal API Re-exports
  *
- * These exports are provided for backward compatibility. For new code, prefer
- * importing directly from '@arbitrage/core/internal' to make the internal
- * nature explicit:
- *
+ * For new code, prefer importing from '@arbitrage/core/internal':
  * ```typescript
- * // Preferred: explicit internal import
  * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core/internal';
- *
- * // Backward compatible: still works
- * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core';
  * ```
  *
  * @see internal/index.ts for the full list of internal exports
  */
 export * from './internal';
-
-/**
- * Deprecated API Re-exports
- *
- * These exports are provided for backward compatibility. They will be removed
- * in v2.0.0. Import from '@arbitrage/core/deprecated' for migration guidance:
- *
- * ```typescript
- * // Explicit deprecated import (recommended during migration)
- * import { calculateIntraChainArbitrage } from '@arbitrage/core/deprecated';
- * ```
- *
- * @see deprecated/index.ts for migration documentation
- * @deprecated Will be removed in v2.0.0
- */
-export * from './deprecated';

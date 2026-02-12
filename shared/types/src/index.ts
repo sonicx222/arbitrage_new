@@ -320,6 +320,37 @@ export interface ServiceHealth {
   restartCount?: number;
 }
 
+// =============================================================================
+// Service Lifecycle Contracts (Refactoring Analysis P0-2, P2-2)
+// =============================================================================
+
+/**
+ * Standard lifecycle contract for all services.
+ * Every service must implement start/stop for consistent orchestration.
+ */
+export interface ServiceLifecycle {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * Service with health reporting capability.
+ * Extends ServiceLifecycle with a health check method.
+ */
+export interface ServiceWithHealth extends ServiceLifecycle {
+  getHealth(): ServiceHealth;
+}
+
+/**
+ * Type-only contract for detector classes.
+ * Does NOT add a base class or change prototype chains (ADR-022 safe).
+ * All detector implementations should satisfy this interface shape.
+ */
+export interface DetectorContract extends ServiceLifecycle {
+  /** Return current detector health status */
+  getHealth(): ServiceHealth | Promise<ServiceHealth>;
+}
+
 export interface PerformanceMetrics {
   eventLatency: number;
   detectionLatency: number;

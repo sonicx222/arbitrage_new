@@ -332,6 +332,8 @@ export interface DetectorConfig {
   whaleConfig?: WhaleAnalysisConfig;
   /** ML prediction configuration */
   mlConfig?: MLPredictionConfig;
+  /** Max price age for hard staleness rejection in ms (default: 30000) */
+  maxPriceAgeMs?: number;
   /** Phase 3: Pre-validation configuration for sample-based opportunity validation */
   preValidationConfig?: PreValidationConfig;
   /**

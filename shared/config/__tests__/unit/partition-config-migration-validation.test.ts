@@ -278,28 +278,28 @@ describe('S3.1.7.3: Partition Service Configuration', () => {
 
   describe('Service exports verification', () => {
     it('should export P1 constants from partition-asia-fast', async () => {
-      const p1Module = await import('../../services/partition-asia-fast/src/index');
+      const p1Module = await import('../../../../services/partition-asia-fast/src/index');
       expect(p1Module.P1_PARTITION_ID).toBe('asia-fast');
       expect(p1Module.P1_CHAINS).toBeDefined();
       expect(p1Module.P1_REGION).toBeDefined();
     });
 
     it('should export P2 constants from partition-l2-turbo', async () => {
-      const p2Module = await import('../../services/partition-l2-turbo/src/index');
+      const p2Module = await import('../../../../services/partition-l2-turbo/src/index');
       expect(p2Module.P2_PARTITION_ID).toBe('l2-turbo');
       expect(p2Module.P2_CHAINS).toBeDefined();
       expect(p2Module.P2_REGION).toBeDefined();
     });
 
     it('should export P3 constants from partition-high-value', async () => {
-      const p3Module = await import('../../services/partition-high-value/src/index');
+      const p3Module = await import('../../../../services/partition-high-value/src/index');
       expect(p3Module.P3_PARTITION_ID).toBe('high-value');
       expect(p3Module.P3_CHAINS).toBeDefined();
       expect(p3Module.P3_REGION).toBeDefined();
     });
 
     it('should export P4 constants from partition-solana', async () => {
-      const p4Module = await import('../../services/partition-solana/src/index');
+      const p4Module = await import('../../../../services/partition-solana/src/index');
       expect(p4Module.P4_PARTITION_ID).toBe('solana-native');
       expect(p4Module.P4_CHAINS).toBeDefined();
       expect(p4Module.P4_REGION).toBeDefined();
@@ -312,10 +312,10 @@ describe('S3.1.7.3: Partition Service Configuration', () => {
 // =============================================================================
 
 describe('S3.1.7.4: Migration Utilities', () => {
-  let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+  let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
   beforeAll(async () => {
-    const module = await import('../../shared/core/src');
+    const module = await import('@arbitrage/core');
     PartitionRouter = module.PartitionRouter;
   });
 
@@ -372,11 +372,11 @@ describe('S3.1.7.4: Migration Utilities', () => {
   });
 
   describe('Deprecation utilities', () => {
-    let createDeprecationWarning: typeof import('../../shared/core/src').createDeprecationWarning;
-    let isDeprecatedPattern: typeof import('../../shared/core/src').isDeprecatedPattern;
+    let createDeprecationWarning: typeof import('@arbitrage/core').createDeprecationWarning;
+    let isDeprecatedPattern: typeof import('@arbitrage/core').isDeprecatedPattern;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       createDeprecationWarning = module.createDeprecationWarning;
       isDeprecatedPattern = module.isDeprecatedPattern;
     });
@@ -755,10 +755,10 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
   });
 
   describe('P2-1-FIX: Dynamic deprecation detection', () => {
-    let isDeprecatedPattern: typeof import('../../shared/core/src').isDeprecatedPattern;
+    let isDeprecatedPattern: typeof import('@arbitrage/core').isDeprecatedPattern;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       isDeprecatedPattern = module.isDeprecatedPattern;
     });
 
@@ -785,10 +785,10 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
   });
 
   describe('P2-2-FIX: Standardized null return type', () => {
-    let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+    let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       PartitionRouter = module.PartitionRouter;
     });
 
@@ -814,10 +814,10 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
   });
 
   describe('P3-1-FIX: DRY endpoint creation', () => {
-    let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+    let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       PartitionRouter = module.PartitionRouter;
     });
 
@@ -857,10 +857,10 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
   });
 
   describe('P3-2-FIX: Array copy to prevent mutation', () => {
-    let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+    let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       PartitionRouter = module.PartitionRouter;
     });
 
@@ -971,10 +971,10 @@ describe('S3.1.7.12: Regression Tests', () => {
   });
 
   describe('PartitionRouter API stability', () => {
-    let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+    let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       PartitionRouter = module.PartitionRouter;
     });
 
@@ -1013,12 +1013,12 @@ describe('S3.1.7.12: Regression Tests', () => {
   });
 
   describe('Deprecation utilities stability', () => {
-    let createDeprecationWarning: typeof import('../../shared/core/src').createDeprecationWarning;
-    let getMigrationRecommendation: typeof import('../../shared/core/src').getMigrationRecommendation;
-    let warnIfDeprecated: typeof import('../../shared/core/src').warnIfDeprecated;
+    let createDeprecationWarning: typeof import('@arbitrage/core').createDeprecationWarning;
+    let getMigrationRecommendation: typeof import('@arbitrage/core').getMigrationRecommendation;
+    let warnIfDeprecated: typeof import('@arbitrage/core').warnIfDeprecated;
 
     beforeAll(async () => {
-      const module = await import('../../shared/core/src');
+      const module = await import('@arbitrage/core');
       createDeprecationWarning = module.createDeprecationWarning;
       getMigrationRecommendation = module.getMigrationRecommendation;
       warnIfDeprecated = module.warnIfDeprecated;
@@ -1057,10 +1057,10 @@ describe('S3.1.7.12: Regression Tests', () => {
 // =============================================================================
 
 describe('S3.1.7.13: P4-x Fix Verification (Second Pass)', () => {
-  let PartitionRouter: typeof import('../../shared/core/src').PartitionRouter;
+  let PartitionRouter: typeof import('@arbitrage/core').PartitionRouter;
 
   beforeAll(async () => {
-    const module = await import('../../shared/core/src');
+    const module = await import('@arbitrage/core');
     PartitionRouter = module.PartitionRouter;
   });
 

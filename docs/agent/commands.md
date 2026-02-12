@@ -10,6 +10,7 @@ Overview of all `/slash` commands available in `.claude/commands/`. Each command
 | `/deep-analysis` | Team | 6 (parallel) | Folder path | Unified analysis report | Auditing code quality/security |
 | `/refactor-analysis` | Team | 4 (+ discussion) | Directory path | Refactoring roadmap | Planning safe refactorings |
 | `/fix-issues` | Team | 3 (3 phases) | Findings/plan | Verified code changes + regression tests | Fixing known issues safely |
+| `/test-audit` | Team | 5 (3 phases) | Folder path (or all) | Prioritized audit report | Auditing test suite quality |
 | `/bug-hunt` | Single | 1 | Codebase area | Prioritized bug report | Finding specific bugs |
 | `/enhancement-research` | Single | 1 | Topic/area | Research report | Exploring optimization ideas |
 
@@ -27,7 +28,9 @@ What do you need to do?
 |   +-- Targeted bug search in a specific area
 |   |   +-- /bug-hunt
 |   +-- Find safe refactoring opportunities
-|       +-- /refactor-analysis
+|   |   +-- /refactor-analysis
+|   +-- Audit test suite quality, structure, and coverage
+|       +-- /test-audit
 |
 +-- FIX known problems (from a report, plan, or issue list)
 |   +-- /fix-issues
@@ -234,6 +237,64 @@ Phase 4-5: Final migration plan, unified report
 
 ---
 
+### `/test-audit [folder]`
+
+**Purpose**: Comprehensive test suite quality audit with per-test analysis, integration test authenticity validation, and consolidation planning.
+
+**When to use**:
+- Periodic test suite health check
+- After major feature additions to ensure tests are properly structured
+- When test suite feels bloated, slow, or hard to maintain
+- When you suspect integration tests aren't testing real interactions (mock theater)
+- Before a testing sprint to prioritize what to fix or rewrite
+- When onboarding and want to understand the test suite's strengths and gaps
+
+**When NOT to use**:
+- You want to write new tests (use `/implement-feature`)
+- You want to find bugs in production code (use `/bug-hunt` or `/deep-analysis`)
+- You want to fix specific test failures (use `/fix-issues`)
+
+**How it works** (5 agents, 3 phases):
+
+```
+Phase 1: Inventory (parallel)
+  test-cataloger (Explore)            -- Scans all test files, categorizes,
+                                         maps structure, checks placement
+  source-coverage-mapper (Explore)    -- Maps source modules to tests,
+                                         finds gaps, checks ADR coverage
+
+Phase 2: Deep Analysis (parallel, from Phase 1 inputs)
+  unit-test-critic (general-purpose)         -- Per-test quality: necessity,
+                                                over-engineering, clean code
+  integration-test-validator (general-purpose) -- Authenticity: real interactions
+                                                  vs mock theater, Redis usage,
+                                                  ADR compliance
+  test-consolidation-strategist (general-purpose) -- Redundancy, consolidation,
+                                                     structural improvements, gaps
+
+Phase 3: Team Lead synthesizes, prioritizes, produces audit report
+```
+
+**Key design principles**:
+
+1. **Three perspectives create cross-validation**: The unit-test-critic evaluates each test individually. The integration-test-validator evaluates tests against architecture. The consolidation-strategist evaluates tests against each other. A test can look clean (critic says GOOD) but be redundant (strategist says CONSOLIDATE).
+
+2. **Inventory before analysis**: Phase 1 builds a complete picture of what exists before Phase 2 agents deep-dive. This prevents missed files and enables cross-referencing.
+
+3. **Authenticity over appearance**: Integration tests are judged by whether they test REAL component interactions, not by whether they follow "integration test" naming conventions.
+
+**Output**: Prioritized audit report with health score, P0-P4 findings, per-test verdicts, integration authenticity matrix, consolidation roadmap, coverage gaps.
+
+**Example invocations**:
+```
+/test-audit shared/core
+/test-audit services/execution-engine
+/test-audit tests/integration
+/test-audit (audits entire project)
+```
+
+---
+
 ### `/bug-hunt [area]`
 
 **Purpose**: Targeted bug search with deep code tracing.
@@ -335,6 +396,13 @@ These commands are designed to chain together. Common workflows:
 /fix-issues                       # 3. Execute the approved refactorings (regression-guarded)
 ```
 
+### Test Suite Cleanup
+```
+/test-audit [area]                # 1. Audit: Find quality issues, mock theater, redundancy
+/fix-issues                       # 2. Fix: Address P0-P1 findings (regression-guarded)
+/implement-feature [missing tests] # 3. Build: Fill critical coverage gaps identified in audit
+```
+
 ---
 
 ## Agent Type Reference
@@ -359,6 +427,7 @@ Commands use two agent types with different capabilities:
 | `/implement-feature` | 5 | 2 | 3 | 3 (recon -> design -> review) | Adversarial reviewer (GO/GO WITH CHANGES/REDESIGN) |
 | `/deep-analysis` | 6 | 4 | 2 | 1 (all parallel) | None (findings only) |
 | `/refactor-analysis` | 4 | 3 | 1 | 2 (discovery -> safety review) | Performance-guardian (SAFE/CONDITIONAL/UNSAFE) |
+| `/test-audit` | 5 | 2 | 3 | 3 (inventory -> analysis -> synthesis) | None (findings + recommendations) |
 | `/fix-issues` | 3 | 1 | 2 | 3 (impact -> fix -> validate) | Regression-guard (SAFE/CAUTION/BLOCK) |
 | `/bug-hunt` | 1 | 0 | 1 | 1 (single pass) | None (findings only) |
 | `/enhancement-research` | 1 | 0 | 1 | 1 (5 research phases) | None (recommendations only) |
@@ -395,3 +464,4 @@ Where applicable, agents are deliberately given different information to prevent
 - `/implement-feature`: feature-architect and test-architect never see each other's output
 - `/fix-issues`: regression-guard never sees fix-implementer's reasoning
 - `/refactor-analysis`: performance-guardian reviews proposals without proposers' justifications
+- `/test-audit`: unit-test-critic, integration-test-validator, and consolidation-strategist evaluate from three different perspectives (individual quality vs architecture vs cross-test relationships)

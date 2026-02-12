@@ -18,8 +18,7 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http';
 import { EventEmitter } from 'events';
 import { createLogger } from './logger';
-import { CHAINS, TESTNET_CHAINS } from '../../config/src';
-import { getPartition } from '../../config/src/partitions';
+import { CHAINS, TESTNET_CHAINS, getPartition } from '@arbitrage/config';
 import { PARTITION_PORTS, PARTITION_SERVICE_NAMES } from './partition-router';
 
 // =============================================================================

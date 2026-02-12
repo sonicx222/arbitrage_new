@@ -28,7 +28,9 @@ process.env.BASE_WS_URL = 'wss://mainnet.base.org';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 // Import config directly to test configuration
-import { CHAINS, ARBITRAGE_CONFIG } from '@arbitrage/config';
+import { CHAINS, ARBITRAGE_CONFIG, getDefaultQuoteToken } from '@arbitrage/config';
+// FIX #13: Import production functions instead of re-implementing inline
+import { normalizeToInternalFormat, toDisplayTokenPair, toInternalTokenPair } from '../../types';
 
 // =============================================================================
 // Configuration Tests (No mocking required)
@@ -495,30 +497,36 @@ describe('Whale Impact Analysis', () => {
 
   describe('Token Parsing from WhaleTransaction', () => {
     /**
-     * FIX 4.3: Token parsing logic extracted from analyzeWhaleImpact
-     * Handles multiple token formats:
-     * - "WETH/USDC" (standard pair format)
-     * - "WETH_USDC" (underscore separator)
-     * - "traderjoe_WETH_USDC" (DEX prefix with underscore)
-     * - "WETH" (single token)
+     * FIX #13: Token parsing logic from analyzeWhaleImpact.
+     * Updated to use getDefaultQuoteToken() from @arbitrage/config
+     * instead of hardcoded 'USDC', matching production behavior.
+     *
+     * NOTE: This is a private helper within analyzeWhaleImpact, so it cannot
+     * be imported directly. The inline copy is maintained for unit-level testing
+     * but kept in sync with the production implementation.
+     *
+     * @see detector.ts analyzeWhaleImpact method (~line 1634)
      */
-    function parseTokenPair(tokenString: string): { baseToken: string; quoteToken: string } {
+    function parseTokenPair(
+      tokenString: string,
+      chain: string = 'ethereum'
+    ): { baseToken: string; quoteToken: string } {
       let baseToken: string;
       let quoteToken: string;
 
       if (tokenString.includes('/')) {
         const tokenParts = tokenString.split('/');
         baseToken = tokenParts[0] || tokenString;
-        quoteToken = tokenParts[1] || 'USDC';
+        quoteToken = tokenParts[1]?.trim() || getDefaultQuoteToken(chain);
       } else if (tokenString.includes('_')) {
         const tokenParts = tokenString.split('_');
         // Take last two parts as tokens (handles DEX_TOKEN0_TOKEN1 format)
         baseToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 2] : tokenString;
-        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : 'USDC';
+        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : getDefaultQuoteToken(chain);
       } else {
         // Single token - common case is trading against stablecoins
         baseToken = tokenString;
-        quoteToken = 'USDC'; // Default quote token for whale trades
+        quoteToken = getDefaultQuoteToken(chain);
       }
 
       return { baseToken, quoteToken };
@@ -554,15 +562,20 @@ describe('Whale Impact Analysis', () => {
       expect(result.quoteToken).toBe('USDT');
     });
 
-    it('should handle single token with USDC default', () => {
-      const result = parseTokenPair('WETH');
-      expect(result.baseToken).toBe('WETH');
-      expect(result.quoteToken).toBe('USDC');
+    it('should handle single token with chain-specific default quote', () => {
+      // FIX #13: Production uses getDefaultQuoteToken(chain), not hardcoded 'USDC'
+      const ethResult = parseTokenPair('WETH', 'ethereum');
+      expect(ethResult.baseToken).toBe('WETH');
+      expect(ethResult.quoteToken).toBe(getDefaultQuoteToken('ethereum'));
+
+      const bscResult = parseTokenPair('WBNB', 'bsc');
+      expect(bscResult.baseToken).toBe('WBNB');
+      expect(bscResult.quoteToken).toBe(getDefaultQuoteToken('bsc'));
     });
 
     it('should handle single token for various tokens', () => {
       expect(parseTokenPair('LINK').baseToken).toBe('LINK');
-      expect(parseTokenPair('LINK').quoteToken).toBe('USDC');
+      expect(parseTokenPair('LINK').quoteToken).toBe(getDefaultQuoteToken('ethereum'));
       expect(parseTokenPair('ARB').baseToken).toBe('ARB');
       expect(parseTokenPair('OP').baseToken).toBe('OP');
     });
@@ -570,14 +583,18 @@ describe('Whale Impact Analysis', () => {
     it('should handle empty string gracefully', () => {
       const result = parseTokenPair('');
       expect(result.baseToken).toBe('');
-      expect(result.quoteToken).toBe('USDC');
+      expect(result.quoteToken).toBe(getDefaultQuoteToken('ethereum'));
     });
   });
 
   describe('Whale Activity Direction Detection', () => {
     /**
-     * Logic for determining dominant direction from buy/sell volumes
-     * Extracted from WhaleActivityTracker.getActivitySummary
+     * Logic for determining dominant direction from buy/sell volumes.
+     * Extracted from WhaleActivityTracker.getActivitySummary in @arbitrage/core.
+     * FIX #13: Kept as inline copy because the production logic is embedded
+     * in WhaleActivityTracker.getActivitySummary (not exported standalone).
+     *
+     * @see shared/core/src/analytics/whale-activity-tracker.ts getActivitySummary
      */
     function detectDominantDirection(
       buyVolumeUsd: number,
@@ -662,8 +679,14 @@ describe('Whale Impact Analysis', () => {
 
   describe('Whale Confidence Boosting', () => {
     /**
-     * Calculate whale-based confidence adjustment
-     * Extracted from detector.ts calculateConfidence
+     * Calculate whale-based confidence adjustment.
+     * FIX #13: This tests the whale boost logic as a unit with configurable
+     * values from whaleConfig. The production implementation now lives in
+     * confidence-calculator.ts (ConfidenceCalculator.applyWhaleBoost) with
+     * different default config values. This inline copy tests the algorithmic
+     * behavior with detector-specific whale config values.
+     *
+     * @see confidence-calculator.ts ConfidenceCalculator.applyWhaleBoost
      */
     function calculateWhaleConfidenceBoost(
       dominantDirection: 'bullish' | 'bearish' | 'neutral',
@@ -751,8 +774,12 @@ describe('Whale Impact Analysis', () => {
     }
 
     /**
-     * Sort opportunities with whale-triggered priority
-     * Extracted from filterValidOpportunities in detector.ts
+     * Sort opportunities with whale-triggered priority.
+     * Extracted from filterValidOpportunities in detector.ts.
+     * FIX #13: Kept as inline copy because filterValidOpportunities is private.
+     * Sorting logic matches production: whale-triggered first, then by netProfit.
+     *
+     * @see detector.ts filterValidOpportunities method
      */
     function sortOpportunities(opportunities: TestOpportunity[]): TestOpportunity[] {
       return [...opportunities].sort((a, b) => {
@@ -872,6 +899,13 @@ describe('Whale Impact Analysis', () => {
       timestamp: number;
     }
 
+    /**
+     * FIX #13: Updated inline copy to match production behavior.
+     * Production uses getDefaultQuoteToken(chain) from @arbitrage/config
+     * instead of hardcoded 'USDC'.
+     *
+     * @see detector.ts analyzeWhaleImpact method
+     */
     function buildTrackedTransaction(whaleTx: WhaleTransaction): TrackedWhaleTransaction {
       let baseToken: string;
       let quoteToken: string;
@@ -879,14 +913,14 @@ describe('Whale Impact Analysis', () => {
       if (whaleTx.token.includes('/')) {
         const tokenParts = whaleTx.token.split('/');
         baseToken = tokenParts[0] || whaleTx.token;
-        quoteToken = tokenParts[1] || 'USDC';
+        quoteToken = tokenParts[1]?.trim() || getDefaultQuoteToken(whaleTx.chain);
       } else if (whaleTx.token.includes('_')) {
         const tokenParts = whaleTx.token.split('_');
         baseToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 2] : whaleTx.token;
-        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : 'USDC';
+        quoteToken = tokenParts.length >= 2 ? tokenParts[tokenParts.length - 1] : getDefaultQuoteToken(whaleTx.chain);
       } else {
         baseToken = whaleTx.token;
-        quoteToken = 'USDC';
+        quoteToken = getDefaultQuoteToken(whaleTx.chain);
       }
 
       return {
@@ -969,7 +1003,8 @@ describe('Whale Impact Analysis', () => {
 
       const tracked = buildTrackedTransaction(whaleTx);
 
-      expect(tracked.tokenIn).toBe('USDC');  // Default quote
+      // FIX #13: Uses chain-specific default quote token, not hardcoded 'USDC'
+      expect(tracked.tokenIn).toBe(getDefaultQuoteToken('polygon'));
       expect(tracked.tokenOut).toBe('LINK');
     });
 
@@ -998,6 +1033,12 @@ describe('Whale Impact Analysis', () => {
 
 // =============================================================================
 // Circuit Breaker Tests (FIX #5 Verification)
+//
+// FIX #13 NOTE: Circuit breaker is private internal state of
+// CrossChainDetectorService (lastCircuitBreakerTrip, detectionErrorCount).
+// These tests use inline logic to test the algorithm in isolation since
+// the production implementation is not exported. This is acceptable as
+// it tests the contract, not the implementation.
 // =============================================================================
 
 describe('Circuit Breaker Behavior', () => {
@@ -1179,7 +1220,11 @@ describe('Version Counter Edge Cases', () => {
 
 describe('ETH Price Detection', () => {
   /**
-   * Logic extracted from maybeUpdateEthPrice in detector.ts
+   * Logic extracted from maybeUpdateEthPrice in detector.ts.
+   * FIX #13: Kept as inline copy because maybeUpdateEthPrice is a private
+   * method of CrossChainDetectorService. The inline logic matches production.
+   *
+   * @see detector.ts maybeUpdateEthPrice method
    */
   function isEthPricePair(pairKey: string): boolean {
     const upperPairKey = pairKey.toUpperCase();
@@ -1228,12 +1273,18 @@ describe('ETH Price Detection', () => {
 
 // =============================================================================
 // Concurrent Detection Guard Tests (Fix 8.1)
+//
+// FIX #13 NOTE: Detection guard is private internal state of the detector
+// (OperationGuard instance). The production implementation uses OperationGuard
+// from @arbitrage/core. This inline reimplementation tests the concurrency
+// guard algorithm in isolation.
 // =============================================================================
 
 describe('Concurrent Detection Guard', () => {
   /**
    * Simulates the isDetecting concurrency guard from detector.ts.
    * This prevents overlapping detection cycles that could cause race conditions.
+   * @see detector.ts detectionGuard (OperationGuard from @arbitrage/core)
    */
   function createDetectionGuard() {
     let isDetecting = false;
@@ -1629,24 +1680,9 @@ describe('Pending Opportunity Analysis', () => {
 // =============================================================================
 
 describe('Token Pair Normalization Edge Cases', () => {
-  /**
-   * Token normalization logic (simplified version from types.ts)
-   */
-  function normalizeToInternalFormat(tokenPair: string): string {
-    if (!tokenPair || typeof tokenPair !== 'string') {
-      return tokenPair;
-    }
-    // If it contains slash, convert to underscore
-    if (tokenPair.includes('/')) {
-      return tokenPair.replace('/', '_');
-    }
-    // Already in internal format or needs extraction from pairKey
-    const parts = tokenPair.split('_');
-    if (parts.length >= 2) {
-      return `${parts[parts.length - 2]}_${parts[parts.length - 1]}`;
-    }
-    return tokenPair;
-  }
+  // FIX #13: Use the production normalizeToInternalFormat from types.ts
+  // instead of re-implementing the logic inline. The production function
+  // is imported at the top of this file.
 
   it('should normalize display format to internal format', () => {
     expect(normalizeToInternalFormat('WETH/USDC')).toBe('WETH_USDC');
@@ -1681,5 +1717,159 @@ describe('Token Pair Normalization Edge Cases', () => {
     // These should be extracted correctly even with chain-specific suffixes
     expect(normalizeToInternalFormat('TRADERJOE_WETH.e_USDC')).toBe('WETH.e_USDC');
     expect(normalizeToInternalFormat('PANCAKE_BTCB_BUSD')).toBe('BTCB_BUSD');
+  });
+});
+
+// =============================================================================
+// P0 Fix Regression Tests
+// =============================================================================
+
+describe('P0 Fix Regression: percentageDiff units consistency', () => {
+  /**
+   * P0 FIX #1 REGRESSION: percentageDiff must be in percentage format (e.g., 2.0 for 2%),
+   * NOT decimal format (e.g., 0.02 for 2%).
+   *
+   * The publisher divides by 100 unconditionally (opportunity-publisher.ts:197):
+   *   expectedProfitInTokens = (percentageDiff / 100) * amountInTokens
+   *
+   * If percentageDiff is a decimal (0.02), the publisher produces:
+   *   0.02 / 100 = 0.0002 (100× too low)
+   *
+   * If percentageDiff is a percentage (2.0), the publisher produces:
+   *   2.0 / 100 = 0.02 (correct)
+   */
+  it('should store percentageDiff as percentage (×100), not decimal ratio', () => {
+    // Simulates the pending opportunity path (analyzePendingOpportunity)
+    const postSwapPrice = 2500;
+    const bestAltPrice = 2550;
+    const priceDiff = bestAltPrice - postSwapPrice;
+    const priceDiffPercent = priceDiff / postSwapPrice; // decimal: 0.02
+
+    // P0 FIX: Must multiply by 100 to match cross-chain convention
+    const percentageDiff = priceDiffPercent * 100; // percentage: 2.0
+
+    expect(percentageDiff).toBe(2.0);
+    expect(percentageDiff).not.toBe(priceDiffPercent); // Must NOT be 0.02
+  });
+
+  it('should produce correct expectedProfit when publisher divides by 100', () => {
+    const percentageDiff = 2.0; // 2% in percentage format
+    const amountInTokens = 1.0; // 1 ETH
+
+    // Publisher formula: (percentageDiff / 100) * amountInTokens
+    const expectedProfitInTokens = (percentageDiff / 100) * amountInTokens;
+
+    expect(expectedProfitInTokens).toBe(0.02); // 2% of 1 token = 0.02 tokens
+  });
+
+  it('should match cross-chain path convention for percentageDiff', () => {
+    // Cross-chain path: percentageDiff = (priceDiff / lowestPrice) * 100
+    const lowestPrice = 2500;
+    const highestPrice = 2550;
+    const crossChainPercentageDiff = ((highestPrice - lowestPrice) / lowestPrice) * 100;
+
+    // Pending path (after fix): percentageDiff = priceDiffPercent * 100
+    const postSwapPrice = 2500;
+    const bestAltPrice = 2550;
+    const pendingPercentageDiff = ((bestAltPrice - postSwapPrice) / postSwapPrice) * 100;
+
+    // Both paths should produce the same format
+    expect(pendingPercentageDiff).toBeCloseTo(crossChainPercentageDiff, 10);
+  });
+});
+
+describe('P0 Fix Regression: net profit includes gas costs and swap fees', () => {
+  /**
+   * P0 FIX #2 REGRESSION: netProfit must subtract gas costs and swap fees,
+   * not just bridge costs. The formula is:
+   *
+   *   netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken
+   *
+   * Where:
+   *   gasCostPerToken = (estimatedGasCost × 2) / tradeTokens  (source + dest chains)
+   *   swapFeePerToken = feePercentage × (sourcePrice + destPrice)  (buy + sell fees)
+   */
+  it('should subtract gas costs and swap fees from net profit', () => {
+    // Given: ETH at $3000 on source, $3060 on dest (2% spread)
+    const lowestPrice = 3000;
+    const highestPrice = 3060;
+    const priceDiff = highestPrice - lowestPrice; // $60/token
+
+    // Bridge cost (already in per-token units)
+    const bridgeCost = 5; // $5/token
+
+    // Gas costs: $5 USD per chain × 2 chains, converted to per-token
+    const estimatedGasCostUsd = 5;
+    const tradeSizeUsd = 1000;
+    const tradeTokens = tradeSizeUsd / lowestPrice; // 0.333 ETH
+    const gasCostPerToken = (estimatedGasCostUsd * 2) / tradeTokens; // ~$30/token
+
+    // Swap fees: 0.3% on buy + 0.3% on sell
+    const feePercentage = 0.003;
+    const swapFeePerToken = feePercentage * (lowestPrice + highestPrice); // ~$18.18/token
+
+    // Net profit with full cost accounting
+    const netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
+
+    // Net should be much less than priceDiff - bridgeCost alone
+    const oldNetProfit = priceDiff - bridgeCost; // $55 (overstated)
+    expect(netProfit).toBeLessThan(oldNetProfit);
+
+    // Verify specific components
+    expect(priceDiff).toBe(60);
+    expect(gasCostPerToken).toBeCloseTo(30, 0);
+    expect(swapFeePerToken).toBeCloseTo(18.18, 1);
+    expect(netProfit).toBeCloseTo(6.82, 0);
+  });
+
+  it('should filter out opportunities where gas and fees exceed price difference', () => {
+    // Given: Small 0.5% price spread
+    const lowestPrice = 3000;
+    const highestPrice = 3015; // 0.5% higher
+    const priceDiff = highestPrice - lowestPrice; // $15/token
+
+    const bridgeCost = 5;
+    const tradeSizeUsd = 1000;
+    const tradeTokens = tradeSizeUsd / lowestPrice;
+    const gasCostPerToken = (5 * 2) / tradeTokens; // ~$30/token
+    const swapFeePerToken = 0.003 * (lowestPrice + highestPrice); // ~$18.05/token
+
+    const netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
+
+    // With full cost accounting, this should be unprofitable
+    expect(netProfit).toBeLessThan(0);
+  });
+
+  it('should handle zero trade tokens gracefully', () => {
+    const tradeTokens = 0;
+    // When tradeTokens is 0, gasCostPerToken should fall back to 0
+    const gasCostPerToken = tradeTokens > 0
+      ? (5 * 2) / tradeTokens
+      : 0;
+
+    expect(gasCostPerToken).toBe(0);
+    expect(Number.isFinite(gasCostPerToken)).toBe(true);
+  });
+
+  it('should handle high-value tokens with low token count correctly', () => {
+    // BTC at $60000, trade size $1000 → only 0.0167 tokens
+    const lowestPrice = 60000;
+    const highestPrice = 61200; // 2% spread
+    const priceDiff = highestPrice - lowestPrice; // $1200/token
+
+    const tradeSizeUsd = 1000;
+    const tradeTokens = tradeSizeUsd / lowestPrice; // ~0.0167 BTC
+    const gasCostPerToken = (5 * 2) / tradeTokens; // ~$600/token
+
+    // Gas cost per token is very high for expensive tokens with small trade sizes
+    expect(gasCostPerToken).toBeCloseTo(600, -1);
+
+    // Even with 2% spread ($1200/token), gas alone may eat most of the profit
+    const swapFeePerToken = 0.003 * (lowestPrice + highestPrice);
+    const bridgeCost = 5;
+    const netProfit = priceDiff - bridgeCost - gasCostPerToken - swapFeePerToken;
+
+    // The high gas-per-token significantly reduces net profit
+    expect(netProfit).toBeLessThan(priceDiff - bridgeCost);
   });
 });

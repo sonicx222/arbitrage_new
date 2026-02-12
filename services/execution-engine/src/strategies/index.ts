@@ -46,11 +46,9 @@
  * @see types.ts ExecutionErrorCode (error codes enum)
  */
 
-export {
-  BaseExecutionStrategy,
-  validateGasPriceConfiguration,
-} from './base.strategy';
-export type { GasConfigValidationResult } from './base.strategy';
+export { BaseExecutionStrategy } from './base.strategy';
+export { validateGasPriceConfiguration } from '../services/gas-price-optimizer';
+export type { GasConfigValidationResult } from '../services/gas-price-optimizer';
 export { IntraChainStrategy } from './intra-chain.strategy';
 export { CrossChainStrategy } from './cross-chain.strategy';
 export { SimulationStrategy } from './simulation.strategy';

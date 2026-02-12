@@ -26,7 +26,7 @@ import {
   getFactoriesWithEventSupport,
   FactoryType,
   FactoryConfig,
-} from '../../config/src/dex-factories';
+} from '@arbitrage/config';
 import { ServiceLogger } from './logging';
 import { AsyncMutex } from './async/async-mutex';
 

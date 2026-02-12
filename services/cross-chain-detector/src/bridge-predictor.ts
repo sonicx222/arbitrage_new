@@ -1,10 +1,10 @@
 // Bridge Latency Prediction Engine
 // Uses machine learning to predict cross-chain bridge times and costs
 
-import { createLogger, CircularBuffer } from '@arbitrage/core';
+import { CircularBuffer } from '@arbitrage/core';
 import { BridgeLatencyData, CrossChainBridge } from '@arbitrage/types';
-
-const logger = createLogger('bridge-predictor');
+// FIX #21: Import Logger type for DI instead of module-level createLogger
+import { Logger } from './types';
 
 // =============================================================================
 // FIX #10: Centralized bridge route configuration
@@ -123,13 +123,35 @@ export interface BridgeMetrics {
 // P2-FIX 3.2: Max history size for CircularBuffer
 const MAX_BRIDGE_HISTORY_SIZE = 1000;
 
+/**
+ * FIX #22: Typed prediction model structure.
+ * Replaces `Map<string, any>` with a well-defined interface matching
+ * the shape written by `updateStatisticalModel()` and `initializeModels()`.
+ */
+export interface BridgePredictionModel {
+  latencyModel: {
+    mean: number;
+    stdDev: number;
+    trend: number;
+  };
+  costModel: {
+    baseCost: number;
+    congestionMultiplier: number;
+    amountMultiplier: number;
+  };
+}
+
 export class BridgeLatencyPredictor {
   // P2-FIX 3.2: Use CircularBuffer for O(1) append instead of O(n) splice
   private bridgeHistory: Map<string, CircularBuffer<BridgeLatencyData>> = new Map();
-  private predictionModel: Map<string, any> = new Map(); // Simple statistical models
+  private predictionModel: Map<string, BridgePredictionModel> = new Map();
   private metricsCache: Map<string, BridgeMetrics> = new Map();
 
-  constructor() {
+  // FIX #21: DI logger instead of module-level createLogger
+  private readonly logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
     this.initializeModels();
   }
 
@@ -228,11 +250,13 @@ export class BridgeLatencyPredictor {
       return failureMetrics;
     }
 
+    // FIX #10: Use reduce instead of Math.min/max spread to prevent RangeError
+    // when latencies array exceeds ~65K entries (stack overflow on spread args)
     const metrics: BridgeMetrics = {
       bridgeName: bridgeKey,
       avgLatency: latencies.reduce((a, b) => a + b, 0) / latencies.length,
-      minLatency: Math.min(...latencies),
-      maxLatency: Math.max(...latencies),
+      minLatency: latencies.reduce((a, b) => a < b ? a : b, Infinity),
+      maxLatency: latencies.reduce((a, b) => a > b ? a : b, -Infinity),
       avgCost: costs.reduce((a, b) => a + b, 0) / costs.length,
       successRate: successfulBridges.length / totalSize,
       sampleCount: totalSize
@@ -520,7 +544,7 @@ export class BridgeLatencyPredictor {
       // If filteredData.length === historyBuffer.size, no cleanup needed
     }
 
-    logger.info('Bridge predictor cleanup completed', {
+    this.logger.info('Bridge predictor cleanup completed', {
       remainingBridges: this.bridgeHistory.size
     });
   }

@@ -190,6 +190,7 @@ interface StreamConsumer extends EventEmitter {
 interface PriceDataManager {
   handlePriceUpdate(update: PriceUpdate): void;
   createSnapshot(): PriceData;
+  createIndexedSnapshot(): IndexedSnapshot;
   getChains(): string[];
   getPairCount(): number;
   cleanup(): void;
@@ -384,7 +385,7 @@ interface MLPredictionConfig { /* ... */ }
 **Features**:
 - **Price History Caching**: Track recent prices per chain/pair for ML input
 - **Prediction Caching**: Cache ML predictions with configurable TTL (default 1s)
-- **Timeout Protection**: Skip ML predictions that exceed latency threshold (default 10ms)
+- **Timeout Protection**: Skip ML predictions that exceed latency threshold (default 50ms)
 - **Parallel Pre-fetching**: Fetch ML predictions for all token pairs before detection
 - **Confidence Adjustment**: Boost confidence when ML predictions align with opportunity direction
 

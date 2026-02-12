@@ -11,7 +11,7 @@ import {
   StreamConsumer,
   Logger,
 } from '../../stream-consumer';
-import { PriceUpdate, WhaleTransaction } from '@arbitrage/types';
+import { PriceUpdate, WhaleTransaction, PendingOpportunity } from '@arbitrage/types';
 import { RecordingLogger } from '@arbitrage/core';
 
 // =============================================================================
@@ -360,6 +360,272 @@ describe('StreamConsumer', () => {
 
       expect(whaleTxHandler).not.toHaveBeenCalled();
       expect(logger.getLogs('warn').length).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // Pending Opportunities (FIX #15)
+  // ===========================================================================
+
+  describe('pending opportunity consumption', () => {
+    // Consumer groups including pending opportunities stream
+    const consumerGroupsWithPending = [
+      ...consumerGroups,
+      {
+        streamName: 'stream:pending-opportunities',
+        groupName: 'cross-chain-detector-group',
+        consumerName: 'test-consumer',
+      },
+    ];
+
+    it('should emit pendingOpportunity for valid messages', async () => {
+      const validOpp: PendingOpportunity = {
+        type: 'pending',
+        intent: {
+          hash: '0xabc123',
+          router: '0xrouter',
+          tokenIn: '0xtoken0',
+          tokenOut: '0xtoken1',
+          sender: '0xsender',
+          chainId: 1,
+          deadline: Math.floor(Date.now() / 1000) + 300,
+          nonce: 42,
+          slippageTolerance: 0.005,
+          gasPrice: '50000000000',
+          amountIn: '1000000000000000000',
+          expectedAmountOut: '2500000000',
+          path: ['0xtoken0', '0xtoken1'],
+          type: 'uniswapV2',
+          firstSeen: Date.now(),
+        },
+        publishedAt: Date.now(),
+      };
+
+      // First call (price updates) returns empty, second (whale) returns empty,
+      // third (pending) returns the valid opportunity
+      mockStreamsClient.xreadgroup
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: '789-0', data: validOpp }]);
+
+      const consumer = createStreamConsumer({
+        instanceId: 'test-instance',
+        streamsClient: mockStreamsClient as any,
+        stateManager: mockStateManager as any,
+        logger: logger as unknown as Logger,
+        consumerGroups: consumerGroupsWithPending,
+        pollIntervalMs: 100,
+      });
+
+      const pendingOppHandler = jest.fn();
+      consumer.on('pendingOpportunity', pendingOppHandler);
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(pendingOppHandler).toHaveBeenCalledWith(validOpp);
+      expect(mockStreamsClient.xack).toHaveBeenCalled();
+    });
+
+    it('should skip invalid pending opportunity (missing fields) and ack message', async () => {
+      const invalidOpp = {
+        type: 'pending',
+        intent: {
+          hash: '0xabc123',
+          // Missing required fields: router, tokenIn, tokenOut, etc.
+        },
+      };
+
+      mockStreamsClient.xreadgroup
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: '789-0', data: invalidOpp }]);
+
+      const consumer = createStreamConsumer({
+        instanceId: 'test-instance',
+        streamsClient: mockStreamsClient as any,
+        stateManager: mockStateManager as any,
+        logger: logger as unknown as Logger,
+        consumerGroups: consumerGroupsWithPending,
+        pollIntervalMs: 100,
+      });
+
+      const pendingOppHandler = jest.fn();
+      consumer.on('pendingOpportunity', pendingOppHandler);
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(pendingOppHandler).not.toHaveBeenCalled();
+      expect(logger.hasLogMatching('warn', /invalid/i)).toBe(true);
+      // Should still ack invalid messages to prevent replay
+      expect(mockStreamsClient.xack).toHaveBeenCalled();
+    });
+
+    it('should reject pending opportunity with missing gasPrice (Phase 2 Fix #6)', async () => {
+      const oppMissingGasPrice: Record<string, unknown> = {
+        type: 'pending',
+        intent: {
+          hash: '0xabc123',
+          router: '0xrouter',
+          tokenIn: '0xtoken0',
+          tokenOut: '0xtoken1',
+          sender: '0xsender',
+          chainId: 1,
+          deadline: Math.floor(Date.now() / 1000) + 300,
+          nonce: 42,
+          slippageTolerance: 0.005,
+          // gasPrice is MISSING - should be rejected by validator
+          amountIn: '1000000000000000000',
+          expectedAmountOut: '2500000000',
+          path: ['0xtoken0', '0xtoken1'],
+          type: 'uniswapV2',
+        },
+      };
+
+      mockStreamsClient.xreadgroup
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: '789-0', data: oppMissingGasPrice }]);
+
+      const consumer = createStreamConsumer({
+        instanceId: 'test-instance',
+        streamsClient: mockStreamsClient as any,
+        stateManager: mockStateManager as any,
+        logger: logger as unknown as Logger,
+        consumerGroups: consumerGroupsWithPending,
+        pollIntervalMs: 100,
+      });
+
+      const pendingOppHandler = jest.fn();
+      consumer.on('pendingOpportunity', pendingOppHandler);
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Should NOT emit because gasPrice validation fails
+      expect(pendingOppHandler).not.toHaveBeenCalled();
+    });
+
+    it('should reject pending opportunity with slippageTolerance > 0.5 (Fix #12)', async () => {
+      const oppHighSlippage: Record<string, unknown> = {
+        type: 'pending',
+        intent: {
+          hash: '0xabc123',
+          router: '0xrouter',
+          tokenIn: '0xtoken0',
+          tokenOut: '0xtoken1',
+          sender: '0xsender',
+          chainId: 1,
+          deadline: Math.floor(Date.now() / 1000) + 300,
+          nonce: 42,
+          slippageTolerance: 0.6, // Exceeds 0.5 upper bound
+          gasPrice: '50000000000',
+          amountIn: '1000000000000000000',
+          expectedAmountOut: '2500000000',
+          path: ['0xtoken0', '0xtoken1'],
+          type: 'uniswapV2',
+        },
+      };
+
+      mockStreamsClient.xreadgroup
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: '789-0', data: oppHighSlippage }]);
+
+      const consumer = createStreamConsumer({
+        instanceId: 'test-instance',
+        streamsClient: mockStreamsClient as any,
+        stateManager: mockStateManager as any,
+        logger: logger as unknown as Logger,
+        consumerGroups: consumerGroupsWithPending,
+        pollIntervalMs: 100,
+      });
+
+      const pendingOppHandler = jest.fn();
+      consumer.on('pendingOpportunity', pendingOppHandler);
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Should NOT emit because slippageTolerance > 0.5
+      expect(pendingOppHandler).not.toHaveBeenCalled();
+    });
+
+    it('should reject pending opportunity with missing intent.type (bug-hunt fix)', async () => {
+      const oppMissingType: Record<string, unknown> = {
+        type: 'pending',
+        intent: {
+          hash: '0xabc123',
+          router: '0xrouter',
+          // type is MISSING — would crash detector.ts intent.type.toLowerCase()
+          tokenIn: '0xtoken0',
+          tokenOut: '0xtoken1',
+          sender: '0xsender',
+          chainId: 1,
+          deadline: Math.floor(Date.now() / 1000) + 300,
+          nonce: 42,
+          slippageTolerance: 0.005,
+          gasPrice: '50000000000',
+          amountIn: '1000000000000000000',
+          expectedAmountOut: '2500000000',
+          path: ['0xtoken0', '0xtoken1'],
+          firstSeen: Date.now(),
+        },
+      };
+
+      mockStreamsClient.xreadgroup
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ id: '789-0', data: oppMissingType }]);
+
+      const consumer = createStreamConsumer({
+        instanceId: 'test-instance',
+        streamsClient: mockStreamsClient as any,
+        stateManager: mockStateManager as any,
+        logger: logger as unknown as Logger,
+        consumerGroups: consumerGroupsWithPending,
+        pollIntervalMs: 100,
+      });
+
+      const pendingOppHandler = jest.fn();
+      consumer.on('pendingOpportunity', pendingOppHandler);
+
+      consumer.start();
+
+      // Trigger poll
+      jest.advanceTimersByTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Should NOT emit because intent.type is missing
+      expect(pendingOppHandler).not.toHaveBeenCalled();
     });
   });
 
