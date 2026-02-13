@@ -11,6 +11,7 @@ import { EventEmitter } from 'events';
 import { UnifiedChainDetector } from '../../unified-detector';
 import { asLogger } from '../../types';
 import { RecordingLogger, ServiceStateManager } from '@arbitrage/core';
+import { createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
 
 // =============================================================================
 // Mock Types
@@ -175,22 +176,7 @@ describe('UnifiedChainDetector', () => {
     };
   }
 
-  // FIX: Helper to create mock logger
-  function createMockLogger() {
-    return {
-      info: jest.fn(),
-      error: jest.fn(),
-      warn: jest.fn(),
-      debug: jest.fn(),
-    };
-  }
-
-  // FIX: Helper to create mock perf logger
-  function createMockPerfLogger() {
-    return {
-      logHealthCheck: jest.fn(),
-    };
-  }
+  // Mock logger and perf logger imported from @arbitrage/test-utils
 
   beforeEach(() => {
     jest.clearAllMocks();

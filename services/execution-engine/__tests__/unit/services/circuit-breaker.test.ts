@@ -17,40 +17,7 @@ import {
   createCircuitBreaker,
 } from '../../../src/services/circuit-breaker';
 import { DEFAULT_CIRCUIT_BREAKER_CONFIG } from '../../../src/types';
-
-// =============================================================================
-// Test Helpers
-// =============================================================================
-
-/**
- * Creates a mock logger for testing CircuitBreaker.
- *
- * **Mock Configuration:**
- * - All log methods (info, warn, error, debug) are Jest spies
- * - No actual console output during tests
- * - Allows verification of logging behavior (e.g., warnings on force-close)
- *
- * **Usage:**
- * ```typescript
- * const mockLogger = createMockLogger();
- * const cb = createCircuitBreaker({ logger: mockLogger });
- *
- * // Verify circuit breaker logged a warning
- * expect(mockLogger.warn).toHaveBeenCalledWith(
- *   expect.stringContaining('disabled')
- * );
- * ```
- *
- * @returns Mock logger with Jest spy methods
- */
-function createMockLogger() {
-  return {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  };
-}
+import { createMockLogger } from '@arbitrage/test-utils';
 
 /**
  * Creates a mock event emitter that captures CircuitBreakerEvent emissions.

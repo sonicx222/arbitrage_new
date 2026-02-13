@@ -123,6 +123,9 @@ import {
 // PriceData, CrossChainOpportunity, DetectorConfig, WhaleAnalysisConfig, MLPredictionConfig
 // are now imported from ./types.ts - See ADR-014: Type Consolidation
 
+// FIX #7: Module-scoped constant to avoid per-call BigInt construction
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
 // =============================================================================
 // Default Configuration (Config C1: Configurable Values)
 // =============================================================================
@@ -1021,7 +1024,22 @@ export class CrossChainDetectorService {
       const estimatedGasCost = BigInt(intent.gasPrice) * BigInt(this.config.estimatedSwapGas ?? 200000);
       const amountInBigInt = BigInt(intent.amountIn);
       const grossProfit = (amountInBigInt * BigInt(Math.floor(priceDiffPercent * 10000))) / BigInt(10000);
-      const netProfit = Number(grossProfit) - Number(estimatedGasCost);
+
+      // FIX #7: BigInt precision handling for grossProfit > 2^53
+      // Number() loses precision for BigInt values beyond MAX_SAFE_INTEGER.
+      // Use BigInt comparison when values are large, Number conversion otherwise.
+      let netProfit: number;
+      if (grossProfit > MAX_SAFE_BIGINT || estimatedGasCost > MAX_SAFE_BIGINT) {
+        // Stay in BigInt domain for the comparison
+        const netProfitBigInt = grossProfit - estimatedGasCost;
+        if (netProfitBigInt <= 0n) {
+          return;
+        }
+        // Safe to convert result since we only need an approximate numeric value for the opportunity
+        netProfit = Number(netProfitBigInt);
+      } else {
+        netProfit = Number(grossProfit) - Number(estimatedGasCost);
+      }
 
       if (netProfit <= 0) {
         return;
@@ -1292,7 +1310,10 @@ export class CrossChainDetectorService {
             undefined, // whaleTx
             this.mlPredictionsCache.size > 0 ? this.mlPredictionsCache : undefined
           );
-          opportunities.push(...pairOpportunities);
+          // FIX #14: Replace spread push with loop push to avoid call stack limit for large results
+          for (const opp of pairOpportunities) {
+            opportunities.push(opp);
+          }
         }
       }
 

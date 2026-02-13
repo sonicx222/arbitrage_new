@@ -46,6 +46,7 @@ import {
   type ContractFactory,
 } from '../../../services/commit-reveal.service';
 import type { Logger, StrategyContext } from '../../../types';
+import { createMockLogger } from '@arbitrage/test-utils';
 
 // =============================================================================
 // Test Configuration
@@ -58,22 +59,6 @@ const TEST_CONTRACT_ADDRESSES: Record<string, string> = {
   ethereum: '0x1111111111111111111111111111111111111111',
   arbitrum: '0x2222222222222222222222222222222222222222',
 };
-
-// =============================================================================
-// Mock Setup Utilities
-// =============================================================================
-
-/**
- * Create mock logger for testing
- */
-function createMockLogger(): Logger {
-  return {
-    info: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-    debug: jest.fn(),
-  };
-}
 
 /**
  * Mock provider with test helpers

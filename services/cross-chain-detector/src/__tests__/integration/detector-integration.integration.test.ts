@@ -2,12 +2,19 @@
  * Integration Tests for CrossChainDetectorService
  *
  * Tests the complete flow from price updates through opportunity detection,
- * including ML integration, modular components, and configuration.
+ * including real Redis Streams publishing, ML integration, and configuration.
  *
+ * Uses real Redis (via redis-memory-server) for OpportunityPublisher tests,
+ * with mock logger/perfLogger for non-Redis dependencies.
+ *
+ * @see ADR-002: Redis Streams over Pub/Sub
  * @see ADR-014: Modular Detector Components
  */
 
-import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
+import Redis from 'ioredis';
+import * as fs from 'fs';
+import * as path from 'path';
 
 // Set required environment variables BEFORE any config imports
 process.env.NODE_ENV = 'test';
@@ -26,12 +33,14 @@ process.env.BASE_WS_URL = 'wss://mainnet.base.org';
 process.env.REDIS_URL = 'redis://localhost:6379';
 
 import { PriceUpdate } from '@arbitrage/types';
+import { RedisStreamsClient } from '@arbitrage/core';
+import { createTestRedisClient } from '@arbitrage/test-utils';
 import { createPriceDataManager, PriceDataManager } from '../../price-data-manager';
 import { createOpportunityPublisher, OpportunityPublisher } from '../../opportunity-publisher';
 import { CrossChainOpportunity, DetectorConfig, MLPredictionConfig } from '../../types';
 
 // =============================================================================
-// Mock Logger
+// Mock Logger & Performance Logger (kept as mocks — not Redis-dependent)
 // =============================================================================
 
 const createMockLogger = () => ({
@@ -41,27 +50,30 @@ const createMockLogger = () => ({
   debug: jest.fn(),
 });
 
-// =============================================================================
-// Mock Redis Streams Client
-// =============================================================================
-
-const createMockStreamsClient = () => ({
-  xadd: jest.fn<() => Promise<string>>().mockResolvedValue('message-id'),
-  xaddWithLimit: jest.fn<() => Promise<string>>().mockResolvedValue('message-id'),
-  xreadgroup: jest.fn<() => Promise<unknown[]>>().mockResolvedValue([]),
-  xgroup: jest.fn<() => Promise<string>>().mockResolvedValue('OK'),
-  xinfo: jest.fn<() => Promise<object>>().mockResolvedValue({}),
-});
-
-// =============================================================================
-// Mock Performance Logger
-// =============================================================================
-
 const createMockPerfLogger = () => ({
   logArbitrageOpportunity: jest.fn(),
   logEventLatency: jest.fn(),
   logHealthCheck: jest.fn(),
 });
+
+// =============================================================================
+// Real Redis Client Factory
+// =============================================================================
+
+function getTestRedisUrl(): string {
+  const configFile = path.resolve(__dirname, '../../../../../.redis-test-config.json');
+  if (fs.existsSync(configFile)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      if (config.url) return config.url;
+    } catch { /* fall through */ }
+  }
+  return process.env.REDIS_URL ?? 'redis://localhost:6379';
+}
+
+function createRealStreamsClient(): RedisStreamsClient {
+  return new RedisStreamsClient(getTestRedisUrl());
+}
 
 // =============================================================================
 // Test Helpers
@@ -209,19 +221,34 @@ describe('CrossChainDetectorService Integration', () => {
   });
 
   // ===========================================================================
-  // OpportunityPublisher Integration
+  // OpportunityPublisher Integration (Real Redis)
   // ===========================================================================
 
-  describe('OpportunityPublisher with Deduplication', () => {
+  describe('OpportunityPublisher with Real Redis', () => {
     let publisher: OpportunityPublisher;
-    let mockStreamsClient: ReturnType<typeof createMockStreamsClient>;
+    let streamsClient: RedisStreamsClient;
+    let rawRedis: Redis;
     let mockPerfLogger: ReturnType<typeof createMockPerfLogger>;
+    const STREAM_NAME = RedisStreamsClient.STREAMS.OPPORTUNITIES;
 
-    beforeEach(() => {
-      mockStreamsClient = createMockStreamsClient();
+    beforeAll(async () => {
+      rawRedis = await createTestRedisClient();
+    });
+
+    afterAll(async () => {
+      if (rawRedis) {
+        await rawRedis.quit();
+      }
+    });
+
+    beforeEach(async () => {
+      // Flush Redis for isolation between tests
+      await rawRedis.flushall();
+
+      streamsClient = createRealStreamsClient();
       mockPerfLogger = createMockPerfLogger();
       publisher = createOpportunityPublisher({
-        streamsClient: mockStreamsClient as any,
+        streamsClient,
         perfLogger: mockPerfLogger as any,
         logger: mockLogger,
         dedupeWindowMs: 5000,
@@ -229,7 +256,13 @@ describe('CrossChainDetectorService Integration', () => {
       });
     });
 
-    it('should publish new opportunity', async () => {
+    afterEach(async () => {
+      if (streamsClient) {
+        await streamsClient.disconnect();
+      }
+    });
+
+    it('should publish opportunity to real Redis stream', async () => {
       const opportunity: CrossChainOpportunity = {
         token: 'WETH/USDC',
         sourceChain: 'optimism',
@@ -250,10 +283,31 @@ describe('CrossChainDetectorService Integration', () => {
       const published = await publisher.publish(opportunity);
 
       expect(published).toBe(true);
-      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
+
+      // Verify the message actually landed in Redis
+      const streamLen = await rawRedis.xlen(STREAM_NAME);
+      expect(streamLen).toBe(1);
+
+      // Read the message back and verify key fields
+      // RedisStreamsClient serializes the message as JSON under a 'data' field
+      const messages = await rawRedis.xrange(STREAM_NAME, '-', '+');
+      expect(messages.length).toBe(1);
+
+      const [, fields] = messages[0];
+      // Fields are stored as ['data', '<json>']
+      const dataIdx = fields.indexOf('data');
+      expect(dataIdx).toBeGreaterThanOrEqual(0);
+
+      const parsed = JSON.parse(fields[dataIdx + 1]);
+      expect(parsed.type).toBe('cross-chain');
+      expect(parsed.buyChain).toBe('optimism');
+      expect(parsed.sellChain).toBe('arbitrum');
+      expect(parsed.tokenIn).toBe('WETH');
+      expect(parsed.tokenOut).toBe('USDC');
+      expect(parsed.bridgeRequired).toBe(true);
     });
 
-    it('should deduplicate identical opportunities within window', async () => {
+    it('should deduplicate identical opportunities (only 1 message in stream)', async () => {
       const opportunity: CrossChainOpportunity = {
         token: 'WETH/USDC',
         sourceChain: 'optimism',
@@ -279,10 +333,12 @@ describe('CrossChainDetectorService Integration', () => {
       const second = await publisher.publish(opportunity);
       expect(second).toBe(false);
 
-      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(1);
+      // Only 1 message should be in the stream
+      const streamLen = await rawRedis.xlen(STREAM_NAME);
+      expect(streamLen).toBe(1);
     });
 
-    it('should republish when profit improves significantly', async () => {
+    it('should republish when profit improves significantly (2 messages in stream)', async () => {
       const opportunity1: CrossChainOpportunity = {
         token: 'WETH/USDC',
         sourceChain: 'optimism',
@@ -309,7 +365,53 @@ describe('CrossChainDetectorService Integration', () => {
       const secondPublished = await publisher.publish(opportunity2);
 
       expect(secondPublished).toBe(true);
-      expect(mockStreamsClient.xaddWithLimit).toHaveBeenCalledTimes(2);
+
+      // Both messages should be in the stream
+      const streamLen = await rawRedis.xlen(STREAM_NAME);
+      expect(streamLen).toBe(2);
+    });
+
+    it('should publish multiple different token opportunities', async () => {
+      const ethOpportunity: CrossChainOpportunity = {
+        token: 'WETH/USDC',
+        sourceChain: 'ethereum',
+        sourceDex: 'uniswap',
+        sourcePrice: 2500,
+        targetChain: 'arbitrum',
+        targetDex: 'sushiswap',
+        targetPrice: 2550,
+        priceDiff: 50,
+        percentageDiff: 2.0,
+        estimatedProfit: 50,
+        bridgeCost: 5,
+        netProfit: 45,
+        confidence: 0.9,
+        createdAt: Date.now(),
+      };
+
+      const btcOpportunity: CrossChainOpportunity = {
+        token: 'WBTC/USDC',
+        sourceChain: 'polygon',
+        sourceDex: 'quickswap',
+        sourcePrice: 42000,
+        targetChain: 'optimism',
+        targetDex: 'velodrome',
+        targetPrice: 42500,
+        priceDiff: 500,
+        percentageDiff: 1.2,
+        estimatedProfit: 500,
+        bridgeCost: 10,
+        netProfit: 490,
+        confidence: 0.88,
+        createdAt: Date.now(),
+      };
+
+      await publisher.publish(ethOpportunity);
+      await publisher.publish(btcOpportunity);
+
+      // Both should be published (different dedupe keys)
+      const streamLen = await rawRedis.xlen(STREAM_NAME);
+      expect(streamLen).toBe(2);
     });
   });
 

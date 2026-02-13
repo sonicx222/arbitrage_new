@@ -473,6 +473,7 @@ export class BridgeLatencyPredictor {
     return Number.isFinite(slope) ? slope : 0;
   }
 
+  // FIX #21: O(n²) → O(n) using running sum accumulator instead of slice+reduce per iteration
   private calculateHistoricalAccuracy(history: BridgeLatencyData[]): number {
     if (history.length < 2) return 0;
 
@@ -480,14 +481,24 @@ export class BridgeLatencyPredictor {
     let totalError = 0;
     let count = 0;
 
+    // Pre-compute running sum for indices 0..9 (the initial window before we start predicting)
+    let runningSum = 0;
+    const startIndex = Math.min(10, history.length);
+    for (let j = 0; j < startIndex; j++) {
+      runningSum += history[j].latency;
+    }
+
     for (let i = 10; i < history.length; i++) {
-      const recentHistory = history.slice(0, i);
-      const predictedLatency = recentHistory.reduce((sum, h) => sum + h.latency, 0) / recentHistory.length;
+      // runningSum contains sum of history[0..i-1], runningCount = i
+      const predictedLatency = runningSum / i;
       const actualLatency = history[i].latency;
 
       const error = Math.abs(predictedLatency - actualLatency) / actualLatency;
       totalError += error;
       count++;
+
+      // Update running sum to include history[i] for next iteration
+      runningSum += history[i].latency;
     }
 
     return count > 0 ? Math.max(0, 1 - totalError / count) : 0;

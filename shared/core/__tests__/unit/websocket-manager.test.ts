@@ -54,52 +54,44 @@ describe('WebSocketManager', () => {
   });
 
   describe('Fallback URL Configuration (S2.1.4)', () => {
-    it('should initialize with primary URL only when no fallbacks provided', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      {
+        desc: 'primary URL only (no fallbacks)',
         url: 'wss://primary.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getConnectionStats();
-
-      expect(stats.totalUrls).toBe(1);
-      expect(stats.currentUrlIndex).toBe(0);
-      expect(manager.getCurrentUrl()).toBe('wss://primary.example.com');
-    });
-
-    it('should initialize with primary and fallback URLs', () => {
-      const config: WebSocketConfig = {
+        fallbackUrls: undefined,
+        expectedTotal: 1,
+        expectedUrl: 'wss://primary.example.com',
+      },
+      {
+        desc: 'primary and 2 fallback URLs',
         url: 'wss://primary.example.com',
-        fallbackUrls: [
-          'wss://fallback1.example.com',
-          'wss://fallback2.example.com',
-        ],
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getConnectionStats();
-
-      expect(stats.totalUrls).toBe(3);
-      expect(stats.currentUrlIndex).toBe(0);
-      expect(manager.getCurrentUrl()).toBe('wss://primary.example.com');
-    });
-
-    it('should initialize with Optimism-style fallback configuration', () => {
-      // Simulates the actual Optimism configuration from S2.1.4
-      const config: WebSocketConfig = {
+        fallbackUrls: ['wss://fallback1.example.com', 'wss://fallback2.example.com'],
+        expectedTotal: 3,
+        expectedUrl: 'wss://primary.example.com',
+      },
+      {
+        desc: 'Optimism-style fallback configuration (S2.1.4)',
         url: 'wss://opt-mainnet.g.alchemy.com/v2/test-key',
         fallbackUrls: [
           'wss://mainnet.optimism.io',
           'wss://optimism.publicnode.com',
           'wss://optimism-mainnet.public.blastapi.io',
         ],
+        expectedTotal: 4,
+        expectedUrl: 'wss://opt-mainnet.g.alchemy.com/v2/test-key',
+      },
+    ])('should initialize with $desc', ({ url, fallbackUrls, expectedTotal, expectedUrl }) => {
+      const config: WebSocketConfig = {
+        url,
+        ...(fallbackUrls ? { fallbackUrls } : {}),
       };
 
       manager = new WebSocketManager(config);
       const stats = manager.getConnectionStats();
 
-      expect(stats.totalUrls).toBe(4);
-      expect(manager.getCurrentUrl()).toBe('wss://opt-mainnet.g.alchemy.com/v2/test-key');
+      expect(stats.totalUrls).toBe(expectedTotal);
+      expect(stats.currentUrlIndex).toBe(0);
+      expect(manager.getCurrentUrl()).toBe(expectedUrl);
     });
 
     it('should use pingInterval alias for heartbeatInterval', () => {
@@ -327,38 +319,19 @@ describe('WebSocketManager', () => {
   });
 
   describe('Event Handlers', () => {
-    it('should allow registering message handlers', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
+    it.each([
+      { desc: 'message handler via onMessage()', method: 'onMessage' as const },
+      { desc: 'connection change handler via onConnectionChange()', method: 'onConnectionChange' as const },
+    ])('should register $desc and return unsubscribe function', ({ method }) => {
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
       const handler = jest.fn();
 
-      const unsubscribe = manager.onMessage(handler);
-
-      expect(typeof unsubscribe).toBe('function');
-    });
-
-    it('should allow registering connection change handlers', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      const handler = jest.fn();
-
-      const unsubscribe = manager.onConnectionChange(handler);
-
+      const unsubscribe = manager[method](handler);
       expect(typeof unsubscribe).toBe('function');
     });
 
     it('should allow unsubscribing from message events', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
       const handler = jest.fn();
 
       const unsubscribe = manager.onMessage(handler);
@@ -369,24 +342,12 @@ describe('WebSocketManager', () => {
       expect(() => unsubscribe()).not.toThrow();
     });
 
-    it('should support on() method for various events', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-
-      const messageUnsubscribe = manager.on('message', () => {});
-      const errorUnsubscribe = manager.on('error', () => {});
-      const connectedUnsubscribe = manager.on('connected', () => {});
-      const disconnectedUnsubscribe = manager.on('disconnected', () => {});
-      const customUnsubscribe = manager.on('custom', () => {});
-
-      expect(typeof messageUnsubscribe).toBe('function');
-      expect(typeof errorUnsubscribe).toBe('function');
-      expect(typeof connectedUnsubscribe).toBe('function');
-      expect(typeof disconnectedUnsubscribe).toBe('function');
-      expect(typeof customUnsubscribe).toBe('function');
+    it.each([
+      'message', 'error', 'connected', 'disconnected', 'custom',
+    ])('should support on() method for "%s" event', (eventName) => {
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
+      const unsubscribe = manager.on(eventName, () => {});
+      expect(typeof unsubscribe).toBe('function');
     });
   });
 });
@@ -405,60 +366,32 @@ describe('WebSocketManager Exponential Backoff', () => {
   });
 
   describe('calculateReconnectDelay()', () => {
-    it('should return base delay for attempt 0', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        reconnectInterval: 1000,
-        backoffMultiplier: 2.0,
-        maxReconnectDelay: 60000,
-        jitterPercent: 0, // Disable jitter for deterministic testing
-      };
+    describe('deterministic delay (no jitter)', () => {
+      it.each([
+        // multiplier=2.0, maxDelay=60000: standard exponential backoff
+        { desc: 'base delay at attempt 0 (2x multiplier)', multiplier: 2.0, maxDelay: 60000, attempt: 0, expected: 1000 },
+        { desc: '2x at attempt 1', multiplier: 2.0, maxDelay: 60000, attempt: 1, expected: 2000 },
+        { desc: '4x at attempt 2', multiplier: 2.0, maxDelay: 60000, attempt: 2, expected: 4000 },
+        { desc: '8x at attempt 3', multiplier: 2.0, maxDelay: 60000, attempt: 3, expected: 8000 },
+        { desc: '16x at attempt 4', multiplier: 2.0, maxDelay: 60000, attempt: 4, expected: 16000 },
+        // multiplier=2.0, maxDelay=5000: cap enforcement
+        { desc: 'capped at maxDelay (attempt 3, max=5000)', multiplier: 2.0, maxDelay: 5000, attempt: 3, expected: 5000 },
+        { desc: 'capped at maxDelay (attempt 10, max=5000)', multiplier: 2.0, maxDelay: 5000, attempt: 10, expected: 5000 },
+        // multiplier=1.5: custom multiplier
+        { desc: 'base delay at attempt 0 (1.5x multiplier)', multiplier: 1.5, maxDelay: 60000, attempt: 0, expected: 1000 },
+        { desc: '1.5x at attempt 1', multiplier: 1.5, maxDelay: 60000, attempt: 1, expected: 1500 },
+        { desc: '2.25x at attempt 2 (1.5x multiplier)', multiplier: 1.5, maxDelay: 60000, attempt: 2, expected: 2250 },
+      ])('$desc → $expected ms', ({ multiplier, maxDelay, attempt, expected }) => {
+        manager = new WebSocketManager({
+          url: 'wss://test.example.com',
+          reconnectInterval: 1000,
+          backoffMultiplier: multiplier,
+          maxReconnectDelay: maxDelay,
+          jitterPercent: 0,
+        });
 
-      manager = new WebSocketManager(config);
-
-      const delay = manager.calculateReconnectDelay(0);
-      // 1000 * 2^0 = 1000ms (no jitter)
-      expect(delay).toBe(1000);
-    });
-
-    it('should apply exponential multiplier correctly', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        reconnectInterval: 1000,
-        backoffMultiplier: 2.0,
-        maxReconnectDelay: 60000,
-        jitterPercent: 0,
-      };
-
-      manager = new WebSocketManager(config);
-
-      // 1000 * 2^0 = 1000
-      expect(manager.calculateReconnectDelay(0)).toBe(1000);
-      // 1000 * 2^1 = 2000
-      expect(manager.calculateReconnectDelay(1)).toBe(2000);
-      // 1000 * 2^2 = 4000
-      expect(manager.calculateReconnectDelay(2)).toBe(4000);
-      // 1000 * 2^3 = 8000
-      expect(manager.calculateReconnectDelay(3)).toBe(8000);
-      // 1000 * 2^4 = 16000
-      expect(manager.calculateReconnectDelay(4)).toBe(16000);
-    });
-
-    it('should cap delay at maxReconnectDelay', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        reconnectInterval: 1000,
-        backoffMultiplier: 2.0,
-        maxReconnectDelay: 5000,
-        jitterPercent: 0,
-      };
-
-      manager = new WebSocketManager(config);
-
-      // 1000 * 2^3 = 8000, but max is 5000
-      expect(manager.calculateReconnectDelay(3)).toBe(5000);
-      // 1000 * 2^10 = 1024000, but max is 5000
-      expect(manager.calculateReconnectDelay(10)).toBe(5000);
+        expect(manager.calculateReconnectDelay(attempt)).toBe(expected);
+      });
     });
 
     it('should add jitter within specified range', () => {
@@ -499,25 +432,6 @@ describe('WebSocketManager Exponential Backoff', () => {
       // Should be between 1000 and 1250 (with 25% jitter)
       expect(delay).toBeGreaterThanOrEqual(1000);
       expect(delay).toBeLessThanOrEqual(1250);
-    });
-
-    it('should handle custom multiplier', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        reconnectInterval: 1000,
-        backoffMultiplier: 1.5,
-        maxReconnectDelay: 60000,
-        jitterPercent: 0,
-      };
-
-      manager = new WebSocketManager(config);
-
-      // 1000 * 1.5^0 = 1000
-      expect(manager.calculateReconnectDelay(0)).toBe(1000);
-      // 1000 * 1.5^1 = 1500
-      expect(manager.calculateReconnectDelay(1)).toBe(1500);
-      // 1000 * 1.5^2 = 2250
-      expect(manager.calculateReconnectDelay(2)).toBe(2250);
     });
 
     it('should prevent thundering herd with jitter', () => {
@@ -826,91 +740,48 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
   });
 
   describe('Runtime Control', () => {
-    it('should allow enabling worker parsing at runtime', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'enable at runtime', initialParsing: undefined, toggleTo: true, expectedBefore: false, expectedAfter: true },
+      { desc: 'disable at runtime', initialParsing: true, toggleTo: false, expectedBefore: true, expectedAfter: false },
+    ])('should $desc', ({ initialParsing, toggleTo, expectedBefore, expectedAfter }) => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
-      };
+        ...(initialParsing !== undefined ? { useWorkerParsing: initialParsing } : {}),
+      });
 
-      manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().enabled).toBe(false);
-
-      manager.setWorkerParsing(true);
-      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+      expect(manager.getWorkerParsingStats().enabled).toBe(expectedBefore);
+      manager.setWorkerParsing(toggleTo);
+      expect(manager.getWorkerParsingStats().enabled).toBe(expectedAfter);
     });
 
-    it('should allow disabling worker parsing at runtime', () => {
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'change threshold to 4096', newThreshold: 4096, expected: 4096 },
+      { desc: 'handle negative threshold by using 0', newThreshold: -100, expected: 0 },
+    ])('should $desc', ({ newThreshold, expected }) => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
         useWorkerParsing: true,
-      };
+      });
 
-      manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().enabled).toBe(true);
-
-      manager.setWorkerParsing(false);
-      expect(manager.getWorkerParsingStats().enabled).toBe(false);
-    });
-
-    it('should allow changing threshold at runtime', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: true,
-      };
-
-      manager = new WebSocketManager(config);
-      // P1-PHASE1: Default threshold changed from 1024 to 2048
-      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(2048);
-
-      manager.setWorkerParsingThreshold(4096);
-      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(4096);
-    });
-
-    it('should handle negative threshold by using 0', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: true,
-      };
-
-      manager = new WebSocketManager(config);
-      manager.setWorkerParsingThreshold(-100);
-      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(0);
+      manager.setWorkerParsingThreshold(newThreshold);
+      expect(manager.getWorkerParsingStats().thresholdBytes).toBe(expected);
     });
   });
 
   describe('Statistics', () => {
-    it('should track main thread parses', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        // Worker parsing disabled - all parses go to main thread
-      };
-
-      manager = new WebSocketManager(config);
+    it.each([
+      { desc: 'mainThreadParses', stat: 'mainThreadParses' as const, expected: 0 },
+      { desc: 'workerThreadParses', stat: 'workerThreadParses' as const, expected: 0 },
+      { desc: 'workerUsagePercent (no parses)', stat: 'workerUsagePercent' as const, expected: 0 },
+    ])('should initialize $desc to $expected', ({ stat, expected }) => {
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
       const stats = manager.getWorkerParsingStats();
-
-      expect(stats.mainThreadParses).toBe(0);
-      expect(stats.workerThreadParses).toBe(0);
-    });
-
-    it('should calculate worker usage percentage', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      const stats = manager.getWorkerParsingStats();
-
-      // With no parses, percentage should be 0
-      expect(stats.workerUsagePercent).toBe(0);
+      expect(stats[stat]).toBe(expected);
     });
 
     it('should reset statistics', () => {
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
 
-      manager = new WebSocketManager(config);
-
-      // Reset stats
       manager.resetWorkerParsingStats();
       const stats = manager.getWorkerParsingStats();
 
@@ -920,17 +791,13 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
       expect(stats.poolStartupFallbacks).toBe(0);
     });
 
-    it('should report pool ready status', () => {
-      const config: WebSocketConfig = {
+    it('should report pool ready status as false initially (lazy initialization)', () => {
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
         useWorkerParsing: true,
-      };
+      });
 
-      manager = new WebSocketManager(config);
-      const stats = manager.getWorkerParsingStats();
-
-      // Pool starts not ready (lazy initialization)
-      expect(stats.poolReady).toBe(false);
+      expect(manager.getWorkerParsingStats().poolReady).toBe(false);
     });
   });
 
@@ -982,65 +849,26 @@ describe('WebSocketManager Worker Thread JSON Parsing', () => {
       expect(manager.getWorkerParsingStats().enabled).toBe(false);
     });
 
-    it('should allow explicit enable override regardless of environment', () => {
-      // Even in non-production, explicit true should enable
-      const config: WebSocketConfig = {
+    it.each([
+      { desc: 'explicit enable in non-production', envSetup: () => {}, useWorkerParsing: true, expected: true },
+      { desc: 'explicit disable in production', envSetup: () => { process.env.NODE_ENV = 'production'; }, useWorkerParsing: false, expected: false },
+    ])('should respect $desc override', ({ envSetup, useWorkerParsing, expected }) => {
+      envSetup();
+      manager = new WebSocketManager({
         url: 'wss://test.example.com',
-        useWorkerParsing: true,
-      };
-
-      manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().enabled).toBe(true);
+        useWorkerParsing,
+      });
+      expect(manager.getWorkerParsingStats().enabled).toBe(expected);
     });
 
-    it('should allow explicit disable override regardless of environment', () => {
-      // Explicit false should always disable, even if env says production
-      process.env.NODE_ENV = 'production';
+    it.each([
+      { desc: 'Fly.io (FLY_APP_NAME)', envVar: 'FLY_APP_NAME', envValue: 'test-app' },
+      { desc: 'Railway (RAILWAY_ENVIRONMENT)', envVar: 'RAILWAY_ENVIRONMENT', envValue: 'production' },
+      { desc: 'NODE_ENV=production', envVar: 'NODE_ENV', envValue: 'production' },
+    ])('should auto-enable in $desc environment', ({ envVar, envValue }) => {
+      process.env[envVar] = envValue;
 
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        useWorkerParsing: false,
-      };
-
-      manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().enabled).toBe(false);
-    });
-
-    it('should detect Fly.io environment', () => {
-      // Note: This test documents the expected behavior but can't fully test
-      // module-load detection due to Jest's module caching.
-      // The detection logic is: FLY_APP_NAME !== undefined
-      process.env.FLY_APP_NAME = 'test-app';
-
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-        // Not specifying useWorkerParsing - should auto-detect
-      };
-
-      manager = new WebSocketManager(config);
-      // Should be enabled because FLY_APP_NAME is set
-      expect(manager.getWorkerParsingStats().enabled).toBe(true);
-    });
-
-    it('should detect Railway environment', () => {
-      process.env.RAILWAY_ENVIRONMENT = 'production';
-
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
-      expect(manager.getWorkerParsingStats().enabled).toBe(true);
-    });
-
-    it('should detect NODE_ENV=production', () => {
-      process.env.NODE_ENV = 'production';
-
-      const config: WebSocketConfig = {
-        url: 'wss://test.example.com',
-      };
-
-      manager = new WebSocketManager(config);
+      manager = new WebSocketManager({ url: 'wss://test.example.com' });
       expect(manager.getWorkerParsingStats().enabled).toBe(true);
     });
   });

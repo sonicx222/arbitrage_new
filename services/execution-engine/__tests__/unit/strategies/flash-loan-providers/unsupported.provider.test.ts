@@ -9,7 +9,25 @@
  * @see unsupported.provider.ts
  */
 
-// Jest is used globally by the project
+// Mock ethers and @arbitrage/config to prevent deep import chain through service-config.ts
+jest.mock('ethers', () => ({
+  ethers: {
+    Interface: jest.fn().mockImplementation(() => ({
+      encodeFunctionData: jest.fn().mockReturnValue('0x1234'),
+    })),
+    isAddress: jest.fn().mockReturnValue(true),
+    ZeroAddress: '0x0000000000000000000000000000000000000000',
+  },
+}));
+
+jest.mock('@arbitrage/config', () => {
+  const BPS_DENOMINATOR = BigInt(10000);
+  return {
+    __esModule: true,
+    getBpsDenominatorBigInt: () => BPS_DENOMINATOR,
+  };
+});
+
 import { UnsupportedFlashLoanProvider } from '../../../../src/strategies/flash-loan-providers/unsupported.provider';
 import type { FlashLoanRequest, FlashLoanSwapStep } from '../../../../src/strategies/flash-loan-providers/types';
 

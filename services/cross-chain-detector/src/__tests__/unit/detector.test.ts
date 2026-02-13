@@ -1523,17 +1523,19 @@ describe('Pending Opportunity Analysis', () => {
    * Calculate confidence adjustment based on slippage tolerance.
    * Higher slippage = lower confidence (whale may be desperate)
    */
+  // FIX #24: Reversed branch order so > 0.03 is checked before > 0.01
+  // Previously, > 0.01 caught all > 0.03 values, making the 0.7x penalty unreachable
   function adjustConfidenceForSlippage(
     baseConfidence: number,
     slippageTolerance: number
   ): number {
-    // High slippage (>1%) reduces confidence
-    if (slippageTolerance > 0.01) {
-      return baseConfidence * 0.9;
-    }
     // Very high slippage (>3%) reduces confidence more
     if (slippageTolerance > 0.03) {
       return baseConfidence * 0.7;
+    }
+    // High slippage (>1%) reduces confidence
+    if (slippageTolerance > 0.01) {
+      return baseConfidence * 0.9;
     }
     // Normal slippage (0.1-0.5%) is standard
     return baseConfidence;
@@ -1573,7 +1575,8 @@ describe('Pending Opportunity Analysis', () => {
     });
 
     it('should reduce confidence more for very high slippage', () => {
-      expect(adjustConfidenceForSlippage(0.8, 0.05)).toBeCloseTo(0.72, 10); // Still 0.9 (> 0.01 check first)
+      // FIX #24: Now correctly applies 0.7x penalty for slippage > 0.03
+      expect(adjustConfidenceForSlippage(0.8, 0.05)).toBeCloseTo(0.56, 10); // 0.8 * 0.7
     });
 
     it('should handle edge cases', () => {

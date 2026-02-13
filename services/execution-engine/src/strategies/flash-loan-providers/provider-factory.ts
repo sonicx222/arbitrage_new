@@ -369,7 +369,12 @@ export class FlashLoanProviderFactory {
       return isValidContractAddress(contractAddress);
     });
 
-    return [...aaveChains, ...balancerChains, ...pancakeSwapChains];
+    const syncSwapChains = Array.from(SYNCSWAP_SUPPORTED_CHAINS).filter(chain => {
+      const contractAddress = this.config.contractAddresses[chain];
+      return isValidContractAddress(contractAddress);
+    });
+
+    return [...aaveChains, ...balancerChains, ...pancakeSwapChains, ...syncSwapChains];
   }
 
   /**

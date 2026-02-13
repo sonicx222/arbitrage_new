@@ -218,29 +218,29 @@ The TypeScript security checklist is **fully passing**:
 
 ### Phase 1: Immediate (P1 — Fix before next deployment)
 
-- [ ] **#1**: Standardize `estimatedProfit` semantics. Choose gross profit (priceDiff) consistently. Document in `CrossChainOpportunity` type.
-- [ ] **#2**: Align confidence calculator defaults with detector defaults (5 parameters).
-- [ ] **#6**: Replace `getPairCount()` O(n) with cached counter in PriceDataManager.
-- [ ] **#7**: Validate `intent.amountIn` as numeric string. Use BigInt arithmetic end-to-end.
-- [ ] **#13**: Fix whale token substring matching → exact part matching.
-- [ ] **#5**: Add rate limiting and unit tests for `updateBridgeData()`.
-- [ ] **#8**: Add tests for `updateEthPrice()` and `getEthPrice()`.
+- [x] **#1**: Standardize `estimatedProfit` semantics. Choose gross profit (priceDiff) consistently. *(Already applied)*
+- [x] **#2**: Align confidence calculator defaults with detector defaults (5 parameters). *(Fixed 2026-02-13: ml.enabled false→true)*
+- [x] **#6**: Replace `getPairCount()` O(n) with cached counter in PriceDataManager. *(Already applied)*
+- [x] **#7**: Validate `intent.amountIn` as numeric string. Use BigInt arithmetic end-to-end. *(Fixed 2026-02-13: BigInt-domain subtraction for >2^53)*
+- [x] **#13**: Fix whale token substring matching → exact part matching. *(Already applied)*
+- [x] **#5**: Add rate limiting and unit tests for `updateBridgeData()`. *(Rate limiting already applied; unit tests deferred to /implement-feature)*
+- [ ] **#8**: Add tests for `updateEthPrice()` and `getEthPrice()`. *(Deferred to /implement-feature)*
 
 ### Phase 2: Next Sprint (P1-P2 — Coverage, security hardening)
 
-- [ ] **#3/#4**: Add unit tests for `start()`/`stop()`, `findArbitrageInPrices()`, `detectWhaleInducedOpportunities()`.
-- [ ] **#9**: Add ETH price change rate circuit breaker (reject >20% jumps).
-- [ ] **#10**: Cap total confidence multiplier at 1.5x. Rate limit whale recording per token.
+- [ ] **#3/#4**: Add unit tests for `start()`/`stop()`, `findArbitrageInPrices()`, `detectWhaleInducedOpportunities()`. *(Deferred to /implement-feature)*
+- [x] **#9**: Add ETH price change rate circuit breaker (reject >20% jumps). *(Already applied)*
+- [x] **#10**: Cap total confidence multiplier at 1.5x. Rate limit whale recording per token. *(Already applied)*
 - [ ] **#16**: Refactor test mocks to typed interfaces, eliminate `as any`.
-- [ ] **#17/#18**: Assert stream name constants in publisher tests. Add ML timeout test.
-- [ ] **#20**: Fix pre-validation budget counting (only count when simulation actually runs).
-- [ ] **#22**: Add exact-value regression tests for ConfidenceCalculator.
+- [ ] **#17/#18**: Assert stream name constants in publisher tests. Add ML timeout test. *(Deferred to /implement-feature)*
+- [x] **#20**: Fix pre-validation budget counting (only count when simulation actually runs). *(Already applied)*
+- [ ] **#22**: Add exact-value regression tests for ConfidenceCalculator. *(Deferred to /implement-feature)*
 
 ### Phase 3: Backlog (P2-P3 — Refactoring, architecture)
 
 - [ ] **#12**: Extract `WhaleOpportunityDetector` and `PendingOpportunityAnalyzer` from detector.ts.
 - [ ] **#11**: Document stale price window as per-chain configurable.
-- [ ] **#21**: Fix `calculateHistoricalAccuracy` O(n²) → running average.
+- [x] **#21**: Fix `calculateHistoricalAccuracy` O(n²) → running average. *(Fixed 2026-02-13: O(n) running sum accumulator)*
 - [ ] **#23**: Evaluate priceData migration from plain objects to nested Maps.
 - [ ] **#27**: Update ADR-014 with missing module sections.
 - [ ] **#28**: Migrate detection loop from setInterval to setTimeout recursion.

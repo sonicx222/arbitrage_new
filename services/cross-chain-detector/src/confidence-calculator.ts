@@ -99,7 +99,7 @@ export interface ConfidenceCalculatorConfig {
 // so standalone CC tests use production-consistent values.
 export const DEFAULT_CONFIDENCE_CONFIG: ConfidenceCalculatorConfig = {
   ml: {
-    enabled: false,
+    enabled: true,
     minConfidence: 0.6,
     alignedBoost: 1.15,
     opposedPenalty: 0.9,

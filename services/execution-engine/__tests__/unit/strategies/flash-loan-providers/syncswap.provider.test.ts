@@ -22,16 +22,22 @@ import type {
   FlashLoanSwapStep,
 } from '../../../../src/strategies/flash-loan-providers/types';
 
-// Mock the config module to avoid BigInt serialization issues
-// Use jest.requireActual to get real implementations (lazy evaluation via functions)
-jest.mock('@arbitrage/config', () => {
-  const actual = jest.requireActual('@arbitrage/config');
-  return {
-    SYNCSWAP_FEE_BPS: 30, // 0.3%
-    getBpsDenominatorBigInt: actual.getBpsDenominatorBigInt, // Use actual implementation directly
-    SYNCSWAP_FLASH_ARBITRAGE_ABI: actual.SYNCSWAP_FLASH_ARBITRAGE_ABI,
-  };
-});
+// Mock @arbitrage/config to prevent deep import chain (service-config -> PANCAKESWAP_V3_FACTORIES)
+// IMPORTANT: Use number-based denominator with BigInt conversion at call time to avoid
+// Jest worker serialization error ("Do not know how to serialize a BigInt").
+const MOCK_BPS_DENOMINATOR_NUM = 10000;
+
+jest.mock('@arbitrage/config', () => ({
+  __esModule: true,
+  SYNCSWAP_FEE_BPS: 30,
+  getBpsDenominatorBigInt: () => BigInt(MOCK_BPS_DENOMINATOR_NUM),
+  SYNCSWAP_FLASH_ARBITRAGE_ABI: [
+    'function executeArbitrage(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+    'function calculateExpectedProfit(address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+    'function isApprovedRouter(address router) external view returns (bool)',
+    'function VAULT() external view returns (address)',
+  ],
+}));
 
 // =============================================================================
 // Test Utilities
@@ -294,7 +300,7 @@ describe('SyncSwapFlashLoanProvider - Fee Calculation', () => {
 
       const feeInfo = provider.calculateFee(amount);
 
-      expect(feeInfo.feeAmount).toBe(0n); // Rounds down to 0
+      expect(feeInfo.feeAmount).toBe(3n); // (1000 * 30) / 10000 = 3
     });
 
     it('should handle very large amounts without overflow', () => {
@@ -521,10 +527,11 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
     });
 
     it('should accept approved routers (case-insensitive)', () => {
+      // Only uppercase hex chars, keep 0x prefix (ethers.isAddress rejects 0X)
       const request = createValidRequest({
         swapPath: [
           {
-            router: TEST_ADDRESSES.ROUTER_SYNCSWAP.toUpperCase(), // Uppercase
+            router: '0x' + TEST_ADDRESSES.ROUTER_SYNCSWAP.slice(2).toUpperCase(),
             tokenIn: TEST_ADDRESSES.WETH,
             tokenOut: TEST_ADDRESSES.USDC,
             amountOutMin: 0n,
@@ -570,12 +577,13 @@ describe('SyncSwapFlashLoanProvider - Request Validation', () => {
     });
 
     it('should accept valid cycle (case-insensitive)', () => {
+      // Only uppercase hex chars, keep 0x prefix (ethers.isAddress rejects 0X)
       const request = createValidRequest({
         asset: TEST_ADDRESSES.WETH.toLowerCase(),
         swapPath: [
           {
             router: TEST_ADDRESSES.ROUTER_SYNCSWAP,
-            tokenIn: TEST_ADDRESSES.WETH.toUpperCase(),
+            tokenIn: '0x' + TEST_ADDRESSES.WETH.slice(2).toUpperCase(),
             tokenOut: TEST_ADDRESSES.USDC,
             amountOutMin: 0n,
           },
