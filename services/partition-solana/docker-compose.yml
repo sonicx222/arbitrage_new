@@ -1,5 +1,3 @@
-version: '3.8'
-
 # P4 Solana-Native Partition Service - Local Development
 #
 # Chain: Solana (non-EVM)

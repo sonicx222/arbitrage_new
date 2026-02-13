@@ -18,7 +18,6 @@ import {
   PerformanceLogger,
   RedisStreamsClient,
   WebSocketManager,
-  WebSocketConfig,
   // P0-1 FIX: Use precision-safe price calculation
   calculatePriceFromBigIntReserves,
   // Simulation mode support
@@ -46,8 +45,6 @@ import {
   // P0-FIX: Import factory event signatures for event routing
   FactoryEventSignatures,
   AdditionalEventSignatures,
-  // P0-FIX: Import interface for type-safe wsManager cast
-  FactoryWebSocketManager,
   // ADR-022: Reserve cache for RPC reduction
   ReserveCache,
   getReserveCache,
@@ -71,8 +68,6 @@ import {
   // FIX (Issue 2.1): Removed deprecated dexFeeToPercentage import
   // Using bpsToDecimal from @arbitrage/core instead
   isEvmChain,
-  // Task 2.1.3: Factory addresses for subscription
-  getAllFactoryAddresses
 } from '@arbitrage/config';
 
 import {
@@ -81,10 +76,9 @@ import {
   PriceUpdate,
   ArbitrageOpportunity,
   SwapEvent,
-  Pair
 } from '@arbitrage/types';
 
-import type { ChainStats } from './types';
+import type { ChainStats, ExtendedPair } from './types';
 import { WhaleAlertPublisher, ExtendedPairInfo } from './publishers';
 // R3 Refactor: Use extracted detection modules
 import {
@@ -101,13 +95,15 @@ import {
   PairForSimulation,
   SimulationCallbacks
 } from './simulation';
+// R8 Refactor: Use extracted subscription and pair initialization modules
+import { createSubscriptionManager } from './subscription';
+import type { SubscriptionCallbacks, SubscriptionStats } from './subscription';
+import { initializePairs as initializePairsFromModule } from './pair-initializer';
 // FIX Config 3.1/3.2: Import utility functions and constants
 // P0-2 FIX: Import centralized validateFee (FIX 9.3)
 import {
   parseIntEnvVar,
   parseFloatEnvVar,
-  toWebSocketUrl,
-  isUnstableChain,
   validateFee,
 } from './types';
 import {
@@ -117,11 +113,13 @@ import {
   DEFAULT_SIMULATION_VOLATILITY,
   MIN_SIMULATION_VOLATILITY,
   MAX_SIMULATION_VOLATILITY,
-  UNSTABLE_WEBSOCKET_CHAINS,
-  DEFAULT_WS_CONNECTION_TIMEOUT_MS,
-  EXTENDED_WS_CONNECTION_TIMEOUT_MS,
+  // R8 Refactor: UNSTABLE_WEBSOCKET_CHAINS, DEFAULT_WS_CONNECTION_TIMEOUT_MS,
+  // EXTENDED_WS_CONNECTION_TIMEOUT_MS moved to subscription-manager.ts
   WS_DISCONNECT_TIMEOUT_MS,
   SNAPSHOT_CACHE_TTL_MS,
+  // FIX #33: Use centralized constants instead of duplicated private members
+  TRIANGULAR_CHECK_INTERVAL_MS,
+  MULTI_LEG_CHECK_INTERVAL_MS,
   // Task 2.1.3: Factory subscription config
   DEFAULT_USE_FACTORY_SUBSCRIPTIONS,
   FACTORY_SUBSCRIPTION_ENABLED_CHAINS,
@@ -137,6 +135,15 @@ import {
 // =============================================================================
 // Types
 // =============================================================================
+
+/** FIX #28: Typed shape for price data stored in HierarchicalCache */
+export interface CachedPriceData {
+  price: number;
+  reserve0: string;
+  reserve1: string;
+  timestamp: number;
+  blockNumber: number;
+}
 
 export interface ChainInstanceConfig {
   chainId: string;
@@ -195,23 +202,9 @@ export interface ChainInstanceConfig {
   usePriceCache?: boolean;
 }
 
-interface ExtendedPair extends Pair {
-  reserve0: string;
-  reserve1: string;
-  blockNumber: number;
-  lastUpdate: number;
-  // HOT-PATH OPT: Cache pairKey to avoid per-event string allocation in emitPriceUpdate()
-  // Format: "${dex}_${token0Symbol}_${token1Symbol}"
-  pairKey?: string;
-  // FIX Perf 10.2: Cache chain:address key to avoid string allocation in activity tracking
-  // Format: "${chainId}:${pairAddress}" - used by activityTracker.recordUpdate()
-  chainPairKey?: string;
-  // FIX Perf 10.2: Cache BigInt reserves to avoid re-parsing in emitPriceUpdate()
-  // Updated atomically with string reserves in handleSyncEvent()
-  // At 100-1000 Sync events/sec, this eliminates ~2000 BigInt parses/sec
-  reserve0BigInt?: bigint;
-  reserve1BigInt?: bigint;
-}
+// R8 Refactor: ExtendedPair interface moved to ./types.ts for shared use
+// by chain-instance.ts and pair-initializer.ts.
+// Detection module's ExtendedPair (in snapshot-manager.ts) is imported as DetectionExtendedPair.
 
 // R3 Refactor: PairSnapshot interface moved to detection/simple-arbitrage-detector.ts
 // Now imported from './detection' module
@@ -323,7 +316,6 @@ export class ChainDetectorInstance extends EventEmitter {
   // Triangular/Quadrilateral arbitrage detection
   private triangularDetector: CrossDexTriangularArbitrage;
   private lastTriangularCheck: number = 0;
-  private readonly TRIANGULAR_CHECK_INTERVAL_MS = 500;
 
   // R3: Extracted detection modules
   private simpleArbitrageDetector: SimpleArbitrageDetector;
@@ -332,7 +324,11 @@ export class ChainDetectorInstance extends EventEmitter {
   // Multi-leg path finding (5-7 token paths)
   private multiLegPathFinder: MultiLegPathFinder | null = null;
   private lastMultiLegCheck: number = 0;
-  private readonly MULTI_LEG_CHECK_INTERVAL_MS = 2000;
+
+  // P1-FIX: Maximum staleness for pair data in arbitrage detection.
+  // Pairs not updated within this window are skipped to prevent false opportunities
+  // from stale reserves. 30s aligns with typical block times across supported chains.
+  private readonly MAX_STALENESS_MS = 30_000;
 
   // Swap event filtering and whale detection
   private swapEventFilter: SwapEventFilter | null = null;
@@ -351,6 +347,9 @@ export class ChainDetectorInstance extends EventEmitter {
   // Task 2.1.3: Factory Subscription Configuration
   // Factory-level subscriptions for 40-50x RPC reduction
   private factorySubscriptionService: FactorySubscriptionService | null = null;
+  // R8 Refactor: Cached boolean for hot-path access (set by SubscriptionManager)
+  // Replaces shouldUseFactorySubscriptions() method call in handleWebSocketMessage()
+  private useFactoryMode: boolean = false;
   private subscriptionConfig: {
     useFactorySubscriptions: boolean;
     factorySubscriptionEnabledChains: string[];
@@ -647,11 +646,8 @@ export class ChainDetectorInstance extends EventEmitter {
         // Initialize RPC provider
         this.provider = new ethers.JsonRpcProvider(this.chainConfig.rpcUrl);
 
-        // Initialize WebSocket manager
-        await this.initializeWebSocket();
-
-        // Subscribe to events
-        await this.subscribeToEvents();
+        // R8 Refactor: Initialize WebSocket and subscribe in a single call
+        await this.initializeWebSocketAndSubscribe();
       }
 
       this.isRunning = true;
@@ -779,6 +775,8 @@ export class ChainDetectorInstance extends EventEmitter {
       monitoredPairs: 0,
       rpcReductionRatio: 1
     };
+    // R8 Refactor: Reset cached factory mode flag
+    this.useFactoryMode = false;
 
     this.status = 'disconnected';
     this.isStopping = false; // Reset for potential restart
@@ -925,7 +923,8 @@ export class ChainDetectorInstance extends EventEmitter {
 
   /**
    * Handle simulated Sync events from the ChainSimulationHandler.
-   * Updates pair state and emits price updates (same as real Sync events).
+   * Aligned with production handleSyncEvent() to ensure consistent behavior:
+   * eventsProcessed, BigInt reserves, reserveCache, activityTracker, checkArbitrageOpportunity.
    */
   private handleSimulatedSyncEvent(event: { address: string; reserve0: string; reserve1: string; blockNumber: number }): void {
     const pairAddress = event.address.toLowerCase();
@@ -938,45 +937,38 @@ export class ChainDetectorInstance extends EventEmitter {
     try {
       const { reserve0, reserve1, blockNumber } = event;
 
-      // Update pair reserves (using Object.assign for atomicity)
-      Object.assign(pair, {
-        reserve0,
-        reserve1,
-        blockNumber,
-        lastUpdate: Date.now()
-      });
+      // P1-FIX: Parse BigInt reserves BEFORE recording activity (matches production order)
+      const reserve0BigInt = BigInt(reserve0);
+      const reserve1BigInt = BigInt(reserve1);
+
+      // P1-FIX: Update reserve cache (matches production handleSyncEvent)
+      if (this.reserveCache) {
+        this.reserveCache.onSyncEvent(this.chainId, pairAddress, reserve0, reserve1, blockNumber);
+      }
+
+      // P1-FIX: Record activity AFTER successful parsing (matches production order)
+      this.activityTracker.recordUpdate(pair.chainPairKey ?? `${this.chainId}:${pairAddress}`);
+
+      // Update pair reserves with BigInt values (matches production direct property assignment)
+      pair.reserve0 = reserve0;
+      pair.reserve1 = reserve1;
+      pair.reserve0BigInt = reserve0BigInt;
+      pair.reserve1BigInt = reserve1BigInt;
+      pair.blockNumber = blockNumber;
+      pair.lastUpdate = Date.now();
 
       // R3 Refactor: Delegate cache invalidation to SnapshotManager
       // SnapshotManager handles version tracking and cache management internally
       this.snapshotManager.invalidateCache();
 
-      // Calculate price and emit price update
-      const price = calculatePriceFromBigIntReserves(
-        BigInt(reserve0),
-        BigInt(reserve1)
-      );
+      // Note: eventsProcessed is incremented by onEventProcessed callback
+      // (called from ChainSimulationHandler.handleSimulatedSyncEvent before onSyncEvent)
 
-      // Skip if price calculation failed
-      if (price === null) {
-        return;
-      }
+      // Calculate and emit price update
+      this.emitPriceUpdate(pair);
 
-      const priceUpdate: PriceUpdate = {
-        chain: this.chainId,
-        dex: pair.dex,
-        // HOT-PATH OPT (Perf-5): Use cached pairKey to avoid per-event string allocation
-        pairKey: pair.pairKey ?? `${pair.dex}_${pair.token0}_${pair.token1}`,
-        token0: pair.token0,
-        token1: pair.token1,
-        price,
-        reserve0,
-        reserve1,
-        blockNumber,
-        timestamp: Date.now(),
-        latency: 0  // Simulated events have zero latency
-      };
-
-      this.emit('priceUpdate', priceUpdate);
+      // P1-FIX: Check for arbitrage opportunities AFTER reserves are fully updated (matches production)
+      this.checkArbitrageOpportunity(pair);
 
     } catch (error) {
       this.logger.error('Error processing simulated sync event', { error, pairAddress });
@@ -987,74 +979,51 @@ export class ChainDetectorInstance extends EventEmitter {
   // WebSocket Management
   // ===========================================================================
 
-  private async initializeWebSocket(): Promise<void> {
-    // FIX Refactor 9.1: Use extracted utility for WebSocket URL validation
-    let primaryWsUrl: string;
-
-    if (this.chainConfig.wsUrl) {
-      // Validate existing WebSocket URL
-      const result = toWebSocketUrl(this.chainConfig.wsUrl);
-      primaryWsUrl = result.url;
-    } else {
-      // Try to convert RPC URL to WebSocket
-      try {
-        const result = toWebSocketUrl(this.chainConfig.rpcUrl);
-        primaryWsUrl = result.url;
-        if (result.converted) {
-          this.logger.warn('Converting RPC URL to WebSocket URL', {
-            original: result.originalUrl,
-            converted: result.url
-          });
-        }
-      } catch (error) {
-        throw new Error(`No valid WebSocket URL available for chain ${this.chainId}. wsUrl: ${this.chainConfig.wsUrl}, rpcUrl: ${this.chainConfig.rpcUrl}`);
-      }
-    }
-
-    // FIX Config 3.2: Use centralized UNSTABLE_WEBSOCKET_CHAINS constant
-    const connectionTimeout = isUnstableChain(this.chainId, UNSTABLE_WEBSOCKET_CHAINS)
-      ? EXTENDED_WS_CONNECTION_TIMEOUT_MS
-      : DEFAULT_WS_CONNECTION_TIMEOUT_MS;
-
-    const wsConfig: WebSocketConfig = {
-      url: primaryWsUrl,
-      fallbackUrls: this.chainConfig.wsFallbackUrls,
-      reconnectInterval: 5000,
+  /**
+   * R8 Refactor: Delegates to extracted SubscriptionManager module.
+   * Initializes WebSocket and subscribes to events in a single call.
+   * Sets this.wsManager, this.factorySubscriptionService, this.useFactoryMode,
+   * and this.subscriptionStats from the returned result.
+   */
+  private async initializeWebSocketAndSubscribe(): Promise<void> {
+    const subscriptionManager = createSubscriptionManager({
+      chainId: this.chainId,
+      chainConfig: {
+        wsUrl: this.chainConfig.wsUrl,
+        rpcUrl: this.chainConfig.rpcUrl,
+        wsFallbackUrls: this.chainConfig.wsFallbackUrls,
+      },
+      subscriptionConfig: this.subscriptionConfig,
       maxReconnectAttempts: this.MAX_RECONNECT_ATTEMPTS,
-      pingInterval: 30000,
-      connectionTimeout,
-      chainId: this.chainId  // FIX: Enable chain-specific staleness detection
+      logger: this.logger,
+    });
+
+    const callbacks: SubscriptionCallbacks = {
+      onMessage: (message) => this.handleWebSocketMessage(message as WebSocketMessage),
+      onError: (error) => this.handleConnectionError(error),
+      onDisconnected: () => {
+        if (this.isRunning) {
+          this.status = 'connecting';
+          this.emit('statusChange', this.status);
+        }
+      },
+      onConnected: () => {
+        this.status = 'connected';
+        this.reconnectAttempts = 0;
+        this.emit('statusChange', this.status);
+      },
+      onSyncEvent: (log) => this.handleSyncEvent(log as EthereumLog),
+      onSwapEvent: (log) => this.handleSwapEvent(log as EthereumLog),
+      onNewBlock: (block) => this.handleNewBlock(block as EthereumBlockHeader),
+      onPairCreated: (event) => this.handlePairCreatedEvent(event),
     };
 
-    this.wsManager = new WebSocketManager(wsConfig);
-    this.logger.info(`WebSocket configured with ${1 + (this.chainConfig.wsFallbackUrls?.length || 0)} URL(s)`);
+    const result = await subscriptionManager.initialize(callbacks, this.pairAddressesCache);
 
-    // Set up WebSocket event handlers
-    this.wsManager.on('message', (message) => {
-      this.handleWebSocketMessage(message);
-    });
-
-    this.wsManager.on('error', (error) => {
-      this.logger.error('WebSocket error', { error });
-      this.handleConnectionError(error);
-    });
-
-    this.wsManager.on('disconnected', () => {
-      this.logger.warn('WebSocket disconnected');
-      if (this.isRunning) {
-        this.status = 'connecting';
-        this.emit('statusChange', this.status);
-      }
-    });
-
-    this.wsManager.on('connected', () => {
-      this.logger.info('WebSocket connected');
-      this.status = 'connected';
-      this.reconnectAttempts = 0;
-      this.emit('statusChange', this.status);
-    });
-
-    await this.wsManager.connect();
+    this.wsManager = result.wsManager;
+    this.factorySubscriptionService = result.factorySubscriptionService;
+    this.subscriptionStats = result.subscriptionStats;
+    this.useFactoryMode = result.useFactoryMode;
   }
 
   private handleConnectionError(error: Error): void {
@@ -1071,126 +1040,39 @@ export class ChainDetectorInstance extends EventEmitter {
   // Pair Initialization
   // ===========================================================================
 
+  /**
+   * R8 Refactor: Delegates to extracted pair-initializer module.
+   * Populates this.pairs, this.pairsByAddress, this.pairsByTokens, this.pairAddressesCache.
+   */
   private async initializePairs(): Promise<void> {
-    // This is a simplified version - in production would query DEX factories
-    // For now, create pairs from token combinations
-    // Note: this.dexes is already filtered by getEnabledDexes() in constructor
+    const result = initializePairsFromModule(
+      { chainId: this.chainId, dexes: this.dexes, tokens: this.tokens },
+      (t0, t1) => this.getTokenPairKey(t0, t1)
+    );
 
-    for (const dex of this.dexes) {
-      for (let i = 0; i < this.tokens.length; i++) {
-        for (let j = i + 1; j < this.tokens.length; j++) {
-          const token0 = this.tokens[i];
-          const token1 = this.tokens[j];
-
-          // Generate a deterministic pair address (placeholder)
-          const pairAddress = this.generatePairAddress(dex.factoryAddress, token0.address, token1.address);
-
-          // Convert fee from basis points to percentage for pair storage
-          // Config stores fees in basis points (30 = 0.30%), Pair uses percentage (0.003)
-          // FIX (Issue 2.1): Migrate from deprecated dex.fee to dex.feeBps
-          // Use bpsToDecimal instead of deprecated dexFeeToPercentage
-          // Validate fee at source to catch config errors early
-          const feePercentage = validateFee(bpsToDecimal(dex.feeBps ?? 30));
-
-          // HOT-PATH OPT: Pre-compute pairKey once during initialization
-          // This avoids per-event string allocation in emitPriceUpdate()
-          const pairKey = `${dex.name}_${token0.symbol}_${token1.symbol}`;
-          // FIX Perf 10.2: Pre-compute chainPairKey for activity tracking
-          // HOT-PATH OPT: Lowercase address once at creation to avoid per-event toLowerCase()
-          const normalizedPairAddress = pairAddress.toLowerCase();
-          const chainPairKey = `${this.chainId}:${normalizedPairAddress}`;
-
-          // HOT-PATH OPT: Lowercase token addresses once at creation
-          const normalizedToken0 = token0.address.toLowerCase();
-          const normalizedToken1 = token1.address.toLowerCase();
-
-          const pair: ExtendedPair = {
-            address: normalizedPairAddress,
-            dex: dex.name,
-            token0: normalizedToken0,
-            token1: normalizedToken1,
-            fee: feePercentage,
-            reserve0: '0',
-            reserve1: '0',
-            blockNumber: 0,
-            lastUpdate: 0,
-            pairKey,  // Cache for O(0) access in hot path
-            chainPairKey,  // FIX Perf 10.2: Cache for O(0) activity tracking
-          };
-
-          this.pairs.set(pairKey, pair);
-          this.pairsByAddress.set(normalizedPairAddress, pair);
-
-          // P0-PERF FIX: Add to token-indexed lookup for O(1) arbitrage detection
-          // Use already-normalized tokens to avoid redundant toLowerCase() in getTokenPairKey
-          const tokenKey = this.getTokenPairKey(normalizedToken0, normalizedToken1);
-          let pairsForTokens = this.pairsByTokens.get(tokenKey);
-          if (!pairsForTokens) {
-            pairsForTokens = [];
-            this.pairsByTokens.set(tokenKey, pairsForTokens);
-          }
-          pairsForTokens.push(pair);
-        }
-      }
-    }
-
-    // P2-FIX 3.3: Build cached pair addresses array once after loading all pairs
-    // This avoids repeated Array.from() calls in subscription methods
-    this.pairAddressesCache = Array.from(this.pairsByAddress.keys());
+    this.pairs = result.pairs;
+    this.pairsByAddress = result.pairsByAddress;
+    this.pairsByTokens = result.pairsByTokens;
+    this.pairAddressesCache = result.pairAddressesCache;
 
     this.logger.info(`Initialized ${this.pairs.size} pairs for monitoring`, {
       tokenPairGroups: this.pairsByTokens.size
     });
   }
 
-  private generatePairAddress(factory: string, token0: string, token1: string): string {
-    // Generate deterministic address based on factory and tokens
-    // This is a simplified version - real implementation would use CREATE2
-    const hash = ethers.keccak256(
-      ethers.solidityPacked(
-        ['address', 'address', 'address'],
-        [factory, token0, token1]
-      )
-    );
-    return '0x' + hash.slice(26);
-  }
-
   // ===========================================================================
-  // Event Subscription (Task 2.1.3: Factory Subscription Migration)
+  // Event Subscription (R8 Refactor: Moved to subscription/subscription-manager.ts)
   // ===========================================================================
+  // shouldUseFactorySubscriptions(), hashChainName(), subscribeToEvents(),
+  // subscribeViaFactoryMode(), subscribeViaLegacyMode() are now in SubscriptionManager.
+  // initializeWebSocket() is merged into initializeWebSocketAndSubscribe().
 
   /**
-   * Task 2.1.3: Determine if factory subscriptions should be used for this chain.
-   * Supports gradual rollout via explicit chain list or percentage-based rollout.
+   * Deterministic hash for chain name (for rollout percentage).
+   * Used by shouldUseReserveCache() for consistent rollout.
+   * Duplicated from SubscriptionManager since it's a pure utility (6 lines).
    */
-  private shouldUseFactorySubscriptions(): boolean {
-    // Check if explicitly disabled via config flag
-    if (!this.subscriptionConfig.useFactorySubscriptions) {
-      return false;
-    }
-
-    // If explicit chain list is provided, only enable for those chains
-    const enabledChains = this.subscriptionConfig.factorySubscriptionEnabledChains;
-    if (enabledChains && enabledChains.length > 0) {
-      return enabledChains.includes(this.chainId);
-    }
-
-    // Check rollout percentage
-    const rolloutPercent = this.subscriptionConfig.factorySubscriptionRolloutPercent;
-    if (rolloutPercent !== undefined && rolloutPercent < 100) {
-      // Use deterministic hash of chain name for consistent rollout
-      const chainHash = this.hashChainName(this.chainId);
-      return (chainHash % 100) < rolloutPercent;
-    }
-
-    // Default: if flag is true but no specific config, enable for all
-    return this.subscriptionConfig.useFactorySubscriptions;
-  }
-
-  /**
-   * Task 2.1.3: Deterministic hash for chain name (for rollout percentage).
-   */
-  private hashChainName(chain: string): number {
+  private static hashChainName(chain: string): number {
     let hash = 0;
     for (let i = 0; i < chain.length; i++) {
       hash = ((hash << 5) - hash + chain.charCodeAt(i)) | 0;
@@ -1218,7 +1100,7 @@ export class ChainDetectorInstance extends EventEmitter {
     const rolloutPercent = this.reserveCacheConfig.reserveCacheRolloutPercent;
     if (rolloutPercent !== undefined && rolloutPercent < 100) {
       // Use deterministic hash of chain name for consistent rollout
-      const chainHash = this.hashChainName(this.chainId);
+      const chainHash = ChainDetectorInstance.hashChainName(this.chainId);
       return (chainHash % 100) < rolloutPercent;
     }
 
@@ -1226,165 +1108,27 @@ export class ChainDetectorInstance extends EventEmitter {
     return this.reserveCacheConfig.useReserveCache;
   }
 
-  private async subscribeToEvents(): Promise<void> {
-    if (!this.wsManager) return;
-
-    // Task 2.1.3: Choose subscription mode based on config
-    if (this.shouldUseFactorySubscriptions()) {
-      await this.subscribeViaFactoryMode();
-    } else {
-      await this.subscribeViaLegacyMode();
-    }
-  }
-
-  /**
-   * Task 2.1.3: Factory-level subscription mode.
-   * Subscribes to factory PairCreated events for dynamic pair discovery.
-   * Achieves 40-50x RPC reduction compared to legacy pair-level subscriptions.
-   */
-  private async subscribeViaFactoryMode(): Promise<void> {
-    if (!this.wsManager) return;
-
-    const factoryAddresses = getAllFactoryAddresses(this.chainId);
-
-    if (factoryAddresses.length === 0) {
-      this.logger.warn('No factory addresses found, falling back to legacy mode', {
-        chainId: this.chainId
-      });
-      await this.subscribeViaLegacyMode();
-      return;
-    }
-
-    // Create factory subscription service
-    this.factorySubscriptionService = new FactorySubscriptionService(
-      {
-        chain: this.chainId,
-        enabled: true,
-        customFactories: factoryAddresses
-      },
-      {
-        logger: this.logger,
-        // P0-FIX: Type assertion required because WebSocketManager.isConnected is private
-        // and the public method is isWebSocketConnected(). The subscribe signature is compatible.
-        wsManager: this.wsManager as unknown as FactoryWebSocketManager | undefined
-      }
-    );
-
-    // Register callback for new pairs discovered via factory events
-    this.factorySubscriptionService.onPairCreated((event: PairCreatedEvent) => {
-      this.handlePairCreatedEvent(event);
-    });
-
-    // Subscribe to factories
-    await this.factorySubscriptionService.subscribeToFactories();
-
-    // Still subscribe to Sync/Swap events for existing pairs
-    // These use the pair addresses we already have
-    // P2-FIX 3.3: Use cached array instead of repeated Array.from()
-    const pairAddresses = this.pairAddressesCache;
-
-    if (pairAddresses.length > 0) {
-      // Subscribe to Sync events for existing pairs
-      await this.wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.SYNC], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.SYNC],
-        callback: (log) => this.handleSyncEvent(log)
-      });
-
-      // Subscribe to Swap events for existing pairs
-      await this.wsManager.subscribe({
-        method: 'eth_subscribe',
-        params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
-        type: 'logs',
-        topics: [EVENT_SIGNATURES.SWAP_V2],
-        callback: (log) => this.handleSwapEvent(log)
-      });
-    }
-
-    // Subscribe to new blocks for latency tracking
-    await this.wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['newHeads'],
-      type: 'newHeads',
-      callback: (block) => this.handleNewBlock(block)
-    });
-
-    // Update subscription stats
-    this.subscriptionStats = {
-      mode: 'factory',
-      legacySubscriptionCount: pairAddresses.length > 0 ? 3 : 1, // Sync, Swap, newHeads or just newHeads
-      factorySubscriptionCount: this.factorySubscriptionService.getSubscriptionCount(),
-      monitoredPairs: pairAddresses.length,
-      rpcReductionRatio: pairAddresses.length / Math.max(factoryAddresses.length, 1)
-    };
-
-    this.logger.info('Subscribed via factory mode', {
-      chainId: this.chainId,
-      factories: factoryAddresses.length,
-      existingPairs: pairAddresses.length,
-      rpcReduction: `${this.subscriptionStats.rpcReductionRatio.toFixed(1)}x`
-    });
-  }
-
-  /**
-   * Task 2.1.3: Legacy pair-level subscription mode (backward compatible).
-   * Subscribes to Sync/Swap events for all known pair addresses.
-   */
-  private async subscribeViaLegacyMode(): Promise<void> {
-    if (!this.wsManager) return;
-
-    // Get monitored pair addresses for filtering
-    // P2-FIX 3.3: Use cached array instead of repeated Array.from()
-    const pairAddresses = this.pairAddressesCache;
-
-    // Subscribe to Sync events
-    await this.wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.SYNC], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.SYNC],
-      callback: (log) => this.handleSyncEvent(log)
-    });
-
-    // Subscribe to Swap events
-    await this.wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['logs', { topics: [EVENT_SIGNATURES.SWAP_V2], address: pairAddresses }],
-      type: 'logs',
-      topics: [EVENT_SIGNATURES.SWAP_V2],
-      callback: (log) => this.handleSwapEvent(log)
-    });
-
-    // Subscribe to new blocks for latency tracking
-    await this.wsManager.subscribe({
-      method: 'eth_subscribe',
-      params: ['newHeads'],
-      type: 'newHeads',
-      callback: (block) => this.handleNewBlock(block)
-    });
-
-    // Update subscription stats
-    this.subscriptionStats = {
-      mode: 'legacy',
-      legacySubscriptionCount: 3, // Sync, Swap, newHeads
-      factorySubscriptionCount: 0,
-      monitoredPairs: pairAddresses.length,
-      rpcReductionRatio: 1 // No reduction in legacy mode
-    };
-
-    this.logger.info('Subscribed via legacy mode', {
-      chainId: this.chainId,
-      pairs: pairAddresses.length
-    });
-  }
+  // R8 Refactor: subscribeToEvents(), subscribeViaFactoryMode(), subscribeViaLegacyMode()
+  // moved to subscription/subscription-manager.ts
 
   /**
    * Task 2.1.3: Handle PairCreated events from factory subscriptions.
    * Dynamically adds new pairs to monitoring without restart.
    */
+  /** Maximum pairs tracked per chain to prevent unbounded memory growth from factory events */
+  private static readonly MAX_PAIRS_PER_CHAIN = 10_000;
+
   private handlePairCreatedEvent(event: PairCreatedEvent): void {
+    // FIX #14: Guard against unbounded pair growth from factory events
+    if (this.pairs.size >= ChainDetectorInstance.MAX_PAIRS_PER_CHAIN) {
+      this.logger.warn('Max pairs per chain reached, ignoring new pair', {
+        chain: this.chainId,
+        maxPairs: ChainDetectorInstance.MAX_PAIRS_PER_CHAIN,
+        pair: event.pairAddress?.slice(0, 10),
+      });
+      return;
+    }
+
     // Skip if tokens are not available (e.g., Balancer pools awaiting token lookup)
     if (!event.token0 || !event.token1 || event.token0 === '0x0000000000000000000000000000000000000000') {
       this.logger.debug('Skipping pair with incomplete token info', {
@@ -1541,7 +1285,7 @@ export class ChainDetectorInstance extends EventEmitter {
             this.handleSyncEvent(result);
           } else if (topic0 === EVENT_SIGNATURES.SWAP_V2) {
             this.handleSwapEvent(result);
-          } else if (this.factorySubscriptionService && this.shouldUseFactorySubscriptions()) {
+          } else if (this.factorySubscriptionService && this.useFactoryMode) {
             // P0-FIX: Route potential factory events to factory subscription service
             // Check if this is a factory event (PairCreated, PoolCreated, etc.)
             if (this.isFactoryEventSignature(topic0)) {
@@ -1658,11 +1402,15 @@ export class ChainDetectorInstance extends EventEmitter {
       // for the majority case where whale detection is not enabled.
       if (!this.whaleAlertPublisher) return;
 
+      // FIX #13: Validate data length before slicing (consistent with handleSyncEvent)
+      // Swap events encode 4 uint256 values: 0x prefix (2) + 4 * 64 hex chars = 258
+      if (!log.data || log.data.length < 258) return;
+
       // Build complete SwapEvent with decoded amounts
-      const amount0In = log.data ? BigInt('0x' + log.data.slice(2, 66)).toString() : '0';
-      const amount1In = log.data ? BigInt('0x' + log.data.slice(66, 130)).toString() : '0';
-      const amount0Out = log.data ? BigInt('0x' + log.data.slice(130, 194)).toString() : '0';
-      const amount1Out = log.data ? BigInt('0x' + log.data.slice(194, 258)).toString() : '0';
+      const amount0In = BigInt('0x' + log.data.slice(2, 66)).toString();
+      const amount1In = BigInt('0x' + log.data.slice(66, 130)).toString();
+      const amount0Out = BigInt('0x' + log.data.slice(130, 194)).toString();
+      const amount1Out = BigInt('0x' + log.data.slice(194, 258)).toString();
 
       // PHASE-3.3: Create pair info for USD value estimation
       const pairInfo: ExtendedPairInfo = {
@@ -1803,13 +1551,14 @@ export class ChainDetectorInstance extends EventEmitter {
     if (this.usePriceCache && this.priceCache) {
       const cacheKey = `price:${this.chainId}:${pair.address.toLowerCase()}`;
       // Fire-and-forget write to avoid blocking hot path
-      this.priceCache.set(cacheKey, {
+      const cacheData: CachedPriceData = {
         price: priceUpdate.price,
         reserve0: priceUpdate.reserve0,
         reserve1: priceUpdate.reserve1,
         timestamp: priceUpdate.timestamp,
-        blockNumber: priceUpdate.blockNumber
-      }).catch(error => {
+        blockNumber: priceUpdate.blockNumber,
+      };
+      this.priceCache.set(cacheKey, cacheData).catch(error => {
         this.logger.warn('Failed to write to price cache', { error, cacheKey });
       });
     }
@@ -1835,10 +1584,13 @@ export class ChainDetectorInstance extends EventEmitter {
    * Useful for recovery scenarios or cross-instance coordination.
    * Does NOT replace hot-path pairsByAddress lookup.
    *
+   * FIX #28: Typed return instead of Promise<any>. The upstream
+   * HierarchicalCache.get() returns any, so we cast at the boundary.
+   *
    * @param pairAddress The pair address to lookup
    * @returns Cached price data or null if not cached
    */
-  async getCachedPrice(pairAddress: string): Promise<any> {
+  async getCachedPrice(pairAddress: string): Promise<CachedPriceData | null> {
     if (!this.usePriceCache || !this.priceCache) {
       return null;
     }
@@ -1891,6 +1643,9 @@ export class ChainDetectorInstance extends EventEmitter {
     // FIX 10.3: Use static empty array instead of creating new [] on every cache miss
     const matchingPairs = this.pairsByTokens.get(tokenKey) ?? ChainDetectorInstance.EMPTY_PAIRS;
 
+    // HOT-PATH OPT: Capture timestamp once for staleness checks and throttle logic
+    const now = Date.now();
+
     // Iterate only matching pairs (O(k) where k is typically 2-5)
     for (const otherPair of matchingPairs) {
       // Skip same pair (same address)
@@ -1899,6 +1654,10 @@ export class ChainDetectorInstance extends EventEmitter {
 
       // Skip same DEX - arbitrage requires different DEXes
       if (otherPair.dex === currentSnapshot.dex) continue;
+
+      // P1-FIX: Skip stale pairs to prevent false arbitrage from outdated reserves.
+      // lastUpdate is 0 at initialization (correctly filtered as stale).
+      if (now - otherPair.lastUpdate > this.MAX_STALENESS_MS) continue;
 
       // Create snapshot only for pairs we'll actually compare
       const otherSnapshot = this.createPairSnapshot(otherPair);
@@ -1914,7 +1673,6 @@ export class ChainDetectorInstance extends EventEmitter {
 
     // P0-PERF FIX: Check throttle BEFORE creating expensive snapshots
     // This prevents O(N) snapshot creation when throttled
-    const now = Date.now();
 
     // VOLATILITY-OPT: Hot pairs (high activity) bypass time-based throttling
     // This ensures we catch arbitrage opportunities on rapidly-updating pairs
@@ -1922,8 +1680,8 @@ export class ChainDetectorInstance extends EventEmitter {
     const isHotPair = this.activityTracker.isHotPair(`${this.chainId}:${updatedPair.address}`);
 
     // Time-based throttle OR hot pair override
-    const shouldCheckTriangular = isHotPair || (now - this.lastTriangularCheck >= this.TRIANGULAR_CHECK_INTERVAL_MS);
-    const shouldCheckMultiLeg = isHotPair || (now - this.lastMultiLegCheck >= this.MULTI_LEG_CHECK_INTERVAL_MS);
+    const shouldCheckTriangular = isHotPair || (now - this.lastTriangularCheck >= TRIANGULAR_CHECK_INTERVAL_MS);
+    const shouldCheckMultiLeg = isHotPair || (now - this.lastMultiLegCheck >= MULTI_LEG_CHECK_INTERVAL_MS);
 
     // Only create snapshot if at least one check will run
     if (shouldCheckTriangular || shouldCheckMultiLeg) {
@@ -2010,15 +1768,11 @@ export class ChainDetectorInstance extends EventEmitter {
     return this.simpleArbitrageDetector.calculateArbitrage(pair1, pair2);
   }
 
-  private async emitOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
+  private emitOpportunity(opportunity: ArbitrageOpportunity): void {
     try {
-      // ADR-002: Use xaddWithLimit to prevent unbounded stream growth
-      // MAXLEN: 10,000 (configured in STREAM_MAX_LENGTHS)
-      await this.streamsClient.xaddWithLimit(
-        RedisStreamsClient.STREAMS.OPPORTUNITIES,
-        opportunity
-      );
-
+      // P0-FIX: Removed direct xaddWithLimit call to prevent duplicate publishing.
+      // The EventEmitter path propagates through chain-instance-manager -> unified-detector -> index.ts
+      // where OpportunityPublisher.publish() is the canonical publisher (adds _source, _publishedAt metadata).
       this.emit('opportunity', opportunity);
 
       this.perfLogger.logArbitrageOpportunity(opportunity);
@@ -2046,7 +1800,7 @@ export class ChainDetectorInstance extends EventEmitter {
     const now = Date.now();
 
     // VOLATILITY-OPT: Skip throttle check when forceCheck is true (hot pair bypass)
-    if (!forceCheck && now - this.lastTriangularCheck < this.TRIANGULAR_CHECK_INTERVAL_MS) {
+    if (!forceCheck && now - this.lastTriangularCheck < TRIANGULAR_CHECK_INTERVAL_MS) {
       return;
     }
     this.lastTriangularCheck = now;
@@ -2070,7 +1824,7 @@ export class ChainDetectorInstance extends EventEmitter {
       );
 
       for (const opp of triangularOpps) {
-        await this.emitTriangularOpportunity(opp, 'triangular');
+        await this.emitPathOpportunity(opp, 'triangular');
       }
 
       // Find quadrilateral opportunities (4-token cycles) if enough pools
@@ -2079,7 +1833,7 @@ export class ChainDetectorInstance extends EventEmitter {
           this.chainId, pools, baseTokens
         );
         for (const opp of quadOpps) {
-          await this.emitTriangularOpportunity(opp, 'quadrilateral');
+          await this.emitPathOpportunity(opp, 'quadrilateral');
         }
       }
     } catch (error) {
@@ -2088,11 +1842,12 @@ export class ChainDetectorInstance extends EventEmitter {
   }
 
   /**
-   * Emit a triangular or quadrilateral arbitrage opportunity.
+   * Emit a path-based arbitrage opportunity (triangular, quadrilateral, or multi-leg).
+   * FIX #17: Merged emitTriangularOpportunity + emitMultiLegOpportunity (~90% identical code).
    */
-  private async emitTriangularOpportunity(
-    opp: TriangularOpportunity | QuadrilateralOpportunity,
-    type: 'triangular' | 'quadrilateral'
+  private async emitPathOpportunity(
+    opp: TriangularOpportunity | QuadrilateralOpportunity | MultiLegOpportunity,
+    type: 'triangular' | 'quadrilateral' | 'multi-leg'
   ): Promise<void> {
     // CRITICAL FIX: Extract tokenIn, tokenOut, amountIn from steps for execution engine
     // For cycles: tokenIn = tokenOut = starting token (we end up with same token)
@@ -2128,11 +1883,12 @@ export class ChainDetectorInstance extends EventEmitter {
     };
 
     this.opportunitiesFound++;
-    await this.emitOpportunity(opportunity);
+    this.emitOpportunity(opportunity);
 
     this.logger.debug(`${type} opportunity detected`, {
       id: opp.id,
       profit: `${opp.profitPercentage.toFixed(2)}%`,
+      pathLength: opp.path.length,
       path: opp.path.join(' → ')
     });
   }
@@ -2155,7 +1911,7 @@ export class ChainDetectorInstance extends EventEmitter {
     const now = Date.now();
 
     // VOLATILITY-OPT: Skip throttle check when forceCheck is true (hot pair bypass)
-    if (!forceCheck && now - this.lastMultiLegCheck < this.MULTI_LEG_CHECK_INTERVAL_MS) {
+    if (!forceCheck && now - this.lastMultiLegCheck < MULTI_LEG_CHECK_INTERVAL_MS) {
       return;
     }
 
@@ -2177,60 +1933,14 @@ export class ChainDetectorInstance extends EventEmitter {
       );
 
       for (const opp of opportunities) {
-        await this.emitMultiLegOpportunity(opp);
+        await this.emitPathOpportunity(opp, 'multi-leg');
       }
     } catch (error) {
       this.logger.error('Multi-leg path finding failed', { error });
     }
   }
 
-  /**
-   * Emit a multi-leg arbitrage opportunity.
-   */
-  private async emitMultiLegOpportunity(opp: MultiLegOpportunity): Promise<void> {
-    // CRITICAL FIX: Extract tokenIn, tokenOut, amountIn from steps for execution engine
-    // For cycles: tokenIn = tokenOut = starting token (we end up with same token)
-    const firstStep = opp.steps[0];
-    const tokenIn = firstStep?.fromToken || opp.path[0];
-    const tokenOut = opp.path[opp.path.length - 1] || opp.path[0]; // Should be same as path[0] for cycles
-    // P1 FIX: Use ?? instead of || for numeric values (0 is valid, not missing)
-    const amountIn = firstStep?.amountIn ?? 0;
-
-    const opportunity: ArbitrageOpportunity = {
-      id: opp.id,
-      type: 'multi-leg',
-      chain: this.chainId,
-      buyDex: opp.steps[0]?.dex || '',
-      sellDex: opp.steps[opp.steps.length - 1]?.dex || '',
-      token0: opp.path[0],
-      token1: opp.path[1],
-      // CRITICAL FIX: Add tokenIn/tokenOut/amountIn required by execution engine
-      tokenIn,
-      tokenOut,
-      amountIn: String(Math.floor(amountIn)),
-      buyPrice: 0,
-      sellPrice: 0,
-      profitPercentage: opp.profitPercentage,
-      // CRITICAL FIX: expectedProfit is already an absolute value from the detector
-      expectedProfit: opp.netProfit,
-      gasEstimate: String(this.detectorConfig.gasEstimate * opp.steps.length),
-      confidence: opp.confidence,
-      timestamp: opp.timestamp,
-      expiresAt: Date.now() + this.detectorConfig.expiryMs,
-      blockNumber: this.lastBlockNumber,
-      status: 'pending'
-    };
-
-    this.opportunitiesFound++;
-    await this.emitOpportunity(opportunity);
-
-    this.logger.debug('Multi-leg opportunity detected', {
-      id: opp.id,
-      profit: `${opp.profitPercentage.toFixed(2)}%`,
-      pathLength: opp.path.length,
-      path: opp.path.join(' → ')
-    });
-  }
+  // FIX #17: emitMultiLegOpportunity removed — merged into emitPathOpportunity above
 
   // ===========================================================================
   // Helpers

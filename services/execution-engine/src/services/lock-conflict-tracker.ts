@@ -11,9 +11,8 @@
  * @see P0-FIX 1.7: Memory growth protection
  */
 
-import { findKSmallest, createLogger } from '@arbitrage/core';
-
-const logger = createLogger('lock-conflict-tracker');
+import { findKSmallest } from '@arbitrage/core';
+import type { Logger } from '../types';
 
 /**
  * Conflict tracking information for a single opportunity.
@@ -29,6 +28,12 @@ export interface ConflictInfo {
  * Configuration for the lock conflict tracker.
  */
 export interface LockConflictTrackerConfig {
+  /**
+   * Logger instance for diagnostic output.
+   * P1 FIX: Injected via constructor DI instead of module-level logger.
+   */
+  logger?: Logger;
+
   /**
    * After this many consecutive lock conflicts, consider force-releasing the lock.
    * Default: 3
@@ -66,6 +71,7 @@ export interface LockConflictTrackerConfig {
  */
 export class LockConflictTracker {
   private tracker: Map<string, ConflictInfo> = new Map();
+  private readonly logger: Logger | null;
 
   // Configuration (readonly after construction)
   private readonly conflictThreshold: number;
@@ -74,6 +80,7 @@ export class LockConflictTracker {
   private readonly maxEntries: number;
 
   constructor(config: LockConflictTrackerConfig = {}) {
+    this.logger = config.logger ?? null;
     this.conflictThreshold = config.conflictThreshold ?? 3;
     this.windowMs = config.windowMs ?? 30000;
     this.minAgeMs = config.minAgeMs ?? 20000;
@@ -180,7 +187,7 @@ export class LockConflictTracker {
         this.tracker.delete(id);
       }
 
-      logger.debug('Lock conflict tracker size enforced', {
+      this.logger?.debug('Lock conflict tracker size enforced', {
         removedCount: removeCount,
         newSize: this.tracker.size
       });

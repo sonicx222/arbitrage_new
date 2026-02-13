@@ -336,6 +336,161 @@ export function guardUnrefactoredMainnetDeployment(
 }
 
 // =============================================================================
+// Mainnet Confirmation Prompt
+// =============================================================================
+
+/**
+ * Prompt the user for interactive confirmation before mainnet operations.
+ *
+ * @param message - The prompt message to display
+ * @param confirmWord - The word the user must type to confirm (default: 'DEPLOY')
+ * @returns true if confirmed, false if rejected
+ */
+async function promptForConfirmation(message: string, confirmWord = 'DEPLOY'): Promise<boolean> {
+  // Skip confirmation in non-interactive environments (CI/CD)
+  if (process.env.CI === 'true' || process.env.SKIP_CONFIRMATION === 'true') {
+    console.log(`  [CI mode] Auto-confirming: ${confirmWord}`);
+    return true;
+  }
+
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  return new Promise<boolean>((resolve) => {
+    rl.question(`${message}\n  Type '${confirmWord}' to continue, anything else to abort: `, (answer) => {
+      rl.close();
+      resolve(answer.trim() === confirmWord);
+    });
+  });
+}
+
+/**
+ * Require interactive confirmation before deploying to mainnet.
+ *
+ * Prevents accidental mainnet deployments by requiring the user to type 'DEPLOY'.
+ * Skipped automatically for testnets and local networks.
+ * Can be bypassed with SKIP_CONFIRMATION=true for CI/CD pipelines.
+ *
+ * @param networkName - Normalized network name
+ * @param contractName - Name of the contract being deployed
+ * @throws Error if user does not confirm
+ */
+export async function confirmMainnetDeployment(
+  networkName: string,
+  contractName: string
+): Promise<void> {
+  if (!isMainnet(networkName)) return;
+
+  console.log('\n' + '⚠️'.repeat(20));
+  console.log(`  MAINNET DEPLOYMENT: ${contractName}`);
+  console.log(`  Network: ${networkName}`);
+  console.log(`  This will deploy to MAINNET and consume real funds.`);
+  console.log('⚠️'.repeat(20));
+
+  const confirmed = await promptForConfirmation(
+    `\n  You are about to deploy ${contractName} to ${networkName} MAINNET.`
+  );
+
+  if (!confirmed) {
+    throw new Error(
+      `[ERR_DEPLOYMENT_CANCELLED] Mainnet deployment cancelled by user.\n` +
+      `Network: ${networkName}\n` +
+      `Contract: ${contractName}`
+    );
+  }
+
+  console.log('  ✅ Mainnet deployment confirmed.\n');
+}
+
+// =============================================================================
+// Duplicate Deployment Check
+// =============================================================================
+
+/**
+ * Check if a contract type has already been deployed to a network.
+ *
+ * Reads the central registry.json and warns the user if the same contractType
+ * has already been deployed to the target network. Prompts for confirmation
+ * before allowing a re-deployment.
+ *
+ * Skipped automatically for localhost and hardhat networks.
+ *
+ * @param networkName - Normalized network name
+ * @param contractType - Contract type key (e.g., 'FlashLoanArbitrage', 'PancakeSwapFlashArbitrage')
+ * @throws Error if user does not confirm re-deployment
+ */
+export async function checkExistingDeployment(
+  networkName: string,
+  contractType: string
+): Promise<void> {
+  // Skip for local development networks
+  if (networkName === 'localhost' || networkName === 'hardhat') {
+    return;
+  }
+
+  const registryFile = path.join(__dirname, '..', '..', 'deployments', 'registry.json');
+
+  // No registry file means no prior deployments
+  if (!fs.existsSync(registryFile)) {
+    return;
+  }
+
+  let registry: Record<string, any>;
+  try {
+    const content = fs.readFileSync(registryFile, 'utf8');
+    registry = JSON.parse(content);
+  } catch {
+    // Registry is unreadable or corrupt -- skip check, don't block deployment
+    console.warn('  Could not read registry.json for duplicate check, skipping...');
+    return;
+  }
+
+  const networkEntry = registry[networkName];
+  if (!networkEntry || typeof networkEntry !== 'object') {
+    return;
+  }
+
+  const existingAddress = networkEntry[contractType];
+  if (!existingAddress) {
+    return;
+  }
+
+  // Existing deployment found -- warn and prompt
+  const deployedAt = networkEntry[`${contractType}_deployedAt`];
+  const deployedAtStr = deployedAt
+    ? new Date(deployedAt * 1000).toISOString()
+    : 'unknown date';
+
+  console.log('\n========================================');
+  console.log(`  EXISTING DEPLOYMENT DETECTED`);
+  console.log('========================================');
+  console.log(`  Contract:  ${contractType}`);
+  console.log(`  Network:   ${networkName}`);
+  console.log(`  Address:   ${existingAddress}`);
+  console.log(`  Deployed:  ${deployedAtStr}`);
+  console.log('========================================');
+  console.log(`\n  Re-deploying will create a NEW contract instance.`);
+  console.log(`  The old contract at ${existingAddress} will remain on-chain`);
+  console.log(`  but the registry will point to the new address.`);
+
+  const confirmed = await promptForConfirmation(
+    `\n  You are about to re-deploy ${contractType} on ${networkName}.`,
+    'CONFIRM_REDEPLOY'
+  );
+
+  if (!confirmed) {
+    throw new Error(
+      `[ERR_REDEPLOY_CANCELLED] Re-deployment cancelled by user.\n` +
+      `Network: ${networkName}\n` +
+      `Contract: ${contractType}\n` +
+      `Existing address: ${existingAddress}`
+    );
+  }
+
+  console.log('  Re-deployment confirmed.\n');
+}
+
+// =============================================================================
 // Balance Checking (Phase 1 Fix)
 // =============================================================================
 
@@ -1238,4 +1393,246 @@ export function printDeploymentSummary(
   }
   console.log(`Verified:         ${result.verified ? '✅ Yes' : '❌ No'}`);
   console.log('========================================\n');
+}
+
+// =============================================================================
+// Deployment Pipeline
+// =============================================================================
+
+/**
+ * Configuration for the shared deployment pipeline.
+ *
+ * Covers all 6 deploy scripts' needs:
+ * - Flash loan contracts (Aave, Balancer, PancakeSwap, SyncSwap)
+ * - CommitRevealArbitrage (no min profit / router config)
+ * - MultiPathQuoter (stateless, no owner / config)
+ */
+export interface DeploymentPipelineConfig {
+  /** Human-readable contract name for console output (e.g., 'FlashLoanArbitrage') */
+  contractName: string;
+
+  /** Registry file name (e.g., 'registry.json', 'pancakeswap-registry.json') */
+  registryName: string;
+
+  /** Contract factory name for ethers.getContractFactory() */
+  contractFactoryName: string;
+
+  /**
+   * Build constructor arguments for deployment.
+   * Receives the deployer address and normalized network name.
+   */
+  constructorArgs: (deployer: string, networkName: string) => any[] | Promise<any[]>;
+
+  /** Whether to configure minimum profit post-deployment. Default: true */
+  configureMinProfit?: boolean;
+
+  /** Whether to approve routers post-deployment. Default: true */
+  configureRouters?: boolean;
+
+  /** Flash loan protocol for profit threshold adjustment */
+  protocol?: 'aave' | 'balancer' | 'pancakeswap' | 'syncswap';
+
+  /** Which smoke test to run after deployment */
+  smokeTest?: 'flashLoan' | 'commitReveal' | 'multiPathQuoter';
+
+  /**
+   * Optional post-deploy hook for contract-specific configuration.
+   * Called after standard configuration (min profit, routers) but before
+   * verification and smoke tests. Return extra fields to merge into result.
+   */
+  postDeploy?: (
+    contract: any,
+    networkName: string,
+    deployer: string
+  ) => Promise<Record<string, any>>;
+
+  /** Supported networks for validation warning (informational only) */
+  supportedNetworks?: string[];
+
+  /** Extra fields to merge into the deployment result */
+  resultExtras?: Record<string, any>;
+
+  /** Whether to skip verification (default: false) */
+  skipVerification?: boolean;
+
+  /**
+   * Explicit owner address for the deployed contract.
+   * If provided, used directly in the result and smoke tests.
+   * If not provided, falls back to deployer address.
+   */
+  ownerAddress?: (deployer: string, networkName: string) => string;
+}
+
+/**
+ * Pipeline result containing the deployment data and deployed contract instance
+ */
+export interface DeploymentPipelineResult {
+  result: Record<string, any>;
+  contract: any;
+}
+
+/**
+ * Shared deployment pipeline that handles the common deployment workflow.
+ *
+ * Handles: signer, normalize network, chain ID, balance check, gas estimate,
+ * deploy, wait, get block info, configure min profit (if enabled), approve
+ * routers (if enabled), verify, smoke test, return result.
+ *
+ * Each deploy script becomes a thin wrapper:
+ *   1. Define config
+ *   2. Call confirmMainnetDeployment()
+ *   3. Call checkExistingDeployment()
+ *   4. Call deployContractPipeline(config)
+ *   5. Call saveDeploymentResult()
+ *   6. Call printDeploymentSummary()
+ *   7. Call contract-specific printNextSteps()
+ *
+ * @param config - Pipeline configuration
+ * @returns Deployment result and contract instance
+ */
+export async function deployContractPipeline(
+  config: DeploymentPipelineConfig
+): Promise<DeploymentPipelineResult> {
+  const [deployer] = await ethers.getSigners();
+  const networkName = normalizeNetworkName(network.name);
+  const chainId = await getSafeChainId();
+
+  // Print header
+  console.log('\n========================================');
+  console.log(`${config.contractName} Deployment`);
+  console.log('========================================');
+  console.log(`Network: ${networkName} (chainId: ${chainId})`);
+  console.log(`Deployer: ${deployer.address}`);
+
+  // Validate supported network (informational warning only)
+  if (config.supportedNetworks && !config.supportedNetworks.includes(networkName)) {
+    console.warn(`\n  Network '${networkName}' is not in the standard supported list.`);
+    console.warn('   Deployment will proceed, but you may need to add custom config.');
+  }
+
+  // Balance check
+  await checkDeployerBalance(deployer);
+
+  // Build constructor args
+  const constructorArgs = await config.constructorArgs(deployer.address, networkName);
+
+  // Log constructor args (skip deployer address for cleaner output)
+  if (constructorArgs.length > 0) {
+    console.log(`Constructor args: [${constructorArgs.map(a => typeof a === 'string' ? a : String(a)).join(', ')}]`);
+  }
+
+  // Gas estimation
+  const ContractFactory = await ethers.getContractFactory(config.contractFactoryName);
+  await estimateDeploymentCost(ContractFactory, ...constructorArgs);
+
+  // Deploy
+  console.log(`\nDeploying ${config.contractName}...`);
+  const contract = await ContractFactory.deploy(...constructorArgs);
+
+  await contract.waitForDeployment();
+  const contractAddress = await contract.getAddress();
+  const deployTx = contract.deploymentTransaction();
+
+  console.log(`Contract deployed at: ${contractAddress}`);
+  console.log(`   Transaction: ${deployTx?.hash}`);
+
+  // Get block info
+  const receipt = await deployTx?.wait();
+  const blockNumber = receipt?.blockNumber ?? 0;
+  const gasUsed = receipt?.gasUsed?.toString() ?? '0';
+  const block = await ethers.provider.getBlock(blockNumber);
+  const timestamp = block?.timestamp ?? Math.floor(Date.now() / 1000);
+
+  // Determine owner address for result metadata and smoke tests
+  const ownerAddress = config.ownerAddress
+    ? config.ownerAddress(deployer.address, networkName)
+    : deployer.address;
+
+  // Post-deployment configuration
+  console.log('\nConfiguring contract...');
+
+  let minimumProfit = 0n;
+  let approvedRoutersList: string[] = [];
+
+  // Configure minimum profit
+  if (config.configureMinProfit !== false && config.protocol) {
+    const rawMinimumProfit = getMinimumProfitForProtocol(networkName, config.protocol);
+    minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
+
+    if (minimumProfit > 0n) {
+      console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} Native Token`);
+      const tx = await contract.setMinimumProfit(minimumProfit);
+      await tx.wait();
+      console.log('  Minimum profit set');
+    }
+  }
+
+  // Configure routers
+  if (config.configureRouters !== false) {
+    const { APPROVED_ROUTERS } = await import('../../deployments/addresses');
+    const routers = APPROVED_ROUTERS[networkName] || [];
+
+    if (routers.length > 0) {
+      const approvalResult = await approveRouters(contract, routers, true);
+      approvedRoutersList = approvalResult.succeeded;
+
+      if (approvalResult.failed.length > 0) {
+        console.warn('\n  WARNING: Some routers failed to approve');
+        console.warn('   Contract is partially configured');
+        console.warn('   Manually approve failed routers before executing arbitrage trades');
+      }
+    } else {
+      console.warn('\n  No routers configured for this network');
+      console.warn('   You must approve routers manually before the contract can execute swaps');
+    }
+  }
+
+  // Run post-deploy hook
+  let extraFields: Record<string, any> = {};
+  if (config.postDeploy) {
+    extraFields = await config.postDeploy(contract, networkName, deployer.address);
+  }
+
+  // Verification
+  let verified = false;
+  if (!config.skipVerification) {
+    verified = await verifyContractWithRetry(
+      contractAddress,
+      constructorArgs,
+      DEFAULT_VERIFICATION_RETRIES,
+      DEFAULT_VERIFICATION_INITIAL_DELAY_MS
+    );
+  }
+
+  // Smoke tests
+  if (config.smokeTest === 'flashLoan') {
+    await smokeTestFlashLoanContract(contract, ownerAddress, contractAddress);
+  } else if (config.smokeTest === 'commitReveal') {
+    await smokeTestCommitRevealContract(contract, ownerAddress);
+  } else if (config.smokeTest === 'multiPathQuoter') {
+    const passed = await smokeTestMultiPathQuoter(contract);
+    if (!passed) {
+      console.log('  Smoke test failed -- contract may not be deployed correctly');
+    }
+  }
+
+  // Build result
+  const result: Record<string, any> = {
+    network: networkName,
+    chainId,
+    contractAddress,
+    ownerAddress,
+    deployerAddress: deployer.address,
+    transactionHash: deployTx?.hash ?? '',
+    blockNumber,
+    timestamp,
+    minimumProfit: minimumProfit.toString(),
+    approvedRouters: approvedRoutersList,
+    gasUsed,
+    verified,
+    ...extraFields,
+    ...(config.resultExtras ?? {}),
+  };
+
+  return { result, contract };
 }

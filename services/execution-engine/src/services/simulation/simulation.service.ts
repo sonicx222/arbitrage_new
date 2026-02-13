@@ -577,9 +577,11 @@ export class SimulationService implements ISimulationService {
   ): Promise<SimulationResult> {
     // Fix 3.1: Use provider-specific timeout from health metrics,
     // falling back to default if no latency data yet
+    // P2 FIX #12: Cap at 15s to prevent unbounded waits from degraded providers
+    const MAX_SIMULATION_TIMEOUT_MS = 15000;
     const health = provider.getHealth();
     const timeoutMs = health.averageLatencyMs > 0
-      ? Math.max(health.averageLatencyMs * 3, SIMULATION_DEFAULTS.timeoutMs) // 3x avg latency or default
+      ? Math.min(Math.max(health.averageLatencyMs * 3, SIMULATION_DEFAULTS.timeoutMs), MAX_SIMULATION_TIMEOUT_MS)
       : SIMULATION_DEFAULTS.timeoutMs;
     const startTime = Date.now();
 

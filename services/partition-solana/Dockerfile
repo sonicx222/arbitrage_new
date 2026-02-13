@@ -9,7 +9,7 @@
 # - Non-EVM: uses program account subscriptions
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -40,7 +40,7 @@ RUN npm run build --workspace=shared/types && \
     npm run build --workspace=services/partition-solana
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
@@ -73,7 +73,7 @@ ENV HEALTH_CHECK_PORT=3004
 # Health check - fast interval for Solana's ~400ms blocks
 # P11-FIX: Check for 200 status (both healthy and degraded return 200)
 HEALTHCHECK --interval=10s --timeout=10s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3004/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+  CMD node -e "require('http').get('http://localhost:' + (process.env.HEALTH_CHECK_PORT || 3004) + '/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
 
 # Run as non-root user for security
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001

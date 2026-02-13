@@ -235,8 +235,8 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
     });
   });
 
-  describe('Combined Uniswap V2/V3 Accuracy - Real Mainnet Data', () => {
-    it('should achieve >90% accuracy across ALL real Uniswap swap transactions', () => {
+  describe('Combined Decoder Accuracy - Real Mainnet Data', () => {
+    it('should achieve >90% accuracy across ALL real swap transactions', () => {
       let successCount = 0;
       const totalCases = ALL_REAL_SWAPS.length;
       const results: { tx: string; success: boolean; type: string | null }[] = [];
@@ -245,7 +245,7 @@ describe('Success Criteria: Decoder Accuracy (>90%) [Real Mainnet Data]', () => 
         const tx = stripMetadata(swapTx);
         const metadata = swapTx._metadata as any;
         const result = registry.decode(tx, 1);
-        const success = result !== null && (result.type === 'uniswapV2' || result.type === 'uniswapV3');
+        const success = result !== null;
 
         results.push({
           tx: metadata.swapType,

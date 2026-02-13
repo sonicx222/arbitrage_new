@@ -44,15 +44,7 @@ const FILE_PATHS = {
   syncSwapProvider: path.join(CONTRACTS_ROOT, '..', 'services', 'execution-engine', 'src', 'strategies', 'flash-loan-providers', 'syncswap.provider.ts'),
 };
 
-// ANSI color codes for terminal output
-const colors = {
-  reset: '\x1b[0m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  bold: '\x1b[1m',
-};
+import { colors } from './lib/colors';
 
 interface VerificationResult {
   passed: boolean;

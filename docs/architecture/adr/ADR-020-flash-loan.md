@@ -65,7 +65,7 @@ Integrate Aave V3 flash loans with a custom arbitrage contract:
 contract FlashLoanArbitrage is
     IFlashLoanSimpleReceiver,
     ReentrancyGuard,
-    Ownable,
+    Ownable2Step,
     Pausable
 {
     // Execute multi-hop arbitrage with flash loan

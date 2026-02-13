@@ -129,6 +129,20 @@ export class WarmingIntegration {
    */
   private pendingWarmings: Map<string, number> = new Map();
 
+  /** FIX #20: Auto-cleanup interval for stale pendingWarmings entries */
+  private pendingWarmingsCleanupInterval: NodeJS.Timeout | null = null;
+  private static readonly PENDING_WARMINGS_CLEANUP_INTERVAL_MS = 30_000;
+
+  /**
+   * Previous cache stats for delta computation in recordCacheMetrics().
+   * Without delta tracking, incrementCounter receives cumulative values,
+   * causing quadratic metric growth (sum of 1..N after N calls).
+   */
+  private previousL1Hits: number = 0;
+  private previousL1Misses: number = 0;
+  private previousL2Hits: number = 0;
+  private previousL2Misses: number = 0;
+
   constructor(
     private readonly cache: HierarchicalCache | null,
     config: Partial<WarmingIntegrationConfig> = {}
@@ -165,6 +179,11 @@ export class WarmingIntegration {
       }
 
       this.initializeWarming();
+
+      // FIX #20: Start auto-cleanup for stale pendingWarmings entries
+      this.pendingWarmingsCleanupInterval = setInterval(() => {
+        this.cleanupStalePendingWarmings();
+      }, WarmingIntegration.PENDING_WARMINGS_CLEANUP_INTERVAL_MS);
     }
 
     this.initialized = true;
@@ -434,18 +453,34 @@ export class WarmingIntegration {
 
     const stats = this.cache.getStats();
 
-    // L1 metrics
-    this.metricsCollector.incrementCounter(
-      'cache_hits_total',
-      { cache_level: 'l1', chain: chainId },
-      stats.l1.hits
-    );
+    // P1-FIX: Compute deltas from cumulative stats to avoid quadratic counter growth.
+    // cache.getStats() returns cumulative values; incrementCounter expects deltas.
+    const l1HitsDelta = stats.l1.hits - this.previousL1Hits;
+    const l1MissesDelta = stats.l1.misses - this.previousL1Misses;
+    const l2HitsDelta = stats.l2.hits - this.previousL2Hits;
+    const l2MissesDelta = stats.l2.misses - this.previousL2Misses;
 
-    this.metricsCollector.incrementCounter(
-      'cache_misses_total',
-      { cache_level: 'l1', chain: chainId },
-      stats.l1.misses
-    );
+    this.previousL1Hits = stats.l1.hits;
+    this.previousL1Misses = stats.l1.misses;
+    this.previousL2Hits = stats.l2.hits;
+    this.previousL2Misses = stats.l2.misses;
+
+    // L1 metrics
+    if (l1HitsDelta > 0) {
+      this.metricsCollector.incrementCounter(
+        'cache_hits_total',
+        { cache_level: 'l1', chain: chainId },
+        l1HitsDelta
+      );
+    }
+
+    if (l1MissesDelta > 0) {
+      this.metricsCollector.incrementCounter(
+        'cache_misses_total',
+        { cache_level: 'l1', chain: chainId },
+        l1MissesDelta
+      );
+    }
 
     this.metricsCollector.setGauge(
       'cache_size_bytes',
@@ -454,17 +489,21 @@ export class WarmingIntegration {
     );
 
     // L2 metrics
-    this.metricsCollector.incrementCounter(
-      'cache_hits_total',
-      { cache_level: 'l2', chain: chainId },
-      stats.l2.hits
-    );
+    if (l2HitsDelta > 0) {
+      this.metricsCollector.incrementCounter(
+        'cache_hits_total',
+        { cache_level: 'l2', chain: chainId },
+        l2HitsDelta
+      );
+    }
 
-    this.metricsCollector.incrementCounter(
-      'cache_misses_total',
-      { cache_level: 'l2', chain: chainId },
-      stats.l2.misses
-    );
+    if (l2MissesDelta > 0) {
+      this.metricsCollector.incrementCounter(
+        'cache_misses_total',
+        { cache_level: 'l2', chain: chainId },
+        l2MissesDelta
+      );
+    }
 
     // Correlation metrics
     if (this.correlationTracker) {
@@ -593,6 +632,12 @@ export class WarmingIntegration {
    * Cleans up resources and pending operations.
    */
   async shutdown(): Promise<void> {
+    // FIX #20: Clear auto-cleanup interval
+    if (this.pendingWarmingsCleanupInterval) {
+      clearInterval(this.pendingWarmingsCleanupInterval);
+      this.pendingWarmingsCleanupInterval = null;
+    }
+
     // Clear pending warmings
     this.pendingWarmings.clear();
 

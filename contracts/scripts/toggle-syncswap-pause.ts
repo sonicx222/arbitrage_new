@@ -20,6 +20,8 @@
  */
 
 import { ethers, network } from 'hardhat';
+import { isMainnet, normalizeChainName } from '../deployments/addresses';
+import { confirmMainnetDeployment } from './lib/deployment-utils';
 
 type Action = 'pause' | 'unpause';
 
@@ -153,6 +155,24 @@ async function main() {
   } else {
     console.log('\n⚠️  This will resume arbitrage execution.');
     console.log('   Make sure issues have been resolved before unpausing.');
+  }
+
+  // Require confirmation before mainnet state changes
+  const networkName = normalizeChainName(network.name);
+  if (isMainnet(networkName)) {
+    const readline = await import('readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const confirmed = await new Promise<boolean>((resolve) => {
+      rl.question(
+        `\n  You are about to ${action} on MAINNET (${networkName}).\n` +
+        `  Type 'CONFIRM' to continue, anything else to abort: `,
+        (answer) => { rl.close(); resolve(answer.trim() === 'CONFIRM'); }
+      );
+    });
+    if (!confirmed) {
+      console.log('  Operation cancelled by user.');
+      return;
+    }
   }
 
   // Execute the action

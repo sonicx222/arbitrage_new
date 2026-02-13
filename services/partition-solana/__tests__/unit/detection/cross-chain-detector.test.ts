@@ -16,6 +16,7 @@ import {
   getDefaultCrossChainCosts,
   CrossChainDetectorConfig,
 } from '../../../src/detection/cross-chain-detector';
+import { EVM_GAS_COSTS_USD, getEvmGasCostUsd } from '../../../src/detection/base';
 import type { VersionedPoolStore } from '../../../src/pool/versioned-pool-store';
 import type { OpportunityFactory } from '../../../src/opportunity-factory';
 import type {
@@ -25,27 +26,14 @@ import type {
   SolanaArbitrageLogger,
   SolanaArbitrageOpportunity,
 } from '../../../src/types';
+import { createMockInternalPool, createMockPoolStore } from '../../helpers/test-fixtures';
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-function createMockPool(overrides: Partial<InternalPoolInfo> = {}): InternalPoolInfo {
-  return {
-    address: 'sol-pool-1',
-    programId: 'program-1',
-    dex: 'raydium',
-    token0: { mint: 'mint0', symbol: 'SOL', decimals: 9 },
-    token1: { mint: 'mint1', symbol: 'USDC', decimals: 6 },
-    fee: 25,
-    price: 100,
-    lastUpdated: Date.now(),
-    normalizedToken0: 'SOL',
-    normalizedToken1: 'USDC',
-    pairKey: 'SOL-USDC',
-    ...overrides,
-  };
-}
+const createMockPool = (overrides: Partial<InternalPoolInfo> = {}): InternalPoolInfo =>
+  createMockInternalPool({ address: 'sol-pool-1', ...overrides });
 
 function createEvmPriceUpdate(overrides: Partial<EvmPriceUpdate> = {}): EvmPriceUpdate {
   return {
@@ -76,15 +64,6 @@ const defaultConfig: CrossChainDetectorConfig = {
     latencyRiskPremium: 0.002,
   },
 };
-
-function createMockPoolStore(pairMap: Map<string, InternalPoolInfo[]>): VersionedPoolStore {
-  return {
-    getPoolsForPair: jest.fn<(key: string) => InternalPoolInfo[]>().mockImplementation(
-      (key: string) => pairMap.get(key) ?? []
-    ),
-    getPairKeys: jest.fn<() => string[]>().mockReturnValue(Array.from(pairMap.keys())),
-  } as unknown as VersionedPoolStore;
-}
 
 function createMockOpportunityFactory(): OpportunityFactory {
   return {
@@ -261,6 +240,58 @@ describe('estimateCrossChainGasCostPercent', () => {
     const largeResult = estimateCrossChainGasCostPercent(largeTradeConfig);
 
     expect(largeResult).toBeLessThan(normalResult);
+  });
+
+  it('should use per-chain gas cost when evmChain is provided', () => {
+    // Arbitrum gas is ~$0.10 vs default $15
+    const arbitrumResult = estimateCrossChainGasCostPercent(defaultConfig, 'arbitrum');
+    const defaultResult = estimateCrossChainGasCostPercent(defaultConfig);
+
+    // (0.10 + 0.01) / 1000 = 0.00011 vs (15 + 0.01) / 1000 = 0.01501
+    expect(arbitrumResult).toBeLessThan(defaultResult);
+    expect(arbitrumResult).toBeCloseTo(0.00011, 4);
+  });
+
+  it('should fall back to config default for unknown chains', () => {
+    const unknownChainResult = estimateCrossChainGasCostPercent(defaultConfig, 'unknown-chain');
+    const defaultResult = estimateCrossChainGasCostPercent(defaultConfig);
+
+    expect(unknownChainResult).toBeCloseTo(defaultResult, 6);
+  });
+
+  it('should be case-insensitive for chain lookup', () => {
+    const upperResult = estimateCrossChainGasCostPercent(defaultConfig, 'ARBITRUM');
+    const lowerResult = estimateCrossChainGasCostPercent(defaultConfig, 'arbitrum');
+
+    expect(upperResult).toBeCloseTo(lowerResult, 6);
+  });
+});
+
+describe('getEvmGasCostUsd', () => {
+  it('should return chain-specific gas cost', () => {
+    expect(getEvmGasCostUsd('arbitrum', 15)).toBe(0.10);
+    expect(getEvmGasCostUsd('base', 15)).toBe(0.05);
+    expect(getEvmGasCostUsd('ethereum', 15)).toBe(15);
+  });
+
+  it('should return default for unknown chain', () => {
+    expect(getEvmGasCostUsd('unknown', 99)).toBe(99);
+  });
+
+  it('should cover all supported chains', () => {
+    const expectedChains = ['ethereum', 'arbitrum', 'base', 'optimism', 'linea', 'zksync', 'polygon', 'bsc', 'avalanche', 'fantom'];
+    for (const chain of expectedChains) {
+      expect(EVM_GAS_COSTS_USD[chain]).toBeDefined();
+      expect(typeof EVM_GAS_COSTS_USD[chain]).toBe('number');
+    }
+  });
+
+  it('should have L2 costs lower than Ethereum mainnet', () => {
+    const l2Chains = ['arbitrum', 'base', 'optimism', 'linea', 'zksync'];
+    const ethCost = EVM_GAS_COSTS_USD['ethereum'];
+    for (const chain of l2Chains) {
+      expect(EVM_GAS_COSTS_USD[chain]).toBeLessThan(ethCost);
+    }
   });
 });
 

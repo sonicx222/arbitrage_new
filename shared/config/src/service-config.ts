@@ -159,6 +159,28 @@ export const SYNCSWAP_FLASH_ARBITRAGE_ABI: string[] = [
   'function VAULT() external view returns (address)',
 ];
 
+/**
+ * PancakeSwapFlashArbitrage contract ABI.
+ *
+ * PancakeSwap V3 has a different `executeArbitrage` signature than the shared base:
+ * it takes an extra `pool` parameter (first arg) to specify which PancakeSwap V3 pool
+ * to flash-borrow from. It also has pool whitelisting management functions.
+ *
+ * **Cannot use SHARED_ARBITRAGE_ABI_FUNCTIONS** because the function signatures differ.
+ *
+ * @see contracts/src/PancakeSwapFlashArbitrage.sol
+ */
+export const PANCAKESWAP_FLASH_ARBITRAGE_ABI: string[] = [
+  'function executeArbitrage(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
+  'function calculateExpectedProfit(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
+  'function whitelistPool(address pool) external',
+  'function isPoolWhitelisted(address pool) external view returns (bool)',
+  'function addApprovedRouter(address router) external',
+  'function isApprovedRouter(address router) external view returns (bool)',
+  'function getWhitelistedPools() external view returns (address[])',
+  'function getApprovedRouters() external view returns (address[])',
+];
+
 // =============================================================================
 // SERVICE CONFIGURATIONS
 // =============================================================================

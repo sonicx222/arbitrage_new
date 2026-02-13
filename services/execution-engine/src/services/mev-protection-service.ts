@@ -330,37 +330,5 @@ export class MevProtectionService {
   }
 }
 
-// =============================================================================
-// Standalone Functions (for backward compatibility)
-// =============================================================================
-
-/**
- * Check if MEV protection should be used for a transaction.
- *
- * @param chain - Chain identifier
- * @param ctx - Strategy context with mevProviderFactory
- * @param expectedProfit - Expected profit in USD
- * @returns Object with eligibility status and provider if eligible
- *
- * @deprecated Use MevProtectionService.checkEligibility() instead
- */
-export function checkMevEligibility(
-  chain: string,
-  ctx: StrategyContext,
-  expectedProfit?: number
-): MevEligibilityResult {
-  const mevProvider = ctx.mevProviderFactory?.getProvider(chain);
-  const chainSettings = MEV_CONFIG.chainSettings[chain];
-
-  const shouldUseMev = !!(
-    mevProvider?.isEnabled() &&
-    chainSettings?.enabled !== false &&
-    (expectedProfit ?? 0) >= (chainSettings?.minProfitForProtection ?? 0)
-  );
-
-  return {
-    shouldUseMev,
-    mevProvider: shouldUseMev ? mevProvider : undefined,
-    chainSettings,
-  };
-}
+// P2 FIX #13: Removed deprecated standalone function checkMevEligibility()
+// Zero production callers — strategies use MevProtectionService.checkEligibility() via class method.

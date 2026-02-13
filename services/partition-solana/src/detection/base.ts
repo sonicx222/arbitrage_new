@@ -65,6 +65,43 @@ export const MAX_MEMO_CACHE_SIZE = 10000;
 export const CROSS_CHAIN_EXPIRY_MULTIPLIER = 10;
 
 /**
+ * Per-chain EVM gas cost estimates in USD.
+ *
+ * Gas costs vary significantly across chains:
+ * - L2s (Arbitrum, Base, Optimism, Linea, zkSync): Very low ($0.01-$0.50)
+ * - Sidechains (BSC, Polygon, Fantom, Avalanche): Low ($0.05-$1.00)
+ * - Ethereum mainnet: High ($5-$50 depending on congestion)
+ *
+ * Values represent typical cost for ~150k gas swap transaction.
+ * Used by cross-chain detector to estimate arbitrage profitability per chain.
+ *
+ * @see Fix #21 - partition-solana-deep-analysis.md
+ */
+export const EVM_GAS_COSTS_USD: Readonly<Record<string, number>> = {
+  ethereum: 15,
+  arbitrum: 0.10,
+  base: 0.05,
+  optimism: 0.05,
+  linea: 0.25,
+  zksync: 0.25,
+  polygon: 0.50,
+  bsc: 0.30,
+  avalanche: 0.50,
+  fantom: 0.10,
+};
+
+/**
+ * Get EVM gas cost for a specific chain, falling back to default.
+ *
+ * @param chain - EVM chain name (lowercase)
+ * @param defaultCostUsd - Fallback cost if chain not in lookup table
+ * @returns Gas cost in USD
+ */
+export function getEvmGasCostUsd(chain: string, defaultCostUsd: number): number {
+  return EVM_GAS_COSTS_USD[chain.toLowerCase()] ?? defaultCostUsd;
+}
+
+/**
  * Circuit breaker configuration for detection methods.
  */
 export const CIRCUIT_BREAKER_CONFIG = {

@@ -51,6 +51,7 @@ import {
   OperationGuard,
   disconnectWithTimeout,
   clearIntervalSafe,
+  clearTimeoutSafe,
 } from '@arbitrage/core';
 import {
   ARBITRAGE_CONFIG,
@@ -539,10 +540,12 @@ export class CrossChainDetectorService {
     if (this.streamConsumer) {
       this.streamConsumer.stop();
     }
+    // NOTE: Detection and health use setInterval + OperationGuard (performance-critical,
+    // guard prevents overlap). ETH price refresh uses setTimeout chain (FIX #28).
     this.opportunityDetectionInterval = clearIntervalSafe(this.opportunityDetectionInterval);
     this.healthMonitoringInterval = clearIntervalSafe(this.healthMonitoringInterval);
-    // Phase 3: Clear ETH price refresh interval
-    this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
+    // FIX #28: ETH price refresh uses setTimeout chain
+    this.ethPriceRefreshInterval = clearTimeoutSafe(this.ethPriceRefreshInterval);
     // FIX #5: Clear rate limit state on shutdown
     this.bridgeDataRateLimit.clear();
     // FIX #9: Clear ETH price history on shutdown
@@ -752,18 +755,13 @@ export class CrossChainDetectorService {
    * Impact: +5-10% cost estimation accuracy
    */
   private startEthPriceRefresh(): void {
-    // P3-002 FIX: Defensive guard - clear existing interval if called twice
-    this.ethPriceRefreshInterval = clearIntervalSafe(this.ethPriceRefreshInterval);
+    // P3-002 FIX: Defensive guard - clear existing timeout if called twice
+    this.ethPriceRefreshInterval = clearTimeoutSafe(this.ethPriceRefreshInterval);
 
-    // Refresh immediately on start
-    this.refreshEthPrice().catch(error => {
-      this.logger.warn('Initial ETH price refresh failed', {
-        error: (error as Error).message
-      });
-    });
-
-    // Set up periodic refresh (5 second interval per research recommendation)
-    this.ethPriceRefreshInterval = setInterval(async () => {
+    // FIX #28: Use setTimeout chain instead of setInterval to prevent overlapping
+    // async calls. Unlike detection/health which have OperationGuard, ETH price
+    // refresh has no concurrency guard, so setTimeout chain is the safest pattern.
+    const scheduleRefresh = async (): Promise<void> => {
       if (!this.stateManager.isRunning()) return;
 
       try {
@@ -773,7 +771,22 @@ export class CrossChainDetectorService {
           error: (error as Error).message
         });
       }
-    }, CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS);
+
+      // Reschedule only if still running (delay starts AFTER completion)
+      if (this.stateManager.isRunning()) {
+        this.ethPriceRefreshInterval = setTimeout(
+          () => { scheduleRefresh().catch(() => {}); },
+          CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS
+        );
+      }
+    };
+
+    // Refresh immediately on start, then schedule chain
+    scheduleRefresh().catch(error => {
+      this.logger.warn('Initial ETH price refresh failed', {
+        error: (error as Error).message
+      });
+    });
 
     this.logger.info('ETH price refresh started', {
       intervalMs: CrossChainDetectorService.ETH_PRICE_REFRESH_INTERVAL_MS

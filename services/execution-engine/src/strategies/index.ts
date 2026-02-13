@@ -89,6 +89,9 @@ export {
   FlashLoanProviderFactory,
   createFlashLoanProviderFactory,
   AaveV3FlashLoanProvider,
+  BalancerV2FlashLoanProvider,
+  PancakeSwapV3FlashLoanProvider,
+  SyncSwapFlashLoanProvider,
   UnsupportedFlashLoanProvider,
 } from './flash-loan-providers';
 export type {

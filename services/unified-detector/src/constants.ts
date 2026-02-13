@@ -15,7 +15,7 @@
  * | Partition ID  | Chains                              | Region    | Block Time |
  * |---------------|-------------------------------------|-----------|------------|
  * | asia-fast     | BSC, Polygon, Avalanche, Fantom     | Singapore | 2-3s       |
- * | l2-fast       | Arbitrum, Optimism, Base            | Singapore | <1s        |
+ * | l2-turbo      | Arbitrum, Optimism, Base            | Singapore | <1s        |
  * | high-value    | Ethereum, zkSync, Linea             | US-East   | >5s        |
  * | solana-native | Solana (non-EVM)                    | US-West   | 400ms      |
  *
@@ -60,7 +60,7 @@
  * | Partition     | Port | Environment Override       |
  * |---------------|------|---------------------------|
  * | asia-fast     | 3001 | HEALTH_CHECK_PORT=3001    |
- * | l2-fast       | 3002 | HEALTH_CHECK_PORT=3002    |
+ * | l2-turbo      | 3002 | HEALTH_CHECK_PORT=3002    |
  * | high-value    | 3003 | HEALTH_CHECK_PORT=3003    |
  * | solana-native | 3004 | HEALTH_CHECK_PORT=3004    |
  *
@@ -174,6 +174,9 @@ export const WS_DISCONNECT_TIMEOUT_MS = 5_000;
 export const STABLECOIN_SYMBOLS = [
   'USDT', 'USDC', 'DAI', 'BUSD', 'FRAX', 'TUSD', 'USDP', 'UST', 'MIM'
 ] as const;
+
+/** FIX #31: O(1) Set for stablecoin lookups (vs O(9) Array.includes) */
+export const STABLECOIN_SYMBOLS_SET: ReadonlySet<string> = new Set(STABLECOIN_SYMBOLS);
 
 /** Default token decimals when token info is not available */
 export const DEFAULT_TOKEN_DECIMALS = 18;

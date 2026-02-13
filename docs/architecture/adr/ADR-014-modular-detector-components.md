@@ -567,11 +567,139 @@ parentPort.on('message', async (msg) => {
 
 **Decision**: Defer implementation until benchmarks show event loop blocking is impacting detection accuracy. Current timeout-based approach provides adequate performance for 100ms detection intervals.
 
+## Implementation Status (Updated 2026-02-13)
+
+### Actual Module Structure
+
+The CrossChainDetectorService has been decomposed into 10 source files (11 including types):
+
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `detector.ts` | 2069 | Main service: lifecycle, detection loop, whale/pending analysis |
+| `stream-consumer.ts` | 514 | Redis Streams consumption with consumer groups |
+| `types.ts` | 485 | Shared type definitions (CrossChainOpportunity, DetectorConfig, etc.) |
+| `ml-prediction-manager.ts` | 477 | ML prediction caching, timeout, and pre-fetching |
+| `price-data-manager.ts` | 464 | Price storage, cleanup, indexed snapshots |
+| `bridge-predictor.ts` | 561 | Bridge latency prediction using statistical models |
+| `confidence-calculator.ts` | 349 | Composite confidence: price diff + age + ML + whale signals |
+| `opportunity-publisher.ts` | 339 | Publish opportunities to Redis with deduplication |
+| `pre-validation-orchestrator.ts` | 322 | Pre-validation pipeline (gas, liquidity, bridge) |
+| `bridge-cost-estimator.ts` | 314 | Bridge cost estimation with ETH price tracking |
+| `index.ts` | 149 | Re-exports for package consumers |
+
+### Module Initialization Flow
+
+```
+CrossChainDetectorService.start()
+  ├── Initialize Redis clients (redis, streamsClient)
+  ├── Initialize PriceOracle
+  ├── initializeModules()
+  │   ├── createPriceDataManager({ logger, cleanupFrequency: 100, maxPriceAgeMs: 5min })
+  │   ├── createOpportunityPublisher({ streamsClient, dedupeWindowMs: 5000 })
+  │   ├── createBridgeCostEstimator({ logger })
+  │   ├── createMLPredictionManager({ logger, mlConfig })
+  │   ├── createStreamConsumer({ streamsClient, stateManager, consumerGroups })
+  │   ├── PreValidationOrchestrator({ bridgeCostEstimator, logger })
+  │   └── createConfidenceCalculator({ mlConfig, whaleConfig })
+  ├── Wire event handlers (StreamConsumer events → detector methods)
+  ├── startStreamConsumer()
+  ├── startOpportunityDetection()  (periodic timer)
+  ├── startHealthMonitoring()       (periodic timer)
+  └── startEthPriceRefresh()        (periodic timer)
+```
+
+### Event Flow
+
+```
+Redis Streams
+  ├── stream:price-updates → StreamConsumer → 'priceUpdate' event
+  │     ├── PriceDataManager.handlePriceUpdate()
+  │     ├── MLPredictionManager.trackPriceUpdate()
+  │     └── maybeUpdateEthPrice() → BridgeCostEstimator.updateEthPrice()
+  │
+  ├── stream:whale-alerts → StreamConsumer → 'whaleTransaction' event
+  │     └── detector.analyzeWhaleImpact()
+  │           └── detector.detectWhaleInducedOpportunities()
+  │                 └── OpportunityPublisher.publish()
+  │
+  └── stream:pending-opportunities → StreamConsumer → 'pendingSwap' event
+        └── detector.analyzePendingOpportunity()
+              └── OpportunityPublisher.publish()
+
+Detection Cycle (every 100ms production / 200ms dev):
+  1. PriceDataManager.createIndexedSnapshot()  (cached if unchanged)
+  2. MLPredictionManager.prefetchPredictions()  (batch with timeout)
+  3. findArbitrageInPrices()
+  │   ├── Stale price rejection (maxPriceAgeMs, default 30s)
+  │   ├── PreValidationOrchestrator.preValidate() (gas, liquidity, bridge)
+  │   ├── ConfidenceCalculator.calculate() (base + age + ML + whale)
+  │   └── BridgeCostEstimator.getDetailedEstimate()
+  4. OpportunityPublisher.publish()  (with deduplication)
+```
+
+### Configuration Cascade
+
+```
+ARBITRAGE_CONFIG (global)
+  └── CrossChainDetectorService constructor
+        ├── DetectorConfig (merged with defaults)
+        │   ├── detectionIntervalMs: 100 (prod) / 200 (dev)
+        │   ├── healthCheckIntervalMs: 10000
+        │   ├── maxPriceAgeMs: 30000 (hard staleness rejection)
+        │   ├── minProfitabilityBps: 50
+        │   └── crossChainEnabled: true
+        ├── MLPredictionConfig → MLPredictionManager
+        │   ├── enabled: true, minConfidence: 0.6
+        │   ├── alignedBoost: 1.15, opposedPenalty: 0.9
+        │   └── maxLatencyMs: 50, cacheTtlMs: 1000
+        ├── WhaleAnalysisConfig → ConfidenceCalculator
+        │   ├── whaleBullishBoost: 1.15, whaleBearishPenalty: 0.85
+        │   └── superWhaleBoost: 1.25, significantFlowThresholdUsd: 100000
+        └── PriceDataManagerConfig
+            ├── cleanupFrequency: 100
+            └── maxPriceAgeMs: 300000 (5 minutes, data cleanup)
+```
+
+### Module Error Handling
+
+| Module | Error Strategy |
+|--------|---------------|
+| StreamConsumer | Logged + stream reading continues (resilient) |
+| PriceDataManager | try/catch per update, logged, processing continues |
+| OpportunityPublisher | Failed publishes logged, detection continues |
+| MLPredictionManager | Timeout returns null, cache miss returns null, detection uses base confidence |
+| BridgeCostEstimator | Failed estimates return conservative defaults |
+| ConfidenceCalculator | Invalid prices return 0 (stateless, no side effects) |
+| PreValidationOrchestrator | Validation failures skip opportunity (logged) |
+
+### Remaining Decomposition Work
+
+- **WhaleOpportunityDetector**: `analyzeWhaleImpact()` + `detectWhaleInducedOpportunities()` remain in detector.ts (~200 lines)
+- **PendingOpportunityAnalyzer**: `analyzePendingOpportunity()` remains in detector.ts (~180 lines)
+- These are the last two significant responsibilities in the main detector class beyond lifecycle management and the detection loop itself
+
+### Test Coverage (Updated 2026-02-13)
+
+| Component | Unit Tests | Integration Tests | Test File |
+|-----------|------------|-------------------|-----------|
+| StreamConsumer | 15 | - | stream-consumer.test.ts |
+| PriceDataManager | 25 | - | price-data-manager.test.ts |
+| OpportunityPublisher | 19 | - | opportunity-publisher.test.ts |
+| BridgePredictor | 34 | - | bridge-predictor.test.ts |
+| BridgeCostEstimator | 26 | - | bridge-cost-estimator.test.ts |
+| MLPredictionManager | 19 | - | ml-prediction-manager.test.ts |
+| ConfidenceCalculator | 43 | - | confidence-calculator.test.ts |
+| Detector (lifecycle) | 28 | - | detector-lifecycle.test.ts |
+| Detector (main) | 35+ | - | detector.test.ts |
+| Detector (pending) | 10 | - | pending-opportunity.test.ts |
+| Integration | - | 19 | detector-integration.integration.test.ts |
+| **Total** | **250+** | **19** | **11 test files** |
+
 ## Confidence Level
 95% - Very high confidence because:
 - Follows established patterns in codebase (factory functions, EventEmitter)
 - Low risk approach (modules alongside existing code)
-- All tests passing (172 tests for cross-chain-detector)
+- All tests passing (407 tests across 12 suites as of 2026-02-13)
 - TypeScript types provide compile-time safety
 - Bug fixes (B1/B2/B4) verified with regression tests
 - ML integration has timeout protection to prevent latency impact

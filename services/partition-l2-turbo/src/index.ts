@@ -26,7 +26,7 @@
  * - PARTITION_CHAINS: Override default chains (comma-separated)
  *
  * @see ADR-003: Partitioned Chain Detectors
- * @see ADR-024: Partition Service Factory Pattern
+ * @see ADR-003: Partitioned Chain Detectors (Factory Pattern)
  */
 
 import { UnifiedChainDetector, UnifiedDetectorConfig } from '@arbitrage/unified-detector';

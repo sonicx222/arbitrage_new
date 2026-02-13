@@ -83,11 +83,6 @@ export {
   NonceAllocationManager,
   getDefaultNonceAllocationManager,
   resetDefaultNonceAllocationManager,
-  // Standalone functions (backward compatibility)
-  acquireChainNonceLock,
-  releaseChainNonceLock,
-  checkConcurrentNonceAccess,
-  clearNonceAllocationTracking,
   // Types
   type NonceAllocationManagerConfig,
 } from './nonce-allocation-manager';
@@ -95,7 +90,6 @@ export {
 // MEV protection service
 export {
   MevProtectionService,
-  checkMevEligibility,
   // Types
   type MevEligibilityResult,
   type MevProtectionServiceConfig,
@@ -104,7 +98,6 @@ export {
 // Bridge profitability analyzer
 export {
   BridgeProfitabilityAnalyzer,
-  checkBridgeProfitability,
   // Types
   type BridgeProfitabilityOptions,
   type BridgeProfitabilityResult,
@@ -135,5 +128,4 @@ export {
   createHealthMonitoringManager,
   // Types
   type HealthMonitoringDependencies,
-  type GasBaselineEntry as HealthGasBaselineEntry,
 } from './health-monitoring-manager';

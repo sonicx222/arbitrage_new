@@ -90,6 +90,9 @@ export * from './integration-patterns';
 // Timer Helpers (P2-TEST: Standardize timer management)
 export * from './helpers';
 
+// Partition Test Factory (parameterized test generation for P1-P4)
+export * from './partition-test-factory';
+
 // Contract Testing (P3-4: Contract Testing)
 export * from './contracts';
 

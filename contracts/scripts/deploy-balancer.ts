@@ -20,261 +20,59 @@
  *   POLYGONSCAN_API_KEY - For contract verification on Polygon
  *   ARBISCAN_API_KEY - For contract verification on Arbitrum
  *
- * Phase 4A Improvements:
- *   ✅ Uses deployment-utils.ts for consistency
- *   ✅ Production config guards (prevents 0n profit on mainnet)
- *   ✅ Gas estimation error handling
- *   ✅ Verification retry with exponential backoff
- *   ✅ Router approval error handling
- *   ✅ Network name normalization
- *   ✅ Preserves 0% fee advantage messaging
- *
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.2
  * @see contracts/src/BalancerV2FlashArbitrage.sol
  */
 
-import { ethers, network } from 'hardhat';
+import { network } from 'hardhat';
 import { BALANCER_V2_VAULTS } from '@arbitrage/config';
-import { APPROVED_ROUTERS } from '../deployments/addresses';
 import {
   normalizeNetworkName,
-  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
-  checkDeployerBalance,
-  estimateDeploymentCost,
-  validateMinimumProfit,
-  approveRouters,
-  verifyContractWithRetry,
-  smokeTestFlashLoanContract,
   saveDeploymentResult,
   printDeploymentSummary,
-  getMinimumProfitForProtocol,  // P2-003 FIX: Import centralized profit policy
-  DEFAULT_VERIFICATION_RETRIES,
-  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
-  type BalancerDeploymentResult,
+  confirmMainnetDeployment,
+  checkExistingDeployment,
+  deployContractPipeline,
+  type DeploymentPipelineConfig,
 } from './lib/deployment-utils';
 
 // =============================================================================
-// Network Configuration
+// Pipeline Configuration
 // =============================================================================
 
-/**
- * Balancer V2 Vault addresses by chain
- * Imported from @arbitrage/config (single source of truth)
- */
-const BALANCER_V2_VAULT_ADDRESSES = BALANCER_V2_VAULTS;
-
-/**
- * Default approved DEX routers by chain
- * Imported from deployments/addresses.ts (single source of truth)
- */
-const DEFAULT_APPROVED_ROUTERS = APPROVED_ROUTERS;
-
-/**
- * P2-003 FIX: Minimum profit thresholds now imported from deployment-utils.ts
- * (centralized policy shared across all deployment scripts)
- *
- * For Balancer V2 deployments (0% flash loan fee), we use getMinimumProfitForProtocol()
- * which applies a 30% discount to the base threshold, reflecting the cost savings.
- *
- * Example: Ethereum base threshold is 0.005 ETH, Balancer gets 0.0035 ETH (30% lower)
- *
- * @see lib/deployment-utils.ts - DEFAULT_MINIMUM_PROFIT for policy details
- * @see lib/deployment-utils.ts - getMinimumProfitForProtocol() for fee adjustments
- */
-
-// =============================================================================
-// Types
-// =============================================================================
-
-// Use standardized BalancerDeploymentResult from deployment-utils
-// This ensures type consistency across all deployment scripts
-type DeploymentResult = BalancerDeploymentResult;
-
-interface DeploymentConfig {
-  vaultAddress: string;
-  ownerAddress?: string;
-  minimumProfit?: bigint;
-  approvedRouters?: string[];
-  skipVerification?: boolean;
-}
-
-// =============================================================================
-// Deployment Functions
-// =============================================================================
-
-/**
- * Deploy BalancerV2FlashArbitrage contract
- * Phase 4A: Refactored to use deployment-utils.ts
- */
-async function deployBalancerV2FlashArbitrage(
-  config: DeploymentConfig
-): Promise<DeploymentResult> {
-  const [deployer] = await ethers.getSigners();
-
-  // Phase 4A: Network name normalization
-  const networkName = normalizeNetworkName(network.name);
-  // P1-007 FIX: Use safe chain ID getter with validation
-  const chainId = await getSafeChainId();
-
-  console.log('\n========================================');
-  console.log('BalancerV2FlashArbitrage Deployment');
-  console.log('========================================');
-  console.log(`Network: ${networkName} (chainId: ${chainId})`);
-  console.log(`Deployer: ${deployer.address}`);
-  console.log(`Vault: ${config.vaultAddress}`);
-  console.log('Flash Loan Fee: 0% (Balancer V2 advantage!)');
-
-  // Phase 4A: Proper balance checking with helpful error messages
-  await checkDeployerBalance(deployer);
-
-  // Determine owner address
-  const ownerAddress = config.ownerAddress || deployer.address;
-  console.log(`Owner: ${ownerAddress}`);
-
-  // Phase 4A: Estimate gas with error handling
-  const BalancerV2FlashArbitrageFactory = await ethers.getContractFactory(
-    'BalancerV2FlashArbitrage'
-  );
-  await estimateDeploymentCost(BalancerV2FlashArbitrageFactory, config.vaultAddress, ownerAddress);
-
-  // Deploy contract
-  console.log('\nDeploying BalancerV2FlashArbitrage...');
-  const balancerV2FlashArbitrage = await BalancerV2FlashArbitrageFactory.deploy(
-    config.vaultAddress,
-    ownerAddress
-  );
-
-  await balancerV2FlashArbitrage.waitForDeployment();
-  const contractAddress = await balancerV2FlashArbitrage.getAddress();
-  const deployTx = balancerV2FlashArbitrage.deploymentTransaction();
-
-  console.log(`✅ Contract deployed at: ${contractAddress}`);
-  console.log(`   Transaction: ${deployTx?.hash}`);
-
-  // Get block info
-  const receipt = await deployTx?.wait();
-  const blockNumber = receipt?.blockNumber ?? 0;
-  const block = await ethers.provider.getBlock(blockNumber);
-  const timestamp = block?.timestamp || Math.floor(Date.now() / 1000);
-
-  // Post-deployment configuration
-  console.log('\nConfiguring contract...');
-
-  // Phase 4A: Validate minimum profit (throws on mainnet if zero/undefined)
-  const rawMinimumProfit = config.minimumProfit ?? getMinimumProfitForProtocol(networkName, 'balancer');
-  const minimumProfit = validateMinimumProfit(networkName, rawMinimumProfit);
-
-  if (minimumProfit > 0n) {
-    console.log(`  Setting minimum profit: ${ethers.formatEther(minimumProfit)} Native Token`);
-    const tx = await balancerV2FlashArbitrage.setMinimumProfit(minimumProfit);
-    await tx.wait();
-    console.log('  ✅ Minimum profit set');
-  }
-
-  // Phase 4A: Router approval with error handling
-  const routers = config.approvedRouters || DEFAULT_APPROVED_ROUTERS[networkName] || [];
-  let approvedRoutersList: string[] = [];
-
-  if (routers.length > 0) {
-    const approvalResult = await approveRouters(balancerV2FlashArbitrage, routers, true);
-    approvedRoutersList = approvalResult.succeeded;
-
-    // If any router failed and we're on mainnet, warn loudly
-    if (approvalResult.failed.length > 0) {
-      console.warn('\n⚠️  WARNING: Some routers failed to approve');
-      console.warn('   Contract is partially configured');
-      console.warn('   Manually approve failed routers before executing arbitrage trades');
-    }
-  } else {
-    console.warn('\n⚠️  No routers configured for this network');
-    console.warn('   You must approve routers manually before the contract can execute swaps');
-  }
-
-  // Phase 4A: Verification with retry logic
-  let verified = false;
-  if (!config.skipVerification) {
-    verified = await verifyContractWithRetry(
-      contractAddress,
-      [config.vaultAddress, ownerAddress],
-      DEFAULT_VERIFICATION_RETRIES,
-      DEFAULT_VERIFICATION_INITIAL_DELAY_MS
-    );
-  }
-
-  // Phase 4A: Smoke test - verify contract is callable
-  // P2-010 FIX: Pass contract address for bytecode verification
-  await smokeTestFlashLoanContract(balancerV2FlashArbitrage, ownerAddress, contractAddress);
-
+function buildConfig(vaultAddress: string): DeploymentPipelineConfig {
   return {
-    network: networkName,
-    chainId,
-    contractAddress,
-    vaultAddress: config.vaultAddress,
-    ownerAddress,
-    deployerAddress: deployer.address,
-    transactionHash: deployTx?.hash || '',
-    blockNumber,
-    timestamp,
-    minimumProfit: minimumProfit.toString(),
-    approvedRouters: approvedRoutersList,
-    flashLoanFee: '0', // Balancer V2 has 0% fees!
-    verified,
+    contractName: 'BalancerV2FlashArbitrage',
+    registryName: 'balancer-registry.json',
+    contractFactoryName: 'BalancerV2FlashArbitrage',
+    constructorArgs: (deployer) => [vaultAddress, deployer],
+    configureMinProfit: true,
+    configureRouters: true,
+    protocol: 'balancer',
+    smokeTest: 'flashLoan',
+    resultExtras: {
+      vaultAddress,
+      flashLoanFee: '0', // Balancer V2 has 0% fees
+    },
   };
 }
 
-/**
- * Save deployment result to file (now using utility function)
- * Kept as wrapper for backward compatibility
- */
-async function saveBalancerDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
-}
-
 // =============================================================================
-// Main Entry Point
+// Next Steps (contract-specific)
 // =============================================================================
 
-async function main(): Promise<void> {
-  const networkName = normalizeNetworkName(network.name);
-
-  // Get Vault address for the network
-  const vaultAddress = BALANCER_V2_VAULT_ADDRESSES[networkName];
-  if (!vaultAddress) {
-    throw new Error(
-      `[ERR_NO_VAULT] Balancer V2 Vault address not configured for network: ${networkName}\n` +
-        `Supported networks: ${Object.keys(BALANCER_V2_VAULT_ADDRESSES).join(', ')}\n\n` +
-        `To add support for ${networkName}:\n` +
-        `1. Find the Balancer V2 Vault address from: https://docs.balancer.fi/reference/contracts/deployment-addresses.html\n` +
-        `2. Add to shared/config/src/addresses.ts: BALANCER_V2_VAULTS\n` +
-        `3. Re-export in contracts/deployments/addresses.ts`
-    );
-  }
-
-  console.log(`\nStarting BalancerV2FlashArbitrage deployment to ${networkName}...`);
-
-  // Deploy with Phase 4A improvements
-  // P2-003 FIX: Use centralized profit policy with Balancer's 30% discount (0% fees)
-  const result = await deployBalancerV2FlashArbitrage({
-    vaultAddress,
-    approvedRouters: DEFAULT_APPROVED_ROUTERS[networkName],
-    minimumProfit: getMinimumProfitForProtocol(networkName, 'balancer'),
-  });
-
-  // Save and print summary
-  await saveBalancerDeployment(result);
-  printDeploymentSummary(result);
-
+function printNextSteps(result: Record<string, any>, networkName: string): void {
   // Print cost savings vs Aave V3 (preserved messaging)
-  console.log('\n💰 Cost Savings vs Aave V3:');
+  console.log('\nCost Savings vs Aave V3:');
   console.log('   Flash Loan Fee: 0% (vs Aave V3\'s 0.09%)');
   console.log('   Example: On a $100K flash loan, save $90 per trade!');
   console.log('========================================\n');
 
-  console.log('🎉 Deployment complete!');
-  console.log('\n📋 NEXT STEPS:\n');
+  console.log('Deployment complete!');
+  console.log('\nNEXT STEPS:\n');
 
   if (!result.verified) {
-    console.log('1. ⚠️  Verify contract manually:');
+    console.log('1. Verify contract manually:');
     console.log(`   npx hardhat verify --network ${networkName} ${result.contractAddress} ${result.vaultAddress} ${result.ownerAddress}\n`);
   }
 
@@ -296,8 +94,46 @@ async function main(): Promise<void> {
   console.log('   - Compare profit margins vs Aave V3');
   console.log('   - Monitor gas costs\n');
 
-  console.log('💡 Tip: Uncomment the Balancer V2 entry in service-config.ts');
+  console.log('Tip: Uncomment the Balancer V2 entry in service-config.ts');
   console.log('   to replace Aave V3 and start saving 0.09% on every flash loan!');
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+async function main(): Promise<void> {
+  const networkName = normalizeNetworkName(network.name);
+
+  // Require confirmation before mainnet deployment
+  await confirmMainnetDeployment(networkName, 'BalancerV2FlashArbitrage');
+
+  // Check for existing deployment on this network
+  await checkExistingDeployment(networkName, 'BalancerV2FlashArbitrage');
+
+  // Get Vault address for the network
+  const vaultAddress = BALANCER_V2_VAULTS[networkName];
+  if (!vaultAddress) {
+    throw new Error(
+      `[ERR_NO_VAULT] Balancer V2 Vault address not configured for network: ${networkName}\n` +
+        `Supported networks: ${Object.keys(BALANCER_V2_VAULTS).join(', ')}\n\n` +
+        `To add support for ${networkName}:\n` +
+        `1. Find the Balancer V2 Vault address from: https://docs.balancer.fi/reference/contracts/deployment-addresses.html\n` +
+        `2. Add to shared/config/src/addresses.ts: BALANCER_V2_VAULTS\n` +
+        `3. Re-export in contracts/deployments/addresses.ts`
+    );
+  }
+
+  console.log(`\nStarting BalancerV2FlashArbitrage deployment to ${networkName}...`);
+  console.log('Flash Loan Fee: 0% (Balancer V2 advantage!)');
+
+  // Deploy via shared pipeline
+  const { result } = await deployContractPipeline(buildConfig(vaultAddress));
+
+  // Save and print summary
+  await saveDeploymentResult(result as any, 'balancer-registry.json', 'BalancerV2FlashArbitrage');
+  printDeploymentSummary(result as any);
+  printNextSteps(result, networkName);
 }
 
 // Run the deployment

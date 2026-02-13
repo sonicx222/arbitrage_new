@@ -1,10 +1,15 @@
+# DEPRECATED: This Dockerfile is ORPHANED and not referenced by any docker-compose file.
+# Production deployments use services/unified-detector/Dockerfile for P1-P3 partitions,
+# orchestrated via infrastructure/docker/docker-compose.partition.yml.
+# This file is retained for reference only and may be removed in a future cleanup.
+#
 # P1 Asia-Fast Partition Service Dockerfile
 # Deployment: Oracle Cloud Singapore (asia-southeast1)
 # Chains: BSC, Polygon, Avalanche, Fantom
 #
 # Multi-stage build for optimized image size
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -24,26 +29,27 @@ COPY services/partition-asia-fast/ ./services/partition-asia-fast/
 # Install dependencies
 RUN npm install
 
-# Build shared packages first
+# Build shared packages in dependency order (fail fast on build errors)
+# Note: Proper build order is types -> config -> core -> unified-detector -> partition
 WORKDIR /app/shared/types
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/config
-RUN npm run build || true
+RUN npm run build
 
 WORKDIR /app/shared/core
-RUN npm run build || true
+RUN npm run build
 
 # Build unified-detector (dependency)
 WORKDIR /app/services/unified-detector
-RUN npm run build || true
+RUN npm run build
 
 # Build partition service
 WORKDIR /app/services/partition-asia-fast
 RUN npm run build
 
 # Production image
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

@@ -40,6 +40,9 @@ services:
       - AVALANCHE_WS_URL=${AVALANCHE_WS_URL:-wss://api.avax.network/ext/bc/C/ws}
       - FANTOM_WS_URL=${FANTOM_WS_URL:-wss://fantom.publicnode.com}
     ports:
+      # NOTE: For production, restrict to internal network only (remove host port mapping)
+      # or use "127.0.0.1:3001:3001" to bind to localhost. The /stats endpoint exposes
+      # operational intelligence; set HEALTH_AUTH_TOKEN to require Bearer auth.
       - "3001:3001"
     depends_on:
       redis:

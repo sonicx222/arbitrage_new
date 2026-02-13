@@ -14,6 +14,7 @@
 import { ethers } from 'ethers';
 import {
   getBpsDenominatorBigInt,
+  PANCAKESWAP_FLASH_ARBITRAGE_ABI,
 } from '@arbitrage/config';
 import type {
   IFlashLoanProvider,
@@ -53,20 +54,6 @@ const PANCAKESWAP_V3_FACTORY_ABI = [
 ];
 
 /**
- * PancakeSwapFlashArbitrage contract ABI (matching PancakeSwapFlashArbitrage.sol)
- */
-const PANCAKESWAP_FLASH_ARBITRAGE_ABI = [
-  'function executeArbitrage(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-  'function calculateExpectedProfit(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath) external view returns (uint256 expectedProfit, uint256 flashLoanFee)',
-  'function whitelistPool(address pool) external',
-  'function isPoolWhitelisted(address pool) external view returns (bool)',
-  'function addApprovedRouter(address router) external',
-  'function isApprovedRouter(address router) external view returns (bool)',
-  'function getWhitelistedPools() external view returns (address[])',
-  'function getApprovedRouters() external view returns (address[])',
-];
-
-/**
  * Cached ethers.Interface for hot-path optimization.
  * Creating Interface objects is expensive - cache at module level.
  */
@@ -85,6 +72,19 @@ interface PoolCacheEntry {
   fee: FeeTier;
   timestamp: number;
 }
+
+/** Pool cache TTL: 5 minutes (pools are immutable once created) */
+const POOL_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Module-level pool cache shared by static findBestPoolStatic() calls.
+ * Prevents creating throwaway provider instances just for pool discovery.
+ * Key: `${factoryAddress}-${tokenA}-${tokenB}-best`
+ */
+const staticPoolCache = new Map<string, PoolCacheEntry>();
+
+/** Preferred fee tier order: 2500 (most common), 500, 10000, 100 */
+const PREFERRED_FEE_TIER_ORDER: FeeTier[] = [2500, 500, 10000, 100];
 
 /**
  * PancakeSwap V3 Flash Loan Provider
@@ -237,6 +237,54 @@ export class PancakeSwapV3FlashLoanProvider implements IFlashLoanProvider {
         }
       } catch {
         // Continue to next fee tier if this one fails
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Static pool discovery without creating a provider instance.
+   *
+   * Uses a module-level cache shared across calls, avoiding the overhead
+   * of creating a temporary provider with a zero contractAddress just
+   * for pool discovery.
+   *
+   * @param factoryAddress - PancakeSwap V3 Factory address
+   * @param tokenA - First token address
+   * @param tokenB - Second token address
+   * @param provider - JSON-RPC provider for pool queries
+   * @returns Pool address and fee tier, or null if no pool found
+   */
+  static async findBestPoolStatic(
+    factoryAddress: string,
+    tokenA: string,
+    tokenB: string,
+    provider: ethers.JsonRpcProvider
+  ): Promise<{ pool: string; feeTier: number } | null> {
+    const cacheKey = `${factoryAddress}-${tokenA}-${tokenB}-best`;
+    const cached = staticPoolCache.get(cacheKey);
+
+    if (cached && Date.now() - cached.timestamp < POOL_CACHE_TTL_MS) {
+      return { pool: cached.poolAddress, feeTier: cached.fee };
+    }
+
+    const factory = new ethers.Contract(factoryAddress, FACTORY_INTERFACE, provider);
+
+    for (const feeTier of PREFERRED_FEE_TIER_ORDER) {
+      try {
+        const poolAddress = await factory.getPool(tokenA, tokenB, feeTier);
+
+        if (poolAddress && poolAddress !== ethers.ZeroAddress) {
+          staticPoolCache.set(cacheKey, {
+            poolAddress,
+            fee: feeTier,
+            timestamp: Date.now(),
+          });
+          return { pool: poolAddress, feeTier };
+        }
+      } catch {
         continue;
       }
     }

@@ -57,6 +57,29 @@ export interface HealthServerOptions {
 
   /** Logger instance */
   logger: ReturnType<typeof createLogger>;
+
+  /**
+   * Optional auth token for the /stats endpoint.
+   * When set, requests to /stats must include `Authorization: Bearer <token>`.
+   * When not set, /stats is unauthenticated (backward-compatible).
+   * @default process.env.HEALTH_AUTH_TOKEN
+   */
+  authToken?: string;
+
+  /**
+   * Bind address for the health server.
+   * Defaults to '0.0.0.0' for backward compatibility.
+   * Set to '127.0.0.1' to restrict to localhost-only access.
+   * @default process.env.HEALTH_BIND_ADDRESS ?? '0.0.0.0'
+   */
+  bindAddress?: string;
+
+  /**
+   * TTL in milliseconds for the health check cache.
+   * Higher values reduce async health check calls at the cost of freshness.
+   * @default 1000
+   */
+  healthCacheTtlMs?: number;
 }
 
 export interface PartitionDetectorInterface extends EventEmitter {
@@ -156,7 +179,7 @@ export function parsePartitionEnvironmentConfig(
     instanceId: process.env.INSTANCE_ID,
     regionId: process.env.REGION_ID,
     enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-    nodeEnv: process.env.NODE_ENV || 'development',
+    nodeEnv: process.env.NODE_ENV ?? 'development',
     rpcUrls,
     wsUrls
   };
@@ -373,15 +396,30 @@ export function validateAndFilterChains(
     return [...defaultChains];
   }
 
-  return validChains;
+  // FIX #15: Warn when configured chains are outside the partition's default assignment.
+  // This is intentional flexibility (operators CAN reassign chains), but should be flagged
+  // so operators are aware of non-standard partition configurations.
+  if (logger) {
+    const defaultSet = new Set(defaultChains);
+    const outsideDefault = validChains.filter(c => !defaultSet.has(c));
+    if (outsideDefault.length > 0) {
+      logger.warn('Configured chains are outside this partition\'s default assignment', {
+        outsideDefaultChains: outsideDefault,
+        defaultChains: [...defaultChains],
+        hint: 'This is allowed but may indicate a misconfiguration. Verify PARTITION_CHAINS is intentional.'
+      });
+    }
+  }
+
+  return [...new Set(validChains)];
 }
 
 // =============================================================================
 // Health Check Cache (PERF-FIX)
 // =============================================================================
 
-/** Cache TTL in milliseconds for health check results */
-const HEALTH_CACHE_TTL_MS = 1000;
+/** Default cache TTL in milliseconds for health check results */
+const DEFAULT_HEALTH_CACHE_TTL_MS = 1000;
 
 interface HealthCacheEntry {
   data: {
@@ -392,6 +430,8 @@ interface HealthCacheEntry {
     totalEventsProcessed: number;
     memoryUsage: number;
   };
+  /** FIX #3: Cache healthyChains alongside health data to prevent contradictory responses */
+  healthyChains: string[];
   timestamp: number;
 }
 
@@ -399,21 +439,24 @@ interface HealthCacheEntry {
  * Simple in-memory cache for health check data.
  * Prevents repetitive async calls on high-frequency health check requests.
  * Each server instance has its own cache to avoid cross-service contamination.
+ *
+ * @param ttlMs - Cache TTL in milliseconds (default: 1000ms)
  */
-function createHealthCache() {
+function createHealthCache(ttlMs: number = DEFAULT_HEALTH_CACHE_TTL_MS) {
   let cache: HealthCacheEntry | null = null;
 
   return {
-    get(): HealthCacheEntry['data'] | null {
+    get(): { data: HealthCacheEntry['data']; healthyChains: string[] } | null {
       if (!cache) return null;
-      if (Date.now() - cache.timestamp > HEALTH_CACHE_TTL_MS) {
+      if (Date.now() - cache.timestamp > ttlMs) {
         cache = null;
         return null;
       }
-      return cache.data;
+      return { data: cache.data, healthyChains: cache.healthyChains };
     },
-    set(data: HealthCacheEntry['data']): void {
-      cache = { data, timestamp: Date.now() };
+    /** FIX #3: Cache healthyChains alongside health data to prevent stale/live mismatch */
+    set(data: HealthCacheEntry['data'], healthyChains: string[]): void {
+      cache = { data, healthyChains, timestamp: Date.now() };
     },
     clear(): void {
       cache = null;
@@ -445,18 +488,36 @@ function createHealthCache() {
  */
 export function createPartitionHealthServer(options: HealthServerOptions): Server {
   const { port, config, detector, logger } = options;
+  const authToken = options.authToken ?? process.env.HEALTH_AUTH_TOKEN;
+  const bindAddress = options.bindAddress ?? process.env.HEALTH_BIND_ADDRESS ?? '0.0.0.0';
 
   // PERF-FIX: Create cache per server instance to avoid repetitive async calls
-  const healthCache = createHealthCache();
+  // FIX #8: Allow per-partition TTL configuration via healthCacheTtlMs option
+  const healthCache = createHealthCache(options.healthCacheTtlMs ?? DEFAULT_HEALTH_CACHE_TTL_MS);
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // SEC-02: Reject non-GET methods (all legitimate consumers use GET)
+    if (req.method !== 'GET') {
+      res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET' });
+      res.end(JSON.stringify({ error: 'Method Not Allowed' }));
+      return;
+    }
+
     if (req.url === '/health') {
       try {
         // PERF-FIX: Use cached health data if available and fresh
-        let health = healthCache.get();
-        if (!health) {
+        // FIX #3: Cache healthyChains alongside health data to prevent contradictory responses
+        // where status could be "healthy" (cached) while healthyChains is [] (live, post-disconnect)
+        let health: HealthCacheEntry['data'];
+        let healthyChains: string[];
+        const cached = healthCache.get();
+        if (cached) {
+          health = cached.data;
+          healthyChains = cached.healthyChains;
+        } else {
           health = await detector.getPartitionHealth();
-          healthCache.set(health);
+          healthyChains = detector.getHealthyChains();
+          healthCache.set(health, healthyChains);
         }
         const statusCode = health.status === 'healthy' ? 200 :
                           health.status === 'degraded' ? 200 : 503;
@@ -467,7 +528,7 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
           status: health.status,
           partitionId: health.partitionId,
           chains: Array.from(health.chainHealth.keys()),
-          healthyChains: detector.getHealthyChains(),
+          healthyChains,
           uptime: health.uptimeSeconds,
           eventsProcessed: health.totalEventsProcessed,
           memoryMB: Math.round(health.memoryUsage / 1024 / 1024),
@@ -484,6 +545,15 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
         }));
       }
     } else if (req.url === '/stats') {
+      // SEC-01: Require auth token for /stats when HEALTH_AUTH_TOKEN is configured
+      if (authToken) {
+        const authHeader = req.headers['authorization'];
+        if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized' }));
+          return;
+        }
+      }
       try {
         const stats = detector.getStats();
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -530,8 +600,14 @@ export function createPartitionHealthServer(options: HealthServerOptions): Serve
     }
   });
 
-  server.listen(port, () => {
-    logger.info(`${config.serviceName} health server listening on port ${port}`);
+  // SEC-03: Prevent slowloris-style DoS via server timeouts
+  server.requestTimeout = 5000;
+  server.headersTimeout = 3000;
+  server.keepAliveTimeout = 5000;
+  server.maxConnections = 100;
+
+  server.listen(port, bindAddress, () => {
+    logger.info(`${config.serviceName} health server listening on ${bindAddress}:${port}`);
   });
 
   // CRITICAL-FIX: Handle fatal server errors appropriately
@@ -653,29 +729,9 @@ export async function shutdownPartitionService(
   logger.info(`Received ${signal}, shutting down ${serviceName}...`);
 
   try {
-    // Close health server first with timeout (P8-FIX pattern)
-    if (healthServer) {
-      let timeoutId: NodeJS.Timeout | null = null;
-      await Promise.race([
-        new Promise<void>((resolve, reject) => {
-          healthServer.close((err) => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (err) reject(err);
-            else resolve();
-          });
-        }),
-        new Promise<void>((_, reject) => {
-          timeoutId = setTimeout(
-            () => reject(new Error('Health server close timeout')),
-            SHUTDOWN_TIMEOUT_MS
-          );
-        })
-      ]).catch((err) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        logger.warn('Health server close error or timeout', { error: (err as Error).message });
-      });
-      logger.info('Health server closed');
-    }
+    // Close health server first with timeout (P8-FIX, safeResolve pattern)
+    // FIX #13: Reuse closeServerWithTimeout to eliminate duplicated shutdown logic
+    await closeServerWithTimeout(healthServer, SHUTDOWN_TIMEOUT_MS, logger);
 
     await detector.stop();
     logger.info(`${serviceName} shutdown complete`);
@@ -691,26 +747,39 @@ export async function shutdownPartitionService(
 // =============================================================================
 
 /**
+ * Cleanup function returned by setupDetectorEventHandlers to remove registered listeners.
+ * Call this during testing or when reinitializing handlers.
+ */
+export type DetectorEventHandlerCleanup = () => void;
+
+/**
  * Sets up standard event handlers for a partition detector.
  * Provides consistent logging across all partitions.
  *
  * FIX 10.3: Uses conditional debug logging to avoid object allocation
  * on hot-path events (priceUpdate fires 100s-1000s times/sec).
  *
+ * FIX #9: Returns a cleanup function that removes all registered handlers.
+ * Backward-compatible - existing callers that ignore the return value are unaffected.
+ *
  * @param detector - Detector instance
  * @param logger - Logger instance
  * @param partitionId - Partition ID for log context
+ * @returns Cleanup function to remove all registered event handlers
  */
 export function setupDetectorEventHandlers(
   detector: PartitionDetectorInterface,
   logger: ReturnType<typeof createLogger>,
   partitionId: string
-): void {
-  // FIX 10.3: Pre-check if debug logging is enabled to avoid hot-path object allocation
-  // priceUpdate events fire 100s-1000s times/sec - even creating log objects has GC cost
-  detector.on('priceUpdate', (update: { chain: string; dex: string; price: number }) => {
+): DetectorEventHandlerCleanup {
+  // FIX #20: Pre-compute debug flag ONCE to avoid per-event evaluation overhead.
+  // priceUpdate events fire 1000+/sec - this eliminates method call + nullish coalescing per event.
+  const debugEnabled = logger.isLevelEnabled?.('debug') ?? logger.level === 'debug';
+
+  // FIX #9: Store handler references for cleanup (same pattern as setupProcessHandlers)
+  const priceUpdateHandler = (update: { chain: string; dex: string; price: number }) => {
     // Only create log object if debug level is enabled
-    if (logger.isLevelEnabled?.('debug') ?? logger.level === 'debug') {
+    if (debugEnabled) {
       logger.debug('Price update', {
         partition: partitionId,
         chain: update.chain,
@@ -718,9 +787,9 @@ export function setupDetectorEventHandlers(
         price: update.price
       });
     }
-  });
+  };
 
-  detector.on('opportunity', (opp: {
+  const opportunityHandler = (opp: {
     id: string;
     type: string;
     buyDex: string;
@@ -737,25 +806,25 @@ export function setupDetectorEventHandlers(
       profit: opp.expectedProfit,
       percentage: opp.profitPercentage.toFixed(2) + '%'  // profitPercentage is already a percentage value
     });
-  });
+  };
 
-  detector.on('chainError', ({ chainId, error }: { chainId: string; error: Error }) => {
+  const chainErrorHandler = ({ chainId, error }: { chainId: string; error: Error }) => {
     logger.error(`Chain error: ${chainId}`, {
       partition: partitionId,
       error: error.message
     });
-  });
+  };
 
-  detector.on('chainConnected', ({ chainId }: { chainId: string }) => {
+  const chainConnectedHandler = ({ chainId }: { chainId: string }) => {
     logger.info(`Chain connected: ${chainId}`, { partition: partitionId });
-  });
+  };
 
-  detector.on('chainDisconnected', ({ chainId }: { chainId: string }) => {
+  const chainDisconnectedHandler = ({ chainId }: { chainId: string }) => {
     logger.warn(`Chain disconnected: ${chainId}`, { partition: partitionId });
-  });
+  };
 
   // FIX: Handle statusChange event emitted by UnifiedChainDetector's chainInstanceManager
-  detector.on('statusChange', ({ chainId, oldStatus, newStatus }: {
+  const statusChangeHandler = ({ chainId, oldStatus, newStatus }: {
     chainId: string;
     oldStatus: string;
     newStatus: string;
@@ -778,7 +847,7 @@ export function setupDetectorEventHandlers(
       });
     } else {
       // FIX 10.3: Conditional debug logging for status changes
-      if (logger.isLevelEnabled?.('debug') ?? logger.level === 'debug') {
+      if (debugEnabled) {
         logger.debug(`Chain status changed: ${chainId}`, {
           partition: partitionId,
           from: oldStatus,
@@ -786,11 +855,31 @@ export function setupDetectorEventHandlers(
         });
       }
     }
-  });
+  };
 
-  detector.on('failoverEvent', (event: unknown) => {
+  const failoverEventHandler = (event: unknown) => {
     logger.warn('Failover event received', { partition: partitionId, ...event as object });
-  });
+  };
+
+  // Register all handlers
+  detector.on('priceUpdate', priceUpdateHandler);
+  detector.on('opportunity', opportunityHandler);
+  detector.on('chainError', chainErrorHandler);
+  detector.on('chainConnected', chainConnectedHandler);
+  detector.on('chainDisconnected', chainDisconnectedHandler);
+  detector.on('statusChange', statusChangeHandler);
+  detector.on('failoverEvent', failoverEventHandler);
+
+  // FIX #9: Return cleanup function to remove all registered handlers
+  return () => {
+    detector.off('priceUpdate', priceUpdateHandler);
+    detector.off('opportunity', opportunityHandler);
+    detector.off('chainError', chainErrorHandler);
+    detector.off('chainConnected', chainConnectedHandler);
+    detector.off('chainDisconnected', chainDisconnectedHandler);
+    detector.off('statusChange', statusChangeHandler);
+    detector.off('failoverEvent', failoverEventHandler);
+  };
 }
 
 // =============================================================================
@@ -837,6 +926,17 @@ export function setupProcessHandlers(
     await shutdownPartitionService(signal, healthServerRef.current, detector, logger, serviceName);
   };
 
+  // FIX #4: Track unhandled rejections and trigger shutdown after threshold.
+  // A single transient rejection shouldn't kill the service, but repeated failures
+  // (e.g., Redis disconnect, WebSocket loss) indicate a zombie state.
+  // NOTE: When running with --unhandled-rejections=throw (set in partition Dockerfiles),
+  // rejections become uncaught exceptions before this handler fires, so the uncaughtHandler
+  // handles them immediately. This threshold serves as defense-in-depth for non-Docker
+  // environments (local dev, tests, direct node execution).
+  const REJECTION_THRESHOLD = 5;
+  const REJECTION_WINDOW_MS = 60_000;
+  const rejectionTimestamps: number[] = [];
+
   // S3.2.3-FIX: Store handler references for cleanup
   const sigtermHandler = () => shutdown('SIGTERM');
   const sigintHandler = () => shutdown('SIGINT');
@@ -848,6 +948,23 @@ export function setupProcessHandlers(
   };
   const rejectionHandler = (reason: unknown, promise: Promise<unknown>) => {
     logger.error(`Unhandled rejection in ${serviceName}`, { reason, promise });
+
+    // FIX #4: Count rejections within time window; trigger shutdown if threshold exceeded
+    const now = Date.now();
+    rejectionTimestamps.push(now);
+    // Evict timestamps outside the window
+    while (rejectionTimestamps.length > 0 && rejectionTimestamps[0] <= now - REJECTION_WINDOW_MS) {
+      rejectionTimestamps.shift();
+    }
+    if (rejectionTimestamps.length >= REJECTION_THRESHOLD) {
+      logger.error(`${REJECTION_THRESHOLD} unhandled rejections within ${REJECTION_WINDOW_MS / 1000}s window - triggering shutdown`, {
+        service: serviceName,
+        rejectionCount: rejectionTimestamps.length,
+      });
+      shutdown('unhandledRejection').catch(() => {
+        process.exit(1);
+      });
+    }
   };
 
   process.on('SIGTERM', sigtermHandler);
@@ -1137,7 +1254,7 @@ export function runPartitionService(
 }
 
 // =============================================================================
-// R10: Partition Entry Point Factory (ADR-024 Extension)
+// R10: Partition Entry Point Factory (ADR-003 Extension)
 // =============================================================================
 
 /**
@@ -1215,7 +1332,7 @@ export interface PartitionEntryResult {
  * ```
  *
  * @see ADR-003: Partitioned Chain Detectors
- * @see ADR-024: Partition Service Factory Pattern
+ * @see ADR-003: Partitioned Chain Detectors (Factory Pattern)
  */
 export function createPartitionEntry(
   partitionId: string,

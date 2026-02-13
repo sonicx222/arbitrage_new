@@ -8,8 +8,8 @@
  *   - service-validator.js — ServiceConfig class + validateAllServices()
  *   - services-config.js (this file) — Slim orchestrator + re-exports
  *
- * FIX M5: Validation no longer runs on module import. Call validateAllServices()
- *   explicitly in startup scripts. Tests no longer need SKIP_SERVICE_VALIDATION.
+ * FIX M5: Validation runs on module import (opt-out via SKIP_SERVICE_VALIDATION=true).
+ *   Startup scripts also call validateAllServices() explicitly for clarity.
  *
  * Environment Variables:
  * - COORDINATOR_PORT: Coordinator service port (default: 3000)
@@ -35,7 +35,7 @@ const path = require('path');
 // =============================================================================
 
 const dotenv = require('dotenv');
-const ROOT_DIR = path.join(__dirname, '..', '..');
+const { ROOT_DIR } = require('./constants');
 
 // IMPORTANT: Load order matters!
 // .env.local is loaded AFTER .env with override: true
@@ -128,8 +128,9 @@ function getCleanupPorts() {
 
 // =============================================================================
 // Validation at Module Load
-// FIX M5: Can be skipped via SKIP_SERVICE_VALIDATION=true for testing/development.
-// In production startup scripts, validateAllServices() is called explicitly.
+// Runs automatically on import unless SKIP_SERVICE_VALIDATION=true.
+// Set SKIP_SERVICE_VALIDATION=true for tests, CI/CD, or when services don't exist yet.
+// Production startup scripts also call validateAllServices() explicitly.
 // =============================================================================
 
 if (process.env.SKIP_SERVICE_VALIDATION !== 'true') {

@@ -164,27 +164,31 @@ export function findTriangularPaths(
   for (const startToken of startTokens) {
     if (pathsFound >= MAX_PATHS_PER_LEVEL * 10) break; // Global limit
 
-    // DFS from each start token
-    const found = dfsPathFinding(
+    const prevLength = paths.length;
+
+    // DFS from each start token — uses backtracking with shared mutable state
+    dfsPathFinding(
       graph,
       startToken,
       startToken,
-      [],
-      new Set<string>(),
+      [],            // currentPath (mutated in-place)
+      new Set<string>(),  // visitedPools (mutated in-place)
+      new Set<string>([startToken]), // visitedTokens (mutated in-place, start token pre-added)
       0,
       visited,
-      config.maxTriangularDepth
+      config.maxTriangularDepth,
+      paths          // results accumulated in-place
     );
 
-    paths.push(...found);
-    pathsFound += found.length;
+    pathsFound += paths.length - prevLength;
   }
 
   return paths;
 }
 
 /**
- * DFS path finding with bounded search.
+ * DFS path finding with bounded search using backtracking pattern.
+ * Uses mutate-then-undo to avoid O(n) copies per recursive call.
  */
 function dfsPathFinding(
   graph: AdjacencyGraph,
@@ -192,18 +196,18 @@ function dfsPathFinding(
   currentToken: string,
   currentPath: TriangularPathStep[],
   visitedPools: Set<string>,
+  visitedTokens: Set<string>,
   depth: number,
   globalVisited: Set<string>,
-  maxDepth: number
-): TriangularPath[] {
-  const paths: TriangularPath[] = [];
-
+  maxDepth: number,
+  results: TriangularPath[]
+): void {
   // Check for valid completion at ANY depth >= 3
   if (currentToken === startToken && currentPath.length >= 3) {
     const profitResult = calculateTriangularProfit(currentPath);
     if (profitResult && profitResult.profitPercentage > 0) {
-      paths.push({
-        steps: [...currentPath],
+      results.push({
+        steps: currentPath.slice(), // snapshot only when we found a profitable path
         inputToken: startToken,
         outputToken: startToken,
         profitPercentage: profitResult.profitPercentage,
@@ -214,12 +218,12 @@ function dfsPathFinding(
 
   // Max depth check
   if (depth >= maxDepth) {
-    return paths;
+    return;
   }
 
   // Limit global visited to prevent memory leak
   if (globalVisited.size >= MAX_MEMO_CACHE_SIZE) {
-    return paths;
+    return;
   }
 
   const edges = graph.get(currentToken) || [];
@@ -229,9 +233,8 @@ function dfsPathFinding(
     if (pathsAtLevel >= MAX_PATHS_PER_LEVEL) break;
     if (visitedPools.has(edge.pool.address)) continue;
 
-    // Allow returning to start, but not other revisits
-    const tokenVisited = currentPath.some(s => s.token === edge.nextToken);
-    if (tokenVisited && edge.nextToken !== startToken) continue;
+    // Allow returning to start, but not other revisits — O(1) Set lookup
+    if (visitedTokens.has(edge.nextToken) && edge.nextToken !== startToken) continue;
 
     const step: TriangularPathStep = {
       token: edge.nextToken,
@@ -241,30 +244,42 @@ function dfsPathFinding(
       fee: edge.fee,
     };
 
-    const newVisited = new Set(visitedPools);
-    newVisited.add(edge.pool.address);
-
     const cacheKey = `${startToken}-${edge.nextToken}-${depth}-${edge.pool.address}`;
     if (!globalVisited.has(cacheKey)) {
       globalVisited.add(cacheKey);
 
-      const found = dfsPathFinding(
+      // Backtracking: mutate, recurse, undo
+      visitedPools.add(edge.pool.address);
+      if (edge.nextToken !== startToken) {
+        visitedTokens.add(edge.nextToken);
+      }
+      currentPath.push(step);
+
+      const prevLength = results.length;
+
+      dfsPathFinding(
         graph,
         startToken,
         edge.nextToken,
-        [...currentPath, step],
-        newVisited,
+        currentPath,
+        visitedPools,
+        visitedTokens,
         depth + 1,
         globalVisited,
-        maxDepth
+        maxDepth,
+        results
       );
 
-      paths.push(...found);
-      pathsAtLevel += found.length;
+      // Undo mutations (guard startToken to prevent accidental removal)
+      currentPath.pop();
+      if (edge.nextToken !== startToken) {
+        visitedTokens.delete(edge.nextToken);
+      }
+      visitedPools.delete(edge.pool.address);
+
+      pathsAtLevel += results.length - prevLength;
     }
   }
-
-  return paths;
 }
 
 /**

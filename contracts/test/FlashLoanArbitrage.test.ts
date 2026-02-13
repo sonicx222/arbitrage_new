@@ -1111,6 +1111,44 @@ describe('FlashLoanArbitrage', () => {
         )
       ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidFlashLoanCaller');
     });
+
+    it('should revert with InvalidFlashLoanInitiator when initiator is not the contract', async () => {
+      const { flashLoanArbitrage, aavePool, weth, owner, attacker } =
+        await loadFixture(deployContractsFixture);
+
+      // Impersonate the Aave Pool to bypass the caller check (msg.sender == POOL),
+      // then provide a wrong initiator to trigger the initiator check.
+      const poolAddress = await aavePool.getAddress();
+      await ethers.provider.send('hardhat_impersonateAccount', [poolAddress]);
+      await owner.sendTransaction({ to: poolAddress, value: ethers.parseEther('1') });
+      const poolSigner = await ethers.getSigner(poolAddress);
+
+      const swapPath = [
+        {
+          router: ethers.ZeroAddress,
+          tokenIn: await weth.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+      const params = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[]', 'uint256'],
+        [swapPath, 0n]
+      );
+
+      // Call executeOperation from the pool with attacker as initiator (not the contract itself)
+      await expect(
+        flashLoanArbitrage.connect(poolSigner).executeOperation(
+          await weth.getAddress(),
+          ethers.parseEther('10'),
+          ethers.parseEther('0.009'),
+          attacker.address, // Wrong initiator - should be the contract address
+          params
+        )
+      ).to.be.revertedWithCustomError(flashLoanArbitrage, 'InvalidFlashLoanInitiator');
+
+      await ethers.provider.send('hardhat_stopImpersonatingAccount', [poolAddress]);
+    });
   });
 
   // ===========================================================================

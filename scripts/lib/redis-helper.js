@@ -14,11 +14,12 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
+const { ROOT_DIR } = require('./constants');
+
 // =============================================================================
 // Constants
 // =============================================================================
 
-const ROOT_DIR = path.join(__dirname, '..', '..');
 const REDIS_MEMORY_CONFIG_FILE = path.join(ROOT_DIR, '.redis-memory-config.json');
 
 // =============================================================================

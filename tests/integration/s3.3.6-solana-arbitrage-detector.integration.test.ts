@@ -965,7 +965,7 @@ describe('S3.3.6 Redis Streams Integration', () => {
       await detector.publishOpportunity(opportunity);
 
       expect(mockStreamsClient.xadd).toHaveBeenCalledWith(
-        'arbitrage:opportunities',
+        'stream:opportunities',
         expect.objectContaining({
           id: opportunity.id,
           type: opportunity.type,
@@ -1287,14 +1287,14 @@ describe('S3.3.6 Batch Import', () => {
       expect(detector.getPool('pool-1')).toBeDefined();
       expect(detector.getPool('pool-2')).toBeDefined();
       expect(detector.getPool('pool-3')).toBeDefined();
-      expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { count: 3 });
+      expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { imported: 3, skipped: 0, total: 3 });
     });
 
     it('should handle empty pool array', () => {
       detector.importPools([]);
 
       expect(detector.getPoolCount()).toBe(0);
-      expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { count: 0 });
+      expect(mockLogger.debug).toHaveBeenCalledWith('importPools called with empty array, nothing to import');
     });
 
     it('should make pools available for arbitrage detection after import', async () => {
@@ -1374,7 +1374,7 @@ describe('S3.3.6 Batch Import', () => {
       await detector.importPools(pools);
 
       expect(detector.getPoolCount()).toBe(100);
-      expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { count: 100 });
+      expect(mockLogger.info).toHaveBeenCalledWith('Imported pools', { imported: 100, skipped: 0, total: 100 });
     });
   });
 });

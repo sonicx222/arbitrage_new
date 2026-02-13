@@ -49,6 +49,9 @@ services:
       - ALCHEMY_API_KEY=${ALCHEMY_API_KEY:-}
 
     ports:
+      # NOTE: For production, restrict to internal network only (remove host port mapping)
+      # or use "127.0.0.1:3003:3003" to bind to localhost. The /stats endpoint exposes
+      # operational intelligence; set HEALTH_AUTH_TOKEN to require Bearer auth.
       - "3003:3003"
     restart: unless-stopped
     healthcheck:

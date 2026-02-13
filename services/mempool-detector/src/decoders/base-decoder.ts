@@ -197,10 +197,13 @@ export function isValidInput(input: string, minLength: number = 10): boolean {
 
 /**
  * Extract address from ABI-encoded data.
- * @param data - 32-byte hex string
- * @returns Address with checksum
+ * @param data - 32-byte hex string (without 0x prefix)
+ * @returns Address with 0x prefix, or null if input is invalid
  */
-export function extractAddress(data: string): string {
+export function extractAddress(data: string): string | null {
+  if (!data || data.length === 0 || !/^[0-9a-fA-F]+$/.test(data)) {
+    return null;
+  }
   // Remove leading zeros and add 0x prefix
   const cleaned = data.replace(/^0+/, '');
   return '0x' + cleaned.padStart(40, '0');

@@ -264,6 +264,8 @@ export {
   SYNCSWAP_FEE_BPS,
   getSyncSwapFeeBpsBigInt,
   SYNCSWAP_FLASH_ARBITRAGE_ABI,
+  // Task 2.1: PancakeSwap V3 flash loan support
+  PANCAKESWAP_FLASH_ARBITRAGE_ABI,
   // Production configuration validation
   validateProductionConfig,
   // Tier 2 Enhancement: MultiPathQuoter contract addresses

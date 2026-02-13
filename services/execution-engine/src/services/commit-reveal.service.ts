@@ -30,13 +30,15 @@ import type { Redis } from 'ioredis';
 // =============================================================================
 
 /**
- * ABI for CommitRevealArbitrage contract v2.0.0
+ * ABI for CommitRevealArbitrage contract (matches v3.1.0)
  * Minimal interface for commit/reveal operations
  *
- * ## v2.0.0 Breaking Change
+ * ## v2.0.0 Breaking Change (historical)
  * reveal() function signature changed to support multi-router arbitrage:
  * - Old: (address tokenIn, address tokenOut, uint256 amountIn, uint256 minProfit, address router, uint256 deadline, bytes32 salt)
  * - New: (address asset, uint256 amountIn, (address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline, bytes32 salt)
+ *
+ * @see contracts/src/CommitRevealArbitrage.sol @custom:version 3.1.0
  */
 const COMMIT_REVEAL_ABI = [
   'function commit(bytes32 commitmentHash) external',
@@ -97,10 +99,9 @@ export interface SwapStep {
 
 /**
  * Parameters for reveal phase
- * Must match CommitRevealArbitrage.sol RevealParams struct (v2.0.0)
+ * Must match CommitRevealArbitrage.sol RevealParams struct (v3.1.0)
  *
- * ## v2.0.0 Breaking Change
- * Changed from single router to SwapStep[] array to support multi-router arbitrage.
+ * Note: SwapStep[] array introduced in v2.0.0 to support multi-router arbitrage.
  */
 export interface CommitRevealParams {
   asset: string;
@@ -175,6 +176,12 @@ export class CommitRevealService {
   private readonly redisClient?: Redis; // Optional Redis client (dependency injection)
   private readonly contractFactory: ContractFactory; // Contract factory for dependency injection
 
+  /**
+   * P2 FIX #9: Cached env var to avoid repeated process.env string lookup
+   * on every store/load/delete operation. Read once at construction time.
+   */
+  private readonly redisFeatureEnabled: boolean;
+
   constructor(
     logger: Logger,
     contractAddresses: Record<string, string>,
@@ -185,6 +192,7 @@ export class CommitRevealService {
     this.contractAddresses = contractAddresses;
     this.redisClient = redisClient;
     this.contractFactory = contractFactory;
+    this.redisFeatureEnabled = process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true';
 
     // Validate that at least one contract address is configured
     const deployedChains = Object.entries(contractAddresses)
@@ -364,20 +372,21 @@ export class CommitRevealService {
         };
       }
 
-      // 3. Re-check profitability (optional - can be disabled for performance)
-      if (state.expectedProfit && process.env.COMMIT_REVEAL_VALIDATE_PROFIT !== 'false') {
-        const stillProfitable = await this.validateProfitability(state, chain, ctx);
-        if (!stillProfitable) {
-          this.logger.warn('Opportunity no longer profitable, skipping reveal', {
-            commitmentHash,
-            chain,
-            expectedProfit: state.expectedProfit,
-          });
-          return {
-            success: false,
-            error: 'Opportunity no longer profitable after commit delay',
-          };
-        }
+      // 3. Profitability re-validation
+      // WARNING: Full quote-based validation is NOT yet implemented.
+      // The validateProfitability() method currently has no oracle/quote source
+      // to compare against, so it cannot meaningfully assess price changes
+      // during the 1-block commit delay. Until a simulation or quote service
+      // is injected, reveals proceed without profitability re-check.
+      // The minProfit threshold from the original detection provides baseline protection.
+      if (state.expectedProfit) {
+        this.logger.warn('Profitability re-validation not yet implemented — reveal proceeds without re-check', {
+          commitmentHash,
+          chain,
+          expectedProfit: state.expectedProfit,
+          minProfit: state.params.minProfit.toString(),
+          hint: 'Inject a quote/simulation service to enable pre-reveal profitability validation',
+        });
       }
 
       // 4. Get contract
@@ -654,14 +663,13 @@ export class CommitRevealService {
     });
 
     // FIX: Redis-first with atomic SET NX for multi-process safety
-    if (process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true') {
+    if (this.redisFeatureEnabled) {
       try {
-        // Use injected Redis client or fall back to global (for backward compatibility)
-        const redis = this.redisClient || (global as any).redisClient as Redis | undefined;
-        if (redis) {
+        // Use injected Redis client (requires DI via constructor)
+        if (this.redisClient) {
           // Atomic SET with NX (not exists) and EX (expiration)
           // Returns 'OK' if set, null if key already exists
-          const result = await redis.set(key, data, 'EX', REDIS_TTL_SECONDS, 'NX');
+          const result = await this.redisClient.set(key, data, 'EX', REDIS_TTL_SECONDS, 'NX');
 
           if (result === 'OK') {
             // Successfully stored in Redis - sync to local memory cache
@@ -712,7 +720,7 @@ export class CommitRevealService {
     this.inMemoryCache.set(key, data);
     this.logger.debug('Stored commitment in memory only', {
       key,
-      reason: process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true' ? 'Redis fallback' : 'Redis disabled',
+      reason: this.redisFeatureEnabled ? 'Redis fallback' : 'Redis disabled',
       storageMode: 'memory-only'
     });
   }
@@ -727,12 +735,11 @@ export class CommitRevealService {
     const key = `${REDIS_KEY_PREFIX}:${chain}:${commitmentHash}`;
 
     // Try Redis first
-    if (process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true') {
+    if (this.redisFeatureEnabled) {
       try {
-        // Use injected Redis client or fall back to global (for backward compatibility)
-        const redis = this.redisClient || (global as any).redisClient as Redis | undefined;
-        if (redis) {
-          const data = await redis.get(key);
+        // Use injected Redis client (requires DI via constructor)
+        if (this.redisClient) {
+          const data = await this.redisClient.get(key);
           if (data) {
             const parsed = JSON.parse(data);
             // Convert string back to bigint
@@ -788,12 +795,11 @@ export class CommitRevealService {
     const key = `${REDIS_KEY_PREFIX}:${chain}:${commitmentHash}`;
 
     // Delete from Redis
-    if (process.env.FEATURE_COMMIT_REVEAL_REDIS === 'true') {
+    if (this.redisFeatureEnabled) {
       try {
-        // Use injected Redis client or fall back to global (for backward compatibility)
-        const redis = this.redisClient || (global as any).redisClient as Redis | undefined;
-        if (redis) {
-          await redis.del(key);
+        // Use injected Redis client (requires DI via constructor)
+        if (this.redisClient) {
+          await this.redisClient.del(key);
         }
       } catch (error) {
         // Ignore deletion errors
@@ -871,18 +877,28 @@ export class CommitRevealService {
   }
 
   /**
-   * Validate profitability before reveal (simple check)
+   * Validate profitability before reveal.
    *
-   * TODO: Implement proper quote fetching for accurate validation
-   * For MVP, we trust the original profitability assessment
+   * NOT YET IMPLEMENTED — requires a quote or simulation service to fetch
+   * fresh prices and compare against state.params.minProfit.
+   *
+   * Implementation plan:
+   * 1. Inject ISimulationService or a quote provider via constructor
+   * 2. Simulate the swap path to get expected output
+   * 3. Compare expected output against minProfit + gas costs
+   * 4. Return false if expected profit < threshold
+   *
+   * Until implemented, the caller in reveal() logs a warning and proceeds
+   * without re-validation. The on-chain minProfit check in the contract
+   * provides baseline protection against executing at a loss.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async validateProfitability(
-    state: CommitmentState,
-    chain: string,
-    ctx: StrategyContext
+    _state: CommitmentState,
+    _chain: string,
+    _ctx: StrategyContext
   ): Promise<boolean> {
-    // MVP: Always return true (optimistic)
-    // v2: Fetch fresh quotes and compare to minProfit
+    // Not implemented — see JSDoc above for implementation plan
     return true;
   }
 

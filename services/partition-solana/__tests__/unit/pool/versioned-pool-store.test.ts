@@ -10,27 +10,13 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { VersionedPoolStore } from '../../../src/pool/versioned-pool-store';
 import type { InternalPoolInfo } from '../../../src/types';
+import { createMockInternalPool } from '../../helpers/test-fixtures';
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-function createMockPool(overrides: Partial<InternalPoolInfo> = {}): InternalPoolInfo {
-  return {
-    address: 'pool-address-1',
-    programId: 'program-1',
-    dex: 'raydium',
-    token0: { mint: 'mint0', symbol: 'SOL', decimals: 9 },
-    token1: { mint: 'mint1', symbol: 'USDC', decimals: 6 },
-    fee: 25,
-    price: 100,
-    lastUpdated: Date.now(),
-    normalizedToken0: 'SOL',
-    normalizedToken1: 'USDC',
-    pairKey: 'SOL-USDC',
-    ...overrides,
-  };
-}
+const createMockPool = createMockInternalPool;
 
 // =============================================================================
 // Tests

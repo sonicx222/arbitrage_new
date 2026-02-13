@@ -32,7 +32,7 @@ const portConfig = require('../../shared/constants/service-ports.json');
  * @throws {Error} If port is NaN or out of range
  */
 function parsePort(envValue, defaultValue, envVarName) {
-  const rawValue = envValue || String(defaultValue);
+  const rawValue = envValue ?? String(defaultValue);
   const port = parseInt(rawValue, 10);
 
   if (isNaN(port)) {

@@ -23,6 +23,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PANCAKESWAP_V3_FACTORIES, CORE_TOKENS } from '@arbitrage/config';  // P2-002 FIX: Import token addresses
 import { normalizeNetworkName, getSafeChainId } from './lib/deployment-utils';  // P1-007 FIX: Import safe chain ID getter
+import {
+  FEE_TIERS,
+  getCommonTokenPairs,
+  type DiscoveredPool as BaseDiscoveredPool,
+} from './lib/pancakeswap-utils';
 
 // =============================================================================
 // Configuration
@@ -35,90 +40,24 @@ import { normalizeNetworkName, getSafeChainId } from './lib/deployment-utils';  
 const PANCAKESWAP_V3_FACTORY_ADDRESSES = PANCAKESWAP_V3_FACTORIES;
 
 /**
- * P2-002 FIX: Build common token pairs dynamically from CORE_TOKENS
- *
- * This eliminates hardcoded token addresses in favor of importing from @arbitrage/config.
- * Maintains single source of truth for token addresses across the entire codebase.
- *
- * Strategy: Generate pairs for high-volume anchor tokens (native + stables)
- * - Native token (WETH, WBNB, etc.) paired with all stables
- * - Stable triangle: USDT/USDC, USDC/DAI
- *
- * @param networkName - Network name (e.g., 'bsc', 'ethereum', 'arbitrum')
- * @returns Array of token pairs for discovery
+ * getCommonTokenPairs, FEE_TIERS, and discoverPools imported from
+ * ./lib/pancakeswap-utils.ts (single source of truth shared with
+ * deploy-pancakeswap.ts)
  */
-function getCommonTokenPairs(
-  networkName: string
-): Array<{ tokenA: string; tokenB: string; symbol: string }> {
-  const tokens = CORE_TOKENS[networkName];
-  if (!tokens || tokens.length === 0) {
-    return [];
-  }
-
-  // Build lookup map for easy access
-  const tokenMap = new Map(tokens.map(t => [t.symbol, t.address]));
-
-  const pairs: Array<{ tokenA: string; tokenB: string; symbol: string }> = [];
-
-  // Helper to add pair if both tokens exist
-  const addPair = (symbolA: string, symbolB: string) => {
-    const addrA = tokenMap.get(symbolA);
-    const addrB = tokenMap.get(symbolB);
-    if (addrA && addrB) {
-      pairs.push({
-        tokenA: addrA,
-        tokenB: addrB,
-        symbol: `${symbolA}/${symbolB}`,
-      });
-    }
-  };
-
-  // Identify native token symbol by network
-  const nativeSymbol = networkName === 'bsc' ? 'WBNB' :
-                       networkName === 'polygon' ? 'WMATIC' :
-                       'WETH'; // Ethereum, Arbitrum, Base, Optimism all use WETH
-
-  // Native token paired with major stables
-  addPair(nativeSymbol, 'USDT');
-  addPair(nativeSymbol, 'USDC');
-  addPair(nativeSymbol, 'DAI');
-
-  // Stable triangle (high-volume arbitrage pairs)
-  addPair('USDT', 'USDC');
-  addPair('USDC', 'DAI');
-  addPair('USDT', 'DAI');
-
-  // Native token paired with major crypto assets
-  addPair(nativeSymbol, 'WBTC');
-  if (networkName === 'bsc') {
-    addPair('WBNB', 'ETH');   // BSC has bridged ETH
-    addPair('WBNB', 'BTCB');  // BSC uses BTCB instead of WBTC
-  }
-
-  return pairs;
-}
-
-/**
- * PancakeSwap V3 fee tiers (in hundredths of a bip)
- */
-const FEE_TIERS = [
-  { value: 100, percent: '0.01%' },
-  { value: 500, percent: '0.05%' },
-  { value: 2500, percent: '0.25%' },
-  { value: 10000, percent: '1%' },
-] as const;
 
 // =============================================================================
 // Types
 // =============================================================================
 
-interface DiscoveredPool {
-  pool: string;
+/**
+ * Extended pool discovery result with liquidity metadata
+ *
+ * Extends the base DiscoveredPool from pancakeswap-utils.ts with additional
+ * fields specific to the standalone discovery script (token addresses, liquidity).
+ */
+interface DiscoveredPool extends BaseDiscoveredPool {
   tokenA: string;
   tokenB: string;
-  pair: string;
-  feeTier: number;
-  feePercent: string;
   token0?: string;
   token1?: string;
 }

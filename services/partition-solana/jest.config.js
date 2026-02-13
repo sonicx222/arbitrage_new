@@ -19,6 +19,7 @@ module.exports = {
     '^@arbitrage/types$': '<rootDir>/../../shared/types/index.ts',
     '^@arbitrage/config$': '<rootDir>/../../shared/config/src/index.ts',
     '^@arbitrage/unified-detector$': '<rootDir>/../unified-detector/src/index.ts',
+    '^@arbitrage/test-utils/(.*)$': '<rootDir>/../../shared/test-utils/src/$1',
   },
   testTimeout: 10000,
   // Clear mocks between tests for isolation

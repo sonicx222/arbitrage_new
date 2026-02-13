@@ -53,7 +53,7 @@ function buildTemplateData(results) {
       : '0.0',
     failedTestsClass: r.summary.failedTests > 0 ? 'failed' : '',
     qualityMetrics: {
-      baselineScore: r.qualityMetrics.baselineScore || 'N/A',
+      baselineScore: r.qualityMetrics.baselineScore ?? 'N/A',
       finalScore: r.qualityMetrics.finalScore,
       scoreChange: r.qualityMetrics.scoreChange,
       impact: r.qualityMetrics.impact,
@@ -132,7 +132,7 @@ function printResults(results) {
   console.log(`Execution Time: ${(r.summary.executionTime / 1000).toFixed(2)}s`);
   console.log(`Tests: ${r.summary.passedTests}/${r.summary.totalTests} passed`);
 
-  if (r.qualityMetrics.baselineScore) {
+  if (r.qualityMetrics.baselineScore != null) {
     console.log(`\nQuality Score:`);
     console.log(`   Baseline: ${r.qualityMetrics.baselineScore}`);
     console.log(`   Final:    ${r.qualityMetrics.finalScore}`);

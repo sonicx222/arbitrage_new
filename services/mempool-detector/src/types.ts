@@ -22,8 +22,7 @@ export type SwapRouterType =
   | 'sushiswap'
   | 'curve'
   | '1inch'
-  | 'pancakeswap'
-  | 'unknown';
+  | 'pancakeswap';
 
 /**
  * Decoded pending swap intent extracted from a pending transaction.
@@ -73,6 +72,17 @@ export interface PendingSwapIntent {
   chainId: number;
   /** Timestamp when the pending tx was first seen */
   firstSeen: number;
+  /**
+   * Curve pool metadata for swaps where token addresses couldn't be resolved
+   * from the pool index. Present only for Curve swaps with unresolved tokens.
+   * Downstream systems can use this to resolve tokens via on-chain calls.
+   */
+  _curvePoolInfo?: {
+    poolAddress: string;
+    tokenInIndex: number;
+    tokenOutIndex: number;
+    tokensResolved: boolean;
+  };
 }
 
 /**
@@ -316,7 +326,15 @@ export interface MempoolDetectorConfig {
   healthCheckPort: number;
   /** Redis stream name for publishing opportunities */
   opportunityStream?: string;
-  /** Minimum swap size in USD to process */
+  /**
+   * Minimum swap size in USD to process.
+   *
+   * @reserved Currently accepted and validated but NOT used for filtering.
+   * The mempool-detector publishes all decoded swaps; USD-based filtering
+   * is deferred to downstream consumers (cross-chain-detector) which have
+   * access to price oracles. This field is reserved for future use if a
+   * lightweight price cache is added to the mempool-detector.
+   */
   minSwapSizeUsd?: number;
   /** Maximum pending transactions to buffer */
   maxBufferSize?: number;

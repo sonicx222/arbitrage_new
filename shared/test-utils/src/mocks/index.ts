@@ -20,10 +20,6 @@ export {
   MockUnifiedChainDetector,
   createCoreMocks,
   createConfigMocks,
-  createUnifiedDetectorMocks,
-  createMockHttpServer,
-  setupPartitionTestEnv,
-  cleanupPartitionTestEnv,
 } from './partition-service.mock';
 
 export type {
@@ -31,7 +27,7 @@ export type {
   MockStateManager,
   MockDetectorOptions,
   PartitionConfigOptions,
-  MockHttpServer,
+  CoreMocksOptions,
 } from './partition-service.mock';
 
 // Shared mock factories (PerfLogger, ExecutionStateManager)

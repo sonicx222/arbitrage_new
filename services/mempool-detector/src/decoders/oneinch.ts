@@ -58,8 +58,9 @@ const ONEINCH_ABI = [
   'function clipperSwapTo(address clipperExchange, address recipient, address srcToken, address dstToken, uint256 inputAmount, uint256 outputAmount, uint256 goodUntil, bytes32 r, bytes32 vs) returns (uint256 returnAmount)',
 ];
 
-// Pre-create Interface instance for performance
+// Pre-create Interface and AbiCoder instances for performance
 const oneInchInterface = new Interface(ONEINCH_ABI);
+const abiCoder = new AbiCoder();
 
 // Native ETH placeholder used by 1inch
 const ETH_ADDRESS = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -104,7 +105,7 @@ const NATIVE_TOKENS_BY_CHAIN_ID: Record<number, string> = (() => {
   }
 
   return fallback;
-})()
+})();
 
 // =============================================================================
 // DECODER IMPLEMENTATION
@@ -252,7 +253,6 @@ export class OneInchDecoder extends BaseDecoder {
    * Manual decoding for when ABI parsing fails.
    */
   private manualDecode(tx: RawPendingTransaction, selector: string): PendingSwapIntent | null {
-    const abiCoder = new AbiCoder();
     const inputData = tx.input.slice(10);
     const chainId = tx.chainId ?? 1;
 
@@ -302,7 +302,7 @@ export class OneInchDecoder extends BaseDecoder {
    */
   private resolveToken(token: string, chainId: number): string {
     if (token.toLowerCase() === ETH_ADDRESS.toLowerCase()) {
-      return NATIVE_TOKENS_BY_CHAIN_ID[chainId] || token;
+      return NATIVE_TOKENS_BY_CHAIN_ID[chainId] ?? token;
     }
     return token;
   }

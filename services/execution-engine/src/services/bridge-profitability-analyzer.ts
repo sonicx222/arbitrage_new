@@ -175,29 +175,5 @@ export class BridgeProfitabilityAnalyzer {
   }
 }
 
-// =============================================================================
-// Standalone Function (for backward compatibility)
-// =============================================================================
-
-/**
- * Check if bridge fees make the opportunity unprofitable.
- *
- * @param bridgeFeeWei - Bridge fee in wei (from bridge quote)
- * @param expectedProfitUsd - Expected profit in USD
- * @param nativeTokenPriceUsd - Price of native token in USD
- * @param logger - Logger instance
- * @param options - Configuration options
- * @returns Object with profitability status and details
- *
- * @deprecated Use BridgeProfitabilityAnalyzer.analyze() instead
- */
-export function checkBridgeProfitability(
-  bridgeFeeWei: bigint,
-  expectedProfitUsd: number,
-  nativeTokenPriceUsd: number,
-  logger: Logger,
-  options: BridgeProfitabilityOptions = {}
-): BridgeProfitabilityResult {
-  const analyzer = new BridgeProfitabilityAnalyzer(logger);
-  return analyzer.analyze(bridgeFeeWei, expectedProfitUsd, nativeTokenPriceUsd, options);
-}
+// P2 FIX #13: Removed deprecated standalone function checkBridgeProfitability()
+// Zero production callers — strategies use BridgeProfitabilityAnalyzer.analyze() via class method.

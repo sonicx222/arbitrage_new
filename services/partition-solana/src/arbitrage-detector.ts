@@ -75,11 +75,18 @@ const MAX_TOKEN_CACHE_SIZE = 10000;
 /** Maximum size for pool store */
 const MAX_POOL_STORE_SIZE = 50000;
 
+/**
+ * Minimum interval between updates for the same pool address (ms).
+ * Prevents CPU saturation from rapid pool update floods.
+ * @see Fix #22 - partition-solana-deep-analysis.md
+ */
+const POOL_UPDATE_COOLDOWN_MS = 100;
+
 /** Maximum latency samples for rolling average */
 const MAX_LATENCY_SAMPLES = 100;
 
 /** Redis stream for opportunity publishing */
-const OPPORTUNITY_STREAM = 'arbitrage:opportunities';
+const OPPORTUNITY_STREAM = 'stream:opportunities';
 
 /** Redis retry configuration */
 const REDIS_RETRY = {
@@ -106,6 +113,9 @@ const SOLANA_ADDRESS_REGEX = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** Regex for test/mock addresses (allows 1-64 char alphanumeric with hyphens) */
 const TEST_ADDRESS_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
+
+/** Default fee in basis points used when adapting a UnifiedPriceUpdate with no fee field */
+const DEFAULT_ADAPTED_FEE_BPS = 30;
 
 // =============================================================================
 // Utility Functions
@@ -168,6 +178,8 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // Pool management
   private readonly poolStore = new VersionedPoolStore(MAX_POOL_STORE_SIZE);
   private readonly tokenCache = new LRUCache<string, string>(MAX_TOKEN_CACHE_SIZE);
+  /** Tracks last update time per pool address for rate limiting (Fix #22) */
+  private readonly poolUpdateTimestamps = new Map<string, number>();
 
   // Opportunity factory
   private opportunityFactory!: OpportunityFactory;
@@ -267,9 +279,14 @@ export class SolanaArbitrageDetector extends EventEmitter {
         throw new Error(`Invalid minProfitThreshold: ${config.minProfitThreshold}. Must be >= 0.`);
       }
     }
+    if (config.defaultTradeValueUsd !== undefined) {
+      if (isNaN(config.defaultTradeValueUsd) || config.defaultTradeValueUsd <= 0) {
+        throw new Error(`Invalid defaultTradeValueUsd: ${config.defaultTradeValueUsd}. Must be > 0.`);
+      }
+    }
     if (config.maxTriangularDepth !== undefined) {
-      if (!Number.isInteger(config.maxTriangularDepth) || config.maxTriangularDepth < 2) {
-        throw new Error(`Invalid maxTriangularDepth: ${config.maxTriangularDepth}. Must be integer >= 2.`);
+      if (!Number.isInteger(config.maxTriangularDepth) || config.maxTriangularDepth < 2 || config.maxTriangularDepth > 10) {
+        throw new Error(`Invalid maxTriangularDepth: ${config.maxTriangularDepth}. Must be integer between 2 and 10.`);
       }
     }
     if (config.opportunityExpiryMs !== undefined) {
@@ -299,7 +316,8 @@ export class SolanaArbitrageDetector extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    // Clean up detector listeners
+    // Always clean up detector listeners, even if not running
+    // (connectToSolanaDetector can be called independently of start)
     if (this.connectedDetector && this.detectorListeners.length > 0) {
       for (const { event, handler } of this.detectorListeners) {
         this.connectedDetector.off(event, handler);
@@ -309,10 +327,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
       this.logger.debug('Cleaned up detector event listeners');
     }
 
-    this.tokenCache.clear();
-
     if (!this.running) return;
     this.running = false;
+
+    this.tokenCache.clear();
+    this.poolUpdateTimestamps.clear();
 
     this.logger.info('SolanaArbitrageDetector stopped');
     this.emit('stopped');
@@ -327,6 +346,15 @@ export class SolanaArbitrageDetector extends EventEmitter {
   // ===========================================================================
 
   addPool(pool: SolanaPoolInfo): void {
+    // Fix #22: Rate limit pool updates to prevent CPU saturation from update floods
+    const now = Date.now();
+    const lastUpdate = this.poolUpdateTimestamps.get(pool.address);
+    if (lastUpdate !== undefined && (now - lastUpdate) < POOL_UPDATE_COOLDOWN_MS) {
+      this.logger.debug('Pool update throttled', { address: pool.address });
+      return;
+    }
+    this.poolUpdateTimestamps.set(pool.address, now);
+
     if (!isValidPoolAddress(pool.address) && !pool.address.includes(':')) {
       this.logger.warn('Invalid pool address format, skipping', {
         address: pool.address?.slice(0, 50),
@@ -400,14 +428,15 @@ export class SolanaArbitrageDetector extends EventEmitter {
     const oldPrice = pool.price;
     if (oldPrice === newPrice && !lastSlot) return;
 
-    const updatedPool: InternalPoolInfo = {
-      ...pool,
-      price: newPrice,
-      lastUpdated: Date.now(),
-      lastSlot: lastSlot ?? pool.lastSlot,
-    };
+    // Mutate in-place (VersionedPoolStore stores by reference) — avoids spread allocation per price tick
+    pool.price = newPrice;
+    pool.lastUpdated = Date.now();
+    if (lastSlot !== undefined) {
+      pool.lastSlot = lastSlot;
+    }
 
-    this.poolStore.set(updatedPool);
+    // Re-set to update version tracking in pool store
+    this.poolStore.set(pool);
 
     if (oldPrice !== newPrice) {
       this.emit('price-update', {
@@ -815,7 +844,12 @@ export class SolanaArbitrageDetector extends EventEmitter {
     }
 
     const adaptPriceUpdate = (update: UnifiedPriceUpdate | SolanaPoolInfo): SolanaPoolInfo | null => {
-      if (!update || typeof update !== 'object') return null;
+      if (!update || typeof update !== 'object') {
+        this.logger.warn('Received invalid price update (null/undefined/non-object)', {
+          type: typeof update,
+        });
+        return null;
+      }
 
       if ('token0' in update && typeof update.token0 === 'object' && 'symbol' in update.token0) {
         return update as SolanaPoolInfo;
@@ -824,11 +858,25 @@ export class SolanaArbitrageDetector extends EventEmitter {
       const priceUpdate = update as UnifiedPriceUpdate;
       if (!priceUpdate.chain || !priceUpdate.dex || !priceUpdate.pairKey ||
           !priceUpdate.token0 || !priceUpdate.token1 || typeof priceUpdate.price !== 'number') {
+        this.logger.warn('Received malformed price update with missing fields', {
+          chain: priceUpdate.chain,
+          hasDex: !!priceUpdate.dex,
+          hasPairKey: !!priceUpdate.pairKey,
+        });
         return null;
       }
 
       if (priceUpdate.chain !== this.config.chainId && priceUpdate.chain !== 'solana') {
         return null;
+      }
+
+      const fee = priceUpdate.fee ?? DEFAULT_ADAPTED_FEE_BPS;
+      if (priceUpdate.fee === undefined || priceUpdate.fee === null) {
+        this.logger.debug('Using default adapted fee for price update', {
+          pairKey: priceUpdate.pairKey,
+          dex: priceUpdate.dex,
+          defaultFeeBps: DEFAULT_ADAPTED_FEE_BPS,
+        });
       }
 
       return {
@@ -837,7 +885,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
         dex: priceUpdate.dex,
         token0: { mint: priceUpdate.token0, symbol: priceUpdate.token0, decimals: getTokenDecimals(priceUpdate.token0) },
         token1: { mint: priceUpdate.token1, symbol: priceUpdate.token1, decimals: getTokenDecimals(priceUpdate.token1) },
-        fee: priceUpdate.fee ?? 30,
+        fee,
         reserve0: priceUpdate.reserve0,
         reserve1: priceUpdate.reserve1,
         price: priceUpdate.price,
@@ -912,6 +960,11 @@ export class SolanaArbitrageDetector extends EventEmitter {
       return;
     }
 
+    if (pools.length === 0) {
+      this.logger.debug('importPools called with empty array, nothing to import');
+      return;
+    }
+
     let imported = 0;
     let skipped = 0;
 
@@ -924,8 +977,7 @@ export class SolanaArbitrageDetector extends EventEmitter {
       }
     }
 
-    // Log even for empty arrays (test expects this)
-    this.logger.info('Imported pools', { count: imported });
+    this.logger.info('Imported pools', { imported, skipped, total: pools.length });
   }
 }
 

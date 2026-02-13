@@ -31,6 +31,7 @@ import type {
   Logger,
   ExecutionStats,
   ConsumerConfig,
+  GasBaselineEntry,
 } from '../types';
 import { DEFAULT_CONSUMER_CONFIG } from '../types';
 import type { LockConflictTracker } from './lock-conflict-tracker';
@@ -42,14 +43,8 @@ import type { SimulationMetricsSnapshot } from './simulation/simulation-metrics-
 // Types
 // =============================================================================
 
-/**
- * Gas baseline entry for tracking gas price history.
- * Used for spike detection and trend analysis.
- */
-export interface GasBaselineEntry {
-  price: bigint;
-  timestamp: number;
-}
+// GasBaselineEntry is now imported from ../types (unified definition)
+export type { GasBaselineEntry } from '../types';
 
 /**
  * Dependencies for HealthMonitoringManager.

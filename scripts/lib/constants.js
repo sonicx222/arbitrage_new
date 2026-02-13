@@ -160,6 +160,19 @@ const UNIFIED_DETECTOR_STARTUP_DELAY_MS = 4500;
 const P4_STARTUP_DELAY_MS = 5000;
 
 // =============================================================================
+// Path Constants
+// =============================================================================
+
+const path = require('path');
+
+/**
+ * Root directory of the monorepo.
+ * Centralized here to avoid repeated `path.join(__dirname, '..', '..')` across scripts/lib/*.
+ * @type {string}
+ */
+const ROOT_DIR = path.join(__dirname, '..', '..');
+
+// =============================================================================
 // Validation Thresholds (P3-3)
 // =============================================================================
 
@@ -176,6 +189,9 @@ const LARGE_NODE_MODULES_THRESHOLD_BYTES = 10 * 1024 * 1024;
 // =============================================================================
 
 module.exports = {
+  // Paths
+  ROOT_DIR,
+
   // Timeouts
   HEALTH_CHECK_TIMEOUT_MS,
   STATUS_CHECK_TIMEOUT_MS,

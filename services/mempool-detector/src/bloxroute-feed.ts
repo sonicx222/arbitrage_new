@@ -38,6 +38,13 @@ const DEFAULT_MAX_RECONNECT_DELAY = 60000;
 const DEFAULT_CONNECTION_TIMEOUT = 10000;
 const DEFAULT_HEARTBEAT_INTERVAL = 30000;
 
+/**
+ * Maximum allowed WebSocket message size (1 MB).
+ * Messages exceeding this are dropped before JSON.parse to prevent OOM
+ * from malicious or buggy feed data.
+ */
+const MAX_MESSAGE_SIZE = 1_048_576;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -114,6 +121,9 @@ export class BloXrouteFeed extends EventEmitter {
   // Subscription management
   private subscriptionId: string | null = null;
   private pendingTxHandlers: Set<PendingTxHandler> = new Set();
+  // INVARIANT: cachedHandlerArray MUST be rebuilt whenever pendingTxHandlers changes.
+  // Maintained by: subscribePendingTxs (add+rebuild), disconnect (clear both).
+  private cachedHandlerArray: PendingTxHandler[] = [];
   private nextRequestId = 1;
 
   // Pre-computed filter sets for O(1) hot path lookup (performance optimization)
@@ -300,6 +310,7 @@ export class BloXrouteFeed extends EventEmitter {
 
     // Clear handlers
     this.pendingTxHandlers.clear();
+    this.cachedHandlerArray = [];
     this.subscriptionId = null;
 
     this.connectionState = 'disconnected';
@@ -314,6 +325,7 @@ export class BloXrouteFeed extends EventEmitter {
   subscribePendingTxs(handler?: PendingTxHandler): void {
     if (handler) {
       this.pendingTxHandlers.add(handler);
+      this.cachedHandlerArray = [...this.pendingTxHandlers];
     }
 
     if (this.connectionState !== 'connected' || !this.ws) {
@@ -348,6 +360,16 @@ export class BloXrouteFeed extends EventEmitter {
     this.metrics.messagesReceived++;
     this.metrics.lastMessageTime = Date.now();
 
+    // FIX P0: Guard against oversized messages before JSON.parse to prevent OOM.
+    // BloXroute pending tx messages are typically <10KB; 1MB is a safe upper bound.
+    if (data.length > MAX_MESSAGE_SIZE) {
+      this.logger.warn('Dropping oversized WebSocket message', {
+        size: data.length,
+        maxSize: MAX_MESSAGE_SIZE,
+      });
+      return;
+    }
+
     let message: BloXrouteMessage;
     try {
       message = JSON.parse(data);
@@ -380,7 +402,16 @@ export class BloXrouteFeed extends EventEmitter {
 
     // Handle pending transaction notification
     if (message.method === 'subscribe' && message.params?.result) {
-      this.processPendingTx(message.params.result as BloXroutePendingTx);
+      const result = message.params.result;
+      // Validate shape before processing - must have txHash and txContents
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'txHash' in result &&
+        'txContents' in result
+      ) {
+        this.processPendingTx(result as BloXroutePendingTx);
+      }
     }
   }
 
@@ -507,8 +538,8 @@ export class BloXrouteFeed extends EventEmitter {
       this.recordLatency(latency);
     }
 
-    // Notify handlers (copy Set to prevent mutation during iteration - Fix 5.3)
-    const handlers = [...this.pendingTxHandlers];
+    // Notify handlers (cached array rebuilt only on add/clear - Fix 5.3, Fix 10)
+    const handlers = this.cachedHandlerArray;
     for (const handler of handlers) {
       try {
         handler(rawTx);

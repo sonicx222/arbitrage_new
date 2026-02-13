@@ -27,6 +27,7 @@ import {
   basisPointsToDecimal,
   meetsThreshold,
   getDefaultPrice,
+  getEvmGasCostUsd,
   DEFAULT_DETECTION_CONFIG,
   CROSS_CHAIN_EXPIRY_MULTIPLIER,
   DEFAULT_SOL_PRICE_USD,
@@ -106,10 +107,9 @@ export function compareCrossChainPrices(
     const evmToken1 = normalizeToken(evmPrice.token1);
     const evmPairKey = createPairKey(evmToken0, evmToken1);
 
-    const solanaPools = poolStore.getPoolsForPair(evmPairKey)
-      .filter(p => isValidPrice(p.price) && !isPriceStale(p, config.priceStalenessMs, logger));
-
-    for (const solanaPool of solanaPools) {
+    const allSolanaPools = poolStore.getPoolsForPair(evmPairKey);
+    for (const solanaPool of allSolanaPools) {
+      if (!isValidPrice(solanaPool.price) || isPriceStale(solanaPool, config.priceStalenessMs, logger)) continue;
       // Raw price difference - fees are applied in detection
       const priceDiff = ((evmPrice.price - solanaPool.price!) / solanaPool.price!) * 100;
 
@@ -137,11 +137,17 @@ export function compareCrossChainPrices(
 /**
  * Estimate cross-chain gas costs as a percentage of trade value.
  *
+ * When evmChain is provided, uses per-chain gas cost estimates
+ * (e.g., Arbitrum ~$0.10 vs Ethereum ~$15) instead of the flat default.
+ *
  * @param config - Detection configuration
+ * @param evmChain - Optional EVM chain name for chain-specific gas cost
  * @returns Gas cost as decimal
  */
-export function estimateCrossChainGasCostPercent(config: CrossChainDetectorConfig): number {
-  const evmGasCost = config.crossChainCosts.evmGasCostUsd;
+export function estimateCrossChainGasCostPercent(config: CrossChainDetectorConfig, evmChain?: string): number {
+  const evmGasCost = evmChain
+    ? getEvmGasCostUsd(evmChain, config.crossChainCosts.evmGasCostUsd)
+    : config.crossChainCosts.evmGasCostUsd;
   const solanaTxCost = config.crossChainCosts.solanaTxCostUsd;
   const totalGasCostUsd = evmGasCost + solanaTxCost;
   return totalGasCostUsd / config.defaultTradeValueUsd;
@@ -202,8 +208,8 @@ export function detectCrossChainArbitrage(
     // 2. Bridge fee
     const bridgeFee = config.crossChainCosts.bridgeFeeDefault;
 
-    // 3. Gas costs as percentage of trade value
-    const gasCostPercent = estimateCrossChainGasCostPercent(config);
+    // 3. Gas costs as percentage of trade value (per-chain: Fix #21)
+    const gasCostPercent = estimateCrossChainGasCostPercent(config, comparison.evmChain);
 
     // 4. Latency risk premium
     const latencyRisk = config.crossChainCosts.latencyRiskPremium;

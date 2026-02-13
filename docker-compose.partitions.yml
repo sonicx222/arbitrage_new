@@ -9,8 +9,8 @@
 #   - P1 Asia-Fast:    BSC, Polygon, Avalanche, Fantom     (Port 3001)
 #   - P2 L2-Turbo:     Arbitrum, Optimism, Base            (Port 3002)
 #   - P3 High-Value:   Ethereum, zkSync, Linea             (Port 3003)
-#   - P4 Solana:       Solana (non-EVM)                    (Port 3006)
-#   - Cross-Chain:     Cross-chain arbitrage detection     (Port 3004)
+#   - P4 Solana:       Solana (non-EVM)                    (Port 3004)
+#   - Cross-Chain:     Cross-chain arbitrage detection     (Port 3006)
 #   - Execution:       Trade execution engine              (Port 3005)
 #
 # Usage:
@@ -168,7 +168,7 @@ services:
       - SOLANA_RPC_URL=${SOLANA_RPC_URL}
       - SOLANA_WS_URL=${SOLANA_WS_URL}
     ports:
-      - "3006:3001"
+      - "3004:3001"
     depends_on:
       redis:
         condition: service_healthy
@@ -192,7 +192,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - LOG_LEVEL=info
     ports:
-      - "3004:3001"
+      - "3006:3001"
     depends_on:
       redis:
         condition: service_healthy
@@ -271,8 +271,8 @@ services:
       - P1_EXTERNAL_PORT=3001
       - P2_EXTERNAL_PORT=3002
       - P3_EXTERNAL_PORT=3003
-      - P4_EXTERNAL_PORT=3006
-      - CROSS_CHAIN_EXTERNAL_PORT=3004
+      - P4_EXTERNAL_PORT=3004
+      - CROSS_CHAIN_EXTERNAL_PORT=3006
       - EXECUTION_EXTERNAL_PORT=3005
     ports:
       - "3000:3000"

@@ -1056,6 +1056,65 @@ describe('BalancerV2FlashArbitrage', () => {
       await ethers.provider.send('hardhat_stopImpersonatingAccount', [vaultAddress]);
     });
 
+    it('should revert with MultiAssetNotSupported when multiple tokens are provided', async () => {
+      const { arbitrage, vault, weth, usdc, owner } = await loadFixture(deployContractsFixture);
+
+      // To reach the MultiAssetNotSupported check, we need _flashLoanActive = true.
+      // The _flashLoanActive guard (FlashLoanNotActive) runs before the multi-asset check.
+      // We use hardhat_setStorageAt to force _flashLoanActive = true in storage.
+      //
+      // Storage layout for BalancerV2FlashArbitrage (verified empirically):
+      // Slot 0: Ownable._owner (address)
+      // Slot 1: Ownable2Step._pendingOwner (address) + Pausable._paused (bool, packed)
+      // Slot 2: ReentrancyGuard._status (uint256, initialized to 1)
+      // Slot 3: BaseFlashArbitrage.minimumProfit
+      // Slot 4: BaseFlashArbitrage.totalProfits
+      // Slot 5: BaseFlashArbitrage.tokenProfits (mapping)
+      // Slot 6: BaseFlashArbitrage.swapDeadline (= 60)
+      // Slot 7: BaseFlashArbitrage._approvedRouters._inner._values (array length)
+      // Slot 8: BaseFlashArbitrage._approvedRouters._inner._indexes (mapping)
+      // Slot 9: BalancerV2FlashArbitrage._flashLoanActive (bool)
+      const arbitrageAddress = await arbitrage.getAddress();
+      const flashLoanActiveSlot = 9;
+
+      // Set _flashLoanActive = true
+      await ethers.provider.send('hardhat_setStorageAt', [
+        arbitrageAddress,
+        ethers.toBeHex(flashLoanActiveSlot, 32),
+        ethers.toBeHex(1, 32), // true = 1
+      ]);
+
+      // Impersonate the vault to call receiveFlashLoan directly
+      const vaultAddress = await vault.getAddress();
+      await ethers.provider.send('hardhat_impersonateAccount', [vaultAddress]);
+      await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther('1') });
+      const vaultSigner = await ethers.getSigner(vaultAddress);
+
+      const userData = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[]', 'uint256'],
+        [[], 0]
+      );
+
+      // Call receiveFlashLoan with 2 tokens to trigger MultiAssetNotSupported
+      await expect(
+        arbitrage.connect(vaultSigner).receiveFlashLoan(
+          [await weth.getAddress(), await usdc.getAddress()],
+          [ethers.parseEther('10'), ethers.parseUnits('10000', 6)],
+          [0, 0],
+          userData
+        )
+      ).to.be.revertedWithCustomError(arbitrage, 'MultiAssetNotSupported');
+
+      await ethers.provider.send('hardhat_stopImpersonatingAccount', [vaultAddress]);
+
+      // Reset _flashLoanActive to false for clean state
+      await ethers.provider.send('hardhat_setStorageAt', [
+        arbitrageAddress,
+        ethers.toBeHex(flashLoanActiveSlot, 32),
+        ethers.toBeHex(0, 32),
+      ]);
+    });
+
     it('should repay flash loan correctly', async () => {
       const { arbitrage, vault, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 

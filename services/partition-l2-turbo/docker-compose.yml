@@ -54,6 +54,9 @@ services:
       - OPTIMISM_WS_URL=${OPTIMISM_WS_URL:-}
       - BASE_WS_URL=${BASE_WS_URL:-}
     ports:
+      # NOTE: For production, restrict to internal network only (remove host port mapping)
+      # or use "127.0.0.1:3002:3002" to bind to localhost. The /stats endpoint exposes
+      # operational intelligence; set HEALTH_AUTH_TOKEN to require Bearer auth.
       - "3002:3002"
     depends_on:
       redis:

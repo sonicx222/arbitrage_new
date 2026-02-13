@@ -17,7 +17,7 @@
 import { ethers } from 'ethers';
 import { ARBITRAGE_CONFIG } from '@arbitrage/config';
 import { createPinoLogger, type ILogger } from '@arbitrage/core';
-import type { Logger } from '../types';
+import type { Logger, GasBaselineEntry } from '../types';
 
 // =============================================================================
 // Module Logger
@@ -41,8 +41,13 @@ function getModuleLogger(): ILogger {
  *
  * GAS_SPIKE_MULTIPLIER_BIGINT: Used for initial spike detection (e.g., 1.5x = 150)
  * WEI_PER_GWEI: 10^9, pre-computed for wei-to-gwei conversions
+ *
+ * P2 FIX #15: Guard against NaN/Infinity from corrupt config.
+ * BigInt(NaN) throws at module load, crashing the service with an unhelpful error.
  */
-export const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(ARBITRAGE_CONFIG.gasPriceSpikeMultiplier * 100));
+const _rawMultiplier = ARBITRAGE_CONFIG.gasPriceSpikeMultiplier;
+const _safeMultiplier = (Number.isFinite(_rawMultiplier) && _rawMultiplier > 0) ? _rawMultiplier : 1.5;
+export const GAS_SPIKE_MULTIPLIER_BIGINT = BigInt(Math.floor(_safeMultiplier * 100));
 export const WEI_PER_GWEI = BigInt(1e9);
 
 /**
@@ -190,13 +195,8 @@ export interface GasConfigValidationResult {
   }>;
 }
 
-/**
- * Gas baseline entry for tracking historical gas prices.
- */
-export interface GasBaselineEntry {
-  price: bigint;
-  timestamp: number;
-}
+// GasBaselineEntry is now imported from ../types (unified definition)
+export type { GasBaselineEntry } from '../types';
 
 /**
  * Configuration for the GasPriceOptimizer.
@@ -389,7 +389,7 @@ export class GasPriceOptimizer {
 
     try {
       const feeData = await provider.getFeeData();
-      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice || fallbackPrice;
+      const currentPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? fallbackPrice;
 
       // Update baseline and check for spike
       this.updateGasBaseline(chain, currentPrice, gasBaselines, lastGasPrices);
@@ -460,7 +460,7 @@ export class GasPriceOptimizer {
 
     try {
       const feeData = await provider.getFeeData();
-      const currentPrice = feeData.maxFeePerGas || feeData.gasPrice;
+      const currentPrice = feeData.maxFeePerGas ?? feeData.gasPrice;
 
       if (!currentPrice) {
         return previousGasPrice;

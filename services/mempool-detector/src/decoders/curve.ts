@@ -322,11 +322,9 @@ export class CurveDecoder extends BaseDecoder {
       deadline: Math.floor(Date.now() / 1000) + 3600, // Curve doesn't have deadline in call
     };
 
-    // FIX 4.3: Add metadata about token resolution status
-    // This allows downstream systems to know if they need to resolve tokens
+    // Add metadata about token resolution status when tokens couldn't be resolved
     if (!tokensResolved) {
-      // Add pool info to help downstream systems resolve tokens
-      (intent as PendingSwapIntent & { _curvePoolInfo?: unknown })._curvePoolInfo = {
+      intent._curvePoolInfo = {
         poolAddress,
         tokenInIndex: i,
         tokenOutIndex: j,

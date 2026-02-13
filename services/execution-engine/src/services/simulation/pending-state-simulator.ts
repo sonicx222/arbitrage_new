@@ -102,10 +102,6 @@ export interface PendingSwapIntent {
    * @example 3000 = 0.3% (most common for volatile pairs)
    */
   feeTier?: UniswapV3FeeTier;
-  /**
-   * @deprecated Use `feeTier` instead. Will be removed in v2.0.0.
-   */
-  fee?: number;
   /** Whether this is a native ETH input swap (requires msg.value) */
   isNativeInput?: boolean;
 }
@@ -968,8 +964,8 @@ export class PendingStateSimulator {
     const amountOutMin = intent.expectedAmountOut -
       (intent.expectedAmountOut * BigInt(Math.floor(intent.slippageTolerance * 10000))) / 10000n;
 
-    // Use feeTier from intent, fall back to legacy fee, default to 3000 (0.3%)
-    const fee = intent.feeTier ?? intent.fee ?? 3000;
+    // P3 FIX #20: Removed deprecated `fee` field — use `feeTier` directly
+    const fee = intent.feeTier ?? 3000;
 
     // Fix 7.3: Check if this is a multi-hop swap (path length > 2)
     if (intent.path.length > 2) {

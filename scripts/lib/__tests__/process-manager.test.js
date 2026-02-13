@@ -38,9 +38,9 @@ describe('process-manager', () => {
     });
 
     it('should return false for non-existent PID', async () => {
-      // Use a very high PID that is unlikely to exist
+      // PID 999999 should not exist; killProcess should return false
       const result = await killProcess(999999);
-      expect(typeof result).toBe('boolean');
+      expect(result).toBe(false);
     });
   });
 
@@ -63,7 +63,8 @@ describe('process-manager', () => {
 
     it('should return false for non-existent PID', async () => {
       const result = await processExists(999999);
-      // On some systems high PIDs may exist, so just check it returns a boolean
+      // Platform-dependent: very high PIDs may exist on some systems (e.g., Linux
+      // with pid_max > 999999), so we only assert the return type here.
       expect(typeof result).toBe('boolean');
     });
   });

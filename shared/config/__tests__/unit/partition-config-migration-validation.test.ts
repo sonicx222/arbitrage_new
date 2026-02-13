@@ -623,7 +623,17 @@ describe('S3.1.7.9: Unified Detector Integration', () => {
       const content = fs.readFileSync(indexPath, 'utf-8');
 
       expect(content).toContain('UnifiedChainDetector');
-      expect(content).toContain('UnifiedDetectorConfig');
+
+      // P4 (partition-solana) was decomposed into focused modules (Fix #17).
+      // UnifiedDetectorConfig is now in service-config.ts, imported by index.ts.
+      // Other partitions still have it directly in index.ts.
+      if (service === 'partition-solana') {
+        const serviceConfigPath = path.join(process.cwd(), `services/${service}/src/service-config.ts`);
+        const serviceConfigContent = fs.readFileSync(serviceConfigPath, 'utf-8');
+        expect(serviceConfigContent).toContain('UnifiedDetectorConfig');
+      } else {
+        expect(content).toContain('UnifiedDetectorConfig');
+      }
     }
   });
 
@@ -722,11 +732,13 @@ describe('S3.1.7.11: Code Analysis Fix Verification', () => {
       expect(p3Content).toMatch(/createPartitionEntry/);
 
       // Verify P4 uses correct port via PARTITION_PORTS
-      const p4Content = fs.readFileSync(
-        path.join(process.cwd(), 'services/partition-solana/src/index.ts'),
+      // P4 was decomposed into focused modules (Fix #17). P4_DEFAULT_PORT definition
+      // is now in service-config.ts, imported and re-exported by index.ts.
+      const p4ConfigContent = fs.readFileSync(
+        path.join(process.cwd(), 'services/partition-solana/src/service-config.ts'),
         'utf-8'
       );
-      expect(p4Content).toMatch(/P4_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3004/);
+      expect(p4ConfigContent).toMatch(/P4_DEFAULT_PORT.*PARTITION_PORTS.*\?\?.*3004/);
     });
   });
 

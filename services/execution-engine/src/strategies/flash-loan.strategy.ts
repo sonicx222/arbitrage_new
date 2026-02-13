@@ -49,6 +49,7 @@ import {
   getAaveV3FeeBpsBigInt,
   getBpsDenominatorBigInt,
   FLASH_LOAN_ARBITRAGE_ABI,
+  PANCAKESWAP_FLASH_ARBITRAGE_ABI,
   // Task 1.2: Batched quoting imports
   FEATURE_FLAGS,
   hasMultiPathQuoter,
@@ -69,6 +70,7 @@ import {
   createInMemoryAggregatorMetrics,
 } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { FlashLoanProtocol } from './flash-loan-providers/types';
 import type { StrategyContext, ExecutionResult, Logger, NHopArbitrageOpportunity } from '../types';
 import {
   createErrorResult,
@@ -92,8 +94,9 @@ import { PancakeSwapV3FlashLoanProvider } from './flash-loan-providers/pancakesw
 // Constants
 // =============================================================================
 
-// Fix 1.1: Use centralized constants from @arbitrage/config
-// These are aliased here for backward compatibility with existing code
+// Module-level BigInt caches for hot-path optimization (ADR-022).
+// getAaveV3FeeBpsBigInt() and getBpsDenominatorBigInt() return fresh BigInts;
+// caching here avoids repeated allocation on every call.
 const AAVE_V3_FEE_BPS = getAaveV3FeeBpsBigInt();
 const BPS_DENOMINATOR = getBpsDenominatorBigInt();
 
@@ -134,30 +137,16 @@ const DEFAULT_GAS_ESTIMATE = 500000n;
 /**
  * Supported flash loan protocols by this strategy.
  *
- * Task 2.1: Added PancakeSwap V3 support alongside Aave V3.
+ * This is the single source of truth for protocol support.
+ * isProtocolSupported() checks FLASH_LOAN_PROVIDERS config against this set.
+ *
  * Each protocol requires different callback interfaces and contract implementations:
  * - Aave V3: Uses FlashLoanArbitrage.sol with executeOperation callback
+ * - Balancer V2: Uses BalancerV2FlashArbitrage.sol with receiveFlashLoan callback (0% fee)
  * - PancakeSwap V3: Uses PancakeSwapFlashArbitrage.sol with pancakeV3FlashCallback
+ * - SyncSwap: Uses SyncSwapFlashArbitrage.sol with onFlashLoan callback (EIP-3156)
  */
-const SUPPORTED_FLASH_LOAN_PROTOCOLS = new Set(['aave_v3', 'pancakeswap_v3']);
-
-/**
- * Chains that support Aave V3 flash loans (pre-computed for O(1) lookup)
- */
-const AAVE_V3_SUPPORTED_CHAINS = new Set(
-  Object.entries(FLASH_LOAN_PROVIDERS)
-    .filter(([_, config]) => config.protocol === 'aave_v3')
-    .map(([chain]) => chain)
-);
-
-/**
- * Task 2.1: Chains that support PancakeSwap V3 flash loans (pre-computed for O(1) lookup)
- */
-const PANCAKESWAP_V3_SUPPORTED_CHAINS = new Set(
-  Object.entries(FLASH_LOAN_PROVIDERS)
-    .filter(([_, config]) => config.protocol === 'pancakeswap_v3')
-    .map(([chain]) => chain)
-);
+const SUPPORTED_FLASH_LOAN_PROTOCOLS = new Set(['aave_v3', 'balancer_v2', 'pancakeswap_v3', 'syncswap']);
 
 // =============================================================================
 // Types
@@ -314,11 +303,11 @@ const FLASH_LOAN_INTERFACE = new ethers.Interface(FLASH_LOAN_ARBITRAGE_ABI);
  * - Contract uses PancakeSwap V3 flash swap mechanism
  * - Different callback interface (pancakeV3FlashCallback)
  *
+ * Uses centralized PANCAKESWAP_FLASH_ARBITRAGE_ABI from @arbitrage/config.
+ *
  * @see contracts/src/PancakeSwapFlashArbitrage.sol
+ * @see service-config.ts PANCAKESWAP_FLASH_ARBITRAGE_ABI
  */
-const PANCAKESWAP_FLASH_ARBITRAGE_ABI = [
-  'function executeArbitrage(address pool, address asset, uint256 amount, tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[] swapPath, uint256 minProfit, uint256 deadline) external',
-];
 const PANCAKESWAP_FLASH_INTERFACE = new ethers.Interface(PANCAKESWAP_FLASH_ARBITRAGE_ABI);
 
 // =============================================================================
@@ -340,10 +329,13 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   private readonly feeCalculator: FlashLoanFeeCalculator;
   // Task 1.2: Cache BatchQuoterService instances per chain
   private readonly batchedQuoters: Map<string, BatchQuoterService>;
+  /** Pre-computed Set per chain for O(1) router validation (hot-path optimization) */
+  private readonly approvedRoutersSets: Map<string, Set<string>>;
+  /** Pre-computed list of chains with supported flash loan protocols */
+  private readonly supportedProtocolChains: string[];
   // Task 2.3: Flash Loan Protocol Aggregation (Clean Architecture)
   private readonly aggregator?: IFlashLoanAggregator;
   private readonly aggregatorMetrics?: IAggregatorMetrics;
-
 
   constructor(logger: Logger, config: FlashLoanStrategyConfig) {
     super(logger);
@@ -446,6 +438,17 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
 
     this.config = config;
 
+    // Pre-compute router Sets for O(1) lookup in isRouterApproved() hot path
+    this.approvedRoutersSets = new Map();
+    for (const [chain, routers] of Object.entries(config.approvedRouters)) {
+      this.approvedRoutersSets.set(chain, new Set(routers.map(r => r.toLowerCase())));
+    }
+
+    // Pre-compute supported protocol chains to avoid per-call Object.entries allocation
+    this.supportedProtocolChains = Object.entries(FLASH_LOAN_PROVIDERS)
+      .filter(([_, cfg]) => SUPPORTED_FLASH_LOAN_PROTOCOLS.has(cfg.protocol))
+      .map(([chain]) => chain);
+
     // P2-8: Initialize fee calculator with config's fee overrides
     this.feeCalculator = new FlashLoanFeeCalculator({
       feeOverrides: config.feeOverrides,
@@ -492,7 +495,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
       const availableProviders = new Map<string, IProviderInfo[]>();
       for (const [chain, providerConfig] of Object.entries(FLASH_LOAN_PROVIDERS)) {
         const providers: IProviderInfo[] = [{
-          protocol: providerConfig.protocol as any,
+          protocol: providerConfig.protocol as FlashLoanProtocol,
           chain,
           poolAddress: providerConfig.address,
           feeBps: providerConfig.fee,
@@ -544,10 +547,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    * ```
    */
   async dispose(): Promise<void> {
+    // Capture size before clearing so the log message is accurate
+    const quoterCount = this.batchedQuoters.size;
     // Clear BatchQuoterService cache
     this.batchedQuoters.clear();
     this.logger.debug('FlashLoanStrategy resources disposed', {
-      strategiesCleared: this.batchedQuoters.size,
+      strategiesCleared: quoterCount,
     });
   }
 
@@ -574,7 +579,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     }
 
     // Issue 4.1 Fix: Validate protocol support before execution
-    // Only Aave V3 chains are currently supported
+    // Supported: aave_v3, balancer_v2, pancakeswap_v3, syncswap
     if (!this.isProtocolSupported(chain)) {
       const flashLoanConfig = FLASH_LOAN_PROVIDERS[chain];
       const protocol = flashLoanConfig?.protocol || 'unknown';
@@ -587,7 +592,7 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
         opportunity.id,
         formatExecutionError(
           ExecutionErrorCode.UNSUPPORTED_PROTOCOL,
-          `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Only Aave V3 chains are currently implemented.`
+          `Flash loan protocol '${protocol}' on chain '${chain}' is not supported. Supported protocols: ${Array.from(SUPPORTED_FLASH_LOAN_PROTOCOLS).join(', ')}.`
         ),
         chain,
         opportunity.buyDex || 'unknown'
@@ -1432,20 +1437,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
     provider: ethers.JsonRpcProvider
   ): Promise<{ pool: string; feeTier: number } | null> {
     try {
-      // Get factory address for chain
       const factoryAddress = getPancakeSwapV3Factory(chain);
 
-      // Create temporary provider instance for pool discovery
-      // Note: We don't need the full contract address or approved routers for discovery
-      const tempProvider = new PancakeSwapV3FlashLoanProvider({
-        chain,
-        poolAddress: factoryAddress, // Factory address
-        contractAddress: '0x0000000000000000000000000000000000000000', // Not needed for discovery
-        approvedRouters: [], // Not needed for discovery
-      });
-
-      // Discover best pool
-      const poolInfo = await tempProvider.findBestPool(tokenA, tokenB, provider);
+      // Use static method to avoid creating a temporary provider with zero contractAddress
+      const poolInfo = await PancakeSwapV3FlashLoanProvider.findBestPoolStatic(
+        factoryAddress, tokenA, tokenB, provider
+      );
 
       if (!poolInfo) {
         this.logger.warn('No PancakeSwap V3 pool found for token pair', {
@@ -1477,9 +1474,6 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   }
 
   // ===========================================================================
-  // Gas Estimation
-  // ===========================================================================
-  // ===========================================================================
   // Router Validation
   // ===========================================================================
 
@@ -1491,11 +1485,11 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
    * @returns True if approved
    */
   isRouterApproved(chain: string, router: string): boolean {
-    const approvedRouters = this.config.approvedRouters[chain];
-    if (!approvedRouters) {
+    const routerSet = this.approvedRoutersSets.get(chain);
+    if (!routerSet) {
       return false;
     }
-    return approvedRouters.some(r => r.toLowerCase() === router.toLowerCase());
+    return routerSet.has(router.toLowerCase());
   }
 
   // ===========================================================================
@@ -1528,15 +1522,17 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   /**
    * Check if the flash loan protocol on a chain is supported by this strategy.
    *
-   * Task 2.1: Updated to support both Aave V3 and PancakeSwap V3.
-   * Each protocol requires different callback interfaces and contract implementations.
+   * Uses FLASH_LOAN_PROVIDERS config as the single source of chain->protocol mapping,
+   * and SUPPORTED_FLASH_LOAN_PROTOCOLS as the set of implemented protocols.
+   * This eliminates the need for per-protocol chain Sets that can drift from config.
    *
    * @param chain - Chain identifier
    * @returns True if the protocol is supported
    */
   isProtocolSupported(chain: string): boolean {
-    // Use pre-computed sets for O(1) lookup
-    return AAVE_V3_SUPPORTED_CHAINS.has(chain) || PANCAKESWAP_V3_SUPPORTED_CHAINS.has(chain);
+    const config = FLASH_LOAN_PROVIDERS[chain];
+    if (!config) return false;
+    return SUPPORTED_FLASH_LOAN_PROTOCOLS.has(config.protocol);
   }
 
   /**
@@ -1552,12 +1548,12 @@ export class FlashLoanStrategy extends BaseExecutionStrategy {
   /**
    * Get list of chains with supported flash loan protocols.
    *
-   * Task 2.1: Returns chains that support either Aave V3 or PancakeSwap V3.
+   * Derives the list from FLASH_LOAN_PROVIDERS config filtered by SUPPORTED_FLASH_LOAN_PROTOCOLS.
    *
    * @returns Array of chain identifiers that support any implemented protocol
    */
   getSupportedProtocolChains(): string[] {
-    return Array.from(new Set([...AAVE_V3_SUPPORTED_CHAINS, ...PANCAKESWAP_V3_SUPPORTED_CHAINS]));
+    return [...this.supportedProtocolChains];
   }
 
   // ===========================================================================

@@ -233,7 +233,8 @@ export class ExecutionEngineService {
 
   // P1 FIX: Lock conflict tracking extracted to dedicated class
   // Tracks repeated lock conflicts to detect crashed lock holders
-  private lockConflictTracker = new LockConflictTracker();
+  // P1 FIX: Logger injected via constructor DI (was module-level)
+  private lockConflictTracker: LockConflictTracker = null!; // Initialized in constructor
 
   // P0 Refactoring: Health monitoring extracted to dedicated manager
   // Handles non-hot-path interval operations (health checks, gas cleanup, pending cleanup)
@@ -328,6 +329,9 @@ export class ExecutionEngineService {
     // Use injected dependencies or defaults
     this.logger = config.logger ?? createLogger('execution-engine');
     this.perfLogger = config.perfLogger ?? getPerformanceLogger('execution-engine');
+
+    // P1 FIX: Initialize lock conflict tracker with injected logger
+    this.lockConflictTracker = new LockConflictTracker({ logger: this.logger });
 
     // Generate unique instance ID
     this.instanceId = `execution-engine-${process.env.HOSTNAME || 'local'}-${Date.now()}`;

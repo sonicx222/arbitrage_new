@@ -47,7 +47,7 @@ const config: UnifiedDetectorConfig = {
   chains: process.env.PARTITION_CHAINS?.split(',').map(c => c.trim()),
   instanceId: process.env.INSTANCE_ID || `unified-${process.env.HOSTNAME || 'local'}-${Date.now()}`,
   regionId,
-  enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
+  enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH === 'true',
   healthCheckPort
 };
 
@@ -115,11 +115,11 @@ function createHealthServer(port: number): Server {
           timestamp: Date.now()
         }));
       } catch (error) {
+        logger.error('Health endpoint error', { error: (error as Error).message });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: serviceName,
           status: 'error',
-          error: (error as Error).message
         }));
       }
     } else if (req.url === '/stats') {
@@ -137,11 +137,11 @@ function createHealthServer(port: number): Server {
           chainStats: Object.fromEntries(stats.chainStats)
         }));
       } catch (error) {
+        logger.error('Stats endpoint error', { error: (error as Error).message });
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           service: serviceName,
           status: 'error',
-          error: (error as Error).message
         }));
       }
     } else if (req.url === '/ready') {
@@ -267,12 +267,27 @@ async function shutdown(signal: string): Promise<void> {
     // BUG-FIX: Clear health cache to prevent stale data on restart scenarios
     healthCache = null;
 
-    // Close health server first
+    // Close health server first (with timeout to prevent hang from keep-alive connections)
     if (healthServer) {
-      await new Promise<void>((resolve, reject) => {
+      await new Promise<void>((resolve) => {
+        let resolved = false;
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            logger.warn('Health server close timed out during shutdown');
+            resolve();
+          }
+        }, 5000);
+
         healthServer!.close((err) => {
-          if (err) reject(err);
-          else resolve();
+          clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            if (err) {
+              logger.warn('Error closing health server during shutdown', { error: err.message });
+            }
+            resolve();
+          }
         });
       });
       logger.info('Health server closed');
@@ -351,7 +366,7 @@ async function main(): Promise<void> {
     logger.info('OpportunityPublisher initialized');
 
     // Start health check server first
-    healthServer = createHealthServer(config.healthCheckPort || DEFAULT_HEALTH_CHECK_PORT);
+    healthServer = createHealthServer(config.healthCheckPort ?? DEFAULT_HEALTH_CHECK_PORT);
 
     // Start detector
     await detector.start();

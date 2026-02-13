@@ -95,15 +95,16 @@ export function detectIntraSolanaArbitrage(
 
   for (const pairKey of pairKeys) {
     // Get pools for this pair, filtering out invalid/stale prices
-    const pools = poolStore.getPoolsForPair(pairKey)
-      .filter(p => {
-        if (!isValidPrice(p.price)) return false;
-        if (isPriceStale(p, config.priceStalenessMs, logger)) {
-          staleSkipped++;
-          return false;
-        }
-        return true;
-      });
+    const allPools = poolStore.getPoolsForPair(pairKey);
+    const pools: InternalPoolInfo[] = [];
+    for (const p of allPools) {
+      if (!isValidPrice(p.price)) continue;
+      if (isPriceStale(p, config.priceStalenessMs, logger)) {
+        staleSkipped++;
+        continue;
+      }
+      pools.push(p);
+    }
 
     if (pools.length < 2) continue;
 

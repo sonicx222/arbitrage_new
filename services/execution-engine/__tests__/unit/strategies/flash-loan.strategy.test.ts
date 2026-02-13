@@ -732,10 +732,10 @@ describe('FlashLoanStrategy', () => {
     it('should correctly identify protocol support per chain', () => {
       // BSC uses PancakeSwap V3 — supported since Task 2.1
       expect(strategy.isProtocolSupported('bsc')).toBe(true);
-      // These chains use protocols not yet in FlashLoanStrategy
-      expect(strategy.isProtocolSupported('fantom')).toBe(false); // Balancer V2
-      expect(strategy.isProtocolSupported('zksync')).toBe(false); // SyncSwap
-      expect(strategy.isProtocolSupported('linea')).toBe(false); // SyncSwap (not configured)
+      // Balancer V2 and SyncSwap now supported
+      expect(strategy.isProtocolSupported('fantom')).toBe(true); // Balancer V2
+      expect(strategy.isProtocolSupported('zksync')).toBe(true); // SyncSwap
+      expect(strategy.isProtocolSupported('linea')).toBe(false); // Not configured in FLASH_LOAN_PROVIDERS
     });
 
     it('should return false for unknown chains', () => {
@@ -743,17 +743,16 @@ describe('FlashLoanStrategy', () => {
     });
 
     it('should return error for unsupported protocol chain execution', async () => {
-      // fantom uses balancer_v2 which FlashLoanStrategy does not yet support
-      const opportunity = createMockOpportunity({ buyChain: 'fantom' });
+      // Use a chain not configured in FLASH_LOAN_PROVIDERS
+      const opportunity = createMockOpportunity({ buyChain: 'unknown-test-chain' });
       const ctx = createMockContext();
-      ctx.providers.set('fantom', createMockProvider());
-      ctx.wallets.set('fantom', createMockWallet());
+      ctx.providers.set('unknown-test-chain', createMockProvider());
+      ctx.wallets.set('unknown-test-chain', createMockWallet());
 
       const result = await strategy.execute(opportunity, ctx);
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not supported');
-      expect(result.error).toContain('balancer_v2');
     });
 
     it('should get protocol for chain', () => {
@@ -767,8 +766,9 @@ describe('FlashLoanStrategy', () => {
       const supported = strategy.getSupportedProtocolChains();
       expect(supported).toContain('ethereum');
       expect(supported).toContain('polygon');
-      expect(supported).toContain('bsc'); // Task 2.1: PancakeSwap V3 support
-      expect(supported).not.toContain('fantom'); // Balancer V2 not yet in FlashLoanStrategy
+      expect(supported).toContain('bsc'); // PancakeSwap V3 support
+      expect(supported).toContain('fantom'); // Balancer V2 now supported
+      expect(supported).toContain('zksync'); // SyncSwap now supported
     });
   });
 

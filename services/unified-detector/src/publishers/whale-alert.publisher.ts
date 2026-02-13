@@ -16,7 +16,7 @@
 import { RedisStreamsClient, WhaleAlert, safeBigIntToDecimal } from '@arbitrage/core';
 import { SwapEvent, Token } from '@arbitrage/types';
 import type { Logger } from '../types';
-import { STABLECOIN_SYMBOLS, DEFAULT_TOKEN_DECIMALS } from '../constants';
+import { STABLECOIN_SYMBOLS_SET, DEFAULT_TOKEN_DECIMALS } from '../constants';
 
 // =============================================================================
 // Types
@@ -246,8 +246,9 @@ export class WhaleAlertPublisher {
   /**
    * Check if a token symbol represents a stablecoin.
    * FIX Refactor 9.3: Use centralized STABLECOIN_SYMBOLS constant
+   * FIX #31: O(1) Set.has instead of O(9) Array.includes
    */
   private isStablecoin(symbol: string): boolean {
-    return (STABLECOIN_SYMBOLS as readonly string[]).includes(symbol.toUpperCase());
+    return STABLECOIN_SYMBOLS_SET.has(symbol.toUpperCase());
   }
 }

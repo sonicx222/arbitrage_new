@@ -1,3 +1,8 @@
+# DEPRECATED: This Dockerfile is ORPHANED and not referenced by any docker-compose file.
+# Production deployments use services/unified-detector/Dockerfile for P1-P3 partitions,
+# orchestrated via infrastructure/docker/docker-compose.partition.yml.
+# This file is retained for reference only and may be removed in a future cleanup.
+#
 # P3 High-Value Partition Detector Service
 # Chains: Ethereum, zkSync, Linea
 # Region: Oracle Cloud US-East (us-east1)
@@ -8,7 +13,7 @@
 # - Heavy resource profile for Ethereum mainnet processing
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -39,7 +44,7 @@ RUN npm run build --workspace=shared/types && \
     npm run build --workspace=services/partition-high-value
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

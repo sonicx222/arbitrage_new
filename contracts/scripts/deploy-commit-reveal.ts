@@ -6,214 +6,71 @@
  * on high-risk arbitrage transactions when private mempools are unavailable.
  *
  * Usage:
- *   # Testnet deployment (recommended first)
  *   npx hardhat run scripts/deploy-commit-reveal.ts --network sepolia
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network arbitrumSepolia
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network baseSepolia
- *
- *   # Mainnet deployment (after testnet validation)
- *   # Phase 1: Core chains
  *   npx hardhat run scripts/deploy-commit-reveal.ts --network ethereum
  *   npx hardhat run scripts/deploy-commit-reveal.ts --network arbitrum
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network bsc
- *
- *   # Phase 2: Additional chains
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network polygon
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network optimism
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network base
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network avalanche
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network fantom
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network zksync
- *
- *   # Phase 3: Linea
- *   npx hardhat run scripts/deploy-commit-reveal.ts --network linea
  *
  * Environment Variables:
  *   DEPLOYER_PRIVATE_KEY - Private key for deployment wallet
  *   CONTRACT_OWNER - Owner address (defaults to deployer if not set)
  *   ETHERSCAN_API_KEY - For contract verification on Ethereum/Sepolia
- *   ARBISCAN_API_KEY - For contract verification on Arbitrum
- *   BSCSCAN_API_KEY - For contract verification on BSC
- *   POLYGONSCAN_API_KEY - For contract verification on Polygon
- *   OPTIMISTIC_ETHERSCAN_API_KEY - For verification on Optimism
- *   BASESCAN_API_KEY - For contract verification on Base
- *   SNOWTRACE_API_KEY - For contract verification on Avalanche
- *   FTMSCAN_API_KEY - For contract verification on Fantom
- *   ZKSYNC_ETHERSCAN_API_KEY - For verification on zkSync
- *   LINEASCAN_API_KEY - For contract verification on Linea
- *
- * Phase 4A Improvements:
- *   ✅ Uses deployment-utils.ts for consistency
- *   ✅ Gas estimation error handling
- *   ✅ Verification retry with exponential backoff
- *   ✅ Network name normalization
- *   ✅ Smoke tests with constraint validation
- *   ✅ No minimumProfit (off-chain validation)
- *   ✅ No router approval (configured manually post-deployment)
- *
- * Post-Deployment Steps:
- *   1. Approve DEX routers via approveRouter(address)
- *   2. Set minimum profit threshold via setMinimumProfit(uint256)
- *   3. Transfer ownership to multisig via transferOwnership(address) + acceptOwnership()
- *   4. Update configuration files with deployed address
  *
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 3 Task 3.1
  */
 
-import { ethers, network } from 'hardhat';
+import { network } from 'hardhat';
 import {
   normalizeNetworkName,
-  getSafeChainId,  // P1-007 FIX: Import safe chain ID getter
-  checkDeployerBalance,
-  estimateDeploymentCost,
-  verifyContractWithRetry,
-  smokeTestCommitRevealContract,
   saveDeploymentResult,
-  printDeploymentSummary,  // P3-005 FIX: Use shared function instead of duplicate
-  DEFAULT_VERIFICATION_RETRIES,
-  DEFAULT_VERIFICATION_INITIAL_DELAY_MS,
-  type CommitRevealDeploymentResult
+  printDeploymentSummary,
+  confirmMainnetDeployment,
+  checkExistingDeployment,
+  deployContractPipeline,
+  type DeploymentPipelineConfig,
 } from './lib/deployment-utils';
 
 // =============================================================================
-// Types
+// Pipeline Configuration
 // =============================================================================
 
 /**
- * Type alias for commit-reveal contract deployment results
- *
- * Maps to CommitRevealDeploymentResult from deployment-utils.ts for type safety.
- * This alias maintains backward compatibility with existing function signatures
- * (e.g., deployCommitRevealArbitrage() return type) while ensuring consistency
- * with the standardized deployment result types used internally.
- *
- * @see CommitRevealDeploymentResult in deployment-utils.ts
- */
-type DeploymentResult = CommitRevealDeploymentResult;
-
-// =============================================================================
-// Configuration
-// =============================================================================
-
-/**
- * NOTE: This contract does NOT define DEFAULT_MINIMUM_PROFIT like other
- * deployment scripts (deploy.ts, deploy-balancer.ts, deploy-pancakeswap.ts).
- *
- * Reason: CommitRevealArbitrage performs profit validation off-chain in the
- * execution-engine service before calling executeArbitrage(). The two-phase
- * commit-reveal pattern already requires off-chain coordination, so profit
- * checks naturally occur at that stage rather than wasting gas on-chain.
+ * NOTE: CommitRevealArbitrage does NOT configure minimumProfit or routers during
+ * deployment. Profit validation is off-chain in the execution-engine service.
+ * Routers are configured manually post-deployment.
  *
  * @see services/execution-engine/src/strategies/commit-reveal-strategy.ts
- * @see contracts/src/CommitRevealArbitrage.sol (no minimumProfit state variable)
  */
-
-/**
- * Get contract owner address from environment or use deployer
- */
-function getOwnerAddress(deployerAddress: string): string {
-  return process.env.CONTRACT_OWNER || deployerAddress;
-}
-
-// =============================================================================
-// Deployment Functions
-// =============================================================================
-
-/**
- * Deploy CommitRevealArbitrage contract
- */
-async function deployCommitRevealArbitrage(): Promise<DeploymentResult> {
-  const [deployer] = await ethers.getSigners();
-  const networkName = normalizeNetworkName(network.name);
-  // P1-007 FIX: Use safe chain ID getter with validation
-  const chainId = await getSafeChainId();
-
-  console.log('\n========================================');
-  console.log('CommitRevealArbitrage Deployment');
-  console.log('========================================');
-  console.log(`Network: ${networkName} (chainId: ${chainId})`);
-  console.log(`Deployer: ${deployer.address}`);
-
-  // Phase 1 Fix: Proper balance checking with helpful error messages
-  await checkDeployerBalance(deployer);
-
-  // Determine owner address
-  const ownerAddress = getOwnerAddress(deployer.address);
-  console.log(`Owner Address: ${ownerAddress}`);
-
-  if (ownerAddress !== deployer.address) {
-    console.log('⚠️  Owner is different from deployer. Remember to accept ownership from owner account.');
-  }
-
-  // Phase 1 Fix: Estimate gas with error handling
-  const CommitRevealArbitrageFactory = await ethers.getContractFactory('CommitRevealArbitrage');
-  await estimateDeploymentCost(CommitRevealArbitrageFactory, ownerAddress);
-
-  // Deploy contract
-  console.log('\nDeploying CommitRevealArbitrage...');
-  const commitRevealArbitrage = await CommitRevealArbitrageFactory.deploy(ownerAddress);
-
-  await commitRevealArbitrage.waitForDeployment();
-  const contractAddress = await commitRevealArbitrage.getAddress();
-  const deployTx = commitRevealArbitrage.deploymentTransaction();
-
-  console.log(`✅ Contract deployed at: ${contractAddress}`);
-  console.log(`   Transaction: ${deployTx?.hash}`);
-
-  // Get deployment details
-  const receipt = await deployTx?.wait();
-  const blockNumber = receipt?.blockNumber ?? 0;
-  const gasUsed = receipt?.gasUsed?.toString() || '0';
-  const block = await ethers.provider.getBlock(blockNumber);
-  const timestamp = block?.timestamp || Math.floor(Date.now() / 1000);
-
-  console.log(`   Block: ${blockNumber}`);
-  console.log(`   Gas Used: ${gasUsed}`);
-
-  // Phase 4A: Verification with retry logic
-  const verified = await verifyContractWithRetry(
-    contractAddress,
-    [ownerAddress],
-    DEFAULT_VERIFICATION_RETRIES,
-    DEFAULT_VERIFICATION_INITIAL_DELAY_MS
-  );
-
-  // Phase 4A: Smoke tests with constraint validation
-  await smokeTestCommitRevealContract(commitRevealArbitrage, ownerAddress);
+function buildConfig(): DeploymentPipelineConfig {
+  const ownerAddress = process.env.CONTRACT_OWNER;
 
   return {
-    network: networkName,
-    chainId,
-    contractAddress,
-    ownerAddress,
-    deployerAddress: deployer.address,
-    transactionHash: deployTx?.hash || '',
-    blockNumber,
-    timestamp,
-    gasUsed,
-    verified,
+    contractName: 'CommitRevealArbitrage',
+    registryName: 'commit-reveal-registry.json',
+    contractFactoryName: 'CommitRevealArbitrage',
+    constructorArgs: (deployer) => [ownerAddress ?? deployer],
+    ownerAddress: (deployer) => ownerAddress ?? deployer,
+    configureMinProfit: false,
+    configureRouters: false,
+    smokeTest: 'commitReveal',
+    supportedNetworks: [
+      'ethereum', 'arbitrum', 'bsc', 'polygon', 'optimism', 'base',
+      'avalanche', 'fantom', 'zksync', 'linea',
+      'sepolia', 'arbitrumSepolia', 'baseSepolia', 'localhost', 'hardhat',
+    ],
   };
 }
 
-/**
- * Save deployment result to file (now using utility function)
- * Kept as wrapper for backward compatibility
- */
-async function saveCommitRevealDeployment(result: DeploymentResult): Promise<void> {
-  await saveDeploymentResult(result, 'commit-reveal-registry.json', 'CommitRevealArbitrage');
-}
+// =============================================================================
+// Next Steps (contract-specific)
+// =============================================================================
 
-/**
- * P3-005 FIX: Print contract-specific next steps (shared summary moved to deployment-utils)
- * This function prints CommitRevealArbitrage-specific configuration steps
- */
-function printCommitRevealNextSteps(result: DeploymentResult): void {
-  console.log('📋 COMMIT-REVEAL SPECIFIC STEPS:\n');
+function printCommitRevealNextSteps(result: Record<string, any>): void {
+  console.log('COMMIT-REVEAL SPECIFIC STEPS:\n');
 
   console.log('1. Approve DEX routers for swap execution:');
   console.log(`   npx hardhat console --network ${result.network}`);
   console.log(`   > const contract = await ethers.getContractAt('CommitRevealArbitrage', '${result.contractAddress}');`);
-  console.log(`   > await contract.approveRouter('0xROUTER_ADDRESS'); // Repeat for each DEX`);
+  console.log(`   > await contract.addApprovedRouter('0xROUTER_ADDRESS'); // Repeat for each DEX`);
   console.log('');
 
   console.log('2. (Optional) Adjust minimum profit threshold:');
@@ -269,12 +126,12 @@ function printCommitRevealNextSteps(result: DeploymentResult): void {
   console.log('');
 
   if (!result.verified) {
-    console.log('⚠️  Contract not verified. To verify manually:');
+    console.log('Contract not verified. To verify manually:');
     console.log(`   npx hardhat verify --network ${result.network} ${result.contractAddress} ${result.ownerAddress}`);
     console.log('');
   }
 
-  console.log('📖 For detailed usage, see:');
+  console.log('For detailed usage, see:');
   console.log('   docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 3 Task 3.1');
   console.log('   contracts/src/CommitRevealArbitrage.sol (inline documentation)');
   console.log('');
@@ -287,31 +144,24 @@ function printCommitRevealNextSteps(result: DeploymentResult): void {
 async function main(): Promise<void> {
   const networkName = normalizeNetworkName(network.name);
 
+  // Require confirmation before mainnet deployment
+  await confirmMainnetDeployment(networkName, 'CommitRevealArbitrage');
+
+  // Check for existing deployment on this network
+  await checkExistingDeployment(networkName, 'CommitRevealArbitrage');
+
   console.log(`\nStarting CommitRevealArbitrage deployment to ${networkName}...`);
 
-  // Validate network
-  const supportedNetworks = [
-    'ethereum', 'arbitrum', 'bsc', 'polygon', 'optimism', 'base',
-    'avalanche', 'fantom', 'zksync', 'linea',
-    'sepolia', 'arbitrumSepolia', 'baseSepolia', 'localhost', 'hardhat'
-  ];
-
-  if (!supportedNetworks.includes(networkName)) {
-    console.warn(`⚠️  WARNING: Network '${networkName}' is not in the standard list.`);
-    console.warn('   Deployment will proceed, but you may need to add custom verification config.');
-  }
-
-  // Deploy
-  const result = await deployCommitRevealArbitrage();
+  // Deploy via shared pipeline
+  const { result } = await deployContractPipeline(buildConfig());
 
   // Save and print summary
-  await saveCommitRevealDeployment(result);
-  // P3-005 FIX: Use shared summary, then contract-specific next steps
-  printDeploymentSummary(result);
+  await saveDeploymentResult(result as any, 'commit-reveal-registry.json', 'CommitRevealArbitrage');
+  printDeploymentSummary(result as any);
   printCommitRevealNextSteps(result);
 
-  console.log('🎉 Deployment complete!');
-  console.log('\n⚠️  IMPORTANT: Remember to:');
+  console.log('Deployment complete!');
+  console.log('\nIMPORTANT: Remember to:');
   console.log('   1. Approve DEX routers');
   console.log('   2. Transfer ownership to multisig');
   console.log('   3. Update addresses.ts with deployed address');

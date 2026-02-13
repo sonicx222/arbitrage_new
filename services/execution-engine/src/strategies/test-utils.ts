@@ -14,6 +14,7 @@
 import { ethers } from 'ethers';
 import type { Logger, StrategyContext, ExecutionStats, ResolvedSimulationConfig } from '../types';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
+import type { PerformanceLogger } from '@arbitrage/core';
 import type {
   ISimulationService,
   SimulationResult,
@@ -243,7 +244,16 @@ export function createMockContext(
 
   return {
     logger: createMockLogger(),
-    perfLogger: { track: jest.fn(), getMetrics: jest.fn() } as any,
+    perfLogger: {
+      startTimer: jest.fn(),
+      endTimer: jest.fn().mockReturnValue(0),
+      logEventLatency: jest.fn(),
+      logArbitrageOpportunity: jest.fn(),
+      logExecutionResult: jest.fn(),
+      logError: jest.fn(),
+      logHealthCheck: jest.fn(),
+      logMetrics: jest.fn(),
+    } as unknown as PerformanceLogger,
     providers,
     wallets,
     providerHealth: new Map(),

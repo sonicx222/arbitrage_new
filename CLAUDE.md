@@ -213,6 +213,8 @@ await expect(tx).to.be.reverted; // Don't do this
 
 ## Analysis Reports
 - `.agent-reports/FINAL_UNIFIED_REPORT.md` - Latest deep analysis (28 findings, grade B+)
+- `.agent-reports/partition-asia-fast-deep-analysis.md` - partition-asia-fast deep analysis (26 findings, grade B+)
+- `.agent-reports/partition-high-value-deep-analysis.md` - partition-high-value deep analysis (22 findings, grade B+)
 
 # Documentation Maintenance
 
@@ -234,6 +236,10 @@ When making changes:
 - Shared packages must build first (types -> config -> core -> ml)
 - `.tsbuildinfo` cache can cause stale builds -- clean with `npm run clean:cache`
 
+**Dockerfile Issues:**
+- Multiple Dockerfiles across services use older Node versions (18/20) despite `engines: ">=22.0.0"` -- check and align when modifying any Dockerfile
+- Service-local Dockerfiles (e.g., `services/partition-asia-fast/Dockerfile`) may differ from infrastructure Dockerfiles (`infrastructure/docker/docker-compose.partition.yml` uses `services/unified-detector/Dockerfile`)
+
 **Redis Issues:**
 - Never use `KEYS` command (blocks Redis) -- use `SCAN` iterator
 - Always await `disconnect()` in cleanup
@@ -252,6 +258,13 @@ When making changes:
 - Cast to `jest.Mock`: `(mockedFunction as jest.Mock).mockReturnValue(value)`
 - Import from source files directly, not barrel exports (index.ts)
 - See `shared/core/__tests__/unit/detector/factory-integration.test.ts` for reference
+
+**Partition Service Architecture:**
+- P1-P3 entry points are thin wrappers (~63 lines) calling `createPartitionEntry()` from `@arbitrage/core`
+- Real logic lives in `shared/core/src/partition-service-utils.ts` (~1288 lines): health server, shutdown, event handlers, env config
+- P4 (partition-solana) does NOT use the factory -- manual 503-line `index.ts` with Solana-specific RPC handling
+- Shared test mocks in `shared/test-utils/src/mocks/partition-service.mock.ts` exist but are incomplete (missing `createPartitionEntry`, `runPartitionService`) -- tests use inline mocks instead
+- `shared/core/__tests__/unit/partition-service-utils.test.ts` has pre-existing `createPartitionEntry` test failures (11 tests, `getPartition` mock issue)
 
 **Testing Patterns (Hardhat for contracts):**
 - Use `loadFixture(deployContractsFixture)` for every test (snapshot/restore)
@@ -299,3 +312,8 @@ Patterns learned from running multi-agent deep analysis and fix workflows on thi
 - Compile after source changes to catch errors early (`npx hardhat compile`)
 - Run full test suite after all fixes to catch interaction effects
 - Some "simple" assertion fixes require understanding OZ version and mock internals
+
+## Shutdown and Server Close Patterns
+- Use the `safeResolve` flag pattern (see `closeServerWithTimeout` in `partition-service-utils.ts`) for server shutdown timeouts
+- Do NOT use `Promise.race` with a deferred `timeoutId` -- `server.close()` can fire synchronously, causing the timeout handle to be null when clearTimeout is called
+- The `||` vs `??` convention applies to ALL env var defaults, including `process.env.NODE_ENV` -- empty string is a valid env value

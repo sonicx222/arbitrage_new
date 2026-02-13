@@ -582,6 +582,22 @@ export interface ProviderHealth extends BaseHealth {
 }
 
 // =============================================================================
+// Gas Baseline
+// =============================================================================
+
+/**
+ * Gas baseline entry for tracking historical gas prices.
+ * Used for spike detection and trend analysis.
+ *
+ * @see GasPriceOptimizer (gas-price-optimizer.ts) - spike detection
+ * @see HealthMonitoringManager (health-monitoring-manager.ts) - baseline cleanup
+ */
+export interface GasBaselineEntry {
+  price: bigint;
+  timestamp: number;
+}
+
+// =============================================================================
 // Simulation Configuration (DEV/TEST MODE - "Dry Run")
 // =============================================================================
 

@@ -118,7 +118,7 @@ async function startService(service) {
     ...filteredEnv,
     ...service.env,
     NODE_ENV: 'development',
-    LOG_LEVEL: process.env.LOG_LEVEL || 'info'
+    LOG_LEVEL: process.env.LOG_LEVEL ?? 'info'
   };
 
   // Cross-platform process spawning (both use array args with shell:true on Windows)
@@ -241,6 +241,29 @@ async function startService(service) {
 // Main Entry Point
 // =============================================================================
 
+// Track started PIDs for cleanup on interruption
+const startedPids = [];
+let interrupted = false;
+
+async function cleanupOnInterrupt() {
+  if (interrupted) return; // Prevent double cleanup
+  interrupted = true;
+  logger.warning('\nInterrupted! Cleaning up started services...');
+  for (const { name, pid } of startedPids) {
+    try {
+      await killProcess(pid);
+      await removePid(name).catch(() => {});
+      logger.info(`  Stopped ${name} (PID: ${pid})`);
+    } catch {
+      // Best effort cleanup
+    }
+  }
+  process.exit(130);
+}
+
+process.on('SIGINT', cleanupOnInterrupt);
+process.on('SIGTERM', cleanupOnInterrupt);
+
 async function main() {
   // P3-4: Use modern logger.header() for section headers
   logger.header('Arbitrage System - Local Development Startup');
@@ -265,7 +288,8 @@ async function main() {
   const failedServices = [];
   for (const service of SERVICES) {
     try {
-      await startService(service);
+      const pid = await startService(service);
+      startedPids.push({ name: service.name, pid });
       // Small delay between services
       await new Promise(r => setTimeout(r, SERVICE_START_DELAY_MS));
     } catch (error) {

@@ -25,6 +25,7 @@ import {
   PROVIDER_HEALTH_CHECK_TIMEOUT_MS,
   PROVIDER_RECONNECTION_TIMEOUT_MS,
 } from '../types';
+import { createCancellableTimeout } from './simulation/types';
 
 export interface ProviderServiceConfig {
   logger: Logger;
@@ -152,12 +153,15 @@ export class ProviderServiceImpl implements IProviderService {
     for (const [chainName, provider] of this.providers) {
       try {
         // Quick connectivity check - get block number
-        await Promise.race([
-          provider.getBlockNumber(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Connectivity check timeout')), PROVIDER_CONNECTIVITY_TIMEOUT_MS)
-          )
-        ]);
+        // P1 FIX: Use cancellable timeout to prevent timer leak on success
+        const { promise: connectivityTimeout, cancel: cancelConnectivity } = createCancellableTimeout(
+          PROVIDER_CONNECTIVITY_TIMEOUT_MS, 'Connectivity check timeout'
+        );
+        try {
+          await Promise.race([provider.getBlockNumber(), connectivityTimeout]);
+        } finally {
+          cancelConnectivity();
+        }
 
         // Mark as healthy - Fix 10.2: Use helper to update cache
         this.updateProviderHealth(chainName, {
@@ -274,12 +278,15 @@ export class ProviderServiceImpl implements IProviderService {
 
     try {
       // Quick health check
-      await Promise.race([
-        provider.getBlockNumber(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), PROVIDER_HEALTH_CHECK_TIMEOUT_MS)
-        )
-      ]);
+      // P1 FIX: Use cancellable timeout to prevent timer leak on success
+      const { promise: healthTimeout, cancel: cancelHealth } = createCancellableTimeout(
+        PROVIDER_HEALTH_CHECK_TIMEOUT_MS, 'Health check timeout'
+      );
+      try {
+        await Promise.race([provider.getBlockNumber(), healthTimeout]);
+      } finally {
+        cancelHealth();
+      }
 
       // Update health status
       if (!health.healthy) {
@@ -333,12 +340,15 @@ export class ProviderServiceImpl implements IProviderService {
       const newProvider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
 
       // Verify connectivity
-      await Promise.race([
-        newProvider.getBlockNumber(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Reconnection timeout')), PROVIDER_RECONNECTION_TIMEOUT_MS)
-        )
-      ]);
+      // P1 FIX: Use cancellable timeout to prevent timer leak on success
+      const { promise: reconnectTimeout, cancel: cancelReconnect } = createCancellableTimeout(
+        PROVIDER_RECONNECTION_TIMEOUT_MS, 'Reconnection timeout'
+      );
+      try {
+        await Promise.race([newProvider.getBlockNumber(), reconnectTimeout]);
+      } finally {
+        cancelReconnect();
+      }
 
       // Replace old provider
       this.providers.set(chainName, newProvider);

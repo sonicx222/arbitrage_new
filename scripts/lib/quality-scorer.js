@@ -43,7 +43,7 @@ function calculateQualityScore(summary) {
  * @returns {{scoreChange: number, impact: string, riskLevel: string}}
  */
 function assessImpact(finalScore, baselineScore) {
-  if (!baselineScore) {
+  if (baselineScore == null) {
     return { scoreChange: 0, impact: 'UNKNOWN', riskLevel: 'UNKNOWN' };
   }
 

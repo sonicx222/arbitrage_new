@@ -1,10 +1,15 @@
+# DEPRECATED: This Dockerfile is ORPHANED and not referenced by any docker-compose file.
+# Production deployments use services/unified-detector/Dockerfile for P1-P3 partitions,
+# orchestrated via infrastructure/docker/docker-compose.partition.yml.
+# This file is retained for reference only and may be removed in a future cleanup.
+#
 # P2 L2-Turbo Partition Service Dockerfile
 # Deployment: Fly.io Singapore (asia-southeast1)
 # Chains: Arbitrum, Optimism, Base
 #
 # Multi-stage build for optimized image size
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -44,16 +49,21 @@ WORKDIR /app/services/partition-l2-turbo
 RUN npm run build
 
 # Production image
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
-# Copy built files
+# Copy only necessary files from builder
 COPY --from=builder /app/services/partition-l2-turbo/dist ./dist
 COPY --from=builder /app/services/partition-l2-turbo/package*.json ./
 COPY --from=builder /app/services/unified-detector/dist ./services/unified-detector/dist
 COPY --from=builder /app/services/unified-detector/package*.json ./services/unified-detector/
-COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/shared/types/package.json ./shared/types/
+COPY --from=builder /app/shared/types/dist ./shared/types/dist
+COPY --from=builder /app/shared/config/package.json ./shared/config/
+COPY --from=builder /app/shared/config/dist ./shared/config/dist
+COPY --from=builder /app/shared/core/package.json ./shared/core/
+COPY --from=builder /app/shared/core/dist ./shared/core/dist
 
 # Install production dependencies only
 RUN npm install --production
@@ -103,4 +113,7 @@ LABEL partition.region="asia-southeast1"
 LABEL partition.provider="fly"
 
 # Start P2 partition service
-CMD ["node", "dist/index.js"]
+# FIX #4: --unhandled-rejections=throw converts unhandled rejections to uncaught exceptions,
+# which trigger graceful shutdown via the existing uncaughtException handler.
+# This prevents zombie state where the service appears healthy but has lost functionality.
+CMD ["node", "--unhandled-rejections=throw", "dist/index.js"]

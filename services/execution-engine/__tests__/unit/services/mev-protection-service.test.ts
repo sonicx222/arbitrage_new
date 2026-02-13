@@ -13,7 +13,6 @@ import { ethers } from 'ethers';
 import { createMockLogger, createMockPerfLogger } from '@arbitrage/test-utils';
 import {
   MevProtectionService,
-  checkMevEligibility,
   type MevEligibilityResult,
 } from '../../../src/services/mev-protection-service';
 import { GasPriceOptimizer } from '../../../src/services/gas-price-optimizer';
@@ -324,24 +323,5 @@ describe('MevProtectionService', () => {
   });
 });
 
-describe('checkMevEligibility (standalone function)', () => {
-  it('should work identically to service method', () => {
-    const mevProvider = createMockMevProvider(true);
-    const ctx = createMockStrategyContext({
-      mevProviderFactory: createMockMevProviderFactory({ ethereum: mevProvider }) as any,
-    });
-
-    const result = checkMevEligibility('ethereum', ctx, 100);
-
-    expect(result.shouldUseMev).toBe(true);
-    expect(result.mevProvider).toBeDefined();
-  });
-
-  it('should handle null provider factory', () => {
-    const ctx = createMockStrategyContext({ mevProviderFactory: null });
-
-    const result = checkMevEligibility('ethereum', ctx, 100);
-
-    expect(result.shouldUseMev).toBe(false);
-  });
-});
+// P2 FIX #13: Removed tests for deprecated checkMevEligibility() standalone function.
+// The function was removed — use MevProtectionService.checkEligibility() directly.

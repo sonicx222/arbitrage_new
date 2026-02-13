@@ -103,6 +103,8 @@ export class SimpleArbitrageDetector {
   // FIX 4.1: Configurable price bounds for different token types
   private readonly minSafePrice: number;
   private readonly maxSafePrice: number;
+  // FIX #32: Counter-based ID generation avoids 2 string allocations per opportunity
+  private idCounter: number = 0;
 
   constructor(config: SimpleArbitrageConfig) {
     this.config = config;
@@ -119,9 +121,16 @@ export class SimpleArbitrageDetector {
   /**
    * Calculate arbitrage opportunity between two pairs.
    *
+   * @note Gas cost filtering is intentionally NOT applied here. The detector's
+   * responsibility is finding price discrepancies between DEXes. The execution
+   * engine (`services/execution-engine`) applies chain-specific gas cost thresholds
+   * before submitting transactions, using real-time gas price oracles. This separation
+   * avoids coupling the detector to chain-specific gas pricing, which varies by L1/L2,
+   * EIP-1559 vs legacy, and network congestion.
+   *
    * @param pair1 - First pair snapshot
    * @param pair2 - Second pair snapshot
-   * @returns ArbitrageOpportunity if profitable, null otherwise
+   * @returns ArbitrageOpportunity if profitable after swap fees, null otherwise
    */
   calculateArbitrage(
     pair1: PairSnapshot,
@@ -201,7 +210,8 @@ export class SimpleArbitrageDetector {
     const expectedProfitAbsolute = Number(amountIn) * netProfitPct;
 
     const opportunity: ArbitrageOpportunity = {
-      id: `${this.config.chainId}-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+      // FIX #32: Counter-based ID avoids Math.random().toString(36) string allocations in hot path
+      id: `${this.config.chainId}-${Date.now()}-${++this.idCounter}`,
       type: 'simple',
       chain: this.config.chainId,
       buyDex: buyPair.dex,

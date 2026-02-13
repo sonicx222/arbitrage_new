@@ -17,6 +17,7 @@
  */
 
 import type { Logger } from '../types';
+import { createCancellableTimeout } from './simulation/types';
 
 // =============================================================================
 // Types
@@ -128,12 +129,11 @@ export class NonceAllocationManager {
         });
 
         // Wait for existing lock with remaining time until deadline
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(
-            () => reject(new Error(`[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`)),
-            remainingTime
-          );
-        });
+        // P1 FIX: Use cancellable timeout to prevent timer leak when lock resolves before timeout
+        const { promise: timeoutPromise, cancel: cancelTimeout } = createCancellableTimeout<void>(
+          remainingTime,
+          `[ERR_NONCE_LOCK_TIMEOUT] Timeout waiting for nonce lock on ${chain}`
+        );
 
         try {
           await Promise.race([existingLock, timeoutPromise]);
@@ -147,6 +147,8 @@ export class NonceAllocationManager {
             elapsedTimeMs: elapsedTime,
           });
           throw error;
+        } finally {
+          cancelTimeout();
         }
 
         // FIX 5.1: Re-check lock after wait completes
@@ -313,67 +315,6 @@ export function resetDefaultNonceAllocationManager(): void {
   }
 }
 
-// =============================================================================
-// Standalone Functions (for backward compatibility)
-// =============================================================================
-
-/**
- * Acquire per-chain nonce lock.
- * Uses the default singleton manager.
- *
- * @deprecated Use NonceAllocationManager instance directly
- */
-export async function acquireChainNonceLock(
-  chain: string,
-  opportunityId: string,
-  logger: Logger,
-  timeoutMs?: number
-): Promise<void> {
-  const manager = getDefaultNonceAllocationManager(logger);
-  return manager.acquireLock(chain, opportunityId, timeoutMs);
-}
-
-/**
- * Release per-chain nonce lock.
- * Uses the default singleton manager.
- *
- * @deprecated Use NonceAllocationManager instance directly
- */
-export function releaseChainNonceLock(
-  chain: string,
-  opportunityId: string,
-  logger: Logger
-): void {
-  const manager = getDefaultNonceAllocationManager(logger);
-  return manager.releaseLock(chain, opportunityId);
-}
-
-/**
- * Check and warn if concurrent nonce access is detected.
- * Uses the default singleton manager.
- *
- * @deprecated Use NonceAllocationManager instance directly
- */
-export function checkConcurrentNonceAccess(
-  chain: string,
-  opportunityId: string,
-  logger: Logger
-): boolean {
-  const manager = getDefaultNonceAllocationManager(logger);
-  return manager.checkConcurrentAccess(chain, opportunityId);
-}
-
-/**
- * Clear in-progress nonce allocation tracking for an opportunity.
- * Uses the default singleton manager.
- *
- * @deprecated Use NonceAllocationManager instance directly
- */
-export function clearNonceAllocationTracking(
-  chain: string,
-  opportunityId: string
-): void {
-  if (_defaultManager) {
-    _defaultManager.clearTracking(chain, opportunityId);
-  }
-}
+// P2 FIX #13: Removed 4 deprecated standalone functions
+// (acquireChainNonceLock, releaseChainNonceLock, checkConcurrentNonceAccess, clearNonceAllocationTracking)
+// All had zero production callers — strategies use NonceAllocationManager instance methods directly.

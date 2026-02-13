@@ -1645,6 +1645,7 @@ export type {
   HealthServerOptions,
   PartitionDetectorInterface,
   ProcessHandlerCleanup,
+  DetectorEventHandlerCleanup,
   // Typed environment config type
   PartitionEnvironmentConfig,
   // R9: Partition Service Runner types

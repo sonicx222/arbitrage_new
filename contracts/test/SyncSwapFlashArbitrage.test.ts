@@ -702,9 +702,44 @@ describe('SyncSwapFlashArbitrage', () => {
         ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidFlashLoanCaller');
       });
 
-      // Note: Testing InvalidInitiator error requires impersonating the vault contract
-      // which is complex in Hardhat. The error is tested implicitly through the
-      // executeArbitrage flow where initiator must be the contract itself.
+      it('should revert with InvalidFlashLoanInitiator when initiator is not the contract', async () => {
+        const { syncSwapArbitrage, vault, weth, owner, attacker } = await loadFixture(
+          deployContractsFixture
+        );
+
+        // Impersonate the SyncSwap Vault to bypass the caller check (msg.sender == VAULT),
+        // then provide a wrong initiator to trigger the initiator check.
+        const vaultAddress = await vault.getAddress();
+        await ethers.provider.send('hardhat_impersonateAccount', [vaultAddress]);
+        await owner.sendTransaction({ to: vaultAddress, value: ethers.parseEther('1') });
+        const vaultSigner = await ethers.getSigner(vaultAddress);
+
+        const swapPath = [
+          {
+            router: ethers.ZeroAddress,
+            tokenIn: await weth.getAddress(),
+            tokenOut: await weth.getAddress(),
+            amountOutMin: 1n,
+          },
+        ];
+        const data = ethers.AbiCoder.defaultAbiCoder().encode(
+          ['tuple(address router, address tokenIn, address tokenOut, uint256 amountOutMin)[]', 'uint256'],
+          [swapPath, 0n]
+        );
+
+        // Call onFlashLoan from the vault with attacker as initiator (not the contract itself)
+        await expect(
+          syncSwapArbitrage.connect(vaultSigner).onFlashLoan(
+            attacker.address, // Wrong initiator - should be the contract address
+            await weth.getAddress(),
+            ethers.parseEther('1'),
+            0,
+            data
+          )
+        ).to.be.revertedWithCustomError(syncSwapArbitrage, 'InvalidFlashLoanInitiator');
+
+        await ethers.provider.send('hardhat_stopImpersonatingAccount', [vaultAddress]);
+      });
     });
   });
 

@@ -116,7 +116,7 @@ Build a **professional and reliable profitable arbitrage application** with:
 │ │                │ │                │ │                │ │                │ │      ││
 │ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │┌──────────────┐│ │ Rail ││
 │ ││ Partition 1  ││ ││ Partition 3  ││ ││ Cross-Chain  ││ ││ Partition 4  ││ │ way  ││
-│ ││BSC/Poly/Avax ││ ││ ETH/zkSync   ││ ││ Detector     ││ ││ SOLANA       ││ │      ││
+│ ││BSC/Poly/Avax ││ ││ETH/zkS/Linea ││ ││ Detector     ││ ││ SOLANA       ││ │      ││
 │ ││ Oracle ARM   ││ ││ Oracle ARM   ││ ││ Oracle AMD   ││ ││ Fly.io US-W  ││ │ + Bkp││
 │ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │└──────────────┘│ │Render││
 │ │                │ │                │ │                │ │                │ │      ││
@@ -178,16 +178,19 @@ The architecture combines two patterns:
 │                                                                                  │
 │  LAYER 1: INGESTION                                                              │
 │  ├── Chain Detector Partition 1 (Asia-Fast: BSC, Polygon, Avalanche, Fantom)    │
-│  ├── Chain Detector Partition 2 (L2-Fast: Arbitrum, Optimism, Base)             │
+│  ├── Chain Detector Partition 2 (L2-Turbo: Arbitrum, Optimism, Base)            │
 │  ├── Chain Detector Partition 3 (High-Value: Ethereum, zkSync, Linea)           │
 │  ├── Chain Detector Partition 4 (Solana: Non-EVM, @solana/web3.js)              │
 │  ├── Unified Detector - Mempool (bloXroute BDN: Pre-block arbitrage)            │
 │  └── Factory Subscription Manager (ADR-019: 40x RPC reduction) ✅ NEW           │
 │                                                                                  │
-│  **P1-004 FIX**: All partitions (P1-P4) and mempool detector use the same       │
+│  **P1-004 FIX**: Partitions P1-P3 and mempool detector use the same            │
 │  **Unified Detector** service (@arbitrage/unified-detector) with different      │
-│  PARTITION_ID environment variables. This consolidates chain detection logic    │
-│  and enables resource-efficient deployment (ADR-003).                           │
+│  PARTITION_ID environment variables. P4 (Solana) uses a HYBRID pattern:        │
+│  UnifiedChainDetector for event ingestion + custom SolanaArbitrageDetector     │
+│  for Solana-specific detection (intra-Solana, triangular, cross-chain).        │
+│  This enables resource-efficient deployment (ADR-003) while supporting         │
+│  non-EVM chains with specialized detection logic.                              │
 │                                                                                  │
 │  LAYER 2: ANALYSIS                                                               │
 │  ├── Cross-Chain Detector (Multi-chain opportunity detection)                   │
@@ -212,8 +215,9 @@ The architecture combines two patterns:
 │  │   ├── SwapBuilder (Cached swap step construction) ✅ NEW                     │
 │  │   └── Strategy Factory (Intra-chain, Cross-chain, Flash Loan)                │
 │  ├── Execution Engine Backup (Failover - **EVM ONLY**)                          │
-│  ├── Flash Loan Strategy (Aave V3 + PancakeSwap V3) ✅ NEW                      │
-│  ├── Flash Loan Contract (FlashLoanArbitrage.sol) ✅ NEW                        │
+│  ├── Flash Loan Strategy (Aave V3, Balancer V2, PancakeSwap V3, SyncSwap) ✅    │
+│  ├── Flash Loan Contracts (5 variants — see §10.6) ✅                           │
+│  ├── CommitRevealArbitrage (MEV-protected commit-reveal scheme) ✅ NEW          │
 │  └── Solana Executor (Jito bundles, priority fees) ⚠️ **DETECTION ONLY**       │
 │                                                                                  │
 │  LAYER 5: COORDINATION                                                           │
@@ -299,7 +303,7 @@ Instead of one service per chain, chains are grouped into partitions based on:
 | Partition | Chains | Location | Provider | Resources |
 |-----------|--------|----------|----------|-----------|
 | P1: Asia-Fast | BSC, Polygon, Avalanche, Fantom | Singapore | Oracle ARM | 2 OCPU, 12GB |
-| P2: L2-Fast | Arbitrum, Optimism, Base | Singapore | Fly.io x2 | 512MB total |
+| P2: L2-Turbo | Arbitrum, Optimism, Base | Singapore | Fly.io x2 | 512MB total |
 | P3: High-Value | Ethereum, zkSync, Linea | US-East | Oracle ARM | 2 OCPU, 12GB |
 | P4: Solana | Solana (non-EVM) | US-West | Fly.io | 256MB |
 
@@ -339,20 +343,20 @@ The Mempool Detector service provides **pre-block arbitrage detection** by monit
 | **Port** | 3007 |
 | **Purpose** | Detect arbitrage opportunities from pending transactions |
 | **Data Source** | bloXroute BDN (Blockchain Distribution Network) |
-| **Supported Chains** | Ethereum, BSC (configurable) |
+| **Supported Chains** | Ethereum, BSC via BloXroute (other chains require alternative feeds) |
 | **Output Stream** | `stream:pending-opportunities` |
 
 **Key Features**:
-- **bloXroute Integration**: Connects to bloXroute BDN WebSocket feed for real-time pending transaction data
-- **Swap Decoder**: Decodes DEX router calls (UniswapV2/V3, PancakeSwap, etc.) to extract swap intents
-- **High Performance**: O(1) latency tracking with circular buffers, sub-millisecond decode times
+- **bloXroute Integration**: Connects to bloXroute BDN WebSocket feed for real-time pending transaction data with message size validation
+- **Swap Decoder**: Decodes DEX router calls (Uniswap V2/V3, Curve, 1inch, PancakeSwap) to extract swap intents via selector-based O(1) dispatch
+- **High Performance**: O(1) latency tracking with circular buffers, cached handler arrays, sub-millisecond decode times
 - **Backpressure Protection**: Circular buffer with configurable size to prevent memory overflow
 - **Batched Publishing**: Efficient Redis Streams publishing with configurable batch size/timeout
-- **Health Monitoring**: HTTP endpoints for health checks, readiness, and statistics
+- **Health Monitoring**: HTTP endpoints (`/health`, `/ready`, `/stats`) for health checks, readiness, and statistics
 
 **Architecture**:
 ```
-bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
+bloXroute BDN → WebSocket Feed → Swap Decoder → Redis Streams
                                        ↓
                               PendingSwapIntent
                                        ↓
@@ -362,7 +366,7 @@ bloXroute BDN → WebSocket Feed → Swap Decoder → Filter → Redis Streams
 **Configuration**:
 - `MEMPOOL_CONFIG.enabled`: Enable/disable mempool detection
 - `MEMPOOL_CONFIG.bloxroute.enabled`: Enable bloXroute feed
-- `MEMPOOL_CONFIG.filters.minSwapSizeUsd`: Minimum swap size (default: $1000)
+- `MEMPOOL_CONFIG.filters.minSwapSizeUsd`: Reserved for future use (not currently used for filtering; downstream consumers apply USD-based filters)
 - `MEMPOOL_CONFIG.service.maxBufferSize`: Transaction buffer size (default: 10000)
 - `MEMPOOL_CONFIG.service.batchSize`: Redis publishing batch size (default: 100)
 
@@ -925,10 +929,25 @@ SimulationService now routes requests based on chain:
    - Contract: `FlashLoanArbitrage.sol`
    - Largest liquidity pools
 
-2. **PancakeSwap V3** (0% fee)
+2. **Balancer V2** (0% fee)
+   - Chains: Ethereum, Polygon, Arbitrum
+   - Contract: `BalancerV2FlashArbitrage.sol`
+   - Zero-fee flash loans via vault
+
+3. **PancakeSwap V3** (0% fee)
    - Chains: BSC, Ethereum (limited liquidity)
    - Contract: `PancakeSwapFlashArbitrage.sol`
    - Zero-cost flash loans when liquidity available
+
+4. **SyncSwap** (0.3% fee, EIP-3156)
+   - Chains: zkSync Era
+   - Contract: `SyncSwapFlashArbitrage.sol`
+   - EIP-3156 compliant flash loan interface
+
+5. **CommitRevealArbitrage** (MEV-protected)
+   - Chains: All EVM chains
+   - Contract: `CommitRevealArbitrage.sol`
+   - Two-phase commit-reveal pattern for MEV protection when private mempools unavailable
 
 **Strategy Selection**: Automatically selects lowest-fee protocol with sufficient liquidity.
 
@@ -936,7 +955,10 @@ SimulationService now routes requests based on chain:
 
 **Key Files**:
 - `contracts/src/FlashLoanArbitrage.sol`
+- `contracts/src/BalancerV2FlashArbitrage.sol`
 - `contracts/src/PancakeSwapFlashArbitrage.sol`
+- `contracts/src/SyncSwapFlashArbitrage.sol`
+- `contracts/src/CommitRevealArbitrage.sol`
 - `services/execution-engine/src/strategies/flash-loan.strategy.ts`
 - `services/execution-engine/src/strategies/flash-loan-providers/`
 

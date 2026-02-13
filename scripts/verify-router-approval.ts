@@ -41,7 +41,7 @@ import {
  */
 function getFlashLoanContractAddress(chain: string, _protocol: string): string | null {
   const envKey = `${chain.toUpperCase()}_CONTRACT_ADDRESS`;
-  return process.env[envKey] || null;
+  return process.env[envKey] ?? null;
 }
 
 /**
@@ -50,7 +50,7 @@ function getFlashLoanContractAddress(chain: string, _protocol: string): string |
  */
 function getRpcUrl(chain: string): string | null {
   const envKey = `${chain.toUpperCase()}_RPC_URL`;
-  return process.env[envKey] || null;
+  return process.env[envKey] ?? null;
 }
 
 // FIX C3: Map all protocols to their ABIs (was binary if/else handling only 2 of 9 protocols)

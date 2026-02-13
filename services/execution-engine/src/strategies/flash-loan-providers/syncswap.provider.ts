@@ -5,7 +5,6 @@
  * Uses SyncSwapFlashArbitrage.sol contract for on-chain execution.
  *
  * Key characteristics:
- * - 0.3% flash loan fee (30 basis points)
  * - EIP-3156 compliant interface
  * - Single Vault per chain (no pool discovery needed)
  * - zkSync Era native (L2-optimized)
@@ -30,6 +29,7 @@ import type {
   FlashLoanFeeInfo,
   FlashLoanProviderCapabilities,
 } from './types';
+import { validateFlashLoanRequest } from './validation-utils';
 
 /**
  * Cached ethers.Interface for hot-path optimization.
@@ -72,6 +72,8 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
 
   private readonly contractAddress: string;
   private readonly approvedRouters: string[];
+  /** Pre-computed Set for O(1) router validation (hot-path optimization) */
+  private readonly approvedRoutersSet: Set<string>;
   private readonly feeOverride?: number;
 
   constructor(config: {
@@ -85,6 +87,7 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
     this.poolAddress = config.poolAddress; // SyncSwap Vault address
     this.contractAddress = config.contractAddress;
     this.approvedRouters = config.approvedRouters;
+    this.approvedRoutersSet = new Set(config.approvedRouters.map(r => r.toLowerCase()));
     this.feeOverride = config.feeOverride;
 
     // Validate configuration
@@ -246,80 +249,7 @@ export class SyncSwapFlashLoanProvider implements IFlashLoanProvider {
    * @returns Validation result with error message if invalid
    */
   validate(request: FlashLoanRequest): { valid: boolean; error?: string } {
-    // Check chain matches
-    if (request.chain !== this.chain) {
-      return {
-        valid: false,
-        error: `[ERR_CHAIN_MISMATCH] Request chain '${request.chain}' does not match provider chain '${this.chain}'`,
-      };
-    }
-
-    // Check asset is valid address
-    if (!ethers.isAddress(request.asset)) {
-      return {
-        valid: false,
-        error: '[ERR_INVALID_ASSET] Invalid asset address',
-      };
-    }
-
-    // Check amount is non-zero
-    if (request.amount === 0n) {
-      return {
-        valid: false,
-        error: '[ERR_ZERO_AMOUNT] Flash loan amount cannot be zero',
-      };
-    }
-
-    // Check swap path is not empty
-    if (request.swapPath.length === 0) {
-      return {
-        valid: false,
-        error: '[ERR_EMPTY_PATH] Swap path cannot be empty',
-      };
-    }
-
-    // Check all routers in path are approved
-    for (const step of request.swapPath) {
-      if (!ethers.isAddress(step.router)) {
-        return {
-          valid: false,
-          error: `[ERR_INVALID_ROUTER] Invalid router address: ${step.router}`,
-        };
-      }
-
-      // Only validate against approved routers if the list is non-empty
-      if (this.approvedRouters.length > 0) {
-        const isApproved = this.approvedRouters.some(
-          r => r.toLowerCase() === step.router.toLowerCase()
-        );
-        if (!isApproved) {
-          return {
-            valid: false,
-            error: `[ERR_UNAPPROVED_ROUTER] Router not approved: ${step.router}`,
-          };
-        }
-      }
-    }
-
-    // Check swap path forms a valid cycle (ends with same token as starts)
-    const firstToken = request.swapPath[0].tokenIn;
-    const lastToken = request.swapPath[request.swapPath.length - 1].tokenOut;
-    if (firstToken.toLowerCase() !== lastToken.toLowerCase()) {
-      return {
-        valid: false,
-        error: '[ERR_INVALID_CYCLE] Swap path must end with the same token it starts with',
-      };
-    }
-
-    // Check first token matches asset
-    if (firstToken.toLowerCase() !== request.asset.toLowerCase()) {
-      return {
-        valid: false,
-        error: '[ERR_ASSET_MISMATCH] First swap token must match flash loan asset',
-      };
-    }
-
-    return { valid: true };
+    return validateFlashLoanRequest(request, this.chain, this.approvedRoutersSet);
   }
 
   /**

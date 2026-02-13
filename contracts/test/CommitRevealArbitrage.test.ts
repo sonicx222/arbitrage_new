@@ -516,6 +516,74 @@ describe('CommitRevealArbitrage', () => {
         .to.emit(commitRevealArbitrage, 'Revealed');
     });
 
+    it('should revert with CommitmentTooRecent when commit and reveal are in the same block', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn,
+        swapPath,
+        minProfit: 0n,
+        deadline,
+        salt,
+      };
+
+      // Disable automine to include both commit and reveal in the same block.
+      // This tests that MIN_DELAY_BLOCKS=1 is enforced: commit at block N,
+      // reveal at block N should fail because block.number < commitBlock + 1.
+      await ethers.provider.send('evm_setAutomine', [false]);
+
+      try {
+        // Both transactions enter the pending pool (explicit gasLimit bypasses gas estimation)
+        const commitTx = await commitRevealArbitrage.connect(user).commit(
+          commitmentHash, { gasLimit: 200000 }
+        );
+        const revealTx = await commitRevealArbitrage.connect(user).reveal(
+          revealParams, { gasLimit: 500000 }
+        );
+
+        // Mine a single block containing both transactions
+        await ethers.provider.send('evm_mine', []);
+
+        // Commit should succeed (status 1)
+        const commitReceipt = await ethers.provider.getTransactionReceipt(commitTx.hash);
+        expect(commitReceipt!.status).to.equal(1);
+
+        // Reveal should revert (status 0) because block.number == commitBlock,
+        // which violates block.number >= commitBlock + MIN_DELAY_BLOCKS (1).
+        // The contract reverts with CommitmentTooRecent in _validateTimingAndDeadline().
+        const revealReceipt = await ethers.provider.getTransactionReceipt(revealTx.hash);
+        expect(revealReceipt!.status).to.equal(0);
+      } finally {
+        // Always re-enable automine to avoid affecting subsequent tests
+        await ethers.provider.send('evm_setAutomine', [true]);
+      }
+    });
+
     it('should revert if expired (> MAX_COMMIT_AGE_BLOCKS)', async () => {
       const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
 
@@ -672,6 +740,96 @@ describe('CommitRevealArbitrage', () => {
         minProfit: 0n,
         deadline: deadline,
         salt: wrongSalt // Wrong salt!
+      };
+
+      await expect(
+        commitRevealArbitrage.connect(user).reveal(revealParams)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
+    });
+
+    it('should revert with CommitmentNotFound when reveal uses wrong amountIn', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+
+      // Reveal with wrong amountIn — hash won't match committed hash
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: ethers.parseEther('2'), // Wrong amount!
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt
+      };
+
+      await expect(
+        commitRevealArbitrage.connect(user).reveal(revealParams)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
+    });
+
+    it('should revert with CommitmentNotFound when reveal uses wrong asset', async () => {
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+
+      // Reveal with wrong asset — hash won't match committed hash
+      const revealParams = {
+        asset: await usdc.getAddress(), // Wrong asset!
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt
       };
 
       await expect(
@@ -989,6 +1147,57 @@ describe('CommitRevealArbitrage', () => {
       await expect(
         commitRevealArbitrage.connect(user).reveal(revealParams)
       ).to.be.revertedWithCustomError(commitRevealArbitrage, 'RouterNotApproved');
+    });
+
+    it('should revert with CommitmentNotFound (not InvalidCommitmentHash) on wrong reveal params', async () => {
+      // Note: InvalidCommitmentHash is declared at CommitRevealArbitrage.sol:180 but is
+      // unreachable. When reveal params differ from the committed params, the keccak256
+      // hash of the reveal params produces a completely different hash that does not match
+      // any stored commitment, so the lookup hits CommitmentNotFound before
+      // InvalidCommitmentHash could ever be reached. This test documents that behavior.
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: 1n,
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+
+      // Reveal with a different salt produces a different hash that is not found
+      const differentSalt = ethers.randomBytes(32);
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: differentSalt, // Different salt -> different hash -> CommitmentNotFound
+      };
+
+      await expect(
+        commitRevealArbitrage.connect(user).reveal(revealParams)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'CommitmentNotFound');
     });
   });
 
@@ -1787,6 +1996,78 @@ describe('CommitRevealArbitrage', () => {
       );
 
       expect(revealedEvent).to.not.be.undefined;
+    });
+
+    it('should enforce profit threshold via InsufficientProfit (not BelowMinimumProfit)', async () => {
+      // Note: BelowMinimumProfit is declared at CommitRevealArbitrage.sol:183 but is unused.
+      // BaseFlashArbitrage._verifyAndTrackProfit() uses InsufficientProfit for all profit
+      // threshold checks. This test documents that the contract-level minimumProfit
+      // enforcement uses InsufficientProfit, not BelowMinimumProfit.
+      const { commitRevealArbitrage, dexRouter1, weth, usdc, owner, user } = await loadFixture(deployContractsFixture);
+
+      await commitRevealArbitrage.connect(owner).addApprovedRouter(await dexRouter1.getAddress());
+
+      // Set a high minimumProfit so the trade fails profit validation
+      await commitRevealArbitrage.connect(owner).setMinimumProfit(ethers.parseEther('10'));
+
+      // Set exchange rates that give small profit (not enough to meet minimum)
+      await dexRouter1.setExchangeRate(
+        await weth.getAddress(),
+        await usdc.getAddress(),
+        ethers.parseUnits('2000', 6)
+      );
+      await dexRouter1.setExchangeRate(
+        await usdc.getAddress(),
+        await weth.getAddress(),
+        RATE_USDC_TO_WETH_1PCT_PROFIT // ~1% profit, well below 10 WETH minimum
+      );
+
+      const amountIn = ethers.parseEther('1');
+      const swapPath = [
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await weth.getAddress(),
+          tokenOut: await usdc.getAddress(),
+          amountOutMin: ethers.parseUnits('1900', 6),
+        },
+        {
+          router: await dexRouter1.getAddress(),
+          tokenIn: await usdc.getAddress(),
+          tokenOut: await weth.getAddress(),
+          amountOutMin: ethers.parseEther('0.99'),
+        },
+      ];
+
+      const deadline = await getDeadline();
+      const salt = ethers.randomBytes(32);
+
+      const commitmentHash = createCommitmentHash(
+        await weth.getAddress(),
+        amountIn,
+        swapPath,
+        0n,
+        deadline,
+        ethers.hexlify(salt)
+      );
+
+      await commitRevealArbitrage.connect(user).commit(commitmentHash);
+      await mineBlocks(1);
+
+      await weth.connect(user).transfer(await commitRevealArbitrage.getAddress(), amountIn);
+
+      const revealParams = {
+        asset: await weth.getAddress(),
+        amountIn: amountIn,
+        swapPath: swapPath,
+        minProfit: 0n,
+        deadline: deadline,
+        salt: salt,
+      };
+
+      // The profit check uses InsufficientProfit from BaseFlashArbitrage, not BelowMinimumProfit
+      await expect(
+        commitRevealArbitrage.connect(user).reveal(revealParams)
+      ).to.be.revertedWithCustomError(commitRevealArbitrage, 'InsufficientProfit');
     });
   });
 

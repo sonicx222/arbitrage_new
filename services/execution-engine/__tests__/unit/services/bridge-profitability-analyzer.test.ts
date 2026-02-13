@@ -2,8 +2,7 @@
  * BridgeProfitabilityAnalyzer Unit Tests
  *
  * Tests bridge fee analysis for cross-chain arbitrage profitability decisions.
- * Covers: analyze(), getMinimumProfitRequired(), getDefaultMaxFeePercentage(),
- * and the deprecated checkBridgeProfitability() standalone function.
+ * Covers: analyze(), getMinimumProfitRequired(), getDefaultMaxFeePercentage().
  *
  * @see services/execution-engine/src/services/bridge-profitability-analyzer.ts
  */
@@ -14,7 +13,6 @@ import { createMockLogger } from '@arbitrage/test-utils';
 
 import {
   BridgeProfitabilityAnalyzer,
-  checkBridgeProfitability,
 } from '../../../src/services/bridge-profitability-analyzer';
 import type {
   BridgeProfitabilityResult,
@@ -247,45 +245,5 @@ describe('BridgeProfitabilityAnalyzer', () => {
   });
 });
 
-// =============================================================================
-// checkBridgeProfitability() standalone function (deprecated)
-// =============================================================================
-
-describe('checkBridgeProfitability (deprecated standalone)', () => {
-  let mockLogger: ReturnType<typeof createMockLogger>;
-
-  beforeEach(() => {
-    mockLogger = createMockLogger();
-  });
-
-  it('should delegate to BridgeProfitabilityAnalyzer.analyze()', () => {
-    const bridgeFeeWei = ethers.parseEther('0.01');
-    const result = checkBridgeProfitability(bridgeFeeWei, 100, 2000, mockLogger);
-
-    expect(result.isProfitable).toBe(true);
-    expect(result.bridgeFeeEth).toBeCloseTo(0.01);
-    expect(result.bridgeFeeUsd).toBeCloseTo(20);
-  });
-
-  it('should pass options through', () => {
-    const bridgeFeeWei = ethers.parseEther('0.01');
-    const result = checkBridgeProfitability(bridgeFeeWei, 100, 2000, mockLogger, {
-      maxFeePercentage: 10,
-      chain: 'arbitrum',
-    });
-
-    // 20% > 10% custom threshold
-    expect(result.isProfitable).toBe(false);
-  });
-
-  it('should return all expected fields', () => {
-    const bridgeFeeWei = ethers.parseEther('0.005');
-    const result = checkBridgeProfitability(bridgeFeeWei, 50, 2000, mockLogger);
-
-    expect(result).toHaveProperty('isProfitable');
-    expect(result).toHaveProperty('bridgeFeeUsd');
-    expect(result).toHaveProperty('bridgeFeeEth');
-    expect(result).toHaveProperty('profitAfterFees');
-    expect(result).toHaveProperty('feePercentageOfProfit');
-  });
-});
+// P2 FIX #13: Removed tests for deprecated checkBridgeProfitability() standalone function.
+// The function was removed — use BridgeProfitabilityAnalyzer.analyze() directly.

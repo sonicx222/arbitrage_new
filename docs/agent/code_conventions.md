@@ -2,6 +2,7 @@
 
 ## General Guidelines
 - Use ES modules (import/export) syntax, not CommonJS (require)
+  - **Exception:** `scripts/lib/*.js` files use CommonJS for direct Node.js execution without a build step. These are development utility scripts that must run with plain `node` (no transpiler). TypeScript scripts in `scripts/` (`.ts` files) and `contracts/scripts/` use ES modules.
 - Make use of npm workspace packages to structure the modules in a clean way
 - Code should be functional, efficient, and adhere to best practices in node.js programming
 

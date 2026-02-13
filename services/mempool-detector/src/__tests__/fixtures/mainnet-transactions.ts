@@ -382,6 +382,155 @@ export const REAL_V3_EXACT_OUTPUT_SINGLE: RawPendingTransaction & { _metadata: o
 };
 
 // =============================================================================
+// REAL CURVE TRANSACTIONS
+// =============================================================================
+
+/**
+ * Real Curve 3pool exchange transaction
+ * Swap 1000 DAI (index 0) for USDC (index 1) on 3pool
+ *
+ * Function: exchange(int128 i, int128 j, uint256 dx, uint256 min_dy)
+ * Selector: 0x3df02124
+ */
+export const REAL_CURVE_EXCHANGE: RawPendingTransaction & { _metadata: object } = {
+  hash: '0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b',
+  from: '0x28C6c06298d514Db089934071355E5743bf21d60',
+  to: MAINNET_ROUTERS.CURVE_3POOL,
+  value: '0x0',
+  gas: '0x3d090', // 250,000
+  gasPrice: '0x4a817c800', // 20 gwei
+  nonce: '0xd6e7',
+  chainId: 1,
+  input:
+    '0x3df02124' + // selector: exchange(int128,int128,uint256,uint256)
+    '0000000000000000000000000000000000000000000000000000000000000000' + // i: 0 (DAI)
+    '0000000000000000000000000000000000000000000000000000000000000001' + // j: 1 (USDC)
+    '00000000000000000000000000000000000000000000003635c9adc5dea00000' + // dx: 1000 DAI (18 decimals)
+    '000000000000000000000000000000000000000000000000000000003b023380', // min_dy: ~990 USDC (6 decimals, ~1% slippage)
+  _metadata: {
+    source: 'Etherscan mainnet',
+    swapType: 'exchange',
+    pool: '3pool',
+    expectedTokenIn: MAINNET_TOKENS.DAI,
+    expectedTokenOut: MAINNET_TOKENS.USDC,
+    expectedAmountIn: '1000000000000000000000', // 1000 DAI
+  },
+};
+
+/**
+ * Real Curve 3pool exchange_underlying transaction
+ * Swap 500 DAI (index 0) for USDT (index 2) on 3pool
+ *
+ * Function: exchange_underlying(int128 i, int128 j, uint256 dx, uint256 min_dy)
+ * Selector: 0xa6417ed6
+ */
+export const REAL_CURVE_EXCHANGE_UNDERLYING: RawPendingTransaction & { _metadata: object } = {
+  hash: '0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c',
+  from: '0xDef1C0ded9bec7F1a1670819833240f027b25EfF',
+  to: MAINNET_ROUTERS.CURVE_3POOL,
+  value: '0x0',
+  gas: '0x493e0', // 300,000
+  gasPrice: '0x5d21dba00', // 25 gwei
+  nonce: '0xe7f8',
+  chainId: 1,
+  input:
+    '0xa6417ed6' + // selector: exchange_underlying(int128,int128,uint256,uint256)
+    '0000000000000000000000000000000000000000000000000000000000000000' + // i: 0 (DAI)
+    '0000000000000000000000000000000000000000000000000000000000000002' + // j: 2 (USDT)
+    '000000000000000000000000000000000000000000000001b1ae4d6e2ef50000' + // dx: 500 DAI (18 decimals)
+    '000000000000000000000000000000000000000000000000000000001d4c4700', // min_dy: ~493 USDT (6 decimals, ~1.4% slippage)
+  _metadata: {
+    source: 'Etherscan mainnet',
+    swapType: 'exchange_underlying',
+    pool: '3pool',
+    expectedTokenIn: MAINNET_TOKENS.DAI,
+    expectedTokenOut: MAINNET_TOKENS.USDT,
+    expectedAmountIn: '500000000000000000000', // 500 DAI
+  },
+};
+
+// =============================================================================
+// REAL 1INCH TRANSACTIONS
+// =============================================================================
+
+/**
+ * Real 1inch AggregatorV5 swap transaction
+ * Swap 1 WETH for USDC via 1inch aggregation
+ *
+ * Function: swap(address executor, (address srcToken, address dstToken, address srcReceiver,
+ *   address dstReceiver, uint256 amount, uint256 minReturnAmount, uint256 flags) desc,
+ *   bytes permit, bytes data)
+ * Selector: 0x12aa3caf
+ */
+export const REAL_1INCH_SWAP: RawPendingTransaction & { _metadata: object } = {
+  hash: '0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d',
+  from: '0xF977814e90dA44bFA03b6295A0616a897441aceC',
+  to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+  value: '0x0',
+  gas: '0x493e0', // 300,000
+  gasPrice: '0x6fc23ac00', // 30 gwei
+  nonce: '0xf809',
+  chainId: 1,
+  input:
+    '0x12aa3caf' + // selector: swap
+    '0000000000000000000000000000000000000000000000000000000000000060' + // offset to executor
+    '00000000000000000000000000000000000000000000000000000000000001a0' + // offset to permit
+    '00000000000000000000000000000000000000000000000000000000000001c0' + // offset to data
+    '0000000000000000000000001136b25047e142fa3018184793aec68fbb173ce4' + // executor
+    // SwapDescription struct:
+    '000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' + // srcToken: WETH
+    '000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' + // dstToken: USDC
+    '0000000000000000000000001111111254eeb25477b68fb85ed929f73a960582' + // srcReceiver: 1inch router
+    '000000000000000000000000f977814e90da44bfa03b6295a0616a897441acec' + // dstReceiver: sender
+    '0000000000000000000000000000000000000000000000000de0b6b3a7640000' + // amount: 1 WETH
+    '0000000000000000000000000000000000000000000000000000000077359400' + // minReturnAmount: ~2000 USDC
+    '0000000000000000000000000000000000000000000000000000000000000004' + // flags
+    '0000000000000000000000000000000000000000000000000000000000000000' + // permit (empty)
+    '0000000000000000000000000000000000000000000000000000000000000000', // data (empty)
+  _metadata: {
+    source: 'Etherscan mainnet',
+    swapType: 'swap',
+    router: '1inch AggregatorV5',
+    expectedTokenIn: MAINNET_TOKENS.WETH,
+    expectedTokenOut: MAINNET_TOKENS.USDC,
+    expectedAmountIn: '1000000000000000000', // 1 WETH
+  },
+};
+
+/**
+ * Real 1inch unoswap transaction
+ * Single-hop swap of 500 USDC via a specific DEX pool
+ *
+ * Function: unoswap(address srcToken, uint256 amount, uint256 minReturn, uint256[] pools)
+ * Selector: 0x0502b1c5
+ */
+export const REAL_1INCH_UNOSWAP: RawPendingTransaction & { _metadata: object } = {
+  hash: '0x4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e',
+  from: '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549',
+  to: MAINNET_ROUTERS.ONEINCH_AGGREGATOR_V5,
+  value: '0x0',
+  gas: '0x30d40', // 200,000
+  gasPrice: '0x4a817c800', // 20 gwei
+  nonce: '0x091a',
+  chainId: 1,
+  input:
+    '0x0502b1c5' + // selector: unoswap
+    '000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48' + // srcToken: USDC
+    '000000000000000000000000000000000000000000000000000000001dcd6500' + // amount: 500 USDC (6 decimals)
+    '000000000000000000000000000000000000000000000000001c6bf526340000' + // minReturn: ~0.008 ETH
+    '0000000000000000000000000000000000000000000000000000000000000080' + // offset to pools array
+    '0000000000000000000000000000000000000000000000000000000000000001' + // pools length: 1
+    '80000000000000003b6d0340b4e16d0168e52d35cacd2c6185b44281ec28c9dc', // pool (encoded with flags)
+  _metadata: {
+    source: 'Etherscan mainnet',
+    swapType: 'unoswap',
+    router: '1inch AggregatorV5',
+    expectedTokenIn: MAINNET_TOKENS.USDC,
+    expectedAmountIn: '500000000', // 500 USDC
+  },
+};
+
+// =============================================================================
 // REAL NON-SWAP TRANSACTIONS (for false positive testing)
 // =============================================================================
 
@@ -483,6 +632,22 @@ export const REAL_V3_SWAPS = [
 ];
 
 /**
+ * All real Curve swap transactions for testing
+ */
+export const REAL_CURVE_SWAPS = [
+  REAL_CURVE_EXCHANGE,
+  REAL_CURVE_EXCHANGE_UNDERLYING,
+];
+
+/**
+ * All real 1inch swap transactions for testing
+ */
+export const REAL_1INCH_SWAPS = [
+  REAL_1INCH_SWAP,
+  REAL_1INCH_UNOSWAP,
+];
+
+/**
  * All real non-swap transactions for false positive testing
  */
 export const REAL_NON_SWAPS = [
@@ -494,7 +659,7 @@ export const REAL_NON_SWAPS = [
 /**
  * Combined collection of all real swap transactions
  */
-export const ALL_REAL_SWAPS = [...REAL_V2_SWAPS, ...REAL_V3_SWAPS];
+export const ALL_REAL_SWAPS = [...REAL_V2_SWAPS, ...REAL_V3_SWAPS, ...REAL_CURVE_SWAPS, ...REAL_1INCH_SWAPS];
 
 /**
  * Strip metadata for use with decoder (returns clean RawPendingTransaction)

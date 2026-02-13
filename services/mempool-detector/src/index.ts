@@ -254,7 +254,6 @@ export class MempoolDetectorService extends EventEmitter {
     txDecoded: 0,
     txDecodeFailures: 0,
     opportunitiesPublished: 0,
-    txFiltered: 0,
     bufferOverflows: 0,
   };
 
@@ -449,9 +448,8 @@ export class MempoolDetectorService extends EventEmitter {
       feedHealth[chainId] = feed.getHealth();
     }
 
-    // FIX 4.2/10.4: Calculate percentiles from circular buffer
-    const latencyP50 = this.calculatePercentile(50);
-    const latencyP99 = this.calculatePercentile(99);
+    // FIX 4.2/10.4: Calculate percentiles from circular buffer (single sort pass)
+    const { p50: latencyP50, p99: latencyP99 } = this.calculatePercentiles();
 
     // Determine health status based on feed health
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'unhealthy';
@@ -535,7 +533,7 @@ export class MempoolDetectorService extends EventEmitter {
                           health.status === 'degraded' ? 200 : 503;
 
         res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(health, null, 2));
+        res.end(JSON.stringify(health));
       } else if (req.url === '/ready') {
         const ready = this.isRunning && this.feeds.size > 0;
         res.writeHead(ready ? 200 : 503, { 'Content-Type': 'application/json' });
@@ -552,7 +550,7 @@ export class MempoolDetectorService extends EventEmitter {
           bufferStats: this.txBuffer.getStats(),
           latencyBufferStats: this.latencyBuffer.getStats(),
           batcherStats: this.streamBatcher?.getStats() ?? null,
-        }, null, 2));
+        }));
       } else {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
@@ -601,6 +599,18 @@ export class MempoolDetectorService extends EventEmitter {
     if (!bloxConfig.authHeader) {
       this.logger.warn('bloXroute auth header not configured');
       return;
+    }
+
+    // Log which configured chains lack BloXroute endpoint support
+    const unsupportedChains = this.config.chains.filter(
+      chain => !this.getBloXrouteEndpoint(chain)
+    );
+    if (unsupportedChains.length > 0) {
+      this.logger.warn('Configured chains without BloXroute BDN endpoint support', {
+        unsupportedChains,
+        supportedChains: ['ethereum', 'bsc'],
+        hint: 'These chains will not receive mempool data via BloXroute',
+      });
     }
 
     // Create feeds for each enabled chain
@@ -653,6 +663,10 @@ export class MempoolDetectorService extends EventEmitter {
 
   /**
    * Get bloXroute endpoint for a chain.
+   *
+   * Currently only Ethereum and BSC have dedicated BloXroute BDN WebSocket
+   * endpoints. Other chains (Arbitrum, Polygon, etc.) require different
+   * mempool data providers or BloXroute plan upgrades.
    */
   private getBloXrouteEndpoint(chainId: string): string | null {
     const bloxConfig = MEMPOOL_CONFIG.bloxroute;
@@ -732,23 +746,6 @@ export class MempoolDetectorService extends EventEmitter {
 
       this.stats.txDecoded++;
 
-      // FIX 7.2: USD Filtering Design Decision
-      // ----------------------------------------
-      // The mempool-detector intentionally does NOT filter by USD value because:
-      // 1. This service doesn't have access to a price oracle for token valuations
-      // 2. Filtering is better done downstream at cross-chain-detector which has price data
-      // 3. Publishing all decoded swaps allows downstream consumers to apply their own filters
-      // 4. Low latency is critical for mempool data - adding price lookups would add latency
-      //
-      // The minSwapSizeUsd config option is reserved for future use if a lightweight
-      // price cache is added, but currently all decoded swaps are published.
-      // Downstream consumers (cross-chain-detector) filter based on opportunity quality.
-      const shouldPublish = true;
-      if (!shouldPublish) {
-        this.stats.txFiltered++;
-        return;
-      }
-
       // FIX 4.5: Publish to Redis stream - only count on successful add
       // FIX 4.1: Wrap in PendingOpportunity and serialize bigint fields
       if (this.streamBatcher) {
@@ -799,19 +796,20 @@ export class MempoolDetectorService extends EventEmitter {
   // ===========================================================================
 
   /**
-   * FIX 4.2/10.4: Calculate percentile from circular buffer.
-   * Uses insertion sort for small buffer sizes (efficient for rolling window).
+   * FIX 4.2/10.4: Calculate percentiles from circular buffer.
+   * Sorts once and returns both P50 and P99 to avoid redundant sorts.
    */
-  private calculatePercentile(percentile: number): number {
+  private calculatePercentiles(): { p50: number; p99: number } {
     if (this.latencyBuffer.isEmpty) {
-      return 0;
+      return { p50: 0, p99: 0 };
     }
 
     const samples = this.latencyBuffer.toArray();
     samples.sort((a, b) => a - b);
 
-    const index = Math.ceil((percentile / 100) * samples.length) - 1;
-    return samples[Math.max(0, index)];
+    const p50Index = Math.max(0, Math.ceil(0.5 * samples.length) - 1);
+    const p99Index = Math.max(0, Math.ceil(0.99 * samples.length) - 1);
+    return { p50: samples[p50Index], p99: samples[p99Index] };
   }
 }
 

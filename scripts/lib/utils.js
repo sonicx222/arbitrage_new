@@ -14,13 +14,7 @@
  * @see ADR-009: Test Architecture
  */
 
-const path = require('path');
-
-// =============================================================================
-// Constants
-// =============================================================================
-
-const ROOT_DIR = path.join(__dirname, '..', '..');
+const { ROOT_DIR } = require('./constants');
 
 // =============================================================================
 // Re-exports from Focused Modules

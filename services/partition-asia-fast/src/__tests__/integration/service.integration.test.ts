@@ -88,7 +88,7 @@ jest.mock('@arbitrage/core', () => {
     parsePort: jest.fn().mockImplementation((portEnv: string | undefined, defaultPort: number) => {
       if (!portEnv) return defaultPort;
       const parsed = parseInt(portEnv, 10);
-      return isNaN(parsed) ? defaultPort : parsed;
+      return isNaN(parsed) || parsed < 1 || parsed > 65535 ? defaultPort : parsed;
     }),
     validateAndFilterChains: jest.fn().mockImplementation((chainsEnv: string | undefined, defaultChains: readonly string[]) => {
       if (!chainsEnv) return [...defaultChains];
@@ -106,7 +106,7 @@ jest.mock('@arbitrage/core', () => {
       instanceId: process.env.INSTANCE_ID,
       regionId: process.env.REGION_ID,
       enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-      nodeEnv: process.env.NODE_ENV || 'development',
+      nodeEnv: process.env.NODE_ENV ?? 'development',
       rpcUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
       wsUrls: Object.fromEntries(chainNames.map(c => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
     })),
@@ -179,7 +179,7 @@ jest.mock('@arbitrage/core', () => {
         instanceId: process.env.INSTANCE_ID,
         regionId: process.env.REGION_ID,
         enableCrossRegionHealth: process.env.ENABLE_CROSS_REGION_HEALTH !== 'false',
-        nodeEnv: process.env.NODE_ENV || 'development',
+        nodeEnv: process.env.NODE_ENV ?? 'development',
         rpcUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_RPC_URL`]])),
         wsUrls: Object.fromEntries(chains.map((c: string) => [c, process.env[`${c.toUpperCase()}_WS_URL`]])),
       };
@@ -266,7 +266,6 @@ describe('P1 Asia-Fast Partition Service Integration', () => {
   let cleanupFn: (() => void) | null = null;
 
   beforeEach(() => {
-    jest.clearAllMocks();
     process.env = {
       ...originalEnv,
       JEST_WORKER_ID: 'test',

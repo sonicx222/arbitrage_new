@@ -17,27 +17,13 @@ import {
 import type { VersionedPoolStore } from '../../../src/pool/versioned-pool-store';
 import type { OpportunityFactory } from '../../../src/opportunity-factory';
 import type { InternalPoolInfo, SolanaArbitrageLogger, SolanaArbitrageOpportunity } from '../../../src/types';
+import { createMockInternalPool, createMockPoolStore } from '../../helpers/test-fixtures';
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-function createMockPool(overrides: Partial<InternalPoolInfo> = {}): InternalPoolInfo {
-  return {
-    address: 'pool-address-1',
-    programId: 'program-id-1',
-    dex: 'raydium',
-    token0: { mint: 'mint0', symbol: 'SOL', decimals: 9 },
-    token1: { mint: 'mint1', symbol: 'USDC', decimals: 6 },
-    fee: 25, // 0.25% in basis points
-    price: 100,
-    lastUpdated: Date.now(),
-    normalizedToken0: 'SOL',
-    normalizedToken1: 'USDC',
-    pairKey: 'SOL-USDC',
-    ...overrides,
-  };
-}
+const createMockPool = createMockInternalPool;
 
 function createMockOpportunity(overrides: Partial<SolanaArbitrageOpportunity> = {}): SolanaArbitrageOpportunity {
   return {
@@ -71,15 +57,6 @@ const defaultConfig: IntraSolanaDetectorConfig = {
   priorityFeeMultiplier: 1.0,
   defaultTradeValueUsd: 1000,
 };
-
-function createMockPoolStore(pairMap: Map<string, InternalPoolInfo[]>): VersionedPoolStore {
-  return {
-    getPairKeys: jest.fn<() => string[]>().mockReturnValue(Array.from(pairMap.keys())),
-    getPoolsForPair: jest.fn<(key: string) => InternalPoolInfo[]>().mockImplementation(
-      (key: string) => pairMap.get(key) ?? []
-    ),
-  } as unknown as VersionedPoolStore;
-}
 
 function createMockOpportunityFactory(): OpportunityFactory {
   return {

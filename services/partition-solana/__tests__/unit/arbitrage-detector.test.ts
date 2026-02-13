@@ -18,10 +18,12 @@ import {
   SolanaArbitrageDetector,
   SolanaArbitrageConfig,
   SolanaPoolInfo,
+  SolanaArbitrageOpportunity,
   EvmPriceUpdate,
   SolanaArbitrageLogger,
   SolanaArbitrageStreamsClient,
-} from '../arbitrage-detector';
+} from '../../src/arbitrage-detector';
+import { createMockSolanaPool } from '../helpers/test-fixtures';
 
 // =============================================================================
 // Test Utilities
@@ -48,14 +50,26 @@ const createMockStreamsClient = (): SolanaArbitrageStreamsClient & { xadd: jest.
   xadd: jest.fn<() => Promise<string | null>>().mockResolvedValue('message-id'),
 });
 
-const createMockPool = (overrides: Partial<SolanaPoolInfo> = {}): SolanaPoolInfo => ({
-  address: `pool-${Math.random().toString(36).slice(2, 10)}`,
-  programId: '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-  dex: 'raydium',
-  token0: { mint: 'So11111111111111111111111111111111111111112', symbol: 'SOL', decimals: 9 },
-  token1: { mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', symbol: 'USDC', decimals: 6 },
-  fee: 25, // 0.25% in basis points
-  price: 100,
+const createMockPool = createMockSolanaPool;
+
+const createSyntheticOpportunity = (overrides: Partial<SolanaArbitrageOpportunity> = {}): SolanaArbitrageOpportunity => ({
+  id: `sol-test-${Math.random().toString(36).slice(2, 10)}`,
+  type: 'intra-solana',
+  chain: 'solana',
+  buyDex: 'raydium',
+  sellDex: 'orca',
+  buyPair: 'pool-buy-1',
+  sellPair: 'pool-sell-1',
+  token0: 'SOL',
+  token1: 'USDC',
+  buyPrice: 90,
+  sellPrice: 100,
+  profitPercentage: 5.0,
+  expectedProfit: 0.05,
+  confidence: 0.85,
+  timestamp: Date.now(),
+  expiresAt: Date.now() + 1000,
+  status: 'pending',
   ...overrides,
 });
 
@@ -268,6 +282,34 @@ describe('SolanaArbitrageDetector', () => {
 
       await detector.importPools(pools);
       expect(detector.getPoolCount()).toBe(3);
+    });
+
+    it('should throttle rapid updates to the same pool address', async () => {
+      // Fix #22: Rate limiting on pool additions
+      const pool = createMockPool({ address: 'throttle-test', price: 100 });
+      await detector.addPool(pool);
+      expect(detector.getPoolCount()).toBe(1);
+
+      // Second add with same address within cooldown should be throttled
+      const updatedPool = createMockPool({ address: 'throttle-test', price: 200 });
+      await detector.addPool(updatedPool);
+
+      // Price should still be original since update was throttled
+      const stored = detector.getPool('throttle-test');
+      expect(stored?.price).toBe(100);
+    });
+
+    it('should allow updates to different pool addresses without throttling', async () => {
+      // Fix #22: Different addresses should not interfere with each other
+      const pool1 = createMockPool({ address: 'rate-limit-pool-1', price: 100 });
+      const pool2 = createMockPool({ address: 'rate-limit-pool-2', price: 200 });
+
+      await detector.addPool(pool1);
+      await detector.addPool(pool2);
+
+      expect(detector.getPoolCount()).toBe(2);
+      expect(detector.getPool('rate-limit-pool-1')?.price).toBe(100);
+      expect(detector.getPool('rate-limit-pool-2')?.price).toBe(200);
     });
   });
 
@@ -545,18 +587,9 @@ describe('SolanaArbitrageDetector', () => {
 
       detector.setStreamsClient(mockStreamsClient);
 
-      const pool1 = createMockPool({ address: 'publish-1', price: 90 });
-      const pool2 = createMockPool({ address: 'publish-2', price: 100 });
-
-      await detector.addPool(pool1);
-      await detector.addPool(pool2);
-
-      const opportunities = await detector.detectIntraSolanaArbitrage();
-
-      if (opportunities.length > 0) {
-        await detector.publishOpportunity(opportunities[0]);
-        expect(mockStreamsClient.xadd).toHaveBeenCalled();
-      }
+      const opportunity = createSyntheticOpportunity();
+      await detector.publishOpportunity(opportunity);
+      expect(mockStreamsClient.xadd).toHaveBeenCalled();
     });
   });
 
@@ -1125,19 +1158,10 @@ describe('SolanaArbitrageDetector', () => {
 
       detector.setStreamsClient(flakeyStreamsClient);
 
-      const pool1 = createMockPool({ address: 'retry-1', price: 90 });
-      const pool2 = createMockPool({ address: 'retry-2', price: 100 });
-
-      await detector.addPool(pool1);
-      await detector.addPool(pool2);
-
-      const opportunities = await detector.detectIntraSolanaArbitrage();
-
-      if (opportunities.length > 0) {
-        await detector.publishOpportunity(opportunities[0]);
-        // Should have been called 3 times (2 failures + 1 success)
-        expect(flakeyStreamsClient.xadd).toHaveBeenCalledTimes(3);
-      }
+      const opportunity = createSyntheticOpportunity();
+      await detector.publishOpportunity(opportunity);
+      // Should have been called 3 times (2 failures + 1 success)
+      expect(flakeyStreamsClient.xadd).toHaveBeenCalledTimes(3);
     });
 
     it('should give up after max retries', async () => {
@@ -1147,19 +1171,10 @@ describe('SolanaArbitrageDetector', () => {
 
       detector.setStreamsClient(failingStreamsClient);
 
-      const pool1 = createMockPool({ address: 'fail-1', price: 90 });
-      const pool2 = createMockPool({ address: 'fail-2', price: 100 });
-
-      await detector.addPool(pool1);
-      await detector.addPool(pool2);
-
-      const opportunities = await detector.detectIntraSolanaArbitrage();
-
-      if (opportunities.length > 0) {
-        await detector.publishOpportunity(opportunities[0]);
-        // Should have been called MAX_ATTEMPTS times (3)
-        expect(failingStreamsClient.xadd).toHaveBeenCalledTimes(3);
-      }
+      const opportunity = createSyntheticOpportunity();
+      await detector.publishOpportunity(opportunity);
+      // Should have been called MAX_ATTEMPTS times (3)
+      expect(failingStreamsClient.xadd).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1458,7 +1473,7 @@ describe('SolanaArbitrageDetector', () => {
   });
 
   // ===========================================================================
-  // O(n²) Comparison Limit Tests (P1)
+  // O(n^2) Comparison Limit Tests (P1)
   // ===========================================================================
 
   describe('comparison limit for large pool sets', () => {

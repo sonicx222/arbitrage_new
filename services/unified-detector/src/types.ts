@@ -6,7 +6,7 @@
  */
 
 // P0-FIX: Import canonical TimeoutError from @arbitrage/types (single source of truth)
-import { TimeoutError } from '@arbitrage/types';
+import { TimeoutError, Pair } from '@arbitrage/types';
 
 // Fee utilities and price bounds - import from canonical source (@arbitrage/core)
 import {
@@ -73,6 +73,36 @@ export interface ChainStats {
 
   /** Number of hot pairs (high activity) for volatility-based prioritization */
   hotPairsCount?: number;
+}
+
+// =============================================================================
+// Extended Pair Interface (moved from chain-instance.ts for shared use)
+// =============================================================================
+
+/**
+ * Extended pair interface with reserve data and hot-path cache fields.
+ * Used by chain-instance.ts for pair tracking and by pair-initializer.ts for creation.
+ *
+ * Note: The detection module has its own ExtendedPair (in snapshot-manager.ts)
+ * which is a simplified version for snapshot use. Chain-instance imports it
+ * as `DetectionExtendedPair` to avoid conflicts.
+ */
+export interface ExtendedPair extends Pair {
+  reserve0: string;
+  reserve1: string;
+  blockNumber: number;
+  lastUpdate: number;
+  // HOT-PATH OPT: Cache pairKey to avoid per-event string allocation in emitPriceUpdate()
+  // Format: "${dex}_${token0Symbol}_${token1Symbol}"
+  pairKey?: string;
+  // FIX Perf 10.2: Cache chain:address key to avoid string allocation in activity tracking
+  // Format: "${chainId}:${pairAddress}" - used by activityTracker.recordUpdate()
+  chainPairKey?: string;
+  // FIX Perf 10.2: Cache BigInt reserves to avoid re-parsing in emitPriceUpdate()
+  // Updated atomically with string reserves in handleSyncEvent()
+  // At 100-1000 Sync events/sec, this eliminates ~2000 BigInt parses/sec
+  reserve0BigInt?: bigint;
+  reserve1BigInt?: bigint;
 }
 
 /**

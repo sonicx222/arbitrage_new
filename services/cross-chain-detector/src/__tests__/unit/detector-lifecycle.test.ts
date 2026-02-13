@@ -34,137 +34,20 @@ process.env.REDIS_URL = 'redis://localhost:6379';
 // Mock Setup
 // =============================================================================
 
-// Factory functions for mock objects that are reset in beforeEach.
-// jest.clearAllMocks() wipes mockReturnValue/mockResolvedValue on all jest.fn()
-// instances, so these must be re-created each test.
-
-const createMockRedisClient = () => ({
-  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  updateServiceHealth: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  get: jest.fn<() => Promise<string | null>>().mockResolvedValue(null),
-  set: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-});
-
-const createMockStreamsClient = () => ({
-  disconnect: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  xreadgroup: jest.fn<() => Promise<any[]>>().mockResolvedValue([]),
-  xack: jest.fn<() => Promise<number>>().mockResolvedValue(1),
-  xaddWithLimit: jest.fn<() => Promise<string>>().mockResolvedValue('stream-id'),
-  createConsumerGroup: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-});
-
-const createMockPriceOracle = () => ({
-  getPrice: jest.fn<any>().mockResolvedValue({ price: 3000, isStale: false, source: 'mock' }),
-});
-
-const createMockWhaleTracker = () => ({
-  recordTransaction: jest.fn(),
-  getActivitySummary: jest.fn().mockReturnValue({
-    dominantDirection: 'neutral',
-    buyVolumeUsd: 0,
-    sellVolumeUsd: 0,
-    superWhaleCount: 0,
-    netFlowUsd: 0,
-    transactionCount: 0,
-    recentTransactions: [],
-  }),
-});
-
-// Mock ServiceStateManager that actually tracks state
-const createMockStateManager = () => {
-  let state = 'STOPPED';
-  return {
-    getState: jest.fn(() => state),
-    isRunning: jest.fn(() => state === 'RUNNING'),
-    executeStart: jest.fn(async (fn: () => Promise<void>) => {
-      if (state !== 'STOPPED') {
-        return { success: false, error: new Error(`Cannot start from state ${state}`) };
-      }
-      state = 'STARTING';
-      try {
-        await fn();
-        state = 'RUNNING';
-        return { success: true };
-      } catch (error) {
-        state = 'ERROR';
-        return { success: false, error };
-      }
-    }),
-    executeStop: jest.fn(async (fn: () => Promise<void>) => {
-      if (state !== 'RUNNING' && state !== 'ERROR') {
-        return { success: false, error: new Error(`Cannot stop from state ${state}`) };
-      }
-      state = 'STOPPING';
-      try {
-        await fn();
-        state = 'STOPPED';
-        return { success: true };
-      } catch (error) {
-        state = 'ERROR';
-        return { success: false, error };
-      }
-    }),
-  };
-};
-
-// Mock StreamConsumer (EventEmitter-like)
-const createMockStreamConsumer = () => ({
-  createConsumerGroups: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  start: jest.fn(),
-  stop: jest.fn(),
-  on: jest.fn(),
-  removeAllListeners: jest.fn(),
-  emit: jest.fn(),
-});
-
-// Mock PriceDataManager
-const createMockPriceDataManager = () => ({
-  handlePriceUpdate: jest.fn(),
-  getPairCount: jest.fn().mockReturnValue(0),
-  getChains: jest.fn().mockReturnValue([]),
-  createIndexedSnapshot: jest.fn().mockReturnValue({
-    tokenPairs: [],
-    byToken: new Map(),
-    byChain: new Map(),
-    timestamp: Date.now(),
-  }),
-  createSnapshot: jest.fn().mockReturnValue([]),
-  clear: jest.fn(),
-});
-
-// Mock OpportunityPublisher
-const createMockOpportunityPublisher = () => ({
-  publish: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  getCacheSize: jest.fn().mockReturnValue(0),
-  cleanup: jest.fn(),
-  clear: jest.fn(),
-});
-
-// Mock BridgeCostEstimator
-const createMockBridgeCostEstimator = () => ({
-  estimateBridgeCost: jest.fn().mockReturnValue(0.001),
-  getDetailedEstimate: jest.fn().mockReturnValue({
-    costEth: 0.001,
-    costUsd: 3,
-    predictedLatency: 120,
-    reliability: 0.95,
-  }),
-  extractTokenAmount: jest.fn().mockReturnValue(1000),
-  updateEthPrice: jest.fn(),
-  getEthPrice: jest.fn().mockReturnValue(3000),
-});
-
-// Mock MLPredictionManager
-// initialize() returns boolean (true=success, false=failure)
-const createMockMLPredictionManager = () => ({
-  initialize: jest.fn<any>().mockResolvedValue(true),
-  isReady: jest.fn().mockReturnValue(false),
-  trackPriceUpdate: jest.fn(),
-  prefetchPredictions: jest.fn<() => Promise<Map<string, any>>>().mockResolvedValue(new Map()),
-  getCachedPrediction: jest.fn().mockReturnValue(null),
-  cleanup: jest.fn(),
-  clear: jest.fn(),
-});
+// FIX #30/#16: Import shared mock factories instead of inline definitions.
+// Factories are called in beforeEach() to survive jest.resetAllMocks().
+import {
+  createMockRedisClient,
+  createMockStreamsClient,
+  createMockPriceOracle,
+  createMockWhaleTracker,
+  createMockStateManager,
+  createMockStreamConsumer,
+  createMockPriceDataManager,
+  createMockOpportunityPublisher,
+  createMockBridgeCostEstimator,
+  createMockMLPredictionManager,
+} from '../helpers/mock-factories';
 
 let mockRedisClient = createMockRedisClient();
 let mockStreamsClient = createMockStreamsClient();
@@ -204,6 +87,10 @@ jest.mock('@arbitrage/core', () => ({
   disconnectWithTimeout: jest.fn<any>().mockResolvedValue(undefined),
   clearIntervalSafe: jest.fn((interval: any) => {
     if (interval) clearInterval(interval);
+    return null;
+  }),
+  clearTimeoutSafe: jest.fn((timeout: any) => {
+    if (timeout) clearTimeout(timeout);
     return null;
   }),
   OperationGuard: jest.fn().mockImplementation(() => ({
@@ -308,6 +195,10 @@ describe('CrossChainDetectorService', () => {
     core.disconnectWithTimeout.mockResolvedValue(undefined);
     core.clearIntervalSafe.mockImplementation((interval: any) => {
       if (interval) clearInterval(interval);
+      return null;
+    });
+    core.clearTimeoutSafe.mockImplementation((timeout: any) => {
+      if (timeout) clearTimeout(timeout);
       return null;
     });
     core.OperationGuard.mockImplementation(() => ({

@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Task P2-2: Use shared constants
-const { LOCK_TIMEOUT_MS, LOCK_RETRY_INTERVAL_MS } = require('./constants');
+const { ROOT_DIR, LOCK_TIMEOUT_MS, LOCK_RETRY_INTERVAL_MS } = require('./constants');
 
 // Import process utilities (moved from inline require to prevent potential circular deps)
 const { processExists } = require('./process-manager');
@@ -23,7 +23,6 @@ const { processExists } = require('./process-manager');
 // Constants
 // =============================================================================
 
-const ROOT_DIR = path.join(__dirname, '..', '..');
 const PID_FILE = path.join(ROOT_DIR, '.local-services.pid');
 const PID_LOCK_FILE = PID_FILE + '.lock';
 

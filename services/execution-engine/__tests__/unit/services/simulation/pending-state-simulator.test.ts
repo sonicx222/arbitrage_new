@@ -305,7 +305,7 @@ describe('PendingStateSimulator - Unit Tests', () => {
           '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
           '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
         ],
-        fee: 3000, // 0.3% fee tier
+        feeTier: 3000, // 0.3% fee tier
       });
 
       const rawTx = await simulator.buildRawTransaction(v3SingleHopIntent);
@@ -325,7 +325,7 @@ describe('PendingStateSimulator - Unit Tests', () => {
           '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
           '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
         ],
-        fee: 3000, // Default fee tier
+        feeTier: 3000, // Default fee tier
       });
 
       const rawTx = await simulator.buildRawTransaction(v3MultiHopIntent);
@@ -345,7 +345,7 @@ describe('PendingStateSimulator - Unit Tests', () => {
           '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
           '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
         ],
-        fee: 500, // 0.05% fee tier
+        feeTier: 500, // 0.05% fee tier
       });
 
       const rawTx = await simulator.buildRawTransaction(v3Intent);
@@ -356,9 +356,9 @@ describe('PendingStateSimulator - Unit Tests', () => {
     });
 
     test('should handle different fee tiers', async () => {
-      const feeTiers = [100, 500, 3000, 10000];
+      const feeTiers = [100, 500, 3000, 10000] as const;
 
-      for (const fee of feeTiers) {
+      for (const feeTier of feeTiers) {
         const v3Intent = createPendingSwapIntent({
           type: 'uniswapV3',
           router: '0xE592427A0AEce92De3Edee1F18E0157C05861564',
@@ -366,7 +366,7 @@ describe('PendingStateSimulator - Unit Tests', () => {
             '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
             '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
           ],
-          fee,
+          feeTier,
         });
 
         const rawTx = await simulator.buildRawTransaction(v3Intent);
@@ -386,7 +386,7 @@ describe('PendingStateSimulator - Unit Tests', () => {
           '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
           '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         ],
-        fee: 3000,
+        feeTier: 3000,
       });
 
       const rawTx = await simulator.buildRawTransaction(v3Intent);
