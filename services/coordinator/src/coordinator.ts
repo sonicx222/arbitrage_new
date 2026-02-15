@@ -44,6 +44,8 @@ import {
 } from '@arbitrage/core';
 import type { ServiceHealth, ArbitrageOpportunity } from '@arbitrage/types';
 import { isAuthEnabled } from '@arbitrage/security';
+import { safeParseInt } from '@arbitrage/config';
+import { serializeOpportunityForStream } from './utils/stream-serialization';
 
 // Import extracted API modules
 // FIX: Import Logger and Alert from consolidated api/types (single source of truth)
@@ -83,6 +85,8 @@ import { ActivePairsTracker } from './tracking';
 
 // P2-11: Import IntervalManager for centralized interval lifecycle management
 import { IntervalManager } from '@arbitrage/core';
+// REFACTOR: Import extracted standby activation manager
+import { StandbyActivationManager } from './standby-activation-manager';
 
 // =============================================================================
 // Service Name Patterns (FIX 3.2: Configurable instead of hardcoded)
@@ -240,9 +244,9 @@ export class CoordinatorService implements CoordinatorStateProvider {
   // and fallback before leadershipElection is initialized. All reads that affect
   // behavior should use getIsLeader() which delegates to LeadershipElectionService.
   private isLeader = false;
-  // P1-8 FIX: Activation state tracking (replaced by LeadershipElectionService.setActivating())
-  // Kept for backward compatibility during transition
-  private activationPromise: Promise<boolean> | null = null;
+  // REFACTOR: Standby activation delegated to StandbyActivationManager
+  private standbyActivationManager: StandbyActivationManager | null = null;
+  // P1-8 FIX: Activation state tracking (backward compat flag)
   private isActivating = false;
   private serviceHealth: Map<string, ServiceHealth> = new Map();
   private systemMetrics: SystemMetrics;
@@ -332,12 +336,7 @@ export class CoordinatorService implements CoordinatorStateProvider {
     // - Use `||` for ports/IDs where 0 is semantically invalid
     // See: docs/agent/code_conventions.md for full guidelines
 
-    // P1 FIX #14: NaN-safe parseInt wrapper - returns defaultValue if env var is non-numeric
-    const safeParseInt = (value: string | undefined, defaultValue: number): number => {
-      if (!value) return defaultValue;
-      const parsed = parseInt(value, 10);
-      return Number.isNaN(parsed) ? defaultValue : parsed;
-    };
+    // P1 FIX #14: NaN-safe parseInt — imported from @arbitrage/config (shared utility)
 
     this.config = {
       // P2 FIX #20: Read COORDINATOR_PORT (per .env.example) with PORT fallback
@@ -425,6 +424,19 @@ export class CoordinatorService implements CoordinatorStateProvider {
       this.healthMonitor,
       { cooldownMs: this.config.alertCooldownMs }
     );
+
+    // REFACTOR: Initialize standby activation manager (uses getters for lazy deps)
+    this.standbyActivationManager = new StandbyActivationManager({
+      logger: this.logger,
+      getLeadershipElection: () => this.leadershipElection,
+      getIsLeader: () => this.isLeader,
+      getIsStandby: () => this.config.isStandby ?? false,
+      getCanBecomeLeader: () => this.config.canBecomeLeader ?? true,
+      instanceId: this.config.leaderElection.instanceId,
+      regionId: this.config.regionId,
+      onActivationSuccess: () => { this.config.isStandby = false; },
+      setIsActivating: (value) => { this.isActivating = value; },
+    });
 
     // Define consumer groups for all streams we need to consume
     // Includes swap-events, volume-aggregates, and price-updates for analytics and monitoring
@@ -1452,27 +1464,10 @@ export class CoordinatorService implements CoordinatorStateProvider {
 
     try {
       // Publish to execution-requests stream for the execution engine to consume
+      // FIX #12: Use shared serialization utility (single source of truth)
       await this.streamsClient.xadd(
         RedisStreamsClient.STREAMS.EXECUTION_REQUESTS,
-        {
-          id: opportunity.id,
-          type: opportunity.type || 'simple',
-          chain: opportunity.chain || 'unknown',
-          // FIX P0-4: Use ?? for fields where empty string is a valid value
-          buyDex: opportunity.buyDex ?? '',
-          sellDex: opportunity.sellDex ?? '',
-          profitPercentage: opportunity.profitPercentage?.toString() || '0',
-          confidence: opportunity.confidence?.toString() || '0',
-          timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
-          expiresAt: opportunity.expiresAt?.toString() ?? '',
-          // Include token info if available
-          tokenIn: opportunity.tokenIn ?? '',
-          tokenOut: opportunity.tokenOut ?? '',
-          amountIn: opportunity.amountIn ?? '',
-          // Source metadata
-          forwardedBy: this.config.leaderElection.instanceId,
-          forwardedAt: Date.now().toString()
-        }
+        serializeOpportunityForStream(opportunity, this.config.leaderElection.instanceId)
       );
 
       // FIX P2: Record success to close circuit breaker if it was half-open
@@ -1902,120 +1897,23 @@ export class CoordinatorService implements CoordinatorStateProvider {
   }
 
   /**
-   * FIX: Updated to use Promise-based mutex check
+   * REFACTOR: Delegates to StandbyActivationManager.
    */
   getIsActivating(): boolean {
-    return this.activationPromise !== null;
+    return this.standbyActivationManager?.getIsActivating() ?? false;
   }
 
   /**
    * Activate a standby coordinator to become the active leader.
-   * This is called when CrossRegionHealthManager signals activation.
+   * REFACTOR: Delegates to StandbyActivationManager.
    *
-   * @returns Promise<boolean> - true if activation succeeded
-   */
-  /**
-   * FIX: Refactored to use Promise-based mutex pattern.
-   * Previously used a boolean flag which had a race window between check and set.
-   * Now uses activationPromise to ensure only one activation runs at a time.
-   *
-   * P1-002 FIX: Moved promise creation to be atomic with mutex check to eliminate
-   * race window where two concurrent calls could both pass the checks and create
-   * separate promises before either sets activationPromise.
+   * @see standby-activation-manager.ts for full implementation
    */
   async activateStandby(): Promise<boolean> {
-    // P1-002 FIX: Atomic check-and-set pattern
-    // Check activationPromise FIRST before any other checks to acquire mutex immediately
-    if (this.activationPromise) {
-      this.logger.warn('Activation already in progress, waiting for result');
-      return this.activationPromise;
-    }
-
-    // Create promise immediately to claim the mutex before any async checks
-    // This prevents race condition where two threads both pass the check above
-    const activationLogic = async (): Promise<boolean> => {
-      // Now that we have the mutex, perform all validation checks
-      if (this.isLeader) {
-        this.logger.warn('Coordinator already leader, skipping activation');
-        return true;
-      }
-
-      if (!this.config.isStandby) {
-        this.logger.warn('activateStandby called on non-standby instance');
-        return false;
-      }
-
-      if (!this.config.canBecomeLeader) {
-        this.logger.error('Cannot activate - canBecomeLeader is false');
-        return false;
-      }
-
-      // Perform the actual activation
-      return this.doActivateStandby();
-    };
-
-    // Set activationPromise synchronously before any await
-    this.activationPromise = activationLogic();
-
-    try {
-      return await this.activationPromise;
-    } finally {
-      // Clear the promise when done (success or failure)
-      this.activationPromise = null;
-    }
-  }
-
-  /**
-   * Internal implementation of standby activation.
-   * Separated to allow Promise-based mutex in activateStandby().
-   *
-   * P1-8 FIX: Now delegates to LeadershipElectionService.setActivating()
-   */
-  private async doActivateStandby(): Promise<boolean> {
-    if (!this.leadershipElection) {
-      this.logger.error('LeadershipElectionService not initialized');
+    if (!this.standbyActivationManager) {
+      this.logger.error('StandbyActivationManager not initialized');
       return false;
     }
-
-    this.logger.warn('🚀 ACTIVATING STANDBY COORDINATOR', {
-      instanceId: this.config.leaderElection.instanceId,
-      regionId: this.config.regionId,
-      previousIsLeader: this.isLeader
-    });
-
-    // P1-8 FIX: Use LeadershipElectionService.setActivating() instead of local flag
-    // This signals the service to bypass standby checks in tryAcquireLeadership
-    this.leadershipElection.setActivating(true);
-    // Update local flag for backward compatibility
-    this.isActivating = true;
-
-    try {
-      // P1-8 FIX: Use service's tryAcquireLeadership() method
-      const acquired = await this.leadershipElection.tryAcquireLeadership();
-
-      if (acquired) {
-        // Successful activation - update config.isStandby atomically at the end
-        this.config.isStandby = false;
-        // P1 FIX #4: Clear standby in LeadershipElectionService so it can
-        // re-acquire leadership if lost, without needing another activation signal
-        this.leadershipElection!.clearStandby();
-        this.logger.warn('✅ STANDBY COORDINATOR ACTIVATED - Now leader', {
-          instanceId: this.config.leaderElection.instanceId,
-          regionId: this.config.regionId
-        });
-        return true;
-      } else {
-        this.logger.error('Failed to acquire leadership during activation');
-        return false;
-      }
-
-    } catch (error) {
-      this.logger.error('Error during standby activation', { error });
-      return false;
-    } finally {
-      // P1-8 FIX: Clear activation flag in both service and local field
-      this.leadershipElection.setActivating(false);
-      this.isActivating = false;
-    }
+    return this.standbyActivationManager.activateStandby();
   }
 }

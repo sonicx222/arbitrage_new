@@ -197,25 +197,6 @@ export interface DexAdapter {
  */
 export type AdapterKey = `${string}:${string}`;
 
-/**
- * Factory function type for creating adapters
- */
-export type AdapterFactory = (config: AdapterConfig) => DexAdapter;
-
-/**
- * Registry entry for an adapter
- */
-export interface AdapterRegistryEntry {
-  /** DEX name */
-  name: string;
-  /** Supported chains */
-  chains: string[];
-  /** Adapter type */
-  type: AdapterType;
-  /** Factory function */
-  factory: AdapterFactory;
-}
-
 // =============================================================================
 // Constants
 // =============================================================================
@@ -309,6 +290,33 @@ export const PLATYPUS_POOL_ABI = [
   'function getLiability(address token) external view returns (uint256)',
   'function quotePotentialSwap(address fromToken, address toToken, uint256 fromAmount) external view returns (uint256 potentialOutcome, uint256 haircut)',
 ];
+
+// =============================================================================
+// RPC Utilities
+// =============================================================================
+
+/** Default timeout for on-chain RPC calls (ms) */
+export const RPC_TIMEOUT_MS = 15_000;
+
+/**
+ * Wraps a promise with a timeout. Rejects if the promise doesn't resolve in time.
+ * Used to prevent hung RPC nodes from blocking adapter operations indefinitely.
+ */
+export function withRpcTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number = RPC_TIMEOUT_MS
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`RPC call timed out after ${timeoutMs}ms`)),
+      timeoutMs
+    );
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); }
+    );
+  });
+}
 
 // =============================================================================
 // Utility Types

@@ -7,7 +7,11 @@
  * - GC-friendly slot clearing
  * - O(n log k) partial sorting for efficient cleanup
  *
- * @see ARCHITECTURE_V2.md Section 4.2 (Data Structures)
+ * Note: For hot-path code, ADR-022 recommends inline implementations
+ * rather than class-based data structures. These modules target non-hot-path
+ * consumers (cleanup, analytics, queue management, caching).
+ *
+ * @see ADR-022 (Hot-Path Performance Rules)
  * @see R1 - Solana Arbitrage Detection Modules extraction
  */
 

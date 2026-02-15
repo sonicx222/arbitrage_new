@@ -36,12 +36,12 @@ export interface DetectorHealthStatus {
   cpuUsage: number;
   lastHeartbeat: number;
   pairs: number;
-  websocket: any;
-  batcherStats: any;
+  websocket: Record<string, unknown> | null;
+  batcherStats: Record<string, unknown> | null;
   chain: string;
   dexCount: number;
   tokenCount: number;
-  factorySubscription: any;
+  factorySubscription: Record<string, unknown> | null;
 }
 
 /**
@@ -49,7 +49,7 @@ export interface DetectorHealthStatus {
  * Minimal interface to avoid import cycles.
  */
 export interface HealthMonitorRedis {
-  updateServiceHealth(serviceName: string, health: any): Promise<void>;
+  updateServiceHealth(serviceName: string, health: Record<string, unknown>): Promise<void>;
 }
 
 /**
@@ -57,7 +57,7 @@ export interface HealthMonitorRedis {
  * Minimal interface - only needs logHealthCheck method.
  */
 export interface HealthMonitorPerfLogger {
-  logHealthCheck(serviceName: string, health: any): void;
+  logHealthCheck(serviceName: string, health: Record<string, unknown>): void;
 }
 
 /**
@@ -68,7 +68,7 @@ export interface HealthMonitorDeps {
   perfLogger: HealthMonitorPerfLogger;
   redis: HealthMonitorRedis | null;
   /** Callback to get current health status from detector */
-  getHealth: () => Promise<any>;
+  getHealth: () => Promise<Record<string, unknown>>;
   /** Callback to check if detector is running */
   isRunning: () => boolean;
   /** Callback to check if detector is stopping */

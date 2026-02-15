@@ -17,6 +17,8 @@ import type { ServiceLogger } from '../logging';
 import type { WebSocketManager } from '../websocket-manager';
 import type {
   FactorySubscriptionService,
+  FactorySubscriptionStats,
+  FactoryWebSocketManager,
   PairCreatedEvent,
 } from '../factory-subscription';
 import { createFactorySubscriptionService } from '../factory-subscription';
@@ -190,7 +192,7 @@ export class FactoryIntegrationService {
     const isStopping = () => this.deps.isStopping();
 
     return {
-      subscribe: (params: any) => {
+      subscribe: (params: Parameters<FactoryWebSocketManager['subscribe']>[0]) => {
         // Guard against subscribe during shutdown
         if (isStopping()) {
           logger.debug('Skipping subscribe during shutdown');
@@ -344,7 +346,7 @@ export class FactoryIntegrationService {
    * Handle a factory event from WebSocket message routing.
    * Called when an event from a factory address is detected.
    */
-  handleFactoryEvent(result: any): void {
+  handleFactoryEvent(result: Record<string, unknown>): void {
     if (this.factorySubscriptionService) {
       this.factorySubscriptionService.handleFactoryEvent(result);
     }
@@ -374,8 +376,8 @@ export class FactoryIntegrationService {
   /**
    * Get stats from factory subscription service.
    */
-  getStats(): any {
-    return this.factorySubscriptionService?.getStats() || null;
+  getStats(): FactorySubscriptionStats | null {
+    return this.factorySubscriptionService?.getStats() ?? null;
   }
 
   /**

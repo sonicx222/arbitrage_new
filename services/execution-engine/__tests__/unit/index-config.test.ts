@@ -50,7 +50,7 @@ import {
   getSimulationConfigFromEnv,
   getCircuitBreakerConfigFromEnv,
   getStandbyConfigFromEnv,
-} from '../../index';
+} from '../../src/index';
 import { getCrossRegionEnvConfig } from '@arbitrage/core';
 
 // Cast to jest.Mock for mock restoration in beforeEach

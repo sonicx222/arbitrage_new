@@ -126,7 +126,9 @@ export function decodeSwapEventData(logData: string, topics?: string[]): Decoded
  */
 export function parseBlockNumber(blockNumber: string | number): number {
   if (typeof blockNumber === 'string') {
-    return parseInt(blockNumber, 16);
+    return blockNumber.startsWith('0x') || blockNumber.startsWith('0X')
+      ? parseInt(blockNumber, 16)
+      : parseInt(blockNumber, 10);
   }
   return blockNumber;
 }

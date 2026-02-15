@@ -54,14 +54,6 @@
  * import { resetRedisInstance, RecordingLogger } from '@arbitrage/core/internal';
  * ```
  *
- * ## DEPRECATED API
- * Exports marked for removal in v2.0.0. For migration guidance, import from
- * '@arbitrage/core/deprecated':
- *
- * ```typescript
- * import { calculateIntraChainArbitrage } from '@arbitrage/core/deprecated';
- * ```
- *
  * @module @arbitrage/core
  * @version 1.0.0
  */
@@ -417,22 +409,14 @@ export type {
 export {
   // Use Cases
   SelectProviderUseCase,
-  createSelectProviderUseCase,
 
   // DTOs
   toSelectProviderResponse,
-  toValidateLiquidityResponse,
 } from './flash-loan-aggregation/application';
 
 export type {
   SelectProviderRequest,
   SelectProviderResponse,
-  ValidateLiquidityRequest,
-  ValidateLiquidityResponse,
-  TrackProviderMetricsRequest,
-  TrackProviderMetricsResponse,
-  GetAggregatedMetricsRequest,
-  GetAggregatedMetricsResponse,
   SelectProviderUseCaseDependencies,
 } from './flash-loan-aggregation/application';
 
@@ -443,19 +427,15 @@ export type {
 export {
   // Strategy implementations
   WeightedRankingStrategy,
-  createWeightedRankingStrategy,
 
   // Validator implementations
   OnChainLiquidityValidator,
-  createOnChainLiquidityValidator,
 
   // Metrics implementations
   InMemoryAggregatorMetrics,
-  createInMemoryAggregatorMetrics,
 
   // Aggregator implementation
   FlashLoanAggregatorImpl,
-  createFlashLoanAggregator,
 } from './flash-loan-aggregation/infrastructure';
 
 export type {
@@ -1414,8 +1394,6 @@ export type {
   SwapQuote,
   DexAdapter,
   AdapterKey,
-  AdapterFactory,
-  AdapterRegistryEntry,
   AdapterResult
 } from './dex-adapters';
 

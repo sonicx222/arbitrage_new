@@ -34,11 +34,11 @@ describe('NumericRollingWindow', () => {
     });
 
     it('should throw for zero maxSize', () => {
-      expect(() => new NumericRollingWindow(0)).toThrow('NumericRollingWindow maxSize must be positive');
+      expect(() => new NumericRollingWindow(0)).toThrow('NumericRollingWindow maxSize must be a positive integer');
     });
 
     it('should throw for negative maxSize', () => {
-      expect(() => new NumericRollingWindow(-3)).toThrow('NumericRollingWindow maxSize must be positive');
+      expect(() => new NumericRollingWindow(-3)).toThrow('NumericRollingWindow maxSize must be a positive integer');
     });
   });
 

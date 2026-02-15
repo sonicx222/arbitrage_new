@@ -8,8 +8,22 @@
  * - Value object creation: <1μs
  * - Property access: O(1), <10ns
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
+
+/**
+ * Assert that a millisecond duration is non-negative.
+ * Shared validation helper for latency/duration fields across domain models.
+ *
+ * @param value - The millisecond value to validate
+ * @param label - Human-readable label for error messages (e.g., 'check latency', 'selection latency')
+ * @throws Error if value is negative
+ */
+function assertNonNegativeMs(value: number, label: string): void {
+  if (value < 0) {
+    throw new Error(`Invalid ${label}: ${value}ms`);
+  }
+}
 
 /**
  * Supported flash loan protocols.
@@ -63,11 +77,12 @@ export class ProviderScore {
     latencyScore: number,
     weights: { fees: number; liquidity: number; reliability: number; latency: number }
   ): ProviderScore {
-    const totalScore =
+    const totalScore = Math.min(1.0, Math.max(0,
       feeScore * weights.fees +
       liquidityScore * weights.liquidity +
       reliabilityScore * weights.reliability +
-      latencyScore * weights.latency;
+      latencyScore * weights.latency
+    ));
 
     return new ProviderScore(
       feeScore,
@@ -116,9 +131,7 @@ export class LiquidityCheck {
     if (requiredLiquidity < 0n) {
       throw new Error(`Invalid required liquidity: ${requiredLiquidity}`);
     }
-    if (checkLatencyMs < 0) {
-      throw new Error(`Invalid check latency: ${checkLatencyMs}ms`);
-    }
+    assertNonNegativeMs(checkLatencyMs, 'check latency');
 
     Object.freeze(this);
   }
@@ -201,9 +214,7 @@ export class ProviderSelection {
     }>
   ) {
     // Validate latency
-    if (selectionLatencyMs < 0) {
-      throw new Error(`Invalid selection latency: ${selectionLatencyMs}ms`);
-    }
+    assertNonNegativeMs(selectionLatencyMs, 'selection latency');
 
     // If protocol selected, must have score
     if (protocol !== null && score === null) {
@@ -211,6 +222,9 @@ export class ProviderSelection {
     }
 
     Object.freeze(this);
+    for (const alt of this.rankedAlternatives) {
+      Object.freeze(alt);
+    }
     Object.freeze(this.rankedAlternatives);
   }
 
@@ -314,6 +328,14 @@ export class AggregatorConfig {
       throw new Error(`Invalid max providers: ${maxProvidersToRank}`);
     }
 
+    // Validate each weight is finite and in [0, 1]
+    const weightValues = [weights.fees, weights.liquidity, weights.reliability, weights.latency];
+    for (const w of weightValues) {
+      if (!Number.isFinite(w) || w < 0 || w > 1) {
+        throw new Error(`Invalid weight value: ${w}. Each weight must be finite and in range [0, 1]`);
+      }
+    }
+
     // Validate weights sum to 1.0
     const sum = weights.fees + weights.liquidity + weights.reliability + weights.latency;
     const tolerance = 0.01;
@@ -327,6 +349,9 @@ export class AggregatorConfig {
 
     Object.freeze(this);
     Object.freeze(this.weights);
+    if (this.protocolLatencyDefaults) {
+      Object.freeze(this.protocolLatencyDefaults);
+    }
   }
 
   /**
@@ -343,11 +368,12 @@ export class AggregatorConfig {
         reliability: 0.15,
         latency: 0.05,
       },
-      5, // Max 5 providers
+      3, // Max 3 providers (aligned with feature-flags default)
       {
         // Protocol-specific latency defaults (0-1 score)
         // Based on typical execution characteristics
         aave_v3: 0.95,        // Fast (single pool call)
+        balancer_v2: 0.90,    // Fast (single vault call)
         pancakeswap_v3: 0.85, // Medium (quoter + pool)
         spookyswap: 0.80,     // Conservative (less data)
         syncswap: 0.80,       // Conservative (less data)
@@ -427,9 +453,7 @@ export class ProviderOutcome {
     public readonly error?: string,
     public readonly errorType?: 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown'
   ) {
-    if (executionLatencyMs < 0) {
-      throw new Error(`Invalid execution latency: ${executionLatencyMs}ms`);
-    }
+    assertNonNegativeMs(executionLatencyMs, 'execution latency');
 
     Object.freeze(this);
   }

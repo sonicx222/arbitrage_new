@@ -8,11 +8,10 @@
  * - selectProvider(): <10ms (cold path - not hot path)
  * - Caching should reduce typical latency to <1ms
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md
  * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
-import type { ProviderSelection, AggregatorConfig } from './models';
+import type { ProviderSelection, AggregatorConfig, FlashLoanProtocol } from './models';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
 /**
@@ -107,12 +106,12 @@ export interface IFlashLoanAggregator {
    * @returns Fallback decision (retry, next provider, abort)
    */
   decideFallback(
-    failedProtocol: string,
+    failedProtocol: FlashLoanProtocol,
     error: Error,
-    remainingProviders: ReadonlyArray<{ protocol: string; score: number }>
+    remainingProviders: ReadonlyArray<{ protocol: FlashLoanProtocol; score: number }>
   ): Promise<{
     shouldRetry: boolean;
-    nextProtocol: string | null;
+    nextProtocol: FlashLoanProtocol | null;
     reason: string;
     errorType: 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown';
   }>;

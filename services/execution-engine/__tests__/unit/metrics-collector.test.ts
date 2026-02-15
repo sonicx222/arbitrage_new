@@ -20,8 +20,8 @@ jest.mock('@arbitrage/core', () => ({
   }),
 }));
 
-import { MetricsCollector } from '../../ab-testing/metrics-collector';
-import type { ABTestingConfig, ABTestExecutionResult } from '../../ab-testing/types';
+import { MetricsCollector } from '../../src/ab-testing/metrics-collector';
+import type { ABTestingConfig, ABTestExecutionResult } from '../../src/ab-testing/types';
 
 // Make this file a module to avoid TS2451 redeclaration errors
 export {};

@@ -12,7 +12,9 @@ import {
   adjustPriceForTokenOrder,
   isValidPairSnapshot,
   validateDetectionInput,
+  calculateCrossChainArbitrage,
   type ArbitrageDetectionInput,
+  type ChainPriceData,
 } from '../../../src/components/arbitrage-detector';
 
 import type { PairSnapshot } from '../../../src/components/pair-repository';
@@ -322,6 +324,44 @@ describe('ArbitrageDetector', () => {
       const result = validateDetectionInput(input);
       expect(result.valid).toBe(false);
       expect(result.errors).toContain('Invalid minProfitThreshold');
+    });
+  });
+
+  // ===========================================================================
+  // Cross-Chain Arbitrage with Custom maxAgeMs (Fix #15 Regression)
+  // ===========================================================================
+
+  describe('calculateCrossChainArbitrage', () => {
+    const createChainPrice = (overrides: Partial<ChainPriceData> = {}): ChainPriceData => ({
+      chain: 'ethereum',
+      dex: 'uniswap',
+      price: 2000,
+      timestamp: Date.now(),
+      pairKey: 'WETH/USDC',
+      ...overrides,
+    });
+
+    it('should accept custom maxAgeMs and use it for confidence', () => {
+      const now = Date.now();
+      // Prices 6 seconds old — with default maxAgeMs=10000, freshnessScore = max(0.5, 1 - 6000/10000) = 0.4 -> capped to 0.5
+      // With maxAgeMs=30000, freshnessScore = max(0.5, 1 - 6000/30000) = 0.8
+      const low = createChainPrice({ chain: 'ethereum', price: 2000, timestamp: now - 6000 });
+      const high = createChainPrice({ chain: 'arbitrum', dex: 'camelot', price: 2100, timestamp: now - 6000 });
+
+      const resultDefault = calculateCrossChainArbitrage([low, high], 0, 0.001);
+      const resultCustom = calculateCrossChainArbitrage([low, high], 0, 0.001, 30000);
+
+      expect(resultDefault).not.toBeNull();
+      expect(resultCustom).not.toBeNull();
+      // Custom maxAgeMs=30000 should produce higher confidence than default 10000
+      // because the freshness penalty is less severe
+      expect(resultCustom!.confidence).toBeGreaterThan(resultDefault!.confidence);
+    });
+
+    it('should return null for fewer than 2 chain prices', () => {
+      const single = createChainPrice();
+      expect(calculateCrossChainArbitrage([single], 0)).toBeNull();
+      expect(calculateCrossChainArbitrage([], 0)).toBeNull();
     });
   });
 });

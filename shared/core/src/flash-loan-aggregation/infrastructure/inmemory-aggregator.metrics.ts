@@ -15,7 +15,7 @@
  * - recordOutcome(): <100μs
  * - getReliabilityScore(): <1ms
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Observer Pattern
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type {
@@ -27,6 +27,49 @@ import type {
 import type { FlashLoanProtocol } from '../domain/models';
 
 /**
+ * Circular buffer for O(1) bounded latency tracking.
+ * Replaces push/shift pattern (which is O(n) due to reindexing).
+ */
+class CircularBuffer {
+  private readonly buffer: number[];
+  private writeIndex = 0;
+  private count = 0;
+
+  constructor(private readonly capacity: number) {
+    this.buffer = new Array<number>(capacity);
+  }
+
+  push(value: number): void {
+    this.buffer[this.writeIndex] = value;
+    this.writeIndex = (this.writeIndex + 1) % this.capacity;
+    if (this.count < this.capacity) {
+      this.count++;
+    }
+  }
+
+  /** Return all stored samples (in insertion order) */
+  toArray(): number[] {
+    if (this.count < this.capacity) {
+      return this.buffer.slice(0, this.count);
+    }
+    // Buffer is full — oldest is at writeIndex, wrap around
+    return [
+      ...this.buffer.slice(this.writeIndex),
+      ...this.buffer.slice(0, this.writeIndex),
+    ];
+  }
+
+  get length(): number {
+    return this.count;
+  }
+
+  reset(): void {
+    this.writeIndex = 0;
+    this.count = 0;
+  }
+}
+
+/**
  * Provider-specific statistics
  */
 interface ProviderStats {
@@ -34,7 +77,7 @@ interface ProviderStats {
   timesSelected: number;
   successCount: number;
   failureCount: number;
-  selectionLatencies: number[]; // Last N samples
+  selectionLatencies: CircularBuffer;
   lastSelectedTime: number;
   lastSuccessTime: number;
   lastFailureTime: number;
@@ -58,18 +101,21 @@ export interface InMemoryAggregatorMetricsConfig {
 export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
   private readonly config: Required<InMemoryAggregatorMetricsConfig>;
   private readonly providerStats = new Map<string, ProviderStats>();
+  /** Secondary index: protocol → stats entries for O(1) lookup in recordOutcome() */
+  private readonly protocolIndex = new Map<FlashLoanProtocol, ProviderStats[]>();
 
   // Global counters
   private totalSelections = 0;
   private selectionsWithLiquidityCheck = 0;
   private fallbacksTriggered = 0;
-  private globalLatencies: number[] = [];
+  private globalLatencies: CircularBuffer;
 
   constructor(config?: InMemoryAggregatorMetricsConfig) {
     this.config = {
       maxLatencySamples: config?.maxLatencySamples ?? 100,
       minSamplesForScore: config?.minSamplesForScore ?? 10,
     };
+    this.globalLatencies = new CircularBuffer(this.config.maxLatencySamples);
   }
 
   /**
@@ -85,9 +131,6 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
     // Update global counters
     this.totalSelections++;
     this.globalLatencies.push(latencyMs);
-    if (this.globalLatencies.length > this.config.maxLatencySamples) {
-      this.globalLatencies.shift();
-    }
 
     // Track liquidity checks
     if (reason.includes('liquidity')) {
@@ -105,9 +148,6 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
       stats.timesSelected++;
       stats.lastSelectedTime = Date.now();
       stats.selectionLatencies.push(latencyMs);
-      if (stats.selectionLatencies.length > this.config.maxLatencySamples) {
-        stats.selectionLatencies.shift();
-      }
     }
   }
 
@@ -115,23 +155,22 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
    * Record provider execution outcome
    */
   recordOutcome(outcome: ProviderOutcome): void {
-    // Find provider stats by protocol
-    // Note: We need to match by protocol since we don't have full IProviderInfo
-    const stats = Array.from(this.providerStats.values()).find(
-      (s) => s.protocol === outcome.protocol
-    );
-
-    if (!stats) {
-      // No stats yet - skip
+    // O(1) lookup via protocol index
+    const statsEntries = this.protocolIndex.get(outcome.protocol);
+    if (!statsEntries || statsEntries.length === 0) {
       return;
     }
 
-    if (outcome.success) {
-      stats.successCount++;
-      stats.lastSuccessTime = Date.now();
-    } else {
-      stats.failureCount++;
-      stats.lastFailureTime = Date.now();
+    // Update all entries for this protocol (may span multiple chains)
+    const now = Date.now();
+    for (const stats of statsEntries) {
+      if (outcome.success) {
+        stats.successCount++;
+        stats.lastSuccessTime = now;
+      } else {
+        stats.failureCount++;
+        stats.lastFailureTime = now;
+      }
     }
   }
 
@@ -246,10 +285,11 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
    */
   resetMetrics(): void {
     this.providerStats.clear();
+    this.protocolIndex.clear();
     this.totalSelections = 0;
     this.selectionsWithLiquidityCheck = 0;
     this.fallbacksTriggered = 0;
-    this.globalLatencies = [];
+    this.globalLatencies = new CircularBuffer(this.config.maxLatencySamples);
   }
 
   /**
@@ -265,12 +305,20 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
         timesSelected: 0,
         successCount: 0,
         failureCount: 0,
-        selectionLatencies: [],
+        selectionLatencies: new CircularBuffer(this.config.maxLatencySamples),
         lastSelectedTime: 0,
         lastSuccessTime: 0,
         lastFailureTime: 0,
       };
       this.providerStats.set(key, stats);
+
+      // Maintain protocol index for O(1) lookup in recordOutcome()
+      let entries = this.protocolIndex.get(provider.protocol);
+      if (!entries) {
+        entries = [];
+        this.protocolIndex.set(provider.protocol, entries);
+      }
+      entries.push(stats);
     }
 
     return stats;
@@ -294,8 +342,9 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
   /**
    * Calculate average latency
    */
-  private calculateAvgLatency(samples: number[]): number {
-    if (samples.length === 0) return 0;
+  private calculateAvgLatency(buffer: CircularBuffer): number {
+    if (buffer.length === 0) return 0;
+    const samples = buffer.toArray();
     const sum = samples.reduce((a, b) => a + b, 0);
     return sum / samples.length;
   }
@@ -303,19 +352,10 @@ export class InMemoryAggregatorMetrics implements IAggregatorMetrics {
   /**
    * Calculate P95 latency
    */
-  private calculateP95Latency(samples: number[]): number {
-    if (samples.length === 0) return 0;
-    const sorted = [...samples].sort((a, b) => a - b);
+  private calculateP95Latency(buffer: CircularBuffer): number {
+    if (buffer.length === 0) return 0;
+    const sorted = buffer.toArray().sort((a, b) => a - b);
     const p95Index = Math.floor(sorted.length * 0.95);
     return sorted[p95Index] || 0;
   }
-}
-
-/**
- * Factory function
- */
-export function createInMemoryAggregatorMetrics(
-  config?: InMemoryAggregatorMetricsConfig
-): InMemoryAggregatorMetrics {
-  return new InMemoryAggregatorMetrics(config);
 }

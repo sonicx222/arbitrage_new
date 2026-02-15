@@ -9,7 +9,7 @@
  * - recordOutcome(): <100μs
  * - getReliabilityScore(): <1ms
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Observer Pattern
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type { ProviderOutcome, FlashLoanProtocol } from './models';

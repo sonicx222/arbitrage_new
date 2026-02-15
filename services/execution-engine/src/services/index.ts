@@ -129,3 +129,33 @@ export {
   // Types
   type HealthMonitoringDependencies,
 } from './health-monitoring-manager';
+
+// =============================================================================
+// Finding #7: Circuit Breaker Manager (extracted from engine.ts)
+// =============================================================================
+
+export {
+  CircuitBreakerManager,
+  createCircuitBreakerManager,
+  type CircuitBreakerManagerDeps,
+} from './circuit-breaker-manager';
+
+// =============================================================================
+// Finding #7: Pending State Manager (extracted from engine.ts)
+// =============================================================================
+
+export {
+  PendingStateManager,
+  createPendingStateManager,
+  type PendingStateManagerDeps,
+  type PendingStateProviderSource,
+} from './pending-state-manager';
+
+// =============================================================================
+// Finding #7: TX Simulation Initializer (extracted from engine.ts)
+// =============================================================================
+
+export {
+  initializeTxSimulationService,
+  type SimulationProviderSource,
+} from './tx-simulation-initializer';

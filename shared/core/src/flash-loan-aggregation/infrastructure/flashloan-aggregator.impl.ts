@@ -6,7 +6,7 @@
  *
  * Performance Target: <10ms selection (with cache <1ms)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Infrastructure Layer
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 import type {
@@ -93,10 +93,10 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
         return selection;
       }
 
-      // Single provider - no ranking needed
+      // Single provider - no ranking needed, use proper ProviderScore instance
       const selection = ProviderSelectionImpl.success(
         provider.protocol,
-        { totalScore: 1.0, feeScore: 1.0, liquidityScore: 1.0, reliabilityScore: 1.0, latencyScore: 1.0 } as any,
+        new ProviderScore(1.0, 1.0, 1.0, 1.0, 1.0),
         null,
         'Only provider available',
         Date.now() - startTime
@@ -109,7 +109,7 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
     // Get ranked providers (cached or fresh)
     const ranked = await this.getRankedProviders(
       chain,
-      BigInt(opportunity.amountIn || 0),
+      BigInt(opportunity.amountIn ?? '0'),
       context
     );
 
@@ -139,7 +139,7 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
         const liquidityCheck = await this.liquidityValidator.checkLiquidity(
           provider,
           opportunity.tokenIn,
-          BigInt(opportunity.amountIn || 0),
+          BigInt(opportunity.amountIn ?? '0'),
           {
             chain,
             rpcProvider: context.rpcProviders?.get(chain),
@@ -197,12 +197,12 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
    * Decide fallback when provider fails
    */
   async decideFallback(
-    failedProtocol: string,
+    failedProtocol: FlashLoanProtocol,
     error: Error,
-    remainingProviders: ReadonlyArray<{ protocol: string; score: number }>
+    remainingProviders: ReadonlyArray<{ protocol: FlashLoanProtocol; score: number }>
   ): Promise<{
     shouldRetry: boolean;
-    nextProtocol: string | null;
+    nextProtocol: FlashLoanProtocol | null;
     reason: string;
     errorType: 'insufficient_liquidity' | 'high_fees' | 'transient' | 'permanent' | 'unknown';
   }> {
@@ -339,7 +339,28 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
       chain,
     });
 
+    // Evict oldest entries if cache exceeds reasonable size (one entry per chain, ~11 chains max)
+    this.cleanupRankingCacheIfNeeded();
+
     return ranked;
+  }
+
+  /** Maximum ranking cache entries (one per chain, generous limit) */
+  private static readonly MAX_RANKING_CACHE_SIZE = 50;
+
+  /**
+   * Evict oldest ranking cache entries if size exceeds limit
+   */
+  private cleanupRankingCacheIfNeeded(): void {
+    if (this.rankingCache.size > FlashLoanAggregatorImpl.MAX_RANKING_CACHE_SIZE) {
+      // Remove oldest 20% of entries
+      const entries = Array.from(this.rankingCache.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, Math.floor(FlashLoanAggregatorImpl.MAX_RANKING_CACHE_SIZE * 0.2));
+      for (const [key] of toRemove) {
+        this.rankingCache.delete(key);
+      }
+    }
   }
 
   /**
@@ -434,23 +455,4 @@ export class FlashLoanAggregatorImpl implements IFlashLoanAggregator {
 
     return 'unknown';
   }
-}
-
-/**
- * Factory function to create aggregator
- */
-export function createFlashLoanAggregator(
-  config: AggregatorConfig,
-  ranker: IProviderRanker,
-  liquidityValidator: ILiquidityValidator | null,
-  metrics: IAggregatorMetrics | null,
-  availableProviders: ReadonlyMap<string, IProviderInfo[]>
-): FlashLoanAggregatorImpl {
-  return new FlashLoanAggregatorImpl(
-    config,
-    ranker,
-    liquidityValidator,
-    metrics,
-    availableProviders
-  );
 }

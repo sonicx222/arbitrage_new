@@ -72,6 +72,11 @@ describe('CacheCoherencyManager', () => {
     mockRedisClient.set.mockResolvedValue(undefined);
     mockRedisClient.subscribe.mockResolvedValue(undefined);
 
+    // Re-establish getRedisClient mock cleared by resetMocks: true
+    const { getRedisClient } =
+      jest.requireMock<typeof import('../../../src/redis')>('../../../src/redis');
+    (getRedisClient as jest.Mock).mockReturnValue(Promise.resolve(mockRedisClient));
+
     manager = new CacheCoherencyManager('node-1', {
       gossipInterval: 1000,
       suspicionTimeout: 5000,

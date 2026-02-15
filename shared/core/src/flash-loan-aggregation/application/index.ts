@@ -12,7 +12,7 @@
  * - Orchestrates domain services
  * - No business logic (delegates to domain)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Application Layer
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 // =============================================================================
@@ -21,7 +21,6 @@
 
 export {
   SelectProviderUseCase,
-  createSelectProviderUseCase,
   type SelectProviderUseCaseDependencies,
 } from './select-provider.usecase';
 
@@ -32,15 +31,8 @@ export {
 export type {
   SelectProviderRequest,
   SelectProviderResponse,
-  ValidateLiquidityRequest,
-  ValidateLiquidityResponse,
-  TrackProviderMetricsRequest,
-  TrackProviderMetricsResponse,
-  GetAggregatedMetricsRequest,
-  GetAggregatedMetricsResponse,
 } from './dtos';
 
 export {
   toSelectProviderResponse,
-  toValidateLiquidityResponse,
 } from './dtos';

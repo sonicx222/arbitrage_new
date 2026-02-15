@@ -87,10 +87,26 @@ describe('Predictive Cache Warming (Task 2.2.2)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRedis.clear();
-    // Reset mock implementations
+    // Re-establish ALL mock implementations (resetMocks: true clears jest.fn() implementations)
     mockRedis.get.mockImplementation((key: string) => redisInstance.get(key));
     mockRedis.getRaw.mockImplementation((key: string) => redisInstance.get(key));
+    mockRedis.set.mockImplementation((key: string, value: any, ttl?: number) => {
+      if (ttl) {
+        return redisInstance.setex(key, ttl, value);
+      }
+      return redisInstance.set(key, value);
+    });
+    mockRedis.setex.mockImplementation((key: string, ttl: number, value: any) => redisInstance.setex(key, ttl, value));
+    mockRedis.del.mockImplementation((key: string) => redisInstance.del(key));
+    mockRedis.keys.mockImplementation((pattern: string) => redisInstance.keys(pattern));
+    mockRedis.ping.mockImplementation(() => Promise.resolve('PONG'));
     mockCorrelationAnalyzer.getPairsToWarm.mockReturnValue([]);
+    mockCorrelationAnalyzer.recordPriceUpdate.mockReturnValue(undefined);
+    mockCorrelationAnalyzer.getCorrelatedPairs.mockReturnValue([]);
+    mockCorrelationAnalyzer.updateCorrelations.mockReturnValue(undefined);
+    mockCorrelationAnalyzer.getStats.mockReturnValue({});
+    mockCorrelationAnalyzer.reset.mockReturnValue(undefined);
+    mockCorrelationAnalyzer.destroy.mockReturnValue(undefined);
   });
 
   afterEach(() => {

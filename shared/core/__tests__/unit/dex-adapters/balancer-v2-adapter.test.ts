@@ -84,7 +84,7 @@ const createTestConfig = (
   ...overrides,
 });
 
-// Mock subgraph response
+// Mock subgraph response with decimals and weights (Fix #15)
 const mockSubgraphPoolsResponse = {
   data: {
     pools: [
@@ -94,8 +94,8 @@ const mockSubgraphPoolsResponse = {
         poolType: 'Weighted',
         swapFee: '0.003',
         tokens: [
-          { address: testTokens.weth, balance: '1000' },
-          { address: testTokens.bal, balance: '5000' },
+          { address: testTokens.weth, balance: '1000', decimals: 18, weight: '0.8' },
+          { address: testTokens.bal, balance: '5000', decimals: 18, weight: '0.2' },
         ],
       },
     ],
@@ -261,8 +261,8 @@ describe('BalancerV2Adapter', () => {
               poolType: 'Weighted',
               swapFee: '0.003',
               tokens: [
-                { address: testTokens.weth, balance: '1000' },
-                { address: testTokens.bal, balance: '5000' },
+                { address: testTokens.weth, balance: '1000', decimals: 18, weight: '0.8' },
+                { address: testTokens.bal, balance: '5000', decimals: 18, weight: '0.2' },
               ],
             },
             {
@@ -271,8 +271,8 @@ describe('BalancerV2Adapter', () => {
               poolType: 'Stable',
               swapFee: '0.0004',
               tokens: [
-                { address: testTokens.usdc, balance: '1000000' },
-                { address: '0xdai_address', balance: '1000000' },
+                { address: testTokens.usdc, balance: '1000000', decimals: 6 },
+                { address: '0xdai_address', balance: '1000000', decimals: 18 },
               ],
             },
           ],
@@ -291,17 +291,19 @@ describe('BalancerV2Adapter', () => {
     });
 
     it('should include pool type in discovered pools', async () => {
+      // Use valid hex address (DAI on Ethereum)
+      const daiAddress = '0xd586e7f844cea2f87f50152665bcbc2c279d8d70';
       const stablePoolResponse = {
         data: {
           pools: [
             {
-              id: '0xstable_pool_id',
-              address: '0xStablePoolAddress',
+              id: '0xstable_pool_id_00000000000000000000000000000014',
+              address: '0x5c6ee304399dbdb9c8ef030ab642b10820db8f56',
               poolType: 'ComposableStable',
               swapFee: '0.0001',
               tokens: [
-                { address: testTokens.usdc, balance: '1000000' },
-                { address: '0xdai_address', balance: '1000000' },
+                { address: testTokens.usdc, balance: '1000000', decimals: 6 },
+                { address: daiAddress, balance: '1000000', decimals: 18 },
               ],
             },
           ],
@@ -315,7 +317,7 @@ describe('BalancerV2Adapter', () => {
 
       const pools = await adapter.discoverPools(
         testTokens.usdc,
-        '0xdai_address'
+        daiAddress
       );
 
       expect(pools[0].poolType).toBe('composable_stable');
@@ -536,8 +538,8 @@ describe('BalancerV2Adapter', () => {
               poolType: subgraphType,
               swapFee: '0.003',
               tokens: [
-                { address: testTokens.weth, balance: '1000' },
-                { address: testTokens.bal, balance: '5000' },
+                { address: testTokens.weth, balance: '1000', decimals: 18, weight: '0.8' },
+                { address: testTokens.bal, balance: '5000', decimals: 18, weight: '0.2' },
               ],
             },
           ],
@@ -576,8 +578,8 @@ describe('BalancerV2Adapter', () => {
               poolType: 'Weighted',
               swapFee: '0.003', // 0.3%
               tokens: [
-                { address: testTokens.weth, balance: '1000' },
-                { address: testTokens.bal, balance: '5000' },
+                { address: testTokens.weth, balance: '1000', decimals: 18, weight: '0.8' },
+                { address: testTokens.bal, balance: '5000', decimals: 18, weight: '0.2' },
               ],
             },
           ],
@@ -595,6 +597,8 @@ describe('BalancerV2Adapter', () => {
     });
 
     it('should handle very small fees correctly', async () => {
+      // Use valid hex address (DAI on Ethereum)
+      const daiAddress = '0xd586e7f844cea2f87f50152665bcbc2c279d8d70';
       const response = {
         data: {
           pools: [
@@ -604,8 +608,8 @@ describe('BalancerV2Adapter', () => {
               poolType: 'Stable',
               swapFee: '0.0001', // 0.01%
               tokens: [
-                { address: testTokens.usdc, balance: '1000000' },
-                { address: '0xdai', balance: '1000000' },
+                { address: testTokens.usdc, balance: '1000000', decimals: 6 },
+                { address: daiAddress, balance: '1000000', decimals: 18 },
               ],
             },
           ],
@@ -617,7 +621,7 @@ describe('BalancerV2Adapter', () => {
         json: () => Promise.resolve(response),
       });
 
-      const pools = await adapter.discoverPools(testTokens.usdc, '0xdai');
+      const pools = await adapter.discoverPools(testTokens.usdc, daiAddress);
 
       expect(pools[0].swapFee).toBe(1); // 0.01% = 1 basis point
     });
@@ -656,6 +660,97 @@ describe('BalancerV2Adapter', () => {
       const body = JSON.parse(fetchCall[1].body);
       expect(body.query).toContain(testTokens.weth.toLowerCase());
       expect(body.query).toContain(testTokens.bal.toLowerCase());
+    });
+  });
+
+  // ===========================================================================
+  // P0-1 Regression: GraphQL Injection Prevention
+  // ===========================================================================
+
+  describe('P0-1: GraphQL injection prevention', () => {
+    beforeEach(async () => {
+      const config = createTestConfig({ provider: mockProvider });
+      adapter = new BalancerV2Adapter(config);
+      await adapter.initialize();
+    });
+
+    it('should reject token addresses with GraphQL injection payload', async () => {
+      const maliciousAddress = '", totalLiquidity_gt: "0" }) { id } query { pools(';
+
+      // discoverPools catches the throw and returns []
+      const pools = await adapter.discoverPools(maliciousAddress, testTokens.bal);
+      expect(pools).toHaveLength(0);
+
+      // fetch should NOT have been called — the injection was blocked before the request
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should reject non-hex token addresses', async () => {
+      const pools = await adapter.discoverPools('not-a-hex-address', testTokens.bal);
+      expect(pools).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should reject addresses with wrong length', async () => {
+      const shortAddress = '0xabcd';
+      const pools = await adapter.discoverPools(shortAddress, testTokens.bal);
+      expect(pools).toHaveLength(0);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('should accept valid lowercase hex addresses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: { pools: [] } }),
+      });
+
+      const pools = await adapter.discoverPools(testTokens.weth, testTokens.bal);
+      // Valid addresses pass validation — fetch is called
+      expect(mockFetch).toHaveBeenCalled();
+      expect(pools).toHaveLength(0);
+    });
+  });
+
+  // ===========================================================================
+  // Swap Quote Edge Cases
+  // ===========================================================================
+
+  describe('getSwapQuote() edge cases', () => {
+    beforeEach(async () => {
+      const config = createTestConfig({ provider: mockProvider });
+      adapter = new BalancerV2Adapter(config);
+      await adapter.initialize();
+    });
+
+    it('should return null when weighted pool calculation yields zero amountOut', async () => {
+      // Discover a pool first to populate cache
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSubgraphPoolsResponse),
+      });
+      await adapter.discoverPools(testTokens.weth, testTokens.bal);
+
+      // Mock getPoolTokens with a pool where balanceOut is very small (near-empty)
+      const mockResult = ethers.AbiCoder.defaultAbiCoder().encode(
+        ['address[]', 'uint256[]', 'uint256'],
+        [
+          [testTokens.weth, testTokens.bal],
+          [BigInt('1000000000000000000000'), BigInt('1')], // 1000 WETH, 1 wei BAL
+          12345000,
+        ]
+      );
+      (mockProvider.call as jest.Mock).mockResolvedValue(mockResult);
+
+      const amountIn = BigInt('1000000000000000000'); // 1 WETH
+      const quote = await adapter.getSwapQuote!(
+        testPoolId,
+        testTokens.weth,
+        testTokens.bal,
+        amountIn
+      );
+
+      // With balanceOut = 1 wei, amountOut rounds to 0 — should return null
+      expect(quote).toBeNull();
     });
   });
 

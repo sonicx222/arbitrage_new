@@ -22,8 +22,8 @@ describe('MinHeap', () => {
   describe('constructor', () => {
     it('should create an empty heap with a comparator', () => {
       const heap = new MinHeap<number>(numericCompare);
-      expect(heap.size()).toBe(0);
-      expect(heap.isEmpty()).toBe(true);
+      expect(heap.size).toBe(0);
+      expect(heap.isEmpty).toBe(true);
     });
   });
 
@@ -71,15 +71,15 @@ describe('MinHeap', () => {
       const heap = new MinHeap<number>(numericCompare);
       heap.push(10);
       heap.push(20);
-      expect(heap.size()).toBe(2);
+      expect(heap.size).toBe(2);
 
       heap.pop();
-      expect(heap.size()).toBe(1);
-      expect(heap.isEmpty()).toBe(false);
+      expect(heap.size).toBe(1);
+      expect(heap.isEmpty).toBe(false);
 
       heap.pop();
-      expect(heap.size()).toBe(0);
-      expect(heap.isEmpty()).toBe(true);
+      expect(heap.size).toBe(0);
+      expect(heap.isEmpty).toBe(true);
     });
   });
 
@@ -95,7 +95,7 @@ describe('MinHeap', () => {
       heap.push(8);
 
       expect(heap.peek()).toBe(2);
-      expect(heap.size()).toBe(3); // not removed
+      expect(heap.size).toBe(3); // not removed
     });
 
     it('should return undefined for empty heap', () => {
@@ -126,8 +126,8 @@ describe('MinHeap', () => {
       heap.push(2);
 
       heap.extractAll();
-      expect(heap.isEmpty()).toBe(true);
-      expect(heap.size()).toBe(0);
+      expect(heap.isEmpty).toBe(true);
+      expect(heap.size).toBe(0);
     });
 
     it('should return empty array for empty heap', () => {
@@ -148,8 +148,8 @@ describe('MinHeap', () => {
       heap.push(3);
 
       heap.clear();
-      expect(heap.isEmpty()).toBe(true);
-      expect(heap.size()).toBe(0);
+      expect(heap.isEmpty).toBe(true);
+      expect(heap.size).toBe(0);
       expect(heap.peek()).toBeUndefined();
     });
   });
@@ -169,7 +169,7 @@ describe('MinHeap', () => {
       heap.push(42);
       expect(heap.peek()).toBe(42);
       expect(heap.pop()).toBe(42);
-      expect(heap.isEmpty()).toBe(true);
+      expect(heap.isEmpty).toBe(true);
     });
 
     it('should handle duplicate values', () => {
@@ -178,7 +178,7 @@ describe('MinHeap', () => {
       heap.push(5);
       heap.push(5);
 
-      expect(heap.size()).toBe(3);
+      expect(heap.size).toBe(3);
       expect(heap.pop()).toBe(5);
       expect(heap.pop()).toBe(5);
       expect(heap.pop()).toBe(5);
@@ -230,7 +230,7 @@ describe('MinHeap', () => {
       const expected = [...values].sort((a, b) => a - b);
 
       expect(sorted).toEqual(expected);
-      expect(heap.isEmpty()).toBe(true);
+      expect(heap.isEmpty).toBe(true);
     });
   });
 });
@@ -267,6 +267,28 @@ describe('findKSmallest', () => {
     const items = new Set([50, 10, 30, 20, 40]);
     const result = findKSmallest(items, 2, numericCompare);
     expect(result).toEqual([10, 20]);
+  });
+
+  it('should work with Map.entries() and tuple comparator (production pattern)', () => {
+    // This is the universal production pattern used by coordinator, opportunity-router,
+    // active-pairs-tracker, and lock-conflict-tracker
+    const map = new Map<string, { timestamp: number; value: string }>();
+    map.set('pair-A', { timestamp: 1000, value: 'oldest' });
+    map.set('pair-B', { timestamp: 3000, value: 'newest' });
+    map.set('pair-C', { timestamp: 2000, value: 'middle' });
+    map.set('pair-D', { timestamp: 1500, value: 'second' });
+
+    const oldest2 = findKSmallest(
+      map.entries(),
+      2,
+      ([, a], [, b]) => a.timestamp - b.timestamp
+    );
+
+    expect(oldest2).toHaveLength(2);
+    expect(oldest2[0][0]).toBe('pair-A');
+    expect(oldest2[0][1].value).toBe('oldest');
+    expect(oldest2[1][0]).toBe('pair-D');
+    expect(oldest2[1][1].value).toBe('second');
   });
 });
 

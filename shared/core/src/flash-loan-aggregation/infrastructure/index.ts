@@ -6,7 +6,7 @@
  * - External dependencies (RPC, caching)
  * - Performance optimizations
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Infrastructure Layer
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
 // =============================================================================
@@ -15,7 +15,6 @@
 
 export {
   WeightedRankingStrategy,
-  createWeightedRankingStrategy,
 } from './weighted-ranking.strategy';
 
 // =============================================================================
@@ -24,7 +23,6 @@ export {
 
 export {
   OnChainLiquidityValidator,
-  createOnChainLiquidityValidator,
   type OnChainLiquidityValidatorConfig,
 } from './onchain-liquidity.validator';
 
@@ -34,7 +32,6 @@ export {
 
 export {
   InMemoryAggregatorMetrics,
-  createInMemoryAggregatorMetrics,
   type InMemoryAggregatorMetricsConfig,
 } from './inmemory-aggregator.metrics';
 
@@ -44,5 +41,13 @@ export {
 
 export {
   FlashLoanAggregatorImpl,
-  createFlashLoanAggregator,
 } from './flashloan-aggregator.impl';
+
+// =============================================================================
+// Shared Utilities
+// =============================================================================
+
+export {
+  calculateLiquidityScore,
+  DEFAULT_LIQUIDITY_SCORE,
+} from './liquidity-scoring';

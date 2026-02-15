@@ -64,18 +64,22 @@ export class AdapterRegistry {
   }
 
   /**
-   * Register an adapter
+   * Register an adapter.
+   * FIX P1-5: Awaits destroy() of any replaced adapter to prevent resource leaks
+   * and race conditions between old adapter cleanup and new adapter usage.
    */
-  register(adapter: DexAdapter): void {
+  async register(adapter: DexAdapter): Promise<void> {
     const key = this.makeKey(adapter.name, adapter.chain);
 
-    // Destroy existing adapter if present
+    // Destroy existing adapter if present — await to prevent race conditions
     const existing = this.adapters.get(key);
     if (existing) {
       this.logger.info(`Replacing existing adapter: ${key}`);
-      existing.destroy().catch((err) => {
+      try {
+        await existing.destroy();
+      } catch (err) {
         this.logger.warn('Error destroying replaced adapter', { key, error: err });
-      });
+      }
     }
 
     this.adapters.set(key, adapter);
@@ -118,16 +122,19 @@ export class AdapterRegistry {
   }
 
   /**
-   * Unregister an adapter
+   * Unregister an adapter.
+   * FIX P1-5: Awaits destroy() to ensure proper resource cleanup before removal.
    */
-  unregister(dexName: string, chain: string): void {
+  async unregister(dexName: string, chain: string): Promise<void> {
     const key = this.makeKey(dexName, chain);
     const adapter = this.adapters.get(key);
 
     if (adapter) {
-      adapter.destroy().catch((err) => {
+      try {
+        await adapter.destroy();
+      } catch (err) {
         this.logger.warn('Error destroying unregistered adapter', { key, error: err });
-      });
+      }
       this.adapters.delete(key);
       this.logger.info(`Unregistered adapter: ${key}`);
     }
@@ -186,17 +193,25 @@ export class AdapterRegistry {
   }
 
   /**
-   * Check health of all adapters
+   * Check health of all adapters in parallel
    */
   async checkHealth(): Promise<Map<AdapterKey, boolean>> {
-    const results = new Map<AdapterKey, boolean>();
+    const entries = Array.from(this.adapters.entries());
 
-    for (const [key, adapter] of this.adapters) {
-      try {
+    const settled = await Promise.allSettled(
+      entries.map(async ([key, adapter]) => {
         const healthy = await adapter.isHealthy();
-        results.set(key, healthy);
-      } catch {
-        results.set(key, false);
+        return [key, healthy] as const;
+      })
+    );
+
+    const results = new Map<AdapterKey, boolean>();
+    for (let i = 0; i < settled.length; i++) {
+      const entry = settled[i];
+      if (entry.status === 'fulfilled') {
+        results.set(entry.value[0], entry.value[1]);
+      } else {
+        results.set(entries[i][0], false);
       }
     }
 

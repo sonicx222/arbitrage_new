@@ -527,6 +527,69 @@ describe('BloXrouteFeed', () => {
       expect(health.connectionState).toBe('disconnected');
       expect(health.reconnectCount).toBe(0);
     });
+
+    // FIX 9: Added missing reconnection edge case tests
+    it('should stop reconnecting after max retries exhausted', async () => {
+      // Use maxAttempts: 0 to immediately trigger the guard condition in
+      // scheduleReconnection(). This avoids the mock WebSocket auto-reconnect
+      // issue where setImmediate -> 'open' resets reconnectAttempts to 0.
+      const feed = createBloXrouteFeed({
+        config: {
+          ...config,
+          reconnect: {
+            interval: 100,
+            maxAttempts: 0,
+          },
+        },
+        logger: logger as unknown as Logger,
+      });
+
+      const connectPromise = feed.connect();
+      jest.advanceTimersByTime(100);
+      await connectPromise;
+
+      // Listen for error event emitted when max attempts is reached
+      const errorSpy = jest.fn();
+      feed.on('error', errorSpy);
+
+      // Simulate connection loss — scheduleReconnection checks reconnectAttempts (0) >= maxAttempts (0)
+      // This immediately triggers the max attempts guard
+      feed.simulateConnectionLoss();
+
+      // Should emit error about max reconnection attempts
+      expect(logger.hasLogMatching('error', /max reconnection attempts/i)).toBe(true);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringMatching(/max reconnection attempts/i) })
+      );
+    });
+
+    it('should track reconnect count in health metrics', async () => {
+      const feed = createBloXrouteFeed({
+        config: {
+          ...config,
+          reconnect: {
+            interval: 100,
+            maxAttempts: 5,
+            backoffMultiplier: 1,
+          },
+        },
+        logger: logger as unknown as Logger,
+      });
+
+      const connectPromise = feed.connect();
+      jest.advanceTimersByTime(100);
+      await connectPromise;
+
+      // Verify initial reconnect count is 0
+      expect(feed.getHealth().reconnectCount).toBe(0);
+
+      // Simulate connection loss — triggers scheduleReconnection which increments reconnectCount
+      feed.simulateConnectionLoss();
+
+      // After connection loss, reconnectCount should increment
+      const health = feed.getHealth();
+      expect(health.reconnectCount).toBeGreaterThanOrEqual(1);
+    });
   });
 
   // ===========================================================================

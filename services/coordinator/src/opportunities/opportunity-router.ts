@@ -12,6 +12,7 @@
 
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 import { findKSmallest } from '@arbitrage/core';
+import { serializeOpportunityForStream } from '../utils/stream-serialization';
 
 /**
  * Logger interface for dependency injection
@@ -272,23 +273,8 @@ export class OpportunityRouter {
       return;
     }
 
-    const messageData = {
-      id: opportunity.id,
-      type: opportunity.type || 'simple',
-      chain: opportunity.chain || 'unknown',
-      // FIX P0-4: Use ?? for fields where empty string is a valid value
-      buyDex: opportunity.buyDex ?? '',
-      sellDex: opportunity.sellDex ?? '',
-      profitPercentage: opportunity.profitPercentage?.toString() || '0',
-      confidence: opportunity.confidence?.toString() || '0',
-      timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
-      expiresAt: opportunity.expiresAt?.toString() ?? '',
-      tokenIn: opportunity.tokenIn ?? '',
-      tokenOut: opportunity.tokenOut ?? '',
-      amountIn: opportunity.amountIn ?? '',
-      forwardedBy: this.config.instanceId,
-      forwardedAt: Date.now().toString(),
-    };
+    // FIX #12: Use shared serialization utility (single source of truth)
+    const messageData = serializeOpportunityForStream(opportunity, this.config.instanceId);
 
     // P1-7 FIX: Retry loop with exponential backoff
     let lastError: Error | null = null;

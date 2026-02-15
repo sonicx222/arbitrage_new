@@ -244,7 +244,7 @@ jest.mock('@arbitrage/core', () => {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import after mocks are set up
-import { ExecutionEngineService, SimulationConfig } from '../../engine';
+import { ExecutionEngineService, SimulationConfig } from '../../src/engine';
 import { RedisStreamsClient, resetRedisStreamsInstance } from '@arbitrage/core';
 import type { ArbitrageOpportunity } from '@arbitrage/types';
 
@@ -420,9 +420,9 @@ describe('Execution Flow Unit Tests', () => {
     let SimulationStrategy: any;
     let resolveSimulationConfig: any;
     beforeAll(async () => {
-      const mod = await import('../../strategies/simulation.strategy');
+      const mod = await import('../../src/strategies/simulation.strategy');
       SimulationStrategy = mod.SimulationStrategy;
-      const typesMod = await import('../../types');
+      const typesMod = await import('../../src/types');
       resolveSimulationConfig = typesMod.resolveSimulationConfig;
     });
 
@@ -623,9 +623,9 @@ describe('Execution Flow Unit Tests', () => {
     let resolveSimulationConfig: any;
     const realPerformanceNow = () => Date.now();
     beforeAll(async () => {
-      const mod = await import('../../strategies/simulation.strategy');
+      const mod = await import('../../src/strategies/simulation.strategy');
       SimulationStrategy = mod.SimulationStrategy;
-      const typesMod = await import('../../types');
+      const typesMod = await import('../../src/types');
       resolveSimulationConfig = typesMod.resolveSimulationConfig;
     });
 
@@ -728,9 +728,9 @@ describe('Execution Flow Unit Tests', () => {
     let SimulationStrategy: any;
     let resolveSimulationConfig: any;
     beforeAll(async () => {
-      const mod = await import('../../strategies/simulation.strategy');
+      const mod = await import('../../src/strategies/simulation.strategy');
       SimulationStrategy = mod.SimulationStrategy;
-      const typesMod = await import('../../types');
+      const typesMod = await import('../../src/types');
       resolveSimulationConfig = typesMod.resolveSimulationConfig;
     });
 

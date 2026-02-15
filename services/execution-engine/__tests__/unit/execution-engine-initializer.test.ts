@@ -27,15 +27,15 @@ const mockInitializeMevProviders = jest.fn<() => Promise<any>>();
 const mockInitializeRiskManagement = jest.fn<() => any>();
 const mockInitializeBridgeRouter = jest.fn<() => any>();
 
-jest.mock('../../initialization/mev-initializer', () => ({
+jest.mock('../../src/initialization/mev-initializer', () => ({
   initializeMevProviders: mockInitializeMevProviders,
 }));
 
-jest.mock('../../initialization/risk-management-initializer', () => ({
+jest.mock('../../src/initialization/risk-management-initializer', () => ({
   initializeRiskManagement: mockInitializeRiskManagement,
 }));
 
-jest.mock('../../initialization/bridge-router-initializer', () => ({
+jest.mock('../../src/initialization/bridge-router-initializer', () => ({
   initializeBridgeRouter: mockInitializeBridgeRouter,
 }));
 
@@ -67,14 +67,14 @@ import {
   resetInitializationState,
   isInitializationComplete,
   getLastPartialResults,
-} from '../../initialization/execution-engine-initializer';
+} from '../../src/initialization/execution-engine-initializer';
 
-import type { ProviderServiceImpl } from '../../services/provider.service';
+import type { ProviderServiceImpl } from '../../src/services/provider.service';
 import type {
   MevInitializationResult,
   RiskManagementComponents,
   BridgeRouterInitializationResult,
-} from '../../initialization/types';
+} from '../../src/initialization/types';
 
 // =============================================================================
 // Test Data Factories

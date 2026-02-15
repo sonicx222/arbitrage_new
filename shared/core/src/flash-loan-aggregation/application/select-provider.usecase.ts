@@ -6,16 +6,16 @@
  *
  * Performance Target: <10ms (cold path)
  *
- * @see docs/CLEAN_ARCHITECTURE_DAY1_SUMMARY.md Use Case Pattern
+ * @see docs/research/FLASHLOAN_MEV_IMPLEMENTATION_PLAN.md Phase 2 Task 2.3
  */
 
+import { randomUUID } from 'node:crypto';
 import type {
   IFlashLoanAggregator,
-  IProviderRanker,
-  ILiquidityValidator,
   IAggregatorMetrics,
   IOpportunityContext,
 } from '../domain';
+import type { ArbitrageOpportunity } from '@arbitrage/types';
 import type {
   SelectProviderRequest,
   SelectProviderResponse,
@@ -104,21 +104,24 @@ export class SelectProviderUseCase {
     const context = this.buildContext(request);
 
     // Build minimal opportunity object for aggregator
-    const opportunity = {
-      id: `temp-${Date.now()}`, // Temporary ID for metrics
+    // All fields except id/confidence/timestamp are optional in ArbitrageOpportunity
+    const opportunity: ArbitrageOpportunity = {
+      id: randomUUID(),
       chain: request.chain,
       tokenIn: request.asset,
       amountIn: request.amount.toString(),
       expectedProfit: request.estimatedValueUsd,
       buyChain: request.chain,
-      buyPrice: 0, // Not needed for provider selection
-      sellPrice: 0, // Not needed for provider selection
+      buyPrice: 0,
+      sellPrice: 0,
+      confidence: 1,
+      timestamp: Date.now(),
     };
 
     // Delegate to aggregator
     const selection = await this.deps.aggregator.selectProvider(
-      opportunity as any, // Type assertion - aggregator expects full ArbitrageOpportunity
-      context as any // Type assertion - aggregator expects full StrategyContext
+      opportunity,
+      context
     );
 
     // Convert domain result to DTO
@@ -135,16 +138,30 @@ export class SelectProviderUseCase {
       throw new Error('SelectProviderRequest: chain is required');
     }
 
-    if (!request.asset || !request.asset.startsWith('0x')) {
-      throw new Error(`SelectProviderRequest: invalid asset address: ${request.asset}`);
+    if (!request.asset) {
+      throw new Error('SelectProviderRequest: asset address is required');
+    }
+
+    // Chain-aware address validation
+    const isSolana = request.chain.toLowerCase() === 'solana';
+    if (isSolana) {
+      // Solana base58 addresses: 32-44 chars, alphanumeric (no 0, O, I, l)
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(request.asset)) {
+        throw new Error(`SelectProviderRequest: invalid Solana address: ${request.asset}`);
+      }
+    } else {
+      // EVM chains: 0x-prefixed, 42 chars (0x + 40 hex chars)
+      if (!/^0x[0-9a-fA-F]{40}$/.test(request.asset)) {
+        throw new Error(`SelectProviderRequest: invalid EVM address: ${request.asset}`);
+      }
     }
 
     if (request.amount <= 0n) {
       throw new Error(`SelectProviderRequest: amount must be positive: ${request.amount}`);
     }
 
-    if (request.estimatedValueUsd < 0) {
-      throw new Error(`SelectProviderRequest: estimatedValueUsd must be non-negative: ${request.estimatedValueUsd}`);
+    if (!Number.isFinite(request.estimatedValueUsd) || request.estimatedValueUsd < 0) {
+      throw new Error(`SelectProviderRequest: estimatedValueUsd must be a finite non-negative number: ${request.estimatedValueUsd}`);
     }
   }
 
@@ -160,13 +177,4 @@ export class SelectProviderUseCase {
       estimatedValueUsd: request.estimatedValueUsd,
     };
   }
-}
-
-/**
- * Factory function to create use case
- */
-export function createSelectProviderUseCase(
-  deps: SelectProviderUseCaseDependencies
-): SelectProviderUseCase {
-  return new SelectProviderUseCase(deps);
 }

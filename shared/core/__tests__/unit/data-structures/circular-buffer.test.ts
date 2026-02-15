@@ -39,11 +39,11 @@ describe('CircularBuffer', () => {
     });
 
     it('should throw for zero capacity', () => {
-      expect(() => new CircularBuffer<number>(0)).toThrow('CircularBuffer capacity must be positive');
+      expect(() => new CircularBuffer<number>(0)).toThrow('CircularBuffer capacity must be a positive integer');
     });
 
     it('should throw for negative capacity', () => {
-      expect(() => new CircularBuffer<number>(-5)).toThrow('CircularBuffer capacity must be positive');
+      expect(() => new CircularBuffer<number>(-5)).toThrow('CircularBuffer capacity must be a positive integer');
     });
   });
 
@@ -477,6 +477,36 @@ describe('CircularBuffer', () => {
       buf.pushOverwrite(1);
       buf.pushOverwrite(2);
       expect(buf.toArray()).toEqual([1, 2]);
+    });
+  });
+
+  // ==========================================================================
+  // pushOverwrite + countWhere combined (Fix #11 regression test)
+  // ==========================================================================
+
+  describe('pushOverwrite + countWhere combined (production pattern)', () => {
+    it('should calculate rolling success rate correctly', () => {
+      // This is the pattern used by BaseSimulationProvider:
+      // pushOverwrite(true/false) + countWhere((r) => r) for success rate
+      const buf = new CircularBuffer<boolean>(5);
+
+      // First 5 results: 3 successes, 2 failures
+      buf.pushOverwrite(true);
+      buf.pushOverwrite(false);
+      buf.pushOverwrite(true);
+      buf.pushOverwrite(true);
+      buf.pushOverwrite(false);
+
+      expect(buf.countWhere(r => r)).toBe(3);
+      expect(buf.size).toBe(5);
+
+      // Add 2 more successes — should overwrite the 2 oldest (true, false)
+      buf.pushOverwrite(true);
+      buf.pushOverwrite(true);
+
+      // Window is now: [true, true, false, true, true] = 4 successes
+      expect(buf.countWhere(r => r)).toBe(4);
+      expect(buf.size).toBe(5);
     });
   });
 
