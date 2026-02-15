@@ -19,6 +19,7 @@ const {
   isWindows,
   checkRedis,
   checkHealth,
+  getRedisMemoryConfig,
   updatePid,
   removePid,
   killProcess,
@@ -102,7 +103,7 @@ function pipeStreamToLog(stream, serviceName, color, filter) {
 // Service Startup
 // =============================================================================
 
-async function startService(service) {
+async function startService(service, runtimeEnvOverrides = {}) {
   logService(service.name, `Starting on port ${service.port}...`, 'yellow');
 
   // FIX H4: Filter sensitive env vars before passing to child processes.
@@ -116,6 +117,7 @@ async function startService(service) {
   }
   const env = {
     ...filteredEnv,
+    ...runtimeEnvOverrides,
     ...service.env,
     NODE_ENV: 'development',
     LOG_LEVEL: process.env.LOG_LEVEL ?? 'info'
@@ -282,13 +284,27 @@ async function main() {
     process.exit(1);
   }
 
+  // If using in-memory Redis, force child services to use a passwordless local URL.
+  // This avoids noisy AUTH warnings when REDIS_PASSWORD exists in .env for Docker mode.
+  const runtimeEnvOverrides = {};
+  const redisStatus = await checkRedis();
+  if (redisStatus.running && redisStatus.type === 'memory') {
+    const memoryConfig = getRedisMemoryConfig();
+    const redisHost = memoryConfig?.host || '127.0.0.1';
+    const redisPort = memoryConfig?.port || PORTS.REDIS;
+    runtimeEnvOverrides.REDIS_URL = `redis://${redisHost}:${redisPort}`;
+    runtimeEnvOverrides.REDIS_PASSWORD = '';
+    runtimeEnvOverrides.REDIS_IN_MEMORY = 'true';
+    logger.info(`Using in-memory Redis override for child services: ${runtimeEnvOverrides.REDIS_URL}`);
+  }
+
   // Start services
   logger.info('\nStarting services...\n');
 
   const failedServices = [];
   for (const service of SERVICES) {
     try {
-      const pid = await startService(service);
+      const pid = await startService(service, runtimeEnvOverrides);
       startedPids.push({ name: service.name, pid });
       // Small delay between services
       await new Promise(r => setTimeout(r, SERVICE_START_DELAY_MS));

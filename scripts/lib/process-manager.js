@@ -128,8 +128,8 @@ async function findProcessesByPort(port) {
     });
     return Array.from(pids);
   }
-  // Unix: use lsof
-  const output = await execCommand(`lsof -t -i :${safePort} 2>/dev/null || true`);
+  // Unix: use lsof (LISTEN sockets only to avoid matching client connections)
+  const output = await execCommand(`lsof -nP -t -iTCP:${safePort} -sTCP:LISTEN 2>/dev/null || true`);
   if (!output) return [];
   return output.split('\n')
     .map(p => parseInt(p, 10))
@@ -154,26 +154,69 @@ function parseProcessLines(output, lineParser) {
 }
 
 /**
+ * Parse PowerShell JSON output for Win32_Process query results.
+ * @param {string} jsonOutput - JSON from ConvertTo-Json
+ * @returns {Array<{ProcessId?: number, CommandLine?: string}>}
+ */
+function parsePowerShellProcessJson(jsonOutput) {
+  if (!jsonOutput) return [];
+
+  try {
+    const parsed = JSON.parse(jsonOutput);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') return [parsed];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Find ghost node processes related to the project (cross-platform).
  * @returns {Promise<Array<{pid: number, cmd: string}>>} - Array of ghost processes
  */
 async function findGhostNodeProcesses() {
   if (isWindows()) {
-    const output = await execCommand('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv 2>nul');
-    if (!output) return [];
-    return parseProcessLines(output, (line) => {
-      // FIX P3-1: Tighten matching to prevent killing unrelated projects
-      const hasArbitrage = line.includes('arbitrage');
-      const hasTsNode = line.includes('ts-node');
-      const hasServices = line.includes('services') && line.includes('index.ts');
-      if (!hasArbitrage || !(hasTsNode || hasServices)) return null;
-      const parts = line.split(',');
-      if (parts.length < 3) return null;
-      return {
-        pid: parseInt(parts[parts.length - 1], 10),
-        cmd: parts.slice(1, -1).join(',').substring(0, 80)
-      };
-    });
+    // Try WMIC first for backward compatibility.
+    const wmicOutput = await execCommand('wmic process where "name=\'node.exe\'" get processid,commandline /format:csv 2>nul');
+    if (wmicOutput) {
+      return parseProcessLines(wmicOutput, (line) => {
+        // FIX P3-1: Tighten matching to prevent killing unrelated projects
+        const hasArbitrage = line.includes('arbitrage');
+        const hasTsNode = line.includes('ts-node');
+        const hasServices = line.includes('services') && line.includes('index.ts');
+        if (!hasArbitrage || !(hasTsNode || hasServices)) return null;
+        const parts = line.split(',');
+        if (parts.length < 3) return null;
+        return {
+          pid: parseInt(parts[parts.length - 1], 10),
+          cmd: parts.slice(1, -1).join(',').substring(0, 80)
+        };
+      });
+    }
+
+    // WMIC may be unavailable on newer Windows installs; fallback to PowerShell.
+    const psCommand = 'powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process -Filter \\"Name=\'node.exe\'\\" | Select-Object ProcessId,CommandLine; $p | ConvertTo-Json -Compress"';
+    const psOutput = await execCommand(psCommand);
+    if (!psOutput) return [];
+
+    const processes = parsePowerShellProcessJson(psOutput);
+    return processes
+      .map((p) => ({
+        pid: parseInt(String(p.ProcessId || ''), 10),
+        cmd: String(p.CommandLine || '')
+      }))
+      .filter((p) => {
+        if (isNaN(p.pid) || p.pid <= 0 || !p.cmd) return false;
+        const hasArbitrage = p.cmd.includes('arbitrage');
+        const hasTsNode = p.cmd.includes('ts-node');
+        const hasServices = p.cmd.includes('services') && p.cmd.includes('index.ts');
+        return hasArbitrage && (hasTsNode || hasServices);
+      })
+      .map((p) => ({
+        pid: p.pid,
+        cmd: p.cmd.substring(0, 80)
+      }));
   }
   // Unix: use ps
   // FIX P3-1: Require "arbitrage" in command line to avoid matching unrelated projects
@@ -195,10 +238,10 @@ async function findGhostNodeProcesses() {
  * @returns {Promise<void>}
  */
 async function killTsNodeProcesses() {
-  const cmd = isWindows()
-    ? 'wmic process where "commandline like \'%ts-node%\' and commandline like \'%arbitrage%\' and name=\'node.exe\'" call terminate 2>nul'
-    : 'pkill -f "ts-node.*arbitrage" 2>/dev/null';
-  await execCommand(cmd);
+  const processes = await findGhostNodeProcesses();
+  for (const proc of processes) {
+    await killProcess(proc.pid);
+  }
 }
 
 // =============================================================================
@@ -212,5 +255,6 @@ module.exports = {
   processExists,
   findProcessesByPort,
   findGhostNodeProcesses,
-  killTsNodeProcesses
+  killTsNodeProcesses,
+  parsePowerShellProcessJson
 };

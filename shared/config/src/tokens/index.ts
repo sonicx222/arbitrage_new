@@ -225,7 +225,7 @@ export const CORE_TOKENS: Record<string, Token[]> = {
  * Used to detect when prices may be stale and need refreshing.
  * Format: ISO 8601 date string
  */
-export const FALLBACK_PRICES_LAST_UPDATED = '2026-01-18T00:00:00Z';
+export const FALLBACK_PRICES_LAST_UPDATED = '2026-02-15T00:00:00Z';
 
 /**
  * Number of days after which fallback prices are considered stale.
@@ -326,7 +326,7 @@ export const FALLBACK_TOKEN_PRICES: Record<string, number> = Object.freeze({
  */
 export const NATIVE_TOKEN_PRICE_METADATA = Object.freeze({
   /** ISO date string of last price update */
-  lastUpdated: '2026-01-18',
+  lastUpdated: '2026-02-15',
   /** Maximum age in days before prices are considered stale */
   maxAgeDays: 7,
   /** Update frequency recommendation */
@@ -372,7 +372,7 @@ let _stalenessWarningShown = false;
  * IMPORTANT: These are FALLBACK prices used when real-time price feeds are unavailable.
  * For production arbitrage, always prefer real-time price data from oracles.
  *
- * Last updated: 2026-01-18
+ * Last updated: 2026-02-15
  * @see NATIVE_TOKEN_PRICE_METADATA for staleness tracking
  * @see checkNativeTokenPriceStaleness() to verify price freshness
  */

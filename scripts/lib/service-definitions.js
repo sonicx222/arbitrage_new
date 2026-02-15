@@ -68,7 +68,10 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P1_ASIA_FAST,
       healthEndpoint: '/health',
       delay: P1_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P1_ASIA_FAST },
+      env: {
+        PARTITION_ID: 'asia-fast',
+        HEALTH_CHECK_PORT: PORTS.P1_ASIA_FAST
+      },
       type: 'node',
       enabled: true
     },
@@ -78,7 +81,10 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P2_L2_TURBO,
       healthEndpoint: '/health',
       delay: P2_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P2_L2_TURBO },
+      env: {
+        PARTITION_ID: 'l2-turbo',
+        HEALTH_CHECK_PORT: PORTS.P2_L2_TURBO
+      },
       type: 'node',
       enabled: true
     },
@@ -88,7 +94,20 @@ function buildServiceDefinitions(PORTS) {
       port: PORTS.P3_HIGH_VALUE,
       healthEndpoint: '/health',
       delay: P3_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE },
+      env: {
+        PARTITION_ID: 'high-value',
+        HEALTH_CHECK_PORT: PORTS.P3_HIGH_VALUE
+      },
+      type: 'node',
+      enabled: true
+    },
+    {
+      name: 'P4 Solana Detector',
+      script: 'services/partition-solana/src/index.ts',
+      port: PORTS.P4_SOLANA,
+      healthEndpoint: '/health',
+      delay: P4_STARTUP_DELAY_MS,
+      env: { HEALTH_CHECK_PORT: PORTS.P4_SOLANA },
       type: 'node',
       enabled: true
     },
@@ -123,17 +142,6 @@ function buildServiceDefinitions(PORTS) {
       healthEndpoint: '/health',
       delay: UNIFIED_DETECTOR_STARTUP_DELAY_MS,
       env: { HEALTH_CHECK_PORT: PORTS.UNIFIED_DETECTOR },
-      type: 'node',
-      enabled: false,
-      optional: true
-    },
-    {
-      name: 'P4 Solana Detector',
-      script: 'services/partition-solana/src/index.ts',
-      port: PORTS.P4_SOLANA,
-      healthEndpoint: '/health',
-      delay: P4_STARTUP_DELAY_MS,
-      env: { HEALTH_CHECK_PORT: PORTS.P4_SOLANA },
       type: 'node',
       enabled: false,
       optional: true

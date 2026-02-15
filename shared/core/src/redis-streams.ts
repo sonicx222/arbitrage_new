@@ -1049,6 +1049,13 @@ export class StreamConsumer {
 let streamsInstance: RedisStreamsClient | null = null;
 let initializingPromise: Promise<RedisStreamsClient> | null = null; // Race condition guard
 
+function resolveRedisPassword(password?: string): string | undefined {
+  const raw = password ?? process.env.REDIS_PASSWORD;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function getRedisStreamsClient(url?: string, password?: string): Promise<RedisStreamsClient> {
   // Return existing instance if available
   if (streamsInstance) {
@@ -1069,7 +1076,7 @@ export async function getRedisStreamsClient(url?: string, password?: string): Pr
   }
 
   const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-  const redisPassword = password || process.env.REDIS_PASSWORD;
+  const redisPassword = resolveRedisPassword(password);
 
   initializingPromise = (async () => {
     try {

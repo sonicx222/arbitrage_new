@@ -60,7 +60,7 @@ npm run dev:execution:fast     # Terminal 3: Execution engine (port 3005)
 
 | Software | Version | Installation |
 |----------|---------|--------------|
-| Node.js | 18+ | [nodejs.org](https://nodejs.org) (LTS version) |
+| Node.js | 22+ | [nodejs.org](https://nodejs.org) (LTS version) |
 | npm | 9+ | Comes with Node.js |
 | Docker Desktop | Latest | [docker.com](https://docker.com/products/docker-desktop) (optional) |
 
@@ -71,9 +71,9 @@ npm run dev:execution:fast     # Terminal 3: Execution engine (port 3005)
 - Docker Desktop requires WSL2 (Windows Subsystem for Linux)
 - All npm scripts work natively
 
-#### macOS (Apple Silicon / M1/M2/M3)
-- Download the **Apple Silicon** version of Docker Desktop
-- Enable **Rosetta for x86/amd64 emulation** in Docker settings
+#### macOS (Apple Silicon / Intel)
+- Install the Docker Desktop build matching your CPU architecture
+- No architecture override is needed in local compose files
 
 #### Linux
 - Install Docker via your package manager or [docker.com](https://docs.docker.com/engine/install/)
@@ -81,7 +81,7 @@ npm run dev:execution:fast     # Terminal 3: Execution engine (port 3005)
 ### Verify Installation
 
 ```bash
-node --version    # Should be 18.x or higher
+node --version    # Should be 22.x or higher
 npm --version     # Should be 9.x or higher
 docker --version  # Optional: Should show Docker version
 ```
@@ -191,7 +191,9 @@ The system loads environment variables in this order (highest to lowest priority
    - Team-shared defaults
 
 3. **Environment variables** - System-level
-   - Set via shell: `export VAR=value`
+   - Set via shell:
+     - macOS/Linux: `export VAR=value`
+     - Windows PowerShell: `$env:VAR="value"`
    - Highest priority if set
 
 4. **Code defaults** - Fallback values in code
@@ -227,8 +229,8 @@ Choose one of the following options:
 ```bash
 npm run dev:redis
 
-# Verify it's running
-docker ps | grep arbitrage-redis
+# Verify it's running (cross-platform)
+docker ps --filter "name=arbitrage-redis"
 
 # Optional: Start with Redis Commander UI
 npm run dev:redis:ui
@@ -282,6 +284,14 @@ curl http://localhost:3000/api/health  # Coordinator
 curl http://localhost:3001/health      # P1 Asia-Fast
 curl http://localhost:3005/health      # Execution Engine
 curl http://localhost:3006/health      # Cross-Chain
+```
+
+Windows PowerShell equivalent:
+```powershell
+irm http://localhost:3000/api/health
+irm http://localhost:3001/health
+irm http://localhost:3005/health
+irm http://localhost:3006/health
 ```
 
 ### Step 6: Access the Dashboard
@@ -602,7 +612,7 @@ npm run build:clean
 npm run dev:status
 
 # For Docker Redis:
-docker ps | grep arbitrage-redis
+docker ps --filter "name=arbitrage-redis"
 npm run dev:redis:down && npm run dev:redis
 
 # For in-memory Redis:
@@ -656,7 +666,11 @@ npm run build:clean
 1. Ensure Redis is running first
 2. Check environment variables are loaded:
    ```bash
-   cat .env  # Should show your config
+   # macOS/Linux
+   cat .env
+
+   # Windows PowerShell
+   Get-Content .env
    ```
 3. Check service logs for errors
 
@@ -699,7 +713,7 @@ Remove-Item -Recurse -Force node_modules; npm install  # Windows PowerShell
 | `npm run dev:redis` | Start Redis container (Docker) |
 | `npm run dev:redis:memory` | Start in-memory Redis (no Docker) |
 | `npm run dev:redis:ui` | Start Redis with Commander web UI |
-| `npm run dev:redis:down` | Stop Redis container |
+| `npm run dev:redis:down` | Stop local Redis (in-memory and/or Docker) |
 | `npm run dev:redis:logs` | View Redis container logs |
 
 ### Service Management (Hot Reload - RECOMMENDED)

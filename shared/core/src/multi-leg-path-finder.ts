@@ -24,6 +24,7 @@ import {
 import type { DexPool, TriangularStep, DynamicSlippageConfig } from './cross-dex-triangular-arbitrage';
 
 const logger = createLogger('multi-leg-path-finder');
+let hasLoggedWorkerFallback = false;
 
 // BigInt constants for precise calculations
 const PRECISION_MULTIPLIER = 10n ** 18n;
@@ -256,7 +257,7 @@ export class MultiLegPathFinder {
     let timedOut = false;
     for (const baseToken of baseTokens) {
       if (this.isTimeout(ctx)) {
-        logger.warn('Path finding timeout reached');
+        logger.debug('Path finding timeout reached');
         timedOut = true;
         break;
       }
@@ -791,6 +792,9 @@ export class MultiLegPathFinder {
   private filterAndRank(opportunities: MultiLegOpportunity[]): MultiLegOpportunity[] {
     return opportunities
       .filter(opp => {
+        // Require at least two distinct DEXes to avoid same-DEX loop noise.
+        if (new Set(opp.dexes).size < 2) return false;
+
         if (opp.netProfit < this.config.minProfitThreshold) return false;
 
         const maxStepSlippage = Math.max(...opp.steps.map(s => s.slippage));
@@ -907,13 +911,30 @@ export class MultiLegPathFinder {
     // Lazy import worker pool to avoid circular dependencies
     const pool = workerPool || (await import('./async/worker-pool')).getWorkerPool();
 
-    // Check if pool is running
-    const health = pool.getHealthStatus?.();
+    // Start pool lazily when first needed by path finding.
+    let health = pool.getHealthStatus?.();
+    if (!health?.healthy && typeof pool.start === 'function') {
+      try {
+        await pool.start();
+        health = pool.getHealthStatus?.();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.warn('Failed to start worker pool for multi-leg path finding', { error: errorMessage });
+      }
+    }
+
     if (!health?.healthy) {
       // Fallback to synchronous execution if worker pool not available
-      logger.warn('Worker pool not healthy, falling back to synchronous execution');
+      if (!hasLoggedWorkerFallback) {
+        logger.warn('Worker pool not healthy, falling back to synchronous execution', {
+          chain,
+          poolHealth: health || null
+        });
+        hasLoggedWorkerFallback = true;
+      }
       return this.findMultiLegOpportunities(chain, pools, baseTokens, targetPathLength);
     }
+    hasLoggedWorkerFallback = false;
 
     const taskId = `multi_leg_${chain}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 

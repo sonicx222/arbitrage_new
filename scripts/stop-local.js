@@ -52,7 +52,7 @@ async function main() {
   deletePidFile();
 
   logger.success('\nAll services stopped.');
-  logger.info('\nTo also stop Redis:');
+  logger.info('\nTo stop Redis separately (if still running):');
   log('  npm run dev:redis:down', 'dim');
   console.log('');
 }

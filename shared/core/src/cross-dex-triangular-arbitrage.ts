@@ -583,6 +583,9 @@ export class CrossDexTriangularArbitrage {
   private filterAndRankQuadrilaterals(opportunities: QuadrilateralOpportunity[]): QuadrilateralOpportunity[] {
     return opportunities
       .filter(opp => {
+        // Enforce cross-DEX routing: single-DEX loops are high-noise in simulation.
+        if (new Set(opp.dexes).size < 2) return false;
+
         // Filter by minimum profit
         if (opp.netProfit < this.minProfitThreshold) return false;
 
@@ -903,6 +906,9 @@ export class CrossDexTriangularArbitrage {
   private filterAndRankOpportunities(opportunities: TriangularOpportunity[]): TriangularOpportunity[] {
     return opportunities
       .filter(opp => {
+        // Enforce cross-DEX routing: single-DEX loops are high-noise in simulation.
+        if (new Set(opp.dexes).size < 2) return false;
+
         // Filter by minimum profit
         if (opp.netProfit < this.minProfitThreshold) return false;
 

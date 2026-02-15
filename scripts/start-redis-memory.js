@@ -37,7 +37,10 @@ async function main() {
   const port = PORTS.REDIS;
   log(`Checking if port ${port} is available...`, 'yellow');
 
-  const portInUse = await isPortInUse(port);
+  const portInUse =
+    await checkTcpConnection('127.0.0.1', port) ||
+    await checkTcpConnection('localhost', port) ||
+    await isPortInUse(port);
 
   if (portInUse) {
     log(`Port ${port} is already in use.`, 'yellow');
@@ -126,7 +129,8 @@ async function main() {
     process.stdin.resume();
 
   } catch (error) {
-    log(`\nFailed to start Redis: ${error.message}`, 'red');
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log(`\nFailed to start Redis: ${errorMessage}`, 'red');
 
     // Clean up config if it was us
     const currentConfig = getRedisMemoryConfig();

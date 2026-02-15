@@ -1292,6 +1292,13 @@ let redisInstance: RedisClient | null = null;
 let redisInstancePromise: Promise<RedisClient> | null = null;
 let initializationError: Error | null = null;
 
+function resolveRedisPassword(password?: string): string | undefined {
+  const raw = password ?? process.env.REDIS_PASSWORD;
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export async function getRedisClient(url?: string, password?: string): Promise<RedisClient> {
   // If already initialized successfully, return immediately
   if (redisInstance) {
@@ -1326,7 +1333,7 @@ export async function getRedisClient(url?: string, password?: string): Promise<R
   redisInstancePromise = (async (): Promise<RedisClient> => {
     try {
       const redisUrl = url || process.env.REDIS_URL || 'redis://localhost:6379';
-      const redisPassword = password || process.env.REDIS_PASSWORD;
+      const redisPassword = resolveRedisPassword(password);
 
       const instance = new RedisClient(redisUrl, redisPassword);
 
@@ -1365,7 +1372,10 @@ export function getRedisClientSync(): RedisClient | null {
 // Health check for Redis connectivity
 export async function checkRedisHealth(url?: string, password?: string): Promise<boolean> {
   try {
-    const client = new RedisClient(url || process.env.REDIS_URL || 'redis://localhost:6379', password || process.env.REDIS_PASSWORD);
+    const client = new RedisClient(
+      url || process.env.REDIS_URL || 'redis://localhost:6379',
+      resolveRedisPassword(password)
+    );
     const isHealthy = await client.ping();
     await client.disconnect(); // Clean up test client
     return isHealthy;

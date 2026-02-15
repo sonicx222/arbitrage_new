@@ -116,14 +116,21 @@ export class ConfigManager {
    * Register default validation rules for common configuration variables.
    */
   private registerDefaultRules(): void {
-    // REDIS_URL - Required unless REDIS_PORT is set (local dev fallback)
-    // FIX: Accept either REDIS_URL or REDIS_PORT for flexibility
-    // service-config.ts falls back to redis://localhost:6379 when REDIS_URL is not set
+    // REDIS_URL - Required in production-like environments.
+    // In local development, service-config.ts falls back to:
+    //   redis://localhost:${REDIS_PORT:-6379}
+    // so missing REDIS_URL should warn (not fail) to avoid startup mismatch.
     this.rules.set('REDIS_URL', {
-      required: (env) => !env.REDIS_PORT, // Not required if REDIS_PORT is set
+      required: (env) => (
+        env.NODE_ENV === 'production' ||
+        !!env.FLY_APP_NAME ||
+        !!env.RAILWAY_ENVIRONMENT ||
+        !!env.RENDER_SERVICE_NAME ||
+        !!env.KOYEB_SERVICE_NAME
+      ),
       validate: (v) => v.startsWith('redis://') || v.startsWith('rediss://'),
       errorMessage: 'REDIS_URL must start with redis:// or rediss://',
-      warnMessage: 'REDIS_URL is not set, will use redis://localhost:${REDIS_PORT:-6379}'
+      warnMessage: 'REDIS_URL is not set in development, using redis://localhost:${REDIS_PORT:-6379}'
     });
 
     // PARTITION_ID - Required for detector services

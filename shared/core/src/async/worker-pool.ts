@@ -4,11 +4,40 @@
 import { Worker } from 'worker_threads';
 import { EventEmitter } from 'events';
 import * as path from 'path';
+import * as fs from 'fs';
 import { createLogger } from '../logger';
 import { clearTimeoutSafe } from '../lifecycle-utils';
 import { WORKER_POOL_CONFIG, PLATFORM_NAME } from '@arbitrage/config';
 
 const logger = createLogger('worker-pool');
+
+/**
+ * Resolve the worker script path across source (ts-node) and build (dist) layouts.
+ *
+ * Source runtime (__dirname = shared/core/src/async):
+ * - worker script is expected at shared/core/dist/event-processor-worker.js (after build)
+ *
+ * Dist runtime (__dirname = shared/core/dist/async):
+ * - worker script is expected at shared/core/dist/event-processor-worker.js
+ */
+function resolveWorkerScriptPath(): string {
+  const candidates = [
+    path.join(__dirname, 'event-processor-worker.js'),
+    path.join(__dirname, '..', 'event-processor-worker.js'),
+    path.join(__dirname, '..', '..', 'dist', 'event-processor-worker.js'),
+    path.join(process.cwd(), 'shared', 'core', 'dist', 'event-processor-worker.js')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Fall back to the historical default for compatibility; start() validates existence.
+  logger.warn('Worker script not found in known locations', { candidates });
+  return candidates[0];
+}
 
 export interface Task {
   id: string;
@@ -267,7 +296,7 @@ export class EventProcessingWorkerPool extends EventEmitter {
     this.taskTimeout = taskTimeout;
     this.priceBuffer = priceBuffer;
     this.keyRegistryBuffer = keyRegistryBuffer;
-    this.workerPath = workerPath ?? path.join(__dirname, 'event-processor-worker.js');
+    this.workerPath = workerPath ?? resolveWorkerScriptPath();
     // Fix #27: Pre-allocate circular buffer arrays
     this.parseTimeWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
     this.overheadWindow = new Array(this.STATS_WINDOW_SIZE).fill(0);
@@ -275,6 +304,13 @@ export class EventProcessingWorkerPool extends EventEmitter {
 
   async start(): Promise<void> {
     if (this.isRunning) return;
+
+    if (!fs.existsSync(this.workerPath)) {
+      throw new Error(
+        `Worker script not found at ${this.workerPath}. ` +
+        'Build shared/core first (npm run build) or provide a valid workerPath.'
+      );
+    }
 
     logger.info(`Starting worker pool with ${this.poolSize} workers`);
 
@@ -721,9 +757,11 @@ export class EventProcessingWorkerPool extends EventEmitter {
     const stats = this.getPoolStats();
     const averageProcessingTime = Array.from(this.workerStats.values())
       .reduce((sum, stat) => sum + stat.averageProcessingTime, 0) / this.workerStats.size;
+    const runningWorkers = this.workers.filter(Boolean).length;
 
     return {
-      healthy: this.isRunning && stats.availableWorkers > 0,
+      // A saturated pool (availableWorkers=0) is still healthy if workers are running.
+      healthy: this.isRunning && runningWorkers > 0,
       poolSize: stats.poolSize,
       availableWorkers: stats.availableWorkers,
       activeTasks: stats.activeTasks,

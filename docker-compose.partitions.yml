@@ -2,7 +2,7 @@
 # Full Partitioned Architecture - Local Development
 # =============================================================================
 # Runs ALL partition services locally, simulating the production distributed
-# architecture on your M1 Mac.
+# architecture on macOS/Windows/Linux.
 #
 # Architecture (Production-style ports):
 #   - Coordinator:     Dashboard & orchestration           (Port 3000)
@@ -18,10 +18,8 @@
 #   npm run dev:partitions:down    # Stop all partitions
 #   npm run dev:partitions:logs    # View all logs
 #
-# Memory estimate: ~2-3GB total (well within 32GB M1 Mac)
+# Memory estimate: ~2-3GB total
 # =============================================================================
-
-version: '3.8'
 
 services:
   # ---------------------------------------------------------------------------
@@ -29,7 +27,6 @@ services:
   # ---------------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    platform: linux/arm64
     container_name: arb-redis
     ports:
       - "6379:6379"
@@ -289,7 +286,6 @@ services:
   # ---------------------------------------------------------------------------
   redis-commander:
     image: rediscommander/redis-commander:latest
-    platform: linux/arm64
     container_name: arb-redis-ui
     environment:
       - REDIS_HOSTS=local:redis:6379
