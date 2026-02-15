@@ -239,6 +239,46 @@ describe('LRUCache', () => {
   });
 
   // ==========================================================================
+  // Undefined Value Handling (Fix #2 regression test)
+  // ==========================================================================
+
+  describe('undefined value handling', () => {
+    it('should correctly handle stored undefined values', () => {
+      const cache = new LRUCache<string, undefined>(3);
+      cache.set('a', undefined);
+      cache.set('b', undefined);
+
+      // get() should treat stored undefined as a cache hit
+      expect(cache.get('a')).toBeUndefined();
+      expect(cache.has('a')).toBe(true);
+      expect(cache.size).toBe(2);
+
+      // Nonexistent key should be a miss
+      expect(cache.get('nonexistent')).toBeUndefined();
+
+      // Stats should reflect 1 hit (a) and 1 miss (nonexistent)
+      const stats = cache.getStats();
+      expect(stats.hits).toBe(1);
+      expect(stats.misses).toBe(1);
+    });
+
+    it('should update LRU order when getting stored undefined values', () => {
+      const cache = new LRUCache<string, undefined>(2);
+      cache.set('a', undefined);
+      cache.set('b', undefined);
+
+      // Access 'a' to promote it in LRU order
+      cache.get('a');
+
+      // Adding 'c' should evict 'b' (oldest), not 'a' (recently accessed)
+      cache.set('c', undefined);
+      expect(cache.has('a')).toBe(true);
+      expect(cache.has('b')).toBe(false);
+      expect(cache.has('c')).toBe(true);
+    });
+  });
+
+  // ==========================================================================
   // Factory Function
   // ==========================================================================
 

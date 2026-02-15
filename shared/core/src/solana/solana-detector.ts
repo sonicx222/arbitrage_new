@@ -953,56 +953,60 @@ export class SolanaDetector extends EventEmitter {
   // Pool Management
   // ===========================================================================
 
-  addPool(pool: SolanaPool): void {
-    this.pools.set(pool.address, pool);
+  async addPool(pool: SolanaPool): Promise<void> {
+    await this.poolUpdateMutex.runExclusive(async () => {
+      this.pools.set(pool.address, pool);
 
-    // Index by DEX
-    if (!this.poolsByDex.has(pool.dex)) {
-      this.poolsByDex.set(pool.dex, new Set());
-    }
-    this.poolsByDex.get(pool.dex)!.add(pool.address);
+      // Index by DEX
+      if (!this.poolsByDex.has(pool.dex)) {
+        this.poolsByDex.set(pool.dex, new Set());
+      }
+      this.poolsByDex.get(pool.dex)!.add(pool.address);
 
-    // Index by token pair (normalized)
-    const pairKey = this.getTokenPairKey(pool.token0.mint, pool.token1.mint);
-    if (!this.poolsByTokenPair.has(pairKey)) {
-      this.poolsByTokenPair.set(pairKey, new Set());
-    }
-    this.poolsByTokenPair.get(pairKey)!.add(pool.address);
+      // Index by token pair (normalized)
+      const pairKey = this.getTokenPairKey(pool.token0.mint, pool.token1.mint);
+      if (!this.poolsByTokenPair.has(pairKey)) {
+        this.poolsByTokenPair.set(pairKey, new Set());
+      }
+      this.poolsByTokenPair.get(pairKey)!.add(pool.address);
 
-    this.logger.debug('Pool added', {
-      address: pool.address,
-      dex: pool.dex,
-      pair: `${pool.token0.symbol}/${pool.token1.symbol}`
+      this.logger.debug('Pool added', {
+        address: pool.address,
+        dex: pool.dex,
+        pair: `${pool.token0.symbol}/${pool.token1.symbol}`
+      });
     });
   }
 
-  removePool(address: string): void {
-    const pool = this.pools.get(address);
-    if (!pool) return;
+  async removePool(address: string): Promise<void> {
+    await this.poolUpdateMutex.runExclusive(async () => {
+      const pool = this.pools.get(address);
+      if (!pool) return;
 
-    // Remove from DEX index and clean up empty Set
-    const dexSet = this.poolsByDex.get(pool.dex);
-    if (dexSet) {
-      dexSet.delete(address);
-      if (dexSet.size === 0) {
-        this.poolsByDex.delete(pool.dex);
+      // Remove from DEX index and clean up empty Set
+      const dexSet = this.poolsByDex.get(pool.dex);
+      if (dexSet) {
+        dexSet.delete(address);
+        if (dexSet.size === 0) {
+          this.poolsByDex.delete(pool.dex);
+        }
       }
-    }
 
-    // Remove from token pair index and clean up empty Set
-    const pairKey = this.getTokenPairKey(pool.token0.mint, pool.token1.mint);
-    const pairSet = this.poolsByTokenPair.get(pairKey);
-    if (pairSet) {
-      pairSet.delete(address);
-      if (pairSet.size === 0) {
-        this.poolsByTokenPair.delete(pairKey);
+      // Remove from token pair index and clean up empty Set
+      const pairKey = this.getTokenPairKey(pool.token0.mint, pool.token1.mint);
+      const pairSet = this.poolsByTokenPair.get(pairKey);
+      if (pairSet) {
+        pairSet.delete(address);
+        if (pairSet.size === 0) {
+          this.poolsByTokenPair.delete(pairKey);
+        }
       }
-    }
 
-    // Remove from main map
-    this.pools.delete(address);
+      // Remove from main map
+      this.pools.delete(address);
 
-    this.logger.debug('Pool removed', { address });
+      this.logger.debug('Pool removed', { address });
+    });
   }
 
   getPool(address: string): SolanaPool | undefined {
@@ -1036,16 +1040,25 @@ export class SolanaDetector extends EventEmitter {
     poolAddress: string,
     update: { price: number; reserve0: string; reserve1: string; slot: number }
   ): Promise<void> {
-    const pool = this.pools.get(poolAddress);
-    if (!pool) {
-      this.logger.warn('Pool not found for price update', { poolAddress });
-      return;
-    }
+    await this.poolUpdateMutex.runExclusive(async () => {
+      const pool = this.pools.get(poolAddress);
+      if (!pool) {
+        this.logger.warn('Pool not found for price update', { poolAddress });
+        return;
+      }
 
-    pool.price = update.price;
-    pool.reserve0 = update.reserve0;
-    pool.reserve1 = update.reserve1;
-    pool.lastSlot = update.slot;
+      // RACE CONDITION FIX: Create new pool object instead of mutating in-place.
+      // checkArbitrage() snapshots the Map but gets references to pool objects —
+      // mutation during iteration could cause incorrect buy/sell direction.
+      const updatedPool: SolanaPool = {
+        ...pool,
+        price: update.price,
+        reserve0: update.reserve0,
+        reserve1: update.reserve1,
+        lastSlot: update.slot,
+      };
+      this.pools.set(poolAddress, updatedPool);
+    });
   }
 
   private getTokenPairKey(token0: string, token1: string): string {

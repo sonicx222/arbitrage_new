@@ -318,11 +318,23 @@ export class ExecutionEngineService {
     this.consumerConfig = config.consumerConfig;
 
     // Task 3: A/B testing config (enabled via environment variable)
+    // FIX P0-2: Validate env var parseFloat/parseInt to prevent NaN propagation
+    const rawTrafficSplit = parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT || '0.1');
+    const rawMinSampleSize = parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE || '100', 10);
+    const rawSignificance = parseFloat(process.env.AB_TESTING_SIGNIFICANCE || '0.05');
+
+    const validTrafficSplit = !Number.isNaN(rawTrafficSplit) && rawTrafficSplit > 0 && rawTrafficSplit < 1
+      ? rawTrafficSplit : 0.1;
+    const validMinSampleSize = !Number.isNaN(rawMinSampleSize) && rawMinSampleSize > 0
+      ? rawMinSampleSize : 100;
+    const validSignificance = !Number.isNaN(rawSignificance) && rawSignificance > 0 && rawSignificance < 1
+      ? rawSignificance : 0.05;
+
     this.abTestingConfig = {
       enabled: process.env.AB_TESTING_ENABLED === 'true',
-      defaultTrafficSplit: parseFloat(process.env.AB_TESTING_TRAFFIC_SPLIT || '0.1'),
-      defaultMinSampleSize: parseInt(process.env.AB_TESTING_MIN_SAMPLE_SIZE || '100', 10),
-      significanceThreshold: parseFloat(process.env.AB_TESTING_SIGNIFICANCE || '0.05'),
+      defaultTrafficSplit: validTrafficSplit,
+      defaultMinSampleSize: validMinSampleSize,
+      significanceThreshold: validSignificance,
       ...config.abTestingConfig,
     };
 
@@ -1282,6 +1294,20 @@ export class ExecutionEngineService {
 
   private async executeOpportunity(opportunity: ArbitrageOpportunity): Promise<void> {
     const startTime = performance.now();
+
+    // FIX P0-3: Fail fast on missing buyChain instead of proceeding with 'unknown'
+    if (!opportunity.buyChain) {
+      const errorResult = createErrorResult(
+        opportunity.id,
+        'Missing required buyChain field',
+        'unknown',
+        opportunity.buyDex || 'unknown'
+      );
+      await this.publishExecutionResult(errorResult);
+      this.opportunityConsumer?.markComplete(opportunity.id);
+      return;
+    }
+
     const chain = opportunity.buyChain || 'unknown';
     const dex = opportunity.buyDex || 'unknown';
 

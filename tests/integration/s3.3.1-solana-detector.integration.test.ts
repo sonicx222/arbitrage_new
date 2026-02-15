@@ -248,26 +248,26 @@ describe('S3.3.1 SolanaDetector Pool Management Integration', () => {
   });
 
   describe('S3.3.1.5: Pool Management', () => {
-    it('should add pool to tracking', () => {
+    it('should add pool to tracking', async () => {
       const pool = createTestPool();
-      detector.addPool(pool);
+      await detector.addPool(pool);
 
       expect(detector.getPoolCount()).toBe(1);
       expect(detector.getPool(VALID_POOL_ADDRESS)).toBeDefined();
     });
 
-    it('should remove pool from tracking', () => {
+    it('should remove pool from tracking', async () => {
       const pool = createTestPool();
-      detector.addPool(pool);
-      detector.removePool(VALID_POOL_ADDRESS);
+      await detector.addPool(pool);
+      await detector.removePool(VALID_POOL_ADDRESS);
 
       expect(detector.getPoolCount()).toBe(0);
       expect(detector.getPool(VALID_POOL_ADDRESS)).toBeUndefined();
     });
 
-    it('should get pools by DEX', () => {
-      detector.addPool(createTestPool({ dex: 'raydium' }));
-      detector.addPool(createTestPool({
+    it('should get pools by DEX', async () => {
+      await detector.addPool(createTestPool({ dex: 'raydium' }));
+      await detector.addPool(createTestPool({
         address: 'DKT8ncTnQMDZ1AnPrKbJTWMqzL7HXSkFHSFCdK8qBM9F',
         dex: 'orca'
       }));
@@ -279,13 +279,13 @@ describe('S3.3.1 SolanaDetector Pool Management Integration', () => {
       expect(orcaPools.length).toBe(1);
     });
 
-    it('should get pools by token pair', () => {
-      detector.addPool(createTestPool({
+    it('should get pools by token pair', async () => {
+      await detector.addPool(createTestPool({
         dex: 'raydium',
         token0: { mint: VALID_TOKEN_MINT_1, symbol: 'SOL', decimals: 9 },
         token1: { mint: VALID_TOKEN_MINT_2, symbol: 'USDC', decimals: 6 }
       }));
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'DKT8ncTnQMDZ1AnPrKbJTWMqzL7HXSkFHSFCdK8qBM9F',
         dex: 'orca',
         token0: { mint: VALID_TOKEN_MINT_1, symbol: 'SOL', decimals: 9 },
@@ -297,8 +297,8 @@ describe('S3.3.1 SolanaDetector Pool Management Integration', () => {
       expect(pools.length).toBe(2);
     });
 
-    it('should handle removing non-existent pool gracefully', () => {
-      detector.removePool('non-existent-address');
+    it('should handle removing non-existent pool gracefully', async () => {
+      await detector.removePool('non-existent-address');
       expect(detector.getPoolCount()).toBe(0);
     });
 
@@ -333,14 +333,14 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
   describe('S3.3.1.6: Arbitrage Detection', () => {
     it('should detect arbitrage opportunity between pools with significant price difference', async () => {
       // Add two pools with price discrepancy
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
         dex: 'raydium',
         price: 150,
         fee: 25 // 0.25%
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb22',
         dex: 'orca',
         price: 152, // 1.33% difference
@@ -357,14 +357,14 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
 
     it('should not detect arbitrage below threshold', async () => {
       // Add two pools with small price discrepancy (0.2%, below 0.3% threshold)
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
         dex: 'raydium',
         price: 150,
         fee: 25
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb22',
         dex: 'orca',
         price: 150.30, // 0.2% difference
@@ -378,7 +378,7 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
 
     it('should require at least 2 pools for arbitrage', async () => {
       // Add only one pool
-      detector.addPool(createTestPool());
+      await detector.addPool(createTestPool());
 
       const opportunities = await detector.checkArbitrage();
 
@@ -387,14 +387,14 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
 
     it('should calculate correct profit after fees', async () => {
       // 2% price difference, 0.5% total fees = ~1.5% net profit
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
         dex: 'raydium',
         price: 100,
         fee: 25 // 0.25%
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb22',
         dex: 'orca',
         price: 102, // 2% higher
@@ -411,7 +411,7 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
 
     it('should handle multiple token pairs', async () => {
       // SOL/USDC pair
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
         dex: 'raydium',
         token0: { mint: VALID_TOKEN_MINT_1, symbol: 'SOL', decimals: 9 },
@@ -420,7 +420,7 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
         fee: 25
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb22',
         dex: 'orca',
         token0: { mint: VALID_TOKEN_MINT_1, symbol: 'SOL', decimals: 9 },
@@ -431,7 +431,7 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
 
       // RAY/USDC pair (different token pair)
       const rayMint = 'Token3RAYaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa33';
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool3ccccccccccccccccccccccccccccccccccccc33',
         dex: 'raydium',
         token0: { mint: rayMint, symbol: 'RAY', decimals: 6 },
@@ -440,7 +440,7 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
         fee: 25
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool4ddddddddddddddddddddddddddddddddddddd44',
         dex: 'orca',
         token0: { mint: rayMint, symbol: 'RAY', decimals: 6 },
@@ -456,14 +456,14 @@ describe('S3.3.1 SolanaDetector Arbitrage Detection Integration', () => {
     });
 
     it('should identify correct buy and sell sides', async () => {
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
         dex: 'raydium',
         price: 100, // Lower price - buy here
         fee: 25
       }));
 
-      detector.addPool(createTestPool({
+      await detector.addPool(createTestPool({
         address: 'Pool2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb22',
         dex: 'orca',
         price: 105, // Higher price - sell here
@@ -580,7 +580,7 @@ describe('S3.3.1 SolanaDetector Cross-Component Integration', () => {
     ];
 
     for (const pool of pools) {
-      detector.addPool(pool);
+      await detector.addPool(pool);
     }
 
     // Verify indexes
@@ -590,7 +590,7 @@ describe('S3.3.1 SolanaDetector Cross-Component Integration', () => {
     expect(detector.getPoolsByTokenPair(VALID_TOKEN_MINT_1, VALID_TOKEN_MINT_2).length).toBe(2);
 
     // Remove one pool
-    detector.removePool('Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11');
+    await detector.removePool('Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11');
 
     // Verify indexes updated
     expect(detector.getPoolCount()).toBe(2);
@@ -598,9 +598,9 @@ describe('S3.3.1 SolanaDetector Cross-Component Integration', () => {
     expect(detector.getPoolsByTokenPair(VALID_TOKEN_MINT_1, VALID_TOKEN_MINT_2).length).toBe(1);
   });
 
-  it('should correctly normalize token pair keys regardless of order', () => {
+  it('should correctly normalize token pair keys regardless of order', async () => {
     // Add pools with tokens in different orders
-    detector.addPool(createTestPool({
+    await detector.addPool(createTestPool({
       address: 'Pool1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa11',
       dex: 'raydium',
       token0: { mint: VALID_TOKEN_MINT_1, symbol: 'SOL', decimals: 9 },
@@ -862,7 +862,7 @@ describe('S3.3.1 SolanaDetector Lifecycle Integration (DI Pattern)', () => {
       });
 
       await detector.start();
-      detector.addPool(createTestPool());
+      await detector.addPool(createTestPool());
 
       expect(detector.getPoolCount()).toBe(1);
 

@@ -68,12 +68,11 @@ module.exports = {
   // Per-file setup - uses the new setup file with proper singleton resets
   setupFilesAfterEnv: ['<rootDir>/shared/test-utils/src/setup/jest-setup.ts'],
 
-  // P2-3.1: Removed global maxWorkers - now configured per-project for optimal performance
-  // Different test types have different parallelization needs:
-  // - Unit tests: High parallelism (CPU-bound, no shared resources)
-  // - Integration tests: Moderate (I/O-bound, shared Redis)
-  // - Performance tests: Serial only (measuring performance)
-  // maxWorkers: process.env.CI ? 2 : '50%',  // REMOVED - now per-project
+  // Global maxWorkers cap to prevent EMFILE (too many open files) on Windows.
+  // When all projects run simultaneously, per-project workers accumulate and
+  // exhaust the OS file descriptor limit. This cap limits total workers across
+  // all projects. Per-project maxWorkers still apply within this budget.
+  maxWorkers: process.env.CI ? 2 : '50%',
 
   // Worker memory limit - increased for memory-intensive tests (ML, performance)
   // Default is 0.5 (50%), but TensorFlow.js and long-running tests need more

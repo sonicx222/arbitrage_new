@@ -11,6 +11,7 @@
  */
 
 import { createLogger } from '../logger';
+import { findKSmallest } from '../data-structures/min-heap';
 
 const logger = createLogger('whale-activity-tracker');
 
@@ -574,7 +575,12 @@ export class WhaleActivityTracker {
     // Find and remove the oldest 10% of wallets by lastSeen
     // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(this.config.maxTrackedWallets * 0.1));
-    const oldest = this.findOldestN(this.wallets, toRemove, (profile) => profile.lastSeen);
+    const oldestEntries = findKSmallest(
+      this.wallets.entries(),
+      toRemove,
+      ([, a], [, b]) => a.lastSeen - b.lastSeen
+    );
+    const oldest = oldestEntries.map(([key]) => key);
 
     for (const key of oldest) {
       this.wallets.delete(key);
@@ -587,32 +593,6 @@ export class WhaleActivityTracker {
     });
   }
 
-  /**
-   * Find the N entries with the smallest timestamps in a single pass.
-   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
-   */
-  private findOldestN<V>(
-    map: Map<string, V>,
-    n: number,
-    getTime: (value: V) => number
-  ): string[] {
-    const oldest: Array<{ key: string; time: number }> = [];
-
-    for (const [key, value] of map) {
-      const time = getTime(value);
-      if (oldest.length < n) {
-        oldest.push({ key, time });
-        if (oldest.length === n) {
-          oldest.sort((a, b) => b.time - a.time);
-        }
-      } else if (time < oldest[0].time) {
-        oldest[0] = { key, time };
-        oldest.sort((a, b) => b.time - a.time);
-      }
-    }
-
-    return oldest.map(e => e.key);
-  }
 }
 
 // =============================================================================

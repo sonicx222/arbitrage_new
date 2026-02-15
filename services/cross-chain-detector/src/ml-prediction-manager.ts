@@ -289,11 +289,19 @@ export function createMLPredictionManager(config: MLPredictionManagerConfig): ML
         volatility: calculateVolatilityInternal(priceHistory),
       });
 
+      // FIX P0-1: Store timeoutId to clear timer when predictionPromise wins the race
+      let timeoutId: ReturnType<typeof setTimeout>;
       const timeoutPromise = new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), mlConfig.maxLatencyMs);
+        timeoutId = setTimeout(() => resolve(null), mlConfig.maxLatencyMs);
       });
 
-      const prediction = await Promise.race([predictionPromise, timeoutPromise]);
+      let prediction: Awaited<typeof predictionPromise> | null;
+      try {
+        prediction = await Promise.race([predictionPromise, timeoutPromise]);
+      } finally {
+        // FIX P0-1: Always clear timeout to prevent orphaned timer accumulation
+        clearTimeout(timeoutId!);
+      }
 
       if (prediction) {
         // Cache successful prediction

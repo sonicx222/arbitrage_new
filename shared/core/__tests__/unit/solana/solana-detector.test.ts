@@ -1634,7 +1634,7 @@ describe('Deep Dive Regression: Pool Update Consistency', () => {
     expect(typeof (detector as any).poolUpdateMutex.tryAcquire).toBe('function');
   });
 
-  test('should keep pools, poolsByDex, and poolsByTokenPair consistent', () => {
+  test('should keep pools, poolsByDex, and poolsByTokenPair consistent', async () => {
     // REGRESSION TEST: Verifies pool indices stay in sync
     const testPool: any = {
       address: 'TestPoolAddress123',
@@ -1646,7 +1646,7 @@ describe('Deep Dive Regression: Pool Update Consistency', () => {
     };
 
     // Add pool
-    detector.addPool(testPool);
+    await detector.addPool(testPool);
 
     // Verify all indices are consistent
     expect(detector.getPool(testPool.address)).toBeDefined();
@@ -1657,7 +1657,7 @@ describe('Deep Dive Regression: Pool Update Consistency', () => {
     expect(pairPools).toContainEqual(expect.objectContaining({ address: testPool.address }));
 
     // Remove pool
-    detector.removePool(testPool.address);
+    await detector.removePool(testPool.address);
 
     // Verify all indices are cleaned up
     expect(detector.getPool(testPool.address)).toBeUndefined();
@@ -1666,7 +1666,7 @@ describe('Deep Dive Regression: Pool Update Consistency', () => {
     expect(pairPoolsAfter).not.toContainEqual(expect.objectContaining({ address: testPool.address }));
   });
 
-  test('should cleanup empty Sets when removing last pool', () => {
+  test('should cleanup empty Sets when removing last pool', async () => {
     // REGRESSION TEST: Verifies memory doesn't leak from empty Sets
     const testPool: any = {
       address: 'OnlyPoolInDex123',
@@ -1677,10 +1677,10 @@ describe('Deep Dive Regression: Pool Update Consistency', () => {
       fee: 30
     };
 
-    detector.addPool(testPool);
+    await detector.addPool(testPool);
     expect(detector.getPoolsByDex('unique-dex')).toHaveLength(1);
 
-    detector.removePool(testPool.address);
+    await detector.removePool(testPool.address);
 
     // The dex should be completely removed (not just empty)
     expect(detector.getPoolsByDex('unique-dex')).toHaveLength(0);
@@ -1750,8 +1750,8 @@ describe('Deep Dive Regression: Arbitrage Detection Snapshot Pattern', () => {
       fee: 30 // 0.30%
     };
 
-    detector.addPool(pool1);
-    detector.addPool(pool2);
+    await detector.addPool(pool1);
+    await detector.addPool(pool2);
 
     const opportunities = await detector.checkArbitrage();
 
@@ -1786,15 +1786,15 @@ describe('Deep Dive Regression: Arbitrage Detection Snapshot Pattern', () => {
       fee: 30
     };
 
-    detector.addPool(pool1);
-    detector.addPool(pool2);
+    await detector.addPool(pool1);
+    await detector.addPool(pool2);
 
     // Start arbitrage check
     const opportunitiesPromise = detector.checkArbitrage();
 
     // Modify pools during check (simulates concurrent modification)
     // Due to snapshot pattern, this shouldn't affect the current check
-    detector.removePool(pool2.address);
+    await detector.removePool(pool2.address);
 
     const opportunities = await opportunitiesPromise;
 
@@ -1824,13 +1824,47 @@ describe('Deep Dive Regression: Arbitrage Detection Snapshot Pattern', () => {
       fee: 30 // 0.30%
     };
 
-    detector.addPool(pool1);
-    detector.addPool(pool2);
+    await detector.addPool(pool1);
+    await detector.addPool(pool2);
 
     const opportunities = await detector.checkArbitrage();
 
     // 0.3% price diff - 0.55% fees = negative profit
     // Should not be detected
     expect(opportunities.length).toBe(0);
+  });
+
+  test('should create new pool object on price update (immutable pattern)', async () => {
+    // REGRESSION TEST: Verifies updatePoolPrice creates a NEW object (not mutated in-place)
+    // This prevents race conditions where checkArbitrage() snapshots the Map but gets
+    // references to the same mutable pool objects that could be changed mid-iteration.
+    const pool: any = {
+      address: 'ImmutableTestPool11111111111111111111111111',
+      dex: 'raydium',
+      token0: { mint: 'ImmutableToken11111111111111111111111111111', symbol: 'TK1' },
+      token1: { mint: 'ImmutableToken22222222222222222222222222222', symbol: 'TK2' },
+      price: 100,
+      fee: 25,
+      reserve0: '1000000',
+      reserve1: '1000000',
+      lastSlot: 1000
+    };
+
+    await detector.addPool(pool);
+    const poolBefore = detector.getPool(pool.address);
+
+    await detector.updatePoolPrice(pool.address, {
+      price: 110,
+      reserve0: '1100000',
+      reserve1: '900000',
+      slot: 1001
+    });
+
+    const poolAfter = detector.getPool(pool.address);
+
+    // Verify new object was created (not mutated in-place)
+    expect(poolAfter).not.toBe(poolBefore); // Different object reference
+    expect(poolAfter!.price).toBe(110);
+    expect(poolBefore!.price).toBe(100); // Original not mutated
   });
 });

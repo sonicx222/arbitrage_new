@@ -97,6 +97,11 @@ export class NumericRollingWindow {
    * @param value - Numeric value to add
    */
   push(value: number): void {
+    // Guard against NaN poisoning the running sum.
+    // Callers may pass computed values (e.g., Date.now() - undefined) that yield NaN.
+    // Silently dropping a bad sample is safer than crashing the detector.
+    if (Number.isNaN(value)) return;
+
     // If buffer is full, subtract the value being overwritten from sum
     if (this.count === this.maxSize) {
       this.sum -= this.buffer[this.index];

@@ -16,6 +16,7 @@
 
 import { createLogger } from '../logger';
 import { createConfigurableSingleton } from '../async/async-singleton';
+import { findKSmallest } from '../data-structures/min-heap';
 
 const logger = createLogger('price-momentum');
 
@@ -363,7 +364,12 @@ export class PriceMomentumTracker {
     // Find and remove the oldest 10% of pairs (at least 1)
     // Uses O(N*k) partial selection instead of O(N log N) full sort
     const toRemove = Math.max(1, Math.floor(maxPairs * 0.1));
-    const oldest = this.findOldestN(this.pairs, toRemove, (state) => state.lastAccessTime);
+    const oldestEntries = findKSmallest(
+      this.pairs.entries(),
+      toRemove,
+      ([, a], [, b]) => a.lastAccessTime - b.lastAccessTime
+    );
+    const oldest = oldestEntries.map(([key]) => key);
 
     for (const key of oldest) {
       this.pairs.delete(key);
@@ -374,34 +380,6 @@ export class PriceMomentumTracker {
       remaining: this.pairs.size,
       maxPairs
     });
-  }
-
-  /**
-   * Find the N entries with the smallest timestamps in a single pass.
-   * O(N*k) where k = n, much better than O(N log N) sort when k << N.
-   */
-  private findOldestN<V>(
-    map: Map<string, V>,
-    n: number,
-    getTime: (value: V) => number
-  ): string[] {
-    const oldest: Array<{ key: string; time: number }> = [];
-
-    for (const [key, value] of map) {
-      const time = getTime(value);
-      if (oldest.length < n) {
-        oldest.push({ key, time });
-        if (oldest.length === n) {
-          // Sort descending so oldest[0] is the newest of the oldest set
-          oldest.sort((a, b) => b.time - a.time);
-        }
-      } else if (time < oldest[0].time) {
-        oldest[0] = { key, time };
-        oldest.sort((a, b) => b.time - a.time);
-      }
-    }
-
-    return oldest.map(e => e.key);
   }
 
   /**

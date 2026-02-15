@@ -503,14 +503,19 @@ export class HotForkSynchronizer {
       return this.baseSyncIntervalMs;
     }
 
-    // Fix 4.2: Calculate average block time using CircularBuffer reduce()
-    // This computes intervals between consecutive timestamps in O(n)
-    const timestamps = this.blockTimestamps.toArray();
+    // Fix 4.2: Calculate average block time using forEach() for zero allocation.
+    // Iterates in insertion order (oldest to newest) without creating an intermediate array.
     let totalInterval = 0;
-    for (let i = 1; i < timestamps.length; i++) {
-      totalInterval += timestamps[i] - timestamps[i - 1];
-    }
-    const avgBlockTime = totalInterval / (timestamps.length - 1);
+    let prevTimestamp = -1;
+    let pairCount = 0;
+    this.blockTimestamps.forEach((ts) => {
+      if (prevTimestamp >= 0) {
+        totalInterval += ts - prevTimestamp;
+        pairCount++;
+      }
+      prevTimestamp = ts;
+    });
+    const avgBlockTime = totalInterval / pairCount;
 
     // Target sync interval should be slightly less than avg block time
     // to catch new blocks quickly, but not waste resources polling too fast

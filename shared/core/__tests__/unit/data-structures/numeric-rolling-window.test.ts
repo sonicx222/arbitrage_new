@@ -299,15 +299,30 @@ describe('NumericRollingWindow', () => {
       expect(win.toArray()).toEqual([991, 992, 993, 994, 995, 996, 997, 998, 999, 1000]);
     });
 
-    it('should handle NaN values', () => {
+    it('should silently discard NaN values to prevent sum poisoning', () => {
       const win = new NumericRollingWindow(3);
       win.push(10);
       win.push(NaN);
       win.push(20);
 
-      // NaN propagates in arithmetic
-      expect(win.getSum()).toBeNaN();
-      expect(win.average()).toBeNaN();
+      // NaN is silently dropped — sum and average remain valid
+      expect(win.size).toBe(2);
+      expect(win.getSum()).toBe(30);
+      expect(win.average()).toBe(15);
+    });
+
+    it('should recover from NaN after full buffer wrap-around', () => {
+      const win = new NumericRollingWindow(3);
+      win.push(10);
+      win.push(20);
+      win.push(30); // Buffer full: [10, 20, 30]
+      win.push(NaN); // Silently dropped — buffer stays [10, 20, 30]
+      win.push(40); // Overwrites 10: [40, 20, 30]
+
+      expect(win.size).toBe(3);
+      expect(win.toArray()).toEqual([20, 30, 40]);
+      expect(win.getSum()).toBe(90);
+      expect(win.average()).toBe(30);
     });
 
     it('should handle very large values', () => {

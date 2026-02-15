@@ -1458,16 +1458,17 @@ export class CoordinatorService implements CoordinatorStateProvider {
           id: opportunity.id,
           type: opportunity.type || 'simple',
           chain: opportunity.chain || 'unknown',
-          buyDex: opportunity.buyDex || '',
-          sellDex: opportunity.sellDex || '',
+          // FIX P0-4: Use ?? for fields where empty string is a valid value
+          buyDex: opportunity.buyDex ?? '',
+          sellDex: opportunity.sellDex ?? '',
           profitPercentage: opportunity.profitPercentage?.toString() || '0',
           confidence: opportunity.confidence?.toString() || '0',
           timestamp: opportunity.timestamp?.toString() || Date.now().toString(),
-          expiresAt: opportunity.expiresAt?.toString() || '',
+          expiresAt: opportunity.expiresAt?.toString() ?? '',
           // Include token info if available
-          tokenIn: opportunity.tokenIn || '',
-          tokenOut: opportunity.tokenOut || '',
-          amountIn: opportunity.amountIn || '',
+          tokenIn: opportunity.tokenIn ?? '',
+          tokenOut: opportunity.tokenOut ?? '',
+          amountIn: opportunity.amountIn ?? '',
           // Source metadata
           forwardedBy: this.config.leaderElection.instanceId,
           forwardedAt: Date.now().toString()

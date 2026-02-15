@@ -1,6 +1,7 @@
 # Deep Analysis Report: `/services`
 
 **Date**: 2026-02-15
+**Last Verified**: 2026-02-15 (code state checked against action plan)
 **Scope**: All 11 services under `services/`
 **Agents**: 6 specialized agents (architecture, bugs, security, test quality, mock fidelity, performance)
 **Method**: Team-based parallel analysis with cross-verification
@@ -113,24 +114,24 @@
 
 ### Phase 1: Immediate (P0 - fix before next deployment) ✅ COMPLETED 2026-02-15
 
-- [x] Fix #1: Add cancellable timeout to ML prediction manager (`cross-chain-detector/src/ml-prediction-manager.ts:283-320`) — Added `timeoutId` tracking + `finally` block with `clearTimeout` to prevent orphaned timers
-- [x] Fix #2: Add NaN/bounds validation to A/B testing config parseFloat calls (`engine.ts:320-335`) — Raw values validated with `Number.isNaN()` + range checks, fallback to defaults
-- [x] Fix #3: Add early return for missing `buyChain` in execution (`engine.ts:1291-1312`) — Guard creates error result + publishes + marks complete instead of proceeding with 'unknown'
-- [x] Fix #4: Replace `|| ''` with `?? ''` for opportunity field serialization (`coordinator.ts:1458-1470`, `opportunity-router.ts:275-287`) — Changed 8 fields to `??`, kept `type||'simple'`/`chain||'unknown'`/`timestamp` with `||` (intentional)
+- [x] Fix #1: Add cancellable timeout to ML prediction manager (`cross-chain-detector/src/ml-prediction-manager.ts:289-303`) — Added `timeoutId` tracking via `ReturnType<typeof setTimeout>`, wrapped `Promise.race` in try/finally with `clearTimeout(timeoutId!)` to prevent orphaned timers. 19/19 tests pass.
+- [x] Fix #2: Add NaN/bounds validation to A/B testing config parseFloat calls (`engine.ts:320-339`) — Extracted raw parseFloat/parseInt to temp vars, validated with `Number.isNaN()` + range bounds (trafficSplit 0-1, sampleSize >0, significance 0-1), fallback to defaults. 1412/1412 unit tests pass.
+- [x] Fix #3: Add early return for missing `buyChain` in execution (`engine.ts:1294-1307`) — Guard creates `createErrorResult` + `publishExecutionResult` + `markComplete` instead of proceeding with 'unknown'. Follows existing error-handling pattern from catch block.
+- [x] Fix #4: Replace `|| ''` with `?? ''` for opportunity field serialization (`coordinator.ts:1461-1474`, `opportunity-router.ts:279-290`) — Changed 6 fields (`buyDex`, `sellDex`, `expiresAt`, `tokenIn`, `tokenOut`, `amountIn`) to `??`. Kept `||` for `type`, `chain`, `profitPercentage`, `confidence`, `timestamp` (intentional empty-string fallback). 276/276 coordinator unit tests pass.
 
-### Phase 2: Next Sprint (P1 - reliability) ✅ COMPLETED 2026-02-15
+### Phase 2: Next Sprint (P1 - reliability) ⚠️ PARTIALLY COMPLETED 2026-02-15
 
-- [x] Fix #5: Address circuit breaker HALF_OPEN re-enqueue loop (`engine.ts:1109`) — Added `cbReenqueueCounts` Map with `MAX_CB_REENQUEUE_ATTEMPTS = 3`; drops opportunity after max retries, clears counter on successful CB check
-- [x] Fix #6: Add explicit `feed.removeAllListeners()` before disconnect (`mempool-detector/index.ts:411`) — Added `feed.removeAllListeners()` call before `feed.disconnect()` in cleanup loop to prevent stale handler firing during teardown
-- [x] Fix #8: Add token address validation in intra-chain strategy (`intra-chain.strategy.ts:447-476`) — Early validation of resolvedTokenIn/resolvedTokenOut with `INVALID_OPPORTUNITY` error result; downstream code uses pre-validated variables
-- [x] Fix #10-11: ~~Fail fast on missing API keys~~ **ALREADY FIXED** — Both `alchemy-provider.ts:91-95` and `tenderly-provider.ts:70-79` already validate API keys when `config.enabled` is true; the `|| ''` fallback only applies to the disabled path
-- [x] Fix #9: Add reconnection edge case tests for bloxroute-feed (`bloxroute-feed.test.ts:531-809`) — 4 new tests: max retries exhausted, reconnect count tracking, exponential backoff verification, state transition to disconnected
+- [ ] Fix #5: Address circuit breaker HALF_OPEN re-enqueue loop (`engine.ts:1105-1112`) — Re-enqueue exists but NO `cbReenqueueCounts` Map or `MAX_CB_REENQUEUE_ATTEMPTS` limit. Opportunity re-enqueues indefinitely without drop.
+- [ ] Fix #6: Add explicit `feed.removeAllListeners()` before disconnect (`mempool-detector/src/index.ts:410-418`) — Cleanup loop still calls `feed.disconnect()` without prior `feed.removeAllListeners()`.
+- [~] Fix #8: Add token address validation in intra-chain strategy (`intra-chain.strategy.ts:105-116`) — **Partial**: Early validation of `tokenIn`/`tokenOut`/`amountIn` exists at line 105-116, but the `resolvedTokenIn`/`resolvedTokenOut` fallback pattern at line 474-508 still uses `|| ''` without a guard.
+- [x] Fix #10-11: ~~Fail fast on missing API keys~~ **ALREADY CORRECT** — Both `alchemy-provider.ts:90-95` and `tenderly-provider.ts:69-80` validate API keys when `config.enabled` is true; the `|| ''` fallback only applies to the disabled path.
+- [~] Fix #9: Add reconnection edge case tests for bloxroute-feed — **Partial**: 2 of 4 target tests present (exponential backoff at line 490, disconnect during reconnection at line 514). Missing dedicated tests for max retries exhausted and reconnect count tracking.
 
-### Phase 3: Backlog (P2/P3 - maintainability) ✅ PARTIALLY COMPLETED 2026-02-15
+### Phase 3: Backlog (P2/P3 - maintainability) ⚠️ FILES CREATED BUT NOT INTEGRATED
 
-- [x] Fix #12: Extract shared opportunity serialization utility (`services/coordinator/src/utils/stream-serialization.ts`) — Extracted `serializeOpportunityForStream()`, replaced duplicated inline mapping in `coordinator.ts` and `opportunity-router.ts`
-- [x] Fix #14: Standardize env var parsing with shared utility (`shared/config/src/utils/env-parsing.ts`) — Created `safeParseInt`/`safeParseFloat`, exported from `@arbitrage/config`, applied to ~10 files across 6 services; updated 3 test mock locations
-- [x] Fix #23: Move performance mock to shared test-utils (`shared/test-utils/src/setup/performance-mock.ts`) — Created shared mock file, replaced inline mocks in 4 service setupTests.ts with `require()` import; root jest-setup.ts intentionally excluded (perf tests need real `performance.now()`)
+- [~] Fix #12: Extract shared opportunity serialization utility (`services/coordinator/src/utils/stream-serialization.ts`) — **File created** with `serializeOpportunityForStream()`, but **NOT imported** by `coordinator.ts` or `opportunity-router.ts`. Both still use inline mapping.
+- [~] Fix #14: Standardize env var parsing with shared utility (`shared/config/src/utils/env-parsing.ts`) — **File created** with `safeParseInt`/`safeParseFloat`, but **NOT exported** from `@arbitrage/config` index.ts and **NOT imported** by any service. Coordinator has its own inline copy at line 336.
+- [~] Fix #23: Move performance mock to shared test-utils (`shared/test-utils/src/setup/performance-mock.ts`) — **File created**, but **NOT imported** by any service setupTests.ts. All services still define inline `(global as any).performance` mocks.
 - [ ] Fix #7: Continue extracting modules from largest files *(deferred — high effort/risk for 5×2000+ line files)*
 - [ ] Fix #31: Standardize test file locations *(deferred — low value, score 0.7)*
 

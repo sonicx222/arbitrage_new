@@ -87,8 +87,8 @@ export class LRUCache<K, V> {
    * @returns The cached value, or undefined if not found
    */
   get(key: K): V | undefined {
-    const value = this.cache.get(key);
-    if (value !== undefined) {
+    if (this.cache.has(key)) {
+      const value = this.cache.get(key)!;
       // Move to end (most recently used)
       this.cache.delete(key);
       this.cache.set(key, value);
